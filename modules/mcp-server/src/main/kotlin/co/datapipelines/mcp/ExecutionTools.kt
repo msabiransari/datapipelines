@@ -44,7 +44,7 @@ internal fun requireReadScope(ctx: McpToolContext) {
  * "not yours" code. The distinction is invisible to a legitimate caller and mirrors the
  * `result.execution_not_found` row of §6.2.15's error table.
  */
-internal fun ExecutionRecord.visibleTo(ctx: McpToolContext): Boolean = triggeredBy == ctx.principal.userId || ctx.principal.isWorkspaceAdmin
+internal fun ExecutionRecord.visibleTo(ctx: McpToolContext): Boolean = isOwnRunOf(ctx.principal.userId) || ctx.principal.isWorkspaceAdmin
 
 /** The §6.2.14 execution projection — metadata only, never rows. */
 internal fun ExecutionRecord.toMcpMetadata(): Map<String, Any?> =
@@ -53,7 +53,10 @@ internal fun ExecutionRecord.toMcpMetadata(): Map<String, Any?> =
         put("pipeline_id", pipelineId.toString())
         put("pipeline_version", pipelineVersion)
         put("status", status.name)
-        put("triggered_by", triggeredBy.toString())
+        // D11 (2026-09-20): `executed_by` replaced `triggered_by` on the wire; the key kind says
+        // whether a key ran it and which kind (null = a signed-in session).
+        put("executed_by", executedBy.toString())
+        put("executed_by_key_kind", executedByKeyKind?.wire)
         put("triggered_via", triggeredVia.name)
         put("correlation_id", correlationId?.toString())
         put("started_at", startedAt)
@@ -73,15 +76,12 @@ internal fun ExecutionRecord.toMcpMetadata(): Map<String, Any?> =
     }
 
 /**
- * `executions_list` (mcp-server.md §6.2.13). Scope: `read`.
+ * `executions_list` (mcp-server.md §6.2.13). Scope: `read`; role: the EXECUTE row (D11).
  *
- * ## Reported gap
- *
- * `ExecutionRepository` exposes `findByUser` and `findByPipeline` only — there is no "all
- * executions" query — so an `admin` key sees its own executions plus, when `pipeline_id` is
- * given, that pipeline's executions from every user. A cross-user unfiltered admin listing needs
- * a repository method in `dag`; reported to the orchestrator rather than worked around by
- * scanning, and no caller ever sees another user's execution through this tool today.
+ * Own runs unless the key's issuer administers the workspace, in which case every run of the
+ * workspace (`findAll`): the same rule the REST listing and the executions screen apply, read
+ * from one predicate (`ExecutionRepository.OWN_RUN_PREDICATE`). An endpoint-key run is nobody's
+ * own and lists for admins only. The promoter is refused the tool by the matrix before it runs.
  */
 class ExecutionsListTool(
     private val executions: ExecutionRepository,
@@ -89,7 +89,10 @@ class ExecutionsListTool(
     override val definition: McpSchema.Tool =
         McpTools.tool(
             name = "executions_list",
-            description = "List recent pipeline executions of the key's pinned workspace, optionally filtered by pipeline or status.",
+            description =
+                "List recent pipeline executions of the key's pinned workspace, optionally filtered by pipeline or status. " +
+                    "Returns the runs YOU started (this key's user); a workspace admin's key returns every run of the " +
+                    "workspace, including runs started by published endpoints. Other members' runs are not listed.",
             schema =
                 """
                 {
@@ -112,15 +115,17 @@ class ExecutionsListTool(
         val status = args.enumString("status", ExecutionStatus.entries.map { it.name }.toSet())
         val pipelineId = args.uuid("pipeline_id")
 
+        // D11: own-or-admin decided in SQL, like the REST listing — an admin's key sees the
+        // workspace's runs (endpoint-key runs included), everyone else exactly their own.
+        val wanted = status?.let { ExecutionStatus.valueOf(it) }
         val candidates =
-            if (pipelineId == null) {
-                executions.findByUser(workspaceId, ctx.principal.userId, limit = limit)
+            if (ctx.principal.isWorkspaceAdmin) {
+                executions.findAll(workspaceId, pipelineId, wanted, limit = limit)
             } else {
-                executions.findByPipeline(workspaceId, pipelineId, limit = limit)
+                executions.findByUser(workspaceId, ctx.principal.userId, pipelineId, wanted, limit = limit)
             }
         return candidates
             .filter { it.visibleTo(ctx) }
-            .filter { status == null || it.status.name == status }
             .map { it.toMcpMetadata() }
     }
 
@@ -130,7 +135,7 @@ class ExecutionsListTool(
     }
 }
 
-/** `executions_get` (mcp-server.md §6.2.14). Scope: `read` + ownership. */
+/** `executions_get` (mcp-server.md §6.2.14). Scope: `read`; role: the EXECUTE row + own-or-admin (D11). */
 class ExecutionsGetTool(
     private val executions: ExecutionRepository,
 ) : McpTool {
@@ -143,7 +148,8 @@ class ExecutionsGetTool(
                     "(datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the " +
                     "exception chain with stack frames — read error.code first, then error.exception.caused_by (root " +
                     "cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result " +
-                    "rows, use executions_get_result.",
+                    "rows, use executions_get_result. Visible for YOUR OWN runs (this key's user), or any run of the " +
+                    "workspace when the key's user is a workspace admin; another member's execution is not found.",
             schema =
                 """
                 {
@@ -172,7 +178,7 @@ class ExecutionsGetTool(
  *
  * The MCP twin of `DELETE /api/v1/executions/{id}` (rest-api §10.4) with one rule REST does not
  * have: **the same-credential rule**. A key cancels only an execution its OWN MCP calls started
- * — `triggered_via = MCP`, `triggered_by` = the key's owner, and an `mcp.tool.called` audit row
+ * — `triggered_via = MCP`, `executed_by` = the key's owner, and an `mcp.tool.called` audit row
  * pairing THIS key id with the execution's correlation id ([McpCallAudit]; the audit row is the
  * join because `pipeline_executions` carries the owner USER id, never the key id). An execution
  * started over REST, the UI, a PIPELINE node or a published endpoint — or by a DIFFERENT key of
@@ -242,7 +248,7 @@ class ExecutionsCancelTool(
         val auditProvesThisKey =
             keyId != null && correlationId != null &&
                 mcpCalls.calledByKey(keyId, correlationId)
-        if (record.triggeredBy != ctx.principal.userId || !auditProvesThisKey) {
+        if (record.executedBy != ctx.principal.userId || !auditProvesThisKey) {
             throw sameCredentialRefusal(
                 id,
                 "different_credential",

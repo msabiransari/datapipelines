@@ -31,7 +31,7 @@ class ScopeInterceptorTest {
         @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
         fun read() = Unit
 
-        @RequiredScope(ScopeMatrix.RestOperation.MUTATE_DATASOURCES)
+        @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
         fun adminOnly() = Unit
 
         fun unannotated() = Unit
@@ -54,7 +54,7 @@ class ScopeInterceptorTest {
      * workspace admin here, which satisfies every capability and leaves the scope check as
      * the only thing that can refuse.
      */
-    private fun adminContext() = WorkspaceContext(UUID.randomUUID(), "acme", MembershipFlags(author = true, promoter = true, admin = true))
+    private fun adminContext() = WorkspaceContext(UUID.randomUUID(), "acme", WorkspaceRole.WORKSPACE_ADMIN)
 
     private fun authenticate(vararg scopes: Scope) {
         val principal =

@@ -155,7 +155,7 @@ class ExecutionsPartialRenderTest {
             pipelineVersion = 1,
             status = ExecutionStatus.SUCCESS,
             parametersJson = "{}",
-            triggeredBy = UUID.randomUUID(),
+            executedBy = UUID.randomUUID(),
             triggeredVia = ExecutionTrigger.REST,
             startedAt = Instant.parse("2026-08-30T14:30:00Z"),
             durationMs = 1200,

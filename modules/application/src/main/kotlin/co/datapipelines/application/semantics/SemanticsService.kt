@@ -2,8 +2,7 @@ package co.datapipelines.application.semantics
 
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Capability
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RoleRequiredException
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.semantics.FactRef
@@ -142,8 +141,8 @@ class SemanticsService(
         val fact = visibleOrNotFound(id, workspaceId, field = "id", datasource = null)
         if (fact.scope == LearnedFactScope.DATASOURCE && fact.recordedIn != workspaceId && !principal.isWorkspaceAdmin) {
             throw RoleRequiredException(
-                Capability.WS_ADMIN,
-                (principal.workspace?.flags ?: MembershipFlags.VIEWER).held(),
+                Permission.WS_ADMIN,
+                principal.workspace?.held() ?: emptySet(),
                 principal.workspace?.name,
             )
         }

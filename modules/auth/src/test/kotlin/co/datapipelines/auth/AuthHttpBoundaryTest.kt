@@ -110,7 +110,7 @@ class AuthHttpBoundaryTest {
 
             @GetMapping("/api/v1/admin-probe")
             @ResponseBody
-            @RequiredScope(ScopeMatrix.RestOperation.MUTATE_DATASOURCES)
+            @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
             fun adminOnly() = principalPayload()
 
             /** Deliberately unannotated — the default-deny case (AUTH-SEC-9). */

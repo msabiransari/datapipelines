@@ -4,6 +4,7 @@ import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldEndWith
 import org.junit.jupiter.api.Test
@@ -42,7 +43,7 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         val before = versionRows(fixture.name)
         val auditBefore = templateAuditCount(fixture.name)
 
-        val viewer = signIn("va-viewer", author = false, promoter = false, admin = false)
+        val viewer = signIn("va-viewer", role = "viewer")
         val watch = viewer.watchResponses()
         openInEditorAsViewer(viewer, fixture, watch)
         readEveryVersion(viewer, fixture, watch)
@@ -138,25 +139,24 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         watch: Watch,
     ) {
         viewer.adminAnchors() shouldBe emptyList()
-        viewer.page.navigate("$baseUrl/promotion")
-        viewer.page.waitForSelector(".app-page-h")
-        viewer.page.locator("#app-main form[action*='/promotion/promote']").count() shouldBe 0
-        viewer.page.locator("#app-main input[type='checkbox']").count() shouldBe 0
-        viewer.verbs().shouldBeEmpty()
-        shot(viewer.page, "viewer-promotion", "light")
-        viewer.page.navigate("$baseUrl/workspaces")
-        viewer.page.waitForSelector(".app-page-h")
-        viewer.page.locator("#workspace-members").count() shouldBe 0
-        viewer.page.locator("[data-verb='member-add']").count() shouldBe 0
-        viewer.page.locator("form[action*='/workspaces/create']").count() shouldBe 0
-        // Switch is the reader's own verb and stays.
-        viewer.page.locator("[data-verb='workspace-switch']").count() shouldBe 1
-        shot(viewer.page, "viewer-workspaces", "light")
+        // 177: the promotion page is `PROMOTION_READ` (author, promoter, admins — rule 13) and
+        // the workspaces page is a workspace admin's (D13). A viewer is refused both by ROLE —
+        // the catalogued 403, not a screen with the verbs hidden — and the rail draws neither
+        // item, so there is no dead link to click. The switcher in the chrome stays.
+        viewer.page.locator("nav.app-nav a[data-nav-section='/promotion']").count() shouldBe 0
+        viewer.page.locator("nav.app-nav a[data-nav-label='Workspaces']").count() shouldBe 0
+        viewer.page.locator("#workspace-switcher").count() shouldBe 1
+        // Asked through the session's own request context (the cookies ride along) rather than
+        // by navigating: the response watcher above records every ≥400 the PAGE sees, and these
+        // two refusals are the point, not a defect.
+        listOf("/promotion", "/workspaces").forEach { path ->
+            val refused = viewer.page.request().get("$baseUrl$path")
+            refused.status() shouldBe 403
+            refused.text() shouldContain "auth.role_required"
+        }
+        shot(viewer.page, "viewer-dashboard", "light")
         ensureThemeOn(viewer.page, "dark")
-        shot(viewer.page, "viewer-workspaces", "dark")
-        viewer.page.navigate("$baseUrl/promotion")
-        viewer.page.waitForSelector(".app-page-h")
-        shot(viewer.page, "viewer-promotion", "dark")
+        shot(viewer.page, "viewer-dashboard", "dark")
         // Boosted navigation keeps the rail as painted: still no Admin after rail clicks.
         viewer.page.locator("nav.app-nav a[data-nav-section='/pipelines']").click()
         viewer.page.waitForURL("**/pipelines**")
@@ -166,11 +166,11 @@ class ViewerAccessBrowserTest : BrowserSuite() {
 
     /** The positive halves, so the reader arm cannot pass by hiding everything. */
     @Test
-    fun `an author keeps the editing surface and Preview, a promoter keeps Release on the read-only source`() {
+    fun `an author keeps the editing surface and Preview, a promoter gets the read-only source and no verb`() {
         startTrace()
         val fixture = seedTemplate()
 
-        val author = signIn("va-author", author = true, promoter = false, admin = false)
+        val author = signIn("va-author", role = "author")
         val watch = author.watchResponses()
         author.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
         author.page
@@ -193,7 +193,9 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         watch.bad shouldBe emptyList()
         author.close()
 
-        val promoter = signIn("va-promoter", author = false, promoter = true, admin = false)
+        // D5 (2026-09-20): the promoter authors nothing and RELEASES nothing — the editor is a
+        // read-only source with the read-only note and no verb at all.
+        val promoter = signIn("va-promoter", role = "promoter")
         val promoterWatch = promoter.watchResponses()
         promoter.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
         promoter.page
@@ -205,9 +207,9 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         promoterWatch.bad shouldBe emptyList()
         promoter.page.waitForURL("**/templates/editor**")
         assertReadOnlyEditor(promoter.page, expectedVersion = 2, expectedBody = fixture.draftBody)
-        promoter.page.locator("[data-verb='template-release']").waitFor()
-        promoter.verbs() shouldBe listOf("template-release")
-        promoter.page.locator("[data-role-note='read-only']").count() shouldBe 0
+        promoter.page.locator("[data-role-note='read-only']").waitFor()
+        promoter.verbs() shouldBe emptyList()
+        promoter.page.locator("[data-verb='template-release']").count() shouldBe 0
         promoterWatch.bad shouldBe emptyList()
         promoter.close()
     }
@@ -223,17 +225,19 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         implicitSuperAdminArm()
     }
 
-    /** Viewer, author, pure promoter: no Admin item at all — the rail is otherwise intact. */
+    /**
+     * Viewer, author, pure promoter: no Admin item at all, and since D13 (2026-09-20) no
+     * Workspaces item either — the page is a workspace admin's; the SWITCHER in the chrome is
+     * what every member keeps. The promoter also has no Executions item (D11); the other two do.
+     */
     private fun readersHaveNoAdminItem() {
-        listOf(
-            Triple("va-nav-viewer", false, false),
-            Triple("va-nav-author", true, false),
-            Triple("va-nav-promoter", false, true),
-        ).forEach { (slug, author, promoter) ->
-            val session = signIn(slug, author = author, promoter = promoter, admin = false)
+        listOf("va-nav-viewer" to "viewer", "va-nav-author" to "author", "va-nav-promoter" to "promoter").forEach { (slug, role) ->
+            val session = signIn(slug, role = role)
             session.page.waitForSelector("nav.app-nav")
             session.adminAnchors() shouldBe emptyList()
-            session.page.locator("nav.app-nav a[data-nav-label='Workspaces']").count() shouldBe 1
+            session.page.locator("nav.app-nav a[data-nav-label='Workspaces']").count() shouldBe 0
+            session.page.locator("#workspace-switcher").count() shouldBe 1
+            session.page.locator("nav.app-nav a[data-nav-section='/executions']").count() shouldBe if (role == "promoter") 0 else 1
             session.close()
         }
     }
@@ -245,12 +249,12 @@ class ViewerAccessBrowserTest : BrowserSuite() {
      */
     private fun workspaceAdminArm() {
         val other = "va-ws-" + suffix()
-        val adminUser = seedRoleUser("va-nav-admin", author = true, promoter = false, admin = true)
+        val adminUser = seedRoleUser("va-nav-admin", role = "workspace_admin")
         seedViewerMembership(other, adminUser.email)
         val admin = openSession(adminUser)
         val watch = admin.watchResponses()
         admin.page.waitForSelector("nav.app-nav")
-        admin.roleBadge() shouldBe "admin"
+        admin.roleBadge() shouldBe "workspace admin"
         val members = admin.adminAnchors().single()
         members.getAttribute("data-nav-admin") shouldBe "members"
         members.getAttribute("href") shouldEndWith "/workspaces#workspace-members"
@@ -267,13 +271,23 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         admin.page.waitForURL("**/executions**")
         admin.adminAnchors().single().getAttribute("data-nav-admin") shouldBe "members"
 
+        // D13/D14 (177): the switcher in the chrome stays every member's and re-issues the
+        // token; the workspaces PAGE is the admin's and refuses the viewer this person now is.
+        val tokenBefore = admin.sessionToken()
         admin.switchTo(other)
         admin.roleBadge() shouldBe "viewer"
+        admin.sessionToken().let {
+            it shouldNotBe null
+            it shouldNotBe tokenBefore
+        }
         admin.adminAnchors() shouldBe emptyList()
-        admin.page.locator("#workspace-members").count() shouldBe 0
-        admin.page.locator("[data-verb='member-add']").count() shouldBe 0
+        admin.page.locator("nav.app-nav a[data-nav-label='Workspaces']").count() shouldBe 0
+        admin.page.locator("#workspace-switcher").count() shouldBe 1
         shot(admin.page, "ws-admin-switched-to-viewer", "light")
         watch.bad shouldBe emptyList()
+        val refused = admin.page.request().get("$baseUrl/workspaces")
+        refused.status() shouldBe 403
+        refused.text() shouldContain "auth.role_required"
         admin.close()
     }
 
@@ -356,13 +370,13 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         val draftBody: String,
     )
 
-    /** v1 RELEASED and v2 DRAFT, made by an author-promoter through REST (a viewer cannot). */
+    /** v1 RELEASED and v2 DRAFT, made by an AUTHOR through REST (release is the author's since D8; a viewer cannot). */
     private fun seedTemplate(): TemplateFixture {
         val leaf = "va143_" + suffix()
         val name = "test/$leaf.sql"
         val releasedBody = "SELECT 1 AS released_$leaf"
         val draftBody = "SELECT 2 AS draft_$leaf"
-        val maker = signIn("va-maker", author = true, promoter = true, admin = false)
+        val maker = signIn("va-maker", role = "author")
         val created =
             send(
                 maker.page,
@@ -476,8 +490,8 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         VALUES ('$workspace', '$workspace', FALSE, NULL)
         """.trimIndent(),
         """
-        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
-        SELECT w.id, u.id, FALSE, FALSE, FALSE FROM workspaces w, users u
+        INSERT INTO workspace_members (workspace_id, user_id, role)
+        SELECT w.id, u.id, 'viewer' FROM workspaces w, users u
          WHERE w.name = '$workspace' AND u.email = '$email'
         """.trimIndent(),
     )
@@ -493,8 +507,8 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         """.trimIndent(),
         "DELETE FROM workspace_members WHERE user_id = (SELECT id FROM users WHERE email = '$email')",
         """
-        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
-        SELECT w.id, u.id, TRUE, FALSE, TRUE FROM workspaces w, users u
+        INSERT INTO workspace_members (workspace_id, user_id, role)
+        SELECT w.id, u.id, 'workspace_admin' FROM workspaces w, users u
          WHERE w.name = '$workspace' AND u.email = '$email'
         """.trimIndent(),
     )
@@ -542,40 +556,48 @@ class ViewerAccessBrowserTest : BrowserSuite() {
             return watch
         }
 
+        /**
+         * Switches through the CHROME's switcher (the `<select>` every member keeps, D13/D14),
+         * landing on the dashboard with the switch applied — not through the workspaces page,
+         * which since 177 is a workspace admin's and would refuse the viewer this session is
+         * about to become.
+         */
         fun switchTo(workspace: String) {
-            page.navigate("$baseUrl/workspaces")
-            val form = "form[action*='/workspace/switch']:has(input[value='$workspace'])"
-            page.waitForSelector("$form [data-verb='workspace-switch']")
-            page.click("$form [data-verb='workspace-switch']")
-            page.waitForURL("**/dashboard")
-            page.navigate("$baseUrl/workspaces")
+            page.navigate("$baseUrl/dashboard")
+            page.waitForSelector("#workspace-switcher")
+            page.selectOption("#workspace-switcher", arrayOf(workspace), Page.SelectOptionOptions().setForce(true))
+            page.waitForFunction(
+                "() => document.querySelector('[data-role]') && document.querySelector('.app-ws b')?.textContent?.trim() === '$workspace'",
+            )
             page.waitForSelector("nav.app-nav")
         }
+
+        /** The `dp_session` cookie's value — a switch re-issues the token (D14), so it must change. */
+        fun sessionToken(): String? =
+            page
+                .context()
+                .cookies()
+                .firstOrNull { it.name == "dp_session" }
+                ?.value
 
         fun close() = session.close()
     }
 
     private fun signIn(
         slug: String,
-        author: Boolean,
-        promoter: Boolean,
-        admin: Boolean,
-    ): RoleSession = openSession(seedRoleUser(slug, author, promoter, admin))
+        role: String,
+    ): RoleSession = openSession(seedRoleUser(slug, role))
 
     private fun seedRoleUser(
         slug: String,
-        author: Boolean,
-        promoter: Boolean,
-        admin: Boolean,
+        role: String,
     ): LocalUser =
         seedLocalUser(
             uniqueEmail("$slug-" + suffix()),
             generatedPassword("pw"),
             mustChange = false,
             isAdmin = false,
-            author = author,
-            promoter = promoter,
-            admin = admin,
+            role = role,
         )
 
     private fun openSession(user: LocalUser): RoleSession {

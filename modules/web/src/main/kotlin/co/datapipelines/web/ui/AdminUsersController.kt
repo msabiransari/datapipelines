@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.auth.WorkspaceRole
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -37,6 +38,8 @@ class AdminUsersController(
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         // The create-local-user form renders only when the method exists (§5A.1).
         model.addAttribute("localEnabled", authProperties.local.enabled)
+        // D22: the create form's role dropdown — the four workspace roles, in doc order.
+        model.addAttribute("workspaceRoles", WorkspaceRole.entries)
         // §5 (097 §B): the page renders the shell AND the initial rows, through the same
         // model the partial renders through. The screen used to paint three skeleton rows and
         // fetch the real ones from an inline <script> — a fourth first-paint idiom, and the

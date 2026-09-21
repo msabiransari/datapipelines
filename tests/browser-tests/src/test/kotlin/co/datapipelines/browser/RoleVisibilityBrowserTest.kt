@@ -27,16 +27,16 @@ import java.sql.DriverManager
 class RoleVisibilityBrowserTest : BrowserSuite() {
     /**
      * The ladder, in one visit each. Three sessions, three roles, one screen — and each role is
-     * asserted against the one below it, because the capability axis is not a chain: only a
-     * side-by-side reading shows that an author LOSES Release while a promoter loses everything
-     * else (D-R2, "the DevOps guys who can only release").
+     * asserted against the one below it, because the roles are not a chain: only a side-by-side
+     * reading shows that a promoter LOSES execute and keys while an author gains release (D5,
+     * D8 — 2026-09-20: "the author releases, the promoter promotes").
      */
     @Test
     fun `the explorer, the datasources screen and the API console render exactly each role's verbs`() {
         startTrace()
 
         // --- viewer: reads everything, changes nothing, and still executes (D-R3).
-        val viewer = signIn("rbv-viewer", author = false, promoter = false, admin = false)
+        val viewer = signIn("rbv-viewer", role = "viewer")
         viewer.page.navigate("$baseUrl/pipelines")
         viewer.page.waitForSelector("[data-role]")
         viewer.roleBadge() shouldBe "viewer"
@@ -44,8 +44,9 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
 
         viewer.page.navigate("$baseUrl/datasources")
         viewer.page.waitForSelector(".app-page-h")
-        // §7.6 puts register/edit/delete/test on ws_admin — a viewer sees the list and no verb.
-        viewer.verbs() shouldContainExactly emptyList()
+        // §7.6 puts register/edit/delete on ws_admin; Test follows execute since 2026-09-20 and
+        // renders for a viewer — the one verb this screen offers them.
+        viewer.verbs().filterNot { it == "datasource-test" } shouldContainExactly emptyList()
 
         viewer.page.navigate("$baseUrl/api-console")
         viewer.page.waitForSelector(".app-page-h")
@@ -56,7 +57,7 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         viewer.close()
 
         // --- author: the authoring verbs, and no Release anywhere.
-        val author = signIn("rbv-author", author = true, promoter = false, admin = false)
+        val author = signIn("rbv-author", role = "author")
         author.page.navigate("$baseUrl/pipelines")
         author.page.waitForSelector("[data-role]")
         author.roleBadge() shouldBe "author"
@@ -70,8 +71,8 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         author.verbs().contains("datasource-register") shouldBe false
         author.close()
 
-        // --- promoter: Release and Switch, and none of the authoring verbs.
-        val promoter = signIn("rbv-promoter", author = false, promoter = true, admin = false)
+        // --- promoter: promotes, and none of the authoring, executing or key verbs (D5).
+        val promoter = signIn("rbv-promoter", role = "promoter")
         promoter.page.navigate("$baseUrl/pipelines")
         promoter.page.waitForSelector("[data-role]")
         promoter.roleBadge() shouldBe "promoter"
@@ -81,11 +82,11 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         promoter.verbs().contains("key-create") shouldBe false
         promoter.close()
 
-        // --- workspace admin: the datasource verbs, and Members with the three checkboxes.
-        val admin = signIn("rbv-admin", author = true, promoter = false, admin = true)
+        // --- workspace admin: the datasource verbs, and Members with the role dropdown.
+        val admin = signIn("rbv-admin", role = "workspace_admin")
         admin.page.navigate("$baseUrl/pipelines")
         admin.page.waitForSelector("[data-role]")
-        admin.roleBadge() shouldBe "admin"
+        admin.roleBadge() shouldBe "workspace admin"
 
         admin.page.navigate("$baseUrl/datasources")
         admin.page.waitForSelector(".app-page-h")
@@ -118,11 +119,11 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
     fun `a viewer opens a pipeline from the explorer and executes it in the editor`() {
         startTrace()
         val name = "test/browser_122_" + generatedPassword("p").take(6).lowercase()
-        val author = signIn("rbv-exec-author", author = true, promoter = false, admin = false)
+        val author = signIn("rbv-exec-author", role = "author")
         createDraftPipeline(author.page, name)
         author.close()
 
-        val viewer = signIn("rbv-exec-viewer", author = false, promoter = false, admin = false)
+        val viewer = signIn("rbv-exec-viewer", role = "viewer")
         val badResponses = mutableListOf<String>()
         var editorDocumentStatus = 0
         viewer.page.onResponse { response ->
@@ -231,20 +232,20 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
     }
 
     /**
-     * §C.1 — the members screen a workspace admin gets: three checkboxes per row, three on the
-     * add form, and the flags landing in `workspace_members`. Asserted at the ROW, because "did
-     * the checkbox reach the database" is the only question that matters and a rendered form
-     * proves nothing about it.
+     * §C.1 / D22 — the members screen a workspace admin gets: ONE role dropdown per row, one on
+     * the add form, and the role landing in `workspace_members`. Asserted at the ROW, because
+     * "did the dropdown reach the database" is the only question that matters and a rendered
+     * form proves nothing about it.
      *
      * The fixture builds its OWN workspace rather than using the shared `default`: every suite
      * on this box seeds members into `default`, so a rule about "the members of a workspace"
      * asserted there would be reading other tests' rows.
      */
     @Test
-    fun `a workspace admin adds a member with flags and then replaces them`() {
+    fun `a workspace admin adds a member with a role and then changes it through the dropdown`() {
         startTrace()
         val workspace = "rbv-ws-" + suffix()
-        val adminUser = seedRoleUser("rbv-mem-admin", author = false, promoter = false, admin = false)
+        val adminUser = seedRoleUser("rbv-mem-admin", role = "viewer")
         val member = viewerUser("rbv-target")
         // BEFORE the login: AuthCache caches memberships per user, so a workspace seeded after
         // the session opened stays invisible for the TTL.
@@ -257,55 +258,53 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         val section = "section[data-workspace='$workspace']"
         admin.page.waitForSelector("$section [data-verb='member-add']")
 
-        // Add-with-flags: the pre-114 form posted `email` only, so every member added from the
+        // Add-with-role: the pre-114 form posted `email` only, so every member added from the
         // UI arrived a viewer whatever the operator meant.
         admin.page.fill("$section form[action$='/members'] input[name=email]", member)
-        admin.page.check("$section form[action$='/members'] input[name=promoter]")
+        admin.page.selectOption("$section form[action$='/members'] select[name=role]", "promoter")
         admin.page.click("$section [data-verb='member-add']")
-        admin.page.waitForSelector("$section tr:has-text('$member')")
+        admin.page.waitForSelector("$section tr[data-member='$member']")
 
-        flagsOf(workspace, member) shouldBe Triple(false, true, false)
+        roleOf(workspace, member) shouldBe "promoter"
 
-        // …and a REPLACE through the row's own form: ticking admin, with the SERVER's
-        // normalisation making it an author too (V23's chk_workspace_member_admin_authors —
-        // stated once, by the constraint, and never re-spelled in the binder).
-        admin.page.navigate("$baseUrl/workspaces")
-        val row = "$section tr:has-text('$member')"
-        admin.page.waitForSelector("$row input[data-flag=admin]")
-        admin.page.check("$row input[data-flag=admin]")
-        admin.page.click("$row [data-verb='member-flags']")
-        // The write's own completion signal: the POST redirects to `?ok=member_flags` only after
-        // the service has committed (PRG, WorkspacesUiController.action). The first draft waited
-        // on `input[data-flag=admin]:checked` — a box `check()` had already ticked in the OLD
-        // document, so the wait returned before the POST was answered and the row below was read
-        // mid-flight: `(false, true, false)` on CI and once in a local gate (#114, 154).
-        admin.page.waitForURL("**/workspaces?ok=member_flags")
-        // …and the re-rendered row shows what the database now holds.
-        admin.page.waitForSelector("$row input[data-flag=admin]:checked")
+        // …and a CHANGE through the row's own dropdown: the one htmx partial on this screen,
+        // which swaps the row in place and toasts. The write's own completion signal is the
+        // success toast — the response that carries it is the response that committed.
+        val row = "$section tr[data-member='$member']"
+        admin.page.waitForSelector("$row select[data-member-role]")
+        admin.page.selectOption("$row select[data-member-role]", "workspace_admin")
+        admin.page.click("$row [data-verb='member-role']")
+        // The response's OWN toast (the `?ok=member_added` flash is already on the page, so a
+        // bare `.ds-toast-success` wait would be satisfied before the POST is answered).
+        admin.page.waitForSelector(".ds-toast-success:has-text('Role changed')")
+        // …and the swapped-in row shows what the database now holds: the SERVER marked the
+        // option selected in the re-rendered fragment (read as the select's value — an <option>
+        // in a closed select is never "visible", so a selector wait on it would never resolve).
+        admin.page.locator("$row select[data-member-role]").inputValue() shouldBe "workspace_admin"
 
-        flagsOf(workspace, member) shouldBe Triple(true, true, true)
+        roleOf(workspace, member) shouldBe "workspace_admin"
         admin.close()
     }
 
     /**
      * The last-admin rule as the USER meets it: a 409 from the service arrives as the §5.1
-     * toast that names the remedy ("Give another member admin first"), not as an error page and
-     * not as a silent no-op. The refusal is the SERVER's — what this asserts is that the screen
-     * tells the truth about it, and that a refused write does not half-apply.
+     * toast that names the remedy ("give someone else the workspace admin role first"), not as
+     * an error page and not as a silent no-op. The refusal is the SERVER's — what this asserts
+     * is that the screen tells the truth about it, and that a refused write does not half-apply.
      */
     @Test
     fun `demoting the only admin renders the last-admin toast and leaves the row alone`() {
         startTrace()
         val workspace = "rbv-last-" + suffix()
-        val adminUser = seedRoleUser("rbv-last-admin", author = false, promoter = false, admin = false)
+        val adminUser = seedRoleUser("rbv-last-admin", role = "viewer")
         seedWorkspaceAdministeredBy(workspace, adminUser.email)
         val admin = openSession(adminUser)
         admin.switchTo(workspace)
 
-        val row = "section[data-workspace='$workspace'] tr:has-text('${admin.email}')"
-        admin.page.waitForSelector("$row input[data-flag=admin]")
-        admin.page.uncheck("$row input[data-flag=admin]")
-        admin.page.click("$row [data-verb='member-flags']")
+        val row = "section[data-workspace='$workspace'] tr[data-member='${admin.email}']"
+        admin.page.waitForSelector("$row select[data-member-role]")
+        admin.page.selectOption("$row select[data-member-role]", "author")
+        admin.page.click("$row [data-verb='member-role']")
 
         admin.page.waitForSelector(".ds-toast-danger")
         admin.page
@@ -313,10 +312,10 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
             .first()
             .innerText()
             .lowercase()
-            .contains("at least one admin") shouldBe true
+            .contains("last workspace admin") shouldBe true
 
         // The row is untouched: a refused write must not half-apply.
-        flagsOf(workspace, admin.email).third shouldBe true
+        roleOf(workspace, admin.email) shouldBe "workspace_admin"
         admin.close()
     }
 
@@ -338,21 +337,17 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         fun roleBadge(): String = page.locator("[data-role]").first().getAttribute("data-role")
 
         /**
-         * Enters [workspace] through the screen's own Switch verb, then lands back on
-         * `/workspaces` with the switch APPLIED.
-         *
-         * Not `BrowserSuite.enterWorkspace`: that one waits for `**\/dashboard` after driving
-         * the rail's switcher, and a session already sitting on `/dashboard` satisfies that
-         * wait instantly — the assertion passes before the POST has been answered, and the
-         * next navigation races the re-minted cookie. Switching FROM `/workspaces` makes the
-         * redirect a real URL change, so the wait has something to wait for.
+         * Enters [workspace] through the chrome's switcher, then lands on `/workspaces` with the
+         * switch APPLIED — the wait is on the badge's workspace NAME changing, so the next
+         * navigation cannot race the re-minted cookie.
          */
         fun switchTo(workspace: String) {
-            page.navigate("$baseUrl/workspaces")
-            val form = "form[action*='/workspace/switch']:has(input[value='$workspace'])"
-            page.waitForSelector("$form [data-verb='workspace-switch']")
-            page.click("$form [data-verb='workspace-switch']")
-            page.waitForURL("**/dashboard")
+            // 177/D13: through the CHROME's switcher — the workspaces PAGE is a workspace
+            // admin's, and this person is a viewer of `default` until the switch lands.
+            page.navigate("$baseUrl/dashboard")
+            page.waitForSelector("#workspace-switcher")
+            page.selectOption("#workspace-switcher", arrayOf(workspace), Page.SelectOptionOptions().setForce(true))
+            page.waitForFunction("() => document.querySelector('.app-ws b')?.textContent?.trim() === '$workspace'")
             page.navigate("$baseUrl/workspaces")
         }
 
@@ -361,16 +356,12 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
 
     private fun signIn(
         slug: String,
-        author: Boolean,
-        promoter: Boolean,
-        admin: Boolean,
-    ): RoleSession = openSession(seedRoleUser(slug, author, promoter, admin))
+        role: String,
+    ): RoleSession = openSession(seedRoleUser(slug, role))
 
     private fun seedRoleUser(
         slug: String,
-        author: Boolean,
-        promoter: Boolean,
-        admin: Boolean,
+        role: String,
     ): LocalUser =
         seedLocalUser(
             uniqueEmail("$slug-" + suffix()),
@@ -379,9 +370,7 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
             // NOT an instance super admin: a super admin holds every capability in every
             // workspace (D-R8), which would make each of these four sessions identical.
             isAdmin = false,
-            author = author,
-            promoter = promoter,
-            admin = admin,
+            role = role,
         )
 
     /**
@@ -400,10 +389,10 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         return RoleSession(session.page, email, session)
     }
 
-    /** A member of `default` and nothing else, with no flags — someone to add somewhere. */
+    /** A member of `default` and nothing else, a viewer — someone to add somewhere. */
     private fun viewerUser(slug: String): String {
         val email = uniqueEmail("$slug-" + suffix())
-        seedLocalUser(email, generatedPassword("pw"), mustChange = false, isAdmin = false, author = false, admin = false)
+        seedLocalUser(email, generatedPassword("pw"), mustChange = false, isAdmin = false, role = "viewer")
         return email
     }
 
@@ -430,8 +419,8 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
                 )
                 statement.execute(
                     """
-                    INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
-                    SELECT w.id, u.id, TRUE, FALSE, TRUE
+                    INSERT INTO workspace_members (workspace_id, user_id, role)
+                    SELECT w.id, u.id, 'workspace_admin'
                       FROM workspaces w, users u
                      WHERE w.name = '$name' AND u.email = '$adminEmail'
                     """.trimIndent(),
@@ -439,18 +428,18 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
             }
         }
 
-    /** The stored `(author, promoter, admin)` of [email]'s membership in [workspace]. */
-    private fun flagsOf(
+    /** The stored role of [email]'s membership in [workspace]. */
+    private fun roleOf(
         workspace: String,
         email: String,
-    ): Triple<Boolean, Boolean, Boolean> =
+    ): String =
         DriverManager
             .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
             .use { connection ->
                 connection
                     .prepareStatement(
                         """
-                        SELECT m.author, m.promoter, m.admin
+                        SELECT m.role
                           FROM workspace_members m
                           JOIN users u ON u.id = m.user_id
                           JOIN workspaces w ON w.id = m.workspace_id
@@ -461,7 +450,7 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
                         statement.setString(2, workspace)
                         statement.executeQuery().use { rows ->
                             check(rows.next()) { "no membership row for $email" }
-                            Triple(rows.getBoolean(1), rows.getBoolean(2), rows.getBoolean(3))
+                            rows.getString(1)
                         }
                     }
             }

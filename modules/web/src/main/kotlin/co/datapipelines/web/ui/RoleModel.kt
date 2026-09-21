@@ -2,9 +2,9 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Capability
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.Scope
+import co.datapipelines.auth.WorkspaceRole
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.Model
 
@@ -25,8 +25,9 @@ import org.springframework.ui.Model
  * `isAdmin` on the datasource partials — and each copy was a place the answer could drift from
  * the matrix. The predicates themselves live on [AuthenticatedPrincipal] (`isAuthor`,
  * `isPromoter`, `isWorkspaceAdmin`, `isSuperAdmin`), which is where 112 put them; this class
- * adds only what the principal has no opinion about — membership itself, execution, and the
- * LABEL — and puts all seven answers into the model under names the templates agree on.
+ * adds only what the principal has no opinion about — membership itself, execution, the two
+ * page-wide reads (executions, promotion) and the LABEL — and puts the answers into the model
+ * under names the templates agree on.
  *
  * ## The API-key conjunct
  * Every boolean here narrows for an API-key principal exactly as
@@ -49,15 +50,23 @@ import org.springframework.ui.Model
  */
 object RoleModel {
     /**
-     * The seven answers for one principal.
+     * The answers for one principal.
      *
      * [canRead] is "is there a workspace to read at all" — false only for a principal with zero
      * reachable memberships, which is the case the no-workspace page (§C.3) exists for.
+     *
+     * [canReadExecutions] (D11, 2026-09-20) is the `READ_EXECUTIONS` row: the same roles as
+     * [canExecute] — the promoter reads no executions — so the rail's Executions item, the
+     * dashboard's runs and every runs panel render by it. [canReadPromotion] is the
+     * `PROMOTION_READ` row (owner rule 13): the author who released sees the promotion page,
+     * the promote verb on it still renders by [canPromote].
      */
     data class Roles(
         val canRead: Boolean,
         val canExecute: Boolean,
+        val canReadExecutions: Boolean,
         val canAuthor: Boolean,
+        val canReadPromotion: Boolean,
         val canPromote: Boolean,
         val canAdminWorkspace: Boolean,
         val isSuperAdmin: Boolean,
@@ -71,9 +80,9 @@ object RoleModel {
      */
     fun roles(principal: AuthenticatedPrincipal?): Roles {
         if (principal == null) return NONE
-        val flags = principal.workspace?.flags ?: return NONE
-        // A member is a member: VIEW and EXECUTE are satisfied by every row (D-R3, "viewers
-        // execute"), so the only question left on those two rungs is the credential's scope.
+        val context = principal.workspace ?: return NONE
+        // VIEW is every role; EXECUTE is every role but the promoter (D5). On both the other
+        // question is the credential's scope.
         //
         // 143: the scope conjunct is stated HERE for author and promoter too. The auth
         // predicates carry it, but they short-circuit on `superAdmin` before reaching it, so
@@ -84,9 +93,13 @@ object RoleModel {
         val canAuthor = principal.isAuthor && principal.scopeReaches(Scope.AUTHOR)
         val canPromote = principal.isPromoter && principal.scopeReaches(Scope.AUTHOR)
         return Roles(
-            canRead = Capability.VIEW.satisfiedBy(flags) && principal.scopeReaches(Scope.READ),
-            canExecute = Capability.EXECUTE.satisfiedBy(flags) && principal.scopeReaches(Scope.EXECUTE),
+            canRead = context.permits(Permission.VIEW) && principal.scopeReaches(Scope.READ),
+            canExecute = context.permits(Permission.EXECUTE) && principal.scopeReaches(Scope.EXECUTE),
+            // READ_EXECUTIONS floors at `read` on the credential axis (§7.6), so an execute-role
+            // issuer's `read` key still sees the runs it may not start.
+            canReadExecutions = context.permits(Permission.EXECUTE) && principal.scopeReaches(Scope.READ),
             canAuthor = canAuthor,
+            canReadPromotion = context.permits(Permission.PROMOTION_READ) && principal.scopeReaches(Scope.AUTHOR),
             canPromote = canPromote,
             // The scope conjunct is added HERE rather than on `isWorkspaceAdmin`, which has
             // none: every §7.6 row a workspace admin drives (`MANAGE_WORKSPACE`,
@@ -100,13 +113,7 @@ object RoleModel {
             // session-only — the matrix says so on the scope axis, and this says the same
             // thing on the screen rather than offering a button the interceptor will refuse.
             isSuperAdmin = principal.isSuperAdmin && principal.scopeReaches(Scope.ADMIN),
-            roleLabel =
-                label(
-                    superAdmin = principal.isSuperAdmin,
-                    admin = principal.isWorkspaceAdmin && principal.scopeReaches(Scope.AUTHOR),
-                    author = canAuthor,
-                    promoter = canPromote,
-                ),
+            roleLabel = label(principal.isSuperAdmin, effectiveRole(principal, context.role)),
         )
     }
 
@@ -128,20 +135,36 @@ object RoleModel {
      *
      * Viewers, authors and pure promoters get neither: an Admin item that leads to a screen
      * the interceptor refuses is exactly the dead link 114 §A exists to remove.
+     *
+     * Three more rail items follow a §7.6 row since 2026-09-20 and are decided here for the
+     * same reason: [executions] is `READ_EXECUTIONS` (the promoter has no Executions item),
+     * [promotion] is `PROMOTION_READ` (authors gain it, viewers never had a reason to see it),
+     * [workspaces] is `WORKSPACES_READ` (D13 — the page is a workspace admin's; a principal
+     * with NO workspace keeps the link, because the no-workspace page is the one screen that
+     * explains their state, ui-screens §4.13).
      */
     data class Shell(
         val adminUsers: Boolean,
         val adminMembers: Boolean,
+        val executions: Boolean,
+        val promotion: Boolean,
+        val workspaces: Boolean,
     )
 
     fun shell(principal: AuthenticatedPrincipal?): Shell {
-        if (principal == null) return Shell(adminUsers = false, adminMembers = false)
+        if (principal == null) return NO_SHELL
         val adminUsers = principal.isSuperAdmin && principal.scopeReaches(Scope.ADMIN)
+        val roles = roles(principal)
         return Shell(
             adminUsers = adminUsers,
-            adminMembers = !adminUsers && roles(principal).canAdminWorkspace,
+            adminMembers = !adminUsers && roles.canAdminWorkspace,
+            executions = roles.canReadExecutions,
+            promotion = roles.canReadPromotion,
+            workspaces = roles.canAdminWorkspace || principal.isSuperAdmin || principal.workspace == null,
         )
     }
+
+    private val NO_SHELL = Shell(adminUsers = false, adminMembers = false, executions = false, promotion = false, workspaces = false)
 
     /**
      * Stamps [roles] into [model] under the names every template reads. Called by each screen's
@@ -156,7 +179,9 @@ object RoleModel {
         val roles = roles(principal)
         model.addAttribute("canRead", roles.canRead)
         model.addAttribute("canExecute", roles.canExecute)
+        model.addAttribute("canReadExecutions", roles.canReadExecutions)
         model.addAttribute("canAuthor", roles.canAuthor)
+        model.addAttribute("canReadPromotion", roles.canReadPromotion)
         model.addAttribute("canPromote", roles.canPromote)
         model.addAttribute("canAdminWorkspace", roles.canAdminWorkspace)
         model.addAttribute("isSuperAdmin", roles.isSuperAdmin)
@@ -177,57 +202,36 @@ object RoleModel {
 
     /**
      * The label for a MEMBERSHIP ROW, rather than for the current principal — what the members
-     * table and the workspace list print about somebody else.
-     *
-     * Same vocabulary as [label], derived from the same flags, so the word beside a member's
-     * name and the word in that person's own shell badge agree. `superAdmin` is a property of
-     * the USER, not of the row, so it never appears here: a row says what the MEMBERSHIP
-     * carries, and an instance super admin's authority is not one.
+     * table and the workspace list print about somebody else: the role's own word
+     * ([WorkspaceRole.label]). `superAdmin` is a property of the USER, not of the row, so it
+     * never appears here: a row says what the MEMBERSHIP carries, and an instance super admin's
+     * authority is not one.
      */
-    fun labelOf(flags: MembershipFlags): String =
-        when {
-            flags.admin -> "admin"
-            flags.author && flags.promoter -> "author · promoter"
-            flags.author -> "author"
-            flags.promoter -> "promoter"
-            else -> "viewer"
-        }
+    fun labelOf(role: WorkspaceRole): String = role.label
 
     /**
-     * The word the shell shows next to the workspace name.
+     * The word the shell shows next to the workspace name. A super admin reads `super admin`
+     * in every workspace, including ones they hold no explicit membership in (D7), because
+     * that is the authority they are acting with; everyone else reads their role.
      *
-     * Derived from the flags, stored nowhere — no single label names an additive row, which is
-     * why the membership carries three booleans and not a role column (D-R2). A super admin
-     * reads `super admin` in every workspace, including ones they hold no explicit membership
-     * in (D-R8), because that is the authority they are acting with.
-     *
-     * The label follows the EFFECTIVE booleans, not the raw row: an API key whose scope narrows
-     * its issuer's authoring reach must not print `author`, or the badge would contradict the
-     * buttons beside it. `super admin` is the exception and says so at the branch — it is what
-     * the credential's OWNER is, not what this credential may do.
+     * `super admin` is the one word not narrowed by the credential — it is what the
+     * credential's OWNER is, not what this credential may do. The role IS narrowed, by
+     * [effectiveRole], so the badge never contradicts the buttons beside it.
      */
     private fun label(
         superAdmin: Boolean,
-        admin: Boolean,
-        author: Boolean,
-        promoter: Boolean,
-    ): String =
-        when {
-            // The USER's instance authority, and the only rung that is not narrowed by the
-            // credential: a key held by a super admin still belongs to one, even though it
-            // cannot drive the instance verbs (O-2 — no key holds `admin` scope).
-            superAdmin -> "super admin"
+        role: WorkspaceRole,
+    ): String = if (superAdmin) "super admin" else role.label
 
-            admin -> "admin"
-
-            author && promoter -> "author · promoter"
-
-            author -> "author"
-
-            promoter -> "promoter"
-
-            else -> "viewer"
-        }
+    /**
+     * The role a CREDENTIAL lets its holder act as: the membership's role, narrowed to
+     * `viewer` for an API key whose scope does not reach `author` — the badge on a `read`
+     * key must not say `author` when every authoring verb beside it is hidden (143).
+     */
+    private fun effectiveRole(
+        principal: AuthenticatedPrincipal,
+        role: WorkspaceRole,
+    ): WorkspaceRole = if (role == WorkspaceRole.VIEWER || principal.scopeReaches(Scope.AUTHOR)) role else WorkspaceRole.VIEWER
 
     /** The credential axis. A session carries no scopes (D-R1) and is judged on the membership alone. */
     private fun AuthenticatedPrincipal.scopeReaches(scope: Scope): Boolean =
@@ -242,7 +246,9 @@ object RoleModel {
         Roles(
             canRead = false,
             canExecute = false,
+            canReadExecutions = false,
             canAuthor = false,
+            canReadPromotion = false,
             canPromote = false,
             canAdminWorkspace = false,
             isSuperAdmin = false,

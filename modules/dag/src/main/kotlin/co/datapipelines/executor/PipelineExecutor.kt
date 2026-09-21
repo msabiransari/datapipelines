@@ -1028,6 +1028,7 @@ class PipelineExecutor(
             tempdbDialect = request.pipeline.settings.tempdb.engine.dialect,
             pipelineQueryTimeoutSeconds = request.pipeline.settings.queryTimeoutSeconds,
             userId = request.userId,
+            executedByKeyKind = request.executedByKeyKind,
             // A null rootExecutionId on the request marks a ROOT execution — its own id is the
             // family's root, exactly as the repository persists it (metadata-db §4.6).
             rootExecutionId = request.rootExecutionId ?: run.executionId,

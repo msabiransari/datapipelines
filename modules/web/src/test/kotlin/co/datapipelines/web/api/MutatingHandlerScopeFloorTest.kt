@@ -233,7 +233,13 @@ class MutatingHandlerScopeFloorTest {
                     "mint and a session carries CSRF, so the read floor is moot for the credential that could abuse it",
             )
 
-        const val BASE_PACKAGE = "co.datapipelines.web"
+        /**
+         * 177 §D.1 — `co.datapipelines`, not `co.datapipelines.web`: every controller on this
+         * module's classpath, whichever module declares it (auth, application, mcp-server sit
+         * below web and are reached; `modules/app` sits above and is covered by
+         * `RoleWalkE2eTest`, which walks the running application's own handler mapping).
+         */
+        const val BASE_PACKAGE = "co.datapipelines"
 
         /**
          * The mutating HTTP verb a handler carries, or null for read verbs.
@@ -302,15 +308,14 @@ class MutatingHandlerScopeFloorTest {
                     "this screen swaps; the redirect re-renders it",
                 "WorkspacesUiController#addMember" to
                     "NO-JS: workspace administration is the recovery surface an operator reaches when the " +
-                    "app is misbehaving, and it is a plain form POST end to end",
+                    "app is misbehaving, and it is a plain form POST end to end. (Changing an existing member's " +
+                    "role is NOT here since 177/D22: it is the `/partials/workspaces/…/role` htmx partial, the one " +
+                    "verb an admin repeats down a table, where a full-page reload per row lost the scroll.)",
                 "WorkspacesUiController#removeMember" to
                     "NO-JS: the sibling of addMember, same form, same banner",
                 "WorkspacesUiController#revokeInvitation" to
                     "NO-JS: the fourth member verb (113) — revoking a pending invitation, same form and " +
                     "same toast stack as the member rows it sits beneath",
-                "WorkspacesUiController#setMemberFlags" to
-                    "NO-JS: the third member verb, same form and same banner as addMember/removeMember — " +
-                    "the three role checkboxes and a Save, posted plainly (114 §C.1)",
                 "WorkspacesUiController#renameDisplay" to
                     "NO-JS: the workspace's display name, edited on the same administration surface and by " +
                     "the same plain form POST as its members",

@@ -274,7 +274,7 @@ class WebPersistenceIntegrationTest {
                 pipelineVersion = 1,
                 status = ExecutionStatus.RUNNING,
                 parametersJson = "{}",
-                triggeredBy = userId,
+                executedBy = userId,
                 triggeredVia = ExecutionTrigger.REST,
             ),
         )

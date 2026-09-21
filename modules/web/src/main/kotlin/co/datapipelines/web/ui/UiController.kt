@@ -61,6 +61,9 @@ class UiController(
         request: HttpServletRequest,
     ): String {
         model.addAttribute("activeTheme", themeResolver.resolve(request))
+        // D11 (2026-09-20): the recent-executions panel is a READ_EXECUTIONS read, so the page
+        // draws it only for a role that holds the row — a promoter's dashboard never asks.
+        RoleModel.stamp(model)
         return "dashboard"
     }
 

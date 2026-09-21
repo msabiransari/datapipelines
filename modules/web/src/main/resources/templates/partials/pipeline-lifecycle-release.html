@@ -112,7 +112,7 @@
         <p th:if="${!dlg.hasChecks}" class="u-secondary u-text-sm u-mb-md">No checks on this version.</p>
 
         <div id="plc-release-footer">
-          <button th:if="${!dlg.hasChecks}" type="submit" data-verb="pipeline-release-confirm" data-consent-submit
+          <button th:if="${!dlg.hasChecks and canAuthor == true}" type="submit" data-verb="pipeline-release-confirm" data-consent-submit
                   class="ds-button ds-button-primary u-full" hx-disabled-elt="this"
                   th:text="'Release v' + ${dlg.version}">Release v3</button>
           <button th:if="${dlg.hasChecks}" type="submit" disabled

@@ -39,7 +39,7 @@
       <!-- Exactly the verbs this row's status allows (§3.5): DRAFT → Release, Purge;
            RELEASED → Discard; DISCARDED → Restore. No Switch — see the header comment. -->
       <!-- 114 §B — state AND role; the menu is hidden entirely when no verb survives. -->
-      <th:block th:with="mayRelease=${v.canRelease and canPromote == true},
+      <th:block th:with="mayRelease=${v.canRelease and canAuthor == true},
                          mayPurge=${v.canPurge and canAuthor == true},
                          mayDiscard=${v.canDiscard and canAuthor == true},
                          mayRestore=${v.canRestore and canAuthor == true}">

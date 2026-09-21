@@ -70,7 +70,7 @@ class WorkspacesControllerApiKeyTest {
                     co.datapipelines.auth.WorkspaceContext(
                         UUID.randomUUID(),
                         "acme",
-                        co.datapipelines.auth.MembershipFlags(author = true, promoter = true, admin = true),
+                        co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN,
                     ),
             )
         SecurityContextHolder.getContext().authentication =
@@ -155,7 +155,7 @@ class WorkspacesControllerApiKeyTest {
 
     @Test
     fun `a read-scoped api key still reads the workspace surface`() {
-        // WORKSPACES_READ stays read-floored (§7.6 "List / read own workspaces & members").
+        // WORKSPACES_READ (one workspace, its members) and WORKSPACE_SWITCH (list-own) both floor at `read` (§7.6).
         authenticateKey(Scope.READ)
 
         invoke("GET", handler("list"), "/api/v1/workspaces").first.shouldBeTrue()
@@ -165,11 +165,12 @@ class WorkspacesControllerApiKeyTest {
 
     /**
      * 114 §C.3a through the REAL interceptor: a session with no reachable workspace still
-     * passes `WORKSPACES_READ` (the no-workspace page's route), and nothing else. A key in the
+     * lists its own workspaces (`GET /api/v1/workspaces`, the switcher's `WORKSPACE_SWITCH` row —
+     * the no-workspace page's own route is `WORKSPACES_READ`), and nothing else. A key in the
      * same state does not — `RoleMatrixTest` pins the matrix, this pins the wire.
      */
     @Test
-    fun `a session with no workspace passes WORKSPACES_READ and no other operation`() {
+    fun `a session with no workspace lists its own workspaces and passes no other operation`() {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
                 AuthenticatedPrincipal(

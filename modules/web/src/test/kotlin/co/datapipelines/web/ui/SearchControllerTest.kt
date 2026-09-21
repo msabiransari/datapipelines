@@ -2,8 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -61,7 +61,7 @@ class SearchControllerTest {
                         WorkspaceContext(
                             workspaceId,
                             "acme",
-                            if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+                            if (workspaceAdmin) WorkspaceRole.WORKSPACE_ADMIN else WorkspaceRole.VIEWER,
                         ),
                 ),
                 null,
@@ -93,7 +93,7 @@ class SearchControllerTest {
             pipelineVersion = 1,
             status = ExecutionStatus.SUCCESS,
             parametersJson = "{}",
-            triggeredBy = userId,
+            executedBy = userId,
             triggeredVia = ExecutionTrigger.UI,
             startedAt = startedAt,
         )

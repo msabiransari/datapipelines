@@ -53,9 +53,14 @@ class PromotionUiController(
      * - **target unreachable / refusing** — the error is rendered in place with its code,
      *   rather than a generic error page, because the operator's next step depends on WHICH
      *   refusal it was.
+     *
+     * `PROMOTION_READ` (owner rule 13, 2026-09-20): author, promoter and admins read the page —
+     * the author who released sees what is promotable; the promote verb below stays
+     * `PROMOTE_VERSION` and renders by `canPromote`. A viewer has no business here and is
+     * refused by role, which is also why the rail draws the item only for those three.
      */
     @GetMapping("/promotion")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.PROMOTION_READ)
     fun screen(
         model: Model,
         request: HttpServletRequest,

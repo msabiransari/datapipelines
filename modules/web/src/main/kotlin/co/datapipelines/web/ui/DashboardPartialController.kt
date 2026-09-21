@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
@@ -31,11 +32,14 @@ class DashboardPartialController(
         val totalPipelines = pipelines.countAll(workspaceId)
         val todayStart = LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC)
 
+        // D11 (2026-09-20): the execution figures follow the READ_EXECUTIONS row — own runs
+        // unless workspace admin, and NONE for a role the row refuses (the promoter), whose
+        // tiles then honestly read zero rather than counting runs it may not see.
         val recentBatch =
-            if (isAdmin) {
-                executions.findAll(workspaceId, limit = STATS_SAMPLE_SIZE, offset = 0)
-            } else {
-                executions.findByUser(workspaceId, principal.userId, limit = STATS_SAMPLE_SIZE, offset = 0)
+            when {
+                !principal.holds(Permission.EXECUTE) -> emptyList()
+                isAdmin -> executions.findAll(workspaceId, limit = STATS_SAMPLE_SIZE, offset = 0)
+                else -> executions.findByUser(workspaceId, principal.userId, limit = STATS_SAMPLE_SIZE, offset = 0)
             }
 
         val executionsToday = recentBatch.count { it.startedAt >= todayStart }
@@ -49,7 +53,7 @@ class DashboardPartialController(
     }
 
     @GetMapping("/recent-executions")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
     fun recentExecutions(model: Model): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id

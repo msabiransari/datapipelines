@@ -9,7 +9,7 @@ import java.util.UUID
  *
  * ## Why the audit rows and not the execution row
  *
- * `pipeline_executions.triggered_by` is a **user** id — the key's owner — and there is no key-id
+ * `pipeline_executions.executed_by` is a **user** id — the key's owner — and there is no key-id
  * column on the table (the exact gap [co.datapipelines.application.endpoints.EndpointServeAudit]
  * KDoc documents for `endpoint.served`). Two keys owned by one person are indistinguishable
  * through it. The audit log is the only place the KEY id and the call's CORRELATION id appear

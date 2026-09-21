@@ -481,17 +481,17 @@ class WorkspaceIsolationIntegrationTest {
                 )
                 statement.execute(
                     """
-                    INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) VALUES
-                        ('$WS_ACME', '$ALICE', TRUE, FALSE, TRUE),
-                        ('$WS_GLOBEX', '$BOB', TRUE, FALSE, TRUE)
+                    INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+                        ('$WS_ACME', '$ALICE', 'workspace_admin'),
+                        ('$WS_GLOBEX', '$BOB', 'workspace_admin')
                     """.trimIndent(),
                 )
                 // 113: one PENDING invitation in globex — the row that must be invisible
                 // from acme, in listings and by revoke (the sweep drives the verb).
                 statement.execute(
                     """
-                    INSERT INTO workspace_invitations (workspace_id, email, author, invited_by) VALUES
-                        ('$WS_GLOBEX', '$GLOBEX_INVITATION_EMAIL', TRUE, '$BOB')
+                    INSERT INTO workspace_invitations (workspace_id, email, role, invited_by) VALUES
+                        ('$WS_GLOBEX', '$GLOBEX_INVITATION_EMAIL', 'author', '$BOB')
                     """.trimIndent(),
                 )
             }
@@ -534,7 +534,7 @@ class WorkspaceIsolationIntegrationTest {
                 statement.execute(
                     """
                     INSERT INTO pipeline_executions
-                        (execution_id, pipeline_id, pipeline_version, status, parameters_json, triggered_by, triggered_via, root_execution_id)
+                        (execution_id, pipeline_id, pipeline_version, status, parameters_json, executed_by, triggered_via, root_execution_id)
                     VALUES
                         ('$EXEC_ACME', '$PIPE_ACME', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', 'REST', '$EXEC_ACME'),
                         ('$EXEC_GLOBEX', '$PIPE_GLOBEX', 1, 'SUCCESS', '{}'::jsonb, '$BOB', 'REST', '$EXEC_GLOBEX')

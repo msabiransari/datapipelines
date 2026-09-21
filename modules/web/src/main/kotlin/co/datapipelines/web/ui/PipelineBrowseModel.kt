@@ -279,7 +279,7 @@ class PipelineBrowseModel(
         val last = lastRun(workspaceId, record.id)
         model.addAttribute("lastRun", last)
         model.addAttribute("lastRunAgo", last?.let { RelativeTime.since(it.startedAt, Instant.now()) })
-        model.addAttribute("lastRunBy", last?.let { actorName(it.triggeredBy) })
+        model.addAttribute("lastRunBy", last?.let { actorName(it.executedBy) })
     }
 
     private fun fillActing(
@@ -357,7 +357,7 @@ class PipelineBrowseModel(
                 executions.findByUser(workspaceId, userId, pipelineId, limit = RUNS_LIMIT)
             }
         model.addAttribute("runs", rows)
-        model.addAttribute("runActors", actors.lookup(rows.map { it.triggeredBy }))
+        model.addAttribute("runActors", actors.lookup(rows.map { it.executedBy }))
         val now = Instant.now()
         model.addAttribute("runAgo", rows.associate { it.executionId to RelativeTime.since(it.startedAt, now) })
         return RUNS_VIEW

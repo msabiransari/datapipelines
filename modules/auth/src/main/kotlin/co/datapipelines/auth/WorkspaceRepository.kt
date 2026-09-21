@@ -53,7 +53,7 @@ class WorkspaceRepository(
     fun membershipsOf(userId: UUID): List<WorkspaceMembership> =
         jdbc.query(
             """
-            SELECT m.workspace_id, w.name AS workspace_name, m.author, m.promoter, m.admin,
+            SELECT m.workspace_id, w.name AS workspace_name, m.role,
                    m.joined_at, w.deactivated_at
               FROM workspace_members m
               JOIN workspaces w ON w.id = m.workspace_id
@@ -115,7 +115,7 @@ class WorkspaceRepository(
     fun findMembersOf(workspaceId: UUID): List<WorkspaceMemberRow> =
         jdbc.query(
             """
-            SELECT m.user_id, u.email, u.display_name, m.author, m.promoter, m.admin, m.joined_at
+            SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at
               FROM workspace_members m
               JOIN users u ON u.id = m.user_id
              WHERE m.workspace_id = :ws
@@ -125,66 +125,61 @@ class WorkspaceRepository(
             MEMBER_MAPPER,
         )
 
-    /** [userId]'s capability flags in [workspaceId], or null when not a member. */
-    fun flagsOf(
+    /** [userId]'s role in [workspaceId], or null when not a member. */
+    fun roleOf(
         workspaceId: UUID,
         userId: UUID,
-    ): MembershipFlags? =
+    ): WorkspaceRole? =
         jdbc
             .query(
-                "SELECT author, promoter, admin FROM workspace_members WHERE workspace_id = :ws AND user_id = :uid",
+                "SELECT role FROM workspace_members WHERE workspace_id = :ws AND user_id = :uid",
                 MapSqlParameterSource().addValue("ws", workspaceId).addValue("uid", userId),
-            ) { rs, _ -> rs.flags() }
+            ) { rs, _ -> rs.role() }
             .firstOrNull()
 
-    /** How many members of [workspaceId] carry `admin` — the last-admin rule's counter (design §1). */
+    /** How many members of [workspaceId] are workspace admins — the last-admin rule's counter (design §1). */
     fun adminCount(workspaceId: UUID): Int =
         jdbc.queryForObject(
-            "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = :ws AND admin",
-            MapSqlParameterSource("ws", workspaceId),
+            "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = :ws AND role = :admin",
+            MapSqlParameterSource("ws", workspaceId).addValue("admin", WorkspaceRole.WORKSPACE_ADMIN.wire),
             Int::class.java,
         ) ?: 0
 
     /**
-     * Adds [userId] to [workspaceId] as `member` (roles are assigned at creation; owner
-     * transfer is not a v1 operation), then returns the membership row with identity
-     * columns. Idempotent: an existing membership — whatever its role — is returned
-     * unchanged, because "already a member" is success for both the open-join
-     * self-service path and an owner re-adding someone.
+     * Adds [userId] to [workspaceId] with [role], then returns the membership row with
+     * identity columns. Idempotent: an existing membership — whatever its role — is returned
+     * unchanged, because "already a member" is success for an admin re-adding someone;
+     * changing an existing member's role is [setRole].
      */
     fun addMember(
         workspaceId: UUID,
         userId: UUID,
-        flags: MembershipFlags = MembershipFlags.VIEWER,
+        role: WorkspaceRole = WorkspaceRole.VIEWER,
     ): WorkspaceMemberRow? {
         jdbc.update(
             """
-            INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
-            VALUES (:ws, :uid, :author, :promoter, :admin)
+            INSERT INTO workspace_members (workspace_id, user_id, role)
+            VALUES (:ws, :uid, :role)
             ON CONFLICT (workspace_id, user_id) DO NOTHING
             """.trimIndent(),
-            flags.asParams().addValue("ws", workspaceId).addValue("uid", userId),
+            MapSqlParameterSource().addValue("ws", workspaceId).addValue("uid", userId).addValue("role", role.wire),
         )
         return findMemberRow(workspaceId, userId)
     }
 
     /**
-     * Replaces [userId]'s capability flags in [workspaceId]; false when there is no such
-     * membership. The `admin → author` invariant is the database's
-     * (`chk_workspace_member_admin_authors`) — the service normalises before calling, and the
-     * constraint is what makes "normalised everywhere" true rather than hoped for.
+     * Replaces [userId]'s role in [workspaceId]; false when there is no such membership. The
+     * value set is the database's (`chk_workspace_member_role`, V29) — a role outside
+     * [WorkspaceRole] cannot be stored, whatever a caller sends.
      */
-    fun setFlags(
+    fun setRole(
         workspaceId: UUID,
         userId: UUID,
-        flags: MembershipFlags,
+        role: WorkspaceRole,
     ): Boolean =
         jdbc.update(
-            """
-            UPDATE workspace_members SET author = :author, promoter = :promoter, admin = :admin
-             WHERE workspace_id = :ws AND user_id = :uid
-            """.trimIndent(),
-            flags.asParams().addValue("ws", workspaceId).addValue("uid", userId),
+            "UPDATE workspace_members SET role = :role WHERE workspace_id = :ws AND user_id = :uid",
+            MapSqlParameterSource().addValue("ws", workspaceId).addValue("uid", userId).addValue("role", role.wire),
         ) > 0
 
     /** One membership row with identity columns, or null when [userId] is not a member. */
@@ -195,7 +190,7 @@ class WorkspaceRepository(
         jdbc
             .query(
                 """
-                SELECT m.user_id, u.email, u.display_name, m.author, m.promoter, m.admin, m.joined_at
+                SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at
                   FROM workspace_members m
                   JOIN users u ON u.id = m.user_id
                  WHERE m.workspace_id = :ws AND m.user_id = :uid
@@ -258,10 +253,10 @@ class WorkspaceRepository(
                     VALUES (:name, :displayName, :isPersonal, :createdBy)
                     RETURNING $COLUMNS
                 ), owner AS (
-                    -- D-R14: the creator enters as the workspace ADMIN (and therefore author,
-                    -- per chk_workspace_member_admin_authors) — the old 'owner' role's successor.
-                    INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)
-                    SELECT id, :createdBy, TRUE, FALSE, TRUE FROM new_workspace
+                    -- D-R14: the creator enters as the WORKSPACE ADMIN — the old 'owner' role's
+                    -- successor (V29: one role per membership).
+                    INSERT INTO workspace_members (workspace_id, user_id, role)
+                    SELECT id, :createdBy, :adminRole FROM new_workspace
                     RETURNING workspace_id
                 )
                 SELECT $QUALIFIED_COLUMNS
@@ -272,7 +267,8 @@ class WorkspaceRepository(
                     .addValue("name", name)
                     .addValue("displayName", displayName)
                     .addValue("isPersonal", isPersonal)
-                    .addValue("createdBy", createdBy),
+                    .addValue("createdBy", createdBy)
+                    .addValue("adminRole", WorkspaceRole.WORKSPACE_ADMIN.wire),
                 MAPPER,
             ).single()
 
@@ -302,20 +298,8 @@ class WorkspaceRepository(
             ).single()
 
     private companion object {
-        /** The three flag columns off one row — every mapper reads them the same way, once. */
-        fun ResultSet.flags(): MembershipFlags =
-            MembershipFlags(
-                author = getBoolean("author"),
-                promoter = getBoolean("promoter"),
-                admin = getBoolean("admin"),
-            )
-
-        /** The three flag columns as bind parameters — the insert/update twin of [flags]. */
-        fun MembershipFlags.asParams(): MapSqlParameterSource =
-            MapSqlParameterSource()
-                .addValue("author", author)
-                .addValue("promoter", promoter)
-                .addValue("admin", admin)
+        /** The role column off one row — every mapper reads it the same way, once (V29). */
+        fun ResultSet.role(): WorkspaceRole = WorkspaceRole.fromWire(getString("role"))
 
         const val COLUMNS =
             "id, name, display_name, is_personal, created_by, is_deleted, created_at, deactivated_at, deactivated_by"
@@ -347,7 +331,7 @@ class WorkspaceRepository(
                 WorkspaceMembership(
                     workspaceId = rs.getObject("workspace_id", UUID::class.java),
                     workspaceName = rs.getString("workspace_name"),
-                    flags = rs.flags(),
+                    role = rs.role(),
                     joinedAt = rs.getObject("joined_at", OffsetDateTime::class.java).toInstant(),
                     workspaceActive = rs.getObject("deactivated_at", OffsetDateTime::class.java) == null,
                 )
@@ -359,7 +343,7 @@ class WorkspaceRepository(
                     userId = rs.getObject("user_id", UUID::class.java),
                     email = rs.getString("email"),
                     displayName = rs.getString("display_name"),
-                    flags = rs.flags(),
+                    role = rs.role(),
                     joinedAt = rs.getObject("joined_at", OffsetDateTime::class.java).toInstant(),
                 )
             }

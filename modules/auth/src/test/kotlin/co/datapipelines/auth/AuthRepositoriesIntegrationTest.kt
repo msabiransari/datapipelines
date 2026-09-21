@@ -67,19 +67,18 @@ class AuthRepositoriesIntegrationTest {
 
         workspaces.addMember(ws.id, bob.id).shouldNotBeNull()
         workspaces.findMembersOf(ws.id).map { it.email } shouldContainExactlyInAnyOrder listOf("alice@company.com", "bob@company.com")
-        // D-R14: the creator enters as the workspace ADMIN (and therefore author, per the
-        // chk_workspace_member_admin_authors constraint); an added member with no flags is a
-        // VIEWER, which is what silence on a permission grant has to mean.
-        workspaces.flagsOf(ws.id, alice.id) shouldBe MembershipFlags(author = true, admin = true)
-        workspaces.flagsOf(ws.id, bob.id) shouldBe MembershipFlags.VIEWER
-        workspaces.findMemberRow(ws.id, bob.id).shouldNotBeNull().flags shouldBe MembershipFlags.VIEWER
+        // D-R14: the creator enters as the WORKSPACE ADMIN; an added member with no role named
+        // is a VIEWER, which is what silence on a permission grant has to mean.
+        workspaces.roleOf(ws.id, alice.id) shouldBe WorkspaceRole.WORKSPACE_ADMIN
+        workspaces.roleOf(ws.id, bob.id) shouldBe WorkspaceRole.VIEWER
+        workspaces.findMemberRow(ws.id, bob.id).shouldNotBeNull().role shouldBe WorkspaceRole.VIEWER
         workspaces.adminCount(ws.id) shouldBe 1
         // Idempotent add: an existing membership comes back unchanged — re-adding does NOT
-        // silently reset somebody's role to the request's flags. Changing a role is setFlags.
-        workspaces.addMember(ws.id, bob.id, MembershipFlags(author = true)).shouldNotBeNull().flags shouldBe MembershipFlags.VIEWER
+        // silently reset somebody's role to the request's. Changing a role is setRole.
+        workspaces.addMember(ws.id, bob.id, WorkspaceRole.AUTHOR).shouldNotBeNull().role shouldBe WorkspaceRole.VIEWER
 
-        // setFlags replaces wholesale, and the admin count follows.
-        workspaces.setFlags(ws.id, bob.id, MembershipFlags(author = true, admin = true)).shouldBeTrue()
+        // setRole replaces the value, and the admin count follows.
+        workspaces.setRole(ws.id, bob.id, WorkspaceRole.WORKSPACE_ADMIN).shouldBeTrue()
         workspaces.adminCount(ws.id) shouldBe 2
 
         // D-R10: deactivation is reversible and purges nothing.

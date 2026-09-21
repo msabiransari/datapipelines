@@ -2,9 +2,6 @@ package co.datapipelines.web.api
 
 import co.datapipelines.auth.ApiKeyMissingException
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Capability
-import co.datapipelines.auth.MembershipFlags
-import co.datapipelines.auth.Scope
 import co.datapipelines.executor.ExecutionRecord
 import org.springframework.security.core.context.SecurityContextHolder
 
@@ -21,9 +18,9 @@ fun currentPrincipal(): AuthenticatedPrincipal =
         ?: throw ApiKeyMissingException()
 
 /**
- * Execution **ownership** (rest-api §7.2, §10.2, §10.4 — carry-forward #2).
+ * Execution **ownership** (D11, 2026-09-20; rest-api §7.2, §10.2, §10.4).
  *
- * A record is visible to its owner and to any `admin`. `dag`'s
+ * A record is visible to the person whose OWN run it is and to any workspace admin. `dag`'s
  * [co.datapipelines.executor.ExecutionCancellationService] deliberately performs no owner check —
  * authorization is the surface's job — so every execution-scoped handler must apply this before
  * acting. A non-visible execution is then reported as *not found* (never 403), so a caller cannot
@@ -32,20 +29,15 @@ fun currentPrincipal(): AuthenticatedPrincipal =
  */
 fun ExecutionRecord.visibleTo(principal: AuthenticatedPrincipal): Boolean =
     when {
-        // §7.7 — an endpoint key is NOT its owner. `triggeredBy` is a user id, so owner-equality
+        // §7.7 — an endpoint key is NOT its owner. `executedBy` is a user id, so owner-equality
         // would let a key bound to /lending read a /payroll key's results merely by sharing an
         // owner. An endpoint key's visibility is decided by [visibleToEndpointKey] instead, which
         // needs a repository and therefore cannot live in this pure extension.
         principal.isEndpointKey -> false
 
-        // RBAC round 1: the bypass was `Scope.satisfies(scopes, ADMIN)` — a scope no key may
-        // hold any more (O-2) and no session ever has (D-R1), so it had become dead code and
-        // "an admin sees the workspace's runs" quietly stopped being true. The authority moved
-        // to the capability axis, where it now lives: a WORKSPACE ADMIN sees every run in
-        // their workspace, a super admin sees any. Everyone else sees their own.
-        //
-        // Deliberately NOT widened to every member, though the design's §1 table would allow
-        // it ("read … executions ✓" for a viewer): that is a behaviour change this round was
-        // not asked to make, and the conservative reading keeps the rule the deployment has.
-        else -> triggeredBy == principal.userId || principal.isWorkspaceAdmin
+        // D11: "own" is `ExecutionRecord.isOwnRunOf` — executed by this user AND not through an
+        // endpoint key (an endpoint's run belongs to the endpoint, and lists for admins only). A
+        // WORKSPACE ADMIN sees every run in their workspace, a super admin any. The promoter is
+        // refused the execution reads by the matrix before this is asked.
+        else -> isOwnRunOf(principal.userId) || principal.isWorkspaceAdmin
     }

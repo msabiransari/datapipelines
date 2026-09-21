@@ -2,9 +2,9 @@ package co.datapipelines.web.executions
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionRecord
@@ -53,14 +53,14 @@ class ExecutionsControllerTest {
 
     private fun record(
         status: ExecutionStatus,
-        triggeredBy: UUID = owner,
+        executedBy: UUID = owner,
     ) = ExecutionRecord(
         executionId = executionId,
         pipelineId = UUID.randomUUID(),
         pipelineVersion = 1,
         status = status,
         parametersJson = "{}",
-        triggeredBy = triggeredBy,
+        executedBy = executedBy,
         triggeredVia = ExecutionTrigger.REST,
         startedAt = Instant.parse("2026-08-05T14:30:00Z"),
     )
@@ -84,7 +84,7 @@ class ExecutionsControllerTest {
                         "acme",
                         // RBAC round 1: a KEY whose owner is a workspace admin sees the workspace's
                         // runs; `Scope.ADMIN` no longer exists on the key axis at all (O-2).
-                        if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+                        if (workspaceAdmin) WorkspaceRole.WORKSPACE_ADMIN else WorkspaceRole.VIEWER,
                     ),
             )
         SecurityContextHolder.getContext().authentication =

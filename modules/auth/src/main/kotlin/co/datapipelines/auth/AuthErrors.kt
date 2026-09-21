@@ -360,8 +360,8 @@ class DeactivatedUserException(
  * hand-rolled 403; the interceptor itself renders [ScopeMatrix.Decision.Refused] directly.
  */
 class RoleRequiredException(
-    required: Capability,
-    held: Set<Capability>,
+    required: Permission,
+    held: Set<Permission>,
     workspace: String? = null,
 ) : AuthException(
         AuthErrorCodes.ROLE_REQUIRED,

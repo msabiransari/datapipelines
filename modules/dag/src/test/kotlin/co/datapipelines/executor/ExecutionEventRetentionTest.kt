@@ -125,7 +125,7 @@ class ExecutionEventRetentionTest {
                 """
                 INSERT INTO pipeline_executions
                     (execution_id, pipeline_id, pipeline_version, status, parameters_json,
-                     triggered_by, triggered_via, correlation_id, started_at, completed_at, root_execution_id)
+                     executed_by, triggered_via, correlation_id, started_at, completed_at, root_execution_id)
                 VALUES
                     (:id, :pipelineId, 1, :status, '{}',
                      :userId, 'REST', :id, :startedAt, :completedAt, :id)

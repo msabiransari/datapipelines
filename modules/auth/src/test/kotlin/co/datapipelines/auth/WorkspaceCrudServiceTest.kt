@@ -44,18 +44,18 @@ class WorkspaceCrudServiceTest {
     private val ws =
         Workspace(UUID.randomUUID(), "acme", "Acme", isPersonal = false, createdBy = adminId, isDeleted = false, createdAt = Instant.EPOCH)
 
-    private val wsAdminFlags = MembershipFlags(author = true, admin = true)
-    private val authorFlags = MembershipFlags(author = true)
+    private val wsAdminRole = WorkspaceRole.WORKSPACE_ADMIN
+    private val authorRole = WorkspaceRole.AUTHOR
 
     /** A workspace ADMIN of `acme` — the old `owner`'s successor. */
-    private fun wsAdmin() = principal(memberships = listOf(membership(wsAdminFlags)))
+    private fun wsAdmin() = principal(memberships = listOf(membership(wsAdminRole)))
 
     /** A plain AUTHOR of `acme`: may author, may not manage. */
-    private fun author() = principal(memberships = listOf(membership(authorFlags)))
+    private fun author() = principal(memberships = listOf(membership(authorRole)))
 
     private fun superAdmin() = principal(superAdmin = true, memberships = emptyList())
 
-    private fun membership(flags: MembershipFlags) = WorkspaceMembership(ws.id, ws.name, flags, Instant.EPOCH)
+    private fun membership(role: WorkspaceRole) = WorkspaceMembership(ws.id, ws.name, role, Instant.EPOCH)
 
     private fun principal(
         superAdmin: Boolean = false,
@@ -75,8 +75,8 @@ class WorkspaceCrudServiceTest {
 
     private fun memberRow(
         userId: UUID,
-        flags: MembershipFlags,
-    ) = WorkspaceMemberRow(userId, "m@company.com", "M", flags, Instant.EPOCH)
+        role: WorkspaceRole,
+    ) = WorkspaceMemberRow(userId, "m@company.com", "M", role, Instant.EPOCH)
 
     // ------------------------------------------------------------ create
 
@@ -140,7 +140,7 @@ class WorkspaceCrudServiceTest {
         every { repository.findByName("acme") } returns ws
 
         val refusal = shouldThrow<RoleRequiredException> { service.updateDisplayName(author(), "acme", "New") }
-        refusal.details["required"] shouldBe Capability.WS_ADMIN.wire
+        refusal.details["required"] shouldBe Permission.WS_ADMIN.wire
     }
 
     @Test
@@ -167,11 +167,11 @@ class WorkspaceCrudServiceTest {
         every { repository.findByName("acme") } returns ws
         every { userRepository.findByEmail("bob@company.com") } returns
             User(memberB, "bob@company.com", "Bob", null, "google", "s", true, false, Instant.EPOCH, Instant.EPOCH, null)
-        every { repository.addMember(ws.id, memberB, MembershipFlags.VIEWER) } returns memberRow(memberB, MembershipFlags.VIEWER)
+        every { repository.addMember(ws.id, memberB, WorkspaceRole.VIEWER) } returns memberRow(memberB, WorkspaceRole.VIEWER)
 
         val outcome = service.addMember(wsAdmin(), "acme", "bob@company.com")
-        (outcome as WorkspaceService.AddMemberOutcome.Added).row.flags shouldBe MembershipFlags.VIEWER
-        verify { repository.addMember(ws.id, memberB, MembershipFlags.VIEWER) }
+        (outcome as WorkspaceService.AddMemberOutcome.Added).row.role shouldBe WorkspaceRole.VIEWER
+        verify { repository.addMember(ws.id, memberB, WorkspaceRole.VIEWER) }
     }
 
     @Test
@@ -179,13 +179,13 @@ class WorkspaceCrudServiceTest {
         every { repository.findByName("acme") } returns ws
         every { userRepository.findByEmail(any()) } returns
             User(memberB, "bob@company.com", "Bob", null, "google", "s", true, false, Instant.EPOCH, Instant.EPOCH, null)
-        every { repository.addMember(ws.id, memberB, any()) } returns memberRow(memberB, wsAdminFlags)
+        every { repository.addMember(ws.id, memberB, any()) } returns memberRow(memberB, wsAdminRole)
 
-        service.addMember(wsAdmin(), "acme", "bob@company.com", MembershipFlags(admin = true))
+        service.addMember(wsAdmin(), "acme", "bob@company.com", WorkspaceRole.WORKSPACE_ADMIN)
 
         // The database's chk_workspace_member_admin_authors would refuse the un-normalised row
         // with no catalogued code; normalising means the caller gets what they asked for.
-        verify { repository.addMember(ws.id, memberB, MembershipFlags(author = true, admin = true)) }
+        verify { repository.addMember(ws.id, memberB, WorkspaceRole.WORKSPACE_ADMIN) }
     }
 
     @Test
@@ -193,30 +193,30 @@ class WorkspaceCrudServiceTest {
         every { repository.findByName("acme") } returns ws
         every { userRepository.findByEmail(any()) } returns null
 
-        val outcome = service.addMember(wsAdmin(), "acme", "Ghost@Company.com", MembershipFlags(author = true))
+        val outcome = service.addMember(wsAdmin(), "acme", "Ghost@Company.com", WorkspaceRole.AUTHOR)
 
         // 113 §B.1: an email with no users row is invited, keyed by the NORMALIZED email,
-        // with the requested flags stored (and the upsert audited as its own event).
+        // with the requested role stored (and the upsert audited as its own event).
         val invited = outcome as WorkspaceService.AddMemberOutcome.Invited
         invited.email shouldBe "ghost@company.com"
-        invited.flags shouldBe MembershipFlags(author = true)
-        verify { invitationRepository.upsert(ws.id, "ghost@company.com", MembershipFlags(author = true), adminId) }
+        invited.role shouldBe WorkspaceRole.AUTHOR
+        verify { invitationRepository.upsert(ws.id, "ghost@company.com", WorkspaceRole.AUTHOR, adminId) }
         verify { auditLogger.log("workspace.member_invited", adminId, null, null, null, any()) }
     }
 
     @Test
-    fun `a second invite with DIFFERENT flags replaces the first - the upsert, not an error`() {
+    fun `a second invite with a DIFFERENT role replaces the first - the upsert, not an error`() {
         every { repository.findByName("acme") } returns ws
         every { userRepository.findByEmail(any()) } returns null
 
-        service.addMember(wsAdmin(), "acme", "ghost@company.com", MembershipFlags(author = true))
-        service.addMember(wsAdmin(), "acme", "ghost@company.com", MembershipFlags(admin = true))
+        service.addMember(wsAdmin(), "acme", "ghost@company.com", WorkspaceRole.AUTHOR)
+        service.addMember(wsAdmin(), "acme", "ghost@company.com", WorkspaceRole.WORKSPACE_ADMIN)
 
-        // Both decisions were stored and both were audited; the row's final flags are the
+        // Both decisions were stored and both were audited; the row's final role is the
         // second call's (upsert semantics — the repository call order is the decision order).
         verifySequence {
-            invitationRepository.upsert(ws.id, "ghost@company.com", MembershipFlags(author = true), adminId)
-            invitationRepository.upsert(ws.id, "ghost@company.com", MembershipFlags(author = true, admin = true), adminId)
+            invitationRepository.upsert(ws.id, "ghost@company.com", WorkspaceRole.AUTHOR, adminId)
+            invitationRepository.upsert(ws.id, "ghost@company.com", WorkspaceRole.WORKSPACE_ADMIN, adminId)
         }
         verify(exactly = 2) { auditLogger.log("workspace.member_invited", adminId, null, null, null, any()) }
     }
@@ -240,9 +240,9 @@ class WorkspaceCrudServiceTest {
     @Test
     fun `the LAST admin cannot be removed`() {
         every { repository.findByName("acme") } returns ws
-        every { repository.findMemberRow(ws.id, adminId) } returns memberRow(adminId, wsAdminFlags)
+        every { repository.findMemberRow(ws.id, adminId) } returns memberRow(adminId, wsAdminRole)
         every { repository.findMembersOf(ws.id) } returns
-            listOf(memberRow(adminId, wsAdminFlags), memberRow(memberB, authorFlags))
+            listOf(memberRow(adminId, wsAdminRole), memberRow(memberB, authorRole))
 
         val refusal = shouldThrow<WorkspaceLastAdminException> { service.removeMember(wsAdmin(), "acme", adminId) }
         refusal.code shouldBe WorkspaceErrorCodes.LAST_ADMIN
@@ -252,36 +252,36 @@ class WorkspaceCrudServiceTest {
     @Test
     fun `the LAST admin cannot be DEMOTED either - the same rule from the other direction`() {
         every { repository.findByName("acme") } returns ws
-        every { repository.findMemberRow(ws.id, adminId) } returns memberRow(adminId, wsAdminFlags)
-        every { repository.findMembersOf(ws.id) } returns listOf(memberRow(adminId, wsAdminFlags))
+        every { repository.findMemberRow(ws.id, adminId) } returns memberRow(adminId, wsAdminRole)
+        every { repository.findMembersOf(ws.id) } returns listOf(memberRow(adminId, wsAdminRole))
 
         shouldThrow<WorkspaceLastAdminException> {
-            service.setMemberFlags(wsAdmin(), "acme", adminId, MembershipFlags(author = true))
+            service.setMemberRole(wsAdmin(), "acme", adminId, WorkspaceRole.AUTHOR)
         }
-        verify(exactly = 0) { repository.setFlags(any(), any(), any()) }
+        verify(exactly = 0) { repository.setRole(any(), any(), any()) }
     }
 
     @Test
     fun `an admin may be demoted while ANOTHER admin remains`() {
         every { repository.findByName("acme") } returns ws
-        every { repository.findMemberRow(ws.id, adminId) } returns memberRow(adminId, wsAdminFlags) andThen memberRow(adminId, authorFlags)
+        every { repository.findMemberRow(ws.id, adminId) } returns memberRow(adminId, wsAdminRole) andThen memberRow(adminId, authorRole)
         every { repository.findMembersOf(ws.id) } returns
-            listOf(memberRow(adminId, wsAdminFlags), memberRow(memberB, wsAdminFlags))
+            listOf(memberRow(adminId, wsAdminRole), memberRow(memberB, wsAdminRole))
 
-        service.setMemberFlags(wsAdmin(), "acme", adminId, authorFlags)
+        service.setMemberRole(wsAdmin(), "acme", adminId, authorRole)
 
-        verify { repository.setFlags(ws.id, adminId, authorFlags) }
-        verify { auditLogger.log("workspace.member_flags_changed", adminId, null, null, null, any()) }
+        verify { repository.setRole(ws.id, adminId, authorRole) }
+        verify { auditLogger.log("workspace.member_role_changed", adminId, null, null, null, any()) }
     }
 
     @Test
-    fun `setting flags REPLACES them wholesale - a promoter asked for stops being an author`() {
-        val promoterOnly = MembershipFlags(promoter = true)
+    fun `setting the role REPLACES it - an author made promoter stops being an author`() {
+        val promoterOnly = WorkspaceRole.PROMOTER
         every { repository.findByName("acme") } returns ws
-        every { repository.findMemberRow(ws.id, memberB) } returns memberRow(memberB, authorFlags) andThen memberRow(memberB, promoterOnly)
+        every { repository.findMemberRow(ws.id, memberB) } returns memberRow(memberB, authorRole) andThen memberRow(memberB, promoterOnly)
 
-        service.setMemberFlags(wsAdmin(), "acme", memberB, promoterOnly).flags shouldBe promoterOnly
-        verify { repository.setFlags(ws.id, memberB, promoterOnly) }
+        service.setMemberRole(wsAdmin(), "acme", memberB, promoterOnly).role shouldBe promoterOnly
+        verify { repository.setRole(ws.id, memberB, promoterOnly) }
     }
 
     // ------------------------------------------------------------ deactivation (D-R10)
@@ -310,7 +310,7 @@ class WorkspaceCrudServiceTest {
         every { repository.findByName("acme") } returns dead
         every { repository.reactivate(ws.id) } returns true
         every { repository.findById(ws.id) } returns ws
-        every { repository.findMembersOf(ws.id) } returns listOf(memberRow(memberB, authorFlags))
+        every { repository.findMembersOf(ws.id) } returns listOf(memberRow(memberB, authorRole))
 
         service.reactivate(superAdmin(), "acme").isActive shouldBe true
         verify { auditLogger.log("workspace.reactivated", any(), null, null, null, any()) }
@@ -331,7 +331,7 @@ class WorkspaceCrudServiceTest {
     fun `delete with empty content soft-deletes and invalidates every member's cache`() {
         every { repository.findByName("acme") } returns ws
         every { contentCheck.nonDeletedCounts(ws.id) } returns emptyMap()
-        every { repository.findMembersOf(ws.id) } returns listOf(memberRow(memberB, authorFlags))
+        every { repository.findMembersOf(ws.id) } returns listOf(memberRow(memberB, authorRole))
 
         service.delete(superAdmin(), "acme")
 
@@ -353,9 +353,9 @@ class WorkspaceCrudServiceTest {
     // ------------------------------------------------------------ listings
 
     @Test
-    fun `listOwn is the caller's memberships, with their flags`() {
+    fun `listOwn is the caller's memberships, with their roles`() {
         val caller = author()
-        service.listOwn(caller).map { it.flags } shouldContainExactly listOf(authorFlags)
+        service.listOwn(caller).map { it.role } shouldContainExactly listOf(authorRole)
     }
 
     @Test

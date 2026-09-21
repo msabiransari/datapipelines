@@ -76,9 +76,9 @@ class WorkspaceInvitationMaterialiseIntegrationTest {
     private fun invite(
         workspace: Workspace,
         email: String,
-        flags: MembershipFlags = MembershipFlags(author = true),
+        role: WorkspaceRole = WorkspaceRole.AUTHOR,
     ) {
-        invitations.upsert(workspace.id, email, flags, inviter.id)
+        invitations.upsert(workspace.id, email, role, inviter.id)
     }
 
     private fun invitedAtOf(
@@ -113,21 +113,17 @@ class WorkspaceInvitationMaterialiseIntegrationTest {
     @Test
     fun `materialise turns the invitation into a membership with the invited flags and deletes it`() {
         val ws = insertWorkspace("acme")
-        invite(ws, "invited@company.com", MembershipFlags(promoter = true))
+        invite(ws, "invited@company.com", WorkspaceRole.PROMOTER)
         val bob = users.findByEmail("invited@company.com").shouldNotBeNull()
 
         val materialised = invitations.materialiseFor("invited@company.com", bob.id)
 
         materialised.shouldHaveSize(1)
         materialised.single().workspaceName shouldBe "acme"
-        materialised.single().flags shouldBe MembershipFlags(promoter = true)
+        materialised.single().role shouldBe WorkspaceRole.PROMOTER
         materialised.single().invitedBy shouldBe inviter.id
         invitations.findByWorkspace(ws.id).shouldHaveSize(0)
-        workspaces
-            .flagsOf(ws.id, bob.id)
-            .shouldNotBeNull()
-            .promoter
-            .shouldBeTrue()
+        workspaces.roleOf(ws.id, bob.id) shouldBe WorkspaceRole.PROMOTER
     }
 
     @Test
@@ -192,19 +188,15 @@ class WorkspaceInvitationMaterialiseIntegrationTest {
         val bob = users.findByEmail("invited@company.com").shouldNotBeNull()
         // The race: bob is ALREADY a member (added after his row appeared) when a stale
         // invitation from before his provisioning is still around.
-        workspaces.addMember(ws.id, bob.id, MembershipFlags.VIEWER)
+        workspaces.addMember(ws.id, bob.id, WorkspaceRole.VIEWER)
         // The service normalises before storing; the repository is the thin layer the CHECK
         // guards, so the test passes the flags the real caller would produce.
-        invite(ws, "invited@company.com", MembershipFlags(author = true, admin = true))
+        invite(ws, "invited@company.com", WorkspaceRole.WORKSPACE_ADMIN)
 
         invitations.materialiseFor("invited@company.com", bob.id) shouldBe emptyList()
 
-        // The membership keeps the flags the user actually holds; the ghost is gone.
-        workspaces
-            .flagsOf(ws.id, bob.id)
-            .shouldNotBeNull()
-            .admin
-            .shouldBeFalse()
+        // The membership keeps the role the user actually holds; the ghost is gone.
+        workspaces.roleOf(ws.id, bob.id) shouldBe WorkspaceRole.VIEWER
         invitations.findByWorkspace(ws.id).shouldHaveSize(0)
     }
 
@@ -219,14 +211,14 @@ class WorkspaceInvitationMaterialiseIntegrationTest {
     @Test
     fun `upsert REPLACES the flags and refreshes the audit-relevant columns`() {
         val ws = insertWorkspace("acme")
-        invite(ws, "invited@company.com", MembershipFlags(author = true))
+        invite(ws, "invited@company.com", WorkspaceRole.AUTHOR)
         val firstAt = invitedAtOf(ws, "invited@company.com")
 
-        invite(ws, "invited@company.com", MembershipFlags(author = true, admin = true))
+        invite(ws, "invited@company.com", WorkspaceRole.WORKSPACE_ADMIN)
 
         invitations.findByWorkspace(ws.id).shouldHaveSize(1)
         val row = invitations.findByWorkspace(ws.id).single()
-        row.flags shouldBe MembershipFlags(author = true, admin = true)
+        row.role shouldBe WorkspaceRole.WORKSPACE_ADMIN
         row.invitedBy shouldBe inviter.id
         (row.invitedAt.isAfter(firstAt) || row.invitedAt == firstAt).shouldBeTrue()
     }
@@ -246,7 +238,7 @@ class WorkspaceInvitationMaterialiseIntegrationTest {
     }
 
     @Test
-    fun `the database keeps the invariants - lowercase email and admin implies author`() {
+    fun `the database keeps the invariants - lowercase email and one of the four roles`() {
         val ws = insertWorkspace("acme")
 
         shouldThrow<DataIntegrityViolationException> {
@@ -259,7 +251,7 @@ class WorkspaceInvitationMaterialiseIntegrationTest {
         }
         shouldThrow<DataIntegrityViolationException> {
             jdbc.jdbcTemplate.update(
-                "INSERT INTO workspace_invitations (workspace_id, email, admin, invited_by) VALUES (?, ?, TRUE, ?)",
+                "INSERT INTO workspace_invitations (workspace_id, email, role, invited_by) VALUES (?, ?, 'owner', ?)",
                 ws.id,
                 "plain@case.com",
                 inviter.id,

@@ -8,12 +8,12 @@ import co.datapipelines.auth.MailKind
 import co.datapipelines.auth.MailProperties
 import co.datapipelines.auth.MailSend
 import co.datapipelines.auth.MailSendRepository
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceMemberRow
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -337,11 +337,11 @@ class AdminUsersPartialControllerTest {
                 any(),
                 "acme",
                 "new@example.com",
-                MembershipFlags(author = true, promoter = true, admin = true),
+                WorkspaceRole.WORKSPACE_ADMIN,
             )
         } returns
             WorkspaceService.AddMemberOutcome.Added(
-                WorkspaceMemberRow(UUID.randomUUID(), "new@example.com", "New", MembershipFlags.VIEWER, Instant.EPOCH),
+                WorkspaceMemberRow(UUID.randomUUID(), "new@example.com", "New", WorkspaceRole.VIEWER, Instant.EPOCH),
             )
 
         val html =
@@ -351,9 +351,7 @@ class AdminUsersPartialControllerTest {
                     "new@example.com",
                     "New",
                     workspace = "acme",
-                    author = true,
-                    promoter = true,
-                    admin = true,
+                    role = "workspace_admin",
                 ),
             )
 

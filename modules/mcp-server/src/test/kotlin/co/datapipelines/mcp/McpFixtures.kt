@@ -2,9 +2,9 @@ package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionStatus
@@ -44,18 +44,19 @@ object McpFixtures {
      * has to be satisfied or every one of them would fail on a refusal that is not what it is
      * testing. The role axis has its own suite (`RoleMatrixTest`) and its own doc guard.
      *
-     * An AUTHOR and promoter, deliberately NOT an admin: `ExecutionRecord.visibleTo` gives a
-     * workspace admin every run in the workspace, so an admin default would make "another
-     * user's execution is invisible" untestable — the suites would pass on the wrong reason and
-     * the isolation they assert would be unguarded. The one tool that needs the admin rung
-     * (`datasources_test`, TEST_DATASOURCE) takes [WORKSPACE_ADMIN] explicitly.
+     * An AUTHOR, deliberately NOT an admin: `ExecutionRecord.visibleTo` gives a workspace admin
+     * every run in the workspace, so an admin default would make "another user's execution is
+     * invisible" untestable — the suites would pass on the wrong reason and the isolation they
+     * assert would be unguarded. Since 2026-09-20 the author holds every tool row an agent
+     * drives (execute, author, release — D8); the promoter is the ops role with no tool of its
+     * own. Tools that need the admin rung take [WORKSPACE_ADMIN] explicitly.
      */
     val WORKSPACE: WorkspaceContext =
-        WorkspaceContext(WORKSPACE_ID, "acme", MembershipFlags(author = true, promoter = true))
+        WorkspaceContext(WORKSPACE_ID, "acme", WorkspaceRole.AUTHOR)
 
-    /** [WORKSPACE] with the admin flag — for the verbs and visibility that need that rung. */
+    /** [WORKSPACE] as a workspace admin — for the verbs and visibility that need that rung. */
     val WORKSPACE_ADMIN: WorkspaceContext =
-        WorkspaceContext(WORKSPACE_ID, "acme", MembershipFlags(author = true, promoter = true, admin = true))
+        WorkspaceContext(WORKSPACE_ID, "acme", WorkspaceRole.WORKSPACE_ADMIN)
 
     /** The default key id principals carry (the dispatcher tests assert it verbatim). */
     const val KEY_ID: String = "dpk_ABCDEFGHIJKL"
@@ -183,7 +184,7 @@ object McpFixtures {
         executionId: UUID = EXECUTION_ID,
         pipelineId: UUID = PIPELINE_ID,
         status: ExecutionStatus = ExecutionStatus.SUCCESS,
-        triggeredBy: UUID = USER,
+        executedBy: UUID = USER,
         startedAt: Instant = Instant.parse("2026-08-09T12:00:00Z"),
         resultRowCount: Long? = 3,
     ): ExecutionRecord =
@@ -193,7 +194,7 @@ object McpFixtures {
             pipelineVersion = 1,
             status = status,
             parametersJson = """{"month":"2026-07"}""",
-            triggeredBy = triggeredBy,
+            executedBy = executedBy,
             triggeredVia = ExecutionTrigger.MCP,
             correlationId = CORRELATION_ID,
             startedAt = startedAt,

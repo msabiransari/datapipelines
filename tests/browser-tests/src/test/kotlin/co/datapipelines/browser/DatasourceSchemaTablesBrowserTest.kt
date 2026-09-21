@@ -55,8 +55,7 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
                 generatedPassword("pw"),
                 mustChange = false,
                 isAdmin = false,
-                author = false,
-                admin = false,
+                role = "viewer",
             )
         // A FRESH session, not a second `login()` on the admin's own page: the admin's session
         // cookie is still live there, so navigating back to `/login` would redirect straight to

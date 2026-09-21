@@ -24,10 +24,10 @@ import java.util.Base64
  * The 113 owner scenario end to end (auth.md §4.6): a workspace admin invites
  * `bob@datapipelines.co` BEFORE Bob has ever signed in, then Bob's FIRST login — a real
  * OIDC code flow through a real Keycloak realm — lands him in the invited workspace with
- * the invited flags, and NOT in `demo`:
+ * the invited role, and NOT in `demo`:
  *
  *  - the invite is a `workspace_invitations` row, and no `workspace_members` row exists;
- *  - the first login materialises it: member with the invited flags, `active_workspace`
+ *  - the first login materialises it: member with the invited role, `active_workspace`
  *    stamped to the invited workspace, the invitation row GONE, no `demo` membership (D-R11);
  *  - the three audit events are present: invited (at invite), materialised (at login), and
  *    the login itself.
@@ -60,13 +60,13 @@ class WorkspaceInvitationOidcE2eTest {
             .build()
 
     @Test
-    fun `an invitation materialises at the invitee's first SSO login with the invited flags and no demo`() {
+    fun `an invitation materialises at the invitee's first SSO login with the invited role and no demo`() {
         // --- The admin half: alice (bootstrap admin) creates a workspace and INVITES bob.
         aliceLogin()
         val alice = alicePrincipal()
         workspaceService.create(alice, "invited-co", "Invited Co")
         val outcome =
-            workspaceService.addMember(alice, "invited-co", "Bob@Datapipelines.CO", MembershipFlags(author = true))
+            workspaceService.addMember(alice, "invited-co", "Bob@Datapipelines.CO", WorkspaceRole.AUTHOR)
         (outcome as WorkspaceService.AddMemberOutcome.Invited).email shouldBe "bob@datapipelines.co"
 
         // The invite is a row keyed by the NORMALIZED email; bob has NO membership and NO
@@ -81,13 +81,12 @@ class WorkspaceInvitationOidcE2eTest {
         val bob = bobUserRow().shouldNotBeNull()
         bob["provider"] shouldBe "invites-keycloak"
 
-        // Member with the invited flags; NOT a viewer of demo (D-R11: the invited workspace
+        // Member with the invited role; NOT a viewer of demo (D-R11: the invited workspace
         // REPLACES the default — the demo join fires only for a user with no membership).
         bobMembershipCount() shouldBe 1
         val membership = bobMembership().shouldNotBeNull()
         membership["workspace"] shouldBe "invited-co"
-        membership["author"] shouldBe true
-        membership["admin"] shouldBe false
+        membership["role"] shouldBe "author"
 
         // The invitation row is gone — materialised, not copied.
         invitations() shouldBe emptyList()
@@ -147,7 +146,7 @@ class WorkspaceInvitationOidcE2eTest {
     private fun bobMembership(): Map<String, Any?>? =
         jdbc.jdbcTemplate
             .queryForList(
-                "SELECT w.name AS workspace, m.author, m.promoter, m.admin FROM workspace_members m" +
+                "SELECT w.name AS workspace, m.role FROM workspace_members m" +
                     " JOIN users u ON u.id = m.user_id JOIN workspaces w ON w.id = m.workspace_id" +
                     " WHERE u.email = 'bob@datapipelines.co'",
             ).firstOrNull()

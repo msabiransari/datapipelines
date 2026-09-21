@@ -120,6 +120,7 @@ class RecordingExecutionRunner(
                         pipelineId = request.pipelineId,
                         pipelineVersion = request.pipelineVersion,
                         userId = request.userId,
+                        executedByKeyKind = request.executedByKeyKind,
                         correlationId = request.correlationId ?: UUID.randomUUID(),
                         triggeredVia = trigger,
                         parametersJson = ExecutorJson.mapper.writeValueAsString(request.parameters),

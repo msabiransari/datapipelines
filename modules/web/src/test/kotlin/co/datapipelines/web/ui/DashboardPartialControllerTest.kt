@@ -2,9 +2,9 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -60,7 +60,7 @@ class DashboardPartialControllerTest {
                             "acme",
                             // RBAC round 1: "an admin sees the workspace's runs" is the CAPABILITY
                             // now — `Scope.ADMIN` is a scope no principal can hold (D-R1, O-2).
-                            if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+                            if (workspaceAdmin) WorkspaceRole.WORKSPACE_ADMIN else WorkspaceRole.VIEWER,
                         ),
                 ),
                 null,
@@ -77,7 +77,7 @@ class DashboardPartialControllerTest {
         pipelineVersion = 1,
         status = status,
         parametersJson = "{}",
-        triggeredBy = userId,
+        executedBy = userId,
         triggeredVia = ExecutionTrigger.UI,
         startedAt = startedAt,
     )

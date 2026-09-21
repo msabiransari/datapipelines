@@ -350,31 +350,31 @@ class PipelineExplorerRenderTest {
      * lose the authoring verbs, which no single "less privileged" case can show.
      */
     @Test
-    fun `114 - the header renders Release only for a promoter and the destructive verbs only for an author`() {
+    fun `114 - the header renders Release and Switch for an author and nothing for a promoter (D8, 2026-09-20)`() {
         val admin = render("partials/pipeline-detail") { fillDetail() }
         admin shouldContain "data-verb=\"pipeline-release\""
         admin shouldContain "data-verb=\"pipeline-discard\""
         admin shouldContain "data-verb=\"pipeline-switch\""
 
-        // An author who is NOT a promoter — §8 test 8, verbatim: no Release, anywhere.
+        // An author: since 2026-09-20 release is the author's (D8), and so is the switch lever.
         val author =
             render("partials/pipeline-detail") {
                 fillDetail()
                 withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
             }
-        author shouldNotContain "data-verb=\"pipeline-release\""
+        author shouldContain "data-verb=\"pipeline-release\""
         author shouldContain "data-verb=\"pipeline-discard\""
-        // O-1: switch is the lever the author and the promoter BOTH hold.
         author shouldContain "data-verb=\"pipeline-switch\""
 
-        // A promoter who is NOT an author: Release and Switch, and nothing destructive.
+        // A promoter: authors nothing, releases nothing, switches nothing (D5). The header
+        // carries no verb at all — the promoter's verb is on the promotion page.
         val promoter =
             render("partials/pipeline-detail") {
                 fillDetail()
-                withRoles(canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+                withRoles(canExecute = false, canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
             }
-        promoter shouldContain "data-verb=\"pipeline-release\""
-        promoter shouldContain "data-verb=\"pipeline-switch\""
+        promoter shouldNotContain "data-verb=\"pipeline-release\""
+        promoter shouldNotContain "data-verb=\"pipeline-switch\""
         promoter shouldNotContain "data-verb=\"pipeline-discard\""
         promoter shouldNotContain "data-verb=\"pipeline-purge\""
 
@@ -409,15 +409,23 @@ class PipelineExplorerRenderTest {
         // The row itself is still there, with its Open link — a viewer reads versions.
         viewer shouldContain "tplx-vacts"
 
-        // A promoter's menu carries Release and only Release.
+        // A promoter's menu is GONE with the release lever (D8): no verb survives the role.
         val promoter =
             render("partials/pipeline-versions") {
                 fillDetail()
-                withRoles(canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
+                withRoles(canExecute = false, canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "promoter")
             }
-        promoter shouldContain "data-verb=\"pipeline-release\""
+        promoter shouldNotContain "tplx-vmenu"
+        promoter shouldNotContain "data-verb=\"pipeline-release\""
         promoter shouldNotContain "data-verb=\"pipeline-purge\""
         promoter shouldNotContain "data-verb=\"pipeline-restore\""
+        // …and an author's carries Release with the destructive verbs.
+        val author =
+            render("partials/pipeline-versions") {
+                fillDetail()
+                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+            }
+        author shouldContain "data-verb=\"pipeline-release\""
     }
 
     @Test
@@ -498,7 +506,7 @@ class PipelineExplorerRenderTest {
                     pipelineVersion = 2,
                     status = ExecutionStatus.SUCCESS,
                     parametersJson = "{}",
-                    triggeredBy = ACTOR,
+                    executedBy = ACTOR,
                     triggeredVia = ExecutionTrigger.MCP,
                     startedAt = started,
                     durationMs = 3200,

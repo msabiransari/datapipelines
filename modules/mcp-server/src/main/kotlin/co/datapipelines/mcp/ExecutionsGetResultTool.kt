@@ -56,7 +56,9 @@ class ExecutionsGetResultTool(
                 "Fetch result rows for a completed execution, paginated via offset+limit. Returns schema + rows + " +
                     "pagination metadata. Works for ANY completed execution that produced a caller result, of any size, " +
                     "until its TTL expires (default 300s, set at execution time). Order is stable across pages. Reading " +
-                    "pages does NOT extend the TTL — after expiry the result is gone and the pipeline must be re-run.",
+                    "pages does NOT extend the TTL — after expiry the result is gone and the pipeline must be re-run. " +
+                    "Readable for YOUR OWN runs (this key's user), or any run of the workspace when the key's user is " +
+                    "a workspace admin; another member's execution is not found.",
             schema =
                 """
                 {

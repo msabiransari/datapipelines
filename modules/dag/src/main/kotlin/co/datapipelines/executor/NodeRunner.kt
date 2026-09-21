@@ -78,6 +78,12 @@ data class NodeExecutionContext(
      */
     val userId: UUID,
     /**
+     * The credential kind behind [userId] ([ExecuteRequest.executedByKeyKind], D11) — inherited
+     * by a PIPELINE node's child for the same reason [userId] is: a run started by a published
+     * endpoint's key stays the endpoint's all the way down its family.
+     */
+    val executedByKeyKind: ExecutedByKeyKind? = null,
+    /**
      * The execution family's top ancestor (metadata-db §4.6): [ExecuteRequest.rootExecutionId],
      * or this execution's own id when it IS the root. A PIPELINE node's child request carries it
      * verbatim, which is what makes family-wide cancellation (design §4.3, D8) reach every

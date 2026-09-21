@@ -86,44 +86,43 @@ class WorkspaceMembershipIntegrationTest {
     fun `create stores the creator as the workspace ADMIN, and the constraint makes them an author`() {
         val ws = service().create(principal(admin, superAdmin = true), "acme", "Acme")
 
-        workspaces.flagsOf(ws.id, admin.id) shouldBe MembershipFlags(author = true, admin = true)
+        workspaces.roleOf(ws.id, admin.id) shouldBe WorkspaceRole.WORKSPACE_ADMIN
         workspaces.adminCount(ws.id) shouldBe 1
     }
 
     @Test
-    fun `the database REFUSES an admin who is not an author - the invariant is not a convention`() {
+    fun `the database REFUSES a role outside the four - the value set is not a convention (V29)`() {
         val ws = workspaces.create("acme", "Acme", isPersonal = false, createdBy = admin.id)
 
-        // Straight to SQL, past the service's normalisation: the point is that the CHECK is
-        // what makes "normalised everywhere" true rather than hoped for.
+        // Straight to SQL, past the service and past WorkspaceRole: the point is that the CHECK
+        // is what makes "one of four values" true rather than hoped for.
         val refusal =
             shouldThrow<org.springframework.dao.DataIntegrityViolationException> {
                 jdbc.jdbcTemplate.update(
-                    "INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin)" +
-                        " VALUES (?, ?, FALSE, FALSE, TRUE)",
+                    "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'owner')",
                     ws.id,
                     alice.id,
                 )
             }
         refusal.message
             .shouldNotBeNull()
-            .contains("chk_workspace_member_admin_authors")
+            .contains("chk_workspace_member_role")
             .shouldBeTrue()
     }
 
     @Test
-    fun `the three flags round-trip independently - a promoter is not an author`() {
+    fun `the role round-trips through the row - a promoter is not an author`() {
         val ws = workspaces.create("acme", "Acme", isPersonal = false, createdBy = admin.id)
-        val promoterOnly = MembershipFlags(promoter = true)
+        val promoterOnly = WorkspaceRole.PROMOTER
 
         workspaces.addMember(ws.id, alice.id, promoterOnly)
 
-        workspaces.flagsOf(ws.id, alice.id) shouldBe promoterOnly
-        // …and the two capabilities that separates: release yes, authoring no.
-        Capability.PROMOTE.satisfiedBy(promoterOnly).shouldBeTrue()
-        Capability.AUTHOR.satisfiedBy(promoterOnly).shouldBeFalse()
-        // …while `switch` is held by both sides of that split (O-1).
-        Capability.SWITCH.satisfiedBy(promoterOnly).shouldBeTrue()
+        workspaces.roleOf(ws.id, alice.id) shouldBe promoterOnly
+        // …and the two permissions that separates (D5, D8): promote yes, authoring no —
+        // and since 2026-09-20 release and switch are the author's, not the promoter's.
+        Permission.PROMOTE.satisfiedBy(promoterOnly, superAdmin = false).shouldBeTrue()
+        Permission.AUTHOR.satisfiedBy(promoterOnly, superAdmin = false).shouldBeFalse()
+        Permission.EXECUTE.satisfiedBy(promoterOnly, superAdmin = false).shouldBeFalse()
     }
 
     @Test
@@ -134,11 +133,11 @@ class WorkspaceMembershipIntegrationTest {
 
         shouldThrow<WorkspaceLastAdminException> { svc.removeMember(actor, "acme", admin.id) }
         shouldThrow<WorkspaceLastAdminException> {
-            svc.setMemberFlags(actor, "acme", admin.id, MembershipFlags(author = true))
+            svc.setMemberRole(actor, "acme", admin.id, WorkspaceRole.AUTHOR)
         }
 
         // Promote somebody else and the refusal lifts — the fix the message names.
-        svc.addMember(actor, "acme", alice.email, MembershipFlags(admin = true))
+        svc.addMember(actor, "acme", alice.email, WorkspaceRole.WORKSPACE_ADMIN)
         workspaces.adminCount(ws.id) shouldBe 2
         svc.removeMember(actor, "acme", admin.id)
         workspaces.adminCount(ws.id) shouldBe 1
@@ -149,7 +148,7 @@ class WorkspaceMembershipIntegrationTest {
         val svc = service()
         val actor = principal(admin, superAdmin = true)
         val ws = svc.create(actor, "acme", "Acme")
-        svc.addMember(actor, "acme", alice.email, MembershipFlags(author = true))
+        svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
 
         svc.deactivate(actor, "acme").isActive.shouldBeFalse()
 
@@ -173,7 +172,7 @@ class WorkspaceMembershipIntegrationTest {
         val svc = service()
         val actor = principal(admin, superAdmin = true)
         svc.create(actor, "acme", "Acme")
-        svc.addMember(actor, "acme", alice.email, MembershipFlags(author = true))
+        svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
         svc.deactivate(actor, "acme")
 
         shouldThrow<WorkspaceNotFoundException> { svc.resolveSwitch(principal(alice), "acme") }
@@ -187,8 +186,8 @@ class WorkspaceMembershipIntegrationTest {
         val zeta = workspaces.create("zeta", "Zeta", false, admin.id)
         val alpha = workspaces.create("alpha", "Alpha", false, admin.id)
         jdbc.jdbcTemplate.update(
-            "INSERT INTO workspace_members (workspace_id, user_id, author, joined_at)" +
-                " VALUES (?, ?, TRUE, ?), (?, ?, TRUE, ?)",
+            "INSERT INTO workspace_members (workspace_id, user_id, role, joined_at)" +
+                " VALUES (?, ?, 'author', ?), (?, ?, 'author', ?)",
             zeta.id,
             alice.id,
             java.sql.Timestamp.from(Instant.parse("2026-08-01T10:00:00Z")),

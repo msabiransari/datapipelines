@@ -2,9 +2,9 @@ package co.datapipelines.web.executions
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -56,13 +56,13 @@ class ResultCursorTest {
                 workspaceId,
                 "acme",
                 // RBAC round 1: "an admin reads any execution" is the capability, not a scope.
-                if (workspaceAdmin) MembershipFlags(admin = true) else MembershipFlags.VIEWER,
+                if (workspaceAdmin) WorkspaceRole.WORKSPACE_ADMIN else WorkspaceRole.VIEWER,
             ),
     )
 
     private fun record(
         status: ExecutionStatus,
-        triggeredBy: UUID = owner,
+        executedBy: UUID = owner,
         rows: Long? = 5,
     ) = ExecutionRecord(
         executionId = executionId,
@@ -70,7 +70,7 @@ class ResultCursorTest {
         pipelineVersion = 1,
         status = status,
         parametersJson = "{}",
-        triggeredBy = triggeredBy,
+        executedBy = executedBy,
         triggeredVia = ExecutionTrigger.REST,
         resultRowCount = rows,
     )
@@ -80,13 +80,13 @@ class ResultCursorTest {
         every { executions.findById(any(), executionId) } returns null
         shouldThrow<ApiException> { cursor.readable(executionId, principal()) }.code shouldBe "result.execution_not_found"
 
-        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS, triggeredBy = UUID.randomUUID())
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS, executedBy = UUID.randomUUID())
         shouldThrow<ApiException> { cursor.readable(executionId, principal()) }.code shouldBe "result.execution_not_found"
     }
 
     @Test
     fun `admin reads any execution`() {
-        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS, triggeredBy = UUID.randomUUID())
+        every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS, executedBy = UUID.randomUUID())
         cursor.readable(executionId, principal(userId = UUID.randomUUID(), workspaceAdmin = true)).status shouldBe
             ExecutionStatus.SUCCESS
     }

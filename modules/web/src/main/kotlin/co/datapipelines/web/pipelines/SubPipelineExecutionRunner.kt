@@ -268,6 +268,7 @@ class SubPipelineExecutionRunner(
         pipelineVersion = ref.version,
         pipeline = child,
         userId = ctx.userId,
+        executedByKeyKind = ctx.executedByKeyKind,
         // Composition inherits the parent's workspace (design §5.3): the child runs where
         // its invoker runs, so its datasource resolution scopes identically (025 A5).
         workspaceId = ctx.workspaceId,
@@ -304,6 +305,7 @@ class SubPipelineExecutionRunner(
                         pipelineId = record.id,
                         pipelineVersion = request.pipelineVersion,
                         userId = request.userId,
+                        executedByKeyKind = request.executedByKeyKind,
                         // Non-null by `childRequest`; the elvis is the type's, not a second policy.
                         correlationId = request.correlationId ?: UUID.randomUUID(),
                         triggeredVia = ExecutionTrigger.PIPELINE,

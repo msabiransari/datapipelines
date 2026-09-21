@@ -75,6 +75,16 @@ class UiWorkspaceAdvice(
     @ModelAttribute("navAdminMembers")
     fun navAdminMembers(): Boolean = RoleModel.shell(principal()).adminMembers
 
+    /** 2026-09-20 — the three rail items that follow a §7.6 row ([RoleModel.Shell]). */
+    @ModelAttribute("navExecutions")
+    fun navExecutions(): Boolean = RoleModel.shell(principal()).executions
+
+    @ModelAttribute("navPromotion")
+    fun navPromotion(): Boolean = RoleModel.shell(principal()).promotion
+
+    @ModelAttribute("navWorkspaces")
+    fun navWorkspaces(): Boolean = RoleModel.shell(principal()).workspaces
+
     @ModelAttribute("activeTheme")
     fun activeTheme(request: HttpServletRequest): String = themeResolver.resolve(request)
 

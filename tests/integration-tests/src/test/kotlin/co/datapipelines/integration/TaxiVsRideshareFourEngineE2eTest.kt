@@ -228,9 +228,8 @@ class TaxiVsRideshareFourEngineE2eTest {
 
         // …and the joiner is a VIEWER of it (D-R11), not its author.
         metadataRow(
-            "SELECT author, promoter, admin FROM workspace_members" +
-                " WHERE workspace_id = '$workspaceId' AND user_id = '$userId'",
-        ).let { listOf(it["author"], it["promoter"], it["admin"]) } shouldBe listOf(false, false, false)
+            "SELECT role FROM workspace_members WHERE workspace_id = '$workspaceId' AND user_id = '$userId'",
+        )["role"] shouldBe "viewer"
 
         // The demo workspace holds the shipped content.
         metadataRows("SELECT name FROM templates WHERE workspace_id = '$workspaceId' ORDER BY name")

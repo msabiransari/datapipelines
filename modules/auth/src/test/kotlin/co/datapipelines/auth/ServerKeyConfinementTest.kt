@@ -156,7 +156,7 @@ class ServerKeyConfinementTest {
                     WorkspaceContext(
                         UUID.randomUUID(),
                         "acme",
-                        MembershipFlags(author = true, promoter = true, admin = true),
+                        WorkspaceRole.WORKSPACE_ADMIN,
                     ),
             )
         SecurityContextHolder.getContext().authentication =

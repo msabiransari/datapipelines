@@ -7,6 +7,7 @@ import co.datapipelines.events.ExecutionEvent
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.PipelineCompleted
 import co.datapipelines.events.PipelineFailed
+import co.datapipelines.executor.ExecutedByKeyKind
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
@@ -22,7 +23,7 @@ import java.util.concurrent.atomic.AtomicReference
  * Everything one execution needs recorded that the executor does not know (rest-api §10.2,
  * metadata-db §4.6).
  *
- * `triggered_via` and `triggered_by` are **not** on the event wire — `ExecuteRequest` carries them
+ * `triggered_via`, `executed_by` and `executed_by_key_kind` are **not** on the event wire — `ExecuteRequest` carries them
  * and only the surface that built it knows them — so they are captured here, per execution, and
  * used when the `RUNNING` row is inserted.
  */
@@ -48,6 +49,8 @@ data class ExecutionContext(
     val parentExecutionId: UUID? = null,
     val parentNodeId: String? = null,
     val rootExecutionId: UUID? = null,
+    /** D11 — the credential kind behind [userId] when a key started the run; null for a session. */
+    val executedByKeyKind: ExecutedByKeyKind? = null,
 )
 
 /**
@@ -183,7 +186,8 @@ class WebEventEmitter(
                     pipelineVersion = context.pipelineVersion,
                     status = ExecutionStatus.RUNNING,
                     parametersJson = context.parametersJson,
-                    triggeredBy = context.userId,
+                    executedBy = context.userId,
+                    executedByKeyKind = context.executedByKeyKind,
                     triggeredVia = context.triggeredVia,
                     correlationId = context.correlationId,
                     startedAt = event.startedAt,

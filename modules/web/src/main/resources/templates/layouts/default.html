@@ -257,7 +257,8 @@
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/datasources')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#database"></use></svg><span class="app-rail-label">Datasources</span></a>
 
         <div class="app-nav-section app-rail-label">Operate</div>
-        <a th:href="@{/executions}" class="app-nav-link" data-nav-section="/executions"
+        <!-- D11 (2026-09-20): the promoter reads no executions, so the item is not drawn for one. -->
+        <a th:if="${navExecutions == true}" th:href="@{/executions}" class="app-nav-link" data-nav-section="/executions"
            data-nav-group="Operate" data-nav-label="Executions"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'active' : null"
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#clock"></use></svg><span class="app-rail-label">Executions</span></a>
@@ -271,13 +272,17 @@
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/api-console')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#activity"></use></svg><span class="app-rail-label">API</span></a>
         <!-- versioning §10.1 D8: promotion is a human action, and this link is the only way to
              reach it — there is no MCP tool and no schedule. -->
-        <a th:href="@{/promotion}" class="app-nav-link" data-nav-section="/promotion"
+        <!-- Owner rule 13 (2026-09-20): the PAGE is readable by author, promoter and admins
+             (`PROMOTION_READ`); the promote verb on it renders by role. -->
+        <a th:if="${navPromotion == true}" th:href="@{/promotion}" class="app-nav-link" data-nav-section="/promotion"
            data-nav-group="Operate" data-nav-label="Promotion"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/promotion')} ? 'active' : null"
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/promotion')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#trending-up"></use></svg><span class="app-rail-label">Promotion</span></a>
 
         <div class="app-nav-section app-rail-label">Organisation</div>
-        <a th:href="@{/workspaces}" class="app-nav-link" data-nav-section="/workspaces"
+        <!-- D13 (2026-09-20): the workspaces PAGE is a workspace admin's; the switcher above
+             stays every member's. -->
+        <a th:if="${navWorkspaces == true}" th:href="@{/workspaces}" class="app-nav-link" data-nav-section="/workspaces"
            data-nav-group="Organisation" data-nav-label="Workspaces"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'active' : null"
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/workspaces')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#building"></use></svg><span class="app-rail-label">Workspaces</span></a>
@@ -489,13 +494,13 @@
         <!-- 114 §C.1 — the last-admin rule NAMES its remedy: a workspace nobody administers
              cannot be repaired from inside it, so the instruction is "promote someone first",
              not "try again". Matches WorkspaceLastAdminException's own userMessage. -->
-        <th:block th:if="${code == 'last_admin'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'A workspace needs at least one admin. Give another member admin first.')}"></div></th:block>
+        <th:block th:if="${code == 'last_admin'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'A workspace needs at least one workspace admin. Give another member the workspace admin role first.')}"></div></th:block>
+        <th:block th:if="${code == 'unknown_role'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'That is not a workspace role. Choose viewer, author, promoter or workspace admin.')}"></div></th:block>
         <th:block th:if="${code == 'role_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'You do not have the role needed for this action in this workspace.')}"></div></th:block>
         <th:block th:if="${code == 'inactive'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'That workspace is deactivated. Reactivate it first.')}"></div></th:block>
       </th:block>
       <th:block th:if="${param.ok}" th:with="code=${param.ok[0]}">
         <th:block th:if="${code == 'created'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The workspace was created.')}"></div></th:block>
-        <th:block th:if="${code == 'member_flags'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The roles on that membership were saved.')}"></div></th:block>
         <th:block th:if="${code == 'display_name'}"><div th:replace="~{partials/toast :: toast('success', 'Done', 'The display name was saved.')}"></div></th:block>
         <th:block th:if="${code == 'deactivated'}"><div th:replace="~{partials/toast :: toast('success', 'Deactivated', 'The workspace is no longer selectable. Nothing was deleted — Reactivate brings it back.')}"></div></th:block>
         <th:block th:if="${code == 'reactivated'}"><div th:replace="~{partials/toast :: toast('success', 'Reactivated', 'The workspace is selectable again.')}"></div></th:block>

@@ -110,6 +110,12 @@ class FlywayMigrationIntegrationTest {
                 // 140 — pipeline_check_runs: the server-side record of every release check run
                 // (metadata-db §4.20).
                 "28|pipeline check runs|true",
+                // 177 (#177) roles R1 — ONE role per membership and invitation (D1/D20), replacing
+                // V23's three flags; `WorkspaceRolesMigrationTest` proves the backfill and the down path.
+                "29|workspace roles|true",
+                // 177 (#177) D11 — `triggered_by` → `executed_by` + `executed_by_key_kind`
+                // (metadata-db §4.6).
+                "30|executions executed by|true",
             )
     }
 
@@ -211,11 +217,12 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `V23 puts capability on the membership and visibility in the grant table`() {
-        // The column inventory, read from the SHIPPED database: the three flags exist, the
-        // `role` column is gone, and the datasource binding split into ownership + grants.
+    fun `V23 puts permission on the membership and visibility in the grant table - V29 makes it ONE role`() {
+        // The column inventory, read from the SHIPPED database: V23's three flags were folded
+        // back into one `role` by V29 (177, D1), and the datasource binding split into
+        // ownership + grants.
         columnsOf("workspace_members") shouldContainExactly
-            listOf("admin", "author", "joined_at", "promoter", "user_id", "workspace_id")
+            listOf("joined_at", "role", "user_id", "workspace_id")
 
         columnsOf("datasource_workspaces") shouldContainExactly
             listOf("datasource_name", "granted_at", "granted_by", "workspace_id")
@@ -250,19 +257,19 @@ class FlywayMigrationIntegrationTest {
     @Test
     fun `V24 creates the invitation table keyed by workspace and normalized email`() {
         // The column inventory, read from the SHIPPED database (113, auth.md §4.6): an
-        // invitation is a membership waiting for its user — the member's flags, the inviter,
-        // and the email in the one canonical form, keyed so one email holds one invitation
-        // per workspace and a re-invite REPLACES the flags (the latest admin decision wins).
+        // invitation is a membership waiting for its user — the member's ONE role (V29), the
+        // inviter, and the email in the one canonical form, keyed so one email holds one
+        // invitation per workspace and a re-invite REPLACES the role (the latest admin decision wins).
         columnsOf("workspace_invitations") shouldContainExactly
-            listOf("admin", "author", "email", "invited_at", "invited_by", "promoter", "workspace_id")
+            listOf("email", "invited_at", "invited_by", "role", "workspace_id")
 
-        // The database keeps the two invariants the service normalises for: admin implies
-        // author (the membership's own CHECK, mirrored), and no row stores a mixed-case email.
+        // The database keeps the two invariants: the role is one of the four (the membership's
+        // own CHECK, mirrored), and no row stores a mixed-case email.
         query(
             "SELECT conname FROM pg_constraint WHERE connamespace = 'public'::regnamespace" +
                 " AND conrelid = 'workspace_invitations'::regclass AND contype = 'c' ORDER BY 1",
         ) { it.getString(1) } shouldContainExactly
-            listOf("chk_workspace_invitation_admin_authors", "chk_workspace_invitation_email_lower")
+            listOf("chk_workspace_invitation_email_lower", "chk_workspace_invitation_role")
 
         // The materialise lookup walks by email; the listing walks the PK prefix.
         query(
@@ -766,6 +773,8 @@ class FlywayMigrationIntegrationTest {
                 "chk_datasource_name",
                 "chk_datasource_query_timeout",
                 "chk_dialect",
+                // V30 (177, D11): the credential kind behind an execution — 'user' | 'endpoint' | 'server' | NULL.
+                "chk_executions_executed_by_key_kind",
                 // 089 §A (V15) — lake_tables.format is parquet|iceberg; a third value would
                 // generate bad view SQL later, and the database is the last place to catch it.
                 "chk_lake_table_format",
@@ -801,15 +810,15 @@ class FlywayMigrationIntegrationTest {
                 "chk_template_versions_via",
                 "chk_triggered_via",
                 "chk_type_dialect",
-                // V24 (113) — the invitation row carries the same invariant as the membership
-                // it becomes, and stores the email in the one canonical form §4.2 mandates.
+                // V24 (113) — the invitation row stores the email in the one canonical form §4.2
+                // mandates; V29 (177) gave it the same ONE-role CHECK the membership carries (D20).
                 // Sorted BEFORE the members' CHECK: pg_constraint's ORDER BY conname puts
                 // "workspace_invitation_*" ahead of "workspace_member_*".
-                "chk_workspace_invitation_admin_authors",
                 "chk_workspace_invitation_email_lower",
-                // V23 replaced the role CHECK with the invariant that outlived it: a workspace
-                // admin can author, stated once in the database (RBAC design §1).
-                "chk_workspace_member_admin_authors",
+                "chk_workspace_invitation_role",
+                // V29 (177, D1): one role per membership — viewer | author | promoter |
+                // workspace_admin; the V23 admin-implies-author CHECK left with the flags.
+                "chk_workspace_member_role",
             )
     }
 
@@ -1055,7 +1064,7 @@ class FlywayMigrationIntegrationTest {
                         .prepareStatement(
                             """
                             INSERT INTO pipeline_executions (
-                                execution_id, pipeline_id, pipeline_version, status, triggered_by, triggered_via
+                                execution_id, pipeline_id, pipeline_version, status, executed_by, triggered_via
                             ) VALUES (?, ?, 1, 'RUNNING', ?, 'REST')
                             """.trimIndent(),
                         ).use {

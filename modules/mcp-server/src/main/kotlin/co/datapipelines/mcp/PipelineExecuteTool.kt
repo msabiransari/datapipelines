@@ -7,6 +7,7 @@ import co.datapipelines.application.mcp.McpCallAudit
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecuteRequest
+import co.datapipelines.executor.ExecutedByKeyKind
 import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
@@ -188,6 +189,8 @@ class PipelineExecuteTool(
                 idempotencyKey = ctx.idempotencyKey,
                 correlationId = ctx.correlationId,
                 triggeredVia = ExecutionTrigger.MCP,
+                // D11: an MCP run is the key owner's own — `/mcp` authenticates with a user key only.
+                executedByKeyKind = ExecutedByKeyKind.USER,
             )
         return when (val decision = decide(request, parameters, ctx)) {
             is LaunchDecision.Attach -> {

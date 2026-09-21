@@ -219,7 +219,7 @@ class McpResourceReaderTest {
     @Test
     fun `another user's execution and its events are not readable`() {
         every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns
-            McpFixtures.executionRecord(triggeredBy = McpFixtures.OTHER_USER)
+            McpFixtures.executionRecord(executedBy = McpFixtures.OTHER_USER)
 
         assertAll(
             { shouldThrow<McpError> { reader.read(McpResourceUri.execution(McpFixtures.EXECUTION_ID), ctx) } },

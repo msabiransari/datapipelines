@@ -155,7 +155,7 @@ class UserService(
     /**
      * Pre-provisions the **system service account** (auth.md §4.5, versioning §10.6 / R7) — the
      * actor every write the SYSTEM makes on nobody's behalf is stamped with, so
-     * `pipeline_versions.created_by` and `pipeline_executions.triggered_by` (both
+     * `pipeline_versions.created_by` and `pipeline_executions.executed_by` (both
      * `NOT NULL REFERENCES users(id)`) point at a real, nameable row without inventing a human.
      *
      * Promotion is its first consumer: a promoted row carries no source user id that means

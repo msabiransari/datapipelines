@@ -1,7 +1,7 @@
 package co.datapipelines.application.semantics
 
 import co.datapipelines.auth.AuthErrorCodes
-import co.datapipelines.auth.MembershipFlags
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.datasources.semantics.FactRef
 import co.datapipelines.datasources.semantics.LearnedFactRecorder
 import co.datapipelines.datasources.semantics.LearnedFactRepository
@@ -164,7 +164,7 @@ class SemanticsServiceTest {
 
         val refused =
             shouldThrow<DatapipelinesException> { service.retire(SemanticsFixtures.principal(), theirs.id, "wrong") }
-        val result = service.retire(SemanticsFixtures.principal(flags = MembershipFlags(author = true, admin = true)), theirs.id, "wrong")
+        val result = service.retire(SemanticsFixtures.principal(role = WorkspaceRole.WORKSPACE_ADMIN), theirs.id, "wrong")
 
         assertAll(
             { refused.code shouldBe AuthErrorCodes.ROLE_REQUIRED },

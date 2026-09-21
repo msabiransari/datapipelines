@@ -49,6 +49,9 @@ class TemplateLifecycleDialogController(
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.release(currentPrincipal().requireWorkspace().id, name))
         model.addAttribute("from", from ?: FROM_EXPLORER)
+        // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
+        // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
+        RoleModel.stamp(model)
         return "partials/template-lifecycle-release"
     }
 
@@ -106,6 +109,9 @@ class TemplateLifecycleDialogController(
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.purge(currentPrincipal().requireWorkspace().id, name, version))
         model.addAttribute("from", from ?: FROM_EXPLORER)
+        // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
+        // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
+        RoleModel.stamp(model)
         return "partials/template-lifecycle-purge"
     }
 
@@ -167,6 +173,9 @@ class TemplateLifecycleDialogController(
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.discard(currentPrincipal().requireWorkspace().id, name, version))
         model.addAttribute("from", FROM_EXPLORER)
+        // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
+        // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
+        RoleModel.stamp(model)
         return "partials/template-lifecycle-discard"
     }
 
@@ -211,6 +220,9 @@ class TemplateLifecycleDialogController(
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.restore(currentPrincipal().requireWorkspace().id, name, version))
         model.addAttribute("from", FROM_EXPLORER)
+        // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
+        // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
+        RoleModel.stamp(model)
         return "partials/template-lifecycle-restore"
     }
 
@@ -258,6 +270,9 @@ class TemplateLifecycleDialogController(
         LifecycleVerbs.requireSession()
         model.addAttribute("dlg", dialogs.purgeEntity(currentPrincipal().requireWorkspace().id, name))
         model.addAttribute("from", FROM_EXPLORER)
+        // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
+        // already refuses the wrong role; the markup now says so too, and the exemption list is empty.
+        RoleModel.stamp(model)
         return "partials/template-lifecycle-purge-entity"
     }
 

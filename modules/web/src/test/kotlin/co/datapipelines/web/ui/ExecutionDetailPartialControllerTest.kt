@@ -81,7 +81,7 @@ class ExecutionDetailPartialControllerTest {
             pipelineVersion = 1,
             status = status,
             parametersJson = "{}",
-            triggeredBy = userId,
+            executedBy = userId,
             triggeredVia = ExecutionTrigger.UI,
             failedNodeId = "extract",
             errorJson = """{"code":"node.failed","message":"boom"}""",

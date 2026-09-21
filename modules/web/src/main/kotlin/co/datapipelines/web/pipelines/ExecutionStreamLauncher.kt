@@ -9,6 +9,7 @@ import co.datapipelines.events.EventEmitter
 import co.datapipelines.executor.CancellationFlags
 import co.datapipelines.executor.CancellationRegistry
 import co.datapipelines.executor.ExecuteRequest
+import co.datapipelines.executor.ExecutedByKeyKind
 import co.datapipelines.executor.ExecutionAbortedException
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionProgress
@@ -202,6 +203,7 @@ class ExecutionStreamLauncher(
                 pipelineId = request.pipelineId,
                 pipelineVersion = request.pipelineVersion,
                 userId = request.principal.userId,
+                executedByKeyKind = request.principal.executedByKeyKind(),
                 correlationId = request.correlationId,
                 triggeredVia = ExecutionTrigger.REST,
                 parametersJson = request.parametersJson,
@@ -260,6 +262,7 @@ class ExecutionStreamLauncher(
                         resultPageRows = request.resultPageRows,
                         correlationId = request.correlationId,
                         triggeredVia = ExecutionTrigger.REST,
+                        executedByKeyKind = request.principal.executedByKeyKind(),
                         executionId = executionId,
                     ),
                 )
@@ -348,3 +351,10 @@ class ExecutionStreamLauncher(
         const val NEVER_TIMEOUT = 0L
     }
 }
+
+/**
+ * D11 — the credential kind an execution is attributed to: the presented API key's kind when
+ * one authenticated this request (`user`; an `endpoint` key never reaches an execute route and a
+ * `server` key never executes, so those map only for completeness), null for a session.
+ */
+private fun AuthenticatedPrincipal.executedByKeyKind(): ExecutedByKeyKind? = keyKind?.let { ExecutedByKeyKind.fromWire(it.wire) }

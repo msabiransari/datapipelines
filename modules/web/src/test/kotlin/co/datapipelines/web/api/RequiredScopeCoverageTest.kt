@@ -237,7 +237,13 @@ class RequiredScopeCoverageTest {
             .sortedBy { it.qualifiedName }
 
     private companion object {
-        const val BASE_PACKAGE = "co.datapipelines.web"
+        /**
+         * 177 §D.1 — `co.datapipelines`, not `co.datapipelines.web`: every controller on this
+         * module's classpath, whichever module declares it (auth, application, mcp-server sit
+         * below web and are reached; `modules/app` sits above and is covered by
+         * `RoleWalkE2eTest`, which walks the running application's own handler mapping).
+         */
+        const val BASE_PACKAGE = "co.datapipelines"
 
         /**
          * The runtime's own constant (025 C6): the interceptor's default-deny and this

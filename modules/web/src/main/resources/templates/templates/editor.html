@@ -68,8 +68,8 @@
     </div>
     <div class="u-row">
       <!-- 114 §A — the viewer's read-only line, and the same rule as the pipeline editor:
-           Release is `canPromote`, Purge draft is `canAuthor`, and neither is greyed. -->
-      <div th:if="${canAuthor != true and canPromote != true}" class="app-note" data-role-note="read-only">
+           Release and Purge draft are both `canAuthor` (D8, 2026-09-20), and neither is greyed. -->
+      <div th:if="${canAuthor != true}" class="app-note" data-role-note="read-only">
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>
         <span>Read-only — you are a viewer in <span th:text="${activeWorkspace}">workspace</span>.</span>
       </div>
@@ -79,7 +79,7 @@
            travels in the query (§9.6), never in a path segment. -->
       <span th:if="${hasDraft}" class="ds-badge ds-badge-warning"
             th:text="'Draft v' + ${draftVersion} + ' — pending release'"></span>
-      <button th:if="${hasDraft == true and canPromote == true}" data-verb="template-release" class="ds-button ds-button-primary ds-button-sm" id="tpl-release-draft"
+      <button th:if="${hasDraft == true and canAuthor == true}" data-verb="template-release" class="ds-button ds-button-primary ds-button-sm" id="tpl-release-draft"
               th:attr="hx-get=@{/partials/templates/lifecycle/release(name=${template?.id}, from='editor')},
                        hx-target='#te-dialog', hx-swap='innerHTML'">Release…</button>
       <button th:if="${hasDraft == true and canAuthor == true}" data-verb="template-purge" class="ds-button ds-button-secondary ds-button-sm" id="tpl-discard-draft"

@@ -4,7 +4,6 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.JwtService
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
@@ -15,6 +14,7 @@ import co.datapipelines.auth.WorkspaceLastAdminException
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -78,74 +78,94 @@ class WorkspacesUiControllerTest {
     }
 
     private fun memberRow(email: String = "bob@acme.test") =
-        WorkspaceMemberRow(UUID.randomUUID(), email, "Bob", MembershipFlags(author = true), Instant.EPOCH)
+        WorkspaceMemberRow(UUID.randomUUID(), email, "Bob", WorkspaceRole.AUTHOR, Instant.EPOCH)
 
     // ------------------------------------------------------------------ 114 §C.1 members
 
     /**
-     * The three checkboxes reach the SERVICE, through the same method the REST
-     * `PUT .../members/{userId}` calls. There is deliberately no second code path: the
-     * last-admin rule and the `admin -> author` normalisation live in `WorkspaceService`, and
-     * a UI binder that re-implemented either would be one more place for them to disagree.
+     * The role dropdown reaches the SERVICE, through the same method the REST
+     * `POST .../members` calls. There is deliberately no second code path: the membership
+     * checks live in `WorkspaceService`, and a UI binder that re-implemented them would be one
+     * more place for them to disagree.
      */
     @Test
-    fun `addMember carries the three role flags into the service`() {
+    fun `addMember carries the ONE role into the service (D22)`() {
         authenticate()
-        val flags = MembershipFlags(author = true, promoter = true, admin = false)
-        every { workspaceService.addMember(principal, "acme", "bob@acme.test", flags) } returns
+        every { workspaceService.addMember(principal, "acme", "bob@acme.test", WorkspaceRole.PROMOTER) } returns
             WorkspaceService.AddMemberOutcome.Added(memberRow())
 
-        controller.addMember("acme", "bob@acme.test", author = true, promoter = true, admin = null) shouldBe
-            "redirect:/workspaces?ok=member_added"
+        controller.addMember("acme", "bob@acme.test", role = "promoter") shouldBe "redirect:/workspaces?ok=member_added"
 
-        verify { workspaceService.addMember(principal, "acme", "bob@acme.test", flags) }
+        verify { workspaceService.addMember(principal, "acme", "bob@acme.test", WorkspaceRole.PROMOTER) }
+    }
+
+    /** A role outside the four is a form nobody rendered — refused before the service, as its own flash. */
+    @Test
+    fun `addMember with an unknown role bounces as unknown_role and never reaches the service`() {
+        authenticate()
+
+        controller.addMember("acme", "bob@acme.test", role = "owner") shouldBe "redirect:/workspaces?error=unknown_role"
+
+        verify(exactly = 0) { workspaceService.addMember(any(), any(), any(), any()) }
     }
 
     /**
-     * An unticked box is a flag being TAKEN AWAY. The form posts all three every time and the
-     * handler REPLACES, because a form that sent only what was ticked could never express a
-     * demotion — and demotion is the operation the last-admin rule exists to refuse.
+     * D22 — the ONE htmx partial: the dropdown's Save replaces the role through the same
+     * `WorkspaceService.setMemberRole` the REST `PUT .../members/{userId}` calls, and answers
+     * with the re-rendered row (the page's own fragment) plus an out-of-band toast.
      */
     @Test
-    fun `setMemberFlags replaces the row - an unticked box is a demotion, not an omission`() {
+    fun `setMemberRole replaces the role through the service and re-renders the row with a toast`() {
         authenticate()
         val target = UUID.randomUUID()
-        val flags = MembershipFlags(author = true, promoter = false, admin = false)
-        every { workspaceService.setMemberFlags(principal, "acme", target, flags) } returns memberRow()
+        val row = WorkspaceMemberRow(target, "bob@acme.test", "Bob", WorkspaceRole.AUTHOR, Instant.EPOCH)
+        every { workspaceService.setMemberRole(principal, "acme", target, WorkspaceRole.AUTHOR) } returns row
+        val model = ExtendedModelMap()
 
-        controller.setMemberFlags("acme", target, author = true, promoter = null, admin = null) shouldBe
-            "redirect:/workspaces?ok=member_flags"
+        controller.setMemberRole(model, "acme", target, role = "author") shouldBe "partials/workspace-member-row :: saved"
 
-        verify { workspaceService.setMemberFlags(principal, "acme", target, flags) }
+        verify { workspaceService.setMemberRole(principal, "acme", target, WorkspaceRole.AUTHOR) }
+        (model["member"] as MemberRowView).role shouldBe WorkspaceRole.AUTHOR
+        model["toastVariant"] shouldBe "success"
+        val html =
+            engine().process(
+                "partials/workspace-member-row",
+                setOf("saved"),
+                webContext().apply { model.forEach { (k, v) -> setVariable(k, v) } },
+            )
+        // The row that comes back is the page's own fragment: the select with the NEW role
+        // selected, posting to the same partial, and the toast bound for the stack.
+        html shouldContain "data-member=\"bob@acme.test\""
+        html shouldContain "value=\"author\" selected"
+        html shouldContain "hx-post=\"/partials/workspaces/acme/members/$target/role\""
+        html shouldContain "hx-swap-oob=\"beforeend:#toast\""
+        html shouldNotContain "checkbox"
     }
 
-    /**
-     * `admin=true&author=false` is passed through UNEXPANDED. The invariant is stated once, by
-     * the service and by the V23 constraint behind it; expanding it in the binder would be a
-     * third copy, and the one place a copy could drift is the one nobody tests.
-     */
+    /** The last admin cannot be demoted: the 409 from the service becomes a toast alone, retargeted at the stack. */
     @Test
-    fun `the binder does not expand admin into author - the service and the constraint own that`() {
+    fun `demoting the last admin answers 409 with the last_admin toast and no row`() {
         authenticate()
         val target = UUID.randomUUID()
-        val asPosted = MembershipFlags(author = false, promoter = false, admin = true)
-        every { workspaceService.setMemberFlags(principal, "acme", target, asPosted) } returns memberRow()
-
-        controller.setMemberFlags("acme", target, author = false, promoter = null, admin = true)
-
-        verify { workspaceService.setMemberFlags(principal, "acme", target, asPosted) }
-    }
-
-    /** The last admin cannot be demoted: a 409 from the service becomes the §5.1 toast's code. */
-    @Test
-    fun `demoting the last admin bounces back as the last_admin toast`() {
-        authenticate()
-        val target = UUID.randomUUID()
-        every { workspaceService.setMemberFlags(principal, "acme", target, any()) } throws
+        every { workspaceService.setMemberRole(principal, "acme", target, any()) } throws
             WorkspaceLastAdminException("acme")
 
-        controller.setMemberFlags("acme", target, author = true, promoter = null, admin = null) shouldBe
-            "redirect:/workspaces?error=last_admin"
+        val response = controller.setMemberRole(ExtendedModelMap(), "acme", target, role = "viewer")
+
+        val entity = response as org.springframework.http.ResponseEntity<*>
+        entity.statusCode.value() shouldBe 409
+        entity.headers.getFirst("HX-Retarget") shouldBe "#toast"
+        (entity.body as String) shouldContain "last workspace admin"
+    }
+
+    @Test
+    fun `an unknown role on the partial is a 400 toast, before the service`() {
+        authenticate()
+
+        val response = controller.setMemberRole(ExtendedModelMap(), "acme", UUID.randomUUID(), role = "owner")
+
+        (response as org.springframework.http.ResponseEntity<*>).statusCode.value() shouldBe 400
+        verify(exactly = 0) { workspaceService.setMemberRole(any(), any(), any(), any()) }
     }
 
     // ------------------------------------------------------------------ 114 §C.3 deactivation
@@ -180,7 +200,7 @@ class WorkspacesUiControllerTest {
     fun `a principal whose only memberships are deactivated gets the no-workspace page`() {
         authenticate()
         every { workspaceService.listOwn(principal) } returns
-            listOf(WorkspaceMembership(UUID.randomUUID(), "acme", MembershipFlags(author = true), Instant.EPOCH, false))
+            listOf(WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.AUTHOR, Instant.EPOCH, false))
         every { themeResolver.resolve(any()) } returns "saas"
 
         controller.screen(ExtendedModelMap(), MockHttpServletRequest()) shouldBe "workspaces/none"
@@ -191,8 +211,8 @@ class WorkspacesUiControllerTest {
         authenticate()
         every { workspaceService.listOwn(principal) } returns
             listOf(
-                WorkspaceMembership(UUID.randomUUID(), "gone", MembershipFlags(), Instant.EPOCH, false),
-                WorkspaceMembership(UUID.randomUUID(), "acme", MembershipFlags(author = true, admin = true), Instant.EPOCH, true),
+                WorkspaceMembership(UUID.randomUUID(), "gone", WorkspaceRole.VIEWER, Instant.EPOCH, false),
+                WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.WORKSPACE_ADMIN, Instant.EPOCH, true),
             )
         every { workspaceService.membersWithInvitations(principal, "acme") } returns
             WorkspaceService.MemberListing(members = listOf(memberRow()), invitations = emptyList())
@@ -214,10 +234,10 @@ class WorkspacesUiControllerTest {
     @Test
     fun `addMember for an email with no account redirects ok=member_invited (113)`() {
         authenticate()
-        every { workspaceService.addMember(principal, "acme", "new@acme.test", MembershipFlags.VIEWER) } returns
-            WorkspaceService.AddMemberOutcome.Invited(email = "new@acme.test", flags = MembershipFlags.VIEWER)
+        every { workspaceService.addMember(principal, "acme", "new@acme.test", WorkspaceRole.VIEWER) } returns
+            WorkspaceService.AddMemberOutcome.Invited(email = "new@acme.test", role = WorkspaceRole.VIEWER)
 
-        controller.addMember("acme", "new@acme.test", null, null, null) shouldBe "redirect:/workspaces?ok=member_invited"
+        controller.addMember("acme", "new@acme.test", role = "viewer") shouldBe "redirect:/workspaces?ok=member_invited"
     }
 
     @Test
@@ -232,7 +252,7 @@ class WorkspacesUiControllerTest {
     @Test
     fun `workspaces page renders the design-system tables and the active badge`() {
         val membership =
-            WorkspaceMembership(UUID.randomUUID(), "acme", MembershipFlags(author = true, admin = true), Instant.EPOCH)
+            WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.WORKSPACE_ADMIN, Instant.EPOCH)
         val html =
             engine().process(
                 "workspaces/index",
@@ -241,11 +261,17 @@ class WorkspacesUiControllerTest {
                     setVariable("own", listOf(WorkspaceRowView.of(membership, "acme", superAdmin = false)))
                     setVariable("canCreate", false)
                     setVariable("managed", mapOf("acme" to listOf(MemberRowView.of(memberRow()))))
+                    setVariable("workspaceRoles", WorkspaceRole.entries)
                 },
             )
 
         // Both tables (own workspaces, per-managed members) are on the design system (029).
         html shouldContain "<table class=\"ds-table\">"
+        // D22: the member row is the partial's fragment — the dropdown with the current role
+        // selected, the row hook the browser suite addresses, the partial's post target.
+        html shouldContain "data-member=\"bob@acme.test\""
+        html shouldContain "value=\"author\" selected"
+        html shouldContain "hx-post=\"/partials/workspaces/acme/members/"
         html shouldContain "ds-badge ds-badge-primary" // the active-workspace chip
         html shouldNotContain "border-collapse: collapse"
     }
@@ -362,19 +388,19 @@ class WorkspacesUiControllerTest {
     @Test
     fun `addMember redirects ok=member_added`() {
         authenticate()
-        every { workspaceService.addMember(principal, "acme", "bob@acme.test", MembershipFlags.VIEWER) } returns
+        every { workspaceService.addMember(principal, "acme", "bob@acme.test", WorkspaceRole.VIEWER) } returns
             WorkspaceService.AddMemberOutcome.Added(memberRow())
 
-        controller.addMember("acme", "bob@acme.test", null, null, null) shouldBe "redirect:/workspaces?ok=member_added"
+        controller.addMember("acme", "bob@acme.test", role = "viewer") shouldBe "redirect:/workspaces?ok=member_added"
     }
 
     @Test
     fun `addMember with an unknown email is the user_not_found banner - never a 500`() {
         authenticate()
-        every { workspaceService.addMember(principal, "acme", "ghost@nowhere.test", MembershipFlags.VIEWER) } throws
+        every { workspaceService.addMember(principal, "acme", "ghost@nowhere.test", WorkspaceRole.VIEWER) } throws
             WorkspaceService.UnknownMemberEmailException("ghost@nowhere.test")
 
-        controller.addMember("acme", "ghost@nowhere.test", null, null, null) shouldBe
+        controller.addMember("acme", "ghost@nowhere.test", role = "viewer") shouldBe
             "redirect:/workspaces?error=user_not_found"
     }
 
@@ -478,13 +504,15 @@ class WorkspacesUiControllerTest {
      * and a `read` key driving a workspace delete violates that outright.
      */
     @Test
-    fun `an API-key principal cannot create, add, change flags, remove, deactivate or delete`() {
+    fun `an API-key principal cannot create, add, change roles, remove, deactivate or delete`() {
         authenticateWithApiKey()
         val refusal = "redirect:/workspaces?error=session_required"
 
         controller.create("globex", "Globex") shouldBe refusal
-        controller.addMember("globex", "bob@acme.test", true, null, null) shouldBe refusal
-        controller.setMemberFlags("globex", UUID.randomUUID(), true, null, null) shouldBe refusal
+        controller.addMember("globex", "bob@acme.test", role = "author") shouldBe refusal
+        // The partial answers the same refusal as a toast (403, `workspace.session_required`).
+        val partial = controller.setMemberRole(ExtendedModelMap(), "globex", UUID.randomUUID(), role = "author")
+        (partial as org.springframework.http.ResponseEntity<*>).statusCode.value() shouldBe 403
         controller.removeMember("globex", UUID.randomUUID()) shouldBe refusal
         controller.renameDisplay("globex", "Globex") shouldBe refusal
         controller.deactivate("globex") shouldBe refusal
@@ -494,7 +522,7 @@ class WorkspacesUiControllerTest {
         // The gate is in FRONT of the service, not behind it.
         verify(exactly = 0) { workspaceService.create(any(), any(), any()) }
         verify(exactly = 0) { workspaceService.addMember(any(), any(), any(), any()) }
-        verify(exactly = 0) { workspaceService.setMemberFlags(any(), any(), any(), any()) }
+        verify(exactly = 0) { workspaceService.setMemberRole(any(), any(), any(), any()) }
         verify(exactly = 0) { workspaceService.removeMember(any(), any(), any()) }
         verify(exactly = 0) { workspaceService.updateDisplayName(any(), any(), any()) }
         verify(exactly = 0) { workspaceService.deactivate(any(), any()) }

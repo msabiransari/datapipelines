@@ -114,7 +114,7 @@ class ViewerAccessE2eTest {
             viewer()
                 .contentType(ContentType.URLENC)
                 .formParam("email", "newcomer@acme.test")
-                .formParam("author", "on")
+                .formParam("role", "author")
                 .post("/workspaces/acme/members"),
         )
         refused(viewer().contentType(ContentType.JSON).post("/api/v1/auth/users/$ALICE/deactivate"))
@@ -141,7 +141,7 @@ class ViewerAccessE2eTest {
         id: String = TPL_NAME,
     ): String = """{"id":"$id","type":"sql","dialect":"POSTGRES","display_name":"Sales","description":"","body":"$body"}"""
 
-    /** The rows a reader must not move: template + pipeline versions, memberships, users' active/admin flags. */
+    /** The rows a reader must not move: template + pipeline versions, membership roles, users' active/admin bits. */
     private data class Snapshot(
         val templateVersions: List<Pair<Int, String>>,
         val pipelineVersions: List<Pair<Int, String>>,
@@ -171,7 +171,7 @@ class ViewerAccessE2eTest {
                         ) { "${it.getInt(1)}|${it.getString(2)}|${it.getString(3)}" }.map { it.substringBefore("|").toInt() to it },
                     members =
                         rows(
-                            "SELECT user_id::text || ':' || author || promoter || admin FROM workspace_members ORDER BY 1",
+                            "SELECT user_id::text || ':' || role FROM workspace_members ORDER BY 1",
                         ) { it.getString(1) },
                     users = rows("SELECT id::text || ':' || is_active || is_admin FROM users ORDER BY 1") { it.getString(1) },
                 )
@@ -243,12 +243,13 @@ class ViewerAccessE2eTest {
                             ('$VERA', 'vera@acme.test', 'Vera', 'test', 'vera-sub', TRUE, FALSE)
                         """.trimIndent(),
                     )
-                    // Alice authors AND promotes (the positive control); Vera is a plain viewer.
+                    // Alice is the AUTHOR (the positive control — a promoter authors nothing, D5);
+                    // Vera is a plain viewer.
                     statement.execute(
                         """
-                        INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin) VALUES
-                            ('$WS_ACME', '$ALICE', TRUE, TRUE, FALSE),
-                            ('$WS_ACME', '$VERA', FALSE, FALSE, FALSE)
+                        INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+                            ('$WS_ACME', '$ALICE', 'author'),
+                            ('$WS_ACME', '$VERA', 'viewer')
                         """.trimIndent(),
                     )
                     statement.execute(

@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v2.23 (revised — see Change Log)
+**Status:** v2.24 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-09-19
@@ -105,10 +105,10 @@ The `provider` field stores the **OIDC registration name** as configured by the 
    Grant-wise this step changes nothing: `is_admin` is decided at row creation and nowhere else (§4.4).
    - **No:** Creates a new user record. Default `is_active: true`, `is_admin: false`.
    2a. **Materialises every pending invitation for that email** (§4.6) into real
-       memberships, with their flags, in the same act — and DELETES the invitations. The
+       memberships, with their roles, in the same act — and DELETES the invitations. The
        materialise runs in `WorkspaceService.workspaceForLogin` (step 4), the one resolution
        both credential paths reach, so it happens before any workspace is stamped: the
-       first login lands an invited user in the invited workspace with the invited flags,
+       first login lands an invited user in the invited workspace with the invited role,
        and the `demo` join below never fires for them (D-R11 — the invited workspace
        REPLACES the default, it is not added beside it). Each materialisation is audited
        (`workspace.invitation_materialised`) with the inviter.
@@ -213,13 +213,14 @@ The rules, each load-bearing:
    DEACTIVATED workspace is refused (`workspace.inactive`, 404) — a super admin can see the
    greyed workspace, and this is the verb telling them the same thing every other member verb
    would.
-3. **The latest admin decision wins.** Re-inviting the same email UPSERTS the row: the flags
-   (and inviter, and date) are replaced, and the upsert is audited (`workspace.member_invited`)
-   every time it fires — the row keeps no history; the audit trail does. `admin` implies
-   `author`, enforced by the same database CHECK the members table states.
+3. **The latest admin decision wins.** Re-inviting the same email UPSERTS the row: the role
+   (and inviter, and date) is replaced, and the upsert is audited (`workspace.member_invited`)
+   every time it fires — the row keeps no history; the audit trail does. The role is one of
+   the four [`WorkspaceRole`](enums.md#8c-workspacerole--the-one-role-a-membership-holds) values,
+   enforced by the same kind of database CHECK the members table states (D20).
 4. **Materialisation at login.** When a user row comes into existence (§4.2's first login, or
    the admin's local-account creation — the two creation paths), every pending invitation for
-   that email becomes a membership with its invited flags, and the invitations are deleted,
+   that email becomes a membership with its invited role, and the invitations are deleted,
    in one atomic statement. The `demo`-viewer default (§4.2 step 4) is applied ONLY when no
    invitation materialised — the invited workspace replaces the demo default, it is not added
    beside it (D-R11) — and `active_workspace` stamps the FIRST-INVITED workspace: the
@@ -240,10 +241,10 @@ The rules, each load-bearing:
 **No expiry in v1, and no email is ever sent** — the product has no SMTP (§5A); an invitation
 is a row, not a message, and it is revocable like any other membership. There is no
 self-service join: invitations are created by a workspace admin or a super admin, through the
-same capability gate as every other member verb (`MANAGE_WORKSPACE_MEMBERS`).
+same permission gate as every other member verb (`MANAGE_WORKSPACE_MEMBERS`).
 
 **Local accounts need no invitation** (§5A.1): the Admin → Users form's optional "also add to
-workspace + flags" writes the user row and the membership in one act, because the row exists
+workspace, with a role" writes the user row and the membership in one act, because the row exists
 by the time the membership is written — rule 1 doing the work directly.
 
 ---
@@ -801,68 +802,90 @@ A key's scope is a CEILING, never a grant on its own: every request also checks 
 
 ### 7.6 Operation Matrix — two axes (authoritative)
 
-This matrix is the ONLY place operation-level requirements are defined. [REST API](rest-api.md), [MCP Server](mcp-server.md), and [UI Screens](ui-screens.md) reference it; they never assert anything locally.
+This matrix is the ONLY place operation-level requirements are defined. [REST API](rest-api.md), [MCP Server](mcp-server.md), and [UI Screens](ui-screens.md) reference it; they never assert anything locally. It is the [roles and permissions design](superpowers/specs/2026-09-20-roles-permissions-design.md) §2 table (ratified 2026-09-20), one row per `RestOperation` and per MCP tool.
 
 Every operation carries **two** minimums, and both must be met ([§11A Roles](#11a-roles)):
 
-- **Min scope** — what the CREDENTIAL must carry. Hierarchical (§7.5), and since RBAC round 1 it applies to **API keys only**: a session carries no scopes at all, because capability moved onto the membership.
-- **Min role** — what the caller must hold in the ACTIVE WORKSPACE. For a session that is its own membership row; for an API key it is **the key issuer's CURRENT membership**, re-read on every request (§7.4), so a demoted issuer's key stops working inside one validation-cache TTL.
+- **The roles** — which of the five roles may perform it in the ACTIVE WORKSPACE (the five columns). For a session that is its own membership's role; for an API key it is **the key issuer's CURRENT role**, re-read on every request (§7.4), so a demoted issuer's key stops working inside one validation-cache TTL. Super admin is a property of the USER, held in every workspace (D7), so its column is ✓ on every row.
+- **Min scope** — what the CREDENTIAL must carry. Hierarchical (§7.5), and since RBAC round 1 it applies to **API keys only**: a session carries no scopes at all, because permission moved onto the membership. Kept as its own, smaller table below each role table.
 
-The two axes are not the same ordering and neither is redundant. `execute` is the second SCOPE but the **viewer-level** ROLE (D-R3, "viewers execute"), so a `read`-scoped key may not execute while a viewer's session may. The datasource probes run the other way: `author` scope (a `read` key must not reach row data) but `view` role (the design's §1 table grants a viewer capped read-only SELECT).
+The two axes are not the same ordering and neither is redundant. `execute` is the second SCOPE but a **viewer-level** permission (D3, "viewers execute"), so a `read`-scoped key may not execute while a viewer's session may. The datasource probes run the other way: `author` scope (a `read` key must not reach row data) but every role, the promoter included (ratified: "introspection is reading").
 
-`ScopeMatrix.allowed(principal, operation, workspace)` answers both axes and is the only function `ScopeInterceptor` and the MCP dispatcher call.
+**Cell alphabet.** ✓ = the role may perform the action; ✗ = refused with `auth.role_required` (a key: `auth.key_issuer_role_lost`); **own** = admitted to the row, and the read path additionally returns only the caller's OWN rows (D11: `executed_by = self`); **all** = admitted, every row of the workspace; **lens** = admitted, and R2 (#178) narrows WHAT is returned to released-and-newer objects — until R2 lands the promoter sees what a viewer sees. Every non-✗ cell is *allowed* to the role walk; ✗ is *refused*.
 
-**REST endpoints:**
+`ScopeMatrix.allowed(principal, operation, workspace)` answers both axes and is the only function `ScopeInterceptor` and the MCP dispatcher call. Each REST row names its `RestOperation` constant in code font — the drift test, the reachability test and the role walk find the row by it, so a renamed label cannot detach a row from its code.
 
-| Operation | Endpoints | Min scope | Min role |
-|---|---|---|---|
-| Read pipelines / templates / datasources (metadata) / executions | all `GET` under `/api/v1/pipelines`, `/api/v1/templates`, `/api/v1/datasources`, `/api/v1/executions` (incl. `/export`, `/versions`) | `read` | `view` |
-| Retrieve execution results (cursor) | `GET /api/v1/executions/{id}/result` (+ ownership check) | `read` | `view` |
-| Execute a pipeline | `POST /api/v1/pipelines/{id}/execute` | `execute` | `execute` |
-| Cancel an execution | `DELETE /api/v1/executions/{id}` (+ ownership check; a super admin may cancel any) | `execute` | `execute` |
-| Create / update / delete pipelines & templates, import | `POST`/`PUT`/`DELETE` on `/api/v1/pipelines`, `/api/v1/templates`, `POST /api/v1/pipelines/import` | `author` | `author` |
-| Test a datasource connection | `POST /api/v1/datasources/{name}/test` | `author` | `ws_admin` |
-| Introspect a datasource schema | `GET /api/v1/datasources/{name}/schemas`, `GET /api/v1/datasources/{name}/tables`, `GET /api/v1/datasources/{name}/tables/{t}/columns` | `author` | `author` |
-| Register / update / delete a datasource bound to THIS workspace | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` for a workspace-owned datasource (RBAC design §4; `member-datasources-enabled` gates whether workspace admins may do it at all) | `author` | `ws_admin` |
-| Register / update / delete an INSTANCE datasource | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` for a datasource no workspace owns | `admin` | `super_admin` |
-| Manage own API keys | `/api/v1/auth/api-keys` (issuance additionally requires `author` in the pinned workspace and scope ≤ the issuer's capability, §7.4) | `read` | `view` |
-| Get current principal | `GET /api/v1/auth/me` ([REST API §16.2](rest-api.md#162-current-principal)) | `read` | `view` |
-| Set own theme preference | `PATCH /partials/profile/theme` (writes the caller's own user row only — no payload-chosen target) | `read` | `view` |
-| User administration | `/api/v1/auth/users/**` (activate, deactivate, grant/revoke super admin) | `admin` | `super_admin` |
-| List / read own workspaces & members | `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members` | `read` | `view` |
-| Create a workspace | `POST /api/v1/workspaces` — workspaces are created by super admins (D-R11); the provisioning modes were retired with round 1 | `admin` | `super_admin` |
-| Update a workspace / manage its members | `PUT /api/v1/workspaces/{name}`, `DELETE /api/v1/workspaces/{name}` | `author` | `ws_admin` |
-| Change own password | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | `read` | `view` |
-| Serve a published endpoint | `GET` on the published tree (`/api/<category>/<version>/<path…>`, R-EP5) ([§7.7](#77-key-kinds-and-published-endpoint-bindings)) — the floor only; the real gate is the path binding, and an `endpoint`-kind key bypasses both axes because it carries neither scopes nor a membership | `read` | `view` |
-| Manage published endpoints | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings ([§7.7](#77-key-kinds-and-published-endpoint-bindings)). Binding additionally requires the key's OWNER, enforced in-handler | `author` | `author` |
-| Register / import / unregister lake tables of a datasource (the dp-lake catalog) | `POST /api/v1/datasources/{name}/tables`, `POST /api/v1/datasources/{name}/tables/import`, `DELETE /api/v1/datasources/{name}/tables/{ns}/{t}` | `author` | `author` |
-| Release a version | `POST /api/v1/pipelines/{id}/release`, `POST /api/v1/templates/release` — withheld from authors on purpose: the promoter exists so "can edit" and "can release" are two answers (D-R2) | `author` | `promote` |
-| Switch the served version | `POST /api/v1/pipelines/{id}/current`, `POST /api/v1/templates/current` — the rollback lever; author, promoter and workspace admin all hold it (O-1) | `author` | `switch` |
-| Promote to the higher environment | `POST /promotion/promote` ([Versioning §10](versioning.md)). The RECEIVING side is not this row — a promotion arrives on the server-key route family (§7.7) | `author` | `promote` |
-| Create / deactivate / reactivate a workspace | `POST /api/v1/workspaces/{name}/deactivate`, `.../reactivate` (D-R10 — deactivate, never delete) | `admin` | `super_admin` |
-| Add / remove members, set their flags | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}`, `DELETE /api/v1/workspaces/{name}/members/{user_id}` — the last admin cannot be removed or demoted (`workspace.last_admin`) | `author` | `ws_admin` |
-| Grant / revoke a datasource to a workspace | `POST`/`DELETE /api/v1/datasources/{name}/grants/{workspace}` (D-R7) — the verb that decides who can SEE a datasource at all | `admin` | `super_admin` |
+**REST endpoints — roles:**
 
-**MCP tools** (all 41 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+| Operation | Endpoints | viewer | author | promoter | ws_admin | super_admin |
+|---|---|---|---|---|---|---|
+| Read pipelines / templates / datasources (metadata) / endpoints — `READ_RESOURCES` | all `GET` under `/api/v1/pipelines`, `/api/v1/templates`, `/api/v1/datasources`, `/api/v1/endpoints` (incl. `/export`, `/versions`), the UI pages and partials that show them | ✓ | ✓ | lens | ✓ | ✓ |
+| Read executions — `READ_EXECUTIONS` | `GET /api/v1/executions`, `GET /api/v1/executions/{id}`, the `/executions` screens and their partials, the SSE replay (D11: own runs unless workspace admin; the promoter reads none) | own | own | ✗ | all | all |
+| Retrieve execution results (cursor) — `RETRIEVE_RESULT` | `GET /api/v1/executions/{id}/result` (the same own-or-admin filter) | own | own | ✗ | all | all |
+| Execute a pipeline — `EXECUTE_PIPELINE` | `POST /api/v1/pipelines/{id}/execute`, the pipeline editor page (`GET /pipelines/{id}/editor`, 122), the release-check run | ✓ | ✓ | ✗ | ✓ | ✓ |
+| Cancel an execution — `CANCEL_EXECUTION` | `DELETE /api/v1/executions/{id}` (+ ownership check; a workspace admin may cancel any) | ✓ | ✓ | ✗ | ✓ | ✓ |
+| Create / update / delete pipelines & templates, import — `MUTATE_PIPELINES_TEMPLATES` | `POST`/`PUT`/`DELETE` on `/api/v1/pipelines`, `/api/v1/templates`, `POST /api/v1/pipelines/import`, the editors' write partials | ✗ | ✓ | ✗ | ✓ | ✓ |
+| Test a datasource connection — `TEST_DATASOURCE` | `POST /api/v1/datasources/{name}/test` — **follows execute** (ratified 2026-09-20): every role that may run a pipeline against the datasource may ask whether it answers | ✓ | ✓ | ✗ | ✓ | ✓ |
+| Introspect a datasource schema — `INTROSPECT_DATASOURCE` | `GET /api/v1/datasources/{name}/schemas`, `.../tables`, `.../tables/{t}/columns`, the datasource browse partials — introspection is reading (ratified) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Register / update / delete datasources — `MUTATE_WORKSPACE_DATASOURCES` | `POST`/`PUT`/`DELETE` on `/api/v1/datasources` and the datasource partials (RBAC design §4; `member-datasources-enabled` gates whether workspace admins may do it at all). An INSTANCE datasource (`global: true`, owned by no workspace) additionally requires **super admin** — decided in the service (`DatasourceWorkspaceRules`) on the same route, because one handler declares one operation. (A separate `MUTATE_DATASOURCES` row existed until 2026-09-20; no handler ever declared it — the reachability gate found it and it was removed. The rule is unchanged.) | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Manage own API keys — `MANAGE_OWN_API_KEYS` | `/api/v1/auth/api-keys` (issuance additionally requires `author` in the pinned workspace and scope ≤ the issuer's role, §7.4). R3 (#179) reshapes this row | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Get current principal — `CURRENT_PRINCIPAL` | `GET /api/v1/auth/me` ([REST API §16.2](rest-api.md#162-current-principal)) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Set own theme preference — `PROFILE_PREFERENCE` | `PATCH /partials/profile/theme` (writes the caller's own user row only — no payload-chosen target) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| User administration — `USER_ADMINISTRATION` | `/api/v1/auth/users/**`, `/admin/users` (activate, deactivate, grant/revoke super admin, local accounts) | ✗ | ✗ | ✗ | ✗ | ✓ |
+| The workspaces page and the workspace reads — `WORKSPACES_READ` | `GET /workspaces`, `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members` — the page administers members (D13). A SESSION with no reachable workspace may still call it, to reach the no-workspace page ([§11A.1](#11a1-the-404-rule)) | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Switch the active workspace, and list what can be switched to — `WORKSPACE_SWITCH` | `POST /workspace/switch` — the shell's switcher; needs a MEMBERSHIP in the target (checked in the handler), re-issues the session token (D13, D14). `GET /api/v1/workspaces` — the caller's OWN memberships, the list the switcher draws from; a self-listing has nothing to protect from its reader, so it stays every member's when the page narrows | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Create a workspace — `WORKSPACE_CREATE` | `POST /api/v1/workspaces`, `POST /workspaces/create` — workspaces are created by super admins (D7); the provisioning modes were retired with round 1 | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Update a workspace — `MANAGE_WORKSPACE` | `PUT /api/v1/workspaces/{name}`, `DELETE /api/v1/workspaces/{name}`, the display-name form | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Change own password — `CHANGE_OWN_PASSWORD` | `POST /partials/account/password` (§5A.4 — the current password is verified in-handler; own account only) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Serve a published endpoint — `SERVE_PUBLISHED_ENDPOINT` | `GET` on the published tree (`/api/<category>/<version>/<path…>`, R-EP5) ([§7.7](#77-key-kinds-and-published-endpoint-bindings)) — the floor only; the real gate is the path binding, and an `endpoint`-kind key bypasses both axes because it carries neither scopes nor a membership | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Manage published endpoints — `MANAGE_ENDPOINTS` | `POST`/`GET`/`DELETE /api/v1/endpoints` and its bindings ([§7.7](#77-key-kinds-and-published-endpoint-bindings)). Binding additionally requires the key's OWNER, enforced in-handler (D9) | ✗ | ✓ | ✗ | ✓ | ✓ |
+| Register / import / unregister lake tables of a datasource (the dp-lake catalog) — `MUTATE_LAKE_TABLES` | `POST /api/v1/datasources/{name}/tables`, `POST /api/v1/datasources/{name}/tables/import`, `DELETE /api/v1/datasources/{name}/tables/{ns}/{t}` | ✗ | ✓ | ✗ | ✓ | ✓ |
+| Release a version — `RELEASE_VERSION` | `POST /api/v1/pipelines/{id}/release`, `POST /api/v1/templates/release`, the release dialogs — **the author's since 2026-09-20** (D8: the promoter promotes, the author releases) | ✗ | ✓ | ✗ | ✓ | ✓ |
+| Switch the served version — `SWITCH_SERVED_VERSION` | `POST /api/v1/pipelines/{id}/current`, `POST /api/v1/templates/current` — the rollback lever, the author's with release (O-1 collapsed) | ✗ | ✓ | ✗ | ✓ | ✓ |
+| Read the promotion page — `PROMOTION_READ` | `GET /promotion` (owner rule 13): the author who released sees what is promotable; the promote verb on the page renders by role | ✗ | ✓ | ✓ | ✓ | ✓ |
+| Promote to the higher environment — `PROMOTE_VERSION` | `POST /promotion/promote` ([Versioning §10](versioning.md)) — the promoter's one verb (D5). The RECEIVING side is not this row — a promotion arrives on the server-key route family (§7.7) | ✗ | ✗ | ✓ | ✓ | ✓ |
+| Create / deactivate / reactivate a workspace — `MANAGE_INSTANCE_WORKSPACES` | `POST /api/v1/workspaces/{name}/deactivate`, `.../reactivate`, `DELETE`, and their form twins (D-R10 — deactivate, never delete) | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Add / remove members, set their role, invite — `MANAGE_WORKSPACE_MEMBERS` | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}` (`{"role": …}`), `DELETE .../members/{user_id}`, `DELETE .../invitations/{email}`, the members forms and the role partial (D22) — the last admin cannot be removed or demoted (`workspace.last_admin`) | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Grant / revoke a datasource to a workspace — `MANAGE_DATASOURCE_GRANTS` | `POST`/`DELETE /api/v1/datasources/{name}/grants/{workspace}` (D-R7) — the verb that decides who can SEE a datasource at all | ✗ | ✗ | ✗ | ✗ | ✓ |
+| Read the audit log — **reserved** (D12) | no surface yet: `audit_log` has no page and no endpoint (verified 2026-09-20 — the only reads are the serve/MCP existence checks and the tool learnings, none caller-facing). When one lands it declares a new constant on this row | ✗ | ✗ | ✗ | ✓ | ✓ |
 
-| Tool | Min scope | Min role |
-|---|---|---|
-| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get`, `datasources_get_table_stats`, `semantics_list`, `docs_list`, `docs_get` | `read` | `view` |
-| `endpoints_list`, `endpoints_get` | `read` | `view` |
-| `pipelines_execute`, `executions_cancel`, `pipelines_run_checks` | `execute` | `execute` |
-| `pipelines_execute_node` | `author` | `execute` |
-| `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `sql_probe` | `author` | `view` |
-| `datasources_test` | `author` | `ws_admin` |
-| `pipelines_create`, `pipelines_update`, `templates_create`, `templates_update`, `templates_render`, `templates_purge_draft` | `author` | `author` |
-| `endpoints_create`, `endpoints_delete` | `author` | `author` |
-| `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | `author` | `author` |
-| `semantics_record`, `semantics_retire` — recording a learned fact is an authoring act ([learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) D-S8); a DATASOURCE-scope record additionally needs the datasource granted to the active workspace (the §5.3 gate — not-found otherwise), and retiring a DATASOURCE fact another workspace established needs the workspace-admin role, enforced in the service | `author` | `author` |
+**REST endpoints — key scopes** (the credential axis; API keys only, a session has none):
+
+| Min scope | Operations |
+|---|---|
+| `read` | `READ_RESOURCES`, `READ_EXECUTIONS`, `RETRIEVE_RESULT`, `MANAGE_OWN_API_KEYS`, `CURRENT_PRINCIPAL`, `PROFILE_PREFERENCE`, `WORKSPACES_READ`, `WORKSPACE_SWITCH`, `CHANGE_OWN_PASSWORD`, `SERVE_PUBLISHED_ENDPOINT` |
+| `execute` | `EXECUTE_PIPELINE`, `CANCEL_EXECUTION` |
+| `author` | `MUTATE_PIPELINES_TEMPLATES`, `TEST_DATASOURCE`, `INTROSPECT_DATASOURCE`, `MUTATE_WORKSPACE_DATASOURCES`, `MANAGE_WORKSPACE`, `MANAGE_ENDPOINTS`, `MUTATE_LAKE_TABLES`, `RELEASE_VERSION`, `SWITCH_SERVED_VERSION`, `PROMOTION_READ`, `PROMOTE_VERSION`, `MANAGE_WORKSPACE_MEMBERS` |
+| `admin` | `USER_ADMINISTRATION`, `WORKSPACE_CREATE`, `MANAGE_INSTANCE_WORKSPACES`, `MANAGE_DATASOURCE_GRANTS` — unobtainable by a key (§7.5), so these are session-only by the scope axis alone |
+
+**MCP tools — roles** (all 41 — [MCP Server §6.2](mcp-server.md#62-tool-definitions)):
+
+| Tools | viewer | author | promoter | ws_admin | super_admin |
+|---|---|---|---|---|---|
+| `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `endpoints_list`, `endpoints_get` | ✓ | ✓ | lens | ✓ | ✓ |
+| `calculators_list`, `calculators_get`, `datasources_get_table_stats`, `semantics_list`, `docs_list`, `docs_get` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `executions_list`, `executions_get`, `executions_get_result` (D11: own runs unless workspace admin; the promoter reads none) | own | own | ✗ | all | all |
+| `pipelines_execute`, `pipelines_execute_node`, `pipelines_run_checks`, `executions_cancel` | ✓ | ✓ | ✗ | ✓ | ✓ |
+| `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `sql_probe` — introspection is reading (ratified) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `datasources_test` — follows execute (ratified) | ✓ | ✓ | ✗ | ✓ | ✓ |
+| `pipelines_create`, `pipelines_update`, `templates_create`, `templates_update`, `templates_render`, `templates_purge_draft` | ✗ | ✓ | ✗ | ✓ | ✓ |
+| `endpoints_create`, `endpoints_delete` | ✗ | ✓ | ✗ | ✓ | ✓ |
+| `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | ✗ | ✓ | ✗ | ✓ | ✓ |
+| `semantics_record`, `semantics_retire` — recording a learned fact is an authoring act ([learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) D-S8); a DATASOURCE-scope record additionally needs the datasource granted to the active workspace (the §5.3 gate — not-found otherwise), and retiring a DATASOURCE fact another workspace established needs the workspace-admin role, enforced in the service | ✗ | ✓ | ✗ | ✓ | ✓ |
+
+**MCP tools — key scopes** (the credential axis of the key that calls `/mcp`):
+
+| Min scope | Tools |
+|---|---|
+| `read` | `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get`, `datasources_get_table_stats`, `endpoints_list`, `endpoints_get`, `semantics_list`, `docs_list`, `docs_get` |
+| `execute` | `pipelines_execute`, `executions_cancel`, `pipelines_run_checks` |
+| `author` | `pipelines_execute_node`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `sql_probe`, `datasources_test`, `pipelines_create`, `pipelines_update`, `templates_create`, `templates_update`, `templates_render`, `templates_purge_draft`, `endpoints_create`, `endpoints_delete`, `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister`, `semantics_record`, `semantics_retire` |
 
 (**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key may hold `admin` scope any more. 37 of the 41 tools operate inside the API key's pinned workspace; the four exceptions are `calculators_list` / `calculators_get` (072) and `docs_list` / `docs_get` (120), and only because they touch no workspace data at all — the calculator catalog and the shipped skill docs are properties of the BUILD, identical for every caller.)
 
-**UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. Since round 2 (114) they also RENDER by it: a verb this matrix would refuse is not drawn at all, and the screen-by-screen inventory — every verb, the flag that renders it, and the operation row above it answers to — is [UI Screens §4.3e](ui-screens.md#43e-role-visibility--every-verb-and-the-flag-that-renders-it-114-normative). There is deliberately no "UI" column here: the rendering rule is derived from the Min role column, and a second copy of it in this table would be a second thing to keep true. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs every non-public route with the same default-deny: an unannotated handler is refused, and a mutating partial enforces its twin's floor on both axes.
+**UI screens** reference the same REST operations they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. Since round 2 (114) they also RENDER by it: a verb this matrix would refuse is not drawn at all, and the screen-by-screen inventory — every verb, the role boolean that renders it, and the operation row above it answers to — is [UI Screens §4.3e](ui-screens.md#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative). There is deliberately no "UI" column here: the rendering rule is derived from the role columns, and a second copy of it in this table would be a second thing to keep true. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's operation with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs every non-public route with the same default-deny: an unannotated handler is refused, and a mutating partial enforces its twin's floor on both axes. Three rail items follow a row since 2026-09-20 and are drawn only for the roles that hold it: Executions (`READ_EXECUTIONS`), Promotion (`PROMOTION_READ`), Workspaces (`WORKSPACES_READ`; a principal with no workspace keeps the link because the no-workspace page is the one screen that explains their state).
 
-One PAGE route floors above `read` without being a mutation: the pipeline editor (`GET /pipelines/{id}/editor`) declares `EXECUTE_PIPELINE` (122) — the operation the screen exists to perform for its LOWEST role (D-R3: viewers execute what they can read), so an `execute` key and a viewer session reach the page and a `read` key is refused. The AUTHORING state the page renders is read, never written — the authoring verbs on it are role-hidden (114) and every mutating call it makes is verb-guarded or viewer-level. The template editor (`GET /templates/editor`) floors at `READ_RESOURCES` since 143 (T315, owner ruling) for the same reason: the explorer's Open links render for every reader, the page renders read state (a draft body is read, never written, by a GET), and every write it can make — Edit, Preview, the lifecycle dialogs — is its own `MUTATE`/`RELEASE` route, hidden by role in the markup ([UI Screens §4.7](ui-screens.md#47-template-editor)). 096 §C's authoring floor stays on those writes.
+One PAGE route floors above `read` without being a mutation: the pipeline editor (`GET /pipelines/{id}/editor`) declares `EXECUTE_PIPELINE` (122) — the operation the screen exists to perform for its LOWEST role (D3: viewers execute what they can read), so an `execute` key and a viewer session reach the page and a `read` key is refused. The AUTHORING state the page renders is read, never written — the authoring verbs on it are role-hidden (114) and every mutating call it makes is verb-guarded or viewer-level. The template editor (`GET /templates/editor`) floors at `READ_RESOURCES` since 143 (T315, owner ruling) for the same reason: the explorer's Open links render for every reader, the page renders read state (a draft body is read, never written, by a GET), and every write it can make — Edit, Preview, the lifecycle dialogs — is its own `MUTATE`/`RELEASE` route, hidden by role in the markup ([UI Screens §4.7](ui-screens.md#47-template-editor)). 096 §C's authoring floor stays on those writes. **Every GET declares the LOWEST operation whose row admits it** (`ReadFloorTest`): a read of executions is `READ_EXECUTIONS`, not `READ_RESOURCES`, because their role sets differ; a read of the workspaces page is `WORKSPACES_READ`; a read anything else may make is `READ_RESOURCES`.
 
 ### 7.7 Key kinds and published-endpoint bindings
 
@@ -1144,8 +1167,8 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 | `auth.api_key.invalid` | 401 | Key id not found, revoked, hash mismatch, or owner deactivated |
 | `auth.api_key.expired` | 401 | Key's `expires_at` is in the past |
 | `auth.scope.insufficient` | 403 | Principal lacks the required SCOPE — the credential axis of the §7.6 matrix. Since RBAC round 1 only an API key can fail this way: a session carries no scopes (§11A) |
-| `auth.role_required` | 403 | Principal lacks the required CAPABILITY in the active workspace — the role axis of the §7.6 matrix (§11A). `details.required` / `details.held` |
-| `auth.key_issuer_role_lost` | 403 | The key was valid; its issuer no longer holds the capability (§7.4). Retrying with this key will never work — a new key from somebody who still holds the role is the fix |
+| `auth.role_required` | 403 | Principal's role lacks the required PERMISSION in the active workspace — the role axis of the §7.6 matrix (§11A). `details.required` (the permission) / `details.held` |
+| `auth.key_issuer_role_lost` | 403 | The key was valid; its issuer no longer holds the permission (§7.4). Retrying with this key will never work — a new key from somebody who still holds the role is the fix |
 | `auth.key_scope_unavailable` | 400 | Issuance requested `admin`, which keys may no longer hold (§7.5) |
 | `auth.key_workspace_inactive` | 404 | The key's pinned workspace is deactivated (§11A); reactivating it restores the key |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched on a state-changing UI request (`details.reason`: `missing` \| `mismatch`) |
@@ -1166,12 +1189,12 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued
 | `auth.login.success` | Login succeeded, JWT issued (OIDC or local — the details' `provider` names the method) |
 | `auth.login.domain_not_allowed` | User's email domain not in allowlist |
 | `auth.super_admin_acting` | A super admin acted in a workspace they hold no explicit membership in (§11A). Emitted by `ScopeInterceptor` at the one choke point every governed handler passes — **reads included**: the 404 rule's promise is that a workspace is invisible from outside, and the one principal exempt from that promise is the one whose reads most need to be on the record. `details`: the operation, workspace, path, method, and `acting_via: super_admin` |
-| `workspace.member_added` | A member was added, with their capability flags (`details.flags`). The first-login demo join (§4.2) carries `reason: first_login_demo_viewer` |
-| `workspace.member_invited` | An invitation was created (§4.6) — or an existing one's flags REPLACED by a re-invite; the upsert is the latest admin decision winning, so it is audited every time it fires. `details`: workspace, email, flags |
+| `workspace.member_added` | A member was added, with their role (`details.role`). The first-login demo join (§4.2) carries `reason: first_login_demo_viewer` |
+| `workspace.member_invited` | An invitation was created (§4.6) — or an existing one's role REPLACED by a re-invite; the upsert is the latest admin decision winning, so it is audited every time it fires. `details`: workspace, email, role |
 | `workspace.invitation_revoked` | A pending invitation was revoked (§4.6). `details`: workspace, email |
-| `workspace.invitation_materialised` | A pending invitation became a real membership at login (§4.2 step 2a / §4.6). `details`: workspace, email, flags, and `inviter` — the actor whose decision the login is executing |
+| `workspace.invitation_materialised` | A pending invitation became a real membership at login (§4.2 step 2a / §4.6). `details`: workspace, email, role, and `inviter` — the actor whose decision the login is executing |
 | `workspace.member_removed` | A member was removed |
-| `workspace.member_flags_changed` | A member's flags were replaced — `details.from` and `details.to` carry both sets, because a membership row keeps no history of its own |
+| `workspace.member_role_changed` | A member's role was replaced (D1; was `workspace.member_flags_changed`) — `details.from` and `details.to` carry both roles, because a membership row keeps no history of its own |
 | `workspace.deactivated` | A workspace was deactivated (§11A). Nothing it owns is purged |
 | `workspace.reactivated` | A deactivated workspace was restored |
 | `datasource.granted` | A datasource was granted to a workspace — the verb that decides who can reach a live database's data. `details.already_granted` separates a new grant from an idempotent re-grant |
@@ -1344,28 +1367,25 @@ a different budget with a different key and fails CLOSED — the two are not int
 
 ## 11A. Roles
 
-**Capability lives in the workspace membership, not on the user** (RBAC design D-R1, ratified 2026-09-10). A person is a viewer in one workspace and an author in another; there is no global "author" any more. The one global capability left is `users.is_admin`, which means **super admin** — the instance.
+**Permission lives in the workspace membership, not on the user** (RBAC design D-R1, ratified 2026-09-10; roles design D1, ratified 2026-09-20). A person is a viewer in one workspace and an author in another; there is no global "author" any more. The one global authority left is `users.is_admin`, which means **super admin** — the instance.
 
-A membership row (`workspace_members`, [metadata-db §4.12](metadata-db.md#412-workspace_members)) carries three **additive flags**: `author`, `promoter`, `admin`. A row with all three false is a **viewer**. The flags are additive rather than a single role column because the roles genuinely are: "an author who also releases" and "a DevOps person who only releases" are both one row, and no single label names both (D-R2).
+A membership row (`workspace_members`, [metadata-db §4.12](metadata-db.md#412-workspace_members)) carries **exactly one role** — `role`, one of `viewer`, `author`, `promoter`, `workspace_admin` (V29; [`WorkspaceRole`](enums.md#8c-workspacerole--the-one-role-a-membership-holds)). V23 had split the role into three additive booleans so that "an author who also releases" could be one row; the 2026-09-20 rulings took release away from the promoter and made it an ops role that authors nothing, so the combination the booleans existed for no longer exists and the row is one value again. The migration's precedence for old rows: admin → `workspace_admin`, else promoter → `promoter`, else author → `author`, else `viewer`. An invitation ([§4.6](#46-invitations)) carries the same one role (D20).
 
-| Capability (operation class) | viewer | author | promoter | ws admin | super admin |
-|---|---|---|---|---|---|
-| Read pipelines / templates / datasources (no credentials) / executions / results / endpoints / own keys | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Execute pipelines (any version), read results, cancel OWN runs | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `sql_probe`, `datasources_preview_rows` (row data) | ✓ (read-only SELECT, capped) | ✓ | ✓ | ✓ | ✓ |
-| Create/edit drafts, register lake tables, publish/unpublish endpoints over released versions, bind keys to endpoint paths | | ✓ | | ✓ | ✓ |
-| discard / restore / purge (versions and entities) | | ✓ | | ✓ | ✓ |
-| **switch** the served version (the rollback lever) | | ✓ | ✓ | ✓ | ✓ |
-| **release** | | | ✓ | ✓ | ✓ |
-| **promote** to the higher environment | | | ✓ | ✓ | ✓ |
-| Issue/revoke keys (scope ≤ own capability); revoke any key in the workspace | | ✓ (own) | | ✓ (all) | ✓ |
-| Register a datasource bound to THIS workspace; test it | | | | ✓ | ✓ |
-| Grant/revoke a datasource to workspaces; register an instance datasource | | | | | ✓ |
-| Members and roles (add, remove, change flags); cannot remove the last admin | | | | ✓ | ✓ |
-| Read the workspace's audit trail | | | | ✓ | ✓ |
-| Create/deactivate workspaces; users; instance config; the instance audit log | | | | | ✓ |
+**Vocabulary (D21).** A **role** is what a member holds. A **permission** is an action a role may perform — a ROW of the §7.6 matrix (`Permission` in code: `view`, `execute`, `author`, `promotion_read`, `promote`, `ws_admin`, `super_admin`, each the set of roles it admits). "The author role has the permission to release" is a sentence about a row; a permission is never a free string, and nothing in the product grants or stores one.
 
-`admin → author` is enforced by the database (`chk_workspace_member_admin_authors`): a workspace admin can author, and stating it once as a constraint is what lets every check read `author` straight off the row.
+The five roles, as the record's §2 ratifies them (the row-by-row table is §7.6; this is the shape):
+
+| Role | Holds | Does NOT hold |
+|---|---|---|
+| **viewer** (D3) | reads everything in the workspace; executes pipelines, cancels and reads its OWN runs and results; tests a datasource connection; introspects schemas | authoring, release, promotion, members |
+| **author** (D4, D8, D9) | the viewer's rows + create/edit/discard/restore/purge pipelines and templates, **release**, switch the served version, publish endpoints, register lake tables, record/retire learned facts, read the promotion page | promote, members, workspace datasources |
+| **promoter** (D5) | reads pipelines, templates, datasources and endpoints (R2 narrows WHAT to released-and-newer — until then, what a viewer sees); introspects schemas; reads the promotion page; **promotes** | execute, cancel, execution and result reads, connection test, authoring, release, switch, members. Promoters are ops people. |
+| **workspace admin** (D6) | everything in the workspace: every row above plus members, roles and invitations, workspace-bound datasources, the workspaces page, the audit trail (D12 — no surface yet), and promotion | the instance verbs |
+| **super admin** (D7) | everything everywhere: every workspace's rows without a membership (audited `acting_via=super_admin`), global datasources and grants, workspaces, users | — |
+
+Reads are cumulative — viewer ⊂ author ⊂ workspace admin ⊂ super admin — and the promoter is NOT on that chain: it reads what a viewer reads (minus executions) and adds the promote verb.
+
+Two rows changed hands on 2026-09-20 and are worth naming: **release** is the author's (it was the promoter's — "the author releases, the promoter promotes", D8), and the **workspaces page** is the workspace admin's (D13) while the switcher in the chrome stays every member's. **Executions** became own-or-admin on every surface (D11): a member's list is their own runs, a workspace admin's is the workspace's, a promoter's does not exist; an endpoint-key run is nobody's own and lists for admins only (`executed_by_key_kind`, [metadata-db §4.6](metadata-db.md#46-pipeline_executions)).
 
 ### 11A.1 The 404 rule
 
@@ -1373,9 +1393,9 @@ A membership row (`workspace_members`, [metadata-db §4.12](metadata-db.md#412-w
 
 The rule is mechanical, not a convention: every repository read that a caller-supplied id or name can reach carries the workspace predicate IN ITS SQL, and `WorkspaceIsolationSweepTest` walks every REST route and every MCP tool with a foreign workspace's identifiers and asserts the not-found answer on every one.
 
-`workspace.membership_required` (403) survives in exactly one place: a principal with ZERO memberships, which addressed no workspace at all and so has no name to protect. One operation is judged WITHOUT a workspace context for a session: `WORKSPACES_READ` — "which workspaces do I belong to" is meaningful when the answer is none, and it is how a zero-membership person reaches the no-workspace page ([UI §4.13](ui-screens.md#413-workspaces-workspaces-design-9-members-and-deactivation-rewritten-by-114)) instead of a JSON 404. A key never gets that exception: a key with no context is a key whose workspace is gone, and it stays the 404.
+`workspace.membership_required` (403) survives in exactly one place: a principal with ZERO memberships, which addressed no workspace at all and so has no name to protect. Two operations are judged WITHOUT a workspace context for a session: `WORKSPACES_READ` (the page) and `WORKSPACE_SWITCH` (the REST list-own, §17.1) — "which workspaces do I belong to" is meaningful when the answer is none, and it is how a zero-membership person reaches the no-workspace page ([UI §4.13](ui-screens.md#413-workspaces-workspaces-design-9-members-and-deactivation-rewritten-by-114)) instead of a JSON 404. A key never gets that exception: a key with no context is a key whose workspace is gone, and it stays the 404.
 
-A second null-context exception stands beside it (#113): a **super admin session** keeps the INSTANCE verbs — the operations whose capability is `super_admin` (create / deactivate / reactivate / delete a workspace, user administration, instance datasources and their grants) — when NO workspace is reachable at all. Those operations are instance-level by construction: none of them reads or writes a workspace's content, and refusing them stranded the one principal who could repair an empty deployment (deactivate the last active workspace, and even the reactivate verb answered `workspace.not_found`). The capability evidence is the user row's `is_admin` flag, re-read per request through the auth cache — not a context the request does not have. Every workspace-scoped operation stays the 404 for that principal, and a key never gets this exception either: the `admin` scope floor is unobtainable by a key (§7.5), so the credential axis refuses first.
+A second null-context exception stands beside it (#113): a **super admin session** keeps the INSTANCE verbs — the operations whose permission is `super_admin` (create / deactivate / reactivate / delete a workspace, user administration, instance datasources and their grants) — when NO workspace is reachable at all. Those operations are instance-level by construction: none of them reads or writes a workspace's content, and refusing them stranded the one principal who could repair an empty deployment (deactivate the last active workspace, and even the reactivate verb answered `workspace.not_found`). The evidence is the user row's `is_admin`, re-read per request through the auth cache — not a context the request does not have. Every workspace-scoped operation stays the 404 for that principal, and a key never gets this exception either: the `admin` scope floor is unobtainable by a key (§7.5), so the credential axis refuses first.
 
 ### 11A.2 Super admins
 
@@ -1399,7 +1419,7 @@ There is deliberately NO last-active-workspace guard: decommissioning the final 
 
 ### 11A.4 Keys
 
-A key is issued by an **author or above** in the workspace it is pinned to (O-2 — viewers never mint keys), with scope ≤ the issuer's capability, and **no `admin` scope at all** (§7.5). On every request four things are re-read inside the validation-cache TTL (60s by default): the key is active, its owner is active, **its issuer still holds the operation's capability in the pinned workspace**, and the workspace is active. So a demoted or removed issuer's keys stop working within one window rather than at expiry, and the refusal says which (`auth.key_issuer_role_lost`), because retrying with that key will never work and the caller cannot guess that from `auth.role_required`.
+A key is issued by an **author or above** in the workspace it is pinned to (O-2 — viewers never mint keys), with scope ≤ the issuer's role, and **no `admin` scope at all** (§7.5). On every request four things are re-read inside the validation-cache TTL (60s by default): the key is active, its owner is active, **its issuer still holds the operation's permission in the pinned workspace**, and the workspace is active. So a demoted or removed issuer's keys stop working within one window rather than at expiry, and the refusal says which (`auth.key_issuer_role_lost`), because retrying with that key will never work and the caller cannot guess that from `auth.role_required`.
 
 ---
 
@@ -1481,6 +1501,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-20 | v2.24 | 177 (#177) roles R1 | **§7.6 rewritten role-first** from the ratified [roles design](superpowers/specs/2026-09-20-roles-permissions-design.md) §2: five role columns per row (viewer \| author \| promoter \| ws_admin \| super_admin), every REST row naming its `RestOperation` constant, the key-scope axis as its own smaller table per surface; `ScopeMatrixSpecDriftTest` parses the new shape (a cell alphabet of ✓ ✗ own all lens, a reserved-row list). Rows that changed: `RELEASE_VERSION` and `SWITCH_SERVED_VERSION` promoter → **author** (D8); `EXECUTE_PIPELINE`, `CANCEL_EXECUTION`, the execution reads and `TEST_DATASOURCE` lose the **promoter** (D5; the connection test follows execute — ratified); `TEST_DATASOURCE` ws_admin → execute; `INTROSPECT_DATASOURCE` author → every role ("introspection is reading" — ratified); `WORKSPACES_READ` every member → **ws_admin** (D13). New rows: **`READ_EXECUTIONS`** (D11: own unless workspace admin, promoter none — the execution reads leave `READ_RESOURCES`), **`WORKSPACE_SWITCH`** (the switcher stays every member's), **`PROMOTION_READ`** (owner rule 13: the page is the author's too); a **reserved** audit-log row (D12 — no surface exists). `MUTATE_DATASOURCES` REMOVED: no handler ever declared it (the instance-datasource rule is `DatasourceWorkspaceRules`' on the same route) — the reachability gate's first finding. §11A rewritten to the five roles: ONE role per membership (V29, `WorkspaceRole`), `Capability` → `Permission` (D21), the vocabulary rule; §4.6 and §10.1 say role, not flags (`workspace.member_flags_changed` → `workspace.member_role_changed`). §4.4/§7.4 keys unchanged (R3). |
 | 2026-09-19 | v2.23 | 173 (#173) the agent surface | §8.3: `/llms.txt` and `/llms-full.txt` join the allowlist (generated from the page registry and the docs catalog, no datastore, no principal — meaningless behind a login, like the sitemap); the `/docs/*` reason names the raw `.md` twin the same glob already covers. `PublicPathsTest` 41 → 43 rows. |
 | 2026-09-19 | v2.22 | 172 (#172) endpoint URL shape | §7.6/§7.7: the published-endpoint surface is `/api/<category>/<version>/<path…>` (R-EP5) — the `endpoint`-kind confinement follows the FIRST segment of the path (reserved: `v[0-9]+`, `api`), never a literal prefix. No scope, role or kind rule changed; the route family an endpoint key reaches is the same set of URLs under a new shape. |
 | 2026-09-17 | v2.21 | 158 (#121) mail connect retry | §5A.8 step 3: a **connect** failure (the connection never opened — the one class that cannot have delivered) is retried in place, bounded (3 attempts, 250 ms / 1 s backoff, `mail.send_retry` logged per retry); anything past connect stays terminal at once — the never-twice rule for password mails is unchanged. The claim row and audit reflect the final outcome only. |

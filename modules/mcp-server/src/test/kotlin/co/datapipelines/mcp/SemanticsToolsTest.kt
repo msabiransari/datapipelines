@@ -1,7 +1,7 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.semantics.SemanticsService
-import co.datapipelines.auth.Capability
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
@@ -68,13 +68,13 @@ class SemanticsToolsTest {
             { McpToolCatalog.NAMES shouldContain "semantics_record" },
             { McpToolCatalog.isMutating("semantics_record") shouldBe true },
             { ScopeMatrix.requiredScopeForTool("semantics_record") shouldBe Scope.AUTHOR },
-            { ScopeMatrix.requiredCapabilityForTool("semantics_record") shouldBe Capability.AUTHOR },
+            { ScopeMatrix.requiredPermissionForTool("semantics_record") shouldBe Permission.AUTHOR },
             { McpToolCatalog.isMutating("semantics_list") shouldBe false },
             { ScopeMatrix.requiredScopeForTool("semantics_list") shouldBe Scope.READ },
-            { ScopeMatrix.requiredCapabilityForTool("semantics_list") shouldBe Capability.VIEW },
+            { ScopeMatrix.requiredPermissionForTool("semantics_list") shouldBe Permission.VIEW },
             { McpToolCatalog.isMutating("semantics_retire") shouldBe true },
             { ScopeMatrix.requiredScopeForTool("semantics_retire") shouldBe Scope.AUTHOR },
-            { ScopeMatrix.requiredCapabilityForTool("semantics_retire") shouldBe Capability.AUTHOR },
+            { ScopeMatrix.requiredPermissionForTool("semantics_retire") shouldBe Permission.AUTHOR },
             {
                 // 120 appended the two docs tools after these three and 140 the check run after
                 // those — the tail is now six.
@@ -128,7 +128,7 @@ class SemanticsToolsTest {
         val other =
             McpFixtures.ctx(
                 Scope.AUTHOR,
-                workspace = co.datapipelines.auth.WorkspaceContext(UUID.randomUUID(), "globex", McpFixtures.WORKSPACE.flags),
+                workspace = co.datapipelines.auth.WorkspaceContext(UUID.randomUUID(), "globex", McpFixtures.WORKSPACE.role),
             )
 
         val record = shouldThrow<DatapipelinesException> { recordTool().call(McpArguments(recordArgs()), other) }

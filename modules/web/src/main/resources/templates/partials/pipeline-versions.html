@@ -40,12 +40,12 @@
       <!-- 114 §B — state AND role. Each `may*` is the row's lifecycle flag ANDed with the
            ACTIVE membership's capability, and the menu itself is hidden when none survives:
            a ⋯ that opens on an empty list is exactly the tease the "hide, don't disable"
-           rule forbids. Release is `canPromote` alone (D-R2); Switch is either (O-1). -->
-      <th:block th:with="mayRelease=${v.canRelease and canPromote == true},
+           rule forbids. Release and Switch are both `canAuthor` (D8, 2026-09-20 — the promoter promotes, the author releases). -->
+      <th:block th:with="mayRelease=${v.canRelease and canAuthor == true},
                          mayPurge=${v.canPurge and canAuthor == true},
                          mayDiscard=${v.canDiscard and canAuthor == true},
                          mayRestore=${v.canRestore and canAuthor == true},
-                         maySwitch=${v.canSwitch and (canAuthor == true or canPromote == true)}">
+                         maySwitch=${v.canSwitch and canAuthor == true}">
       <th:block th:if="${mayRelease or mayPurge or mayDiscard or mayRestore or maySwitch}">
         <details class="tplx-vmenu">
           <summary class="ds-button ds-button-ghost ds-button-sm" aria-label="Version actions" title="Version actions">⋯</summary>

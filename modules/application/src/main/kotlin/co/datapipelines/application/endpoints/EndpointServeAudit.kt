@@ -9,7 +9,7 @@ import java.util.UUID
  *
  * ## Why the audit row and not the execution row
  *
- * `pipeline_executions.triggered_by` is a **user** id — the key's owner. Two endpoint keys owned
+ * `pipeline_executions.executed_by` is a **user** id — the key's owner. Two endpoint keys owned
  * by the same person are indistinguishable through it, so a key bound to `/lending` could read
  * the results of a key bound to `/payroll` merely by sharing an owner. The serve audit row is the
  * only place the KEY id and the EXECUTION id appear together, which is exactly the pairing this

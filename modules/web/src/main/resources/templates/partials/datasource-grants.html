@@ -52,7 +52,7 @@
           <td th:text="${g.grantedBy}">Muhammad</td>
           <td class="u-secondary u-text-sm" th:text="${g.grantedAt}">2026-09-10T09:00:00Z</td>
           <td class="num">
-            <button type="button" data-verb="datasource-grant-remove" class="ds-button ds-button-ghost ds-button-sm"
+            <button th:if="${isSuperAdmin == true}" type="button" data-verb="datasource-grant-remove" class="ds-button ds-button-ghost ds-button-sm"
                     th:attr="hx-post=@{/partials/datasources/{name}/grants/{workspace}/remove(name=${datasource.name}, workspace=${g.workspace})},
                              hx-target='#ds-dialog', hx-swap='innerHTML'"
                     hx-disabled-elt="this">Revoke</button>
@@ -69,7 +69,7 @@
               th:disabled="${#lists.isEmpty(grantableWorkspaces)}">
         <option th:each="w : ${grantableWorkspaces}" th:value="${w}" th:text="${w}">team-etl</option>
       </select>
-      <button type="submit" data-verb="datasource-grant-add" class="ds-button ds-button-primary ds-button-sm"
+      <button th:if="${isSuperAdmin == true}" type="submit" data-verb="datasource-grant-add" class="ds-button ds-button-primary ds-button-sm"
               hx-disabled-elt="this"
               th:disabled="${#lists.isEmpty(grantableWorkspaces)}">Grant</button>
     </form>

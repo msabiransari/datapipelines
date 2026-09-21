@@ -3,9 +3,9 @@ package co.datapipelines.application.semantics
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.semantics.FactRef
 import co.datapipelines.datasources.semantics.LearnedFact
@@ -35,7 +35,7 @@ internal object SemanticsFixtures {
 
     fun principal(
         workspaceId: UUID = ACME,
-        flags: MembershipFlags = MembershipFlags(author = true),
+        role: WorkspaceRole = WorkspaceRole.AUTHOR,
         keyId: String? = "dpk_ABCDEFGHIJKL",
     ): AuthenticatedPrincipal =
         AuthenticatedPrincipal(
@@ -45,7 +45,7 @@ internal object SemanticsFixtures {
             scopes = setOf(Scope.AUTHOR),
             authMethod = if (keyId == null) AuthMethod.OIDC else AuthMethod.API_KEY,
             keyId = keyId,
-            workspace = WorkspaceContext(workspaceId, if (workspaceId == ACME) "acme" else "globex", flags),
+            workspace = WorkspaceContext(workspaceId, if (workspaceId == ACME) "acme" else "globex", role),
         )
 
     fun fact(

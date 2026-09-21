@@ -58,7 +58,7 @@ class UiLayoutChromeAdviceTest {
     ) = co.datapipelines.auth.WorkspaceMembership(
         workspaceId = UUID.randomUUID(),
         workspaceName = name,
-        flags = co.datapipelines.auth.MembershipFlags.VIEWER,
+        role = co.datapipelines.auth.WorkspaceRole.VIEWER,
         joinedAt = java.time.Instant.EPOCH,
         workspaceActive = active,
     )
@@ -69,22 +69,39 @@ class UiLayoutChromeAdviceTest {
         advice.navAdminUsers() shouldBe false
         advice.navAdminMembers() shouldBe false
 
-        authenticateAs(co.datapipelines.auth.MembershipFlags.VIEWER)
+        authenticateAs(co.datapipelines.auth.WorkspaceRole.VIEWER)
         advice.navAdminUsers() shouldBe false
         advice.navAdminMembers() shouldBe false
 
-        authenticateAs(co.datapipelines.auth.MembershipFlags(author = true, admin = true))
+        authenticateAs(co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN)
         advice.navAdminUsers() shouldBe false
         advice.navAdminMembers() shouldBe true
 
         // A super admin with NO active workspace keeps the instance entry.
-        authenticateAs(flags = null, superAdmin = true)
+        authenticateAs(role = null, superAdmin = true)
         advice.navAdminUsers() shouldBe true
         advice.navAdminMembers() shouldBe false
     }
 
+    /** 2026-09-20 — the three row-following rail items ride the advice for the same reason. */
+    @Test
+    fun `the advice stamps the Executions, Promotion and Workspaces items from the principal's row`() {
+        authenticateAs(co.datapipelines.auth.WorkspaceRole.PROMOTER)
+        advice.navExecutions() shouldBe false
+        advice.navPromotion() shouldBe true
+        advice.navWorkspaces() shouldBe false
+
+        authenticateAs(co.datapipelines.auth.WorkspaceRole.VIEWER)
+        advice.navExecutions() shouldBe true
+        advice.navPromotion() shouldBe false
+        advice.navWorkspaces() shouldBe false
+
+        authenticateAs(co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN)
+        advice.navWorkspaces() shouldBe true
+    }
+
     private fun authenticateAs(
-        flags: co.datapipelines.auth.MembershipFlags?,
+        role: co.datapipelines.auth.WorkspaceRole?,
         superAdmin: Boolean = false,
     ) {
         val principal =
@@ -94,7 +111,7 @@ class UiLayoutChromeAdviceTest {
                 "A",
                 emptySet(),
                 AuthMethod.OIDC,
-                workspace = flags?.let { co.datapipelines.auth.WorkspaceContext(UUID.randomUUID(), "acme", it) },
+                workspace = role?.let { co.datapipelines.auth.WorkspaceContext(UUID.randomUUID(), "acme", it) },
                 superAdmin = superAdmin,
             )
         SecurityContextHolder.getContext().authentication =
@@ -172,6 +189,11 @@ class UiLayoutChromeAdviceTest {
         context.setVariable("activeTheme", "light")
         context.setVariable("authenticated", authenticated)
         context.setVariable("currentPath", currentPath)
+        // 2026-09-20: the three row-following rail items (RoleModel.Shell) — a member who holds
+        // every row, so the section-active assertion has an Executions anchor to find.
+        context.setVariable("navExecutions", authenticated)
+        context.setVariable("navPromotion", authenticated)
+        context.setVariable("navWorkspaces", authenticated)
         return engine.process("test-stub", context)
     }
 

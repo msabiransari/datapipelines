@@ -96,9 +96,10 @@
       <!-- 114 §B — `canPromote` in the SOURCE workspace. PromotionUiController reads
            `principal.requireWorkspace()` (the ACTIVE workspace) and the interceptor judges
            `PROMOTE_VERSION` against that same context; the target is only a base URL and no
-           target-side role is consulted here. The PLAN stays readable for everyone — it is a
-           read, and hiding it would leave an author unable to see what is waiting — but the
-           button that SENDS it is the promoter's alone, which is the whole of D-R2. -->
+           target-side role is consulted here. The PLAN stays readable for every role the page
+           admits (`PROMOTION_READ`: author, promoter, admins — owner rule 13) — hiding it would
+           leave the author who released unable to see what is waiting — but the button that
+           SENDS it is the promoter's and the admin's alone (D5, D8). -->
       <!-- 143 (T315): the form — Send column, selection boxes, Promote — exists for a PROMOTER
            only. A reader gets the same plan as a plain table below: no form, no input, no
            control the server would refuse, and the note naming who can send it. -->

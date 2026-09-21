@@ -151,9 +151,8 @@ class SampleDataBootstrapE2eTest {
 
         // …and the joiner is a VIEWER of it, which is the D-R11 rule in one row.
         row(
-            "SELECT author, promoter, admin FROM workspace_members" +
-                " WHERE workspace_id = '$workspaceId' AND user_id = '$userId'",
-        ).let { listOf(it["author"], it["promoter"], it["admin"]) } shouldBe listOf(false, false, false)
+            "SELECT role FROM workspace_members WHERE workspace_id = '$workspaceId' AND user_id = '$userId'",
+        )["role"] shouldBe "viewer"
 
         // The example pipeline reads the bootstrap-registered readonly datasource: §12 validation
         // resolved that reference at import time, which is the two halves of this slice meeting.

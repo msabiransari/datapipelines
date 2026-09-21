@@ -75,7 +75,7 @@ class ExecutionDetailControllerTest {
         pipelineVersion = 1,
         status = status,
         parametersJson = "{}",
-        triggeredBy = userId,
+        executedBy = userId,
         triggeredVia = ExecutionTrigger.REST,
         resultRowCount = rowCount,
     )

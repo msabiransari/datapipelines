@@ -31,50 +31,75 @@ data class Workspace(
 /**
  * A row of `workspace_members` joined with its workspace's name (metadata-db §4.12).
  *
- * [flags] replaced the v1 `role` column in V23 (D-R1/D-R2): capability is additive flags
- * on the membership, so "author who also releases" and "DevOps who only releases" are
- * both one row. A row with no flags is a viewer.
+ * [role] is the ONE role the member holds here (D1, V29). V23 had split it into three
+ * additive flags; the 2026-09-20 rulings made the combinations meaningless (a promoter
+ * authors nothing, an author releases), so the row is a single value again.
  */
 data class WorkspaceMembership(
     val workspaceId: UUID,
     val workspaceName: String,
-    val flags: MembershipFlags,
+    val role: WorkspaceRole,
     val joinedAt: Instant,
     val workspaceActive: Boolean = true,
 )
 
 /**
  * A member of one workspace, as the `/members` listing projects them (metadata-db §4.12 ×
- * `users`): identity columns plus the capability flags. No [WorkspaceMembership] reuse
- * because that type answers the reverse question ("which workspaces does THIS user belong
- * to") and carries no user identity.
+ * `users`): identity columns plus the role. No [WorkspaceMembership] reuse because that
+ * type answers the reverse question ("which workspaces does THIS user belong to") and
+ * carries no user identity.
  */
 data class WorkspaceMemberRow(
     val userId: UUID,
     val email: String,
     val displayName: String,
-    val flags: MembershipFlags,
+    val role: WorkspaceRole,
     val joinedAt: Instant,
 )
 
 /**
  * The resolved active workspace a request pipeline carries (design §5): everything
  * downstream — repositories, execution records, template resolution — is scoped to it,
- * and [flags] is what [ScopeMatrix.allowed] reads to answer "may this principal do this
- * here" (RBAC design §2).
+ * and [role] + [superAdmin] are what [ScopeMatrix.allowed] reads to answer "may this
+ * principal do this here" (roles design §2).
  *
  * Resolution produces this exactly once per request (see `WorkspaceResolutionFilter`):
  * from the JWT `active_workspace` claim or a `DP-Workspace` switch for session
  * principals, from the key's pinned `workspace_id` for API-key principals. A super
- * admin resolves ANY workspace (D-R8) with every flag set and
- * [MembershipFlags.implicit] true when they hold no explicit membership — which is
- * what the `acting_via=super_admin` audit flag is read from.
+ * admin resolves ANY workspace (D7) with [superAdmin] set and [implicit] true when they
+ * hold no explicit membership — which is what the `acting_via=super_admin` audit flag is
+ * read from. Their [role] is the explicit membership's when they have one and [WorkspaceRole.VIEWER]
+ * otherwise; [Permission.satisfiedBy] admits a super admin before it looks at the role.
  */
 data class WorkspaceContext(
     val id: UUID,
     val name: String,
-    val flags: MembershipFlags = MembershipFlags.VIEWER,
+    val role: WorkspaceRole = WorkspaceRole.VIEWER,
+    val superAdmin: Boolean = false,
+    val implicit: Boolean = false,
 ) {
-    /** D-R8 — this action is being taken by a super admin outside their own memberships. */
-    val actingViaSuperAdmin: Boolean get() = flags.implicit
+    /** D7 — this action is being taken by a super admin outside their own memberships. */
+    val actingViaSuperAdmin: Boolean get() = implicit
+
+    /** May a principal in this context perform [permission]'s actions? The matrix's one question. */
+    fun permits(permission: Permission): Boolean = permission.satisfiedBy(role, superAdmin)
+
+    /** The permissions this context holds — the refusal's `held` detail and the UI's role model. */
+    fun held(): Set<Permission> = Permission.heldBy(role, superAdmin)
+
+    companion object {
+        /** The context a super admin runs in inside a workspace: their explicit [role] if any, [implicit] otherwise. */
+        fun superAdminOver(
+            id: UUID,
+            name: String,
+            explicitRole: WorkspaceRole?,
+        ): WorkspaceContext =
+            WorkspaceContext(
+                id = id,
+                name = name,
+                role = explicitRole ?: WorkspaceRole.VIEWER,
+                superAdmin = true,
+                implicit = explicitRole == null,
+            )
+    }
 }

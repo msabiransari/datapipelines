@@ -29,10 +29,10 @@ class ExecutionsCancelToolTest {
     private val ctx = McpFixtures.ctx(co.datapipelines.auth.Scope.EXECUTE)
 
     private fun running(
-        triggeredBy: java.util.UUID = McpFixtures.USER,
+        executedBy: java.util.UUID = McpFixtures.USER,
         triggeredVia: ExecutionTrigger = ExecutionTrigger.MCP,
     ) = McpFixtures
-        .executionRecord(status = ExecutionStatus.RUNNING, triggeredBy = triggeredBy)
+        .executionRecord(status = ExecutionStatus.RUNNING, executedBy = executedBy)
         .let { it.copy(triggeredVia = triggeredVia) }
 
     @Test
@@ -57,7 +57,7 @@ class ExecutionsCancelToolTest {
     @Test
     fun `another user's execution is not-found, never a disclosure`() {
         every { executions.findById(McpFixtures.WORKSPACE_ID, McpFixtures.EXECUTION_ID) } returns
-            running(triggeredBy = McpFixtures.OTHER_USER)
+            running(executedBy = McpFixtures.OTHER_USER)
 
         val thrown =
             shouldThrow<DatapipelinesException> {

@@ -223,7 +223,7 @@ class McpExecuteIdempotencyTest {
             pipelineVersion = 1,
             status = ExecutionStatus.SUCCESS,
             parametersJson = """{"month":"2026-07"}""",
-            triggeredBy = McpFixtures.USER,
+            executedBy = McpFixtures.USER,
             triggeredVia = ExecutionTrigger.MCP,
             startedAt = STARTED_AT,
             completedAt = COMPLETED_AT,

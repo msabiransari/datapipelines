@@ -292,7 +292,7 @@ class TemplateBrowseModel(
                 }.sortedByDescending(ExecutionRecord::startedAt)
                 .take(PipelineBrowseModel.RUNS_LIMIT)
         model.addAttribute("runs", rows)
-        model.addAttribute("runActors", actors.lookup(rows.map { it.triggeredBy }))
+        model.addAttribute("runActors", actors.lookup(rows.map { it.executedBy }))
         val now = Instant.now()
         model.addAttribute("runAgo", rows.associate { it.executionId to RelativeTime.since(it.startedAt, now) })
         model.addAttribute("runPipelines", rows.associate { it.executionId to it.pipelineId })

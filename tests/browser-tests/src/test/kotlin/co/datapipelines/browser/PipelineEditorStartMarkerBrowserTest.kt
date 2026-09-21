@@ -108,16 +108,14 @@ class PipelineEditorStartMarkerBrowserTest : BrowserSuite() {
         page.waitForURL("**/dashboard")
         val pipelineId = seedPipeline(page, "smv")
 
-        // …and opened by a VIEWER of that workspace (no author, promoter or admin flag).
+        // …and opened by a VIEWER of that workspace.
         val viewer =
             seedLocalUser(
                 uniqueEmail("smv-" + generatedPassword("u").take(8)),
                 generatedPassword("pw"),
                 mustChange = false,
                 isAdmin = false,
-                author = false,
-                promoter = false,
-                admin = false,
+                role = "viewer",
             )
         val session = newSession()
         try {

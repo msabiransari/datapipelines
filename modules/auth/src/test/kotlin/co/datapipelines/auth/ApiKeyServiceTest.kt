@@ -32,7 +32,9 @@ class ApiKeyServiceTest {
     private val workspaceService =
         mockk<WorkspaceService>(relaxed = true) {
             every { isActive(any()) } returns true
-            every { issuerFlags(any(), any(), any()) } returns MembershipFlags(author = true)
+            every { issuerContext(any(), any(), any(), any()) } answers {
+                WorkspaceContext(thirdArg(), arg(3), WorkspaceRole.AUTHOR)
+            }
         }
     private val service = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService)
 
@@ -60,7 +62,7 @@ class ApiKeyServiceTest {
             displayName = "Owner",
             scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
-            workspace = WorkspaceContext(workspaceId, "acme", MembershipFlags(author = true)),
+            workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.AUTHOR),
         )
 
     private fun activeOwner() =
@@ -272,7 +274,7 @@ class ApiKeyServiceTest {
         // The floor moved from a SCOPE to the issuer's super-admin flag (D-R1): a server key
         // is the promotion receiver's whole credential, and "who may mint one" is an instance
         // question, which is exactly the kind of question a scope stopped being able to answer.
-        refusal.details["required"] shouldBe Capability.SUPER_ADMIN.wire
+        refusal.details["required"] shouldBe Permission.SUPER_ADMIN.wire
     }
 
     @Test

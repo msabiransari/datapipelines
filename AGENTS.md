@@ -27,3 +27,22 @@
 The issue-management policy was adopted on 2026-09-15 and supersedes the earlier plan to
 wait until after beta. Historical imports carry legacy IDs, implementation links and
 original integration dates; their GitHub timestamps represent the import date.
+
+## Authorization: a handler or tool lands with its row (adopted 2026-09-20, roles design §4.9)
+
+- A new REST handler or MCP tool lands **in the same commit** as (1) its `ScopeMatrix` row —
+  the `RestOperation` it declares in `@RequiredScope`, or its entries in
+  `MCP_TOOL_MIN_SCOPE` / `MCP_TOOL_MIN_PERMISSION` — (2) its `docs/auth.md` §7.6 row, role-first
+  (the five role cells, the constant named in the REST row, the key scope in the scope table),
+  and (3) its `RoleWalkE2eTest` expectation, which is that doc row: the walk parses §7.6 and
+  asserts every route and tool against it, so a row with no code or code with no row is red.
+  `ScopeMatrixSpecDriftTest`, `MatrixRowReachabilityTest` and `ReadFloorTest` are the
+  build-time guards; a GET declares the LOWEST operation whose row admits it.
+- A lane prompt for any feature that adds an action states the **roles** for every new action
+  (which of viewer / author / promoter / workspace admin / super admin may perform it, and which
+  guard pins it) — the store's `prompts/_TEMPLATE.md` carries the mandatory section. A prompt
+  without it is not ready to dispatch.
+- Vocabulary: a **role** is what a member holds (one per workspace); a **permission** is a row of
+  the matrix — an action a role may perform, never a free string. The word "flags" does not
+  describe roles anywhere in UI text, docs or identifiers.
+

@@ -47,7 +47,7 @@ class WorkspaceKeyPinTest {
 
     private val ownerId = UUID.randomUUID()
     private val memberId = UUID.randomUUID()
-    private val wsAdminFlags = MembershipFlags(author = true, admin = true)
+    private val wsAdminFlags = WorkspaceRole.WORKSPACE_ADMIN
     private val acme = workspace("acme", "Acme")
     private val globex = workspace("globex", "Globex")
 

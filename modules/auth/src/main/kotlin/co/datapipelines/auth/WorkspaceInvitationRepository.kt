@@ -33,26 +33,25 @@ class WorkspaceInvitationRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
     /**
-     * Inserts [email]'s invitation into [workspaceId], or REPLACES the flags of the
+     * Inserts [email]'s invitation into [workspaceId], or REPLACES the role of the
      * row already there — the latest admin decision wins (auth.md §4.6), audited by
-     * the caller every time. The caller normalises the flags before calling; the
-     * `admin → author` CHECK is the database's backstop, not this method's job.
+     * the caller every time. The `chk_workspace_invitation_role` CHECK is the database's
+     * backstop for the value; [WorkspaceRole] is the code's.
      */
     fun upsert(
         workspaceId: UUID,
         email: String,
-        flags: MembershipFlags,
+        role: WorkspaceRole,
         invitedBy: UUID,
     ): Boolean =
         jdbc.update(
             """
-            INSERT INTO workspace_invitations (workspace_id, email, author, promoter, admin, invited_by)
-            VALUES (:ws, :email, :author, :promoter, :admin, :by)
+            INSERT INTO workspace_invitations (workspace_id, email, role, invited_by)
+            VALUES (:ws, :email, :role, :by)
             ON CONFLICT (workspace_id, email) DO UPDATE
-                SET author = EXCLUDED.author, promoter = EXCLUDED.promoter, admin = EXCLUDED.admin,
-                    invited_by = EXCLUDED.invited_by, invited_at = NOW()
+                SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by, invited_at = NOW()
             """.trimIndent(),
-            invitationParams(workspaceId, email, flags, invitedBy),
+            invitationParams(workspaceId, email, role, invitedBy),
         ) > 0
 
     /** Every invitation of [workspaceId], oldest invitation first (the members listing's `invitations[]`). */
@@ -102,10 +101,10 @@ class WorkspaceInvitationRepository(
      *   an email with no `users` row (auth.md §4.6 rule 1), so membership-with-invitation is
      *   always the check-then-act race of an invite landing mid-provisioning — and the
      *   membership the user actually holds is the later, deliberate decision. The invited
-     *   flags survive in the audit trail, not on the row.
+     *   role survives in the audit trail, not on the row.
      *
      * Returns what materialised, in `invited_at` order, so the caller audits each row with
-     * the workspace name, the flags and the INVITER (auth.md §10).
+     * the workspace name, the role and the INVITER (auth.md §10).
      */
     fun materialiseFor(
         email: String,
@@ -114,14 +113,14 @@ class WorkspaceInvitationRepository(
         jdbc.query(
             """
             WITH invited AS (
-                INSERT INTO workspace_members (workspace_id, user_id, author, promoter, admin, joined_at)
-                SELECT i.workspace_id, :uid, i.author, i.promoter, i.admin, i.invited_at
+                INSERT INTO workspace_members (workspace_id, user_id, role, joined_at)
+                SELECT i.workspace_id, :uid, i.role, i.invited_at
                   FROM workspace_invitations i
                   JOIN workspaces w ON w.id = i.workspace_id
                  WHERE i.email = :email AND w.is_deleted = FALSE AND w.deactivated_at IS NULL
                  ORDER BY i.invited_at
                 ON CONFLICT (workspace_id, user_id) DO NOTHING
-                RETURNING workspace_id, author, promoter, admin
+                RETURNING workspace_id, role
             ), gone AS (
                 DELETE FROM workspace_invitations i
                  WHERE i.email = :email
@@ -130,8 +129,7 @@ class WorkspaceInvitationRepository(
                                     WHERE m.workspace_id = i.workspace_id AND m.user_id = :uid))
                 RETURNING i.workspace_id, i.invited_by, i.invited_at
             )
-            SELECT w.name AS workspace_name, v.author, v.promoter, v.admin,
-                   g.invited_by, g.invited_at
+            SELECT w.name AS workspace_name, v.role, g.invited_by, g.invited_at
               FROM gone g
               JOIN invited v ON v.workspace_id = g.workspace_id
               JOIN workspaces w ON w.id = g.workspace_id
@@ -144,7 +142,7 @@ class WorkspaceInvitationRepository(
     /** One invitation that became a membership — what the audit event records (auth.md §10). */
     data class MaterialisedInvitation(
         val workspaceName: String,
-        val flags: MembershipFlags,
+        val role: WorkspaceRole,
         val invitedBy: UUID,
         val invitedAt: Instant,
     )
@@ -152,27 +150,25 @@ class WorkspaceInvitationRepository(
     private fun invitationParams(
         workspaceId: UUID,
         email: String,
-        flags: MembershipFlags,
+        role: WorkspaceRole,
         invitedBy: UUID,
     ): MapSqlParameterSource =
         MapSqlParameterSource()
             .addValue("ws", workspaceId)
             .addValue("email", email)
-            .addValue("author", flags.author)
-            .addValue("promoter", flags.promoter)
-            .addValue("admin", flags.admin)
+            .addValue("role", role.wire)
             .addValue("by", invitedBy)
 
     private companion object {
         const val SELECT_COLUMNS =
-            "SELECT workspace_id, email, author, promoter, admin, invited_by, invited_at FROM workspace_invitations"
+            "SELECT workspace_id, email, role, invited_by, invited_at FROM workspace_invitations"
 
         val MAPPER =
             RowMapper { rs: ResultSet, _: Int ->
                 WorkspaceInvitation(
                     workspaceId = rs.getObject("workspace_id", UUID::class.java),
                     email = rs.getString("email"),
-                    flags = rs.flags(),
+                    role = rs.role(),
                     invitedBy = rs.getObject("invited_by", UUID::class.java),
                     invitedAt = rs.getObject("invited_at", OffsetDateTime::class.java).toInstant(),
                 )
@@ -182,18 +178,13 @@ class WorkspaceInvitationRepository(
             RowMapper { rs: ResultSet, _: Int ->
                 MaterialisedInvitation(
                     workspaceName = rs.getString("workspace_name"),
-                    flags = rs.flags(),
+                    role = rs.role(),
                     invitedBy = rs.getObject("invited_by", UUID::class.java),
                     invitedAt = rs.getObject("invited_at", OffsetDateTime::class.java).toInstant(),
                 )
             }
 
-        /** The three flag columns off one invitation row — the membership row's own shape. */
-        fun ResultSet.flags(): MembershipFlags =
-            MembershipFlags(
-                author = getBoolean("author"),
-                promoter = getBoolean("promoter"),
-                admin = getBoolean("admin"),
-            )
+        /** The role column off one invitation row — the membership row's own shape (V29). */
+        fun ResultSet.role(): WorkspaceRole = WorkspaceRole.fromWire(getString("role"))
     }
 }

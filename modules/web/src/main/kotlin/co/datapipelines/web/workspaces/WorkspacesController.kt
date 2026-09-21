@@ -1,12 +1,12 @@
 package co.datapipelines.web.workspaces
 
-import co.datapipelines.auth.MembershipFlags
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceInvitation
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiException
@@ -42,9 +42,13 @@ import java.util.UUID
 class WorkspacesController(
     private val workspaces: WorkspaceService,
 ) {
-    /** §17.1 — the caller's own memberships (design §9 "list-own"; admins list their own too — no merged view). */
+    /**
+     * §17.1 — the caller's own memberships (design §9 "list-own"; admins list their own too — no
+     * merged view). Every member's read: it is the list the switcher draws from, so it sits on
+     * the switcher's row (`WORKSPACE_SWITCH`), not on the page's (D13 narrowed the PAGE).
+     */
     @GetMapping
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACES_READ)
+    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACE_SWITCH)
     fun list(): ApiResponse<List<Map<String, Any?>>> = ApiResponse.of(workspaces.listOwn(currentPrincipal()).map { it.toResponse() })
 
     /** §17.2 — one workspace. Members share one 403 for unknown and not-a-member; only an admin gets the 404. */
@@ -160,7 +164,7 @@ class WorkspacesController(
                     "A member email is required.",
                     mapOf("field" to "email"),
                 )
-        return when (val outcome = workspaces.addMember(currentPrincipal(), name, email, flagsOf(body))) {
+        return when (val outcome = workspaces.addMember(currentPrincipal(), name, email, roleOf(body))) {
             is WorkspaceService.AddMemberOutcome.Added -> {
                 ResponseEntity.ok(ApiResponse.of(outcome.row.toResponse()))
             }
@@ -205,22 +209,21 @@ class WorkspacesController(
     }
 
     /**
-     * §17.10 — set an existing member's capability flags (RBAC design §1). Workspace admin or
-     * super admin; demoting the LAST admin is `workspace.last_admin` (409).
+     * §17.10 — set an existing member's ROLE (D1, D20). Workspace admin or super admin;
+     * demoting the LAST admin is `workspace.last_admin` (409).
      *
-     * A PUT rather than a PATCH: the three flags are REPLACED wholesale, so a caller that
-     * sends `{"author": true}` gets exactly an author — not an author with whatever promoter
-     * flag happened to be there. Roles are additive, which makes a partial update ambiguous in
-     * precisely the way this surface must not be.
+     * A PUT: the membership's one value is replaced. The body is `{"role": "<viewer|author|
+     * promoter|workspace_admin>"}`; the three boolean fields of the flags era are gone from the
+     * wire (rest-api.md §17 change log, 2026-09-20).
      */
     @PutMapping("/{name}/members/{userId}")
     @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
-    fun setMemberFlags(
+    fun setMemberRole(
         @PathVariable name: String,
         @PathVariable userId: UUID,
         @RequestBody body: JsonNode,
     ): ApiResponse<Map<String, Any?>> =
-        ApiResponse.of(workspaces.setMemberFlags(currentPrincipal(), name, userId, flagsOf(body)).toResponse())
+        ApiResponse.of(workspaces.setMemberRole(currentPrincipal(), name, userId, roleOf(body)).toResponse())
 
     /**
      * D-R10 — deactivate a workspace. Super admin. Nothing is purged, ever: it stops being
@@ -241,19 +244,20 @@ class WorkspacesController(
     ): ApiResponse<Map<String, Any?>> = ApiResponse.of(workspaces.reactivate(currentPrincipal(), name).toResponse())
 
     /**
-     * The three capability flags off a request body (RBAC design §1). Absent means FALSE:
-     * a body that says nothing asks for a viewer, which is the least a membership can be and
-     * the only safe reading of silence on a permission grant.
-     *
-     * `admin` normalisation (admin → author) is the service's, not this surface's — one place,
-     * beside the database constraint that makes it true.
+     * The role off a request body (D1). Absent means VIEWER: a body that says nothing asks for
+     * the least a membership can be, the only safe reading of silence on a permission grant.
+     * A value outside the four roles is the surface's bad-parameter code — a role that does
+     * not exist is the caller's bug, never a default.
      */
-    private fun flagsOf(body: JsonNode): MembershipFlags =
-        MembershipFlags(
-            author = body.get("author")?.asBoolean() == true,
-            promoter = body.get("promoter")?.asBoolean() == true,
-            admin = body.get("admin")?.asBoolean() == true,
-        )
+    private fun roleOf(body: JsonNode): WorkspaceRole {
+        val token = body.get("role")?.takeIf { it.isTextual }?.asText() ?: return WorkspaceRole.VIEWER
+        return WorkspaceRole.fromWireOrNull(token)
+            ?: throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "Unknown workspace role '$token'.",
+                mapOf("field" to "role", "allowed" to WorkspaceRole.entries.map { it.wire }),
+            )
+    }
 
     /** §17.2's wire shape — the fields a reader is entitled to. */
     private fun Workspace.toResponse(): Map<String, Any?> =
@@ -270,20 +274,15 @@ class WorkspacesController(
         )
 
     /**
-     * §17.1's list-own row — a membership: the workspace's name, the caller's capability flags
-     * and the join date.
-     *
-     * `role` is GONE from the wire with the column (D-R1/D-R2). It is replaced by the three
-     * booleans, not by a computed "highest role" string: additive flags are the whole point
-     * ("author who also releases" and "DevOps who only releases" are both one row), and any
-     * single label would have to lie about one of them. `active` carries D-R10's state.
+     * §17.1's list-own row — a membership: the workspace's name, the caller's role and the
+     * join date. `role` is BACK on the wire (D1/D21, 2026-09-20) — one of the four
+     * [WorkspaceRole] tokens — replacing the three booleans V23's flags put there. `active`
+     * carries D-R10's state.
      */
     private fun WorkspaceMembership.toResponse(): Map<String, Any?> =
         mapOf(
             "name" to workspaceName,
-            "author" to flags.author,
-            "promoter" to flags.promoter,
-            "admin" to flags.admin,
+            "role" to role.wire,
             "active" to workspaceActive,
             "joined_at" to joinedAt.toString(),
         )
@@ -293,9 +292,7 @@ class WorkspacesController(
             "user_id" to userId.toString(),
             "email" to email,
             "display_name" to displayName,
-            "author" to flags.author,
-            "promoter" to flags.promoter,
-            "admin" to flags.admin,
+            "role" to role.wire,
             "joined_at" to joinedAt.toString(),
         )
 
@@ -306,9 +303,7 @@ class WorkspacesController(
     private fun WorkspaceInvitation.toResponse(): Map<String, Any?> =
         mapOf(
             "email" to email,
-            "author" to flags.author,
-            "promoter" to flags.promoter,
-            "admin" to flags.admin,
+            "role" to role.wire,
             "invited_by" to invitedBy.toString(),
             "invited_at" to invitedAt.toString(),
         )
@@ -318,8 +313,6 @@ class WorkspacesController(
         mapOf(
             "invited" to true,
             "email" to email,
-            "author" to flags.author,
-            "promoter" to flags.promoter,
-            "admin" to flags.admin,
+            "role" to role.wire,
         )
 }

@@ -1567,7 +1567,7 @@ class PipelineRepositoryIntegrationTest {
             jdbc.queryForObject(
                 """
                 INSERT INTO pipeline_executions
-                    (pipeline_id, pipeline_version, status, triggered_by, triggered_via, root_execution_id)
+                    (pipeline_id, pipeline_version, status, executed_by, triggered_via, root_execution_id)
                 VALUES (:pipelineId, :version, 'SUCCESS', :actor, 'REST', gen_random_uuid())
                 RETURNING execution_id
                 """.trimIndent(),
