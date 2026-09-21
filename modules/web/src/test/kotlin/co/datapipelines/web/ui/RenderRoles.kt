@@ -37,6 +37,8 @@ fun WebContext.withRoles(
     navExecutions: Boolean = canReadExecutions,
     navPromotion: Boolean = canReadPromotion,
     navWorkspaces: Boolean = canAdminWorkspace || isSuperAdmin,
+    // 179 — the avatar menu's API-keys link (MANAGE_API_KEYS).
+    navApiKeys: Boolean = canAdminWorkspace || isSuperAdmin,
 ): WebContext =
     apply {
         setVariable("canRead", canRead)
@@ -53,6 +55,7 @@ fun WebContext.withRoles(
         setVariable("navExecutions", navExecutions)
         setVariable("navPromotion", navPromotion)
         setVariable("navWorkspaces", navWorkspaces)
+        setVariable("navApiKeys", navApiKeys)
     }
 
 /** The same set from [RoleModel.Roles], so a render test can stamp exactly what a controller would. */

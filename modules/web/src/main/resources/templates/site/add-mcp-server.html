@@ -44,33 +44,34 @@
   <section class="section band" aria-labelledby="step2-title">
     <div class="container">
       <p class="kicker">Step 2</p>
-      <h2 id="step2-title" class="ds-headline">Mint a key for that one agent</h2>
-      <!-- claim: docs/ui-screens.md §4.18 -->
+      <h2 id="step2-title" class="ds-headline">Copy your MCP key from the top bar</h2>
+      <!-- claim: docs/ui-screens.md §3.4 (the top bar's chip), docs/auth.md §7.4 -->
       <p class="section-lede">
-        Sign in and open the <strong>API</strong> section — <code>/api-console</code>, where the endpoints a key may
-        call and the MCP connection block live beside the keys themselves. <strong>New key</strong> asks in this order:
-        the <em>kind</em> (an agent's key is the <code>user</code> kind — the same credential a program uses over REST),
-        the scope, a name for you to recognise it by, and an expiry. Copy the secret — the plaintext is shown
-        <em>once</em>, in a panel that stays put rather than a toast that does not. Afterwards the list shows the prefix
-        only.
+        Sign in — that is the whole mint. Your MCP key is created for you the moment you enter a workspace,
+        one per workspace, and waits in the <strong>top bar</strong> on the right: the <code>dpk_…</code> chip beside
+        your account menu. <strong>Copy</strong> fetches the full key (it is served on the click, never sitting in the
+        page) and puts it on your clipboard. The chip is also where you rotate: delete it, and your next sign-in
+        mints a fresh one.
       </p>
-      <!-- claim: docs/auth.md §7.5 -->
-      <p>Scopes are hierarchical, and the smallest one that does the job is the right one:</p>
+      <!-- claim: docs/auth.md §7.4 (the key carries the role), §7.5 (the ladder) -->
+      <p>The key carries YOUR role in that workspace — there is no scope to pick:</p>
       <table class="facts-table">
-        <caption>The scope to pick, by what the agent is for.</caption>
+        <caption>What the key may do, by the role you hold in its workspace.</caption>
         <thead>
-          <tr><th scope="col">Scope</th><th scope="col">Give it when the agent should…</th></tr>
+          <tr><th scope="col">Your role</th><th scope="col">The agent may…</th></tr>
         </thead>
         <tbody>
-          <tr><th scope="row"><code>read</code></th><td>browse pipelines, templates, datasources and past executions</td></tr>
-          <tr><th scope="row"><code>execute</code></th><td>also run pipelines and read their results</td></tr>
-          <tr><th scope="row"><code>author</code></th><td>also create and update pipelines and templates, and introspect schemas</td></tr>
+          <tr><th scope="row">Viewer</th><td>browse pipelines, templates, datasources and past executions, and run pipelines</td></tr>
+          <tr><th scope="row">Author</th><td>also create and update pipelines and templates, and introspect schemas</td></tr>
+          <tr><th scope="row">Promoter</th><td>read released-and-newer pipelines and templates — the promotion reviewer's reach, nothing executable</td></tr>
+          <tr><th scope="row">Workspace admin</th><td>everything the author may do, plus the workspace's administration</td></tr>
         </tbody>
       </table>
-      <!-- claim: docs/auth.md §7.5 — admin is not a key scope -->
-      <p>There is no admin scope to pick: administration is for signed-in people, and a key that asked for it would be refused at issuance. The three above are the whole list.</p>
-      <!-- claim: docs/ui-screens.md §4.18, docs/auth.md §7.4 -->
-      <p>A key's scopes can never exceed the scopes of whoever issued it, and the select you see is filtered to your own — the server refuses a superset regardless, so the filter is convenience rather than the guard. Revoking is per-key and takes effect within about a minute; an expiry does the same thing on a date you set. No shared password to rotate.</p>
+      <!-- claim: docs/auth.md §7.5 — admin is not a key scope; §11A.4 — the issuer's role is re-read per request -->
+      <p>Administration of the INSTANCE is for signed-in people — no key can hold it. And the key's reach is re-read
+        against your role on every request: a demotion narrows the key within about a minute, no reissue needed.</p>
+      <!-- claim: docs/auth.md §7.4 (rotation) -->
+      <p>Rotating is delete-to-rotate on the chip and your next sign-in; it takes effect within about a minute. No shared password to rotate.</p>
     </div>
   </section>
 
@@ -113,7 +114,7 @@
       <ul class="fact-list fact-list-plain">
         <li><strong><code>401 auth.api_key.missing</code></strong> — the header did not arrive. Check the header name, and that the client sends headers at all on HTTP transports.</li>
         <li><strong><code>401 auth.api_key.invalid</code> or <code>auth.api_key.expired</code></strong> — wrong, revoked, expired, or the owning user is deactivated.</li>
-        <li><strong><code>403 auth.scope.insufficient</code></strong> — the key is real and too small for what the agent tried. Mint one at the next scope up rather than widening the one you have.</li>
+        <li><strong><code>403 auth.scope.insufficient</code> or <code>auth.role_required</code></strong> — the key is real and your role in that workspace is too small for what the agent tried. The key follows the role: ask a workspace admin to raise it rather than looking for a wider key — none exists.</li>
         <li><strong>Silent rejection of a browser session</strong> — expected. <code>/mcp</code> takes API keys only; a cookie will never work there.</li>
       </ul>
       <p><a th:href="@{/docs/mcp-server}">The MCP server specification &rarr;</a> &middot;
@@ -137,8 +138,8 @@
       <h2 id="cta-title" class="ds-headline">Do the whole loop on the demo</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
-        The demo stack is one command, and every step on this page works against it: mint the key, paste the config,
-        list the tools, run a pipeline. Connecting to your own databases is the same ritual with real stakes.
+        The demo stack is one command, and every step on this page works against it: sign in, copy the key from the
+        top bar, paste the config, list the tools, run a pipeline. Connecting to your own databases is the same ritual with real stakes.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/deployment}">Demo quickstart</a>

@@ -403,6 +403,15 @@
         <svg class="ds-icon ds-icon-md" data-mode-icon="dark" th:attr="hidden=${activeTheme == 'dark'} ? null : 'hidden'" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#moon"></use></svg>
       </button>
 
+      <!-- 179 (D16) — the MCP-key chip, right side beside the user menu: the caller's
+           login-minted key for the ACTIVE workspace. Omitted entirely when no live key
+           exists (post-rotation, pre-login); the chip partial carries both states for its
+           htmx refresh. th:if CANNOT share an element with th:replace (the layout's own
+           note at the toast bin), so the condition wraps the th:block. -->
+      <th:block th:if="${mcpKey != null}">
+        <div th:replace="~{partials/mcp-key-chip :: chip(${mcpKey})}"></div>
+      </th:block>
+
       <div class="app-user">
         <button type="button" id="app-avatar" class="app-avatar"
                 aria-haspopup="menu" aria-expanded="false" aria-controls="app-user-menu"
@@ -452,7 +461,10 @@
 
           <div class="app-menu-sep"></div>
           <a th:href="@{/settings}" role="menuitem" hx-boost="true"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#settings"></use></svg>Settings</a>
-          <a th:href="@{/api-console}" role="menuitem" hx-boost="true"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#key"></use></svg>API keys</a>
+          <!-- 179 (D17): the menu's key link leads to the API keys page, a workspace
+               admin's screen — rendered only for the roles that hold MANAGE_API_KEYS.
+               Everyone's own MCP key lives in the top bar beside this menu. -->
+          <a th:if="${navApiKeys == true}" th:href="@{/api-keys}" role="menuitem" hx-boost="true"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#key"></use></svg>API keys</a>
           <!-- 127 §C: one "Report a problem" for the whole app — the bug form, in a NEW tab
                (external, never boosted), the URL read off the same SitePages constant the site
                renders from (surfaced by SiteOriginAdvice). Choosing it closes the menu under the

@@ -115,6 +115,7 @@ class RoleWalkE2eTest {
     @Test
     fun `every MCP tool answers each role's key exactly as auth-md §7-6 says`() {
         ensureSeeded()
+        ensureKeysLive()
         val schemas = toolSchemas()
         val tallies = ROLES.associateWith { role -> walkMcp(role, schemas) }
         val counts = tallies.mapValues { (_, tally) -> tally.allowed to tally.refused }
@@ -549,6 +550,24 @@ class RoleWalkE2eTest {
         private fun b64(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 
         private var seeded = false
+
+        /**
+         * 179: the REST walk drives `DELETE /partials/mcp-key` (the top bar's
+         * delete-to-rotate, `VIEW_OWN_MCP_KEY` — every role), which REVOKES the walked
+         * user's seeded key. When the REST walk runs before the MCP walk, those keys must
+         * be un-revoked first; V31's unique index is untouched (no second key was ever
+         * minted — minting happens at login, and the walk never logs in).
+         */
+        fun ensureKeysLive() {
+            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        "UPDATE api_keys SET is_revoked = FALSE WHERE id IN " +
+                            KEYS.values.joinToString(", ", "(", ")") { "'${it.id}'" },
+                    )
+                }
+            }
+        }
 
         fun ensureSeeded() {
             if (seeded) return

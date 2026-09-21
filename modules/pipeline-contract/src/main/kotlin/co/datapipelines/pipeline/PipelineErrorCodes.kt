@@ -592,6 +592,13 @@ object PipelineErrorCodes {
         /** §13.7 — issuance asked for a scope keys may no longer hold; today that is `admin` (O-2). */
         const val KEY_SCOPE_UNAVAILABLE = "auth.key_scope_unavailable"
 
+        /**
+         * §13.7 (179, D16) — on-demand issuance asked for a `user` key. User keys are minted
+         * by the login/switch hook only, one per user per workspace; no surface may mint one
+         * on demand. A 400: the credential is fine, the KIND is not mintable.
+         */
+        const val KEY_KIND_NOT_MINTABLE = "auth.key_kind_not_mintable"
+
         /** §13.7 — the workspace this key is pinned to has been deactivated (D-R10). */
         const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
     }

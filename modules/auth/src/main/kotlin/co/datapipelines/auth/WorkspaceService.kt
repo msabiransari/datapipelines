@@ -37,6 +37,25 @@ fun interface WorkspaceLiveness {
 }
 
 /**
+ * The login-minted MCP key hook (D16, roles design §3.3): mint the user's one `user` key
+ * for the workspace they just entered — or do nothing when they already hold one.
+ *
+ * A PORT, not a call into `ApiKeyService`: that service already depends on
+ * [WorkspaceService] (issuance's membership guard), so a direct call back would be a
+ * constructor cycle. The aggregation layer binds this to `ApiKeyService.mintLoginKey`
+ * through a lazy provider. The rule lives HERE — on the one path both login handlers and
+ * the switcher converge on — for the same reason the invitation materialise does: the
+ * owner's rule is about LOGGING IN, not about which provider did it.
+ */
+fun interface McpKeyMint {
+    /** Mints the login key for [user] in [context]'s workspace when none is live; a no-op otherwise. */
+    fun mint(
+        user: User,
+        context: WorkspaceContext,
+    )
+}
+
+/**
  * Workspace membership resolution and the CRUD / member-management service paths the REST
  * surface calls (RBAC design §5, §6; the role model is §1).
  *
@@ -75,6 +94,13 @@ class WorkspaceService(
     private val authProperties: AuthProperties,
     private val contentCheck: WorkspaceContentCheck = WorkspaceContentCheck.NONE,
     private val demoWorkspaceSeeder: DemoWorkspaceSeeder? = null,
+    /**
+     * The D16 login-mint port — nullable so auth-only test slices build the service with
+     * no key machinery; the application always binds it (AuthConfiguration). The mint
+     * itself decides "already holds one" and "owes a password change"; this service only
+     * decides WHERE the hook fires.
+     */
+    private val mcpKeyMint: McpKeyMint? = null,
 ) : WorkspaceLiveness {
     private val log = LoggerFactory.getLogger(WorkspaceService::class.java)
 
@@ -149,6 +175,12 @@ class WorkspaceService(
      *
      * Null when there is nothing to stamp: no membership and no active `demo` (deactivated, or
      * never seeded). Round 1 returns that state; round 2 draws the "no workspace" page.
+     *
+     * **The D16 mint rides the resolution:** every non-null answer mints the user's one MCP
+     * key for that workspace on the way out ([McpKeyMint]) — login is exactly when "entered
+     * a workspace" becomes true, and a key that already exists makes the mint a no-op, so a
+     * second login mints nothing. A user who owes a password change gets nothing until the
+     * first login or switch after it (the mint's own gate).
      */
     fun workspaceForLogin(
         user: User,
@@ -178,10 +210,34 @@ class WorkspaceService(
         }
         val memberships = activeMemberships(user.id)
         lastUsedWorkspaceStore?.lastUsed(user.id)?.let { last ->
-            memberships.firstOrNull { it.workspaceName == last }?.let { return context(it) }
+            memberships.firstOrNull { it.workspaceName == last }?.let { return minted(user, context(it)) }
         }
-        memberships.firstOrNull()?.let { return context(it) }
-        return demoWorkspaceSeeder?.joinDemoIfUnaffiliated(user.id)?.also { authCache.invalidateMemberships(user.id) }
+        memberships.firstOrNull()?.let { return minted(user, context(it)) }
+        return demoWorkspaceSeeder
+            ?.joinDemoIfUnaffiliated(user.id)
+            ?.also { authCache.invalidateMemberships(user.id) }
+            ?.let { minted(user, it) }
+    }
+
+    /**
+     * The switch half of D16: a successful switch IS an entry into that workspace, so it
+     * mints exactly as login does. Called by the switch handler once the target has
+     * resolved (a refused switch mints nothing — the resolution threw).
+     */
+    fun mintMcpKeyOnEntry(
+        user: User,
+        context: WorkspaceContext,
+    ) {
+        mcpKeyMint?.mint(user, context)
+    }
+
+    /** Resolution plus the D16 mint — the one shape every login answer takes. */
+    private fun minted(
+        user: User,
+        context: WorkspaceContext,
+    ): WorkspaceContext {
+        mintMcpKeyOnEntry(user, context)
+        return context
     }
 
     /**

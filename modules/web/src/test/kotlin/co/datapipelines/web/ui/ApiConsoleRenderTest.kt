@@ -1,8 +1,6 @@
 package co.datapipelines.web.ui
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.mcp.McpToolCatalog
-import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -16,20 +14,18 @@ import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
 
 /**
- * 079 §C — the API section, pinned at the RENDER.
- *
- * The screen closes T139 and the owner's "I don't see any API menu": published endpoints,
- * the keys that may call them and the MCP connection had no page anywhere in the app. What
- * this test protects is not the layout but the four claims the page makes about the system,
- * each of which is the kind that goes quietly wrong:
+ * 079 §C — the API section, pinned at the RENDER. Since 179 the console is READ-ONLY: the
+ * keys card and its minting modal moved to `/api-keys` (D17, pinned by
+ * [ApiKeysPageRenderTest]), and this suite protects what the console still claims:
  *
  *  - **The tool count is derived, never written down.** A literal here would drift from
  *    `tools/list` and would be believed by whoever pasted the config.
- *  - **The `endpoint` key kind shows its BINDINGS, not its scopes.** It has none by design
- *    (auth §7.7), and an empty scope cell reads as "this key can do nothing".
+ *  - **The endpoint row names its ASSOCIATED API keys.** "How many" was the pre-179 answer;
+ *    the operator's question is "which".
  *  - **There is no "Calls 24 h" column.** Nothing records endpoint serves, so the mock's
  *    column has no truthful source; the page says so rather than inventing one.
  *  - **The version shown is the RELEASED one.** An endpoint pins a pipeline, not a version.
+ *  - **The manage link renders for the roles `MANAGE_API_KEYS` admits, and no other.**
  */
 class ApiConsoleRenderTest {
     private val engine =
@@ -44,30 +40,25 @@ class ApiConsoleRenderTest {
         }
 
     /**
-     * 114 §B — O-2, "viewers never mint keys". Minting is `canAuthor`; REVOKING is not.
-     *
-     * §7.6's `MANAGE_OWN_API_KEYS` row is `view`, and only ISSUANCE carries the extra author
-     * gate (§7.4). Hiding Revoke from a viewer would strand a DEMOTED author with a live key
-     * they are not allowed to withdraw — the opposite of what O-2 is for — so the two verbs
-     * sit on different rungs and this test is what keeps them there.
+     * 179 (D17) — the keys card is GONE from the console: no table, no modal, no create verb.
+     * What remains is the read-only inventory and, for the roles that hold MANAGE_API_KEYS,
+     * the link to where the verbs live.
      */
     @Test
-    fun `114 - a viewer cannot mint a key and can still revoke one`() {
+    fun `the console carries no key management - and the manage link follows MANAGE_API_KEYS`() {
+        val admin = render { }
+        admin shouldNotContain "id=\"keys-table\""
+        admin shouldNotContain "id=\"key-modal\""
+        admin shouldNotContain "data-verb=\"key-create\""
+        admin shouldContain "Manage API keys"
+        admin shouldContain "href=\"/api-keys\""
+
         val viewer =
             render {
-                setVariable("keys", listOf(row()))
                 withRoles(canAuthor = false, canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "viewer")
             }
-
-        viewer shouldNotContain "data-verb=\"key-create\""
-        // The whole modal goes with the button: no form nobody may submit.
-        viewer shouldNotContain "id=\"key-modal\""
-        viewer shouldContain "data-verb=\"key-revoke\""
-
-        val author = render { setVariable("keys", listOf(row())) }
-        author shouldContain "data-verb=\"key-create\""
-        author shouldContain "id=\"key-modal\""
-        author shouldContain "data-verb=\"key-revoke\""
+        viewer shouldNotContain "href=\"/api-keys\""
+        viewer shouldNotContain ">Manage<"
     }
 
     private fun render(fill: WebContext.() -> Unit): String {
@@ -85,7 +76,6 @@ class ApiConsoleRenderTest {
         context.setVariable("authenticated", true)
         context.setVariable("currentPath", "/api-console")
         context.setVariable("endpoints", emptyList<Any>())
-        context.setVariable("keys", emptyList<Any>())
         context.setVariable("mcpUrl", "https://app.example/mcp")
         context.setVariable("mcpHeader", "DP-API-Key")
         context.setVariable("keyPrefix", "dpk_")
@@ -96,48 +86,9 @@ class ApiConsoleRenderTest {
         )
         context.setVariable("mcpToolCount", McpToolCatalog.NAMES.size)
         context.setVariable("defaultTimeoutSeconds", 30)
-        context.setVariable("canAuthor", true)
-        // 091 — the form's options come from ApiKeyForm on both sides (page and partial),
-        // so the fixtures ARE the production tables rather than a second copy of them.
-        context.setVariable("kindChoices", ApiKeyForm.kindChoices(isAdmin = false))
-        context.setVariable("scopeChoices", ApiKeyForm.scopeChoices(setOf(Scope.AUTHOR)))
-        context.setVariable("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
-        context.setVariable("expiryCustomWire", ApiKeyForm.CUSTOM)
-        context.setVariable("bindingNodes", ApiKeyForm.bindingNodes(listOf("/nyc/mobility/briefing")))
         context.fill()
         return engine.process("api/console", context)
     }
-
-    @Suppress("LongParameterList") // a row, spelled out
-    private fun row(
-        name: String = "agent",
-        kind: String = "user",
-        scopes: List<String> = listOf("read"),
-        boundPaths: List<String> = emptyList(),
-        createdRelative: String = "3 days ago",
-        createdAbsolute: String = "2026-09-05 09:00 UTC",
-        lastUsedRelative: String = "never",
-        lastUsedAbsolute: String? = null,
-        expiresRelative: String = "never",
-        expiresAbsolute: String? = null,
-        isRevoked: Boolean = false,
-        isExpired: Boolean = false,
-    ) = ApiKeyRows.Row(
-        id = "dpk_A7QxKF2MPLQR",
-        name = name,
-        kind = kind,
-        prefix = "dpk_A7QxKF2MPLQR".take(8) + "…",
-        scopes = scopes,
-        boundPaths = boundPaths,
-        createdRelative = createdRelative,
-        createdAbsolute = createdAbsolute,
-        lastUsedRelative = lastUsedRelative,
-        lastUsedAbsolute = lastUsedAbsolute,
-        expiresRelative = expiresRelative,
-        expiresAbsolute = expiresAbsolute,
-        isRevoked = isRevoked,
-        isExpired = isExpired,
-    )
 
     private fun endpoint(
         url: String = "/api/nyc/v1/mobility/briefing",
@@ -146,16 +97,15 @@ class ApiConsoleRenderTest {
         served: Int? = 3,
         draft: Boolean = false,
         timeout: Int = 30,
-        bound: Int = 2,
+        boundKeyNames: List<String> = listOf("ci", "nightly"),
         enabled: Boolean = true,
-    ) = ApiConsoleController.EndpointRow(url, listOf(false), displayName, path, served, draft, timeout, bound, enabled)
+    ) = ApiConsoleController.EndpointRow(url, listOf(false), displayName, path, served, draft, timeout, boundKeyNames, enabled)
 
     @Test
-    fun `the three cards render, and the tool count is the catalog's size`() {
+    fun `the two cards render, and the tool count is the catalog's size`() {
         val html = render { }
 
         html shouldContain "Published endpoints"
-        html shouldContain "API keys"
         html shouldContain "MCP server"
         // Derived at request time from McpToolCatalog.NAMES — never a literal. If someone
         // adds a tool, this number moves with it, which is the whole contract.
@@ -177,14 +127,16 @@ class ApiConsoleRenderTest {
     }
 
     @Test
-    fun `an endpoint renders GET, its path, the RELEASED version and its bound-key chip`() {
+    fun `an endpoint renders GET, its path, the RELEASED version and its associated keys by name`() {
         val html = render { setVariable("endpoints", listOf(endpoint())) }
 
         html shouldContain ">GET<"
         html shouldContain "/api/nyc/v1/mobility/briefing"
         html shouldContain "Mobility briefing"
         html shouldContain "v3"
-        html shouldContain "2 bound"
+        // 179: names, not a count — "which keys" is the question.
+        html shouldContain ">ci<"
+        html shouldContain ">nightly<"
         html shouldContain "30 s"
     }
 
@@ -198,173 +150,19 @@ class ApiConsoleRenderTest {
     }
 
     @Test
-    fun `an endpoint whose pipeline has no release says so, and an unbound one is flagged`() {
+    fun `an endpoint whose pipeline has no release says so, and one with no associated keys is flagged`() {
         val html =
             render {
-                setVariable("endpoints", listOf(endpoint(served = null, bound = 0, enabled = false)))
+                setVariable("endpoints", listOf(endpoint(served = null, boundKeyNames = emptyList(), enabled = false)))
             }
 
         // Three separate truths, none of them papered over: an endpoint can outlive the
-        // release it was published against, "no bindings" is not "nobody can call it" (a
+        // release it was published against, "no associations" is not "nobody can call it" (a
         // workspace-pinned user key with `execute` still may), and a disabled endpoint is
         // still listed.
         html shouldContain "nothing to serve"
         html shouldContain ">none<"
         html shouldContain "Disabled"
-    }
-
-    @Test
-    fun `a user key shows scopes, an endpoint key its bindings, a server key its route family`() {
-        val html =
-            render {
-                setVariable(
-                    "keys",
-                    listOf(
-                        row(name = "agent", kind = "user", scopes = listOf("execute", "read")),
-                        row(name = "serve", kind = "endpoint", boundPaths = listOf("/nyc/mobility")),
-                        row(name = "uat receiver", kind = "server"),
-                    ),
-                )
-            }
-
-        html shouldContain "dpk_A7Qx…"
-        html shouldContain ">read<"
-        html shouldContain ">execute<"
-        // An endpoint key carries NO scopes (auth §7.7); its authority is its bindings, and
-        // that is what the cell must show — in the `/nyc/**` form 074 defined.
-        html shouldContain "/nyc/mobility/**"
-        // The ROOT binding reads `/**`, never `//**`: it authorises the whole tree.
-        render { setVariable("keys", listOf(row(kind = "endpoint", boundPaths = listOf("/")))) } shouldContain ">/**<"
-        // A server key has neither, and an empty cell would read as "this key can do nothing".
-        html shouldContain "promotion routes"
-    }
-
-    @Test
-    fun `every timestamp is relative in the cell and absolute on hover`() {
-        // Both questions are real: "is this about to expire?" at a glance, "exactly when?" on
-        // hover. A cell with only one of them sends the reader to the database.
-        val html =
-            render {
-                setVariable(
-                    "keys",
-                    listOf(
-                        row(
-                            createdRelative = "3 days ago",
-                            createdAbsolute = "2026-09-05 09:00 UTC",
-                            expiresRelative = "in 84 days",
-                            expiresAbsolute = "2026-12-01 00:00 UTC",
-                            lastUsedRelative = "2 hours ago",
-                            lastUsedAbsolute = "2026-09-08 07:00 UTC",
-                        ),
-                    ),
-                )
-            }
-
-        html shouldContain "title=\"2026-09-05 09:00 UTC\""
-        html shouldContain ">3 days ago<"
-        html shouldContain "title=\"2026-12-01 00:00 UTC\""
-        html shouldContain ">in 84 days<"
-        html shouldContain "title=\"2026-09-08 07:00 UTC\""
-        html shouldContain ">2 hours ago<"
-    }
-
-    @Test
-    fun `a dead key keeps its row and loses its revoke affordance`() {
-        val revoked = render { setVariable("keys", listOf(row(isRevoked = true))) }
-        revoked shouldContain ">revoked<"
-        revoked shouldNotContain "hx-delete"
-
-        val expired = render { setVariable("keys", listOf(row(isExpired = true))) }
-        expired shouldContain ">expired<"
-        expired shouldNotContain "hx-delete"
-
-        // …and a live one HAS it, or the two assertions above would pass on a table with no
-        // revoke button at all.
-        render { setVariable("keys", listOf(row())) } shouldContain "hx-delete"
-    }
-
-    @Test
-    fun `the form's fields are in the owner's order - Kind, Scope, Name, Expiry, Bindings`() {
-        val html = render { }
-
-        val order =
-            listOf(
-                "name=\"kind\"",
-                "id=\"key-scope\"",
-                "id=\"key-name\"",
-                "id=\"key-expiry\"",
-                "id=\"key-bindings-field\"",
-            ).map { html.indexOf(it) }
-
-        withClue("one of the five fields is missing: $order") { order.none { it < 0 } shouldBe true }
-        withClue("the fields render out of order: $order") { order shouldBe order.sorted() }
-    }
-
-    @Test
-    fun `scope and bindings are conditional on the kind, and the server kind is admin-only`() {
-        val forMember = render { }
-        // The two conditional fields exist for the kinds that take them…
-        forMember shouldContain "id=\"key-scope-field\""
-        forMember shouldContain "id=\"key-bindings-field\""
-        // …and each kind card declares which, so the script has no table of its own to drift.
-        forMember shouldContain "data-scope=\"true\""
-        forMember shouldContain "data-bindings=\"true\""
-        // A non-admin is not offered a kind the server would refuse (§7.7: minting a server
-        // key is admin-only). The UI filter is convenience; ApiKeyService is the guard.
-        forMember shouldNotContain "Server key"
-
-        val forAdmin = render { setVariable("kindChoices", ApiKeyForm.kindChoices(isAdmin = true)) }
-        forAdmin shouldContain "Server key"
-    }
-
-    @Test
-    fun `the scope select states capabilities, not HTTP verbs`() {
-        val html = render { }
-
-        html shouldContain "list and inspect"
-        html shouldContain "run released pipelines"
-        // The owner asked for verb scopes and the answer is no: `execute` is a POST that
-        // writes nothing, and an MCP tool call has no verb to split on.
-        html shouldNotContain ">GET — "
-        html shouldNotContain "POST scope"
-    }
-
-    @Test
-    fun `the binding picker offers the literal published prefixes and the whole tree`() {
-        val html =
-            render {
-                setVariable("bindingNodes", ApiKeyForm.bindingNodes(listOf("/nyc/revenue/{borough}")))
-            }
-
-        html shouldContain "/** (everything)"
-        html shouldContain "/nyc/**"
-        html shouldContain "/nyc/revenue/**"
-        // A node with a {variable} segment is NOT offered: the authorizer walks the concrete
-        // request path's ancestors, so binding one would authorise nothing at all.
-        html shouldNotContain "{borough}"
-    }
-
-    @Test
-    fun `the two sections share one stack, and the empty state's call to action stays inline`() {
-        // Owner's screenshot, 2026-09-08: the full-width keys card and the two-column row
-        // touched, and the keys empty state broke "Create one with / New key / ." over three
-        // lines. The gap comes from the sections being siblings inside `.app-stack`; the
-        // inline call to action from it NOT being a `<b>` — `.app-empty > b:first-child` is
-        // the block-level title, and only the first.
-        val html = render { }
-        val stack = html.indexOf("class=\"app-stack\"")
-        val stackEnd = html.indexOf("id=\"key-modal\"")
-        stack shouldBe html.lastIndexOf("class=\"app-stack\"") // exactly one stack
-        withClue("both sections sit inside the stack") {
-            val keys = html.indexOf("id=\"keys-table\"")
-            val grid = html.indexOf("app-grid-wide-left")
-            (stack < keys && keys < stackEnd) shouldBe true
-            (stack < grid && grid < stackEnd) shouldBe true
-        }
-        withClue("the empty state's action is not a second block-level <b>") {
-            val empty = html.substring(html.indexOf("No API keys"), html.indexOf("New key</strong>") + 16)
-            empty shouldNotContain "<b>"
-        }
     }
 
     @Test

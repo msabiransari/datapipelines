@@ -97,13 +97,25 @@ object ScopeMatrix {
         MUTATE_WORKSPACE_DATASOURCES(Scope.AUTHOR, Permission.WS_ADMIN),
 
         /**
-         * "Manage own API keys — any authenticated" (§7.6). [Scope.READ] is the floor
-         * of the §7.5 hierarchy: every scope implies it, so requiring `read` is exactly
-         * "any authenticated principal" and nothing weaker exists to express. The real
-         * guard on this operation is the key-scopes ⊆ creator-scopes subset check in
-         * [ApiKeyService.issue] (§7.4), not a scope minimum. R3 (#179) reshapes this row.
+         * "See, copy and delete your own MCP key" (§7.6; D16, 179). The `user`-kind key the
+         * login hook minted for the caller in the active workspace: the top-bar chip, its
+         * copy endpoint, and the delete that ROTATES it (the next login mints a new one).
+         * Renamed from `MANAGE_OWN_API_KEYS` when R3 took CREATION off this row entirely —
+         * a user key is minted at login or not at all, so "manage" was a promise the row no
+         * longer keeps. [Scope.READ] is the floor of the §7.5 hierarchy: every scope implies
+         * it, so requiring `read` is exactly "any authenticated principal" and nothing weaker
+         * exists to express.
          */
-        MANAGE_OWN_API_KEYS(Scope.READ, Permission.VIEW),
+        VIEW_OWN_MCP_KEY(Scope.READ, Permission.VIEW),
+
+        /**
+         * "Manage the workspace's API keys" (§7.6; D17, 179): the `/api-keys` page and its
+         * partials — create/delete `endpoint` keys, associate them with published paths — and
+         * the REST bindings routes. ws_admin and super admin only (owner ruling 8). The
+         * `author` scope floor matches every other workspace-admin verb; the ROLE axis is the
+         * one that excludes the author.
+         */
+        MANAGE_API_KEYS(Scope.AUTHOR, Permission.WS_ADMIN),
 
         /**
          * "Get current principal — any authenticated" (§7.6 v2.5, `GET /api/v1/auth/me`,

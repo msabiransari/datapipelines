@@ -24,9 +24,9 @@ object ApiKeyForm {
      * One kind, as the form's radio cards present it (owner ruling, 091): what it IS, in a
      * sentence, rather than an enum name a reader has to already understand.
      *
-     * The `user` label is "Agent / API key" deliberately — one kind, two surfaces. What an
-     * agent presents over MCP and what a program presents over REST is the same credential,
-     * and giving each surface its own name would invent a distinction the system does not make.
+     * Since 179 (D16) there is NO `user` choice: a user key is minted at login, never on
+     * demand, and the endpoint kind is labelled "API key" (D17) — the wire value stays
+     * `endpoint`, but that word no longer names the kind anywhere a person reads.
      */
     data class KindChoice(
         val wire: String,
@@ -80,27 +80,21 @@ object ApiKeyForm {
         )
 
     /**
-     * The kinds this caller may mint. `server` appears only for an admin — [ApiKeyService.issue]
-     * refuses it for anyone else, and rendering an option the server will refuse is a worse
-     * answer than not rendering it (the UI is convenience; the server check is the guard).
+     * The kinds this caller may mint. `user` is ABSENT since 179 (D16) — it is minted at
+     * login, not on demand, so a form that offered it would be offering a refusal
+     * (`auth.key_kind_not_mintable`). `server` appears only for an admin —
+     * [ApiKeyService.issue] refuses it for anyone else, and rendering an option the server
+     * will refuse is a worse answer than not rendering it (the UI is convenience; the server
+     * check is the guard).
      */
     fun kindChoices(isAdmin: Boolean): List<KindChoice> =
         listOfNotNull(
             KindChoice(
-                wire = ApiKeyKind.USER.wire,
-                label = "Agent / API key",
-                summary =
-                    "What an agent presents over MCP and what a program presents over REST — one kind, two " +
-                        "surfaces. Its scope decides what it may do.",
-                takesScope = true,
-                takesBindings = false,
-            ),
-            KindChoice(
                 wire = ApiKeyKind.ENDPOINT.wire,
-                label = "Endpoint key",
+                label = "API key",
                 summary =
-                    "Calls published endpoints and nothing else. It carries no scope at all: the paths you bind " +
-                        "it to are its whole authority.",
+                    "Calls the published endpoints it is associated with, and nothing else. It carries no " +
+                        "scope at all: the paths you bind it to are its whole authority.",
                 takesScope = false,
                 takesBindings = true,
             ),

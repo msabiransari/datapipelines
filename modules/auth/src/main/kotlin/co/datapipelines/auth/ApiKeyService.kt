@@ -30,6 +30,14 @@ class ApiKeyService(
     private val secretHasher: SecretHasher,
     private val authProperties: AuthProperties,
     private val workspaceService: WorkspaceService,
+    /**
+     * The sealer for the login-minted key's plaintext (D16/§3.3). Optional so auth-only
+     * test slices construct the service without the encryptor; the application always
+     * wires it (`DomainConfiguration`). Without it a login mint still happens — the key
+     * works — but nothing can offer its secret for copying, so a missing sealer is a WARN
+     * at mint time, never a silent gap.
+     */
+    private val secretSealer: SecretSealer? = null,
 ) {
     private val log = LoggerFactory.getLogger(ApiKeyService::class.java)
     private val random = SecureRandom()
@@ -285,6 +293,132 @@ class ApiKeyService(
         return revoked
     }
 
+    /**
+     * Revokes an `endpoint` key of [workspaceId], whoever owns it — the `/api-keys` page's
+     * delete (D17, `MANAGE_API_KEYS`). The caller's ROLE was judged at the route; the kind
+     * and workspace predicates in SQL are what keep this from ever touching a user's MCP
+     * key or another workspace's.
+     */
+    fun revokeWorkspaceEndpointKey(
+        keyId: String,
+        workspaceId: UUID,
+        actorId: UUID,
+    ): Boolean {
+        val revoked = apiKeyRepository.revokeInWorkspace(keyId, workspaceId, ApiKeyKind.ENDPOINT)
+        if (revoked) {
+            authCache.invalidateKey(keyId)
+            auditLogger.log(
+                event = "auth.api_key.revoked",
+                userId = actorId,
+                keyId = keyId,
+                details = mapOf("workspace_id" to workspaceId.toString(), "kind" to ApiKeyKind.ENDPOINT.wire),
+            )
+        }
+        return revoked
+    }
+
+    /**
+     * **The login mint (D16, §3.3)** — called by [WorkspaceService.workspaceForLogin] and the
+     * workspace switch through the `McpKeyMint` port, never from a request surface. If the
+     * user holds no live `user` key in [context]'s workspace, mint one:
+     *
+     * - scopes = the role's reach on the CREDENTIAL axis, derived from the matrix rather than
+     *   chosen by anyone: an AUTHOR-or-above context gets `author` (which subsumes execute
+     *   and read, §7.5), an EXECUTE-only context (the viewer) `execute`, everything else
+     *   (the promoter) `read`. With D16 the key IS the member's credential, so its scope
+     *   set is the role's, re-read per request as today (§7.4's issuer check is unchanged);
+     * - no expiry, name `mcp/<workspace>`;
+     * - `minted_at_login = TRUE`, and the plaintext SEALED into `secret_sealed` so the top
+     *   bar can offer Copy later — the plaintext is never returned to anyone at mint time,
+     *   because there is no screen in a login redirect.
+     *
+     * A user who owes a forced password change (§5A.4) gets NO key: the gate holds every
+     * governed route until the change, and a credential minted into that state would start
+     * life reachable only by a session that cannot use it. The first login or switch AFTER
+     * the change mints it.
+     *
+     * Idempotent under concurrent logins by the V31 partial unique index, not by the
+     * existence check: a lost race is one `DuplicateKeyException`, re-read as "the other
+     * login minted it" — the answer the check would have given a microsecond later.
+     *
+     * Returns the new record, or null when no mint happened (key exists, password change
+     * owed). The plaintext deliberately does NOT leave this method.
+     */
+    fun mintLoginKey(
+        user: User,
+        context: WorkspaceContext,
+    ): ApiKey? {
+        if (user.mustChangePassword) return null
+        if (apiKeyRepository.findLiveUserKey(user.id, context.id) != null) return null
+
+        val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
+        val secret = randomBase32(SECRET_LEN)
+        val fullKey = "$keyId.$secret"
+        val scopes =
+            when {
+                context.permits(Permission.AUTHOR) -> Scope.AUTHOR.expand()
+                context.permits(Permission.EXECUTE) -> Scope.EXECUTE.expand()
+                else -> setOf(Scope.READ)
+            }
+        val sealed =
+            secretSealer?.seal(fullKey, keyId)
+                ?: run {
+                    log.warn("No SecretSealer wired: the login-minted key {} will have no copyable secret", keyId)
+                    null
+                }
+        val record =
+            try {
+                apiKeyRepository.insert(
+                    id = keyId,
+                    userId = user.id,
+                    name = loginKeyName(context.name),
+                    keyHash = secretHasher.hash(fullKey),
+                    scopes = scopes,
+                    expiresAt = null,
+                    workspaceId = context.id,
+                    kind = ApiKeyKind.USER,
+                    secretSealed = sealed,
+                    mintedAtLogin = true,
+                )
+            } catch (_: org.springframework.dao.DuplicateKeyException) {
+                // The unique index is the arbiter: a concurrent login minted first.
+                return null
+            }
+        auditLogger.log(
+            event = "auth.api_key.created",
+            userId = user.id,
+            keyId = keyId,
+            details =
+                mapOf(
+                    "name" to record.name,
+                    "scopes" to scopes.map { it.wire },
+                    "workspace_id" to context.id.toString(),
+                    "kind" to ApiKeyKind.USER.wire,
+                    "minted_at_login" to true,
+                ),
+        )
+        return record
+    }
+
+    /**
+     * The caller's own MCP key's plaintext, opened from `secret_sealed` — the top bar's Copy
+     * (D16: the secret is served by THIS call, never rendered into a page). Null when the key
+     * is not the caller's own live `user` key in [workspaceId], or when it predates R3 and
+     * carries no sealed copy — the bar then shows "delete and sign in again" instead.
+     *
+     * Not cached and deliberately not routed through [AuthCache]: a copy click is rare, and
+     * the sealed blob is the one value that must not outlive a rotation in a cache.
+     */
+    fun openOwnMcpKey(
+        userId: UUID,
+        workspaceId: UUID,
+    ): String? {
+        val record = apiKeyRepository.findLiveUserKey(userId, workspaceId) ?: return null
+        val sealed = apiKeyRepository.sealedSecretOf(record.id) ?: return null
+        val sealer = secretSealer ?: return null
+        return sealer.open(sealed, record.id)
+    }
+
     private fun randomBase32(len: Int): String {
         val sb = StringBuilder(len)
         repeat(len) { sb.append(BASE32[random.nextInt(BASE32.length)]) }
@@ -309,6 +443,9 @@ class ApiKeyService(
         private const val KEY_PREFIX = ApiKeyCredential.KEY_PREFIX
         private const val ID_LEN = 12
         private const val SECRET_LEN = 48
+
+        /** The login-minted key's name (D16): which workspace this MCP key belongs to. */
+        fun loginKeyName(workspaceName: String): String = "mcp/$workspaceName"
 
         // RFC 4648 base32 alphabet (no padding, unambiguous, scanner-friendly).
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"

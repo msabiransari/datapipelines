@@ -17,9 +17,9 @@ import kotlin.io.path.relativeTo
  *
  * The whole resources tree is scanned, not just the four files: the rule is "the app never
  * blocks on a native dialog", and a new screen reintroducing one is exactly the drift a
- * fixed file list would miss. `api/console.html`'s `hx-confirm` is EXCLUDED BY PATH — it is
+ * fixed file list would miss. The key surfaces' `hx-confirm` is EXCLUDED BY PATH — it is
  * htmx's own attribute (an inline confirm string htmx renders), not a native dialog call;
- * excluding by pattern would ban the htmx feature itself, which is the console's to use.
+ * excluding by pattern would ban the htmx feature itself, which is those screens' to use.
  *
  * The BROWSER tests' sources are scanned too: a Playwright helper falling back to
  * `page.onDialog` handling would be a test-side reintroduction of the same native path.
@@ -41,7 +41,8 @@ class NativeDialogBanTest {
                 stream.filter(::isScannable).toList()
             }
         return sources
-            // Excluded BY PATH (the prompt's rule): htmx's own attribute on the API console,
+            // Excluded BY PATH (the prompt's rule): htmx's own attribute on the key surfaces
+            // (moved off the API console in 179 when the keys card became the /api-keys page),
             // never a native call.
             .filter { it.relativeTo(this).toString() != "api/console.html" }
             .filter(::carriesNativeDialog)
@@ -59,11 +60,15 @@ class NativeDialogBanTest {
     }
 
     @Test
-    fun `the exclusion is the console's single htmx attribute - nothing else`() {
+    fun `the exclusion is the key surfaces' htmx attributes - nothing else`() {
         // A floor, not a ceiling: if someone widens the exclusion to a directory, this pins
-        // that the console still carries exactly the one htmx attribute the exclusion names.
-        val text = Files.readString(projectRoot().resolve("modules/web/src/main/resources/templates/api/console.html"))
-        Regex("hx-confirm").findAll(text).count() shouldBeExactly 1
+        // that the key screens carry exactly the htmx attributes the exclusion names — one
+        // destructive confirm per surface (179 moved the console's to the /api-keys page's
+        // Delete and the top bar chip's rotate).
+        val keysPage = Files.readString(projectRoot().resolve("modules/web/src/main/resources/templates/api/keys.html"))
+        Regex("hx-confirm").findAll(keysPage).count() shouldBeExactly 1
+        val chip = Files.readString(projectRoot().resolve("modules/web/src/main/resources/templates/partials/mcp-key-chip.html"))
+        Regex("hx-confirm").findAll(chip).count() shouldBeExactly 1
     }
 
     private val roots =

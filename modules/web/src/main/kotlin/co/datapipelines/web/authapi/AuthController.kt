@@ -59,9 +59,14 @@ data class CreateApiKeyRequest(
  * principal, and user administration.
  *
  * Scope enforcement is the annotation + `auth`'s ScopeInterceptor ([ScopeMatrix] rows
- * `MANAGE_OWN_API_KEYS`, `CURRENT_PRINCIPAL`, `USER_ADMINISTRATION`); the privilege-escalation
- * guard on key scopes (§7.4) lives in [ApiKeyService.issue]. Audit events are written by the
- * services, not here (auth.md §10.1).
+ * `VIEW_OWN_MCP_KEY`, `MANAGE_API_KEYS`, `CURRENT_PRINCIPAL`, `USER_ADMINISTRATION`); the
+ * privilege-escalation guard on key scopes (§7.4) lives in [ApiKeyService.issue]. Audit
+ * events are written by the services, not here (auth.md §10.1).
+ *
+ * Since 179 (D16/D17) issuance and the self surface are DIFFERENT rows: a `user` key is
+ * minted by the login hook and nowhere else (`auth.key_kind_not_mintable` answers any
+ * attempt), and creating `endpoint` keys is the workspace admin's `MANAGE_API_KEYS`. What
+ * every role keeps is the view/delete of its OWN login-minted key — `VIEW_OWN_MCP_KEY`.
  *
  * ## Catalog gaps — reported, not papered over
  * §13 has no `auth.user.not_found` and no "api key not found" code. Unknown users are answered
@@ -85,14 +90,43 @@ class AuthController(
 ) {
     /** §16.1 — the caller's own keys, revoked included (`is_revoked` must be able to vary); never secrets. */
     @GetMapping("/api-keys")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS)
+    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
     fun listKeys(): ApiResponse<List<Map<String, Any?>>> =
         ApiResponse.of(apiKeyRepository.findByUser(currentPrincipal().userId).map { it.toResponse() })
 
-    /** §16.1 — issue. The plaintext `key` is in this response exactly once. */
+    /**
+     * §16.1 (179, D16) — the caller's ONE live MCP key in the ACTIVE workspace: what the top
+     * bar shows (id, prefix, whether the sealed secret can be copied). 404-shaped emptiness is
+     * deliberately NOT used — "no key yet" is a state, not an error, so the answer is
+     * `data: null` and the caller renders the sign-in hint.
+     */
+    @GetMapping("/api-keys/mine")
+    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
+    fun myMcpKey(): ApiResponse<Map<String, Any?>?> {
+        val principal = currentPrincipal()
+        val key =
+            principal.workspace?.let { apiKeyRepository.findLiveUserKey(principal.userId, it.id) }
+                ?: return ApiResponse.of(null)
+        return ApiResponse.of(
+            mapOf(
+                "id" to key.id,
+                "name" to key.name,
+                "prefix" to key.id.take(MCP_PREFIX_CHARS) + "…",
+                "copyable" to key.hasSealedSecret,
+                "created_at" to key.createdAt.toString(),
+            ),
+        )
+    }
+
+    /**
+     * §16.1 — issue (D17: the `MANAGE_API_KEYS` row since 179 — a workspace admin's verb).
+     * `kind` absent means `user`, which the service REFUSES (`auth.key_kind_not_mintable`):
+     * the refusal, not a silently different credential, is what a pre-179 client should meet.
+     * The plaintext `key` is in this response exactly once.
+     */
     @PostMapping("/api-keys")
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
     fun createKey(
         @RequestBody body: CreateApiKeyRequest,
     ): ApiResponse<Map<String, Any?>> {
@@ -140,7 +174,7 @@ class AuthController(
     /** §16.1 — revoke. Idempotent `204`: no existence disclosure (see the class KDoc). */
     @DeleteMapping("/api-keys/{keyId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_OWN_API_KEYS)
+    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
     fun revokeKey(
         @PathVariable keyId: String,
     ) {
@@ -272,5 +306,8 @@ class AuthController(
 
     private companion object {
         const val MAX_ECHOED_VALUE_CHARS = 32
+
+        /** D16 — the top bar shows this many characters of the key (the `dpk_` id head). */
+        const val MCP_PREFIX_CHARS = 12
     }
 }

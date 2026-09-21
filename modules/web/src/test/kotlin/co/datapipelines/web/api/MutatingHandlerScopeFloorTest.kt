@@ -203,17 +203,18 @@ class MutatingHandlerScopeFloorTest {
 
         val READ_FLOORED_MUTATION_HANDLERS: Map<String, String> =
             mapOf(
-                "AuthController#createKey" to
-                    "own-resource: issuance resolves the caller's own userId, and the §7.4 subset check in " +
-                    "ApiKeyService.issue (a read key mints only read keys) is the real privilege guard — " +
-                    "'any authenticated' IS the documented floor for managing one's own keys (§7.6)",
                 "AuthController#revokeKey" to
                     "own-resource: revocation is scoped to the caller's own keys in SQL " +
                     "(ApiKeyService.revoke(keyId, caller.userId)); no payload-chosen target beyond the caller's own key",
-                "ApiKeysPartialController#create" to
-                    "the /partials twin of AuthController#createKey — same own-resource issuance, same §7.4 subset guard",
-                "ApiKeysPartialController#revoke" to
-                    "the /partials twin of AuthController#revokeKey — same own-resource, SQL-scoped revocation",
+                // 179 (D16) removed the two CREATE entries: key issuance is no longer
+                // 'any authenticated' — `user` keys are login-minted and `endpoint` keys are
+                // the workspace admin's MANAGE_API_KEYS (author scope), so both create
+                // handlers sit above the read floor now and the non-vacuity arm keeps them
+                // off this list.
+                "ApiKeysPartialController#rotate" to
+                    "own-resource delete-to-rotate (D16): resolves the caller's OWN login-minted key in the " +
+                    "ACTIVE workspace — one exists at most (V31's partial unique index) — so the handler takes " +
+                    "no key id at all and there is no payload-chosen target",
                 "UserSettingsController#updateTheme" to
                     "own-resource: the write targets the caller's own user row (the handler resolves the caller's " +
                     "userId); there is no payload-chosen target",

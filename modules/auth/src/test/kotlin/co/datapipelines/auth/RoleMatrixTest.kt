@@ -315,7 +315,7 @@ class RoleMatrixTest {
             setOf(
                 Op.READ_RESOURCES,
                 Op.INTROSPECT_DATASOURCE,
-                Op.MANAGE_OWN_API_KEYS,
+                Op.VIEW_OWN_MCP_KEY,
                 Op.CURRENT_PRINCIPAL,
                 Op.PROFILE_PREFERENCE,
                 Op.CHANGE_OWN_PASSWORD,
@@ -350,6 +350,8 @@ class RoleMatrixTest {
                 Op.MANAGE_WORKSPACE,
                 Op.MANAGE_WORKSPACE_MEMBERS,
                 Op.WORKSPACES_READ,
+                // 179 (D17): the workspace's API keys — create, delete, associate.
+                Op.MANAGE_API_KEYS,
             )
 
         /** The two rows a session may hold with NO workspace context: the page and the REST list-own. */

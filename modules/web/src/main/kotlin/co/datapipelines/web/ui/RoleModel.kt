@@ -141,7 +141,9 @@ object RoleModel {
      * [promotion] is `PROMOTION_READ` (authors gain it, viewers never had a reason to see it),
      * [workspaces] is `WORKSPACES_READ` (D13 — the page is a workspace admin's; a principal
      * with NO workspace keeps the link, because the no-workspace page is the one screen that
-     * explains their state, ui-screens §4.13).
+     * explains their state, ui-screens §4.13). [apiKeys] (179, D17) is `MANAGE_API_KEYS`:
+     * the avatar menu's "API keys" link leads to `/api-keys`, a workspace admin's page, and
+     * renders for nobody else — the top bar's chip is everyone else's key surface.
      */
     data class Shell(
         val adminUsers: Boolean,
@@ -149,6 +151,7 @@ object RoleModel {
         val executions: Boolean,
         val promotion: Boolean,
         val workspaces: Boolean,
+        val apiKeys: Boolean,
     )
 
     fun shell(principal: AuthenticatedPrincipal?): Shell {
@@ -161,10 +164,14 @@ object RoleModel {
             executions = roles.canReadExecutions,
             promotion = roles.canReadPromotion,
             workspaces = roles.canAdminWorkspace || principal.isSuperAdmin || principal.workspace == null,
+            // `/api-keys` resolves the ACTIVE workspace, so a super admin with none keeps the
+            // instance entry only — a link whose page must refuse is the dead link this model
+            // exists to prevent.
+            apiKeys = roles.canAdminWorkspace || (adminUsers && principal.workspace != null),
         )
     }
 
-    private val NO_SHELL = Shell(adminUsers = false, adminMembers = false, executions = false, promotion = false, workspaces = false)
+    private val NO_SHELL = Shell(adminUsers = false, adminMembers = false, executions = false, promotion = false, workspaces = false, apiKeys = false)
 
     /**
      * Stamps [roles] into [model] under the names every template reads. Called by each screen's

@@ -1137,6 +1137,34 @@
       }
     });
 
+    /* 179 (D16) — the top bar's MCP-key Copy. The secret is NOT in the page: the click
+       fetches it from its own one-purpose endpoint (VIEW_OWN_MCP_KEY — the caller's own
+       login-minted key in the active workspace, opened from its sealed store), puts it on
+       the clipboard and toasts the outcome. The fetch carries the layout's CSRF header
+       contract like every mutating call — a GET needs no token, so none is sent. A 4xx
+       (the key was rotated in another tab) is a toast, not a silent no-op. */
+    doc.body.addEventListener("click", function (evt) {
+      var copy = evt.target.closest && evt.target.closest("[data-mcp-copy]");
+      if (!copy) return;
+      evt.preventDefault();
+      var url = copy.getAttribute("data-mcp-copy");
+      if (!url || !window.fetch) return;
+      var toast = window.DpToast;
+      window.fetch(url, { headers: { "Accept": "text/plain" }, credentials: "same-origin" })
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.text();
+        })
+        .then(function (secret) {
+          return navigator.clipboard.writeText(secret).then(function () {
+            if (toast) toast.show("success", "MCP key copied", "The full key is on your clipboard.");
+          });
+        })
+        .catch(function () {
+          if (toast) toast.show("danger", "Copy failed", "The key could not be read — it may have been rotated. Reload and try again.");
+        });
+    });
+
     /* 079 §B — the avatar menu. Opening is a click on the avatar; closing is
        Escape, a click anywhere outside, or choosing an item. Arrow keys move
        within it without activating anything.

@@ -87,6 +87,7 @@ class AuthConfiguration {
         authProperties: AuthProperties,
         contentCheck: ObjectProvider<WorkspaceContentCheck>,
         demoWorkspaceSeeder: ObjectProvider<DemoWorkspaceSeeder>,
+        apiKeyService: ObjectProvider<ApiKeyService>,
     ): WorkspaceService =
         WorkspaceService(
             workspaceRepository,
@@ -101,6 +102,11 @@ class AuthConfiguration {
             // examples file — construct a WorkspaceService without one. In the application it
             // is always present; the D-R11 demo join is not optional there.
             demoWorkspaceSeeder.getIfAvailable(),
+            // D16 — the login mint. ApiKeyService depends on WorkspaceService (the issuance
+            // membership guard), so the port closes over a PROVIDER and resolves the service
+            // on the first login, never at construction: the cycle that would otherwise exist
+            // between these two beans stays unrolled.
+            McpKeyMint { user, context -> apiKeyService.getObject().mintLoginKey(user, context) },
         )
 
     /**
@@ -133,7 +139,21 @@ class AuthConfiguration {
         secretHasher: SecretHasher,
         authProperties: AuthProperties,
         workspaceService: WorkspaceService,
-    ): ApiKeyService = ApiKeyService(apiKeyRepository, userService, authCache, auditLogger, secretHasher, authProperties, workspaceService)
+        secretSealer: ObjectProvider<SecretSealer>,
+    ): ApiKeyService =
+        ApiKeyService(
+            apiKeyRepository,
+            userService,
+            authCache,
+            auditLogger,
+            secretHasher,
+            authProperties,
+            workspaceService,
+            // D16 — bound in `web` (`DomainConfiguration`) to the datasources module's
+            // CredentialEncryptor, which auth cannot see (module-structure §4.2). Optional
+            // so this module's own test slices construct the service without one.
+            secretSealer.getIfAvailable(),
+        )
 
     @Bean
     fun authErrorWriter(objectMapper: ObjectMapper): AuthErrorWriter = AuthErrorWriter(objectMapper)

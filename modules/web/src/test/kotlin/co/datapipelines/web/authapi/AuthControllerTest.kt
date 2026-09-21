@@ -3,6 +3,7 @@ package co.datapipelines.web.authapi
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.auth.ApiKey
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
@@ -10,10 +11,10 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeInsufficientException
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -120,25 +121,50 @@ class AuthControllerTest {
     @Test
     fun `create returns the plaintext exactly once`() {
         authenticate(setOf(Scope.AUTHOR))
-        every { apiKeyService.issue(any(), userId, "claude", setOf(Scope.READ), any(), null) } returns
-            IssuedApiKey(key("dpk_new", false), "dpk_new.secret")
+        every { apiKeyService.issue(any(), userId, "ci", emptySet(), any(), null, ApiKeyKind.ENDPOINT) } returns
+            IssuedApiKey(key("dpk_new", false).copy(kind = ApiKeyKind.ENDPOINT, scopes = emptySet()), "dpk_new.secret")
 
-        val data = controller.createKey(CreateApiKeyRequest(name = "claude", scopes = listOf("read"))).data
+        val data = controller.createKey(CreateApiKeyRequest(name = "ci", kind = "endpoint")).data
         data["key"] shouldBe "dpk_new.secret"
-        data["scopes"] shouldBe listOf("read")
+        data["kind"] shouldBe "endpoint"
+        data["scopes"] shouldBe emptyList<String>()
+    }
+
+    /**
+     * 179 (D16) — the default kind is `user`, and `user` is refused on EVERY request surface:
+     * a pre-179 client posting what it always posted gets the catalogued 400 that says what
+     * changed, never a silently different credential.
+     */
+    @Test
+    fun `an absent or user kind is the not-mintable refusal, and no key is issued`() {
+        authenticate(setOf(Scope.AUTHOR))
+
+        val defaulted =
+            shouldThrow<DatapipelinesException> {
+                controller.createKey(CreateApiKeyRequest(name = "claude", scopes = listOf("read")))
+            }
+        defaulted.code shouldBe "auth.key_kind_not_mintable"
+
+        val explicit =
+            shouldThrow<DatapipelinesException> {
+                controller.createKey(CreateApiKeyRequest(name = "claude", kind = "user", scopes = listOf("read")))
+            }
+        explicit.code shouldBe "auth.key_kind_not_mintable"
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun `scopes outside the caller's own are the 403 the service raises`() {
-        authenticate(setOf(Scope.READ))
-        every { apiKeyService.issue(any(), userId, "x", setOf(Scope.ADMIN), any(), null) } throws
-            ScopeInsufficientException(Scope.ADMIN, setOf(Scope.READ))
+    fun `scopes on a scopeless kind are refused before any mint`() {
+        authenticate(setOf(Scope.AUTHOR))
 
+        // The funnel owns this refusal (§7.7): an endpoint key's authority is its bindings,
+        // and a scope on it is a mental model to correct out loud, not to drop quietly.
         val error =
-            shouldThrow<ScopeInsufficientException> {
-                controller.createKey(CreateApiKeyRequest(name = "x", scopes = listOf("admin")))
+            shouldThrow<DatapipelinesException> {
+                controller.createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", scopes = listOf("admin")))
             }
-        error.code shouldBe "auth.scope.insufficient"
+        error.code shouldBe "endpoint.key_kind_refused"
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

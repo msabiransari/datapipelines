@@ -79,11 +79,13 @@ class ApiKeyRepository(
         expiresAt: Instant?,
         workspaceId: UUID,
         kind: ApiKeyKind = ApiKeyKind.DEFAULT,
+        secretSealed: ByteArray? = null,
+        mintedAtLogin: Boolean = false,
     ): ApiKey {
         jdbc.update(
             """
-            INSERT INTO api_keys (id, user_id, name, key_hash, scopes, expires_at, workspace_id, kind)
-            VALUES (:id, :user_id, :name, :key_hash, :scopes, :expires_at, :workspace_id, :kind)
+            INSERT INTO api_keys (id, user_id, name, key_hash, scopes, expires_at, workspace_id, kind, secret_sealed, minted_at_login)
+            VALUES (:id, :user_id, :name, :key_hash, :scopes, :expires_at, :workspace_id, :kind, :secret_sealed, :minted_at_login)
             """.trimIndent(),
             MapSqlParameterSource()
                 .addValue("id", id)
@@ -93,10 +95,72 @@ class ApiKeyRepository(
                 .addValue("scopes", scopes.map { it.wire }.toTypedArray())
                 .addValue("expires_at", expiresAt?.let { java.sql.Timestamp.from(it) })
                 .addValue("workspace_id", workspaceId)
-                .addValue("kind", kind.wire),
+                .addValue("kind", kind.wire)
+                .addValue("secret_sealed", secretSealed)
+                .addValue("minted_at_login", mintedAtLogin),
         )
         return checkNotNull(findById(id)) { "api_keys row '$id' vanished immediately after insert" }
     }
+
+    /**
+     * The caller's ONE live `user` key in [workspaceId] — the login-minted MCP key (D16,
+     * V31's partial unique index makes "one" a database fact, not a hope). Null when the
+     * login hook has not minted yet (or the user rotated and has not signed in since).
+     */
+    fun findLiveUserKey(
+        userId: UUID,
+        workspaceId: UUID,
+    ): ApiKey? =
+        jdbc
+            .query(
+                "$SELECT_COLUMNS WHERE k.user_id = :uid AND k.workspace_id = :wid " +
+                    "AND k.kind = 'user' AND k.is_revoked = FALSE ORDER BY k.created_at DESC",
+                MapSqlParameterSource("uid", userId).addValue("wid", workspaceId),
+                ::map,
+            ).firstOrNull()
+
+    /**
+     * The sealed plaintext of [keyId] (V31, D16) — read ONLY by the copy surface, never
+     * loaded onto the [ApiKey] model: a secret that rides every row read is a secret that
+     * one careless log serializes. Null for rows minted before R3 and for non-user kinds.
+     */
+    fun sealedSecretOf(keyId: String): ByteArray? =
+        jdbc
+            .query(
+                "SELECT secret_sealed FROM api_keys WHERE id = :id",
+                MapSqlParameterSource("id", keyId),
+            ) { rs, _ -> rs.getBytes("secret_sealed") }.firstOrNull()
+
+    /**
+     * Every key of [kind] pinned to [workspaceId], revoked included, newest first — the
+     * `/api-keys` admin page's listing (D17). Unlike [findByUser] this is NOT owner-scoped:
+     * the page administers the WORKSPACE's API keys, whoever created them.
+     */
+    fun findByWorkspaceAndKind(
+        workspaceId: UUID,
+        kind: ApiKeyKind,
+    ): List<ApiKey> =
+        jdbc.query(
+            "$SELECT_COLUMNS WHERE k.workspace_id = :wid AND k.kind = :kind ORDER BY k.created_at DESC",
+            MapSqlParameterSource("wid", workspaceId).addValue("kind", kind.wire),
+            ::map,
+        )
+
+    /**
+     * Soft revoke of a key of [kind] in [workspaceId], NOT owner-scoped — the `/api-keys`
+     * page's delete (D17: a workspace admin retires the workspace's API keys, not only their
+     * own). The kind and workspace predicates are the safety rails: this can never touch a
+     * user's MCP key or a key pinned elsewhere.
+     */
+    fun revokeInWorkspace(
+        id: String,
+        workspaceId: UUID,
+        kind: ApiKeyKind,
+    ): Boolean =
+        jdbc.update(
+            "UPDATE api_keys SET is_revoked = TRUE WHERE id = :id AND workspace_id = :wid AND kind = :kind AND is_revoked = FALSE",
+            MapSqlParameterSource().addValue("id", id).addValue("wid", workspaceId).addValue("kind", kind.wire),
+        ) > 0
 
     /** Soft revoke. Returns true if a live key was flipped. Owner check enforced by caller. */
     fun revoke(
@@ -130,10 +194,20 @@ class ApiKeyRepository(
     }
 
     private companion object {
-        /** Every read joins `workspaces` so the pinned workspace's name reaches the principal (D3). */
+        /**
+         * Every read joins `workspaces` so the pinned workspace's name reaches the principal
+         * (D3). The columns are EXPLICIT since V31 rather than `k.*`: `secret_sealed` is the
+         * one column this projection must never return — a sealed secret riding the
+         * hot validation path's row object is a secret one careless log away from a leak —
+         * while `(k.secret_sealed IS NOT NULL)` is the fact the top bar needs.
+         */
         val SELECT_COLUMNS =
             """
-            SELECT k.*, w.name AS workspace_name
+            SELECT k.id, k.user_id, k.name, k.key_hash, k.scopes, k.is_revoked, k.created_at,
+                   k.last_used_at, k.last_used_ip, k.last_used_user_agent, k.expires_at,
+                   k.workspace_id, k.kind, k.minted_at_login,
+                   (k.secret_sealed IS NOT NULL) AS has_sealed_secret,
+                   w.name AS workspace_name
               FROM api_keys k
               JOIN workspaces w ON w.id = k.workspace_id
             """.trimIndent()
@@ -161,6 +235,8 @@ class ApiKeyRepository(
             // there is no null to tolerate — but fromWire would throw on an unexpected value,
             // and a key that cannot be classified must fail loudly rather than authenticate.
             kind = ApiKeyKind.fromWire(rs.getString("kind")),
+            hasSealedSecret = rs.getBoolean("has_sealed_secret"),
+            mintedAtLogin = rs.getBoolean("minted_at_login"),
         )
     }
 }

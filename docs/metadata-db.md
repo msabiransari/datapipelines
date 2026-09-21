@@ -142,6 +142,8 @@ CREATE TABLE api_keys (
     last_used_ip          INET,
     last_used_user_agent  TEXT,
     kind                  TEXT        NOT NULL DEFAULT 'user',   -- 'user' | 'endpoint' (V11) | 'server' (V17)
+    secret_sealed         BYTEA,                       -- V31: the full key, sealed (D16); NULL pre-R3
+    minted_at_login       BOOLEAN     NOT NULL DEFAULT FALSE,    -- V31: the login hook minted this (D16)
     CONSTRAINT chk_api_keys_kind CHECK (kind IN ('user', 'endpoint', 'server'))
 );
 
@@ -150,6 +152,10 @@ CREATE INDEX idx_api_keys_expires ON api_keys(expires_at)
     WHERE expires_at IS NOT NULL AND is_revoked = FALSE;
 CREATE INDEX idx_api_keys_endpoint_kind ON api_keys(workspace_id)
     WHERE kind = 'endpoint' AND is_revoked = FALSE;
+-- V31 (D16): ONE live `user` key per (user, workspace) — the login hook's "none yet"
+-- check is a read; this index is the arbiter of the race.
+CREATE UNIQUE INDEX api_keys_one_live_user_key ON api_keys(user_id, workspace_id)
+    WHERE kind = 'user' AND is_revoked = FALSE;
 ```
 
 **Notes:**
@@ -158,6 +164,7 @@ CREATE INDEX idx_api_keys_endpoint_kind ON api_keys(workspace_id)
 - `scopes` is a `TEXT[]`; a key's scopes must be a subset of its creator's scopes at creation time (enforced by the application, not the schema — the creator's scopes are derived per D14, not stored).
 - `is_revoked` and `expires_at` are both re-checked on every request through the 60s cache in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13), so revocation takes effect within ~1 minute.
 - Revocation is a soft flag, not a DELETE: `audit_log.key_id` must keep resolving to something meaningful.
+- `secret_sealed` / `minted_at_login` (V31, [Auth §7.4](auth.md#74-issuance), D16): a `user` key is minted by the login/switch hook, never on demand, and its plaintext is sealed with the deployment's credential-encryption key (AAD = the key id) so the top bar's copy endpoint can open it later. NULL for keys minted before R3 — they show their prefix with no copy button. `minted_at_login` marks the hook's rows; the Argon2id `key_hash` stays the authentication half. The partial unique index `api_keys_one_live_user_key` enforces one live `user` key per (user, workspace); `endpoint` and `server` keys are excluded, and revoked rows do not block the rotation re-mint. The migration revokes all but the newest live `user` key per pair (a NOTICE reports the count) before creating the index.
 - `kind` (V11) is the key's KIND ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): `user` is every key that existed before it — scopes, a workspace, the whole API surface its scopes allow — and `endpoint` is a credential for published endpoints only. An `endpoint` key's scopes are never consulted; its authority is its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings), and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'user'` is the correct backfill for the whole pre-V11 table, so the migration needs no `UPDATE`.
 - No `updated_at` — the only mutations are `last_used_*` (written on use), `is_revoked` (written once) and `kind` (written once, at issuance), and all are self-timestamping or immutable.
 

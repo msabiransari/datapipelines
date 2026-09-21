@@ -24,12 +24,12 @@
   </div>
   <p class="u-secondary u-text-sm u-m0"><span th:text="${keyName}">name</span> created.</p>
   <!-- E2: the create response is the ONLY chance to refresh the table without a reload.
-       Same table markup as the page (api/console :: keysTable) — extracted, never
+       Same table markup as the page (api/keys :: keysTable) — extracted, never
        duplicated. The OOB element is the WHOLE TABLE (the controller set oob=true, which
        puts hx-swap-oob="true" on it for THIS render only): a tbody-level OOB element
        nested in this div is destroyed by the browser's fragment parser (030 — table-only
        tags outside table context are dropped tokens), so the refresh would silently never
        happen. outerHTML (inline) OOB form: the new table replaces #keys-table. -->
-  <th:block th:replace="~{api/console :: keysTable(${keys})}"></th:block>
+  <th:block th:replace="~{api/keys :: keysTable(${keys})}"></th:block>
   <div th:replace="~{partials/toast-oob :: oob('info', 'API key created', 'The key is shown once on this screen — copy it now.')}"></div>
 </div>

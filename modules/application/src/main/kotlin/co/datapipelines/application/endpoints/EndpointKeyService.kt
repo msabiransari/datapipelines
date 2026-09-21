@@ -5,6 +5,7 @@ import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
+import co.datapipelines.auth.KeyKindNotMintableException
 import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -44,6 +45,8 @@ class EndpointKeyService(
      *
      * @throws DatapipelinesException `endpoint.path_invalid` for a malformed binding path, or
      *   `endpoint.key_kind_refused` when the kind and the other arguments contradict each other.
+     * @throws KeyKindNotMintableException `auth.key_kind_not_mintable` for `kind = user` —
+     *   since 179 (D16) a user key is minted by the login hook only, never on demand.
      */
     @Suppress("LongParameterList") // the issuance contract, mirroring ApiKeyService.issue
     fun issue(
@@ -56,6 +59,16 @@ class EndpointKeyService(
     ): IssuedApiKey {
         val workspaceId = principal.requireWorkspace().id
         val normalized = bindingPaths.map(::normalizeBinding)
+
+        // D16 (179): a `user` key is minted by the LOGIN/SWITCH hook and nowhere else — one
+        // per user per workspace, rotated by deleting it and signing in again. Every request
+        // surface (REST, this page's form, and any future caller of this funnel) refuses the
+        // kind outright, for EVERY role: `auth.key_kind_not_mintable`, before anything else
+        // is validated, so the refusal never depends on which other argument happened to
+        // fail first.
+        if (kind == ApiKeyKind.USER) {
+            throw KeyKindNotMintableException(kind)
+        }
 
         // Bindings belong to exactly ONE kind. Stated as "not endpoint" rather than "is user"
         // so a kind added later (091's `server` was) cannot fall through and silently WRITE

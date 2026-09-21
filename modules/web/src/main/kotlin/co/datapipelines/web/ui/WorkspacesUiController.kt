@@ -314,6 +314,9 @@ class WorkspacesUiController(
             val principal = requireSessionPrincipal()
             val target = workspaceService.resolveSwitch(principal, name.trim())
             val user = userService.snapshot(principal.userId) ?: return "redirect:/workspaces?error=unknown_user"
+            // D16: a successful switch IS an entry into that workspace — mint the user's one
+            // MCP key there exactly as login does (no-op when one is already live).
+            workspaceService.mintMcpKeyOnEntry(user, target)
             // Re-minting keeps the session's login method: a switch must not turn a Google
             // session into a password one (and back into the §5A.4 gate).
             val jwt = jwtService.issue(user, target.name, principal.loginMethod ?: LoginMethod.PWD)

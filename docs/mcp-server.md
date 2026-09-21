@@ -13,7 +13,7 @@ datapipelines.co is **MCP-native**. Agentic tools (Claude Desktop, GLM, Copilot,
 
 This spec defines:
 - The **MCP transport** (Streamable HTTP) and how clients connect.
-- The **authentication model** (API key issued per-user-per-agent from the UI).
+- The **authentication model** (the user's MCP key — minted at sign-in, one per workspace, copied from the top bar).
 - The **tool surface** (functions the agent can call).
 - The **resource surface** (entities the agent can read as files).
 - The **prompt surface** (predefined workflows the agent can invoke).
@@ -25,7 +25,7 @@ This spec defines:
 
 1. **MCP is a thin adapter over REST.** Every MCP tool maps to one or more REST endpoints defined in [REST API spec](rest-api.md). No business logic in the MCP layer — it's translation only.
 2. **Tools for actions, resources for inspection.** If an agent needs to *do* something (execute a pipeline, create a template), it calls a tool. If it needs to *read* something (look at a pipeline definition), it reads a resource. We avoid duplicating read operations as both.
-3. **API key, not OAuth.** Self-hosted, internal-users-only deployment model makes OAuth overkill. The user grabs an API key from the UI, passes it to their agent, the agent uses it — in either the `DP-API-Key` header or an `Authorization: Bearer dpk_...` header. See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
+3. **API key, not OAuth.** Self-hosted, internal-users-only deployment model makes OAuth overkill. The user copies their MCP key from the top bar (minted at sign-in — [Auth §7.4](auth.md#74-issuance), D16), passes it to their agent, the agent uses it — in either the `DP-API-Key` header or an `Authorization: Bearer dpk_...` header. See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
 4. **MCP versioning follows the protocol.** We commit to a specific MCP protocol version per datapipelines.co release, and document upgrade paths when the protocol evolves.
 5. **Fail loudly, never silently.** MCP-level errors (transport, auth) and application errors (pipeline validation, datasource unreachable) both surface as structured errors the agent can act on. No silent fallbacks.
 6. **Workspace-scoped by the key (workspaces design §5.2/§9).** Every tool and resource operates inside the workspace the API key is PINNED to at issuance — `DP-Workspace` is refused on MCP requests (`400 workspace.header_forbidden`), because a header-switchable agent key would make every leaked key a skeleton key across the user's workspaces. Pipelines, templates and executions of other workspaces are ABSENT (not hidden): their ids resolve as not-found. Datasources visible here are exactly the ones GRANTED to the pinned workspace (D-R7): there is no global datasource, and one that is not granted is ABSENT, not hidden. The `initialize` result's `instructions` field states this so an agent does not reason about invisible siblings.
@@ -89,12 +89,12 @@ Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, 
 
 **Session JWTs are not accepted on `/mcp`.** There is no cookie auth and no non-`dpk_` Bearer token path — a browser-embedded MCP client must use an API key like any other agent.
 
-API keys are:
-- Issued per-user-per-agent from the UI's API screen (e.g., "Claude Desktop key", "GLM key"); HTTP surface in [REST API §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only).
-- Revocable, optionally expiring.
-- Scoped `read` / `execute` / `author` (hierarchical, [Auth §7.5](auth.md#75-scopes)). **`admin` is no longer issuable to a key** — it was the only scope that ever bought a key an INSTANCE verb, and instance verbs are human. A key's scopes are a subset of what its issuer can do in the pinned workspace at issue time.
+API keys (the `user` kind — "your MCP key") are:
+- **Minted by the login/switch hook, one per user per workspace** (179, D16) — never on demand (`auth.key_kind_not_mintable` answers any attempt); shown in the top bar with a copy button; rotation is delete there and sign in again.
+- Never expiring, owner-scoped to delete; HTTP reads in [REST API §16.1](rest-api.md#161-api-keys-own-keys-creation-is-a-workspace-admins--179).
+- Scoped by the ROLE the user holds in the pinned workspace (hierarchical `read` / `execute` / `author`, [Auth §7.5](auth.md#75-scopes)) — since 179 nobody chooses scopes at issuance. **`admin` is no longer issuable to a key** — it was the only scope that ever bought a key an INSTANCE verb, and instance verbs are human. The key's effective reach is additionally capped by what its issuer can do in the pinned workspace RIGHT NOW, re-read per request.
 
-**An agent's key is a `user` key — the same kind a program uses over REST.** The UI labels it "Agent / API key" for exactly that reason: one credential kind, two surfaces. The other two kinds ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) do not reach `/mcp` at all — an `endpoint` key authorises published endpoints and a `server` key the promotion routes, and each is refused here with `403 endpoint.key_kind_refused` by `McpAuthFilter` (the scope interceptor never sees `/mcp`, which is a servlet, so the refusal is made again at the transport). A scopeless key could otherwise read the whole tool catalogue through `tools/list` without being able to call any of it.
+**An agent's key is a `user` key — the same kind a program uses over REST:** one credential kind, two surfaces. (The form label "Agent / API key" left with on-demand minting in 179 — the kind needs no label where it is never chosen.) The other two kinds ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) do not reach `/mcp` at all — an `endpoint` key authorises published endpoints and a `server` key the promotion routes, and each is refused here with `403 endpoint.key_kind_refused` by `McpAuthFilter` (the scope interceptor never sees `/mcp`, which is a servlet, so the refusal is made again at the transport). A scopeless key could otherwise read the whole tool catalogue through `tools/list` without being able to call any of it.
 
 **Enforcement is TWO axes, and a key must satisfy both** ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative), [§11A](auth.md#11a-roles)). The minimum SCOPE and the minimum ROLE for every MCP tool are defined once in that matrix — this spec restates each tool's requirement in §6.2 for readability, but the matrix is authoritative on any conflict, and one function (`ScopeMatrix.allowedTool`) answers both here and at the REST interceptor.
 

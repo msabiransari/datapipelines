@@ -1604,20 +1604,25 @@ A complete OpenAPI 3.1 spec lives in `docs/api/openapi.yaml` and is published at
 
 Flows and rules are specified in [Auth](auth.md) (§7.4 issuance, §7.6 scope matrix); this section defines the HTTP surface. All endpoints below live under `/api/v1`.
 
-### 16.1 API keys (any authenticated principal — own keys only)
+### 16.1 API keys (own keys; creation is a workspace admin's — 179)
 
 ```
 GET /auth/api-keys
 ```
-Lists the caller's keys (id, name, `kind`, scopes, created_at, expires_at, last_used_at, is_revoked). Never returns secrets.
+Lists the caller's keys (id, name, `kind`, scopes, created_at, expires_at, last_used_at, is_revoked). Never returns secrets. (`VIEW_OWN_MCP_KEY` — every role.)
+
+```
+GET /auth/api-keys/mine
+```
+The caller's ONE live `user` key in the active workspace — the login-minted MCP key (D16): `id`, `name`, `prefix`, `copyable` (whether the sealed secret can be served — false for keys minted before V31), `created_at`. `data` is `null` when none exists (post-rotation, pre-login — a state, not an error).
 
 ```
 POST /auth/api-keys
 Content-Type: application/json
 
-{"name": "claude-desktop", "scopes": ["read", "execute"], "expires_at": "2027-08-07T00:00:00Z"}
+{"name": "nightly-sync", "kind": "endpoint", "bindings": ["/nyc"], "expires_at": "2027-08-07T00:00:00Z"}
 ```
-`scopes` must be ⊆ the caller's scopes (`403 auth.scope.insufficient` otherwise); `expires_at` optional. Response `201`:
+**Workspace admins and super admins only** (`MANAGE_API_KEYS`, since 179 — D17). `expires_at` optional. Response `201`:
 
 ```json
 {
@@ -1625,10 +1630,10 @@ Content-Type: application/json
   "correlation_id": "uuid",
   "data": {
     "id": "dpk_ab12cd34ef56",
-    "name": "claude-desktop",
-    "kind": "user",
-    "scopes": ["read", "execute"],
-    "bindings": [],
+    "name": "nightly-sync",
+    "kind": "endpoint",
+    "scopes": [],
+    "bindings": ["/nyc"],
     "key": "dpk_ab12cd34ef56.9f8e7d6c...",
     "created_at": "2026-09-08T09:00:00Z",
     "expires_at": "2027-08-07T00:00:00Z"
@@ -1638,20 +1643,20 @@ Content-Type: application/json
 
 `key` is the full plaintext, returned **exactly once** — it is never retrievable again.
 
-**`kind`** ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Enums §8A](enums.md#8a-apikeykind--what-an-api-key-is)) is `user` (the default and every key minted before 074), `endpoint`, or `server`. It changes what the rest of the body means:
+**`kind`** ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Enums §8A](enums.md#8a-apikeykind--what-an-api-key-is)) is `user`, `endpoint`, or `server`. It changes what the rest of the body means:
 
 | `kind` | `scopes` | `bindings` | Who may mint |
 |---|---|---|---|
-| `user` | Required in effect — absent falls back to the configured default | Refused (`403 endpoint.key_kind_refused`) | Any authenticated principal, at or below its own scopes |
-| `endpoint` | **Refused if present** — an endpoint key's authority is its bindings | The endpoint-tree nodes it authorises, validated BEFORE the key is minted | Any authenticated principal |
-| `server` | **Refused if present** — a server key's authority is a route family | Refused | `admin` only (`403 auth.scope.insufficient` otherwise) |
+| `user` | — | — | **Nobody, on any request surface (179, D16)**: minted by the login/switch hook, one per user per workspace. `400 auth.key_kind_not_mintable` for every role — and an ABSENT `kind` means `user`, so a pre-179 client gets the refusal, not a silently different credential |
+| `endpoint` | **Refused if present** — an endpoint key's authority is its bindings | The endpoint-tree nodes it authorises, validated BEFORE the key is minted | Workspace admins and super admins (`MANAGE_API_KEYS`) |
+| `server` | **Refused if present** — a server key's authority is a route family | Refused | Super admin only |
 
 An unknown `kind` is `403 endpoint.key_kind_refused`, naming the supported values. A `server` key is the credential a SENDING deployment presents as `DP-Promotion-Key` (§18); it authenticates nothing on this API — presented as `DP-API-Key` it is refused on every route with `403 endpoint.key_kind_refused` and `details.reason = "server_key_off_surface"`.
 
 ```
 DELETE /auth/api-keys/{key_id}
 ```
-Revokes the key (effective ≤ cache TTL, ~60s). `204 No Content`.
+Revokes the caller's OWN key (owner-scoped; `VIEW_OWN_MCP_KEY`, every role — this is also the MCP key's delete-to-rotate). Effective ≤ cache TTL, ~60s. `204 No Content`.
 
 ### 16.2 Current principal
 
@@ -1780,7 +1785,7 @@ The RECEIVER half of promotion ([Versioning §10](versioning.md#10-promotion-ui-
 
 **Authentication is different here, and deliberately narrower.** These routes are gated by the server key of §10.6, presented as `DP-Promotion-Key`. The header is read on this prefix and no other, so the credential authenticates nothing anywhere else and grants no read access outside this pair. The converse also holds: an ordinary API key or a session cookie does **not** open these routes — promotion is a deployment-to-deployment channel, not a privileged human one.
 
-**How the receiver mints one (091).** On the receiver, an `admin` opens the API screen, creates a key of kind **`server`** (no scope, no bindings — the form hides both for this kind) and copies the plaintext, which is shown once. That value goes into the SENDER's `datapipelines.deployment.promotion.target.server-key`. Equivalently over REST, on the receiver:
+**How the receiver mints one (091; the page moved in 179).** On the receiver, a super admin opens the API keys page (`/api-keys`), creates a key of kind **`server`** (no scope, no bindings — the form hides both for this kind) and copies the plaintext, which is shown once. That value goes into the SENDER's `datapipelines.deployment.promotion.target.server-key`. Equivalently over REST, on the receiver:
 
 ```
 POST /auth/api-keys   {"name": "uat receiver", "kind": "server"}
@@ -1983,10 +1988,14 @@ is fine, and the answer is coming.
 segment, because a `path_pattern` contains `/` and an encoded `%2F` is refused below routing on
 the pinned Tomcat (the measured reason §8 moved templates to query addressing).
 
-Bindings are `POST` / `DELETE /api/v1/endpoints/bindings`, naming the key by NAME and requiring
-the key's **owner**. Binding another user's key is not offered in v1: `api_keys.name` carries no
-uniqueness constraint, so "the key named `ci`" is ambiguous deployment-wide and a surface that
-resolved it would pick one person's credential to widen. Promotion carries endpoint rows and their bindings **by key name**; a target missing
+Bindings are `POST` / `DELETE /api/v1/endpoints/bindings`, and since 179 (D17) they are a
+**workspace admin's verb** (`MANAGE_API_KEYS` — associating a credential with an endpoint tree is
+no longer the publisher's). The key is named by **`api_key_id`** (the `/api-keys` page's shape —
+unambiguous, workspace-scoped, `endpoint` kind required) or, kept for REST compatibility, by
+**`api_key_name`** — which resolves within the caller's OWN keys only, exactly as before:
+`api_keys.name` carries no uniqueness constraint, so "the key named `ci`" is ambiguous
+deployment-wide and a surface that resolved it across owners would pick one person's credential
+to widen. Promotion carries endpoint rows and their bindings **by key name**; a target missing
 that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed.
 The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool-definitions)).
 

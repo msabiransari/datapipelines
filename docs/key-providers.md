@@ -11,6 +11,8 @@ This document is written for someone — a person or an agent — who has this r
 
 Datasource passwords are encrypted at rest with AES-256-GCM ([Datasources §7.1](datasources.md#71-encryption-at-rest)). *Where the AES keys come from* is the only part a customer's environment changes, and it is behind one interface. Implementing AWS KMS, GCP KMS, Azure Key Vault or Vault transit means writing that interface — not touching the crypto.
 
+Since 179 (roles design D16) the same `CredentialEncryptor` — and therefore the same provider — also seals the login-minted MCP keys' plaintext (`api_keys.secret_sealed`, AAD = the key id), through the `SecretSealer` port in `auth`; a KMS-backed provider covers those rows with no extra work.
+
 ---
 
 ## 1. What a provider is, and is not
@@ -217,4 +219,5 @@ The honest summary for a customer: **`env` protects a stolen database backup; a 
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.1 | 179 (#179) keys | The same encryptor — and therefore every provider this guide covers — also seals the login-minted MCP keys' plaintext (`api_keys.secret_sealed`, AAD = the key id), bound through `auth`'s `SecretSealer` port. No provider change |
 | 2026-09-04 | v1.0 | 068 key-provider seam | Born. The `KeyProvider` contract, the `env` provider, the envelope design for KMS-backed providers, the step list and the AWS worked recipe, and the threat model |

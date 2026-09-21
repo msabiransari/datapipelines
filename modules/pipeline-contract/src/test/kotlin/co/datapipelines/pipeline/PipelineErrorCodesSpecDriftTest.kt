@@ -164,6 +164,10 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Auth.ROLE_REQUIRED,
                 PipelineErrorCodes.Auth.KEY_ISSUER_ROLE_LOST,
                 PipelineErrorCodes.Auth.KEY_SCOPE_UNAVAILABLE,
+                // 179 — a user key is minted at login only; "kind" is a property of the
+                // credential requested, not of a named entity, so the code is two-segment
+                // like its key_* siblings above.
+                PipelineErrorCodes.Auth.KEY_KIND_NOT_MINTABLE,
                 PipelineErrorCodes.Auth.KEY_WORKSPACE_INACTIVE,
                 // 112 — the workspace domain's two: "the last admin" and "deactivated" are
                 // states of the WORKSPACE, with no entity dimension under it.

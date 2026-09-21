@@ -254,7 +254,19 @@ nav packs to the top; the free space below it is deliberate.
   of the app renders — the inventory is [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative).
 
 **The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold),
-the search field **palette** (161), the light/dark toggle, and the avatar menu.
+the search field **palette** (161), the light/dark toggle, the **MCP-key chip** (179), and the
+avatar menu.
+
+- **The MCP-key chip** (179, D16 — ruling 7): the caller's ONE login-minted `user` key in the
+  ACTIVE workspace, right side beside the user menu — the `dpk_…` prefix (12 characters), a
+  **Copy** button, and **delete-to-rotate**. Copy FETCHES the secret from
+  `GET /partials/mcp-key/secret` (shell.js → clipboard): the secret is never in the page.
+  A key minted before V31 carries no sealed secret, so its chip shows the prefix WITHOUT Copy
+  and says "delete and sign in again to get a copyable key". After a delete the chip re-renders
+  to "no key — one is minted at your next sign-in", and the chip is absent entirely when no
+  live key exists. The chip links to `/api-console`'s MCP card for the connection JSON. Every
+  role may do all three on their OWN key (`VIEW_OWN_MCP_KEY`), so the chip's guard is the key's
+  existence (`mcpKey != null`), not a role.
 
 - **The breadcrumb** is server-rendered from `AppNav.crumbFor(currentPath)` and re-derived
   client-side after a boosted swap from the active rail link's own `data-nav-group` /
@@ -697,8 +709,8 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Datasources (§4.5) | Register, Edit, Delete | `canAdminWorkspace` | `MUTATE_WORKSPACE_DATASOURCES` |
 | Datasources | **Test** | `canExecute` — the connection test **follows execute** (ratified 2026-09-20) | `TEST_DATASOURCE` |
 | Datasource grants (§4.5a) | Grants, Grant, Revoke | `isSuperAdmin` | `MANAGE_DATASOURCE_GRANTS` |
-| API keys (§4.18) | New key | `canAuthor` (O-2 — viewers never mint) | `MANAGE_OWN_API_KEYS` + the §7.4 issuance gate |
-| API keys | Revoke | `canRead` — any member, own keys | `MANAGE_OWN_API_KEYS` |
+| API keys (§4.19) | New API key / Delete / Edit associations | `canAdminWorkspace` or `isSuperAdmin` | `MANAGE_API_KEYS` (179, D17) |
+| Top bar (§4.3e) | MCP key copy / delete-to-rotate | every role, own key (`mcpKey != null`) | `VIEW_OWN_MCP_KEY` (179, D16) |
 | Promotion (§4.17) | the page itself | `canReadPromotion` — author, promoter, admins (owner rule 13) | `PROMOTION_READ` |
 | Promotion (§4.17) | Promote — and, since 143, the whole submission form (Send column, selection boxes) | `canPromote` in the SOURCE workspace; an author gets the plan as a plain table | `PROMOTE_VERSION` |
 | Workspaces (§4.13) | the page itself | `canAdminWorkspace` or `isSuperAdmin` (D13) — the switcher in the chrome stays every member's | `WORKSPACES_READ` / `WORKSPACE_SWITCH` |
@@ -1037,27 +1049,26 @@ The panel has exactly three states, decided by the cursor response:
 
 For anything that must outlive the TTL, the answer is not a longer TTL: write it back with `output.target: "datasource"` ([REST §7.1](rest-api.md#71-model)).
 
-### 4.10 API Keys — the link (091)
+### 4.10 API Keys — the pointer (091; repointed 179)
 
-**This screen is a LINK now.** Issuing, listing and revoking keys moved to §4.18's API section,
-where the endpoints those keys call and the MCP connection they authenticate already live: "the
-keys that may call this deployment" and "the endpoints they may call" are one question, and
-keeping them a page apart made the API screen a read-only shadow of a settings page nobody
-found. This screen renders one sentence and a link to `/api-console`.
+**This screen is a pointer.** 179 split the keys in two (D16/D17): YOUR MCP key is minted at
+sign-in and lives in the top bar (§4.3e) — copy from the chip, delete there to rotate — and the
+workspace's API keys (the `endpoint` kind) are the workspace admin's `/api-keys` page (§4.19).
+This screen says exactly that, reads no keys at all, and links to `/api-keys` only for the roles
+that hold `MANAGE_API_KEYS`.
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /settings/api-keys` |
-| Auth required | Yes — any authenticated principal (the key VERBS live on §4.18: New key is `canAuthor`, Revoke is `canRead` — [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
-| Purpose | Point at §4.18. It reads no keys at all |
+| Auth required | Yes — any authenticated principal (the key VERBS live on §4.19 and §4.3e — [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
+| Purpose | Point at the top bar (your MCP key) and §4.19 (the workspace's API keys) |
 | Design primitives | `.ds-card`, `.app-empty`, `.ds-button` |
 | JS | None |
 | htmx | No |
 
-**Why the route survives.** The avatar menu, `AppNav`'s off-rail breadcrumb table and every
-bookmark point here; answering them with a 404 to save one template would be a worse deal than
-rendering a sentence and a link. (The avatar menu's "API keys" entry and Settings' API card both
-already target `/api-console`, so the only way here is a bookmark.)
+**Why the route survives.** `AppNav`'s off-rail breadcrumb table and every bookmark point here;
+answering them with a 404 to save one template would be a worse deal than rendering a sentence
+and the links.
 
 ### 4.11 User Settings
 
@@ -1323,16 +1334,16 @@ Each row shows the pipeline's version here and on the target (`absent` when the 
 
 ---
 
-### 4.18 API section (079 §C, closes T139)
+### 4.18 API section (079 §C, closes T139; read-only since 179)
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /api-console` |
 | Auth required | Yes — `read` (`ScopeMatrix.RestOperation.READ_RESOURCES`), the same floor `EndpointsController.list` uses |
-| Purpose | Everything a program uses to talk to this workspace, in one place: published endpoints, the keys that may call them, the MCP connection |
+| Purpose | Everything a program uses to talk to this workspace, in one place: published endpoints, the API keys associated with each, the MCP connection |
 | Design primitives | `.ds-card`, `.ds-table`, `.app-chip`, `.app-code`, `.app-empty` |
-| JS | Light — the modal, the kind-conditional fields, and the select-the-secret reveal |
-| htmx | Yes for KEYS (`hx-post="/partials/api-keys"` into `#keyCreated`; `hx-delete="/partials/api-keys/{id}"` into `#keys-table-body`, each with a §5.1 Shape A out-of-band piece). The endpoints and MCP cards stay read-only |
+| JS | None |
+| htmx | None — since 179 the page is a read-only inventory. The key verbs moved to `/api-keys` (§4.19) |
 
 **Why the route is `/api-console` and not something under `/api`.** That prefix is the
 programmatic surface, split in two — the `/api/v1` REST envelope and the published
@@ -1345,82 +1356,82 @@ prefixes govern only where an UNannotated handler is default-denied), the annota
 gate here — and it is also what refuses an `endpoint`-kind key, which carries no scopes by
 design ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) and reaches only the published-endpoint surface.
 
-**Read-only about ENDPOINTS; the management screen for KEYS (091).** Publishing an endpoint and
-binding an existing key stay on REST/MCP (074 step 6's intent) — the endpoints card is a
-truthful inventory plus links. Keys are different: their whole lifecycle is here. The key
-surface is `MANAGE_OWN_API_KEYS` (any authenticated principal, own keys only), enforced by the
-partial controllers' own annotation rather than by this page's `read` floor. Actions a principal
-lacks scope for are not rendered (§4 preamble), and the server re-checks regardless.
+**Read-only about everything on it (179).** The keys card and its minting modal lived here
+from 091 to 179; they moved to `/api-keys` (§4.19), the workspace admin's page (D17). What
+remains is the inventory — and, for the roles `MANAGE_API_KEYS` admits, a **Manage** link per
+endpoint row and **Manage API keys** in the header. Your own MCP key is not here at all: it is
+the top bar's chip (§4.3e), minted at sign-in (D16).
 
-Three cards. Since 091 the **API keys** card leads the page and spans it: it is the management
-surface now, and seven columns do not fit the narrow track the read-only version sat in
-(measured on a live stack at 1440 — `Last used` and the revoke action were off the card's right
-edge). The endpoints inventory and the MCP connection keep the two-column row below it. The
-numbering below stays in the order the cards were introduced.
+Two cards.
 
 1. **Published endpoints** — from `EndpointPublishService.list(principal)`, one batch lookup
    for pipeline names and one for released versions (never a query per row, the rule
-   `PipelineNames` was written for). Columns: path, pipeline, timeout, bound keys.
+   `PipelineNames` was written for). Columns: path, pipeline, timeout, **API keys**.
    - The method is always **GET**: `PublishedEndpointController` refuses everything else with
      `Allow: GET`, so it is a fact about the surface rather than a column that could vary.
    - The version shown is the **released** one, not `pipelines.current_version`. An endpoint
      pins a PIPELINE and serves its latest release, so a draft number would describe something
      no call will ever run. A pipeline with no release renders "no released version" — an
      endpoint can outlive the release it was published against, and that is worth seeing.
-   - "N bound" is the **exact-node** binding count, which is what the REST surface reports.
-     It is deliberately not the EFFECTIVE authorization, which walks ancestors and takes the
-     nearest node carrying any binding (`EndpointAuthorizer`); and zero bindings does not mean
-     nobody can call it — a `user` key pinned to this workspace with `execute` still may.
+   - **API keys** names the keys associated at the EXACT node (179: names, not a count —
+     "which keys" is the operator's question). It is deliberately not the EFFECTIVE
+     authorization, which walks ancestors and takes the nearest node carrying any binding
+     (`EndpointAuthorizer`); and no associations does not mean nobody can call it — a `user`
+     key pinned to this workspace with `execute` still may. The **Manage** link (admins only)
+     leads to the association editor on `/api-keys`.
    - **There is no "calls in the last 24 h" column, and the mock has one.** Nothing in this
      system records endpoint serves: no counter column on `published_endpoints`, no Micrometer
      counter, no query. The only trace is an append-only `endpoint.served` audit row whose one
      production reader is a per-execution boolean and whose KDoc argues explicitly against
      broadening it. A column filled from a sample would be a plausible number and a false one,
      so the card states the absence instead. Adding the column means adding the counter first.
-2. **API keys** — the caller's own keys, and since 091 the place they are ISSUED and REVOKED
-   (§4.10 is a link now). Columns: key (name + `dpk_RGAX…` prefix), kind, **reach**, created,
-   expires, last used, and a revoke action.
-   - **Reach** is whatever decides what the key may do, and that differs by kind: scopes for a
-     `user` key, the bound paths (`/nyc/**`) for an `endpoint` key, the promotion route family
-     for a `server` key. An empty scope cell on the last two would read as "this key can do
-     nothing", which is the opposite of true ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)).
-   - Every timestamp is **relative in the cell, absolute (UTC) on hover**: "is this about to
-     expire?" and "exactly when?" are both real questions, and a cell with one of them sends the
-     reader to the database.
-   - Revoked AND **expired** keys keep their row and lose the revoke affordance. §7.3 refuses
-     both, so a table that showed an expired key as live would disagree with the authenticator.
-   - The list is the caller's OWN keys — the list endpoint never accepts a user filter, and
-     admins get no cross-user view of keys here.
-
-   **The create form** — one modal, in the order the owner ratified: **Kind → Scope → Name →
-   Expiry → Bindings**, with scope and bindings CONDITIONAL on the kind.
-
-   | Field | What it does |
-   |---|---|
-   | **Kind** | Radio cards, one sentence each. `user` is labelled **"Agent / API key"**: one kind, two surfaces (an agent's key over MCP and a program's key over REST are the same credential, and two names would invent a distinction the system does not make). `server` is rendered for **admins only** — `ApiKeyService` refuses it to anyone else, and a form that offers a refused option lies |
-   | **Scope** | A select of the CAPABILITIES with their meanings — `read` (list and inspect, runs nothing), `execute` (run released pipelines, includes read), `author` (create and change templates, pipelines, datasources, includes execute), `admin` (everything, including users and workspaces). Filtered to the caller's own scopes (§7.4's subset rule); the server refuses a superset regardless. **Hidden for `endpoint` and `server`**, whose inputs are DISABLED rather than merely hidden — a disabled input is not submitted, and a scope on a scopeless kind is refused, not dropped |
-   | **Name** | Not unique, and the hint says so: `api_keys.name` carries no uniqueness constraint and two people in one workspace may legitimately both have an "agent" key. The prefix is what identifies a key |
-   | **Expiry** | A select — Never / 1 / 7 / 30 / 90 days / custom date — resolved SERVER-side from the same table the page renders from, so the select cannot offer a value the server refuses. A custom date expires at the **end** of that day, UTC (a human typing a date means "valid through that day"). A bad one is `400 auth.api_key.expiry_invalid` with a stable `details.reason`, never a silent fallback to "never": failing toward a BROADER credential is the wrong way to fail |
-   | **Bindings** | `endpoint` kind only — the published-endpoint picker, showing the tree nodes in the `/nyc/**` form 074 defined. Only **literal** prefixes are offered: `EndpointAuthorizer` walks the ancestors of the CONCRETE request path, so a node containing a `{variable}` segment would be a checkbox that authorises nothing. The root `/` is always offered and always first |
-
-   **The create result** shows the secret ONCE in a persistent inline panel (§5.1's hard rule — a
-   6s toast never carries anything the user must keep), beside the prefix, kind, scope-or-
-   bindings and expiry of what was actually minted. The same response refreshes the whole table
-   out-of-band (at TABLE level: a `tbody` OOB element nested in the response dies in the
-   browser's fragment parser) and points an info toast at the panel.
-
-   **One fragment, three renders.** The page, the post-create refresh and the rows a revoke
-   swaps in all render `api/console :: keysTable` / `:: keyRows` from one row model
-   (`ApiKeyRows`). Before 091 the revoke path hand-built its rows in Kotlin and a parity test
-   kept the two markups "byte-for-byte" alike; there is one markup now.
-3. **MCP server** — the connection JSON, the live tool count and the P32 rule. The count is
-   `McpToolCatalog.NAMES.size` at request time, never a literal, exactly as the marketing site
-   renders it. The header name is `ApiKeyCredential.HEADER`. The server URL comes from
-   `datapipelines.auth.base-url`, the deployment's DECLARED external origin — never derived
-   from the request, for the reason `OidcConfig` documents: a hostile `Host` /
+2. **MCP server** — the connection JSON, the live tool count and the confinement note. The
+   count is `McpToolCatalog.NAMES.size` at request time, never a literal, exactly as the
+   marketing site renders it. The header name is `ApiKeyCredential.HEADER`. The server URL
+   comes from `datapipelines.auth.base-url`, the deployment's DECLARED external origin —
+   never derived from the request, for the reason `OidcConfig` documents: a hostile `Host` /
    `X-Forwarded-Host` would otherwise choose a URL a reader is invited to paste into an agent's
    config next to a live API key. Unset, the card shows the `{host}/mcp` placeholder the
-   marketing site already uses rather than guessing.
+   marketing site already uses rather than guessing. The key the config wants is the TOP BAR's
+   (D16): minted at sign-in, copied from the chip.
+
+---
+
+### 4.19 API keys (179, D17 — the workspace's `endpoint` keys)
+
+| Attribute | Value |
+|---|---|
+| URL | `GET /api-keys` |
+| Auth required | Yes — `MANAGE_API_KEYS`: workspace admins and super admins (owner ruling 8) |
+| Purpose | Create, delete and associate the workspace's API keys — the credentials programs call published endpoints with |
+| Design primitives | `.ds-card`, `.ds-table`, `.app-chip`, `.app-picker`, `.app-modal` |
+| JS | The create modal, the kind-conditional associations field, and the select-the-secret reveal |
+| htmx | `hx-post="/partials/api-keys"` (create, into `#keyCreated`); `hx-delete="/partials/api-keys/{id}"` (delete, into `#keys-table-body`); `hx-post="/partials/api-keys/{id}/bindings"` (save an association SET) — each with a §5.1 Shape A out-of-band piece |
+
+The table lists the workspace's API keys, whoever created them: name + `dpk_…` prefix (12
+characters, D16's length), **created by**, associated endpoints (`/nyc/**` form; the root reads
+as the whole-tree wildcard), created, expires, last used — relative in the cell, absolute (UTC)
+on hover, like every table here. Deleted and expired keys keep their row and lose their verbs.
+
+- **Create** — one modal: **Kind → Name → Expiry → Associations**. Kind offers `endpoint`
+  ("API key") and, to a super admin, `server`; there is NO `user` choice (D16 — the login
+  hook mints those, and the service refuses `auth.key_kind_not_mintable` for every role).
+  Expiry is the same server-resolved select §4.18 used to host (a custom date expires at the
+  end of that day, UTC; a bad one is `400 auth.api_key.expiry_invalid`). Associations are the
+  published-path picker: only LITERAL prefixes are offered, because `EndpointAuthorizer` walks
+  the concrete request path's ancestors and a `{variable}` node would authorise nothing.
+  The secret is shown ONCE in a persistent inline panel; the response refreshes the whole
+  table out-of-band (at TABLE level — a `tbody` OOB element dies in the browser's fragment
+  parser) and points a toast at the panel.
+- **Delete** — revokes the key (a workspace-scoped, kind-pinned SQL revoke: it cannot touch
+  a user's MCP key or another workspace's).
+- **Edit associations** — a per-row disclosure with the picker pre-checked to the key's
+  current bindings; Save posts the whole SET and the service writes the delta (add/remove),
+  so a checkbox never maps to "add" or "remove" by itself.
+
+**One fragment, three renders.** The page, the post-create refresh and the rows a delete or
+association save swaps in all render `api/keys :: keysTable` / `:: keyRows` from one row model
+(`ApiKeyRows`).
 
 ---
 
@@ -1581,6 +1592,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.60 | 179 (#179) roles R3 — keys | **§4.3e / §3.4: the top bar gains the MCP-key chip** (D16, ruling 7) — prefix, Copy (fetches the secret from `GET /partials/mcp-key/secret`; never in the page) and delete-to-rotate for every role on their own key. **§4.18 read-only again**: the keys card and its modal left the console for **§4.19 `/api-keys`** (new; `MANAGE_API_KEYS` — ws_admin + super admin), which carries create (Kind → Name → Expiry → Associations), delete and per-key association; the console's endpoints table gains the associated-keys-by-name column with an admins-only Manage link, and keeps the MCP card. **§4.10 repointed**: the settings screen points at the top bar (your MCP key) and §4.19 (the workspace's). The avatar menu's "API keys" link leads to `/api-keys` for the roles that hold `MANAGE_API_KEYS` and is absent otherwise. `ApiKeysPageRenderTest` pins the page; `ApiConsoleRenderTest` pins the console's new shape. |
 | 2026-09-20 | v1.59 | 177 (#177) roles R1 | §4.13 the workspaces page is a **workspace admin's** (D13: `WORKSPACES_READ` → `ws_admin`; the rail draws the item for admins and for a principal with no workspace; the switcher stays every member's under its own `WORKSPACE_SWITCH` row); the members table is **one role dropdown per row** (D22) with a Save through the one htmx partial (`POST /partials/workspaces/{name}/members/{userId}/role`, row swap + toast), the add form takes the same dropdown, the checkbox script is gone, the last-admin toast names the workspace admin role. §4.12's create form takes the dropdown too. §4.3e rewritten to the ratified rows: Release and Switch are `canAuthor` (D8), datasource **Test** is `canExecute` (follows execute — ratified), the promotion page is `canReadPromotion` (rule 13), the Executions rail item and the dashboard's runs are `canReadExecutions` (D11 — the promoter has neither), the lifecycle and datasource dialogs guard their verbs in the markup (the route-guarded exemption list is empty). §3.4 the badge prints the one role (`workspace admin`, not `admin`). §4.4/§4.7 the promoter's editors are read-only with no Release. Vocabulary: role and permission; the word "flags" leaves this document (D21). |
 | 2026-09-19 | v1.58 | 161 (#161) the login page renders the one brand mark | §3.4 brand mark: `login.html`'s card brand and `layouts/auth.html`'s brand link had kept the retired filled-tile SVG inline (163's sweep rendered the rail, the top bar and the site only); both now include `partials/brand-mark.html` exactly as `layouts/default.html` does — no CSS change, the tile and mark are sized by class. `BrandMarkParityRenderTest` renders the login page and the forced-password gate as two more surfaces (each divergence named) and sweeps every template source for the retired rect. |
 | 2026-09-19 | v1.57 | 172 (#172) | The `/api-console` route rationale reworded for the re-rooted published-endpoint tree (R-EP5); no screen, route or verb changed. |
