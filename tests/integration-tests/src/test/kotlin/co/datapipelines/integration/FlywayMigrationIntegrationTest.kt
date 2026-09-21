@@ -116,6 +116,9 @@ class FlywayMigrationIntegrationTest {
                 // 177 (#177) D11 — `triggered_by` → `executed_by` + `executed_by_key_kind`
                 // (metadata-db §4.6).
                 "30|executions executed by|true",
+                // 179 — D16: the login-minted MCP key (sealed secret, the flag, one live
+                // `user` key per (user, workspace)).
+                "31|login minted mcp keys|true",
             )
     }
 
@@ -668,6 +671,9 @@ class FlywayMigrationIntegrationTest {
         indexes shouldContainExactlyInAnyOrder
             listOf(
                 "api_keys.api_keys_pkey",
+                // 179 (V31): one live `user` key per (user, workspace) — the login mint's
+                // race arbiter.
+                "api_keys.api_keys_one_live_user_key",
                 "api_keys.idx_api_keys_endpoint_kind",
                 "api_keys.idx_api_keys_expires",
                 "api_keys.idx_api_keys_user",

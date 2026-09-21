@@ -340,6 +340,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
 
         private const val ALICE = "aaa00000-0000-0000-0000-000000000001"
         private const val BOB = "bbb00000-0000-0000-0000-000000000002"
+        private const val EVE = "e0e00000-0000-0000-0000-000000000005"
         private const val ROOT = "ddd00000-0000-0000-0000-000000000004"
         private const val WS_ACME = "aca00000-0000-0000-0000-000000000001"
         private const val WS_GLOBEX = "b0b00000-0000-0000-0000-000000000002"
@@ -361,7 +362,11 @@ class WorkspaceSurfacesFixRoundE2eTest {
         private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
         private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
         private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author"), ownerId = ROOT)
-        private val READONLY_KEY = E2eAuth.generateKey("readonly-key", arrayOf("read"), ownerId = ALICE)
+        /**
+         * 179 (V31): one live `user` key per (user, workspace) — Alice's read-only key moved
+         * to EVE, a viewer in acme: the same read-scope assertions, a legal pair.
+         */
+        private val READONLY_KEY = E2eAuth.generateKey("readonly-key", arrayOf("read"), ownerId = EVE)
 
         private fun sessionJwt(
             userId: String,
@@ -412,6 +417,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
                         INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
                             ('$ALICE', 'alice@acme.test', 'Alice', 'test', 'alice-sub', TRUE, FALSE),
                             ('$BOB', 'bob@globex.test', 'Bob', 'test', 'bob-sub', TRUE, FALSE),
+                            ('$EVE', 'eve@acme.test', 'Eve', 'test', 'eve-sub', TRUE, FALSE),
                             ('$ROOT', 'root@company.test', 'Root', 'test', 'root-sub', TRUE, TRUE)
                         """.trimIndent(),
                     )
@@ -419,6 +425,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
                         """
                         INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
                             ('$WS_ACME', '$ALICE', 'workspace_admin'),
+                            ('$WS_ACME', '$EVE', 'viewer'),
                             ('$WS_GLOBEX', '$BOB', 'workspace_admin')
                         """.trimIndent(),
                     )

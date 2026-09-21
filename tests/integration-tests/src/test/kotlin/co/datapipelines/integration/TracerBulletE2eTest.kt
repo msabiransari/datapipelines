@@ -424,7 +424,8 @@ class TracerBulletE2eTest {
                 statement.execute(
                     """
                     INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)
-                    VALUES ('$ADMIN_USER_ID', 'tracer-e2e-admin@datapipelines.test', 'E2E Admin', 'test', 'e2e-admin-sub', TRUE, TRUE)
+                    VALUES ('$ADMIN_USER_ID', 'tracer-e2e-admin@datapipelines.test', 'E2E Admin', 'test', 'e2e-admin-sub', TRUE, TRUE),
+                           ('$READER_USER_ID', 'tracer-e2e-reader@datapipelines.test', 'E2E Reader', 'test', 'e2e-reader-sub', TRUE, FALSE)
                     """.trimIndent(),
                 )
             }
@@ -435,7 +436,10 @@ class TracerBulletE2eTest {
                 ).use { ps ->
                     for (key in listOf(ADMIN_KEY, READ_ONLY_KEY)) {
                         ps.setString(1, key.id)
-                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
+                        // 179 (V31): one live `user` key per (user, workspace) — the
+                        // read-only key gets its own owner (the viewer fallback is what its
+                        // 403 assertions exercise either way).
+                        ps.setObject(2, UUID.fromString(if (key === READ_ONLY_KEY) READER_USER_ID else ADMIN_USER_ID))
                         ps.setString(3, key.name)
                         ps.setString(4, key.hash)
                         ps.setArray(5, connection.createArrayOf("text", key.scopes))
@@ -453,6 +457,7 @@ class TracerBulletE2eTest {
         private const val API_KEY_HEADER = "DP-API-Key"
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
+        private val READER_USER_ID: String = UUID.randomUUID().toString()
 
         /** Active emails in the order the template returns them (`created_at DESC`). */
         private val ACTIVE_EMAILS = listOf("newer@datapipelines.test", "older@datapipelines.test")
