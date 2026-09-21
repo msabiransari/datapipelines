@@ -14,9 +14,11 @@ out/
 # Kotlin 2.x per-project analysis state (trailing comments are NOT supported
 # in .gitignore — they become part of the pattern, so keep them on their own line)
 .kotlin/
-# Gate run logs — scripts/gate.sh writes .gate-logs/, agent worktrees write gate-logs/
+# Gate run logs — scripts/gate.sh writes .gate-logs/, agent worktrees write gate-logs/;
+# scripts/pregate.sh writes .pregate-logs/
 .gate-logs/
 gate-logs/
+.pregate-logs/
 # Scanner binaries installed by the scan scripts (DEVELOPMENT.md §10.2). Lives
 # OUTSIDE build/ so `gradlew clean` does not force a re-download.
 .tools/
