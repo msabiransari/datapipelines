@@ -276,7 +276,7 @@ datapipelines:
   # refused BY NAME at startup — so they must not appear here either, defaults included: a
   # placeholder with a default IS a set key to Spring, and this file would refuse its own boot.
   workspaces:
-    member-datasources-enabled: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}
+    member-datasources-enabled: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:false}
 
   staging:
     h2:
@@ -414,6 +414,10 @@ datapipelines:
   # deployment's datasources carry their own longer query_timeout_seconds.
   datasources:
     retire-ceiling-seconds: ${DATAPIPELINES_DATASOURCES_RETIRE_CEILING_SECONDS:}
+    # §3.26 (186): the declared roots a file-backed in-process datasource (H2 `file:`/bare
+    # path, SQLite, DuckDB file) must live under. EMPTY = refused for everyone — no
+    # file-backed datasource is registrable until the deployment declares where they live.
+    file-roots: ${DATAPIPELINES_DATASOURCES_FILE_ROOTS:}
   # 137 — outbound mail (configuration.md §3.27, auth.md §5A.8): the welcome / password-reset
   # mail to a local user and the new-user notice to sys-ops. Appended after the whole
   # datapipelines: tree, like the block above (a block inserted mid-tree reparents its

@@ -182,13 +182,16 @@ class WorkspaceSurfacesFixRoundE2eTest {
     @Test
     fun `F6 - an author key CAN register through the partial - the floor is not a wall`() {
         ensureSeeded()
+        // #186: the engine is a SERVER dialect — an in-process engine is super-admin-only now,
+        // and this case's subject is the SCOPE floor (an author key passes it), not the engine.
+        // The URL never connects: registration validates without opening a connection.
         given()
             .port(port)
             .header(API_KEY_HEADER, aliceKey)
             .contentType(ContentType.URLENC)
             .formParam("name", "partial-reg")
-            .formParam("dialect", "H2")
-            .formParam("jdbcUrl", "jdbc:h2:mem:fixround_partial;DB_CLOSE_DELAY=-1")
+            .formParam("dialect", "POSTGRES")
+            .formParam("jdbcUrl", "jdbc:postgresql://db:5432/app")
             .formParam("username", H2_USER)
             .formParam("password", H2_PASSWORD)
             .`when`()
@@ -258,12 +261,18 @@ class WorkspaceSurfacesFixRoundE2eTest {
      * Datasources are registered over REST (idempotent, once): the registry's save path
      * builds a REAL pool, so the H2 in-memory URLs make the test pool build succeed, and
      * the encryption key is random per boot — SQL seeding cannot produce valid ciphertext.
+     *
+     * #186: in-process engines register as the SUPER ADMIN (the H2 `mem:` URLs below), so the
+     * workspace-bound rows go through the root session with an explicit `workspace` binding —
+     * the same ownership shape Alice's key used to produce. The suite's D8 premise still
+     * needs `member-datasources-enabled=true` (set in the context): it is what the scope-floor
+     * cases exercise.
      */
     private fun ensureDatasourcesRegistered() {
         if (datasourcesRegistered) return
         datasourcesRegistered = true
-        register(ALICE_KEY.plaintext, DS_ACME, H2_ACME_URL)
-        register(BOB_KEY.plaintext, DS_GLOBEX, H2_GLOBEX_URL)
+        registerWorkspaceDatasource(DS_ACME, H2_ACME_URL, "acme")
+        registerWorkspaceDatasource(DS_GLOBEX, H2_GLOBEX_URL, "globex")
         registerInstanceDatasource(DS_GLOBAL, H2_GLOBAL_URL)
         // D-R7: "global" is gone. What made this datasource shared is now an explicit GRANT
         // per workspace — so F5's premise ("referenced by ANOTHER workspace's pipeline") needs
@@ -308,20 +317,21 @@ class WorkspaceSurfacesFixRoundE2eTest {
             .statusCode(200)
     }
 
-    private fun register(
-        key: String,
+    /** #186: a workspace-OWNED in-process datasource — registered by the super admin into the named workspace. */
+    private fun registerWorkspaceDatasource(
         name: String,
         jdbcUrl: String,
-        global: Boolean = false,
+        workspace: String,
     ) {
-        val globalFlag = if (global) ",\"global\":true" else ""
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, key)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, FIX_ROUND_CSRF)
+            .header(CSRF_HEADER, FIX_ROUND_CSRF)
             .body(
-                """{"name": "$name", "display_name": "Fix-round $name", "dialect": "H2",
-                   "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD"$globalFlag}""",
+                """{"name": "$name", "display_name": "Fix $name", "dialect": "H2",
+                   "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD","workspace":"$workspace"}""",
             ).`when`()
             .post("/api/v1/datasources")
             .then()
@@ -494,6 +504,11 @@ class WorkspaceSurfacesFixRoundE2eTest {
             }
 
             registry.add("datapipelines.auth.base-url") { "http://localhost:8080" }
+
+            // The suite's D8 premise: workspace admins MAY register datasources (the 186
+            // default is now false). The in-process engines stay super-admin-only regardless —
+            // this context's H2 rows are registered through the root session.
+            registry.add("datapipelines.workspaces.member-datasources-enabled") { "true" }
 
             // design §7: the open-join self-service row runs against the FULL app in this
             // suite — bob (a globex owner, not an acme member) joins acme with his own email.

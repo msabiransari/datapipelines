@@ -58,7 +58,7 @@ class PromotionConfigKeysSpecDriftTest {
         // the ones a mis-indented insert would have swallowed.
         shipped["datapipelines.deployment.authoring-enabled"] shouldBe "\${DATAPIPELINES_DEPLOYMENT_AUTHORING_ENABLED:true}"
         shipped["datapipelines.workspaces.member-datasources-enabled"] shouldBe
-            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}"
+            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:false}"
         shipped["datapipelines.env"] shouldBe "\${DATAPIPELINES_ENV:local}"
     }
 

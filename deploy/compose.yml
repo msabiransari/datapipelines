@@ -114,7 +114,7 @@ services:
       # because Spring's relaxed binding reads DATAPIPELINES_WORKSPACES_* as the key.
       # Workspaces are created by super admins; `demo` ships and every user with no
       # membership joins it as a viewer on first login.
-      DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:-true}
+      DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:-false}
 
       # Config-declared startup content (configuration.md §3.18). BOTH ARE PATHS,
       # and EMPTY MEANS OFF — the same shape as the two keys above, and the reason
@@ -169,6 +169,9 @@ services:
       DATAPIPELINES_EXECUTOR_HEARTBEAT_SECONDS: ${DATAPIPELINES_EXECUTOR_HEARTBEAT_SECONDS:-15}
       # 094 — empty = derived from NODE_QUERY_TIMEOUT_SECONDS + 30 (datasources §5.2).
       DATAPIPELINES_DATASOURCES_RETIRE_CEILING_SECONDS: ${DATAPIPELINES_DATASOURCES_RETIRE_CEILING_SECONDS:-}
+      # 186 — empty = refused for everyone (datasources §9). The demo families need the
+      # read-only sample volume, and app.sh --demo exports exactly that root.
+      DATAPIPELINES_DATASOURCES_FILE_ROOTS: ${DATAPIPELINES_DATASOURCES_FILE_ROOTS:-}
       DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:-5}
       DATAPIPELINES_STAGING_H2_MODE: ${DATAPIPELINES_STAGING_H2_MODE:-PostgreSQL}
       DATAPIPELINES_STAGING_H2_MAX_MEMORY_MB: ${DATAPIPELINES_STAGING_H2_MAX_MEMORY_MB:-1024}

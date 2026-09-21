@@ -92,6 +92,11 @@ class DatasourceUpdateServiceTest {
             }
         }
 
+        override fun requireInProcessDatasourceAllowed(
+            principal: AuthenticatedPrincipal,
+            datasource: Datasource,
+        ) = record("requireInProcessDatasourceAllowed(${datasource.dialect.wire})")
+
         private fun record(call: String) {
             calls += call
             if (refuseAt != null && call.startsWith(refuseAt)) error("refused at $call")
@@ -121,6 +126,8 @@ class DatasourceUpdateServiceTest {
                         "requireGlobalFlagWriteAllowed(null)",
                         "bind",
                         "resolveUpdateBinding(null,null)",
+                        // #186: the in-process gate reads the BOUND row — after bind, before save.
+                        "requireInProcessDatasourceAllowed(POSTGRES)",
                     )
             },
             { result shouldBe saved.single() },

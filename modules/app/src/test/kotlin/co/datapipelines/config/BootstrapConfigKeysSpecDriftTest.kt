@@ -66,7 +66,7 @@ class BootstrapConfigKeysSpecDriftTest {
         // subject is the INDENTATION, not the key — a block that re-parents its neighbours is
         // the failure, and it needs a live neighbour to be visible at all.
         loaded["datapipelines.workspaces.member-datasources-enabled"] shouldBe
-            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}"
+            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:false}"
         loaded["datapipelines.audit.retention-days"] shouldBe "\${DATAPIPELINES_AUDIT_RETENTION_DAYS:365}"
         loaded["datapipelines.observability.logging.format"] shouldBe "\${DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT:json}"
         loaded["datapipelines.ui.theme"] shouldBe "\${DATAPIPELINES_UI_THEME:dark}"

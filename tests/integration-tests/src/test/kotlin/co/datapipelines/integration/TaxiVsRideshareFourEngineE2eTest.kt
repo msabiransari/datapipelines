@@ -667,7 +667,9 @@ class TaxiVsRideshareFourEngineE2eTest {
         @BeforeAll
         @JvmStatic
         fun seedFixtures() {
-            staging = Files.createTempDirectory("lake-4eng-e2e")
+            // The DynamicPropertySource supplier below may have created the staging dir already
+            // (context refresh runs before @BeforeAll): reuse it, never replace it.
+            if (!::staging.isInitialized) staging = Files.createTempDirectory("lake-4eng-e2e")
             generateLakeParquet(staging.resolve("lake/hvfhv_zone_day"))
             sqliteFile = staging.resolve("nyc_reference.db")
             generateZonesSqlite(sqliteFile)
@@ -816,6 +818,13 @@ class TaxiVsRideshareFourEngineE2eTest {
             registry.add("datapipelines.auth.oidc.providers[0].issuer-uri") { oidc.issuer }
             registry.add("datapipelines.auth.oidc.providers[0].display-name") { "Test google" }
             registry.add("datapipelines.auth.base-url") { "http://localhost:8080" }
+
+            // 186: the suite registers a file-backed SQLite datasource — its path must sit
+            // under a declared root, and the fixture root is this suite's staging directory.
+            registry.add("datapipelines.datasources.file-roots") {
+                if (!::staging.isInitialized) staging = Files.createTempDirectory("lake-4eng-e2e")
+                staging.absolutePathString()
+            }
 
             // The seeder path (089 §E/§F): the shipped lake examples file, imported into each
             // fresh personal workspace when its requires_datasources gate passes.

@@ -6,7 +6,9 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspacesProperties
 import co.datapipelines.datasources.Datasource
+import co.datapipelines.datasources.JdbcUrlForm
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiException
 import java.util.UUID
 
@@ -22,6 +24,10 @@ import java.util.UUID
  * - an explicit `workspace` binding must name a workspace the caller can access (member or
  *   admin); a binding to an unreachable workspace is the 400, not the switch path's 403 —
  *   §8 catalogues it as `datasource.validation.workspace_forbidden`.
+ * - an IN-PROCESS engine — H2 `mem:`/`file:`, DuckDB, SQLite (#186, [JdbcUrlForm]) — is
+ *   super-admin-only on create AND on update (a URL change is a registration), whatever the
+ *   member gate says: its SQL runs inside the server's own JVM. A server-reachable H2
+ *   (`tcp:`/`ssl:`) is not in-process and follows the ordinary rules.
  *
  * The caller still owns VISIBILITY (read the target through `getVisible` first) and the
  * registry save (pool invalidation); these rules answer "who may write what".
@@ -82,13 +88,21 @@ class DatasourceWorkspaceRules(
     /**
      * The create binding (D8): `global` → null workspace (admin-only); `workspace` name
      * → accessible workspace; else the ACTIVE workspace.
+     *
+     * Also carries the #186 registration gate: [dialect]/[jdbcUrl] are what the registration
+     * would RUN, and an in-process engine — H2 mem/file, DuckDB, SQLite ([JdbcUrlForm]) — runs
+     * author SQL inside the server's own process, so registering one is a super-admin act
+     * whatever `member-datasources-enabled` allows a workspace admin to register otherwise.
      */
     fun resolveCreateBinding(
         principal: AuthenticatedPrincipal,
         global: Boolean?,
         workspaceName: String?,
+        dialect: Dialect,
+        jdbcUrl: String,
     ): UUID? {
         requireMemberDatasourcesGate(principal)
+        requireInProcessDatasourceAllowed(principal, dialect, jdbcUrl)
         val isGlobal = global ?: false
         if (isGlobal && workspaceName != null) {
             throw workspaceForbidden("a datasource is either global or bound to one workspace, not both")
@@ -123,6 +137,33 @@ class DatasourceWorkspaceRules(
         }
         if (workspaceName != null) return resolveAccessibleWorkspace(principal, workspaceName).id
         return existing.ownerWorkspaceId
+    }
+
+    /**
+     * The #186 gate, shared by create ([resolveCreateBinding]) and update: an IN-PROCESS
+     * engine — classified by [JdbcUrlForm], so a server-reachable H2 (`tcp:`/`ssl:`) is not
+     * one — runs author SQL inside the server JVM, where H2's admin surface reads the process
+     * environment and loads JVM classes. Registering or re-pointing one is therefore a
+     * super-admin act even when `member-datasources-enabled` is on; the refusal is the D8
+     * `workspace_forbidden` family with the rule named, exactly like the instance-datasource
+     * rule above it.
+     */
+    override fun requireInProcessDatasourceAllowed(
+        principal: AuthenticatedPrincipal,
+        datasource: Datasource,
+    ) = requireInProcessDatasourceAllowed(principal, datasource.dialect, datasource.jdbcUrl)
+
+    private fun requireInProcessDatasourceAllowed(
+        principal: AuthenticatedPrincipal,
+        dialect: Dialect,
+        jdbcUrl: String,
+    ) {
+        if (!principal.isSuperAdmin && JdbcUrlForm.classify(dialect, jdbcUrl).isInProcess) {
+            throw workspaceForbidden(
+                "in-process engines (H2 mem/file, DuckDB, SQLite) are registered by a super admin — " +
+                    "their SQL runs inside the server's own process",
+            )
+        }
     }
 
     /**

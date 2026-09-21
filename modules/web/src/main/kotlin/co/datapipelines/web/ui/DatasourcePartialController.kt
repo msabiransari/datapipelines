@@ -143,7 +143,7 @@ class DatasourcePartialController(
             val kind =
                 CredentialKind.fromWireOrNull(credentialKind.trim().lowercase())
                     ?: return refused("Unknown credential kind '$credentialKind'.")
-            val workspaceId = rules.resolveCreateBinding(principal, global, null)
+            val workspaceId = rules.resolveCreateBinding(principal, global, null, resolvedDialect, jdbcUrl.trim())
             val datasource =
                 Datasource(
                     name = name.trim(),

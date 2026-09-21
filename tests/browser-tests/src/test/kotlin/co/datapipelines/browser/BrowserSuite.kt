@@ -328,6 +328,9 @@ abstract class BrowserSuite {
             // exactly the local form and the suite never touches an identity provider.
             registry.add("datapipelines.auth.local.enabled") { true }
             registry.add("datapipelines.auth.rate-limit.login-per-minute") { 100 }
+            // 186: browser suites register file-backed datasources (SQLite fixture files) from
+            // temp directories — declare the temp family as the file root for this context.
+            registry.add("datapipelines.datasources.file-roots") { System.getProperty("java.io.tmpdir") }
         }
     }
 }

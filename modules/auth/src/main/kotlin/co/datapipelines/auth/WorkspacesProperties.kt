@@ -18,5 +18,5 @@ data class WorkspacesProperties(
      * May a workspace ADMIN register a datasource bound to their own workspace (design §4)?
      * `false` makes datasource registration a super-admin-only act instance-wide.
      */
-    val memberDatasourcesEnabled: Boolean = true,
+    val memberDatasourcesEnabled: Boolean = false,
 )

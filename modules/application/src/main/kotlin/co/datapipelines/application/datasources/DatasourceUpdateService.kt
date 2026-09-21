@@ -43,6 +43,19 @@ interface DatasourceUpdateRules {
         global: Boolean?,
         workspaceName: String?,
     ): UUID?
+
+    /**
+     * The #186 gate on the BOUND row (#186's "update is a registration": a URL change on an
+     * existing row can turn it into an in-process engine): an in-process dialect/form — H2
+     * mem/file, DuckDB, SQLite — is super-admin-only, whatever `member-datasources-enabled`
+     * says. Runs after [bind] in [DatasourceUpdateService] because it reads the payload's own
+     * values; the three pre-bind gates still refuse an unauthorized caller before their payload
+     * is interpreted at all.
+     */
+    fun requireInProcessDatasourceAllowed(
+        principal: AuthenticatedPrincipal,
+        datasource: Datasource,
+    )
 }
 
 /**
@@ -62,7 +75,10 @@ interface DatasourceUpdateRules {
  * [DatasourcePayloadBinder]; the UI binds form fields through `DatasourcePoolForm`. Both then
  * hand the same [Datasource] to the same method — [bind] is called AFTER the three gates have
  * run, so a caller who may not perform this write is refused before their payload is
- * interpreted at all, which is the order the REST controller already had.
+ * interpreted at all, which is the order the REST controller already had. The ONE exception is
+ * [DatasourceUpdateRules.requireInProcessDatasourceAllowed] (#186): it reads the payload's own
+ * dialect and URL — the thing being gated IS the payload — so it runs on the bound row, after
+ * bind, before save. A refusal still precedes every write.
  *
  * ## What it deliberately does NOT do
  *
@@ -98,6 +114,9 @@ class DatasourceUpdateService(
         rules.requireMemberDatasourcesGate(principal)
         rules.requireGlobalFlagWriteAllowed(principal, globalRequested)
         val bound = bind().copy(ownerWorkspaceId = rules.resolveUpdateBinding(principal, existing, globalRequested, workspaceName))
+        // #186 — the gate that must see the payload: a dialect/URL change on an existing row is
+        // a registration, so the in-process rule reads the BOUND datasource, after bind, before save.
+        rules.requireInProcessDatasourceAllowed(principal, bound)
         return datasources.save(bound, principal.userId)
     }
 }

@@ -239,6 +239,13 @@ export DATAPIPELINES_DEMO="$DEMO_FAMILIES"
 export SAMPLE_NYC_ON=$([[ $DEMO_NYC == 1 ]] && echo 1 || echo "")
 export SAMPLE_TRADE_ON=$([[ $DEMO_TRADE == 1 ]] && echo 1 || echo "")
 export SAMPLE_LAKE_ON=$([[ $DEMO_LAKE == 1 ]] && echo 1 || echo "")
+# 186 — the demo's bootstrap registers file-backed datasources under the read-only sample
+# volume, and file-backed registration is refused without a declared root
+# (datapipelines.datasources.file-roots, datasources §9). A demo invocation declares exactly
+# that root; an operator-set value (their own roots) wins over this derivation.
+if [[ -z "${DATAPIPELINES_DATASOURCES_FILE_ROOTS:-}" && -n "$SAMPLE_NYC_ON$SAMPLE_TRADE_ON$SAMPLE_LAKE_ON" ]]; then
+  export DATAPIPELINES_DATASOURCES_FILE_ROOTS=/srv/sample
+fi
 
 # The EFFECTIVE value of a key across the env-file list, in compose's own precedence
 # (later file wins), with the process environment winning over all of them — which is

@@ -36,7 +36,7 @@ class StagingH2ConfigKeysSpecDriftTest {
     @Test
     fun `the neighbouring blocks still bind - the staging block re-parented nothing`() {
         loaded["datapipelines.workspaces.member-datasources-enabled"] shouldBe
-            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}"
+            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:false}"
         loaded["datapipelines.result.ttl-default-seconds"] shouldBe "\${DATAPIPELINES_RESULT_TTL_DEFAULT_SECONDS:300}"
         loaded["datapipelines.sse.heartbeat-interval-seconds"] shouldBe "\${DATAPIPELINES_SSE_HEARTBEAT_INTERVAL_SECONDS:15}"
     }

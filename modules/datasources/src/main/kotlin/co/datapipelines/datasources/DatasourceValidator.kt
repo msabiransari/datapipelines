@@ -28,6 +28,15 @@ import java.util.Properties
 class DatasourceValidator(
     private val adapters: (Dialect) -> DialectAdapter = DialectAdapters::forDialect,
     private val driverAvailable: (Dialect) -> Boolean = JdbcDrivers::isAvailable,
+    /**
+     * The declared file roots for in-process file-backed URLs (#186) — the save-time half of the
+     * containment: an H2 `file:`/bare-path, DuckDB or SQLite file URL is refused unless its path
+     * sits under a declared root, and with no roots declared (the default) no file-backed
+     * datasource is registrable by anyone. Role-gating (in-process engines are a super admin's)
+     * is a separate rule, enforced before save in the workspace rules; this one binds NO ONE's
+     * role — it is the entry-point refusal the owner's "never store unchecked data" rule asks for.
+     */
+    private val fileRoots: DatasourceFileRoots = DatasourceFileRoots.EMPTY,
 ) {
     /**
      * @param isCreate true on create (the credential secret becomes required, §9).
@@ -165,13 +174,19 @@ class DatasourceValidator(
     }
 
     /**
-     * The adapter's own URL check, plus the §5.6 **fail-closed backstop**.
+     * The adapter's own URL check, plus the §5.6 **fail-closed backstop**, plus the #186 form
+     * rules.
      *
      * The adapter is an injected dependency, so "the adapter validated it" is not a guarantee the
      * validator can rely on: a non-conforming implementation could wave a URL through. The second
      * pass therefore re-scans the URL against the union derived from the **dialect enum**
      * ([RefusedPropertyKeys.forDialect]), which no adapter can shrink. It is skipped when the
      * adapter already rejected the URL, so one bad key still yields exactly one error.
+     *
+     * The form rules (#186) run last and likewise only on a URL nothing else has faulted: an
+     * in-process URL form this product does not support (H2's `zip:`/`nio:`/`async:` family,
+     * SQLite's `:resource:`, DuckDB's `md:`) is refused outright, and a file-backed in-process
+     * URL must resolve under a declared [fileRoots] root.
      */
     private fun validateJdbcUrl(
         datasource: Datasource,
@@ -181,9 +196,43 @@ class DatasourceValidator(
         val adapterErrors = adapter.validateJdbcUrl(datasource.jdbcUrl).errors
         errors += adapterErrors
         if (adapterErrors.isNotEmpty()) return
-        JdbcUrlGuard
-            .refusalErrors(datasource.jdbcUrl, RefusedPropertyKeys.forDialect(datasource.dialect, adapter))
-            ?.let { errors += it }
+        val refused = JdbcUrlGuard.refusalErrors(datasource.jdbcUrl, RefusedPropertyKeys.forDialect(datasource.dialect, adapter))
+        if (refused != null) {
+            errors += refused
+            return
+        }
+        validateInProcessForm(datasource, errors)
+    }
+
+    /**
+     * #186: the in-process form rules. [JdbcUrlForm] classifies; here the verdicts land:
+     * [JdbcUrlForm.Form.Unknown] is refused outright (fail-closed — a form nobody classified is
+     * not one a rule can reason about), and [JdbcUrlForm.Form.InProcessFile] must sit under a
+     * declared root. Both are `jdbc_url_malformed` — the §6.1 code for "the URL is not
+     * acceptable" — with a message that names the form or the config key, never a secret.
+     */
+    private fun validateInProcessForm(
+        datasource: Datasource,
+        errors: MutableList<ValidationError>,
+    ) {
+        when (val form = JdbcUrlForm.classify(datasource.dialect, datasource.jdbcUrl)) {
+            is JdbcUrlForm.Form.Unknown ->
+                errors +=
+                    error(
+                        DatasourceErrorCodes.JDBC_URL_MALFORMED,
+                        "jdbc_url",
+                        "the URL form '${form.prefix}' is not supported for dialect ${datasource.dialect.wire} — " +
+                            "supported in-process forms are H2 mem:/file:/tcp:/ssl:, DuckDB :memory:/file, " +
+                            "SQLite :memory:/file; unrecognised forms are refused rather than guessed.",
+                    )
+
+            is JdbcUrlForm.Form.InProcessFile ->
+                fileRoots.refusalFor(form.rawPath)?.let { reason ->
+                    errors += error(DatasourceErrorCodes.JDBC_URL_MALFORMED, "jdbc_url", reason)
+                }
+
+            else -> Unit
+        }
     }
 
     /**
