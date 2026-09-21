@@ -362,6 +362,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
         private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
         private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
         private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author"), ownerId = ROOT)
+
         /**
          * 179 (V31): one live `user` key per (user, workspace) — Alice's read-only key moved
          * to EVE, a viewer in acme: the same read-scope assertions, a legal pair.
