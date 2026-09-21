@@ -8,11 +8,15 @@
 #
 # Tool: osv-scanner, PINNED. Version verified 2026-08-15 against the GitHub
 # releases API (google/osv-scanner, latest release). Install method: the
-# release binary is downloaded from the release page into .tools/ (git-ignored,
-# OUTSIDE build/ so `gradlew clean` does not force a re-download),
-# SHA256-checked against the release's own osv-scanner_SHA256SUMS manifest, and
-# reused on later runs. Bump by editing OSV_SCANNER_VERSION after verifying the
-# new release the same way.
+# release binary is downloaded from the release page into the MACHINE-level
+# scanner cache (scan_tools_dir in scripts/lib/scan-tools.sh: $SCAN_TOOLS_DIR,
+# else ${XDG_CACHE_HOME:-$HOME/.cache}/datapipelines/tools — shared by every
+# checkout and worktree, #193), SHA256-checked against the release's own
+# osv-scanner_SHA256SUMS manifest, which is cached BESIDE the binary as
+# "<binary>.SHA256SUMS", and RE-VERIFIED against that manifest on every run —
+# not only at install — so a corrupted or swapped cached binary is refused
+# (exit 2, both hashes printed) rather than trusted for being present. Bump by
+# editing OSV_SCANNER_VERSION after verifying the new release the same way.
 #
 # Scope: every committed gradle.lockfile (root, modules, tests, buildSrc). The
 # lockfiles ARE the resolved dependency set — scanning them covers direct and
@@ -76,17 +80,29 @@ os=$(uname -s | tr '[:upper:]' '[:lower:]')    # darwin | linux
 # subshell silences the line; the parent's trap is untouched; EXIT stays 2.
 arch=$(trap - ERR; scan_tools_arch amd64) || { echo "vuln-scan: unsupported architecture $(uname -m)" >&2; exit 2; }
 BIN="$TOOL_DIR/osv-scanner-${OSV_SCANNER_VERSION}-${os}-${arch}"
+# The release manifest, cached beside the binary it verifies (one per version,
+# so a kept newer binary never gets checked against an older release's sums).
+SUMS="$BIN.SHA256SUMS"
+RELEASE_BASE="https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}"
+ASSET="osv-scanner_${os}_${arch}"
 
 install_osv_scanner() {
   mkdir -p "$TOOL_DIR"
-  local base="https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}"
-  local asset="osv-scanner_${os}_${arch}"
-  echo "vuln-scan: installing osv-scanner ${OSV_SCANNER_VERSION} (${asset})"
-  scan_tools_download vuln-scan "$base/$asset" "$BIN"
-  scan_tools_download vuln-scan "$base/osv-scanner_SHA256SUMS" "$TOOL_DIR/SHA256SUMS"
-  scan_tools_verify_sha256 vuln-scan "$BIN" "$TOOL_DIR/SHA256SUMS" "$asset"
+  echo "vuln-scan: installing osv-scanner ${OSV_SCANNER_VERSION} (${ASSET}) into $TOOL_DIR"
+  scan_tools_download vuln-scan "$RELEASE_BASE/$ASSET" "$BIN"
+  scan_tools_download vuln-scan "$RELEASE_BASE/osv-scanner_SHA256SUMS" "$SUMS"
+  # Verified BEFORE the prune: a bad download must never cost the older
+  # binary the prune would otherwise leave as the fallback.
+  scan_tools_verify_sha256 vuln-scan "$BIN" "$SUMS" "$ASSET"
   chmod +x "$BIN"
   scan_tools_prune vuln-scan osv-scanner "$BIN"
+}
+
+# Installed = binary AND its manifest are both cached; a binary without the
+# manifest beside it (the pre-#193 layout kept one shared SHA256SUMS) cannot be
+# re-verified, so it is reinstalled rather than trusted.
+osv_scanner_cached() {
+  [ -x "$BIN" ] && [ -f "$SUMS" ]
 }
 
 # Fail-soft offline preflight: osv-scanner is useless without osv.dev.
@@ -113,6 +129,11 @@ case "$net" in
     : ;;
   offline)
     echo "vuln-scan: WARNING — osv.dev unreachable (offline, connection-level or double-timeout per the classifier above); vulnerability scan SKIPPED (fail-soft)." >&2
+    if ! osv_scanner_cached; then
+      # #193: name what a warm cache would have had, so the skip is diagnosable —
+      # the next online run installs it once for every checkout on this machine.
+      echo "vuln-scan: WARNING — no cached scanner either: missing $BIN (and/or $SUMS); would have downloaded $RELEASE_BASE/$ASSET" >&2
+    fi
     exit "$SCAN_EXIT_OFFLINE"
     ;;
   nocurl)
@@ -125,7 +146,12 @@ case "$net" in
     ;;
 esac
 
-[ -x "$BIN" ] || install_osv_scanner
+osv_scanner_cached || install_osv_scanner
+# Every run, not only the install (#193): the cache is machine-level and long-
+# lived, so the binary is checked against the manifest cached beside it before
+# it is executed. A mismatch prints both hashes, deletes the binary and exits 2
+# (no verdict — the contract's tooling-failure code; 1 would read as findings).
+scan_tools_verify_sha256 vuln-scan "$BIN" "$SUMS" "$ASSET"
 
 lockfiles=()
 while IFS= read -r f; do lockfiles+=("$f"); done < <(git ls-files -- 'gradle.lockfile' '**/gradle.lockfile')

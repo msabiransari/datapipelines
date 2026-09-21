@@ -20,7 +20,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr th:each="r : ${executions}" class="app-row-clickable" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
+        <tr th:each="r : ${executions}" class="app-row-clickable" th:attr="data-href=@{/executions/{id}(id=${r.executionId})}">
           <td>
             <!-- T114: the display name is prose — it renders in the body face, not mono
                  (mono is for identifiers). The machine name (a folder path) rides on
@@ -38,7 +38,6 @@
             </th:block>
             <div class="u-text-xs" th:if="${r.parentExecutionId != null}">
               <a class="u-muted" th:href="@{/executions/{id}(id=${r.parentExecutionId})}"
-                 onclick="event.stopPropagation()"
                  th:text="${'spawned by ' + r.parentExecutionId.toString().substring(0, 8) + '...'}">spawned by</a>
             </div>
           </td>

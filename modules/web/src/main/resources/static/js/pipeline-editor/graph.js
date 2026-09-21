@@ -578,10 +578,11 @@
     // markStreamLost). The card keeps the last words it knew and stops every motion:
     // the state is not rewritten, because nothing about the node was observed since.
     var stale = data.stale ? " pe-card-stale" : "";
+    // 188: the card names its TYPE (`data-type`); app.css maps it to --type/--type-bg.
+    // A `style=` attribute in innerHTML markup is an inline style the CSP refuses.
     var h =
       '<div class="pe-card pe-card-' + esc(state) + stale + '" data-node-id="' + esc(data.id) +
-      '" style="--type:var(--type-' + esc(typeToken(data.type)) + ");--type-bg:var(--type-" +
-      esc(typeToken(data.type)) + '-bg)">';
+      '" data-type="' + esc(typeToken(data.type)) + '">';
 
     h += '<span class="pe-card-port pe-card-port-in" aria-hidden="true"></span>';
     h += '<span class="pe-card-port pe-card-port-out" aria-hidden="true"></span>';

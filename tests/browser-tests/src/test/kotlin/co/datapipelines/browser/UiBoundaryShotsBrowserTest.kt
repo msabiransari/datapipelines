@@ -154,10 +154,10 @@ class UiBoundaryShotsBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/templates/editor?name=" + java.net.URLEncoder.encode(name, "UTF-8"))
         page.waitForSelector(".te-page")
 
-        // §D: the page's own scripts are FILES. The layout keeps exactly one inline snippet
-        // (the rail-collapse flash preventer, which must run before first paint).
+        // §D: the page's own scripts are FILES — since 188 (#188) the layout's rail-collapse
+        // flash preventer is one too (/js/rail.js), so an executing inline <script> here is ZERO.
         val inlineScripts = page.evaluate("() => [...document.querySelectorAll('script')].filter(s => !s.src).length")
-        inlineScripts shouldBe 1
+        inlineScripts shouldBe 0
         val srcs = page.evaluate("() => [...document.querySelectorAll('script[src]')].map(s => s.getAttribute('src')).join(' ')")
         srcs.toString() shouldContain "/js/template-editor/lifecycle.js"
         srcs.toString() shouldContain "/js/csrf.js"

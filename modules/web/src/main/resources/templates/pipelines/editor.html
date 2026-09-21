@@ -242,7 +242,7 @@
 
           <div class="pe-legend" aria-hidden="true">
             <template x-for="chip in legendChips()" :key="chip.label">
-              <span class="pe-legend-chip"><i x-bind:style="'--type:var(' + chip.token + ')'"></i><span x-text="chip.label"></span></span>
+              <span class="pe-legend-chip"><i x-bind:data-type="chip.type"></i><span x-text="chip.label"></span></span>
             </template>
           </div>
           <!-- 151 (#127) — how to read the links. An arrow is an ORDERING (the node it points
@@ -332,7 +332,7 @@
         </div>
         <div class="pe-empty" x-show="!selectedNode">Select a node to see its source, template, output and last run.</div>
         <template x-if="selectedNode">
-          <div class="pe-details" x-bind:style="detailsTypeStyle(selectedNode)">
+          <div class="pe-details" x-bind:data-type="detailsTypeToken(selectedNode)">
             <div class="pe-details-meta">
               <div class="pe-details-h">
                 <span class="pe-card-tile" x-html="detailsIcon(selectedNode)"></span>

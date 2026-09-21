@@ -226,7 +226,25 @@ class WorkspaceIsolationSweepTest {
         val fingerprint: String,
     )
 
+    /**
+     * One probe. A `429` is the per-user limiter (rest-api §12: 100 requests/second), never
+     * an isolation verdict — this walk fires every route twice, back to back, on one
+     * principal, and on a warm box it outruns that budget (188's gate: the incremental
+     * cycle alone reported `… -> 429, but a NONEXISTENT id gives 400` on one route as a
+     * leak). The one retry waits out the second the budget is counted in; a second 429 is
+     * returned as-is and fails the differential, as any real refusal should.
+     */
     private fun call(
+        route: Route,
+        authenticate: (RequestSpecification) -> RequestSpecification,
+    ): Answer {
+        val first = callOnce(route, authenticate)
+        if (first.status != RATE_LIMITED) return first
+        Thread.sleep(RATE_LIMIT_WINDOW_MS)
+        return callOnce(route, authenticate)
+    }
+
+    private fun callOnce(
         route: Route,
         authenticate: (RequestSpecification) -> RequestSpecification,
     ): Answer {
@@ -484,6 +502,10 @@ class WorkspaceIsolationSweepTest {
          * a silently-empty walk impossible.
          */
         const val MINIMUM_SWEPT_ROUTES = 25
+
+        /** The limiter's refusal status and the window its per-second budget refills in. */
+        const val RATE_LIMITED = 429
+        const val RATE_LIMIT_WINDOW_MS = 1_100L
         const val MINIMUM_SWEPT_TOOLS = 12
 
         val VARIABLE_PATTERN = Regex("\\{([^}]+)\\}")

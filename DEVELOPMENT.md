@@ -810,14 +810,40 @@ shared with `gate.sh` via `scripts/lib/scan-tools.sh`):
   connection refused, DNS — and a curl *timeout* only after one retry at a
   longer budget, so a slow-but-online box cannot silently skip the scan)
 
-osv-scanner (pinned in the script, downloaded into the git-ignored `.tools/` —
-outside `build/`, so `gradlew clean` does not force a re-download — and
-SHA256-verified against the release manifest) checks the
+osv-scanner (pinned in the script, downloaded into the **machine-level scanner
+cache** and SHA256-verified against the release manifest) checks the
 resolved dependency set — the lockfiles, direct and transitive — against
 the OSV database. Ignores live in `osv-scanner.toml`; every entry needs a reason +
 date comment and an `ignoreUntil`. `scripts/gate.sh` runs the scan as its final
 stage; exit 200 warns and does NOT fail the gate (the scan is meaningless
-without osv.dev — the skip is printed, never silent); exits 1 and 2 fail it.
+without osv.dev — the skip is printed with the script's own WARNING lines,
+never silent); exits 1 and 2 fail it.
+
+**Where the scanners live (#193).** All three scanner binaries (osv-scanner,
+gitleaks, trivy) install through `scan_tools_dir` in `scripts/lib/scan-tools.sh`:
+
+- `SCAN_TOOLS_DIR` (env), when set — an absolute path, or a path relative to
+  the repo root. `SCAN_TOOLS_DIR=./.tools` is the pre-#193 per-checkout layout
+  (still git-ignored), for anyone who wants a checkout-private copy.
+- otherwise `${XDG_CACHE_HOME:-$HOME/.cache}/datapipelines/tools/<tool>/` —
+  ONE cache per machine, shared by every checkout and worktree. A lane
+  worktree no longer starts cold, so a GitHub outage cannot turn a green build
+  into a red gate once the machine has downloaded the pinned version once.
+  CI sets nothing and caches under the runner's `$HOME`.
+
+osv-scanner's release manifest is cached beside the binary
+(`osv-scanner-<version>-<os>-<arch>.SHA256SUMS`) and the binary is
+**re-verified against it on every run**, not only at install. The three
+outcomes, each proven from a fresh worktree (lane 188's evidence):
+
+| situation | result |
+|---|---|
+| cache warm (binary + manifest present, hashes match) | the scan runs — no download at all, online or not-GitHub-only |
+| offline, cache cold | exit `200` (`skipped-offline`), with a WARNING naming the missing binary path and the release URL it would have fetched; `gate.sh` counts the skip and prints those lines |
+| cached binary does not match its manifest (corrupted, swapped) | exit `2` — both hashes printed, the binary deleted so the next online run re-installs; never a skip, never `1` |
+
+Offline with a warm cache still exits `200`: the preflight is against osv.dev,
+which the scan needs; the cache only removes the *GitHub* dependency.
 
 The shared install helpers in `scripts/lib/scan-tools.sh` (download, SHA256
 verify) exit `2` on failure for **all three** scanner scripts —

@@ -4,7 +4,7 @@ import co.datapipelines.web.config.DeploymentEnv
 
 /**
  * The §3.23 posture rules (075), lifted out of [ConfigValidator]'s companion so neither
- * grows past the size the build's own complexity guard allows — and because these four
+ * grows past the size the build's own complexity guard allows — and because these rules
  * belong together: they are the whole of what "the environment's NAME belongs to the org,
  * the POSTURE belongs to the product" means in enforcement.
  *
@@ -195,6 +195,35 @@ internal object PostureRules {
                     "message=\"DATAPIPELINES_AUTH_ALLOW_LOCAL_ONLY=true: this hardened deployment has no OIDC " +
                     "provider and authenticates with local password accounts only (acknowledged explicitly).\""
             }
+        }
+    }
+
+    /**
+     * §7 / §3.23 (#189) — a passwordless Redis off loopback is a REFUSAL under `hardened`,
+     * where under `development` it is [ConfigValidator]'s `config.redis_no_password` WARNING.
+     * Postgres never had the soft default (its password is a §2 required key); Redis holds
+     * materialized caller results and the idempotency keys (deployment.md §9), so the
+     * hardened stance treats the two alike. Blank means blank: the value is trimmed first,
+     * so a whitespace-only password cannot pass as present.
+     *
+     * The loopback half is the same as the warning's: a loopback Redis is already refused
+     * by [checkHardenedPosture], and that refusal names the host — this rule is the other
+     * half of the same table row, not a second line about the same host.
+     */
+    fun checkHardenedRedisPassword(
+        snapshot: ConfigSnapshot,
+        violations: MutableList<String>,
+    ) {
+        val env = DeploymentEnv.resolveEnv(snapshot.env, snapshot.deploymentName)
+        if (DeploymentEnv.resolvePosture(snapshot.posture, env) != DeploymentEnv.HARDENED) return
+        val redisHost = snapshot.redisHost?.trim()
+        if (redisHost == null || ConfigValidator.isLoopback(redisHost)) return
+        if (snapshot.redisPassword.isNullOrBlank()) {
+            violations +=
+                "datapipelines.redis.password is empty while datapipelines.redis.host is '$redisHost' " +
+                "under ${DeploymentEnv.POSTURE_KEY}=${DeploymentEnv.HARDENED} (env '$env', §3.23). " +
+                "A hardened deployment does not run a passwordless Redis off loopback " +
+                "(DATAPIPELINES_REDIS_PASSWORD; the compose files start Redis with --requirepass from it)."
         }
     }
 }

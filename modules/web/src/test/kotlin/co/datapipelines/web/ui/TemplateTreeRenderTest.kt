@@ -236,10 +236,16 @@ class TemplateTreeRenderTest {
 
         html shouldContain "id=\"create-template-type\""
         html shouldContain "id=\"create-template-dialect-field\""
-        html shouldContain "syncTemplateDialect()"
+        // 188: the sync lives in the page's script file (no inline script under the CSP);
+        // the page loads it, and the file carries the mechanism.
+        html shouldContain "/js/template-create-modal.js"
+        val script =
+            checkNotNull(javaClass.getResource("/static/js/template-create-modal.js")) { "template-create-modal.js not on the classpath" }
+                .readText()
+        script shouldContain "syncTemplateDialect()"
         // The dialect control is DISABLED for html, not merely hidden — a hidden-but-enabled
         // select still posts its value.
-        html shouldContain "select.disabled = !isSql"
+        script shouldContain "select.disabled = !isSql"
     }
 
     @Test

@@ -128,6 +128,49 @@ class ApplicationSmokeTest {
         // so it is deliberately not asserted here.
     }
 
+    /**
+     * 188 (#188): the headers the app STATES, read off the REAL routes of the assembled app
+     * — the login page, the public site root, an API list, `/mcp` and an SSE route. The
+     * 401s are the point: an entry point that wrote its envelope before the header writers
+     * ran would ship the refusal bare. The auth module proves the same over its probes
+     * (`AuthHttpBoundaryTest`, an open SSE stream included); this is the assembled app.
+     */
+    @Test
+    fun `every real route states the security headers - login, site root, api, mcp and sse`() {
+        val routes =
+            listOf(
+                "/login" to 200,
+                "/" to 200,
+                "/api/v1/pipelines" to 401,
+                "/mcp" to 401,
+                "/api/v1/executions/00000000-0000-0000-0000-000000000000/events" to 401,
+            )
+        routes.forEach { (path, expected) ->
+            val response = rest.getForEntity(path, String::class.java)
+            withClue("GET $path") {
+                response.statusCode.value() shouldBe expected
+                val h = response.headers
+                h.getFirst("Content-Security-Policy") shouldBe CSP_POLICY
+                h.getFirst("X-Frame-Options") shouldBe "SAMEORIGIN"
+                h.getFirst("X-Content-Type-Options") shouldBe "nosniff"
+                h.getFirst("Referrer-Policy") shouldBe "strict-origin-when-cross-origin"
+                h.getFirst("Permissions-Policy") shouldBe "camera=(), microphone=(), geolocation=()"
+                h.getFirst("X-XSS-Protection") shouldBe "0"
+                h.getFirst("Strict-Transport-Security") shouldBe null
+            }
+        }
+        // The one route with a different policy: the pipeline editor (Alpine's eval, #195,
+        // and the hash of the one <style> Cytoscape injects — SecurityHeaders says why).
+        val editor = rest.getForEntity("/pipelines/00000000-0000-0000-0000-000000000000/editor", String::class.java)
+        editor.headers.getFirst("Content-Security-Policy") shouldBe
+            CSP_POLICY
+                .replace("script-src 'self'", "script-src 'self' 'unsafe-eval'")
+                .replace("style-src 'self'", "style-src 'self' 'sha256-pgvDUBa4IjFA2yuSJ2cqcyxmNYJMborsd0ORcRv9vw8='")
+        // And the one route with none: the sitemap (an XML data document).
+        val sitemap = rest.getForEntity("/sitemap.xml", String::class.java)
+        sitemap.headers.getFirst("Content-Security-Policy") shouldBe null
+    }
+
     @Test
     fun `no actuator endpoint is reachable on the application port`() {
         // observability.md §6.4: only /health, /ready and /info are public on the app
@@ -151,6 +194,15 @@ class ApplicationSmokeTest {
     }
 
     private companion object {
+        /**
+         * The policy as a LITERAL, not `SecurityHeaders.CSP_POLICY`: `app` depends on `web`
+         * only (module-structure §4.2), and a wire assertion should read the header the way
+         * an operator does — as the string the browser receives (188).
+         */
+        const val CSP_POLICY =
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; " +
+                "connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
+
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedPostgres.postgres
         private val redis get() = SharedRedis.redis
@@ -187,9 +239,10 @@ class ApplicationSmokeTest {
 
             registry.add("spring.data.redis.host") { redis.host }
             registry.add("spring.data.redis.port") { SharedRedis.port }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("spring.data.redis.password") { SharedRedis.PASSWORD }
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedRedis.port }
+            registry.add("datapipelines.redis.password") { SharedRedis.PASSWORD }
 
             registry.add("datapipelines.jwt.secret") { randomSecret() }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }

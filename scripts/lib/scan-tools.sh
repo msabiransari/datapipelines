@@ -5,12 +5,21 @@
 #
 #   source "$ROOT/scripts/lib/scan-tools.sh"
 #
-# Install root: $ROOT/.tools/ (git-ignored) — deliberately OUTSIDE build/.
-# The 006 layout installed into build/tools/, which `gradlew clean` (gate.sh
-# cycle 1) deletes: every gate run re-downloaded ~50MB, and after any clean an
-# offline developer could not COMMIT — the pre-commit hook execs
-# secret-scan.sh, whose curl install died under `set -e` with a near-silent
-# diagnostic. Binaries now survive clean; install failures name the URL.
+# Install root (scan_tools_root below): MACHINE-level, shared by every checkout
+# and worktree — `$SCAN_TOOLS_DIR` when set, else
+# `${XDG_CACHE_HOME:-$HOME/.cache}/datapipelines/tools`. The 006 layout
+# installed into build/tools/, which `gradlew clean` (gate.sh cycle 1)
+# deletes: every gate run re-downloaded ~50MB, and after any clean an offline
+# developer could not COMMIT — the pre-commit hook execs secret-scan.sh, whose
+# curl install died under `set -e` with a near-silent diagnostic. The 013
+# layout moved to `$ROOT/.tools/`, which survives clean but is PER CHECKOUT:
+# every lane worktree started cold, so a GitHub outage (#193, 2026-09-21: the
+# SHA256SUMS download answered 504 in the worktree while the main checkout's
+# cached binary scanned clean) turned a green build into a red gate. One
+# cache per machine means a binary downloaded once is verified and reused
+# everywhere; `SCAN_TOOLS_DIR=./.tools` restores the per-checkout layout
+# explicitly (relative paths resolve against $ROOT). Install failures name
+# the URL.
 
 # vuln-scan exit contract, defined ONCE so the producer (vuln-scan.sh) and the
 # consumer (gate.sh) can never drift apart (012/F1). osv-scanner's own exit
@@ -68,9 +77,24 @@ scan_tools_classify_network() {
   esac
 }
 
+# scan_tools_root — the machine-level scanner cache (header). `$SCAN_TOOLS_DIR`
+# wins when set (a relative value is taken from $ROOT, so `./.tools` is the
+# old per-checkout layout); the default follows the XDG cache convention so
+# CI, which sets nothing, caches under the runner's $HOME.
+scan_tools_root() {
+  if [ -n "${SCAN_TOOLS_DIR:-}" ]; then
+    case "$SCAN_TOOLS_DIR" in
+      /*) echo "$SCAN_TOOLS_DIR" ;;
+      *)  echo "$ROOT/$SCAN_TOOLS_DIR" ;;
+    esac
+  else
+    echo "${XDG_CACHE_HOME:-$HOME/.cache}/datapipelines/tools"
+  fi
+}
+
 # scan_tools_dir <name> — where scanner <name> (gitleaks|osv-scanner|trivy) lives.
 scan_tools_dir() {
-  echo "$ROOT/.tools/$1"
+  echo "$(scan_tools_root)/$1"
 }
 
 # scan_tools_arch <style> — map `uname -m` to the arch token a tool's release
@@ -166,7 +190,9 @@ scan_tools_prune() {
     local fver="${frec#"$tool"-}"
     fver="${fver%%-*}"
     if scan_tools_ver_lt "$fver" "$keep_ver"; then
-      rm -f "$f"
+      # A binary's sidecars (vuln-scan caches the release manifest beside it as
+      # "<binary>.SHA256SUMS") go with it; `-f` makes an unmatched glob harmless.
+      rm -f "$f" "$f".*
       removed=$((removed + 1))
     else
       echo "$script: keeping $frec (same platform, not older than installed $keep_ver — or version not comparable)" >&2

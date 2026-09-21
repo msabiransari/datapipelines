@@ -14,7 +14,7 @@
         associated with the endpoints they may reach. Your own MCP key is in the top bar.</p>
     </div>
     <div class="app-page-actions" th:if="${canAdminWorkspace == true or isSuperAdmin == true}">
-      <button type="button" data-verb="key-create" class="ds-button ds-button-primary" onclick="showKeyModal()">New API key</button>
+      <button type="button" data-verb="key-create" class="ds-button ds-button-primary" data-action="key-modal-open">New API key</button>
     </div>
   </div>
 
@@ -123,7 +123,7 @@
        scope field: an API key's authority is its associations, not a scope. -->
   <div th:if="${canAdminWorkspace == true or isSuperAdmin == true}" id="key-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-md">
-      <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideKeyModal()">
+      <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" data-action="key-modal-close">
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
       </button>
       <h2 class="ds-title u-m0 u-mb-md">New API key</h2>
@@ -138,8 +138,7 @@
           <legend class="u-block u-secondary u-text-sm u-mb-xs">Kind</legend>
           <label class="app-kind" th:each="kc, kcStat : ${kindChoices}">
             <input type="radio" name="kind" th:value="${kc.wire}" th:checked="${kcStat.first}"
-                   th:attr="data-bindings=${kc.takesBindings}"
-                   onchange="keyKindChanged()">
+                   th:attr="data-bindings=${kc.takesBindings}">
             <span class="app-kind-b">
               <b th:text="${kc.label}">API key</b>
               <span th:text="${kc.summary}">what it is</span>
@@ -161,7 +160,7 @@
              that day, UTC, and a date already past is refused rather than clamped. -->
         <div class="u-mb-md">
           <label class="u-block u-secondary u-text-sm u-mb-xs" for="key-expiry">Expiry</label>
-          <select id="key-expiry" name="expiry" class="ds-input u-full" onchange="keyExpiryChanged()">
+          <select id="key-expiry" name="expiry" class="ds-input u-full">
             <option th:each="ec : ${expiryChoices}" th:value="${ec.wire}" th:text="${ec.label}">Never</option>
           </select>
           <input id="key-expiry-date" type="date" name="expiryDate" class="ds-input u-full u-mt-xs u-hidden">
@@ -189,62 +188,7 @@
     </div>
   </div>
 
-  <script>
-    function showKeyModal() {
-      document.getElementById('key-modal').style.display = 'flex';
-    }
-    function hideKeyModal() {
-      document.getElementById('key-modal').style.display = 'none';
-    }
-    // The kind decides whether associations exist at all (auth §7.7): bindings on a server
-    // key are REFUSED by the server, not dropped, so the form must not carry any. Disabled
-    // inputs are not submitted, which is the point — hiding alone would still POST a stale
-    // value.
-    function keyKindChanged() {
-      var checked = document.querySelector('#createKeyForm input[name=kind]:checked');
-      var wantsBindings = checked && checked.getAttribute('data-bindings') === 'true';
-      var bindingsField = document.getElementById('key-bindings-field');
-      bindingsField.classList.toggle('u-hidden', !wantsBindings);
-      var boxes = bindingsField.querySelectorAll('input[name=bindings]');
-      for (var i = 0; i < boxes.length; i++) { boxes[i].disabled = !wantsBindings; }
-    }
-    function keyExpiryChanged() {
-      var custom = document.getElementById('key-expiry').value === 'custom';
-      var date = document.getElementById('key-expiry-date');
-      date.classList.toggle('u-hidden', !custom);
-      date.disabled = !custom;
-    }
-    // 076 §D: arm immediately when this fragment arrives in a boosted swap
-    // (DOMContentLoaded has long fired); wait for the parse only on a cold load.
-    var initKeyForm = function() {
-      if (!document.getElementById('createKeyForm')) return;
-      keyKindChanged();
-      keyExpiryChanged();
-      var created = document.getElementById('keyCreated');
-      if (!created) return;
-      var observer = new MutationObserver(function() {
-        // Condition on CONTENT ARRIVING, never on the panel still being hidden: the second
-        // mint of a session finds the panel already visible. The OOB swap already refreshed
-        // the table and pointed a toast at this panel — no refetch; just select the secret.
-        if (created.children.length > 0) {
-          created.classList.remove('u-hidden');
-          hideKeyModal();
-          document.getElementById('createKeyForm').reset();
-          keyKindChanged();
-          keyExpiryChanged();
-          setTimeout(function() {
-            var secret = created.querySelector('input');
-            if (secret) secret.select();
-          }, 50);
-        }
-      });
-      observer.observe(created, {childList: true, subtree: true});
-    };
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initKeyForm);
-    } else {
-      initKeyForm();
-    }
-  </script>
+  <!-- 188: the screen's behaviour lives in /js/api-keys.js (no inline scripts under the CSP). -->
+  <script th:src="@{/js/api-keys.js}"></script>
 </th:block>
 </html>

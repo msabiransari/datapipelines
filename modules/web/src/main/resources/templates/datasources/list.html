@@ -15,7 +15,7 @@
          verb). The modal below is rendered under the same pair: markup nobody can submit is
          still markup a reader has to reason about. -->
     <div class="app-page-actions" th:if="${canRegister == true and canAdminWorkspace == true}">
-      <button data-verb="datasource-register" class="ds-button ds-button-primary" onclick="showRegisterModal()">Register Datasource</button>
+      <button data-verb="datasource-register" class="ds-button ds-button-primary" data-action="datasource-register-open">Register Datasource</button>
     </div>
   </div>
 
@@ -61,7 +61,7 @@
 
   <div th:if="${canRegister == true and canAdminWorkspace == true}" id="register-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-md">
-      <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" onclick="hideRegisterModal()"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
+      <button class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" data-action="datasource-register-close"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
       <h2 class="ds-title u-m0 u-mb-md">Register Datasource</h2>
       <form th:attr="hx-post=@{/partials/datasources}"
             hx-target="#register-result"
@@ -146,101 +146,7 @@
     </div>
   </div>
 
-  <script>
-    // 094 §A/§B: the edit and delete dialogs live in #ds-dialog. Emptying it is the ONLY
-    // close path — no display toggling, so the container can never be left holding a hidden
-    // dialog whose stale form would post on the next Enter.
-    function closeDsDialog() {
-      document.getElementById('ds-dialog').innerHTML = '';
-    }
-
-    function showRegisterModal() {
-      document.getElementById('register-result').removeAttribute('data-error');
-      document.getElementById('register-result').innerHTML = '';
-      document.getElementById('register-modal').style.display = 'flex';
-    }
-    function hideRegisterModal() {
-      document.getElementById('register-modal').style.display = 'none';
-    }
-    // 076 §D: arm immediately when this fragment arrives in a boosted swap
-    // (DOMContentLoaded has long fired); wait for the parse only on a cold load.
-    var initRegisterModal = function() {
-      // 114: a role below `ws_admin` gets no register modal at all — nothing to arm.
-      var result = document.getElementById('register-result');
-      if (!result) return;
-
-      // Refusals arrive as 4xx and htmx does not swap those. The layout now carries
-      // toast.js's bridgeErrors, which admits a 4xx retargeted at #toast by header —
-      // but the register refusal deliberately carries NO HX-Retarget: this screen
-      // still owns its error path because the modal must not close over an error,
-      // and a 6s toast is the wrong place for form-level feedback (022 review F9).
-      // Handle the failure explicitly: the refusal markup lands in #register-result,
-      // tagged so the observer below does NOT close the modal over it.
-      document.body.addEventListener('htmx:responseError', function(event) {
-        if (!event.detail.elt.closest || !event.detail.elt.closest('#register-modal')) return;
-        result.setAttribute('data-error', 'true');
-        result.innerHTML = event.detail.xhr.responseText;
-      });
-
-      // A fresh attempt clears the previous refusal, so a later success is not masked by it.
-      document.body.addEventListener('htmx:beforeRequest', function(event) {
-        if (!event.detail.elt.closest || !event.detail.elt.closest('#register-modal')) return;
-        result.removeAttribute('data-error');
-        result.innerHTML = '';
-      });
-
-      // Close the modal only on SUCCESS content — never over an error (F9).
-      var observer = new MutationObserver(function() {
-        var modal = document.getElementById('register-modal');
-        if (modal.style.display === 'flex' &&
-            result.children.length > 0 &&
-            result.getAttribute('data-error') !== 'true') {
-          hideRegisterModal();
-        }
-      });
-      if (result) observer.observe(result, {childList: true, subtree: true});
-    };
-    // 094: the edit/delete dialogs use the SAME success/refusal contract as the register
-    // modal (022/F9) — a 4xx refusal renders inline and must NOT close the dialog, while the
-    // success node's arrival closes it. The dialog's markup is fetched, so this listener is
-    // delegated on document.body rather than bound to an element that may not exist yet.
-    var initDsDialog = function() {
-      var container = document.getElementById('ds-dialog');
-
-      document.body.addEventListener('htmx:responseError', function(event) {
-        if (!event.detail.elt.closest || !event.detail.elt.closest('#ds-dialog')) return;
-        var result = container.querySelector('#ds-dialog-result');
-        if (!result) return;
-        result.setAttribute('data-error', 'true');
-        result.innerHTML = event.detail.xhr.responseText;
-      });
-
-      document.body.addEventListener('htmx:beforeRequest', function(event) {
-        if (!event.detail.elt.closest || !event.detail.elt.closest('#ds-dialog')) return;
-        var result = container.querySelector('#ds-dialog-result');
-        if (!result) return;
-        result.removeAttribute('data-error');
-        result.innerHTML = '';
-      });
-
-      // The success node carries data-ds-saved; the refusal never does. Closing on the
-      // ATTRIBUTE rather than on "the result box is non-empty" is what keeps a refusal on
-      // screen — the same distinction the register modal draws with data-error.
-      document.body.addEventListener('htmx:afterSwap', function(event) {
-        if (!container.contains(event.target)) return;
-        if (event.target.querySelector('[data-ds-saved]')) closeDsDialog();
-      });
-    };
-
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', function() {
-        initRegisterModal();
-        initDsDialog();
-      });
-    } else {
-      initRegisterModal();
-      initDsDialog();
-    }
-  </script>
+  <!-- 188: the screen's behaviour lives in /js/datasources.js (no inline scripts under the CSP). -->
+  <script th:src="@{/js/datasources.js}"></script>
 </th:block>
 </html>

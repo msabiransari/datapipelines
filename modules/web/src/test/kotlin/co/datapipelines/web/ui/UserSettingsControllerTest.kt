@@ -178,12 +178,18 @@ class UserSettingsControllerTest {
                 "partials/password-card.html not on the test classpath"
             }.readText()
 
+        // 188: the card's error path is /js/password-card.js (no inline script under the
+        // CSP); the partial loads it and the result node, and the file owns the listener.
+        template shouldContain "@{/js/password-card.js}"
+        template shouldContain "password-change-result"
+        val script =
+            checkNotNull(javaClass.getResource("/static/js/password-card.js")) { "password-card.js not on the classpath" }.readText()
         // The failures are field-level/credential validation — they stay inline (§5.1),
         // but htmx never swaps 4xx, so the screen owns its error path explicitly.
-        template shouldContain "htmx:responseError"
-        template shouldContain "password-change-result"
+        script shouldContain "htmx:responseError"
+        script shouldContain "password-change-result"
         // 076 §D: armed via the readyState guard so the listener survives a boosted swap.
-        template shouldContain "document.readyState === 'loading'"
+        script shouldContain "document.readyState === 'loading'"
     }
 
     @Test

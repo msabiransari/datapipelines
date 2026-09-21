@@ -14,6 +14,8 @@ import org.thymeleaf.context.WebContext
 import org.thymeleaf.spring6.SpringTemplateEngine
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver
 import org.thymeleaf.web.servlet.JakartaServletWebApplication
+import java.net.URLClassLoader
+import java.nio.file.Files
 
 /**
  * The in-product docs screens (033), rendered exactly as DocsController hands them to the
@@ -128,6 +130,52 @@ class DocsRenderTest {
                 webContext().apply { setVariable("docHtml", rendered.html) },
             ) shouldContain "<article"
         }
+    }
+
+    /**
+     * #190 (188): raw HTML in a doc source is TEXT on the page. The rendered body reaches
+     * `th:utext` in `docs/doc.html` and `doc-public.html`, so the renderer is the only
+     * escape between a Markdown file and the browser. The fixture set is the real slug
+     * list (the catalog refuses a doc outside its grouping), one of which carries the
+     * two payloads a stored-XSS review reaches for; the loader has NO parent so the
+     * packaged docs cannot satisfy the assertion by accident. Falsified at birth: with
+     * `escapeHtml(true)` removed from the builder the `<script>` survives verbatim.
+     */
+    @Test
+    fun `raw html in a doc source renders as text - a script or an onerror image never reaches the page`() {
+        val fixtures = Files.createTempDirectory("dp-docs-fixture")
+        val docs = fixtures.resolve("docs")
+        Files.createDirectories(docs)
+        val slugs = catalog.index().flatMap { group -> group.docs.map { it.slug } }
+        slugs.forEach { slug -> docs.resolve("$slug.md").toFile().writeText("# $slug\n\nA fixture.\n") }
+        val payload =
+            """
+            # readme
+
+            Before <script>alert('docs')</script> after.
+
+            <img src=x onerror="alert('docs')">
+
+            <div class="x">block</div>
+
+            A `<code>` span stays what it was.
+            """.trimIndent()
+        docs.resolve("readme.md").toFile().writeText(payload)
+        val loader = URLClassLoader(arrayOf(fixtures.toUri().toURL()), null)
+
+        val html = DocsCatalog(loader).render("readme")!!.html
+
+        html shouldNotContain "<script>"
+        html shouldNotContain "<img"
+        html shouldNotContain "<div class="
+        // No tag on the page carries the handler: every `<` that reaches the browser as a
+        // tag is the renderer's own (h1/p/code), and none of those has an attribute.
+        Regex("<[a-zA-Z][^>]*onerror").containsMatchIn(html) shouldBe false
+        html shouldContain "&lt;script&gt;alert('docs')&lt;/script&gt;"
+        html shouldContain "&lt;img src=x onerror=&quot;alert('docs')&quot;&gt;"
+        html shouldContain "&lt;div class=&quot;x&quot;&gt;block&lt;/div&gt;"
+        html shouldContain "<code>&lt;code&gt;</code>"
+        fixtures.toFile().deleteRecursively()
     }
 
     @Test

@@ -80,10 +80,10 @@ class PipelineEditorJsonRenderTest {
         val doc = Jsoup.parse(html)
 
         // The document's script elements are exactly the ones the templates declare: every
-        // vendor/page script loads from src, the layout's rail-state script and the two
-        // JSON blobs are the only inline ones. An injected <script> is a fourth.
+        // vendor/page script loads from src (188: the rail-state script too — /js/rail.js),
+        // and the two JSON blobs are the only inline ones. An injected <script> is a third.
         val inline = doc.select("script").filter { !it.hasAttr("src") }
-        inline.map { it.id() } shouldContainExactlyInAnyOrder listOf("", "pipeline-data", "pipeline-lifecycle")
+        inline.map { it.id() } shouldContainExactlyInAnyOrder listOf("pipeline-data", "pipeline-lifecycle")
         inline.filter { it.attr("type") == "application/json" }.map { it.id() } shouldContainExactlyInAnyOrder
             listOf("pipeline-data", "pipeline-lifecycle")
 

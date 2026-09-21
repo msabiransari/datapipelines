@@ -219,7 +219,12 @@ if [ "$scan" -eq 0 ]; then
   echo "  vuln-scan  PASS — no known vulnerabilities in the committed lockfiles"
 elif [ "$scan" -eq "$SCAN_EXIT_OFFLINE" ]; then
   skips=$((skips + 1))
-  echo "  vuln-scan  SKIPPED — offline (fail-soft by design; log: $LOGDIR/vuln-scan.log)"
+  # #193: a skip is a VERDICT THE ORCHESTRATOR MUST READ, never a quiet pass —
+  # the script's own WARNING lines (offline classification; and, when the
+  # machine-level cache is cold, the missing binary and the URL it would have
+  # fetched) are repeated here so the gate output carries the reason itself.
+  echo "  vuln-scan  !! SKIPPED — offline (fail-soft by design; NOT a clean result; log: $LOGDIR/vuln-scan.log)"
+  grep -F 'WARNING' "$LOGDIR/vuln-scan.log" | sed 's/^/             /' || true
 else
   fails=$((fails + 1))
   echo "  vuln-scan  EXIT=$scan  (known vulnerabilities or scan error — log: $LOGDIR/vuln-scan.log)"

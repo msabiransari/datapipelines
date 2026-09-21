@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.23
+**Status:** v1.25
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-19
@@ -233,6 +233,44 @@ refused ([Configuration §3.4/§7](configuration.md#34-auth)) — a typo'd range
 silently widen proxy trust. The shipped default is EMPTY: a deployment with no proxy
 in front behaves exactly as before, and the header stays ignored.
 
+#### What the edge sets, and what it must not touch (188, #188)
+
+The app states its own security posture on **every** response — HTML, JSON, SSE and the
+`/mcp` refusal alike — and pins it with tests (`SecurityHeadersTest`, the wire-level case
+in `AuthHttpBoundaryTest`, `ApplicationSmokeTest`). What it sends:
+
+| Header | Value | Why |
+|---|---|---|
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'` | Enforced, no `'unsafe-inline'`, no nonce, no `'unsafe-eval'`: every script and stylesheet is a file the app serves. `img-src https:` admits the OIDC profile picture. **The one exception:** `GET /pipelines/{id}/editor` carries `script-src 'self' 'unsafe-eval'` for Alpine.js (#195 tracks removing it) and, on `style-src`, the SHA-256 of the one `<style>` element Cytoscape injects at init — a hash names exactly that sheet and nothing else. `/sitemap.xml` carries no policy (an XML data document; the browser's own viewer is the only style it ever has). |
+| `X-Frame-Options` | `SAMEORIGIN` | The product's intent — embedded dashboards on its own origin are on the roadmap; nothing is meant for a foreign frame. `frame-ancestors 'self'` says the same in CSP terms. |
+| `X-Content-Type-Options` | `nosniff` | |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | The product uses none of these. |
+| `X-XSS-Protection` | `0` | The legacy filter off, as every current guide recommends; the CSP is the control. |
+| `Cache-Control` | `no-cache, no-store, max-age=0, must-revalidate` on authenticated responses; the public site and docs set their own public windows | |
+
+**The app deliberately sends no `Strict-Transport-Security`.** It cannot know it is
+behind TLS — it sees plain HTTP from the edge — and an HSTS header on a plain-HTTP
+deployment locks a browser out of it. The edge (the reverse proxy / load balancer that
+terminates TLS: Caddy, nginx, an ALB) owns it. What the product EXPECTS of any edge in
+front of it:
+
+- **HSTS, one year, subdomains included, no `preload`:**
+  `Strict-Transport-Security: max-age=31536000; includeSubDomains`. Preload is a
+  registry submission the operator makes deliberately for their own domain, not a header
+  the product should imply on their behalf.
+- **Pass the app's headers through untouched.** An edge MUST NOT weaken
+  `Content-Security-Policy` (no rewriting to add `'unsafe-inline'`, no stripping) and
+  MUST NOT relax `X-Frame-Options` beyond `SAMEORIGIN` or drop `frame-ancestors`. An
+  edge that sets its own `Referrer-Policy` should set the same value, not a looser one.
+- **TLS termination and redirect:** HTTP → HTTPS redirect at the edge; the app is reached
+  over the private network only.
+- Forward the client address (`X-Forwarded-For`) and declare the edge in
+  `datapipelines.auth.trusted-proxies` — the paragraph above.
+
+The reference edge for datapipelines.co lives in its own repository by design; this
+section is the contract it implements, not its configuration.
+
 #### What's stateless (any instance serves any request)
 
 - REST API (all CRUD, list, detail, execute endpoints)
@@ -426,7 +464,7 @@ aws s3 sync modules/web/build/website-export/ s3://YOUR-BUCKET/ --delete
 aws cloudfront create-invalidation --distribution-id YOUR_DIST_ID --paths "/*"
 ```
 
-The export renders `/`-rooted links (`/site/...`, `/vendor/design-system/...`), which the bucket layout mirrors exactly — upload the CONTENTS of `website-export/`, not the folder. S3 static website hosting (or CloudFront with an origin access control) serves `index.html` as the index document. Nothing fingerprinted: keep TTLs short for `index.html` and longer for `vendor/**` (those files change only when the design system is re-vendored). This is an emergency procedure, not a second primary deploy — the app is the primary.
+The export renders `/`-rooted links (`/site/...`, `/vendor/design-system/...`), which the bucket layout mirrors exactly — upload the CONTENTS of `website-export/`, not the folder. S3 static website hosting (or CloudFront with an origin access control) serves `index.html` as the index document. Nothing fingerprinted: keep TTLs short for `index.html` and longer for `vendor/**` (those files change only when the design system is re-vendored). This is an emergency procedure, not a second primary deploy — the app is the primary. The exported pages need nothing the app's `Content-Security-Policy` (§6.2) forbids — no inline script, handler or style; their only `<script>` blocks are JSON-LD data — so the bucket's edge (CloudFront response-headers policy) can and should set the same CSP verbatim; static hosting sends no headers of its own (188).
 
 ---
 
@@ -520,11 +558,13 @@ lifecycle:
 
 ## 9. Security Hardening Checklist (Deployment)
 
-- [ ] TLS termination at load balancer / proxy (let it handle cert renewal).
+- [ ] TLS termination at load balancer / proxy (let it handle cert renewal), with HSTS set THERE (one year, no preload) — the app sends none, by design (§6.2 "What the edge sets").
+- [ ] The edge passes the app's security headers through untouched — the app's `Content-Security-Policy` (enforced; no `'unsafe-inline'`), `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy` — and never weakens one (§6.2).
 - [ ] Metadata DB password rotated and not in source control.
 - [ ] `DATAPIPELINES_JWT_SECRET` is high-entropy (≥ 32 bytes random).
 - [ ] `DATAPIPELINES_DB_ENCRYPTION_KEY` is high-entropy (32 bytes random) and stored in a secret manager, not a plaintext env file.
-- [ ] Redis password set if Redis is networked (`requirepass` on the server, `datapipelines.redis.password` on every app instance — they must match).
+- [ ] Redis password set if Redis is networked (`requirepass` on the server, `datapipelines.redis.password` on every app instance — they must match). Under the `hardened` posture an empty password with a non-loopback Redis host is REFUSED at boot ([Configuration §3.23](configuration.md#323-environment-and-posture), #189); `development` warns.
+- [ ] No credential on a command line inside a container: the reference compose files give `redis-cli` its password through `REDISCLI_AUTH` in the redis service's environment and `mysqladmin` through `MYSQL_PWD` — an argv password is readable in `ps` by every process in the container. The Redis server's own `--requirepass` argument is the one remaining argv credential in the reference stack (tracked separately).
 - [ ] Redis `maxmemory-policy noeviction` (§4.2.1) — correctness, not tuning.
 - [ ] OIDC client secrets from a secret manager, not a plaintext env file; at least one provider configured (§5.1).
 - [ ] NetworkPolicy restricts app's egress.
@@ -536,7 +576,7 @@ lifecycle:
 - [ ] No `/actuator/*` path reachable on the application port; `/actuator/prometheus` on the management port (`management.server.port`), cluster-internal only ([Observability §4.2](observability.md#42-exposure)). The management port is never published to a host or load balancer; `MANAGEMENT_SERVER_ADDRESS` defaults to loopback — setting it to `0.0.0.0` (required for k8s scraping) demands an accompanying NetworkPolicy confining the port to the monitoring namespace.
 - [ ] Internet-exposed deployments may prefer to omit `-Pdatapipelines.commit` at build time — a public `/info` commit hash maps the instance to exact source revisions.
 - [ ] The `lib/` driver drop-in mount is **read-only** in the container, populated at image build or by a trusted init container, never writable by the app user; `LOADER_PATH`, if set, comes from the image — never inherited from the deployment environment (a writable `lib/` is code-execution-by-file-drop).
-- [ ] Production Redis requires `requirepass` (or ACLs) **and** TLS, or is confined to a private network segment with a NetworkPolicy — it holds fully materialized caller results for up to an hour (D9). The app logs a structured WARN at startup when the Redis password is empty and the host is not loopback ([Configuration §7](configuration.md#7-config-validation)).
+- [ ] Production Redis requires `requirepass` (or ACLs) **and** TLS, or is confined to a private network segment with a NetworkPolicy — it holds fully materialized caller results for up to an hour (D9). The app logs a structured WARN at startup when the Redis password is empty and the host is not loopback under `development`, and refuses to start under `hardened` ([Configuration §7](configuration.md#7-config-validation)).
 
 ---
 
@@ -960,6 +1000,8 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.25 | 188 (#188) the app states its headers | §6.2 gains "What the edge sets, and what it must not touch": the header table the app sends on every response (an enforced CSP with no `'unsafe-inline'`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`; the editor route's `'unsafe-eval'` exception, #195), why the app sends no HSTS, and the four things the product expects of an edge (HSTS one year without preload, headers passed through unweakened, TLS + redirect, the forwarded address). §9: two checklist lines for the same. |
+| 2026-09-21 | v1.24 | 188 (#189) Redis credentials | §9: the hardened posture refuses a passwordless non-loopback Redis; the reference compose files pass the healthcheck password as `REDISCLI_AUTH` (environment), never `redis-cli -a` (argv); the server's `--requirepass` argv named as the remaining exposure. |
 | 2026-09-19 | v1.23 | 173 (#173) the agent surface before indexing | §6.7: `/llms.txt`, `/llms-full.txt` and `/docs/{slug}.md` listed beside the crawler surfaces; the Search Console note says llms.txt needs no submission; the sitemap bullet corrected — `lastmod` has been absent since 145, not read from `build-info.properties`. |
 | 2026-09-17 | v1.22 | Writable temporary storage (#133) | §6.4: disk-backed `/tmp` emptyDir with optional size limit while preserving the read-only root filesystem; LAKE disk sizing and cleanup requirements. |
 | 2026-09-14 | v1.21 | 137 mail notices | §5.1: the first-admin story no longer says "no SMTP" — with `DATAPIPELINES_MAIL_HOST` + `_FROM` set the one-time credential is emailed to the user and sys-ops (`DATAPIPELINES_MAIL_OPS_TO`) is told about every new user ([Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)); the variables are catalogued in [Configuration §3.27](configuration.md#327-mail) and named in `deploy/secrets.env.example`, per this doc's no-restated-keys rule. |

@@ -17,6 +17,7 @@ import org.springframework.security.web.authentication.session.NullAuthenticated
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler
 import org.springframework.security.web.header.HeaderWriterFilter
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 
@@ -65,8 +66,9 @@ class SecurityConfig(
     @Bean
     // One line over detekt's LongMethod cap after the 027 CSRF-stability block landed
     // inline — same call as PipelineExecutor's suppress: the filter chain reads as one
-    // vertical narrative (csrf → authz → session → logout); splitting a customizer out
-    // would hide the CSRF config's coupling to the repository/handler lines above it.
+    // vertical narrative (csrf → headers → authz → session → logout); splitting a
+    // customizer out would hide the CSRF config's coupling to the repository/handler
+    // lines above it.
     @Suppress("LongMethod")
     fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
@@ -94,6 +96,22 @@ class SecurityConfig(
                 // is neutered. The cookie is minted by the first render that materializes
                 // the deferred token (the login page) and never rewritten afterwards.
                 csrf.sessionAuthenticationStrategy(NullAuthenticatedSessionStrategy())
+            }.headers { headers ->
+                // 188 (#188): the app STATES its headers — the values and the reasoning
+                // live in [SecurityHeaders]; this block only wires them. `nosniff`,
+                // `Cache-Control` and `X-XSS-Protection: 0` keep Spring's defaults, now
+                // pinned by SecurityHeadersTest rather than assumed.
+                headers.frameOptions { it.sameOrigin() }
+                headers.referrerPolicy { it.policy(ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN) }
+                headers.permissionsPolicyHeader { it.policy(SecurityHeaders.PERMISSIONS_POLICY) }
+                // No HSTS from the app — it cannot know it is behind TLS; the edge sets it
+                // (deployment.md §6.2). Spring's writer only fires on a request the container
+                // sees as secure, so this is explicit rather than a change in behaviour.
+                headers.httpStrictTransportSecurity { it.disable() }
+                // The CSP is two writers, not `contentSecurityPolicy { }`: the pipeline
+                // editor's route carries `'unsafe-eval'` for Alpine.js (#195) and nothing
+                // else does — the matchers are complementary, so every response gets exactly one.
+                SecurityHeaders.cspWriters().forEach { headers.addHeaderWriter(it) }
             }.authorizeHttpRequests { auth ->
                 // Async re-dispatches (SSE completion, rest-api §6) and error dispatches
                 // re-enter this chain with no SecurityContext: the auth filters are

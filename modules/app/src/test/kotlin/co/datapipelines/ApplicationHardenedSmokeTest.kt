@@ -163,9 +163,10 @@ class ApplicationHardenedSmokeTest {
 
             registry.add("spring.data.redis.host") { host }
             registry.add("spring.data.redis.port") { SharedRedis.port }
-            registry.add("spring.data.redis.password") { "" }
+            registry.add("spring.data.redis.password") { SharedRedis.PASSWORD }
             registry.add("datapipelines.redis.host") { host }
             registry.add("datapipelines.redis.port") { SharedRedis.port }
+            registry.add("datapipelines.redis.password") { SharedRedis.PASSWORD }
 
             registry.add("datapipelines.jwt.secret") { randomSecret() }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }

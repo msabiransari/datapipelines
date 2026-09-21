@@ -12,7 +12,7 @@ import java.io.File
  *
  * `th:utext` is the unescaped insertion point: whatever the model carries reaches the
  * document as markup. Today that is legitimate for exactly seven slots — the two rendered
- * Markdown bodies (a spec-drift round of its own, #190) and the five JSON-LD / JSON script
+ * Markdown bodies (escaped by `DocsCatalog` since 188, #190) and the five JSON-LD / JSON script
  * blocks, which are safe ONLY because their writers escape. The sweep pins both halves:
  * no NEW unescaped slot can arrive silently, and the editor's two blobs cannot lose their
  * writer-side escaping without this audit going red.
@@ -90,7 +90,7 @@ class ScriptBlockUtextAuditTest {
         /**
          * Every `th:utext` slot, with the count each file may carry. All five writers are
          * safe TODAY: `docs/doc.html` and `docs/doc-public.html` render packaged Markdown
-         * (#190 tracks their own review), and the three JSON writers go through
+         * through a renderer that escapes raw HTML (188, #190), and the three JSON writers go through
          * [ScriptSafeJson] — the docs' JSON-LD via `DocJsonLd`, the FAQ blocks via
          * `FaqJsonLd`, the editor's two blobs via `PipelineEditorController`.
          */

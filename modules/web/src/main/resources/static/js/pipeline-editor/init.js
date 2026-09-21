@@ -419,9 +419,10 @@
       /* -------------------------------------------------- the Details pane */
 
       /** The pane's `--type`/`--type-bg` pair (the tile and the eyebrow read it). */
-      detailsTypeStyle: function (node) {
-        var tok = window.PEGraphUtil ? window.PEGraphUtil.typeToken(node && node.type) : "dql";
-        return "--type:var(--type-" + tok + ");--type-bg:var(--type-" + tok + "-bg)";
+      // 188: the pane's `data-type` (app.css maps it to --type/--type-bg); it used to
+      // return a style STRING, which Alpine applied as a style attribute the CSP refuses.
+      detailsTypeToken: function (node) {
+        return window.PEGraphUtil ? window.PEGraphUtil.typeToken(node && node.type) : "dql";
       },
 
       detailsIcon: function (node) {
@@ -1016,7 +1017,7 @@
           if (!LABELS[type] || seen[type]) return;
           seen[type] = true;
           var tok = window.PEGraphUtil ? window.PEGraphUtil.typeToken(type) : "dql";
-          chips.push({ label: LABELS[type], token: "--type-" + tok });
+          chips.push({ label: LABELS[type], token: "--type-" + tok, type: tok });
         });
         return chips;
       },

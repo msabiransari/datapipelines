@@ -123,6 +123,29 @@ class ConfigValidatorPostureTest {
     }
 
     @Test
+    fun `passwordless redis off loopback is a warning under development and refused under hardened`() {
+        val passwordless = validSnapshot().copy(redisPassword = "")
+        val development = ConfigValidator.validate(passwordless)
+        development.violations.shouldBeEmpty()
+        development.warnings.single().shouldContain("config.redis_no_password")
+
+        val report = ConfigValidator.validate(hardened().copy(redisPassword = ""))
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.redis.password")
+        report.violations.single().shouldContain("redis.internal")
+        report.violations.single().shouldContain("DATAPIPELINES_REDIS_PASSWORD")
+        // One line per fact (#189): the refusal replaces the warning, it does not join it.
+        report.warnings.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a whitespace-only redis password is as absent as an empty one under hardened`() {
+        val report = ConfigValidator.validate(hardened().copy(redisPassword = "   "))
+        report.violations.shouldHaveSize(1)
+        report.violations.single().shouldContain("datapipelines.redis.password")
+    }
+
+    @Test
     fun `hardened without OIDC is refused unless local-only is acknowledged`() {
         val localOnly = hardened().copy(oidcProviders = emptyList(), localEnabled = true)
 
