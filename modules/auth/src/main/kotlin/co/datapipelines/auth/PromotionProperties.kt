@@ -27,6 +27,16 @@ import java.security.MessageDigest
 class PromotionProperties(
     val serverKey: String? = null,
     val target: Target = Target(),
+    /**
+     * How long the SENDER remembers the target's inventory (178, the promoter lens; §3.19).
+     * The lens evaluates versioning §10.2 on EVERY read a promoter makes, so the inventory
+     * call is cached in-process for this many seconds per workspace — an unreachable answer
+     * too, for the same window, so a dead target costs one probe and one WARN per window
+     * rather than one per read. A successful push invalidates the workspace's entry. The
+     * push path itself never reads the cache (§10.3 guards against a FRESH inventory).
+     * `0` disables caching (every read calls the target).
+     */
+    val inventoryCacheTtlSeconds: Long = DEFAULT_INVENTORY_CACHE_TTL_SECONDS,
 ) {
     /** The single configured higher environment (§10.6's sender half). */
     class Target(
@@ -42,10 +52,14 @@ class PromotionProperties(
     /** True when this deployment can RECEIVE — the fail-closed gate's one question. */
     val receives: Boolean get() = !serverKey.isNullOrBlank()
 
-    override fun toString(): String = "PromotionProperties(serverKey=${redact(serverKey)}, target=$target)"
+    override fun toString(): String =
+        "PromotionProperties(serverKey=${redact(serverKey)}, target=$target, inventoryCacheTtlSeconds=$inventoryCacheTtlSeconds)"
 
-    private companion object {
-        fun redact(value: String?): String = if (value.isNullOrBlank()) "(unset)" else "(set)"
+    companion object {
+        /** One minute — the same liveness window `AuthCache` gives memberships. */
+        const val DEFAULT_INVENTORY_CACHE_TTL_SECONDS: Long = 60
+
+        private fun redact(value: String?): String = if (value.isNullOrBlank()) "(unset)" else "(set)"
     }
 }
 

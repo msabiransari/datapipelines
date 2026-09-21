@@ -113,6 +113,16 @@ class PromotionServerKeysTest {
     }
 
     @Test
+    fun `the inventory cache TTL defaults to a minute and binds beside the two halves`() {
+        // 178: the knob rides on the same class the two halves bind to, so a yaml reparenting
+        // of the promotion block would take all three down together (and the drift test in
+        // `app` asserts the doc, the yaml and this class agree on the key).
+        PromotionProperties().inventoryCacheTtlSeconds shouldBe 60L
+        PromotionProperties(inventoryCacheTtlSeconds = 0).inventoryCacheTtlSeconds shouldBe 0L
+        PromotionProperties(inventoryCacheTtlSeconds = 5).toString().contains("inventoryCacheTtlSeconds=5") shouldBe true
+    }
+
+    @Test
     fun `receives and isConfigured read blank as absent`() {
         PromotionProperties(serverKey = "  ").receives shouldBe false
         PromotionProperties().receives shouldBe false

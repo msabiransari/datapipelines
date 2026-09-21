@@ -263,6 +263,12 @@ datapipelines:
       target:
         base-url: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_URL:}
         server-key: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_TARGET_KEY:}
+      # 178 — how long the sender remembers the target's inventory, per workspace. The
+      # promoter LENS (auth.md §11A.1) evaluates versioning §10.2 on every read a promoter
+      # makes; this keeps that to one target call per window. An unreachable target is
+      # remembered for the same window (one probe, one WARN per window). A successful push
+      # invalidates the entry; the push path itself always reads a FRESH inventory (§10.3).
+      inventory-cache-ttl-seconds: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_INVENTORY_CACHE_TTL_SECONDS:60}
 
   # §3.17 — workspaces. `provisioning-mode` and `open-join` were REMOVED in RBAC round 1
   # (D-R11): workspaces are created by super admins, and the workspace that ships is `demo`,

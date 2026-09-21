@@ -95,7 +95,7 @@ class PipelineLifecycleDialogModelTest {
         every { templates.statusOf(any(), "test/t2.sql", 1) } returns RELEASED
         val other = UUID.randomUUID()
         // t1@1's used-by: THIS pipeline (twice — two nodes) and one other pipeline (twice too).
-        every { usage.usedBy(WS, "test/t1.sql", 1) } returns
+        every { usage.usedBy(WS, any(), any(), "test/t1.sql", 1) } returns
             TemplateUsageService.UsedBy(
                 "test/t1.sql",
                 1,
@@ -121,7 +121,7 @@ class PipelineLifecycleDialogModelTest {
         every { repository.findVersionBody(any(), any(), any()) } returns twoTemplateBody
         every { templates.statusOf(any(), "test/t1.sql", 1) } returns DRAFT
         every { templates.statusOf(any(), "test/t2.sql", 1) } returns null
-        every { usage.usedBy(WS, "test/t1.sql", 1) } returns
+        every { usage.usedBy(WS, any(), any(), "test/t1.sql", 1) } returns
             TemplateUsageService.UsedBy("test/t1.sql", 1, listOf(pin(ID)), pipelineCount = 1)
 
         val missing = model.release(WS, ID)
@@ -140,7 +140,7 @@ class PipelineLifecycleDialogModelTest {
         every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
         every { repository.findVersionBody(any(), any(), any()) } returns twoTemplateBody
         every { templates.statusOf(any(), any(), any()) } returns DRAFT
-        every { usage.usedBy(any(), any(), any()) } throws
+        every { usage.usedBy(any(), any(), any(), any(), any()) } throws
             DatapipelinesException(PipelineErrorCodes.Template.NOT_FOUND, "gone", emptyMap())
 
         model.release(WS, ID).draftPins.map { it.otherPinners } shouldBe listOf(0, 0)
@@ -158,10 +158,10 @@ class PipelineLifecycleDialogModelTest {
         every { repository.findVersionBody(any(), any(), any()) } returns twoTemplateBody
         every { templates.statusOf(any(), any(), any()) } returns DRAFT
 
-        every { usage.usedBy(any(), any(), any()) } throws IllegalStateException("connection refused")
+        every { usage.usedBy(any(), any(), any(), any(), any()) } throws IllegalStateException("connection refused")
         shouldThrow<IllegalStateException> { model.release(WS, ID) }.message shouldBe "connection refused"
 
-        every { usage.usedBy(any(), any(), any()) } throws
+        every { usage.usedBy(any(), any(), any(), any(), any()) } throws
             DatapipelinesException(PipelineErrorCodes.Validation.PIPELINE_NOT_FOUND, "another refusal", emptyMap())
         shouldThrow<DatapipelinesException> { model.release(WS, ID) }.code shouldBe PipelineErrorCodes.Validation.PIPELINE_NOT_FOUND
     }

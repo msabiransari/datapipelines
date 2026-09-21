@@ -185,6 +185,23 @@ data class AuthenticatedPrincipal(
      */
     val workspaceRole: WorkspaceRole? get() = workspace?.role
 
+    /**
+     * "Does the promoter LENS apply to this principal" (roles design §3.1, D5; 178): a
+     * promoter — and nothing else — in the active workspace. Since V29 a member holds one
+     * role, so "promoter and also an author" cannot exist; the one conjunct that still
+     * matters is the instance authority: a super admin whose explicit membership is a
+     * promoter role reads everything, the way every other super-admin read does.
+     *
+     * Deliberately NOT [isPromoter]: that predicate answers "may this principal PROMOTE" and
+     * is true for admins; the lens is about what a principal SEES, and admins see everything.
+     * Nor does it consult the credential axis — a promoter's API key is a promoter's key
+     * (`ApiKeyService.pinnedContext` stamps the role), and the reads it makes are lensed the
+     * same way the session's are. The receiver's promotion principal has no workspace and
+     * never reaches here.
+     */
+    val isLensed: Boolean
+        get() = workspaceRole == WorkspaceRole.PROMOTER && !superAdmin
+
     /** [Permission.satisfiedBy] over the active context; false with no context. The one spelling every predicate above shares. */
     fun holds(permission: Permission): Boolean = workspace?.permits(permission) ?: false
 
