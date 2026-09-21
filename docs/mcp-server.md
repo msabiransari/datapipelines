@@ -1938,7 +1938,7 @@ The error payload inside the tool result matches the [REST API `error` object](r
 ### 9.3 Transport errors
 
 - HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked, expired, or its owner was deactivated. Retrying does not help; the user must supply a new key.
-- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Retrying does not help; the user must mint a key with a higher scope.
+- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Retrying does not help: since 179 a user key's scope IS the owner's role, so the fix is a higher role in that workspace, not a new key.
 - HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
 - HTTP 429 (`rate_limit.unavailable`) → the limiter could not decide and refused the call (fail closed, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Not your budget: honor `Retry-After` and retry, and do not treat it as a signal to reduce your request rate permanently.
 - HTTP 5xx → server error; agent should retry with backoff.
@@ -1982,7 +1982,7 @@ Agents can use these for visibility into an execution while a `pipelines_execute
 Users discover the MCP endpoint via the UI's "Connect an Agent" page, which exposes:
 
 - The full MCP endpoint URL (`https://{host}/mcp`).
-- API key creation/management ([UI Screens](ui-screens.md); REST surface in [REST API §16.1](rest-api.md#161-api-keys-any-authenticated-principal--own-keys-only)), including the scope picker — the page must state which scope an agent needs for what it will do (`read` to browse, `execute` to run pipelines, `author` to create them) and that a key's scopes cannot exceed the creator's.
+- The MCP key's home ([UI Screens](ui-screens.md); REST surface in [REST API §16.1](rest-api.md#161-api-keys-own-keys-creation-is-a-workspace-admins--179)): the top bar's chip — the page must make the prefix, the copy and the delete-to-rotate findable, and state that the key's reach IS the owner's role in the workspace (a viewer's key reads and runs; an author's also creates; a promoter's only reads released content).
 - A copy-pasteable configuration snippet for common agents, using whichever header that client supports (`DP-API-Key` or `Authorization: Bearer dpk_...` — §3.2):
   - Claude Desktop: `mcpServers` JSON for `claude_desktop_config.json`.
   - Cursor: settings JSON.

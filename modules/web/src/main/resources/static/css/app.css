@@ -928,6 +928,38 @@ button.app-busy::after {
   z-index: var(--z-sticky);
 }
 
+/* 179 (D16) — the top bar's MCP-key chip: the prefix, Copy and delete-to-rotate beside the
+   user menu. Token-only, like everything else here. */
+.app-mcpkey {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  font-size: var(--text-sm);
+}
+
+.app-mcpkey-label {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.app-mcpkey-prefix {
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+/* The /api-keys page's per-row association editor (179, D17): the disclosure's form packs
+   under the row's action cell. */
+.app-assoc {
+  display: inline-block;
+  text-align: left;
+}
+
+.app-assoc-form {
+  display: grid;
+  gap: var(--gap-xs);
+  margin-block-start: var(--gap-sm);
+}
+
 .app-crumbs {
   display: flex;
   align-items: baseline;
@@ -1525,6 +1557,21 @@ button.app-busy::after {
   .app-grid-3,
   .app-grid-wide-left {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 179: the chip's word label leaves first — the prefix and the two buttons stay. Below the
+   phone breakpoint the prefix goes too: the avatar menu still carries the entry point, and a
+   top bar that wraps is the worse failure (the same rule the search follows). */
+@media (max-width: 1099.98px) {
+  .app-mcpkey-label {
+    display: none;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .app-mcpkey-prefix {
+    display: none;
   }
 }
 

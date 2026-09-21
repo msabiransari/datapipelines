@@ -354,9 +354,14 @@ class ApiKeyService(
         val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
         val secret = randomBase32(SECRET_LEN)
         val fullKey = "$keyId.$secret"
+        // The role's reach on the credential axis — and a super admin's context here is the
+        // membership the resolution returned (the demo join is a VIEWER row), while their
+        // authority is D7's instance-wide one: `user.isAdmin` is what validation will
+        // re-read on every request, so it is what the mint reads too. A super admin's key
+        // carrying `read` would be capped BELOW its issuer forever.
         val scopes =
             when {
-                context.permits(Permission.AUTHOR) -> Scope.AUTHOR.expand()
+                user.isAdmin || context.permits(Permission.AUTHOR) -> Scope.AUTHOR.expand()
                 context.permits(Permission.EXECUTE) -> Scope.EXECUTE.expand()
                 else -> setOf(Scope.READ)
             }

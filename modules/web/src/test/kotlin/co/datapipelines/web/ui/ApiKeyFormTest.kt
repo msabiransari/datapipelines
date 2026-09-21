@@ -2,8 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
-import co.datapipelines.auth.KEY_SCOPES
-import co.datapipelines.auth.Scope
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
@@ -85,36 +83,6 @@ class ApiKeyFormTest {
         refused.details["reason"] shouldBe "date_unparseable"
         refused.details["value"] shouldBe "nope"
         refused.status shouldBe 400
-    }
-
-    @Test
-    fun `scope choices are the caller's own scopes and everything below them`() {
-        // §7.4: a key's scopes must be a subset of its creator's. The UI filter is convenience —
-        // ApiKeyService refuses a superset regardless — but offering a checkbox the server will
-        // refuse is a form that lies.
-        assertAll(
-            { ApiKeyForm.scopeChoices(setOf(Scope.READ)).map { it.wire } shouldBe listOf("read") },
-            { ApiKeyForm.scopeChoices(setOf(Scope.EXECUTE)).map { it.wire } shouldBe listOf("read", "execute") },
-            { ApiKeyForm.scopeChoices(setOf(Scope.AUTHOR)).map { it.wire } shouldBe listOf("read", "execute", "author") },
-            // O-2: `admin` is not offered even to a principal who satisfies it — no key may
-            // hold it, and a form that offers what issuance refuses teaches the wrong model.
-            { ApiKeyForm.scopeChoices(setOf(Scope.ADMIN)).map { it.wire } shouldBe listOf("read", "execute", "author") },
-            { ApiKeyForm.scopeChoices(emptySet()) shouldBe emptyList() },
-        )
-    }
-
-    @Test
-    fun `every scope has a meaning, and none of them is an HTTP verb`() {
-        assertAll(
-            { ApiKeyForm.SCOPE_MEANINGS.keys shouldBe KEY_SCOPES },
-            {
-                withClue("a verb leaked into the capability vocabulary") {
-                    ApiKeyForm.SCOPE_MEANINGS.values.none { meaning ->
-                        listOf("GET", "POST", "PUT", "DELETE").any { meaning.contains(it) }
-                    } shouldBe true
-                }
-            },
-        )
     }
 
     @Test

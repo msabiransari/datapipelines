@@ -979,7 +979,7 @@
     },
     {
      "level": "H2",
-     "text": "Mint a key for that one agent"
+     "text": "Copy your MCP key from the top bar"
     },
     {
      "level": "H2",
@@ -1027,7 +1027,8 @@
     "headings": {
      "Claude Code": "173 (SEO coverage before indexing): the per-client config block became an H2 named for the measured phrase — \"The Claude Code MCP server config\" (claude code mcp server, 880/mo); no anchor existed.",
      "Cursor — ~/.cursor/mcp.json": "173 (SEO coverage before indexing): became the H2 \"The Cursor MCP server config — ~/.cursor/mcp.json\" (cursor mcp server, 720/mo); no anchor existed.",
-     "GitHub Copilot in VS Code — .vscode/mcp.json": "173 (SEO coverage before indexing): became the H2 \"The GitHub Copilot MCP server config — .vscode/mcp.json\", the same shape as its two siblings; no anchor existed."
+     "GitHub Copilot in VS Code — .vscode/mcp.json": "173 (SEO coverage before indexing): became the H2 \"The GitHub Copilot MCP server config — .vscode/mcp.json\", the same shape as its two siblings; no anchor existed.",
+     "Mint a key for that one agent": "179/D16: the key is minted at sign-in and copied from the top bar's chip; there is no minting ceremony to headline any more"
     }
    }
   },
@@ -2922,7 +2923,7 @@
     },
     {
      "level": "H2",
-     "text": "Mint the agent's key"
+     "text": "Copy your MCP key from the top bar"
     },
     {
      "level": "H2",
@@ -2942,7 +2943,7 @@
     },
     {
      "level": "H2",
-     "text": "Scope a key to the endpoint"
+     "text": "Scope an API key to the endpoint"
     },
     {
      "level": "H2",
@@ -3139,7 +3140,9 @@
      "Execute and watch": "174: agent-loop step; now tutorial step 4",
      "Read row-level results": "174: agent-loop step; now tutorial steps 4 and 8",
      "One small demo. No business data required.": "174: the vague quickstart became step 1 with the real output",
-     "The same logic. New inputs. Fresh results.": "174: retired with the reuse section"
+     "The same logic. New inputs. Fresh results.": "174: retired with the reuse section",
+     "Mint the agent's key": "179/D16: tutorial step 2 is the top-bar chip copy, not a mint",
+     "Scope a key to the endpoint": "179/D17: endpoint keys are API keys, created by an admin on /api-keys and associated there"
     }
    }
   },

@@ -60,6 +60,7 @@ class ApiKeyMintingTest {
     @Test
     @Order(1)
     fun `a login that owes a password change mints nothing - the first clean login mints`() {
+        ensureCleanSlate()
         val first = postLogin(ADMIN_EMAIL, SEED_PASSWORD)
         first.statusCode shouldBe 302
 
@@ -71,8 +72,10 @@ class ApiKeyMintingTest {
             .statusCode shouldBe 200
 
         // The first CLEAN login. The admin holds no membership yet, so D-R11's demo join
-        // fires — and the mint lands there, with the demo membership's viewer reach.
-        postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
+        // fires — and the mint lands there, carrying the SUPER ADMIN's ladder (D7), not the
+        // demo membership's viewer reach: the key must not be capped below its issuer.
+        val clean = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
+        clean.statusCode shouldBe 302
 
         val rows = keyRows(ADMIN_EMAIL)
         rows shouldHaveSize 1
@@ -80,8 +83,9 @@ class ApiKeyMintingTest {
         rows.single()["minted_at_login"] shouldBe true
         rows.single()["name"] shouldBe "mcp/demo"
         rows.single()["secret_sealed"] shouldBe true
-        // The viewer's reach on the credential axis (§7.5): read + execute, never author.
-        rows.single()["scopes"] shouldBe "{read,execute}"
+        // A super admin's key carries the full key ladder (§7.5) — `admin` itself keys
+        // may never hold (O-2).
+        rows.single()["scopes"] shouldBe "{read,execute,author}"
     }
 
     @Test
@@ -281,6 +285,53 @@ class ApiKeyMintingTest {
 
     // ------------------------------------------------------------------ helpers
 
+    /**
+     * This suite creates its world through the APP (the creation IS the subject), so it
+     * cannot `E2eClean.beforeSeeding` (that truncates the demo content the mint-into-demo
+     * assertion needs). What it can and must do is delete its OWN namespaced rows, so a
+     * re-run on the shared container does not collide with the last run's: workspace
+     * `mint-acme`, users `mint-*@datapipelines.test`, and the keys and bindings between
+     * them. Dependency order, children first.
+     */
+    private fun ensureCleanSlate() {
+        if (cleaned) return
+        cleaned = true
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "DELETE FROM endpoint_key_bindings WHERE api_key_id IN " +
+                        "(SELECT id FROM api_keys WHERE name LIKE 'on-demand%' OR workspace_id IN " +
+                        "(SELECT id FROM workspaces WHERE name LIKE 'mint-%'))",
+                )
+                statement.execute(
+                    "DELETE FROM api_keys WHERE workspace_id IN (SELECT id FROM workspaces WHERE name LIKE 'mint-%') " +
+                        "OR user_id IN (SELECT id FROM users WHERE email LIKE 'mint-%@datapipelines.test')",
+                )
+                statement.execute(
+                    "DELETE FROM workspace_invitations WHERE workspace_id IN (SELECT id FROM workspaces WHERE name LIKE 'mint-%')",
+                )
+                statement.execute(
+                    "DELETE FROM workspace_members WHERE workspace_id IN (SELECT id FROM workspaces WHERE name LIKE 'mint-%') " +
+                        "OR user_id IN (SELECT id FROM users WHERE email LIKE 'mint-%@datapipelines.test')",
+                )
+                statement.execute("DELETE FROM workspaces WHERE name LIKE 'mint-%'")
+                statement.execute("DELETE FROM users WHERE email LIKE 'mint-%@datapipelines.test' AND email <> '$ADMIN_EMAIL'")
+                // The bootstrap admin is the LocalAdminSeeder's row: keep the row, but a
+                // re-run needs the seed credential BACK and the forced change owed again —
+                // otherwise the first login's gate assertion runs against a settled account.
+                // A real Argon2id hash of THIS run's seed password, from the same helper
+                // every suite's key fixture uses (E2eAuth) — the hasher is stateless, so a
+                // test-side one matches what the app's verifies.
+                val hash = E2eAuth.argon2Hash(SEED_PASSWORD)
+                statement.execute(
+                    "UPDATE users SET password_hash = '$hash', password_changed_at = NOW(), must_change_password = TRUE, " +
+                        "failed_login_count = 0, locked_until = NULL WHERE email = '$ADMIN_EMAIL'",
+                )
+            }
+        }
+    }
+
+    private var cleaned = false
     /** The top bar's read: the caller's live MCP key in the session's active workspace. */
     private fun mine(session: String): Map<String, Any?> {
         val body =

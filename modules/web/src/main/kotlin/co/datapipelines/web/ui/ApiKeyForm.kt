@@ -2,8 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
-import co.datapipelines.auth.KEY_SCOPES
-import co.datapipelines.auth.Scope
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -36,37 +34,12 @@ object ApiKeyForm {
         val takesBindings: Boolean,
     )
 
-    /** One scope, with the one-line meaning §7.5's table states in prose. */
-    data class ScopeChoice(
-        val wire: String,
-        val label: String,
-        val meaning: String,
-    )
-
     /** One expiry preset. [days] is null for both "never" and "custom" — see [resolveExpiry]. */
     data class ExpiryChoice(
         val wire: String,
         val label: String,
         val days: Long?,
     )
-
-    /**
-     * The scope hierarchy, each with what it actually lets a key DO (auth.md §7.5).
-     *
-     * These are CAPABILITIES, not HTTP verbs, and the form offers no verb scopes at all. Two
-     * reasons, both worth stating where the strings live: `execute` is a POST that writes
-     * nothing (running a released pipeline), so a verb split would put it on the wrong side;
-     * and an MCP tool call has no verb to split on. One vocabulary, both surfaces.
-     */
-    val SCOPE_MEANINGS: Map<Scope, String> =
-        mapOf(
-            Scope.READ to "list and inspect — runs nothing",
-            Scope.EXECUTE to "run released pipelines (includes read)",
-            Scope.AUTHOR to "create and change templates, pipelines, datasources (includes execute)",
-            // `admin` is deliberately ABSENT (O-2): a key may not hold it, issuance refuses it
-            // with `auth.key_scope_unavailable`, and a form that offers a choice the server
-            // rejects is a form that teaches people the wrong model.
-        )
 
     /** The presets, in the order the select renders them. */
     val EXPIRY_CHOICES: List<ExpiryChoice> =
@@ -108,18 +81,6 @@ object ApiKeyForm {
                 takesBindings = false,
             ).takeIf { isAdmin },
         )
-
-    /**
-     * The scopes this caller may put on a key: their own, and everything below them (§7.4 —
-     * a key's scopes must be a subset of its creator's at issue time).
-     */
-    fun scopeChoices(held: Set<Scope>): List<ScopeChoice> =
-        Scope.entries
-            // O-2: `admin` is not a KEY scope. Without this filter an issuer who satisfies it
-            // walks off the end of SCOPE_MEANINGS, which no longer has an entry for it, and the
-            // form throws where it should simply offer one choice fewer.
-            .filter { it in KEY_SCOPES && Scope.satisfies(held, it) }
-            .map { ScopeChoice(it.wire, it.wire, SCOPE_MEANINGS.getValue(it)) }
 
     /**
      * The binding picker's nodes, derived from the workspace's published endpoint patterns.
