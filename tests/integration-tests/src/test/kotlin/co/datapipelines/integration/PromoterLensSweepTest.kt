@@ -303,6 +303,16 @@ class PromoterLensSweepTest {
                 }
             }
         }
+        withClue("184: the node-SQL partial answers a hidden pipeline id exactly as an absent one — the house 404, never the 500") {
+            HIDDEN_PIPELINE_IDS.forEach { hidden ->
+                val asPromoter = call("/partials/pipelines/$hidden/nodes/n1/sql", promoter)
+                val absent = call("/partials/pipelines/$ABSENT_UUID/nodes/n1/sql", promoter)
+                withClue("hidden $hidden") {
+                    asPromoter.status shouldBe HTTP_NOT_FOUND
+                    asPromoter.fingerprint shouldBe absent.fingerprint
+                }
+            }
+        }
         withClue("fix 3: used_by shows no DRAFT pin and no draft version, and the DRAFT template version is not-found") {
             val used = toolResult(tool("templates_used_by", """{"id":"$T/newer.sql","version":3}""", keyFor(PROMOTER)))
             val references = used.path("references")

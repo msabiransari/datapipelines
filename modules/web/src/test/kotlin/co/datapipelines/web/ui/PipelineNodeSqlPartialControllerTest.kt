@@ -4,7 +4,9 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.TemplateEngine
 import co.datapipelines.templates.TemplateRenderException
@@ -14,15 +16,21 @@ import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.view
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.ui.ExtendedModelMap
 import java.time.Instant
 import java.util.UUID
@@ -231,18 +239,30 @@ class PipelineNodeSqlPartialControllerTest {
     }
 
     @Test
-    fun `a pipeline outside the caller's workspace is a 404, not a partial`() {
+    fun `an unknown pipeline id is the house 404, never the 500 (184)`() {
         every { pipelines.findById(any(), pipelineId) } returns null
-        every { pipelines.findDraftDetail(any(), pipelineId) } returns null
-        every { pipelines.findCurrentVersionDetail(any(), pipelineId) } returns null
+        val mvc = mvcFor(controller)
 
-        assertThrows<NoSuchElementException> {
-            controller.nodeSql(pipelineId, "trips_by_day", null, ExtendedModelMap())
-        }
+        // The non-htmx shape: the shared not-found page, status carried.
+        mvc
+            .perform(get("/partials/pipelines/$pipelineId/nodes/trips_by_day/sql"))
+            .andExpect(status().isNotFound)
+            .andExpect(view().name("error/404"))
+
+        // The htmx shape: §5.1 Shape C, the code — and never the exception's message.
+        val body =
+            mvc
+                .perform(get("/partials/pipelines/$pipelineId/nodes/trips_by_day/sql").header("HX-Request", "true"))
+                .andExpect(status().isNotFound)
+                .andExpect(header().string("HX-Retarget", "#toast"))
+                .andReturn()
+                .response.contentAsString
+        body shouldContain PipelineErrorCodes.Execution.NOT_FOUND
+        body shouldNotContain pipelineId.toString()
     }
 
     @Test
-    fun `a pipeline the promoter lens hides is the SAME 404 as an absent one (178)`() {
+    fun `a pipeline the promoter lens hides is the SAME 404 as an absent one (178, 184)`() {
         val lensed =
             PipelineNodeSqlPartialController(
                 pipelines,
@@ -251,15 +271,51 @@ class PipelineNodeSqlPartialControllerTest {
                 co.datapipelines.web.pipelineServiceOver(pipelines),
                 co.datapipelines.application.lens.PromoterLens {
                     co.datapipelines.application.lens.LensedView(
-                        co.datapipelines.pipeline.ReadLens.NOTHING,
-                        co.datapipelines.pipeline.ReadLens.NOTHING,
+                        ReadLens.NOTHING,
+                        ReadLens.NOTHING,
                     )
                 },
             )
+        val absentId = UUID.randomUUID()
+        every { pipelines.findById(any(), absentId) } returns null
+        val mvc = mvcFor(lensed)
 
-        assertThrows<NoSuchElementException> {
-            lensed.nodeSql(pipelineId, "trips_by_day", null, ExtendedModelMap())
-        }
+        fun probe(id: UUID): String =
+            mvc
+                .perform(get("/partials/pipelines/$id/nodes/trips_by_day/sql").header("HX-Request", "true"))
+                .andExpect(status().isNotFound)
+                .andReturn()
+                .response.contentAsString
+
+        // findById still answers for the hidden id — the LENS is what hides it — and the two
+        // answers are identical once the per-request correlation id is stripped.
+        withoutCorrelation(probe(pipelineId)) shouldBe withoutCorrelation(probe(absentId))
+    }
+
+    @Test
+    fun `a draft-only pipeline under a narrowing lens is the same 404 - the resolver's not-found is mapped too (184)`() {
+        // The lens ADMITS the pipeline's name, so findRecord passes; the resolver then finds no
+        // RELEASED version (a draft-only pipeline's current_version is NULL, and the narrowing
+        // lens never reads the draft branch) and throws — the controller's mapping, not the
+        // service's, is what answers 404 here.
+        val narrowing =
+            PipelineNodeSqlPartialController(
+                pipelines,
+                templateEngines,
+                templates,
+                co.datapipelines.web.pipelineServiceOver(pipelines),
+                co.datapipelines.application.lens.PromoterLens {
+                    co.datapipelines.application.lens.LensedView(
+                        ReadLens.Only(setOf("test/nyc")),
+                        ReadLens.Only(setOf("test/nyc")),
+                    )
+                },
+            )
+        every { pipelines.findCurrentVersionDetail(any(), pipelineId) } returns null
+
+        mvcFor(narrowing)
+            .perform(get("/partials/pipelines/$pipelineId/nodes/trips_by_day/sql").header("HX-Request", "true"))
+            .andExpect(status().isNotFound)
     }
 
     @Test
@@ -280,6 +336,15 @@ class PipelineNodeSqlPartialControllerTest {
         model.getAttribute("state") shouldBe "node-missing"
         io.mockk.verify(exactly = 0) { pipelines.findVersionBody(any(), pipelineId, 1) }
     }
+
+    /** The HTTP-level harness, [PipelineChecksPartialsControllerTest]'s shape: the advice is the mapping under test. */
+    private fun mvcFor(controller: PipelineNodeSqlPartialController): MockMvc =
+        MockMvcBuilders
+            .standaloneSetup(controller)
+            .setControllerAdvice(UiExceptionHandler())
+            .build()
+
+    private fun withoutCorrelation(body: String): String = body.replace(CORRELATION_ID, "")
 
     private fun record() =
         co.datapipelines.pipeline.PipelineRecord(
@@ -317,4 +382,9 @@ class PipelineNodeSqlPartialControllerTest {
         createdAt = Instant.parse("2026-08-01T00:00:00Z"),
         createdBy = UUID.randomUUID(),
     )
+
+    private companion object {
+        /** `PromoterLensSweepTest`'s fingerprint rule: the per-request correlation id is not content. */
+        val CORRELATION_ID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    }
 }
