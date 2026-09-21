@@ -124,8 +124,10 @@ test("formatRunLine: a calculator's footer counts its keys — the values are th
 test("the card is the mock's anatomy: tile, id, eyebrow, facts, footer, ports, progress", () => {
   const g = loadGraph();
   const card = g.buildCardHtml(DQL_CARD);
-  // The type accent pair rides inline — the tile and the eyebrow read it back.
-  assert.match(card, /style="--type:var\(--type-dql\);--type-bg:var\(--type-dql-bg\)"/);
+  // 188: the card names its TYPE; app.css maps `data-type` to the accent pair the tile
+  // and the eyebrow read. Never a style attribute — the CSP refuses inline styles.
+  assert.match(card, /data-type="dql"/);
+  assert.doesNotMatch(card, /style=/, "no inline style attribute anywhere on a card");
   assert.match(card, /class="pe-card-tile"><svg class="ds-icon ds-icon-sm"/, "the icon TILE carries the type glyph");
   assert.match(card, /class="pe-card-id"[^>]*>trips_by_borough</);
   assert.match(card, /class="pe-card-kind">dql</, "the type eyebrow, lowercase for the CSS uppercase");
@@ -335,7 +337,7 @@ test("a CALCULATOR node's card facts are kind → context_key, and its eyebrow r
 
   const card = g.buildCardHtml(els[0].data);
   assert.match(card, /class="pe-card-kind">calculator</);
-  assert.match(card, /--type:var\(--type-calc\)/, "the calc accent pair");
+  assert.match(card, /data-type="calc"/, "the calc accent (188: data-type, mapped by app.css)");
   assert.match(card, /fiscal_quarter → run_fiscal_quarter/);
   assert.match(card, /lucide-sprite\.svg#calculator/,
     "085 §B: the honest glyph — the `file` stand-in is retired with the full icon set");

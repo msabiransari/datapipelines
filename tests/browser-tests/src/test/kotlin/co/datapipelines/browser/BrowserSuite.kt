@@ -64,6 +64,15 @@ abstract class BrowserSuite {
             tracingThisTest = false
         }
         context.close()
+        // 188 (#188): ZERO Content-Security-Policy violations across every page every test
+        // visited — the live counterpart of InlineScriptAuditTest. Chromium reports a refused
+        // inline script, handler or style as a console error naming the policy; every page
+        // any context of this suite opens is watched (newBrowserContext), and the test that
+        // caused one fails here by name, with the page URL and the browser's own sentence.
+        val violations = drainCspViolations()
+        if (violations.isNotEmpty()) {
+            throw AssertionError("Content-Security-Policy violations during this test:\n" + violations.joinToString("\n"))
+        }
     }
 
     /** Subclass tests call this FIRST so a failing run leaves a diagnoseable trace. */
@@ -285,11 +294,28 @@ abstract class BrowserSuite {
         private var browserHolder: Browser? = null
 
         @JvmStatic
-        protected fun newBrowserContext(): BrowserContext = browser.newContext()
+        protected fun newBrowserContext(): BrowserContext = browser.newContext().watchingCsp()
 
         /** A context with options — a public-site arm's reduced motion, dark scheme or no-JS posture (145). */
         @JvmStatic
-        protected fun newBrowserContext(options: Browser.NewContextOptions): BrowserContext = browser.newContext(options)
+        protected fun newBrowserContext(options: Browser.NewContextOptions): BrowserContext = browser.newContext(options).watchingCsp()
+
+        /** The CSP violations seen since the last drain — see [closePage]. Static: one per test JVM. */
+        private val cspViolations = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+        /** Every page this context opens reports a CSP refusal into [cspViolations]. */
+        private fun BrowserContext.watchingCsp(): BrowserContext =
+            apply {
+                onPage { page ->
+                    page.onConsoleMessage { message ->
+                        if (message.text().contains("Content Security Policy")) cspViolations += "${page.url()} — ${message.text()}"
+                    }
+                }
+            }
+
+        /** Returns what was collected and clears it — the per-test read in [closePage]. */
+        @JvmStatic
+        protected fun drainCspViolations(): List<String> = cspViolations.toList().also { cspViolations.clear() }
 
         private val browser: Browser
             get() {

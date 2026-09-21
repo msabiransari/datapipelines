@@ -164,6 +164,19 @@ class AuthHttpBoundaryTest {
             @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
             fun mcp() = principalPayload()
 
+            /**
+             * 188: an SSE probe — the security headers must be on a streamed response too,
+             * which is what `setShouldWriteHeadersEagerly` in [SecurityConfig] exists for.
+             * Authenticated like the real events route, so the stream is opened with a key.
+             */
+            @GetMapping("/api/v1/probe/stream", produces = [org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE])
+            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            fun probeStream(): org.springframework.web.servlet.mvc.method.annotation.SseEmitter =
+                org.springframework.web.servlet.mvc.method.annotation.SseEmitter().apply {
+                    send("ok")
+                    complete()
+                }
+
             private fun principalPayload(): Map<String, String?> {
                 val principal =
                     SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
@@ -267,6 +280,46 @@ class AuthHttpBoundaryTest {
     @Test
     fun `the health probe is anonymous and 200`() {
         call(HttpMethod.GET, "/health").statusCode.value() shouldBe 200
+    }
+
+    // ------------------------------------------------- the headers the app states (#188)
+
+    /**
+     * Every response — a 200 page, a 401 envelope, the MCP refusal and an SSE stream —
+     * carries the [SecurityHeaders] set, read off the wire through the real chain. The
+     * 401s matter most: an entry point that wrote its envelope BEFORE the header writers
+     * ran would ship the refusal without them. Falsified at birth by dropping one writer
+     * from `SecurityConfig` (188's evidence).
+     */
+    @Test
+    fun `every response carries the stated security headers, 401s and the SSE stream included`() {
+        data class Case(val method: HttpMethod, val path: String, val expected: Int, val headers: HttpHeaders = HttpHeaders())
+        val cases =
+            listOf(
+                Case(HttpMethod.GET, "/health", 200),
+                Case(HttpMethod.GET, "/api/v1/probe", 401),
+                Case(HttpMethod.POST, "/mcp", 401),
+                Case(HttpMethod.GET, "/pipelines/abc-123/editor", 401),
+                Case(HttpMethod.GET, "/api/v1/probe/stream", 200, headers(apiKey = readKey)),
+            )
+        cases.forEach { (method, path, expected, requestHeaders) ->
+            val response = call(method, path, requestHeaders)
+            withClue("$method $path") {
+                response.statusCode.value() shouldBe expected
+                val h = response.headers
+                h.getFirst("X-Content-Type-Options") shouldBe "nosniff"
+                h.getFirst("X-Frame-Options") shouldBe SecurityHeaders.FRAME_OPTIONS
+                h.getFirst("X-XSS-Protection") shouldBe "0"
+                h.getFirst("Referrer-Policy") shouldBe SecurityHeaders.REFERRER_POLICY
+                h.getFirst("Permissions-Policy") shouldBe SecurityHeaders.PERMISSIONS_POLICY
+                h.getFirst("Cache-Control").shouldNotBeBlank()
+                // No HSTS from the app — the edge's header (deployment.md §6.2).
+                h.getFirst("Strict-Transport-Security") shouldBe null
+                h[SecurityHeaders.CSP_HEADER]?.size shouldBe 1
+                h.getFirst(SecurityHeaders.CSP_HEADER) shouldBe
+                    if (path.endsWith("/editor")) SecurityHeaders.CSP_POLICY_EDITOR else SecurityHeaders.CSP_POLICY
+            }
+        }
     }
 
     // ------------------------------------------------- API-key rejection codes

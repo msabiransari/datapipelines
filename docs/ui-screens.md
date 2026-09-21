@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.63
+**Status:** v1.64
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-19 (173)
@@ -211,10 +211,15 @@ nav packs to the top; the free space below it is deliberate.
   narrowed by the credential axis like every rung (no key holds `admin`, O-2). Active state
   is the path rule unchanged: `/admin/*` lights Admin; on `/workspaces` the Workspaces item is
   the active one and the members shortcut never lights by itself.
-- **The collapsed state** is a class on `<html>`, written by the layout's ONE inline script
-  before the first paint and toggled by `shell.js` afterwards. This is the single deliberate
-  exception to "no inline scripts": a deferred external script runs after the document paints,
-  so the rail would render at 232px and snap to 60px on every navigation.
+- **The collapsed state** is a class on `<html>`, written by `/js/rail.js` — a
+  parser-blocking script in the layout's `<head>` — before the first paint and toggled by
+  `shell.js` afterwards. It was the layout's one inline script until 188 (#188): the enforced
+  Content-Security-Policy has no `'unsafe-inline'`, so **no template carries an inline
+  `<script>`, an `on*=` handler or a `style=` attribute** (`InlineScriptAuditTest`; the
+  browser suite holds every page to zero CSP violations). The reason the rail script cannot
+  be deferred still holds — a deferred script runs after the document paints, so the rail
+  would render at 232px and snap to 60px on every navigation — which is why it is its own
+  blocking file rather than part of `shell.js`.
 - **The active item** is `--brand-soft` background, `--brand` text and icon, **plus a 3px
   `--border-focus` left bar**. The bar is not decoration: §2.8 is normative that
   `surface-selected` reaches only 1.5:1 and a tint alone cannot carry selection. The mock
@@ -1605,6 +1610,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.64 | 188 (#188) security headers + CSP | Doc-only for the screens (no visible behaviour changes). §3.4: the rail's first-paint script is `/js/rail.js`, not an inline block — the enforced CSP (`script-src 'self'; style-src 'self'`, no `'unsafe-inline'`) forbids every inline script, `on*=` handler and `style=` attribute in a template; the five page scripts and twenty-three handlers moved into `/js` (`api-keys.js`, `datasources.js`, `template-create-modal.js`, `password-card.js`, `rail.js`; the rest into `shell.js` and `template-editor/lifecycle.js` as `data-action` controls), the executions rows navigate by `data-href`, and the type-coloured editor elements carry `data-type` instead of a style attribute. The pipeline editor's route alone allows `'unsafe-eval'` for Alpine (#195). Guards: `InlineScriptAuditTest`, the browser suite's zero-violation rule, `SecurityHeadersTest`. |
 | 2026-09-21 | v1.63 | 180 (#180) roles R4 — deactivation | Doc-only. §4.11: `?error=inactive` is also where a session deactivated mid-life lands (cookie cleared by the filter, redirect by the entry point). §4.12: the deactivation window sentence names the knob and the new code `auth.principal_deactivated`; nothing is revoked, Activate restores. |
 | 2026-09-21 | v1.62 | 185 (#185) script-block escaping | §4.4: the editor's two JSON blobs are written through `ScriptSafeJson.forScriptBlock`, so a closing-tag sequence inside any free-text field the pipeline carries cannot close the `<script type="application/json">` block the blob is inserted into (stored XSS, #185). One shared escaper with the docs' and FAQ's JSON-LD writers; guarded by `PipelineEditorJsonRenderTest` (jsoup) and `ScriptBlockUtextAuditTest`'s closed `th:utext` allowlist. |
 | 2026-09-21 | v1.61 | 179 (#179) roles R3 — keys | **§4.3e / §3.4: the top bar gains the MCP-key chip** (D16, ruling 7) — prefix, Copy (fetches the secret from `GET /partials/mcp-key/secret`; never in the page) and delete-to-rotate for every role on their own key. **§4.18 read-only again**: the keys card and its modal left the console for **§4.19 `/api-keys`** (new; `MANAGE_API_KEYS` — ws_admin + super admin), which carries create (Kind → Name → Expiry → Associations), delete and per-key association; the console's endpoints table gains the associated-keys-by-name column with an admins-only Manage link, and keeps the MCP card. **§4.10 repointed**: the settings screen points at the top bar (your MCP key) and §4.19 (the workspace's). The avatar menu's "API keys" link leads to `/api-keys` for the roles that hold `MANAGE_API_KEYS` and is absent otherwise. `ApiKeysPageRenderTest` pins the page; `ApiConsoleRenderTest` pins the console's new shape. |

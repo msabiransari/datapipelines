@@ -23,7 +23,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr th:each="r : ${executions}" class="app-row-clickable" th:attr="onclick='window.location.href=\'/executions/' + ${r.executionId} + '\''">
+        <tr th:each="r : ${executions}" class="app-row-clickable" th:attr="data-href=@{/executions/{id}(id=${r.executionId})}">
           <td>
             <!-- 079 §E: the display name is prose, the machine path sits UNDER it in mono
                  (§3.3 — mono is for identifiers only). The path was previously only a

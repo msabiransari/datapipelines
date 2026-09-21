@@ -5,6 +5,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- 188 (#188): htmx under the enforced CSP. `allowEval:false` — nothing here uses
+       hx-on, `js:` values or trigger filters, and the policy has no 'unsafe-eval' to
+       run them anyway; `includeIndicatorStyles:false` — htmx would inject an inline
+       <style> for .htmx-indicator, which `style-src 'self'` refuses; app.css carries
+       the same three rules instead. -->
+  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false}'>
 
   <link th:href="@{/vendor/design-system/tokens.css}" rel="stylesheet">
   <link th:id="theme-link"
@@ -67,16 +73,16 @@
   <link th:href="@{/css/template-tree.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
-       This is the ONE inline script in the layout, and the round's only
-       deliberate exception to "no inline scripts" (ui-screens.md §3.2 keeps the
-       rule for everything else). The reason it cannot move into shell.js: a
-       deferred external script runs after the document has painted, so the rail
-       would render at 232px and snap to 60px in front of the user on every
-       navigation — a flash of the wrong layout, which is the exact class of
-       thing the boosted-navigation work exists to remove. The class goes on
-       <html> rather than the shell element because <body> does not exist yet at
-       this point in the parse; shell.js toggles the same class on the same
-       element, so there is one source of truth for it.
+       Until 188 this was the ONE inline script in the layout — the round's only
+       deliberate exception to "no inline scripts". The enforced CSP (#188:
+       `script-src 'self'`, no 'unsafe-inline') moved its body, unchanged, into
+       /js/rail.js, loaded HERE as a parser-blocking script (no defer): the reason
+       it could never be part of shell.js still holds — a deferred script runs
+       after the document has painted, so the rail would render at 232px and snap
+       to 60px in front of the user on every navigation, a flash of the wrong
+       layout. The class goes on <html> rather than the shell element because
+       <body> does not exist yet at this point in the parse; shell.js toggles the
+       same class on the same element, so there is one source of truth for it.
 
        110 added the mirror class for the opposite choice: from 768 to 1099px the
        rail's DEFAULT is collapsed (a CSS media rule, so it also survives a live
@@ -88,7 +94,7 @@
        Wrapped in try/catch: localStorage throws outright in some privacy modes,
        and a shell that cannot render because a preference could not be read is
        a worse failure than a rail that opens. -->
-  <script>try{var v=localStorage.getItem("dp-rail");if(v==="1")document.documentElement.classList.add("rail-collapsed");else if(v==="0")document.documentElement.classList.add("rail-expanded")}catch(e){}</script>
+  <script th:src="@{/js/rail.js}"></script>
 
   <link rel="icon" href="/favicon.ico" sizes="48x48">
   <link rel="icon" type="image/png" sizes="32x32" th:href="@{/site/brand/favicon-32.png}">
@@ -214,7 +220,7 @@
           </span>
           <svg class="app-ws-caret app-rail-label ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevrons-up-down"></use></svg>
         </label>
-        <select id="workspace-switcher" name="name" onchange="this.form.submit()"
+        <select id="workspace-switcher" name="name" data-submit-on-change
                 class="app-workspace-select" aria-label="Switch workspace">
           <option th:each="membership : ${workspaceOptions}"
                   th:value="${membership.workspaceName}"

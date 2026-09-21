@@ -5,6 +5,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- 188 (#188): the same htmx-config as layouts/default.html — see the note there. -->
+  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false}'>
 
   <!--/* 090 §C — THE AUTHENTICATION LAYOUT.
        The login screen, the forced-password-change gate and the OIDC error banner are
@@ -25,7 +27,7 @@
          it. `hx-boost` appears nowhere here (076 §B already marked /login and the OIDC
          redirects as full navigations; this removes the machinery instead of opting
          each link out of it);
-       - no `dp-rail` inline script: there is no rail whose width could flash.
+       - no /js/rail.js: there is no rail whose width could flash.
 
        What it KEEPS, because the ceremony needs it: the design system and the resolved
        theme (a ceremony screen in the wrong theme is the first thing a returning user

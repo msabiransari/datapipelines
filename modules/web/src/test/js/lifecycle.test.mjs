@@ -95,8 +95,11 @@ globalThis.window = {
     },
   },
 };
+const bodyListeners = {};
 globalThis.document = {
   cookie: "dp_csrf=tok%2Fen",
+  // 188: the delegated `data-action` listener lifecycle.js arms on the body.
+  body: { addEventListener: (type, fn) => { bodyListeners[type] = fn; } },
   getElementById: (id) => (elements[id] === undefined ? null : elements[id]),
   querySelector: (sel) => (sel === "[data-template-id]" ? el("te-page") : null),
   querySelectorAll: () => contextRows,
@@ -237,4 +240,36 @@ test("a failed preview builds its card from nodes and leaves the pane's markup a
   assert.equal(card.className, "ds-card app-error-card u-p-md");
   assert.equal(card.children[0].textContent, "network down");
   assert.equal(el("previewBtn").disabled, false);
+});
+
+// 188 (#188): the page's controls are `data-action` attributes read by ONE delegated click
+// listener — the `onclick` globals are gone. A click on a control resolves to the same
+// function the attribute used to name; a click elsewhere is left alone.
+function clickOn(attrs) {
+  let prevented = false;
+  const el = { getAttribute: (name) => (name in attrs ? attrs[name] : null) };
+  bodyListeners.click({
+    target: { closest: (sel) => (sel === "[data-action]" && attrs ? el : null) },
+    preventDefault: () => { prevented = true; },
+  });
+  return prevented;
+}
+
+test("188: the delegated listener routes data-action clicks to the tab switch", () => {
+  assert.ok(bodyListeners.click, "lifecycle.js armed a body click listener");
+  elements["context-kv"] = el("context-kv");
+  elements["context-json"] = el("context-json");
+  elements["tab-kv-btn"] = el("tab-kv-btn");
+  elements["tab-json-btn"] = el("tab-json-btn");
+  lifecycle.switchTab("kv");
+  assert.equal(clickOn({ "data-action": "context-tab", "data-tab": "json" }), true);
+  assert.equal(lifecycle.selectedTab(), "json");
+  assert.equal(clickOn({ "data-action": "context-tab", "data-tab": "kv" }), true);
+  assert.equal(lifecycle.selectedTab(), "kv");
+});
+
+test("188: a click outside any data-action control is not intercepted", () => {
+  lifecycle.switchTab("kv");
+  assert.equal(clickOn(null), false);
+  assert.equal(lifecycle.selectedTab(), "kv");
 });

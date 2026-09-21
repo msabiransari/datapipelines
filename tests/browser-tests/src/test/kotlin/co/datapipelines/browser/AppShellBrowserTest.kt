@@ -524,6 +524,43 @@ class AppShellBrowserTest : BrowserSuite() {
         errors shouldBe emptyList()
     }
 
+    /**
+     * 188 (#188): the CSP is ENFORCED, and the suite's collector sees a refusal. The
+     * suite-wide zero-violation rule (BrowserSuite.closePage) would hold vacuously against
+     * a report-only policy, a policy that was never sent, or a listener that never
+     * attached — so this test provokes one: an inline `<script>` appended to a live app
+     * page (through CDP, which the policy does not govern) must be REFUSED by the browser,
+     * and the refusal must reach the collector naming the policy. Drained afterwards so the
+     * deliberate violation is not charged to this test. Every real page is then held to
+     * zero by the same collector — this is what makes that zero mean something.
+     */
+    @Test
+    fun `the content security policy is enforced - an injected inline script is refused and seen`() {
+        startTrace()
+        signedIn("csp")
+        page.navigate("$baseUrl/dashboard")
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        drainCspViolations() shouldBe emptyList()
+
+        val ran =
+            page.evaluate(
+                """
+                () => {
+                  window.__dpCspProbe = false;
+                  const s = document.createElement('script');
+                  s.textContent = 'window.__dpCspProbe = true';
+                  document.body.appendChild(s);
+                  return window.__dpCspProbe;
+                }
+                """.trimIndent(),
+            )
+        ran shouldBe false
+        val seen = drainCspViolations()
+        seen.size shouldBeGreaterThanOrEqual 1
+        seen.first() shouldContain "Content Security Policy"
+        seen.first() shouldContain "script-src"
+    }
+
     @Test
     fun `the vendored webfonts are served and actually used`() {
         startTrace()

@@ -15,7 +15,7 @@
 <div xmlns:th="http://www.thymeleaf.org" class="u-backdrop" id="ds-edit-modal">
   <div class="ds-card app-modal app-modal-md">
     <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl"
-            aria-label="Close" onclick="closeDsDialog()">
+            aria-label="Close" data-action="ds-dialog-close">
       <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
     </button>
     <h2 class="ds-title u-m0 u-mb-md">Edit <span th:text="${datasource.name}">pg-prod</span></h2>

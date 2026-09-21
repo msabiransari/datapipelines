@@ -136,8 +136,9 @@ test("a PIPELINE node's Details: child, parameter mapping, output, child executi
 });
 
 test("the Details pane's type accent and icon follow the node type", () => {
-  assert.equal(editor.detailsTypeStyle(CALC), "--type:var(--type-calc);--type-bg:var(--type-calc-bg)");
-  assert.equal(editor.detailsTypeStyle(DQL), "--type:var(--type-dql);--type-bg:var(--type-dql-bg)");
+  // 188: a TYPE token for `data-type` (app.css maps it to --type/--type-bg), not a style string.
+  assert.equal(editor.detailsTypeToken(CALC), "calc");
+  assert.equal(editor.detailsTypeToken(DQL), "dql");
   assert.match(editor.detailsIcon(CHILD), /lucide-sprite\.svg#workflow/);
 });
 

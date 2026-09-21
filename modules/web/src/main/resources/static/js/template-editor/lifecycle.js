@@ -22,8 +22,8 @@
  *
  * Testability: an IIFE exporting its state machine for `node --test`
  * (modules/web/src/test/js/lifecycle.test.mjs); in the browser it publishes
- * `window.TplLifecycle` plus the handful of global names the page's `onclick` attributes
- * still use.
+ * `window.TplLifecycle` and arms one delegated click listener for the page's
+ * `data-action` controls (188 — the `onclick` attributes are gone with the CSP).
  */
 (function () {
   "use strict";
@@ -209,11 +209,24 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api; // node --test
   if (typeof window !== "undefined") {
     window.TplLifecycle = api;
-    // The page's `onclick` attributes call these by name; they are the file's public
-    // surface as much as `TplLifecycle` is.
-    window.switchTab = switchTab;
-    window.addContextRow = addContextRow;
-    window.removeContextRow = removeContextRow;
-    window.renderPreview = renderPreview;
+    // 188 (#188): the page's controls carry `data-action` values, read by ONE delegated
+    // listener — the `onclick` attributes that called these by name are gone (the
+    // enforced CSP has no 'unsafe-inline'), and with them the window globals they
+    // needed. Delegated so the buttons a boosted arrival re-renders need no re-arming;
+    // armed once, shell.js's own pattern.
+    if (!window.__dpTplLifecycleArmed && typeof document !== "undefined" && document.body) {
+      window.__dpTplLifecycleArmed = true;
+      document.body.addEventListener("click", function (evt) {
+        var el = evt.target.closest && evt.target.closest("[data-action]");
+        if (!el) return;
+        switch (el.getAttribute("data-action")) {
+          case "context-tab": evt.preventDefault(); switchTab(el.getAttribute("data-tab")); break;
+          case "context-row-add": evt.preventDefault(); addContextRow(); break;
+          case "context-row-remove": evt.preventDefault(); removeContextRow(el); break;
+          case "template-preview": evt.preventDefault(); renderPreview(); break;
+          default: break;
+        }
+      });
+    }
   }
 })();

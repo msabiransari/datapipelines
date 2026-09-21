@@ -1165,6 +1165,28 @@
         });
     });
 
+    /* 188 (#188) — the two layout-level behaviours that used to be `on*=` attributes,
+       now data attributes read here: an enforced CSP with no 'unsafe-inline' refuses
+       every inline handler, and a handler in markup is a handler no test reads.
+
+       `data-submit-on-change` — the workspace switcher: choosing a workspace submits
+       its form. `data-href` — a clickable row (the executions tables): a click anywhere
+       on the row navigates, EXCEPT a click on a link or button inside it, which keeps
+       its own target (the "spawned by" link used to stopPropagation for this). Both
+       are delegated to the document so the rows htmx swaps in need no re-arming. */
+    doc.body.addEventListener("change", function (evt) {
+      var control = evt.target.closest && evt.target.closest("[data-submit-on-change]");
+      if (control && control.form) control.form.submit();
+    });
+    doc.body.addEventListener("click", function (evt) {
+      if (evt.defaultPrevented || evt.button !== 0 || evt.metaKey || evt.ctrlKey) return;
+      var inner = evt.target.closest && evt.target.closest("a, button, input, select, textarea, label");
+      var row = evt.target.closest && evt.target.closest("[data-href]");
+      if (!row || (inner && row.contains(inner))) return;
+      var href = row.getAttribute("data-href");
+      if (href) window.location.href = href;
+    });
+
     /* 079 §B — the avatar menu. Opening is a click on the avatar; closing is
        Escape, a click anywhere outside, or choosing an item. Arrow keys move
        within it without activating anything.
