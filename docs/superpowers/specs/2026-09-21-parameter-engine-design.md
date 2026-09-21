@@ -1,4 +1,4 @@
-# Parameter engine — design record (2026-09-21, draft 1 for owner review)
+# Parameter engine — design record (2026-09-21, draft 2 for owner review)
 
 Owner's intent (2026-09-21): "populate input controls … used to feed its selection into
 charts/dashboards as parameters. We don't have dashboards or charts yet. Build an engine for
@@ -17,7 +17,7 @@ named in §0 with its reason; nothing else is new.
 
 ## 0. Decisions
 
-Rulings the owner made in conversation (P1–P17) and the four taken in the follow-up (P18–P21).
+Rulings the owner made in conversation (P1–P17) and the six taken in the follow-ups (P18–P23).
 Two deviations from the conversation's wording (P8's third column, P13's invalidation outcome)
 are marked **deviation** and carry their reason.
 
@@ -45,6 +45,7 @@ are marked **deviation** and carry their reason.
 | P20 | Roles: **read** every role (promoter through the lens); **author** (create/update/release/purge) author + admins; **evaluate** every role that may execute a pipeline (viewer, author, admins; promoter ✗); **promote** promoter + admins. Three `RestOperation` rows (§9.3). |
 | P21 | Round one ships **MCP tools + REST API, no UI**. The reference renderer lands with dashboards (#10). |
 | P22 | **Selector SQL is a pinned template**, never inline SQL: `source.template = {id, version}` (the node shape of pipeline-contract §4.1), rendered through `TemplateEngine`, parents bound as `:name`, `${parent}` refused at save, pins released before the set releases, and the templates used-by / delete-guard reverse scans extended to parameter sets (§6, §8.4). |
+| P23 | **Hard-coded values, both ways** (owner 2026-09-21, second follow-up). (a) A SELECT's options are **either** a hard-coded list (`source.constants`, §3.3) **or** SQL (`source.template`, §3.4) — SQL is the option for data that changes and must come from a database, never a requirement. (b) A **`FIXED`** parameter (§3.7) has no options and is never chosen by a user: its value is hard-coded in the definition (`default_value`) and/or **passed in by the caller** at evaluate time in a separate `inputs` map (a dashboard's `customer_id = 42`), typed, coerced and constrained like every other value, bindable by children as `:name`, present in `values`, never rendered. |
 
 ---
 
@@ -179,14 +180,14 @@ Redis (rule 3).
 | `description` | optional, ≤ 2000 chars | `parameter.validation.description_too_long` |
 | `type` | one of `BOOLEAN`, `INTEGER`, `BIGINTEGER`, `DECIMAL`, `BIGDECIMAL`, `STRING`, `BINARY`, `DATE`, `TIME`, `TIMESTAMP` (`LogicalType` minus `NULL`) | `parameter.validation.type_invalid` |
 | `precision`, `scale` | exactly pipeline-contract §6.2 / §12.7: `precision` required for `DECIMAL`, optional (= unbounded) for `BIGDECIMAL`; `scale` required for `BIGDECIMAL` and for exact `DECIMAL` | `parameter.validation.precision_missing`, `parameter.validation.scale_missing` |
-| `kind` | `INPUT` (free value) or `SELECT` (from options) | `parameter.validation.kind_invalid` |
-| `cardinality` | `SINGLE` or `MULTI`; `MULTI` only with `kind: SELECT` | `parameter.validation.cardinality_invalid` |
+| `kind` | `INPUT` (a value the user types), `SELECT` (a value the user picks from options — hard-coded via `constants` **or** from a database via a `template`; P23a), or `FIXED` (a value nobody picks — hard-coded and/or caller-supplied, §3.7; P23b) | `parameter.validation.kind_invalid` |
+| `cardinality` | `SINGLE` or `MULTI`; `MULTI` with `kind: SELECT` or `FIXED` (an `INPUT` is always `SINGLE`) | `parameter.validation.cardinality_invalid` |
 | `required` | boolean; a `required` parameter that resolves to no value and no options is an evaluate error (§5.4), not a save error | — |
 | `default_value` | wire-encoded for `type`; `SINGLE`/`INPUT` → one value, `MULTI` → array; must survive the FULL coercion (§12.7's `default_type_mismatch` rule); for `SELECT` with `constants` it must be among the option values; for `SELECT` with a template it is checked at evaluate, not save (the options depend on parents) | `parameter.validation.default_type_mismatch`, `parameter.validation.default_not_an_option` |
-| `source` | required iff `kind: SELECT`; exactly one of `constants` (§3.3) or `template` + `datasource` (§3.4) | `parameter.validation.source_missing`, `parameter.validation.source_ambiguous`, `parameter.validation.source_on_input` |
-| `depends_on` | parameter names in the same set; must be a **superset** of every `:bind` the selector template uses and every `ref` in the two expressions (discovery is never load-bearing — P12); no self reference; the set's graph must be acyclic | `parameter.validation.dependency_unknown`, `parameter.validation.bind_undeclared`, `parameter.validation.ref_undeclared`, `parameter.validation.dependency_cycle` |
-| `hidden_expression`, `disabled_expression` | a §7 AST or `null` (= `false`) | `parameter.validation.expression_invalid` and the §7 codes |
-| `constraints` | `INPUT` only (§3.5) | `parameter.validation.constraints_on_select` |
+| `source` | required iff `kind: SELECT`; exactly one of `constants` (§3.3) or `template` + `datasource` (§3.4); forbidden on `INPUT` and `FIXED` | `parameter.validation.source_missing`, `parameter.validation.source_ambiguous`, `parameter.validation.source_not_allowed` |
+| `depends_on` | parameter names in the same set; must be a **superset** of every `:bind` the selector template uses and every `ref` in the two expressions (discovery is never load-bearing — P12); no self reference; the set's graph must be acyclic; **empty on `FIXED`** (a fixed value is a root) | `parameter.validation.dependency_unknown`, `parameter.validation.bind_undeclared`, `parameter.validation.ref_undeclared`, `parameter.validation.dependency_cycle`, `parameter.validation.dependencies_on_fixed` |
+| `hidden_expression`, `disabled_expression` | a §7 AST or `null` (= `false`); **not allowed on `FIXED`** (it is never rendered, so neither state means anything) | `parameter.validation.expression_invalid`, `parameter.validation.expression_on_fixed` and the §7 codes |
+| `constraints` | `INPUT` and `FIXED` (§3.5) — a caller-supplied fixed value is validated exactly like a typed one | `parameter.validation.constraints_on_select` |
 | `format` | optional, from the closed catalogue (§3.6) | `parameter.validation.format_invalid` |
 
 ### 3.3 Constants source
@@ -203,6 +204,12 @@ non-empty string; `is_default` is a boolean, at most one `true` (P7); values are
 is non-empty and at most `max-options-per-selector` long. Order is the display order and the
 default order.
 
+This is the **default way to populate a selector** (P23a): a list an author (or agent) writes into
+the definition — statuses, regions, a yes/no pair, anything stable. The template form (§3.4) is
+for options that change and must come from a database. A constants selector needs no datasource,
+no template and no query at evaluate time; the two forms are interchangeable to a renderer, which
+sees the same `{value, display_value, is_default}` rows either way.
+
 ### 3.4 Template source (P22)
 
 ```json
@@ -215,7 +222,7 @@ template's `name`, resolved in the active workspace). `datasource` is a datasour
 from the workspace (bound or global). The template must be `type='sql'` with a `dialect` equal to
 the datasource's dialect. The SQL contract is §6.
 
-### 3.5 Constraints (`INPUT` only; P19)
+### 3.5 Constraints (`INPUT` and `FIXED`; P19)
 
 ```json
 "constraints": { "min": 0, "max": 1000000, "min_length": null, "max_length": null, "pattern": null }
@@ -255,6 +262,35 @@ is needed. Decimal places always come from `scale`. New kinds are additive.
   "default_value": 0, "constraints": { "min": 0 }, "format": { "kind": "currency" } }
 ```
 
+### 3.7 Fixed parameters (P23b) — a value nobody picks
+
+```json
+{ "name": "customer_id", "label": "Customer", "type": "BIGINTEGER", "kind": "FIXED",
+  "cardinality": "SINGLE", "required": true, "default_value": null,
+  "constraints": { "min": "1" }, "depends_on": [] }
+```
+
+A `FIXED` parameter is a **typed slot in the form that a user never sees or edits**. Its value
+comes from one of two places, in this order:
+
+1. **the caller**, at evaluate time, in the request's `inputs` map (§5.1) — the embedding
+   dashboard passing the tenant, the current user's region, a report's period;
+2. **the definition**, `default_value` — a genuinely hard-coded value (a constant `market =
+   'EU'` every child selector filters on).
+
+`required: true` with neither present is a whole-request refusal (`parameter.evaluate.input_missing`,
+400): the caller is wrong, not the user. A supplied input goes through the same coercion and
+constraints as an `INPUT` value; a failure is `parameter.evaluate.input_invalid` (400, whole
+request — again the caller's error, so it is not a per-parameter `errors[]` row the form would
+show a user). A `FIXED` name appearing in `selections` is `parameter.evaluate.fixed_in_selections`
+(400): the two maps are kept apart precisely so a renderer cannot spoof what the embedder set.
+
+Rules: no `source`, no `constraints_on_select` concern (constraints ARE allowed), no
+`hidden_expression` / `disabled_expression`, `depends_on` empty — it is a root of the graph, and
+any parameter may depend on it and bind it (`WHERE customer_id = :customer_id`). `MULTI` is allowed
+(an allowed-regions list passed in). It appears in `parameters[]` with `kind: "FIXED"` and
+`state.value` (so a renderer can skip it and a consumer can read it), and in `values`.
+
 ---
 
 ## 4. Save-time validation (the order the validator runs)
@@ -293,23 +329,33 @@ is unchanged.
 
 ```json
 { "version": 4,
+  "inputs":     { "customer_id": "42" },
   "selections": { "country": "USA", "state": "NY", "city": null, "min_order_amount": 250.00 } }
 ```
+
+- `inputs` (optional): the caller's values for `FIXED` parameters only (§3.7), wire-encoded for
+  their types. A key naming a non-`FIXED` parameter is `parameter.evaluate.input_not_fixed` (400).
+  Absent keys fall back to the definition's `default_value`.
 
 - `version` optional: a released version number, or absent = the served version (`current_version`);
   a DRAFT may be evaluated by its author with `version` = the draft's number (the working-version
   read rule, versioning §7.1). An MCP evaluate of a draft set whose pinned DRAFT template was
   updated after the key's last `templates_render` of it is refused with
   `parameter.evaluate.template_unrendered` — the 139 gate's twin, MCP-only.
-- `selections`: **every parameter's current value** (P15), wire-encoded for its type; `MULTI` as
-  an array; `null` or an absent key = *no selection* (first render sends `{}`). A key that names
-  no parameter of the set is `parameter.evaluate.unknown_parameter` (the whole request is refused —
-  a client that sends unknown keys is wrong, not the user).
+- `selections`: **every non-`FIXED` parameter's current value** (P15), wire-encoded for its type;
+  `MULTI` as an array; `null` or an absent key = *no selection* (first render sends `{}`). A key
+  that names no parameter of the set is `parameter.evaluate.unknown_parameter`; a key that names
+  a `FIXED` one is `parameter.evaluate.fixed_in_selections` (both 400 — the whole request is
+  refused; a client that sends those keys is wrong, not the user).
 
 ### 5.2 Algorithm
 
-1. Coerce every supplied value through `ParameterCoercion` for its type; a wire-form failure is
-   recorded on that parameter (`invalid_value_type`) and treated as *no selection* for the
+0. Resolve every `FIXED` parameter first (§3.7): `inputs[name]`, else `default_value`; coerce
+   and constrain; `required` and unresolved ⇒ `input_missing`, a bad value ⇒ `input_invalid` —
+   both refuse the whole request before any selector runs (the caller's error is never turned
+   into a form the user has to read).
+1. Coerce every supplied selection through `ParameterCoercion` for its type; a wire-form failure
+   is recorded on that parameter (`invalid_value_type`) and treated as *no selection* for the
    cascade, so the rest of the form still answers.
 2. Build the `Dag` (from the stored, validated definition — never re-validated here).
 3. Launch one coroutine per parameter (P16, the executor's pattern): each awaits its parents'
@@ -318,8 +364,9 @@ is unchanged.
 4. Per parameter, in this order: (a) `hidden` and `disabled` from the expressions over the
    parents' **resolved** values; (b) options — `constants` verbatim, or the template rendered
    against `{parents' resolved values} ∪ org tier ∪ platform tier` and run (§6.3); (c) the value:
+   - `FIXED` ⇒ already resolved in step 0; nothing else applies;
    - hidden or disabled ⇒ **server-owned** — the submission is ignored, the value is the default
-     (P5; a hidden tenant filter still binds for its children and still appears in `values`);
+     (P5; a hidden parameter still binds for its children and still appears in `values`);
    - `SELECT`: the submitted value(s) if every one is among the options, else the default
      (`is_default` row, else first row; `default_value` when among the options takes precedence)
      with `reset: true` (P13) — a `MULTI` keeps the surviving members and resets only when none survive;
@@ -336,8 +383,10 @@ is unchanged.
 ```json
 { "name": "acme/sales/region_filters", "version": 4, "valid": true,
   "org": { "currency_symbol": "$", "currency_name": "USD" },
-  "values": { "country": "USA", "state": "NY", "city": "New York", "min_order_amount": 250.00 },
+  "values": { "customer_id": "42", "country": "USA", "state": "NY", "city": "New York", "min_order_amount": 250.00 },
   "parameters": [
+    { …"name": "customer_id", "kind": "FIXED"…, "dependents": ["country"],
+      "state": { "value": "42", "hidden": true, "disabled": true, "reset": false, "options": null, "errors": [] } },
     { …the §3.2 definition…,
       "dependents": ["state", "city"],
       "state": { "value": "USA", "hidden": false, "disabled": false, "reset": false,
@@ -355,8 +404,9 @@ is unchanged.
   `MULTI`; `null` when none), hidden and disabled included. It is what a future dashboard hands
   to a pipeline's `parameters`.
 - `parameters[]` carries the full definition (a renderer is stateless — P3) plus `dependents`
-  (P14) and `state`. `options` is `null` for `INPUT`. `errors[]` entries are
-  `{code, message, details}` in the house envelope shape.
+  (P14) and `state`. `options` is `null` for `INPUT` and `FIXED`; a `FIXED` entry always reports
+  `hidden: true, disabled: true` so a renderer that keys on state alone still skips it. `errors[]`
+  entries are `{code, message, details}` in the house envelope shape.
 - `valid` = no parameter has an error. A renderer that submits to a consumer should refuse while
   `valid` is false; the server does not remember anything between calls.
 
@@ -371,6 +421,8 @@ is unchanged.
 | submitted value for a hidden/disabled parameter | **not an error** — ignored (P5) |
 | selector datasource unreachable / statement failed / over the option cap | the datasource's own code, or `parameter.evaluate.too_many_options`, on that parameter |
 | unknown key in `selections` | whole request `parameter.evaluate.unknown_parameter` (400) |
+| a `FIXED` name in `selections`; a non-`FIXED` name in `inputs` | whole request `parameter.evaluate.fixed_in_selections` / `input_not_fixed` (400) |
+| required `FIXED` with no input and no default; an input that fails coercion or a constraint | whole request `parameter.evaluate.input_missing` / `input_invalid` (400) — the caller's error, never shown as a form error |
 | deadline | whole request `parameter.evaluate.timeout` (504-class in the house mapping the lane confirms in rest-api §4) |
 
 ---
@@ -588,14 +640,15 @@ the lowest admitting row; `RequiredScopeCoverageTest` / `RequiredScopeKonsistTes
 | `parameter.validation.duplicate_name` | 409 | set name exists in the workspace (discarded included) |
 | `parameter.validation.duplicate_parameter` | 400 | two parameters share a name |
 | `parameter.validation.too_many_parameters` | 400 | over `max-parameters-per-set` |
-| `parameter.validation.label_invalid`, `description_too_long`, `type_invalid`, `precision_missing`, `scale_missing`, `kind_invalid`, `cardinality_invalid`, `default_type_mismatch`, `default_not_an_option`, `source_missing`, `source_ambiguous`, `source_on_input`, `constraints_on_select`, `constraint_not_applicable`, `constraint_invalid`, `pattern_invalid`, `format_invalid` | 400 | §3.2–§3.6 |
+| `parameter.validation.label_invalid`, `description_too_long`, `type_invalid`, `precision_missing`, `scale_missing`, `kind_invalid`, `cardinality_invalid`, `default_type_mismatch`, `default_not_an_option`, `source_missing`, `source_ambiguous`, `source_not_allowed`, `constraints_on_select`, `constraint_not_applicable`, `constraint_invalid`, `pattern_invalid`, `format_invalid` | 400 | §3.2–§3.6 |
+| `parameter.validation.dependencies_on_fixed`, `expression_on_fixed` | 400 | §3.7 |
 | `parameter.validation.option_invalid`, `option_duplicate`, `multiple_defaults`, `too_many_options` | 400 | §3.3 constants |
 | `parameter.validation.dependency_unknown`, `dependency_self`, `dependency_cycle`, `bind_undeclared`, `ref_undeclared` | 400 | §3.2 `depends_on`; `dependency_cycle` carries `details.cycle` |
 | `parameter.validation.expression_invalid`, `expression_depth_exceeded`, `expression_too_large`, `expression_cardinality`, `expression_literal_type`, `expression_type_unsupported` | 400 | §7 |
 | `parameter.validation.template_not_found`, `template_version_not_found`, `template_type_mismatch`, `template_dialect_mismatch`, `template_render_failed` | 400 | §4 steps 4–5 (the §12.6 twins) |
 | `parameter.validation.datasource_not_found`, `datasource_unreachable` | 400 | §3.4, §4 step 6 |
 | `parameter.validation.selector_columns_invalid`, `selector_value_type_mismatch`, `selector_order_by_missing` | 400 | §6 |
-| `parameter.evaluate.unknown_parameter` | 400 | §5.1 |
+| `parameter.evaluate.unknown_parameter`, `fixed_in_selections`, `input_not_fixed`, `input_missing`, `input_invalid` | 400 | §5.1, §3.7 — whole-request refusals (the caller's error) |
 | `parameter.evaluate.invalid_value_type`, `constraint_violation`, `required_missing`, `too_many_options`, `selector_value_type_mismatch` | 200 (in `errors[]`) | §5.4 — per-parameter, the request itself succeeds |
 | `parameter.evaluate.template_unrendered` | 400 | MCP-only, §5.1 |
 | `parameter.evaluate.timeout` | 504 (house mapping confirmed by the lane against rest-api §4) | §5.2 step 5 |
@@ -640,7 +693,7 @@ in the domain `ParametersConfig` — both literals live as named constants (MIST
 | `parameters` integration (`*IntegrationTest`, Postgres container) | repository + every §3.5 lifecycle verb; hash precondition; one-draft index | as templates' |
 | `application` | reverse arrow: used-by rows and the delete guard cover a set-only pin | delete the set scanner → guard lets the delete through, test red |
 | `web` + `mcp-server` | handler/tool tests; `MatrixRowReachabilityTest`, `ReadFloorTest`, `RequiredScopeCoverageTest` green with the new rows; catalog count pins | remove `@RequiredScope` → red |
-| E2E (`tests/integration-tests`) | the country → state → city cascade over a real H2/Postgres datasource through **REST and MCP**: first render, parent change resets children with `reset: true`, hidden/disabled from expressions, an `INPUT` with `scale: 2` + `min: 0` refusing `12.345` and `-1`, a `MULTI` parent binding into `IN (:regions)`, an unreachable datasource answering a whole form; release refused on a draft pin; `RoleWalkE2eTest` rows; `PromoterLensSweepTest` and `WorkspaceIsolationSweepTest` extended | the sweeps' non-vacuity floors |
+| E2E (`tests/integration-tests`) | the country → state → city cascade over a real H2/Postgres datasource through **REST and MCP**: first render, parent change resets children with `reset: true`, hidden/disabled from expressions, an `INPUT` with `scale: 2` + `min: 0` refusing `12.345` and `-1`, a `MULTI` parent binding into `IN (:regions)`, a `constants` selector beside a template one, a `FIXED` `customer_id` supplied via `inputs` and bound by `country`'s template (and the same name in `selections` refused 400, a missing required input refused 400), an unreachable datasource answering a whole form; release refused on a draft pin; `RoleWalkE2eTest` rows; `PromoterLensSweepTest` and `WorkspaceIsolationSweepTest` extended | the sweeps' non-vacuity floors |
 | drift | `ParameterErrorCodesSpecDriftTest`, `ScopeMatrixSpecDriftTest`, `ParametersConfigKeysSpecDriftTest`, `SkillDistributionTest`, `verifyModuleDependencies`, `ArchitectureGuardTest` | add a code to the doc → red until the constant exists |
 | coverage | the module floors the conventions plugin sets (Kover) | — |
 
@@ -699,3 +752,4 @@ on every handback).
 | date | version | change |
 |---|---|---|
 | 2026-09-21 | draft 1 | Recovered from the owner's Codex conversation of the same day; four follow-up decisions (P18–P21) and the template-backed selector ruling (P22) added; every code fact re-verified on `b34bdddf`. |
+| 2026-09-21 | draft 2 | P23 — hard-coded values both ways: §3.3 states that `constants` is the default way to populate a selector and SQL is optional; new `kind: FIXED` (§3.7) with the evaluate request's `inputs` map (§5.1), step 0 of the algorithm (§5.2), the response shape (§5.3), five whole-request codes (§5.4, §10) and two save-time codes; the E2E row (§12) covers both. |
