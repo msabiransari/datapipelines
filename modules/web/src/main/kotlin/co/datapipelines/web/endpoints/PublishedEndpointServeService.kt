@@ -11,6 +11,7 @@ import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutedByKeyKind
 import co.datapipelines.executor.ExecutionResult
@@ -76,6 +77,15 @@ class PublishedEndpointServeService(
     private val audit: AuditEventSink,
     private val authoring: AuthoringGuard,
     private val scope: CoroutineScope,
+    /**
+     * 180 (D15) — the endpoint's OWN workspace, read per serve through the auth liveness cache.
+     * A deactivated workspace's endpoint is unknown (the 404 rule), whoever presents the key:
+     * before 180 that held only because a key PINNED there was refused at validation, and a
+     * `user` key of another workspace reached the authorizer and was told `key_not_bound`
+     * (403) — which confirms the endpoint exists. [EndpointAuthorizer] stays pure; the
+     * question is asked here, where the endpoint row is in hand.
+     */
+    private val workspaceLiveness: WorkspaceLiveness,
 ) {
     private val log = LoggerFactory.getLogger(PublishedEndpointServeService::class.java)
 
@@ -126,6 +136,9 @@ class PublishedEndpointServeService(
 
         val matched = registry.matcher().match(path) ?: return notFound()
         val endpoint = matched.endpoint
+        // §5.6 / D15 — BEFORE the pipeline is resolved: nothing about a deactivated
+        // workspace's endpoint is read, and the body is the unmatched path's, byte for byte.
+        if (!workspaceLiveness.isActive(endpoint.workspaceId)) return notFound()
         val version = pointedVersion(endpoint) ?: return notReleased(endpoint)
 
         val readOnly = readOnlyRule.check(version.pipeline, endpoint.workspaceId)

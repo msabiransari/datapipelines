@@ -2,6 +2,7 @@ package co.datapipelines.auth
 
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import jakarta.servlet.http.HttpServletResponse
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
@@ -51,6 +52,45 @@ class AuthEntryPointT31Test {
         val response = commence("/", "text/html")
         response.status shouldBe 302
         response.getHeader("Location") shouldBe "/login"
+    }
+
+    /**
+     * 180 (D15): a session whose user was deactivated mid-life has its cookie cleared by the
+     * filter and the refusal stashed; a person navigating a page is told WHY on the login
+     * screen (`?error=inactive`, the same landing the login rejection uses) rather than
+     * bounced to a bare `/login` that looks like an ordinary expiry.
+     */
+    @Test
+    fun `a browser whose session was refused as deactivated lands on login with the inactive reason`() {
+        val request = MockHttpServletRequest("GET", "/pipelines")
+        request.addHeader("Accept", "text/html")
+        request.setAttribute(AuthAttributes.AUTH_ERROR, PrincipalDeactivatedException(java.util.UUID.randomUUID()))
+        val response = MockHttpServletResponse()
+        entryPoint.commence(
+            request,
+            response,
+            org.springframework.security.authentication
+                .InsufficientAuthenticationException("unauthenticated"),
+        )
+        response.status shouldBe 302
+        response.getHeader("Location") shouldBe "/login?error=inactive"
+    }
+
+    @Test
+    fun `an API client whose session was refused as deactivated gets the 401 envelope with the code`() {
+        val request = MockHttpServletRequest("GET", "/api/v1/pipelines")
+        request.addHeader("Accept", "application/json")
+        request.setAttribute(AuthAttributes.AUTH_ERROR, PrincipalDeactivatedException(java.util.UUID.randomUUID()))
+        val response = MockHttpServletResponse()
+        entryPoint.commence(
+            request,
+            response,
+            org.springframework.security.authentication
+                .InsufficientAuthenticationException("unauthenticated"),
+        )
+        response.status shouldBe 401
+        response.getHeader("Location") shouldBe null
+        response.contentAsString shouldContain "\"auth.principal_deactivated\""
     }
 
     @Test

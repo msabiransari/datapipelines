@@ -601,6 +601,13 @@ object PipelineErrorCodes {
 
         /** §13.7 — the workspace this key is pinned to has been deactivated (D-R10). */
         const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
+
+        /**
+         * §13.7 (180, D15) — the principal's USER is deactivated: a session, a `user` key, or
+         * the owner of an `endpoint`/`server` key. One predicate judges it where the
+         * credential becomes a principal; a deactivated WORKSPACE keeps the 404 rule instead.
+         */
+        const val PRINCIPAL_DEACTIVATED = "auth.principal_deactivated"
     }
 
     /** §13.8 — datasource. Defined in datasources.md §9–10; cataloged here (D5). */

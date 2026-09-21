@@ -29,12 +29,13 @@ import org.springframework.web.server.ResponseStatusException
  * ceremony itself, so there is no principal for [co.datapipelines.auth.ScopeInterceptor]
  * to check yet — exactly like the OIDC callback it mirrors. It is public (§8.3),
  * metered per IP by [co.datapipelines.auth.LoginRateLimitFilter] (`/login` prefix),
- * and protected by the same `dp_csrf` double-submit as every cookie-context POST.
+ * and protected by the same double-submit CSRF as every cookie-context POST — the form
+ * field is Spring's `_csrf`; `dp_csrf` is the COOKIE and `DP-CSRF-Token` the header (§8.4).
  *
  * On success it mints the SAME session the OIDC success handler mints — same
- * [JwtService.issue], same workspace resolution (design §5.1/§7, `auto-per-user`
- * provisioning included), same `auth.login.success` audit event — so both flows
- * converge on one principal. Every mutating endpoint that comes AFTER login lives
+ * [JwtService.issue], same workspace resolution (design §5.1/§7 — `workspaceForLogin`:
+ * last-used, else first active membership, else the D-R11 `demo` join), same
+ * `auth.login.success` audit event — so both flows converge on one principal. Every mutating endpoint that comes AFTER login lives
  * on a governed path; this one only creates the session.
  */
 @Controller

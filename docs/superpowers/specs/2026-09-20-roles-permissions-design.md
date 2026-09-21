@@ -107,9 +107,31 @@ the wire `kind` stay `endpoint` (the REST contract does not rename). The MCP con
 next to the user's MCP key (3.3).
 
 ### 3.5 Deactivation (D15)
-One boundary check, one code (`auth.principal_deactivated`), applied to sessions, user keys, endpoint
-keys and server keys whose user or pinned workspace is deactivated — in `ScopeInterceptor`, `McpAuthFilter`,
-`EndpointAuthorizer` and `PromotionServerKeyFilter` through ONE shared predicate.
+ONE shared predicate (`PrincipalLiveness`: user active ∧ pinned/resolved workspace active, both through
+the `AuthCache` TTL), judged where each credential becomes a principal — the earliest point a refusal
+can happen, and the one every surface passes through because the security chain is global:
+`JwtAuthenticationFilter` (sessions), `ApiKeyService.validate` (user and endpoint keys, which is what
+feeds REST, `/mcp` and the published-endpoint route) and `ApiKeyService.validateServerKey` (the promotion
+peer). The published-endpoint serve service adds the RESOURCE half — an endpoint whose own workspace is
+deactivated is unknown — with `EndpointAuthorizer` kept pure. Nothing is restated at `ScopeInterceptor`
+or `McpAuthFilter`: a principal cannot reach either while deactivated, so a check there could never
+fire (lane 180, orchestrator ruling 2026-09-21).
+
+Two older ratified rules constrain the CODE, so it is one predicate but not one code everywhere
+(orchestrator resolution 2026-09-21, lane 180):
+- a deactivated **user** — session, user key, endpoint key owner, server key owner — answers the new
+  `auth.principal_deactivated` (401 on API surfaces; a session additionally has its cookie cleared and
+  an HTML navigation is sent to `/login?error=inactive`) on every surface except the promotion peer;
+- a deactivated **workspace** keeps the 404 rule (auth.md §11A.1: indistinguishable from a workspace
+  that does not exist) — `auth.key_workspace_inactive` for a key pinned there, `workspace.not_found`
+  for a session switch, "unknown endpoint" for a published endpoint whose workspace it is;
+- the promotion peer keeps its one-answer rule (`PromotionServerKeyFilter`, "a caller must not
+  classify a credential"): every refusal on `/api/v1/promotion/**`, deactivated owner or deactivated
+  pin included, is `auth.promotion.key_invalid`.
+
+If the owner rules "one code everywhere", the change is the mapping in `PrincipalLiveness.Refusal`:
+the workspace case's exception becomes `PrincipalDeactivatedException` and the promotion filter's fold
+is left as is.
 
 ### 3.6 Scopes on user keys
 With D16 every user key's scope equals its role, so the credential axis carries information only for
@@ -131,7 +153,9 @@ Alternative (larger): fold the axis for user kinds. Recommend the former for thi
    and nothing at or below the target's version; non-vacuity: the fixture holds ≥1 of each hidden kind.
 6. New `ExecutionsVisibilityTest`: own-only for viewer/author/promoter, all for admins, via REST and MCP.
 7. New `DeactivationSweepTest`: every route and tool as a deactivated user / in a deactivated workspace
-   / with keys pinned to either → `auth.principal_deactivated`, nothing else leaks.
+   / with keys pinned to either → exactly the code §3.5's table owes each (`auth.principal_deactivated`
+   for the user, the 404 rule for the workspace, the promotion peer's one answer), nothing else leaks;
+   the deactivated-vs-unknown differential is zero on every route.
 8. `RoleVisibilityRenderTest`'s "route-guarded exemption" list shrinks to zero: every verb control is
    inside a role guard.
 9. PROCESS gate: (a) the store's prompt template gains a mandatory "Roles" section — every lane prompt

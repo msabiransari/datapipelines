@@ -36,7 +36,16 @@ class ApiKeyServiceTest {
                 WorkspaceContext(thirdArg(), arg(3), WorkspaceRole.AUTHOR)
             }
         }
-    private val service = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService)
+    private val liveness = PrincipalLiveness(userService, workspaceService)
+    private val service =
+        ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService, liveness)
+
+    init {
+        // 180: the liveness predicate reads `isActive`, the cached form of the snapshot the
+        // principal is built from. Live by default, like the workspace above; the tests that
+        // are about deactivation say so themselves.
+        every { userService.isActive(any()) } returns true
+    }
 
     private val ownerId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -172,13 +181,38 @@ class ApiKeyServiceTest {
     }
 
     @Test
-    fun `a key whose owner is inactive is rejected as invalid`() {
+    fun `a key whose owner is deactivated is refused with auth principal_deactivated, not api_key invalid (180)`() {
         echoInsert()
         val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
         every { repo.findById(issued.record.id) } returns issued.record
         every { userService.snapshot(ownerId) } returns activeOwner().copy(isActive = false)
+        every { userService.isActive(ownerId) } returns false
+
+        val thrown = shouldThrow<PrincipalDeactivatedException> { service.validate(issued.plaintext) }
+        thrown.code shouldBe AuthErrorCodes.PRINCIPAL_DEACTIVATED
+    }
+
+    @Test
+    fun `a key whose owner row is gone is rejected as invalid — there is no person to be deactivated`() {
+        echoInsert()
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
+        every { repo.findById(issued.record.id) } returns issued.record
+        every { userService.snapshot(ownerId) } returns null
+        every { userService.isActive(ownerId) } returns false
 
         shouldThrow<ApiKeyInvalidException> { service.validate(issued.plaintext) }
+    }
+
+    @Test
+    fun `a key pinned to a deactivated workspace keeps the 404 rule (auth key_workspace_inactive)`() {
+        echoInsert()
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
+        every { repo.findById(issued.record.id) } returns issued.record
+        every { userService.snapshot(ownerId) } returns activeOwner()
+        every { workspaceService.isActive(workspaceId) } returns false
+
+        val thrown = shouldThrow<KeyWorkspaceInactiveException> { service.validate(issued.plaintext) }
+        thrown.status shouldBe 404
     }
 
     @Test
@@ -199,7 +233,8 @@ class ApiKeyServiceTest {
         // A non-default configured value, so a hard-coded `read` cannot pass this test.
         val configured =
             AuthProperties(apiKeys = AuthProperties.ApiKeys(defaultScopes = listOf("execute")))
-        val withDefaults = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured, workspaceService)
+        val withDefaults =
+            ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured, workspaceService, liveness)
         val scopes = slot<Set<Scope>>()
         every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any(), any()) } answers {
             ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
@@ -213,7 +248,8 @@ class ApiKeyServiceTest {
     @Test
     fun `an unusable configured default falls back to read (§7-5)`() {
         val configured = AuthProperties(apiKeys = AuthProperties.ApiKeys(defaultScopes = listOf("nonsense")))
-        val withDefaults = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured, workspaceService)
+        val withDefaults =
+            ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured, workspaceService, liveness)
         val scopes = slot<Set<Scope>>()
         every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any(), any()) } answers {
             ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
@@ -235,7 +271,8 @@ class ApiKeyServiceTest {
     fun `an unparseable configured default-scopes token is reported at WARN, naming the token`() {
         val configured =
             AuthProperties(apiKeys = AuthProperties.ApiKeys(defaultScopes = listOf("nonsense", "execute")))
-        val withDefaults = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured, workspaceService)
+        val withDefaults =
+            ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), configured, workspaceService, liveness)
         val scopes = slot<Set<Scope>>()
         every { repo.insert(any(), ownerId, any(), any(), capture(scopes), any(), any()) } answers {
             ApiKey(firstArg(), ownerId, thirdArg(), arg(3), arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
@@ -372,6 +409,45 @@ class ApiKeyServiceTest {
     }
 
     @Test
+    fun `a server key pinned to a deactivated workspace stops opening the promotion route (180, gap 1)`() {
+        echoInsert(kind = ApiKeyKind.SERVER)
+        val issued =
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
+        every { repo.findById(issued.record.id) } returns issued.record
+        every { userService.snapshot(ownerId) } returns activeOwner()
+        every { workspaceService.isActive(workspaceId) } returns false
+
+        // An AuthException of any kind — the promotion filter folds it into its one answer.
+        shouldThrow<KeyWorkspaceInactiveException> { service.validateServerKey(issued.plaintext) }
+    }
+
+    @Test
+    fun `a server key whose owner is deactivated stops opening the promotion route`() {
+        echoInsert(kind = ApiKeyKind.SERVER)
+        val issued =
+            service.issue(
+                issuer.copy(superAdmin = true),
+                ownerId,
+                "uat receiver",
+                emptySet(),
+                workspaceId,
+                kind = ApiKeyKind.SERVER,
+            )
+        every { repo.findById(issued.record.id) } returns issued.record
+        every { userService.snapshot(ownerId) } returns activeOwner().copy(isActive = false)
+        every { userService.isActive(ownerId) } returns false
+
+        shouldThrow<PrincipalDeactivatedException> { service.validateServerKey(issued.plaintext) }
+    }
+
+    @Test
     fun `an expired server key stops opening the promotion route`() {
         echoInsert(kind = ApiKeyKind.SERVER)
         val issued =
@@ -415,7 +491,7 @@ class ApiKeyServiceTest {
 
     private val sealer = FakeSealer()
     private val mintingService =
-        ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService, sealer)
+        ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService, liveness, sealer)
 
     private fun owner(
         mustChange: Boolean = false,

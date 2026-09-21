@@ -36,12 +36,15 @@ class AuthEntryPoint(
         response: HttpServletResponse,
         authException: AuthenticationException,
     ) {
+        val recorded = request.getAttribute(AuthAttributes.AUTH_ERROR) as? AuthException
         if (redirectsToLogin(request)) {
             response.status = HttpServletResponse.SC_FOUND
-            response.setHeader("Location", LOGIN_PATH)
+            // 180 (D15): a session refused because its user was DEACTIVATED lands where the
+            // login rejection for the same state lands (`?error=inactive`), so the person is
+            // told why instead of seeing what looks like an ordinary expiry. Still relative.
+            response.setHeader("Location", if (recorded is PrincipalDeactivatedException) LOGIN_INACTIVE_PATH else LOGIN_PATH)
             return
         }
-        val recorded = request.getAttribute(AuthAttributes.AUTH_ERROR) as? AuthException
         errorWriter.write(request, response, recorded ?: ApiKeyMissingException())
     }
 
@@ -57,5 +60,8 @@ class AuthEntryPoint(
 
     private companion object {
         const val LOGIN_PATH = "/login"
+
+        /** The login page's deactivated-account landing (`LocalLoginController`, `OidcSuccessHandler`). */
+        const val LOGIN_INACTIVE_PATH = "/login?error=inactive"
     }
 }

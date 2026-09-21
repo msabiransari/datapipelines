@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.21 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
+**Status:** v2.23 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-09-17
+**Last updated:** 2026-09-21
 
 ---
 
@@ -1686,7 +1686,7 @@ Returns the authenticated principal: `user_id`, `email`, `display_name`, `scopes
 ```
 GET  /auth/users?q={search}&offset=0&limit=50     — list users
 GET  /auth/users/{user_id}                         — user detail
-POST /auth/users/{user_id}/deactivate              — is_active = false (effective ≤ ~60s, Auth §4.2)
+POST /auth/users/{user_id}/deactivate              — is_active = false (effective ≤ ~60s: every session and key of that user then answers 401 auth.principal_deactivated, Auth §11A.3)
 POST /auth/users/{user_id}/activate                — is_active = true
 POST /auth/users/{user_id}/grant-admin             — is_admin = true
 POST /auth/users/{user_id}/revoke-admin            — is_admin = false
@@ -1745,6 +1745,14 @@ Renames the display name; `name` is immutable v1. An absent `display_name` keeps
 DELETE /workspaces/{name}
 ```
 Soft delete. `409 workspace.in_use` while the workspace still owns non-deleted pipelines, templates or (workspace-bound) datasources — `details.counts` names what blocks, by kind. Owner or global admin.
+
+### 17.5a Deactivate / reactivate a workspace
+
+```
+POST /workspaces/{name}/deactivate
+POST /workspaces/{name}/reactivate
+```
+Super admin (`MANAGE_INSTANCE_WORKSPACES`). Deactivate, never delete (D-R10): nothing is purged; the workspace stops being selectable, its published endpoints become unknown paths to every caller, keys pinned to it answer `404 auth.key_workspace_inactive` and a server key pinned to it is refused by the promotion peer — all within the ~60 s liveness window ([Auth §11A.3](auth.md#11a3-deactivation)). Returns the §17.2 record (`active: false`, `deactivated_at` set). Reactivate restores every credential; reactivating an already-active workspace is `404 workspace.not_found` (the 404 rule: the surface owes no "it was not deactivated"). Both are audited (`workspace.deactivated` / `workspace.reactivated`).
 
 ### 17.6 List members
 
@@ -2049,6 +2057,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v2.23 | 180 (#180) roles R4 | Additive. §16.3: user deactivation names its effect — every session and key of the user answers `401 auth.principal_deactivated` within the liveness window (new §13.7 code; `auth.api_key.invalid` no longer means "owner deactivated"). New §17.5a documents the existing `POST /workspaces/{name}/deactivate` and `/reactivate` routes (super admin) and the 404 rule they keep. |
 | 2026-09-21 | v2.22 | 178 (#178) roles R2 | **The promoter lens** ([Auth §11A.1](auth.md#11a1-the-404-rule)) on every pipeline, template and endpoint read (§5, §8, §19.5): a promoter's session or key sees released objects newer than the promotion target's and nothing else; hidden ones are the same `404` an id from another workspace gets; listings, levels and counts are the lensed set; fail closed (never a `502` on a read) while the target is unreadable. §18.1: the sender caches the inventory per workspace (`inventory-cache-ttl-seconds`). No wire shape changed. |
 | 2026-09-20 | v2.21 | 177 (#177) roles R1 | **Two deliberate breaks under the ratified [roles design](superpowers/specs/2026-09-20-roles-permissions-design.md)**, both on surfaces whose only callers are the product's own UI and E2E suites: (1) §17 — the membership wire says **`role`** (`viewer` \| `author` \| `promoter` \| `workspace_admin`), replacing the `author`/`promoter`/`admin` booleans on §17.1, §17.6, §17.7 (request and both responses) and §17.10 (renamed *Set a member's role*; body `{"role"}`); an unknown role is a 400. §17.2/§17.6 are a workspace admin's reads (D13); §17.1 (list-own) stays every member's on the switcher's row. (2) §10 — `triggered_by` → **`executed_by`** on the list and read projections, plus **`executed_by_key_kind`** (`user` \| `endpoint` \| `server` \| null); `triggered_via` documents `ENDPOINT`. Ownership rewritten to D11: own unless workspace admin, promoter refused by role, endpoint-key runs admin-only. `/promotion` (UI) is readable by authors too (rule 13). |
 | 2026-09-19 | v2.20 | 172 (#172) | **§19 re-rooted (BREAKING for a surface with zero callers)**: published endpoints serve at `/api/<category>/<version>/<path…>` — at least three segments; the category is the engineer's namespace with `v[0-9]+` and `api` reserved (`400 endpoint.path_reserved`, re-checked when the serve registry is built); the version is one free-form literal segment; variables live after it. One `/api` prefix on a submitted pattern is normalised away, never stored. The catch-all mapping constrains the category, so `/api/v1/…` stays the product's — its unknown paths answer the product's 404, not `endpoint.not_found`. Create/read responses gain the full served `url`. Prod held zero published endpoints at the ruling, so nothing migrates. |

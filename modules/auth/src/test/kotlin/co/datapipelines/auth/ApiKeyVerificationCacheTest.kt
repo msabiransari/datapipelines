@@ -33,7 +33,17 @@ class ApiKeyVerificationCacheTest {
                 WorkspaceContext(thirdArg(), arg(3), WorkspaceRole.AUTHOR)
             }
         }
-    private val service = ApiKeyService(repo, userService, cache, auditLogger, hasher, AuthProperties(), workspaceService)
+    private val service =
+        ApiKeyService(
+            repo,
+            userService,
+            cache,
+            auditLogger,
+            hasher,
+            AuthProperties(),
+            workspaceService,
+            PrincipalLiveness(userService, workspaceService),
+        )
 
     private val ownerId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -72,6 +82,7 @@ class ApiKeyVerificationCacheTest {
         every { repo.insert(any(), ownerId, any(), capture(hash), any(), any(), any()) } answers {
             ApiKey(firstArg(), ownerId, thirdArg(), hash.captured, arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
+        every { userService.isActive(ownerId) } returns true
         every { userService.snapshot(ownerId) } returns
             User(ownerId, "o@c.com", "O", null, "kc", "s", true, false, Instant.now(), Instant.now(), null)
         val issued = service.issue(issuerPrincipal, ownerId, "k", setOf(Scope.READ), workspaceId)

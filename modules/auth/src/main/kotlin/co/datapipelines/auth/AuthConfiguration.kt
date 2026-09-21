@@ -130,6 +130,16 @@ class AuthConfiguration {
             instanceDatasourceGrants.getIfAvailable() ?: InstanceDatasourceGrants.NONE,
         )
 
+    /**
+     * 180 (D15) — the ONE liveness predicate, a bean so the session filter and the key
+     * service judge through the SAME object rather than two constructions of the same rule.
+     */
+    @Bean
+    fun principalLiveness(
+        userService: UserService,
+        workspaceService: WorkspaceService,
+    ): PrincipalLiveness = PrincipalLiveness(userService, workspaceService)
+
     @Suppress("LongParameterList") // the wiring bean — every parameter is an @Bean reference (019 precedent)
     @Bean
     fun apiKeyService(
@@ -140,6 +150,7 @@ class AuthConfiguration {
         secretHasher: SecretHasher,
         authProperties: AuthProperties,
         workspaceService: WorkspaceService,
+        principalLiveness: PrincipalLiveness,
         secretSealer: ObjectProvider<SecretSealer>,
     ): ApiKeyService =
         ApiKeyService(
@@ -150,6 +161,7 @@ class AuthConfiguration {
             secretHasher,
             authProperties,
             workspaceService,
+            principalLiveness,
             // D16 — bound in `web` (`DomainConfiguration`) to the datasources module's
             // CredentialEncryptor, which auth cannot see (module-structure §4.2). Optional
             // so this module's own test slices construct the service without one.
@@ -239,10 +251,11 @@ class AuthConfiguration {
         clientAddressResolver: ClientAddressResolver,
         promotionProperties: PromotionProperties,
         meterRegistry: ObjectProvider<MeterRegistry>,
+        principalLiveness: PrincipalLiveness,
     ): AuthFilters =
         AuthFilters(
             apiKey = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger, clientAddressResolver),
-            jwt = JwtAuthenticationFilter(jwtService, userService, clientAddressResolver),
+            jwt = JwtAuthenticationFilter(jwtService, userService, clientAddressResolver, principalLiveness),
             oidcSignedInBounce = OidcSignedInBounceFilter(jwtService, userService),
             loginRateLimit =
                 LoginRateLimitFilter(

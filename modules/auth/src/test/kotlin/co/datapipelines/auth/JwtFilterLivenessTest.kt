@@ -26,7 +26,14 @@ class JwtFilterLivenessTest {
     private val secret = Base64.getEncoder().encodeToString(ByteArray(32) { (it + 7).toByte() })
     private val jwtService = JwtService(JwtProperties(secret), AuthProperties())
     private val userService = mockk<UserService>()
-    private val filter = JwtAuthenticationFilter(jwtService, userService, ClientAddressResolver(emptyList()))
+    private val workspaceService = mockk<WorkspaceService>()
+    private val filter =
+        JwtAuthenticationFilter(
+            jwtService,
+            userService,
+            ClientAddressResolver(emptyList()),
+            PrincipalLiveness(userService, workspaceService),
+        )
 
     private val userId = UUID.randomUUID()
     private val token =
@@ -53,6 +60,7 @@ class JwtFilterLivenessTest {
 
     @Test
     fun `an active user's valid session authenticates, carrying NO scopes (D-R1)`() {
+        every { userService.isActive(userId) } returns true
         every { userService.snapshot(userId) } returns user(userId, isActive = true)
 
         run(token)
@@ -67,15 +75,25 @@ class JwtFilterLivenessTest {
     }
 
     @Test
-    fun `a deactivated user's valid session is rejected and the cookie is cleared`() {
+    fun `a deactivated user's valid session is rejected with auth principal_deactivated and the cookie is cleared`() {
+        every { userService.isActive(userId) } returns false
         every { userService.snapshot(userId) } returns user(userId, isActive = false)
 
-        val response = run(token)
+        val request = MockHttpServletRequest("GET", "/api/v1/pipelines")
+        request.setCookies(Cookie(OidcSuccessHandler.SESSION_COOKIE, token))
+        val response = MockHttpServletResponse()
+        filter.doFilter(request, response, MockFilterChain())
 
         SecurityContextHolder.getContext().authentication.shouldBeNull()
         val cleared = response.getCookie(OidcSuccessHandler.SESSION_COOKIE)
         cleared.shouldNotBeNull()
         cleared.maxAge shouldBe 0
+        // 180 (D15): the stashed refusal is the deactivation code, not `auth.api_key.invalid`
+        // — the entry point answers it on the API and sends an HTML navigation to
+        // `/login?error=inactive`.
+        val stashed = request.getAttribute(AuthAttributes.AUTH_ERROR) as AuthException
+        stashed.code shouldBe AuthErrorCodes.PRINCIPAL_DEACTIVATED
+        (stashed as PrincipalDeactivatedException).userId shouldBe userId
     }
 
     @Test

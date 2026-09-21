@@ -216,8 +216,13 @@ class ApiErrorCatalogSpecDriftTest {
          * (400 — on-demand `user` key issuance is refused on every surface; the login hook
          * mints those), landed in the SAME commit as its constants (both mirrors) and its
          * catalog row. Re-derived from the document's own parse.
+         *
+         * 181 → 182 with 180 (roles R4, D15): §13.7 gains `auth.principal_deactivated` (401 —
+         * the deactivated-user refusal on every surface but the promotion peer), landed in
+         * the SAME commit as its constants (both mirrors), its exception class and its catalog
+         * row. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 181
+        const val SECTION_13_ROW_COUNT = 182
 
         /**
          * §12's distinct validation codes.

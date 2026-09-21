@@ -222,6 +222,10 @@ object ApiErrorCatalog {
             // `auth.key_workspace_inactive` because the holder already knows the workspace
             // exists and an operator greps for it.
             co.datapipelines.auth.AuthErrorCodes.KEY_WORKSPACE_INACTIVE to HttpStatus.NOT_FOUND,
+            // 180 (D15) — a deactivated user's credential is refused with its own 401, a bare
+            // `auth.` code with no dotted family, so it is wired explicitly like the two 403s
+            // above rather than resolving to the catalog's 500 for an unknown code.
+            co.datapipelines.auth.AuthErrorCodes.PRINCIPAL_DEACTIVATED to HttpStatus.UNAUTHORIZED,
             // The credential making the request is fine; the requested scope is not one keys
             // have (O-2) — a 400, like `auth.api_key.expiry_invalid` and for the same reason.
             co.datapipelines.auth.AuthErrorCodes.KEY_SCOPE_UNAVAILABLE to HttpStatus.BAD_REQUEST,

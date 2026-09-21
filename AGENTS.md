@@ -42,6 +42,9 @@ original integration dates; their GitHub timestamps represent the import date.
   (which of viewer / author / promoter / workspace admin / super admin may perform it, and which
   guard pins it) — the store's `prompts/_TEMPLATE.md` carries the mandatory section. A prompt
   without it is not ready to dispatch.
+- Every lane prompt and handback carries the store template's **Security** section; a diff touching
+  auth, the serve path, MCP tools, files, user-data rendering, config or outbound calls gets the
+  orchestrator's security pass before merge (roles design §4.9, adopted 2026-09-21).
 - Vocabulary: a **role** is what a member holds (one per workspace); a **permission** is a row of
   the matrix — an action a role may perform, never a free string. The word "flags" does not
   describe roles anywhere in UI text, docs or identifiers.
