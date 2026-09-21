@@ -64,7 +64,10 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   can undo. So datasource create, update and delete are UI/REST-only. If the datasource you need
   does not exist, **ask the person to add it in the UI**, then read it back with
   `datasources_list`. (There was a `datasources_create` tool; it carried a warning in its own
-  description, and a description is not a control, so it was removed.)
+  description, and a description is not a control, so it was removed.) One nuance worth passing
+  along: in-process engines — H2 `mem:`/`file:`, DuckDB, SQLite — are registered by a **super
+  admin** only, and file-backed ones only under the deployment's declared file roots, so for
+  those the right person to ask is a super admin, not a workspace admin.
 
 - **Which datasources can my key see? The ones GRANTED to its workspace — nothing else.**
   There is no such thing as a global datasource any more. A datasource is registered once and
