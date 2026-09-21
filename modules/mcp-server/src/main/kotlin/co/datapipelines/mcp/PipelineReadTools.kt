@@ -101,7 +101,7 @@ class PipelinesListTool(
             ).asSequence()
             .take(limit)
             .toList()
-            .withLifecycle(workspaceId)
+            .withLifecycle(workspaceId, view)
     }
 
     /**
@@ -125,7 +125,7 @@ class PipelinesListTool(
         return mapOf(
             "prefix" to prefix.orEmpty(),
             "folders" to level.folders.map { mapOf("path" to it.path, "segment" to it.segment, "pipeline_count" to it.pipelineCount) },
-            "pipelines" to level.pipelines.withLifecycle(workspaceId),
+            "pipelines" to level.pipelines.withLifecycle(workspaceId, view),
             "total" to level.total,
             "has_more" to level.hasMore,
         )
@@ -151,8 +151,11 @@ class PipelinesListTool(
      *
      * The drafts come from ONE batched query for the whole page, not one per row.
      */
-    private fun List<PipelineRecord>.withLifecycle(workspaceId: java.util.UUID): List<Map<String, Any?>> {
-        val drafts = pipelines.findDrafts(workspaceId, map { it.id })
+    private fun List<PipelineRecord>.withLifecycle(
+        workspaceId: java.util.UUID,
+        view: ReadLens,
+    ): List<Map<String, Any?>> {
+        val drafts = pipelines.findDrafts(workspaceId, view, map { it.id })
         return map { it.toMetadata(drafts[it.id]) }
     }
 
@@ -248,18 +251,19 @@ class PipelinesGetTool(
         val explicit = args.version()
         val version =
             explicit
-                ?: pipelines.workingVersion(workspaceId, record)
+                ?: pipelines.workingVersion(workspaceId, view, record)
                 ?: throw McpNotFound.pipelineVersion(id, 1)
-        return body(workspaceId, record, version)
+        return body(workspaceId, view, record, version)
     }
 
     private fun body(
         workspaceId: UUID,
+        view: ReadLens,
         record: PipelineRecord,
         version: Int,
     ): JsonNode {
         val id = record.id
-        val loaded = pipelines.findVersion(workspaceId, record, version) ?: throw McpNotFound.pipelineVersion(id, version)
+        val loaded = pipelines.findVersion(workspaceId, view, record, version) ?: throw McpNotFound.pipelineVersion(id, version)
         val json = loaded.bodyJson
         val detail = loaded.version
         val tree = McpTools.readTree(json) as? com.fasterxml.jackson.databind.node.ObjectNode ?: error("body of $id is not an object")
@@ -270,8 +274,8 @@ class PipelinesGetTool(
         tree.put("status", detail.status.name)
         tree.put("body_hash", detail.bodyHash)
         val draftPointer = tree.putObject("draft")
-        // A derived read: `record` was resolved through the caller's view three lines up.
-        val draft = pipelines.findDraft(workspaceId, ReadLens.Everything, id)
+        // Null under a narrowing lens: a promoter never sees a draft pointer (178).
+        val draft = pipelines.findDraft(workspaceId, view, id)
         if (draft != null) {
             draftPointer
                 .put("version", draft.version)

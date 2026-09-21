@@ -51,20 +51,29 @@ open class TemplateService(
         id: String,
     ): Template? = if (lens.admits(id)) templates.findLatest(workspaceId, id) else null
 
-    /** The working version (draft, else current release) of an admitted template, or null. */
+    /**
+     * The working version (draft, else current release) of an admitted template, or null.
+     * Under a narrowing lens the working version IS the release: a promoter never sees a
+     * draft, not as an object and not as the pending edits of a visible one (178).
+     */
     open fun findWorking(
         workspaceId: UUID,
         lens: ReadLens,
         id: String,
-    ): Template? = if (lens.admits(id)) templates.findWorking(workspaceId, id) else null
+    ): Template? =
+        when {
+            !lens.admits(id) -> null
+            lens.isEverything -> templates.findWorking(workspaceId, id)
+            else -> templates.findLatest(workspaceId, id)
+        }
 
-    /** One stored version of an admitted template, or null. */
+    /** One stored version of an admitted template, or null — a DRAFT version is null under a narrowing lens. */
     open fun findVersion(
         workspaceId: UUID,
         lens: ReadLens,
         id: String,
         version: Int,
-    ): Template? = if (lens.admits(id)) templates.findVersion(workspaceId, id, version) else null
+    ): Template? = if (lens.admits(id)) templates.findVersion(workspaceId, id, version)?.takeIf { released(lens, it.status) } else null
 
     /**
      * The engine's version record for an admitted template — [TemplateRepository.lookupVersion]'s
@@ -77,7 +86,8 @@ open class TemplateService(
         lens: ReadLens,
         id: String,
         version: Int,
-    ): TemplateVersion? = if (lens.admits(id)) templates.lookupVersion(workspaceId, id, version) else null
+    ): TemplateVersion? =
+        if (lens.admits(id)) templates.lookupVersion(workspaceId, id, version)?.takeIf { released(lens, it.status) } else null
 
     /** True when any version of [id] exists AND the lens admits it — the not-found split's first half. */
     open fun existsId(
@@ -168,7 +178,8 @@ open class TemplateService(
         workspaceId: UUID,
         lens: ReadLens,
         id: String,
-    ): List<TemplateVersionSummary> = if (lens.admits(id)) templates.listVersions(workspaceId, id) else emptyList()
+    ): List<TemplateVersionSummary> =
+        if (lens.admits(id)) templates.listVersions(workspaceId, id).filter { released(lens, it.status) } else emptyList()
 
     /** One version's lifecycle detail of an admitted template, or null. */
     open fun findVersionDetail(
@@ -176,20 +187,22 @@ open class TemplateService(
         lens: ReadLens,
         id: String,
         version: Int,
-    ): TemplateVersionDetail? = if (lens.admits(id)) templates.findVersionDetail(workspaceId, id, version) else null
+    ): TemplateVersionDetail? =
+        if (lens.admits(id)) templates.findVersionDetail(workspaceId, id, version)?.takeIf { released(lens, it.status) } else null
 
-    /** The draft pointer of an admitted template, or null. */
+    /** The draft pointer of an admitted template, or null — always null under a narrowing lens. */
     open fun findDraftDetail(
         workspaceId: UUID,
         lens: ReadLens,
         id: String,
-    ): TemplateVersionDetail? = if (lens.admits(id)) templates.findDraftDetail(workspaceId, id) else null
+    ): TemplateVersionDetail? = if (lens.isEverything && lens.admits(id)) templates.findDraftDetail(workspaceId, id) else null
 
-    /** The DRAFT detail of each of [ids] that has one — [ids] came from a lensed read, so no lens here. */
+    /** The DRAFT detail of each of [ids] that has one — the list badge; empty under a narrowing lens. */
     open fun findDrafts(
         workspaceId: UUID,
+        lens: ReadLens,
         ids: Collection<String>,
-    ): Map<String, TemplateVersionDetail> = templates.findDrafts(workspaceId, ids)
+    ): Map<String, TemplateVersionDetail> = if (lens.isEverything) templates.findDrafts(workspaceId, ids) else emptyMap()
 
     /** The lifecycle status of one version of an admitted template, or null. */
     open fun findVersionStatus(
@@ -197,7 +210,8 @@ open class TemplateService(
         lens: ReadLens,
         id: String,
         version: Int,
-    ): PipelineVersionStatus? = if (lens.admits(id)) templates.findVersionStatus(workspaceId, id, version) else null
+    ): PipelineVersionStatus? =
+        if (lens.admits(id)) templates.findVersionStatus(workspaceId, id, version)?.takeIf { released(lens, it) } else null
 
     /**
      * The admitted current-version rows under the list filters, name-ordered — the one read
@@ -235,6 +249,12 @@ open class TemplateService(
         return admitted(workspaceId, lens, dialect, type, q = null)
             .filter { it.id.startsWith(scope) && '/' !in it.id.removePrefix(scope) }
     }
+
+    /** Under [ReadLens.Everything] every status; under a narrowing lens RELEASED only (a draft is never a promoter's). */
+    private fun released(
+        lens: ReadLens,
+        status: PipelineVersionStatus,
+    ): Boolean = lens.isEverything || status == PipelineVersionStatus.RELEASED
 
     /** `prefix/` for a folder, the empty string for the root — the repository's `namePattern` scope. */
     private fun scope(prefix: String?): String = if (prefix.isNullOrEmpty()) "" else "$prefix/"

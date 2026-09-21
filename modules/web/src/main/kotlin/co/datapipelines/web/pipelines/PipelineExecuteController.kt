@@ -76,7 +76,7 @@ class PipelineExecuteController(
         // discarded, which is the ordinary version-not-found refusal.
         val version =
             explicitVersion
-                ?: pipelines.workingVersion(workspaceId, record)
+                ?: pipelines.workingVersion(workspaceId, ReadLens.Everything, record)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), 1)
 
         // D6: the version resolution is the aggregate's, shared with `pipelines_execute`.

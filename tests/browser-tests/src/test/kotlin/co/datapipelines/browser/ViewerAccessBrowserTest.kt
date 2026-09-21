@@ -164,9 +164,17 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         watch.bad shouldBe emptyList()
     }
 
-    /** The positive halves, so the reader arm cannot pass by hiding everything. */
+    /**
+     * The positive halves, so the reader arm cannot pass by hiding everything.
+     *
+     * 178: the read-only source is a VIEWER's assertion now, not a promoter's. A promoter reads
+     * through the lens (auth.md §11A.1), and this fixture configures NO promotion target, so a
+     * promoter here sees nothing at all — the explorer says why in the promotion page's words.
+     * That is asserted as its own half below; `PromoterLensSweepTest` covers the promoter who
+     * CAN see a template opening its read-only source (the same `readOnly` rule, over HTTP).
+     */
     @Test
-    fun `an author keeps the editing surface and Preview, a promoter gets the read-only source and no verb`() {
+    fun `an author keeps the editing surface and Preview, a viewer the read-only source and no verb, a promoter with no target nothing`() {
         startTrace()
         val fixture = seedTemplate()
 
@@ -193,23 +201,56 @@ class ViewerAccessBrowserTest : BrowserSuite() {
         watch.bad shouldBe emptyList()
         author.close()
 
-        // D5 (2026-09-20): the promoter authors nothing and RELEASES nothing — the editor is a
-        // read-only source with the read-only note and no verb at all.
-        val promoter = signIn("va-promoter", role = "promoter")
-        val promoterWatch = promoter.watchResponses()
-        promoter.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
-        promoter.page
+        // A non-author (D3/D5): the editor is a read-only source with the read-only note and
+        // no verb at all — 143 (T315)'s rule, asserted for the viewer.
+        val reader = signIn("va-reader", role = "viewer")
+        val readerWatch = reader.watchResponses()
+        reader.page.navigate("$baseUrl/templates?q=${fixture.leaf}")
+        reader.page
             .locator("button.tpl-result")
             .first()
             .click()
-        val promoterOpen = promoter.page.locator("a:has-text('Open in editor')").first()
-        promoter.page.waitForResponse(::isEditorDocument) { promoterOpen.click() }
-        promoterWatch.bad shouldBe emptyList()
-        promoter.page.waitForURL("**/templates/editor**")
-        assertReadOnlyEditor(promoter.page, expectedVersion = 2, expectedBody = fixture.draftBody)
-        promoter.page.locator("[data-role-note='read-only']").waitFor()
+        val readerOpen = reader.page.locator("a:has-text('Open in editor')").first()
+        reader.page.waitForResponse(::isEditorDocument) { readerOpen.click() }
+        readerWatch.bad shouldBe emptyList()
+        reader.page.waitForURL("**/templates/editor**")
+        assertReadOnlyEditor(reader.page, expectedVersion = 2, expectedBody = fixture.draftBody)
+        reader.page.locator("[data-role-note='read-only']").waitFor()
+        reader.verbs() shouldBe emptyList()
+        reader.page.locator("[data-verb='template-release']").count() shouldBe 0
+        readerWatch.bad shouldBe emptyList()
+        reader.close()
+
+        promoterSeesNothingWithoutATarget(fixture.leaf)
+    }
+
+    /** 178: the promoter lens, fail closed — see the test above. */
+    private fun promoterSeesNothingWithoutATarget(leaf: String) {
+        // 178: the promoter lens, fail closed. No promotion target is configured here, so the
+        // promoter's explorer is EMPTY and says why — the promotion page's own sentence — with
+        // no template row to open and no verb; the rail badges read zero.
+        val promoter = signIn("va-promoter", role = "promoter")
+        val promoterWatch = promoter.watchResponses()
+        promoter.page.navigate("$baseUrl/templates?q=$leaf")
+        promoter.page
+            .locator("[data-lens-unavailable]")
+            .first()
+            .waitFor()
+        promoter.page
+            .locator("[data-lens-unavailable]")
+            .first()
+            .innerText() shouldContain "Could not read the target"
+        promoter.page.locator("button.tpl-result").count() shouldBe 0
         promoter.verbs() shouldBe emptyList()
-        promoter.page.locator("[data-verb='template-release']").count() shouldBe 0
+        promoter.page.navigate("$baseUrl/pipelines")
+        promoter.page
+            .locator("[data-lens-unavailable]")
+            .first()
+            .waitFor()
+        promoter.page
+            .locator("nav.app-nav .app-nav-badge")
+            .allInnerTexts()
+            .map { it.trim() } shouldBe listOf("0", "0")
         promoterWatch.bad shouldBe emptyList()
         promoter.close()
     }

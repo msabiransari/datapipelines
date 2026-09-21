@@ -325,7 +325,7 @@ open class PipelineService(
                 PipelinePage(all.drop(offset).take(size), all.size, all.size > offset + size, emptyMap())
             }
         // versioning §7: the "unreleased edits exist" badge, for the rows actually shown.
-        return page.copy(drafts = pipelines.findDrafts(workspaceId, page.items.map { it.id }))
+        return page.copy(drafts = findDrafts(workspaceId, lens, page.items.map { it.id }))
     }
 
     /**
@@ -373,8 +373,9 @@ open class PipelineService(
     /** The DRAFT detail of each of [pipelineIds] that has one — the list screens' badge (§7). */
     open fun findDrafts(
         workspaceId: UUID,
+        lens: ReadLens,
         pipelineIds: Collection<UUID>,
-    ): Map<UUID, PipelineVersionDetail> = pipelines.findDrafts(workspaceId, pipelineIds)
+    ): Map<UUID, PipelineVersionDetail> = if (lens.isEverything) pipelines.findDrafts(workspaceId, pipelineIds) else emptyMap()
 
     /** The `q` rule, in one place: a case-insensitive substring of name, display name or description. */
     private fun PipelineRecord.matches(lowercaseQuery: String): Boolean =
@@ -407,7 +408,9 @@ open class PipelineService(
         pipelineId: UUID,
     ): LoadedPipeline? {
         val record = findRecord(workspaceId, lens, pipelineId) ?: return null
-        val draft = pipelines.findDraftDetail(workspaceId, record.id)
+        // 178: a narrowing lens never sees a draft — not as an object and not as the pending
+        // edits of a visible one ("it should hide draft"); the working version is the release.
+        val draft = if (lens.isEverything) pipelines.findDraftDetail(workspaceId, record.id) else null
         val version = draft ?: pipelines.findCurrentVersionDetail(workspaceId, record.id) ?: return null
         val body = pipelines.findVersionBody(workspaceId, record.id, version.version) ?: return null
         return LoadedPipeline(record, body, version, draft)
@@ -427,11 +430,13 @@ open class PipelineService(
     /** One specific version of a known pipeline, body and detail together. */
     open fun findVersion(
         workspaceId: UUID,
+        lens: ReadLens,
         record: PipelineRecord,
         version: Int,
     ): LoadedPipeline? {
-        val body = pipelines.findVersionBody(workspaceId, record.id, version) ?: return null
         val detail = pipelines.findVersionDetail(workspaceId, record.id, version) ?: return null
+        if (!lens.isEverything && detail.status == PipelineVersionStatus.DRAFT) return null
+        val body = pipelines.findVersionBody(workspaceId, record.id, version) ?: return null
         return LoadedPipeline(record, body, detail)
     }
 
@@ -441,7 +446,7 @@ open class PipelineService(
         lens: ReadLens,
         pipelineId: UUID,
     ): PipelineVersionDetail? {
-        if (!admitted(workspaceId, lens, pipelineId)) return null
+        if (!lens.isEverything) return null
         return pipelines.findDraftDetail(workspaceId, pipelineId)
     }
 
@@ -460,6 +465,9 @@ open class PipelineService(
         version: Int,
     ): String? {
         if (!admitted(workspaceId, lens, pipelineId)) return null
+        if (!lens.isEverything && pipelines.findVersionDetail(workspaceId, pipelineId, version)?.status != PipelineVersionStatus.RELEASED) {
+            return null
+        }
         return pipelines.findVersionBody(workspaceId, pipelineId, version)
     }
 
@@ -480,7 +488,8 @@ open class PipelineService(
         pipelineId: UUID,
     ): List<PipelineVersionRecord> {
         if (!admitted(workspaceId, lens, pipelineId)) return emptyList()
-        return pipelines.listVersions(workspaceId, pipelineId)
+        val versions = pipelines.listVersions(workspaceId, pipelineId)
+        return if (lens.isEverything) versions else versions.filter { it.status != PipelineVersionStatus.DRAFT }
     }
 
     // -------------------------------------------------------------------------------------
@@ -507,8 +516,9 @@ open class PipelineService(
      */
     open fun workingVersion(
         workspaceId: UUID,
+        lens: ReadLens,
         record: PipelineRecord,
-    ): Int? = pipelines.findDraftDetail(workspaceId, record.id)?.version ?: record.currentVersion
+    ): Int? = (if (lens.isEverything) pipelines.findDraftDetail(workspaceId, record.id)?.version else null) ?: record.currentVersion
 
     /**
      * The execute path's resolution (D6): the body of [version] and the [Pipeline] parsed from

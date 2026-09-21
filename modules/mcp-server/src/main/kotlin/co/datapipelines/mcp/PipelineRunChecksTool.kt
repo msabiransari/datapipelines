@@ -88,7 +88,7 @@ class PipelineRunChecksTool(
         val record = pipelines.findRecord(workspace.id, ReadLens.Everything, id) ?: throw McpNotFound.pipeline(id)
         val version =
             args.version()
-                ?: pipelines.workingVersion(workspace.id, record)
+                ?: pipelines.workingVersion(workspace.id, ReadLens.Everything, record)
                 ?: throw McpNotFound.pipelineVersion(id, 1)
         val outcomes =
             checkRunner.run(

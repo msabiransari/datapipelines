@@ -127,7 +127,7 @@ class PipelineServiceIntegrationTest {
             saved.draft?.bodyHash shouldBe saved.version?.bodyHash
         }
         withClue("it is executable at once — the working version is the draft (D56)") {
-            service.workingVersion(WORKSPACE_ID, saved.record) shouldBe 1
+            service.workingVersion(WORKSPACE_ID, ReadLens.Everything, saved.record) shouldBe 1
         }
     }
 
@@ -155,12 +155,12 @@ class PipelineServiceIntegrationTest {
         val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
         val fresh = checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id))
         withClue("a fresh create: the draft v1 is the only thing there is to run") {
-            service.workingVersion(WORKSPACE_ID, fresh) shouldBe 1
+            service.workingVersion(WORKSPACE_ID, ReadLens.Everything, fresh) shouldBe 1
         }
 
         service.release(WORKSPACE_ID, created.record.id, checkNotNull(created.version).bodyHash, owner)
         val releasedOnly = checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id))
-        withClue("released, no draft: the release") { service.workingVersion(WORKSPACE_ID, releasedOnly) shouldBe 1 }
+        withClue("released, no draft: the release") { service.workingVersion(WORKSPACE_ID, ReadLens.Everything, releasedOnly) shouldBe 1 }
 
         val draft =
             service.update(
@@ -173,7 +173,7 @@ class PipelineServiceIntegrationTest {
             )
         val withDraft = checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id))
         withClue("release v1 + draft v2: the DRAFT wins — 'the last version' is what the pipeline IS") {
-            service.workingVersion(WORKSPACE_ID, withDraft) shouldBe 2
+            service.workingVersion(WORKSPACE_ID, ReadLens.Everything, withDraft) shouldBe 2
             withDraft.currentVersion shouldBe 1
         }
 
@@ -181,6 +181,7 @@ class PipelineServiceIntegrationTest {
         withClue("purging the draft falls back to the release") {
             service.workingVersion(
                 WORKSPACE_ID,
+                ReadLens.Everything,
                 checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id)),
             ) shouldBe
                 1
@@ -265,7 +266,7 @@ class PipelineServiceIntegrationTest {
         }
 
         withClue("so the working version — the execute default — is the release, by construction") {
-            receiver.workingVersion(WORKSPACE_ID, record) shouldBe 1
+            receiver.workingVersion(WORKSPACE_ID, ReadLens.Everything, record) shouldBe 1
             countRows("pipeline_versions WHERE status = 'DRAFT'") shouldBe 0
         }
     }
@@ -541,10 +542,10 @@ class PipelineServiceIntegrationTest {
         }
         val record = checkNotNull(service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id))
         withClue("the versioned reads compose record, body and detail") {
-            service.findVersion(WORKSPACE_ID, record, 1)?.bodyJson shouldNotBe null
+            service.findVersion(WORKSPACE_ID, ReadLens.Everything, record, 1)?.bodyJson shouldNotBe null
             service.findVersionBody(WORKSPACE_ID, ReadLens.Everything, record.id, 1) shouldNotBe null
             service.findExecutable(WORKSPACE_ID, record, 1)?.pipeline shouldNotBe null
-            service.findDrafts(WORKSPACE_ID, listOf(record.id)) shouldBe emptyMap()
+            service.findDrafts(WORKSPACE_ID, ReadLens.Everything, listOf(record.id)) shouldBe emptyMap()
             service.findCurrentVersion(WORKSPACE_ID, ReadLens.Everything, record.id)?.version shouldBe 1
         }
     }
@@ -601,6 +602,32 @@ class PipelineServiceIntegrationTest {
             weekly.bodyHash shouldBe checkNotNull(repository.findCurrentVersionDetail(WORKSPACE_ID, hidden.id)).bodyHash
             weekly.displayName shouldBe hidden.displayName
         }
+    }
+
+    @Test
+    fun `a visible pipeline's pending DRAFT is invisible under a narrowing lens - the working version is the release`() {
+        val shown = createReleased(Fixtures.pipeline(name = "finance/daily")).record
+        val lens = ReadLens.Only(setOf("finance/daily"))
+        // "It should hide draft" — as an object AND as the unreleased edits of a visible one.
+        val edited =
+            service.update(
+                WORKSPACE_ID,
+                shown.id,
+                body(renamed("Newer edits")),
+                checkNotNull(service.findCurrentVersion(WORKSPACE_ID, ReadLens.Everything, shown.id)).bodyHash,
+                owner,
+                WriteSurface.SESSION,
+            )
+        val draftVersion = checkNotNull(edited.draft).version
+        service.findWorking(WORKSPACE_ID, ReadLens.Everything, shown.id)?.version?.version shouldBe draftVersion
+        service.findWorking(WORKSPACE_ID, lens, shown.id)?.version?.version shouldBe 1
+        service.findDraft(WORKSPACE_ID, lens, shown.id) shouldBe null
+        service.findDrafts(WORKSPACE_ID, lens, listOf(shown.id)) shouldBe emptyMap()
+        service.workingVersion(WORKSPACE_ID, lens, shown) shouldBe 1
+        service.listVersions(WORKSPACE_ID, lens, shown.id).map { it.status } shouldContainExactly listOf(PipelineVersionStatus.RELEASED)
+        service.findVersionBody(WORKSPACE_ID, lens, shown.id, draftVersion) shouldBe null
+        service.findVersion(WORKSPACE_ID, lens, shown, draftVersion) shouldBe null
+        service.findVersion(WORKSPACE_ID, ReadLens.Everything, shown, draftVersion) shouldNotBe null
     }
 
     @Test
@@ -719,7 +746,7 @@ class PipelineServiceIntegrationTest {
 
         // D55: a create lands a DRAFT, so the version to resolve is the WORKING one —
         // `record.currentVersion` is null here, which is the point of the ruling.
-        val working = checkNotNull(service.workingVersion(WORKSPACE_ID, record))
+        val working = checkNotNull(service.workingVersion(WORKSPACE_ID, ReadLens.Everything, record))
         val executable = checkNotNull(service.findExecutable(WORKSPACE_ID, record, working))
 
         executable.version shouldBe 1

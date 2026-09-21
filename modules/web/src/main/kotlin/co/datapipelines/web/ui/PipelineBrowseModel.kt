@@ -116,7 +116,7 @@ class PipelineBrowseModel(
         // returned by search (`q`, a flat list of full paths), by `pipelines_list`, and by its
         // own UUID URL, which is how it is opened and run.
         val rendered = if (prefix.isNullOrEmpty()) level.withoutLeaves() else level
-        fillLevelAttributes(model, workspaceId, prefix, page, rendered)
+        fillLevelAttributes(model, workspaceId, view.pipelines, prefix, page, rendered)
         model.addAttribute(LENS_UNAVAILABLE, view.unavailable)
         return LEVEL_VIEW
     }
@@ -126,13 +126,14 @@ class PipelineBrowseModel(
         model: Model,
         prefix: String,
     ): String {
-        fillLevelAttributes(model, workspaceId = null, prefix = prefix, page = 0, level = EMPTY_LEVEL)
+        fillLevelAttributes(model, workspaceId = null, lens = ReadLens.Everything, prefix = prefix, page = 0, level = EMPTY_LEVEL)
         return LEVEL_VIEW
     }
 
     private fun fillLevelAttributes(
         model: Model,
         workspaceId: UUID?,
+        lens: ReadLens,
         prefix: String?,
         page: Int,
         level: PipelineFolderLevel,
@@ -149,7 +150,7 @@ class PipelineBrowseModel(
             if (workspaceId == null || level.pipelines.isEmpty()) {
                 emptyMap()
             } else {
-                pipelines.findDrafts(workspaceId, level.pipelines.map { it.id })
+                pipelines.findDrafts(workspaceId, lens, level.pipelines.map { it.id })
             }
         model.addAttribute("drafts", drafts)
         model.addAttribute("offset", page)

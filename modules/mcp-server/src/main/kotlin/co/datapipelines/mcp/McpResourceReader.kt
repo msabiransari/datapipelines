@@ -152,7 +152,7 @@ class McpResourceReader(
         // D55: with no version in the URI this serves the WORKING version — the draft when one
         // exists, else the latest release — the same default `pipelines_execute` runs, so an
         // agent reading the body and then running it sees one pipeline, not two.
-        val resolved = version ?: pipelines.workingVersion(workspaceId, record) ?: throw notFound(McpResourceUri.pipeline(id))
+        val resolved = version ?: pipelines.workingVersion(workspaceId, view, record) ?: throw notFound(McpResourceUri.pipeline(id))
         return pipelines.findVersionBody(workspaceId, view, id, resolved) ?: throw notFound(McpResourceUri.pipeline(id))
     }
 

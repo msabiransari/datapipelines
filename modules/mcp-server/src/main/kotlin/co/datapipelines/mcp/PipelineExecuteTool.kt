@@ -163,7 +163,7 @@ class PipelineExecuteTool(
         // release), resolved by the aggregate — never `current_version` directly.
         val version =
             args.version()
-                ?: pipelines.workingVersion(workspace.id, record)
+                ?: pipelines.workingVersion(workspace.id, ReadLens.Everything, record)
                 ?: throw McpNotFound.pipelineVersion(id, 1)
         // D6: the version resolution is the aggregate's, shared with the REST execute path.
         val executable =

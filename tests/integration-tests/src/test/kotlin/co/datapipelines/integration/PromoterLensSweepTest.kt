@@ -197,6 +197,13 @@ class PromoterLensSweepTest {
             root.map { it.path("path").asText() to it.path("template_count").asInt() } shouldContainExactly
                 listOf(T to VISIBLE_TEMPLATES.size)
         }
+        withClue("REST: a visible object's pending DRAFT is invisible — the working version is the release") {
+            getJson("/api/v1/pipelines/$PIPE_NEWER", auth).path("data").path("version").asInt() shouldBe 3
+            names(getJson("/api/v1/pipelines/$PIPE_NEWER/versions", auth).path("data"), "status") shouldContainExactly listOf("RELEASED")
+            call("/api/v1/pipelines/$PIPE_NEWER/versions/4", auth).status shouldBe HTTP_NOT_FOUND
+            getJson("/api/v1/templates?name=$T/newer.sql", auth).path("data").path("version").asInt() shouldBe 3
+            call("/api/v1/templates/versions?name=$T/newer.sql&version=4", auth).status shouldBe HTTP_NOT_FOUND
+        }
         withClue("REST endpoints: visible iff the pipeline is") {
             names(getJson("/api/v1/endpoints", auth).path("data"), "path") shouldContainExactly listOf(VISIBLE_ENDPOINT)
         }
@@ -234,6 +241,15 @@ class PromoterLensSweepTest {
                 refused(tool("pipelines_get", """{"id":"$PIPE_NEWER"}""", key)) shouldBe false
                 refused(tool("templates_get", """{"id":"$T/newer.sql"}""", key)) shouldBe false
             }
+            withClue("a visible object's pending DRAFT is invisible: the get serves the release, the draft version is not-found") {
+                val got = toolResult(tool("pipelines_get", """{"id":"$PIPE_NEWER"}""", key))
+                got.path("version").asInt() shouldBe 3
+                got.path("status").asText() shouldBe "RELEASED"
+                got.path("draft").size() shouldBe 0
+                refused(tool("pipelines_get", """{"id":"$PIPE_NEWER","version":4}""", key)) shouldBe true
+                toolResult(tool("templates_get", """{"id":"$T/newer.sql"}""", key)).path("version").asInt() shouldBe 3
+                refused(tool("templates_get", """{"id":"$T/newer.sql","version":4}""", key)) shouldBe true
+            }
             val catalogue = mcp("""{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}""", key)
             HIDDEN_TOKENS.filter { it in catalogue } shouldBe emptyList()
             catalogue.contains(PIPE_NEWER.toString()) shouldBe true
@@ -260,6 +276,10 @@ class PromoterLensSweepTest {
         names(getJson("/api/v1/endpoints", auth).path("data"), "path") shouldContainExactlyInAnyOrder
             listOf(VISIBLE_ENDPOINT, HIDDEN_ENDPOINT)
         HIDDEN_PIPELINE_IDS.forEach { id -> call("/api/v1/pipelines/$id", auth).status shouldBe HTTP_OK }
+        withClue("the viewer sees the visible object's DRAFT — so the promoter's not seeing it is the lens, not a missing row") {
+            call("/api/v1/pipelines/$PIPE_NEWER", auth).body.contains(DRAFT_MARKER) shouldBe true
+            call("/api/v1/templates?name=$T/newer.sql", auth).body.contains(DRAFT_MARKER) shouldBe true
+        }
         reachableGetRoutes().forEach { route -> identifierPairs(route).forEach { (hidden, _) -> call(hidden, auth) } }
         names(toolResult(tool("pipelines_list", "{}", keyFor(VIEWER))), "name") shouldContainExactlyInAnyOrder
             VISIBLE_PIPELINES + HIDDEN_PIPELINES
@@ -579,7 +599,7 @@ class PromoterLensSweepTest {
 
         /** Everything a promoter's answer must never carry: the hidden names, ids and the hidden endpoint's path. */
         private val HIDDEN_TOKENS: List<String> =
-            HIDDEN_PIPELINES + HIDDEN_TEMPLATES + HIDDEN_PIPELINE_IDS.map { it.toString() } + HIDDEN_ENDPOINT
+            HIDDEN_PIPELINES + HIDDEN_TEMPLATES + HIDDEN_PIPELINE_IDS.map { it.toString() } + HIDDEN_ENDPOINT + DRAFT_MARKER
 
         private val USERS: Map<String, String> =
             mapOf(
@@ -624,6 +644,12 @@ class PromoterLensSweepTest {
 
         private const val PIPELINE_BODY =
             """{"schema_version":1,"name":"lens","display_name":"Lens","description":"",""" +
+                """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"lt/newer.sql","version":1}}]}"""
+
+        /** A visible object's pending DRAFT: its body carries this marker, which no promoter answer may contain. */
+        private const val DRAFT_MARKER = "draft_marker_178_never_shown"
+        private const val DRAFT_BODY =
+            """{"schema_version":1,"name":"lens","display_name":"$DRAFT_MARKER","description":"$DRAFT_MARKER",""" +
                 """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"lt/newer.sql","version":1}}]}"""
 
         private fun sessionJwt(
@@ -702,7 +728,8 @@ class PromoterLensSweepTest {
                     ('$PIPE_ON_TARGET', 2, '$PIPELINE_BODY'::jsonb, 'hash-same', 'RELEASED', '$owner', '$owner', NOW()),
                     ('$PIPE_BEHIND', 1, '$PIPELINE_BODY'::jsonb, 'hash-ours', 'RELEASED', '$owner', '$owner', NOW()),
                     ('$PIPE_NEWER', 3, '$PIPELINE_BODY'::jsonb, 'hash-new', 'RELEASED', '$owner', '$owner', NOW()),
-                    ('$PIPE_ABSENT', 1, '$PIPELINE_BODY'::jsonb, 'hash-absent', 'RELEASED', '$owner', '$owner', NOW())
+                    ('$PIPE_ABSENT', 1, '$PIPELINE_BODY'::jsonb, 'hash-absent', 'RELEASED', '$owner', '$owner', NOW()),
+                    ('$PIPE_NEWER', 4, '$DRAFT_BODY'::jsonb, 'hash-new-draft', 'DRAFT', '$owner', NULL, NULL)
                 """.trimIndent(),
             )
         }
@@ -745,6 +772,16 @@ class PromoterLensSweepTest {
                         "('$id', $version, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 1', '$hash', " +
                         "'$status', '$owner', $released)",
                 )
+                // The visible `newer` template also carries a pending DRAFT (v4) — a promoter must
+                // never see its body, its pointer or its version row.
+                if (name == "$T/newer.sql") {
+                    statement.execute(
+                        "INSERT INTO template_versions (template_id, version, engine, dialect, is_library, imports_json, body, " +
+                            "body_hash, status, created_by, released_by, released_at) VALUES " +
+                            "('$id', 4, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT $DRAFT_MARKER', 'thash-new-draft', " +
+                            "'DRAFT', '$owner', NULL, NULL)",
+                    )
+                }
             }
         }
 

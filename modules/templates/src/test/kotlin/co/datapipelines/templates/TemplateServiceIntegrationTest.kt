@@ -1,6 +1,7 @@
 package co.datapipelines.templates
 
 import co.datapipelines.pipeline.CreateLifecycle
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
@@ -131,6 +132,36 @@ class TemplateServiceIntegrationTest {
                 service.findDraftDetail(workspaceId, lens, id).shouldBeNull()
                 service.findVersionStatus(workspaceId, lens, id, 1).shouldBeNull()
             }
+        }
+        withClue("a visible template's pending DRAFT is invisible under the lens: the working version is the release") {
+            // "It should hide draft" — as an object AND as the unreleased edits of a visible one.
+            val released = checkNotNull(repository.findLatest(workspaceId, "finance/daily.sql"))
+            repository.createDraft(
+                workspaceId,
+                "finance/daily.sql",
+                TemplateDraft(
+                    id = "finance/daily.sql",
+                    type = TemplateType.SQL,
+                    dialect = Dialect.POSTGRES,
+                    displayName = "finance/daily.sql",
+                    description = "Fixture.",
+                    body = "SELECT 2",
+                ),
+                released.bodyHash,
+                actor,
+                WriteSurface.SESSION,
+            )
+            repository.findWorking(workspaceId, "finance/daily.sql")?.status shouldBe PipelineVersionStatus.DRAFT
+            service.findWorking(workspaceId, lens, "finance/daily.sql")?.status shouldBe PipelineVersionStatus.RELEASED
+            service.findDraftDetail(workspaceId, lens, "finance/daily.sql").shouldBeNull()
+            service.findDrafts(workspaceId, lens, listOf("finance/daily.sql")) shouldBe emptyMap()
+            service.listVersions(workspaceId, lens, "finance/daily.sql").map { it.status } shouldContainExactly
+                listOf(PipelineVersionStatus.RELEASED)
+            service.findVersion(workspaceId, lens, "finance/daily.sql", 2).shouldBeNull()
+            service.findVersionDetail(workspaceId, lens, "finance/daily.sql", 2).shouldBeNull()
+            service.findVersionStatus(workspaceId, lens, "finance/daily.sql", 2).shouldBeNull()
+            service.lookupVersion(workspaceId, lens, "finance/daily.sql", 2).shouldBeNull()
+            service.findVersion(workspaceId, ReadLens.Everything, "finance/daily.sql", 2).shouldNotBeNull()
         }
         withClue("and the admitted one reads exactly as without a lens") {
             service.findLatest(workspaceId, lens, "finance/daily.sql") shouldBe repository.findLatest(workspaceId, "finance/daily.sql")

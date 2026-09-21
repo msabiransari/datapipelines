@@ -175,10 +175,10 @@ class PipelinesController(
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val record =
-            pipelines.findRecord(workspaceId, lens.viewFor(principal).pipelines, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val view = lens.viewFor(principal).pipelines
+        val record = pipelines.findRecord(workspaceId, view, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         val loaded =
-            pipelines.findVersion(workspaceId, record, version)
+            pipelines.findVersion(workspaceId, view, record, version)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), version)
         return ApiResponse.of(PipelineResponses.full(record, loaded.bodyJson, loaded.version))
     }
@@ -476,17 +476,18 @@ class PipelinesController(
         val size = Pagination.clampLimit(limit)
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal).pipelines
         val filtered =
             pipelines.list(
                 workspaceId,
-                lens.viewFor(principal).pipelines,
+                view,
                 ownerId = owner,
                 datasourceName = datasource,
                 query = q,
             )
         val shown = filtered.drop(page).take(size)
         // One batched draft lookup for the page, so each row can state its working version (D55).
-        val drafts = pipelines.findDrafts(workspaceId, shown.map { it.id })
+        val drafts = pipelines.findDrafts(workspaceId, view, shown.map { it.id })
         val items = shown.map { PipelineResponses.listEntry(it, drafts[it.id]) }
         val pagination = Pagination.of(page, size, filtered.size.toLong(), items.size)
         return ApiResponse.of(PagedData(items, pagination))
@@ -511,10 +512,11 @@ class PipelinesController(
     ): ApiResponse<Map<String, Any?>> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal).pipelines
         val level =
             pipelines.browseLevel(
                 workspaceId,
-                lens.viewFor(principal).pipelines,
+                view,
                 prefix,
                 Pagination.clampOffset(offset),
                 Pagination.clampLimit(limit),
@@ -524,7 +526,7 @@ class PipelinesController(
                 "prefix" to prefix,
                 "folders" to level.folders.map { mapOf("path" to it.path, "segment" to it.segment, "pipeline_count" to it.pipelineCount) },
                 "pipelines" to
-                    pipelines.findDrafts(workspaceId, level.pipelines.map { it.id }).let { drafts ->
+                    pipelines.findDrafts(workspaceId, view, level.pipelines.map { it.id }).let { drafts ->
                         level.pipelines.map { PipelineResponses.listEntry(it, drafts[it.id]) }
                     },
                 "total" to level.total,

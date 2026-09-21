@@ -283,7 +283,7 @@ class PipelineCheckRunnerTest {
         val pipelines =
             mockk<PipelineService> {
                 every { findRecord(WORKSPACE, any(), PIPELINE_ID) } returns record
-                every { workingVersion(WORKSPACE, record) } returns 2
+                every { workingVersion(WORKSPACE, any(), record) } returns 2
                 every { findExecutable(WORKSPACE, record, 2) } returns
                     PipelineService.ExecutablePipeline(record, 2, "{}", body)
             }
