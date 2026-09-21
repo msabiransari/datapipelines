@@ -67,19 +67,18 @@ class SiteRenderTest {
 
     @Test
     fun `the engineering page renders the moved sections with the catalog tool count`() {
-        // 115 §A.3: the homepage's engineering sections moved here verbatim — the agent loop
-        // with its live tool count, and the recorded run. 145 keeps all of it under the
-        // walkthrough; the old H1 is the depth's H2 and every anchor survives.
+        // 115 §A.3: the homepage's engineering sections moved here verbatim. 145 kept them
+        // under the walkthrough; 174 made the page the executed tutorial and retired the
+        // agent-loop section and its SVG (the loop's pins "/mcp — N MCP tools" and
+        // "(N tools)" retired with it) — the tool count now renders in step 3's sentence.
         val count = McpToolCatalog.NAMES.size
         val html = SitePageRenderer.render(SitePages.HOW_IT_WORKS)
 
         html shouldContain "How it works, for the engineer who has to run it"
         html shouldContain "id=\"hiw-title\""
         html shouldContain "<title>${SitePages.HOW_IT_WORKS.title}</title>"
-        // The moved facts, still derived from the catalog rather than transcribed (033/C4).
+        // The moved fact, still derived from the catalog rather than transcribed (033/C4).
         html shouldContain "<span>$count</span> tools cover the full lifecycle"
-        html shouldContain "/mcp — $count MCP tools"
-        html shouldContain "($count tools)"
         // 133 §B.3: the run is a rendered console and the endpoint a rendered panel.
         html shouldContain "class=\"console\""
         // 169 §B: the three screenshot slots are filled with real captures — labelled frames,

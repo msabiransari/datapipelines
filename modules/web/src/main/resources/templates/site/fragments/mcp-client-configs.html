@@ -1,0 +1,55 @@
+<!-- The MCP client config blocks, shared by /add-mcp-server-to-claude-code (step 3) and the
+     /how-it-works tutorial (step 3) so the two pages cannot drift (174). The host is a
+     parameter: the tutorial passes the local demo URL, the setup page the placeholder a
+     reader replaces with their own host. The URL and the header are the product's contract
+     (docs/mcp-server.md §3.2, §4.1); the file names and the JSON shape around them belong
+     to each client. The root is a th:block so the include leaves no wrapper element —
+     a wrapper div broke the site's vertical-rhythm selectors (SiteRhythmBrowserTest). -->
+<th:block th:fragment="clientConfigs(host)" xmlns:th="http://www.thymeleaf.org">
+  <h2 id="claude-code-config" class="ds-subheadline">The Claude Code MCP server config</h2>
+  <div class="code-block">
+    <pre><code>claude mcp add --transport http datapipelines <span th:text="${host}">https://your-host</span>/mcp \
+  --header "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
+    <button type="button" class="copy-btn" hidden>Copy</button>
+  </div>
+
+  <h2 id="cursor-config" class="ds-subheadline">The Cursor MCP server config — <code>~/.cursor/mcp.json</code></h2>
+  <div class="code-block">
+    <pre><code>{
+  "mcpServers": {
+    "datapipelines": {
+      "url": "<span th:text="${host}">https://your-host</span>/mcp",
+      "headers": { "DP-API-Key": "dpk_&lt;id&gt;.&lt;secret&gt;" }
+    }
+  }
+}</code></pre>
+    <button type="button" class="copy-btn" hidden>Copy</button>
+  </div>
+
+  <h2 id="copilot-config" class="ds-subheadline">The GitHub Copilot MCP server config — <code>.vscode/mcp.json</code></h2>
+  <div class="code-block">
+    <pre><code>{
+  "servers": {
+    "datapipelines": {
+      "type": "http",
+      "url": "<span th:text="${host}">https://your-host</span>/mcp",
+      "headers": { "DP-API-Key": "dpk_&lt;id&gt;.&lt;secret&gt;" }
+    }
+  }
+}</code></pre>
+    <button type="button" class="copy-btn" hidden>Copy</button>
+  </div>
+
+  <h2 id="other-clients-config" class="ds-subheadline">Claude Desktop and other JSON-configured clients</h2>
+  <div class="code-block">
+    <pre><code>{
+  "mcpServers": {
+    "datapipelines": {
+      "url": "<span th:text="${host}">https://your-host</span>/mcp",
+      "headers": { "Authorization": "Bearer dpk_&lt;id&gt;.&lt;secret&gt;" }
+    }
+  }
+}</code></pre>
+    <button type="button" class="copy-btn" hidden>Copy</button>
+  </div>
+</th:block>

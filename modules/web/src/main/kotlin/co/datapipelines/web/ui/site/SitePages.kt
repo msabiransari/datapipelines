@@ -483,18 +483,19 @@ object SitePages {
      * the fold free of it; every term the fold guard bans lives here instead (the guard
      * asserts the move, not a removal). FAQ: `SiteFaqs.APIS_AND_OPERATIONS`, the most
      * engineering-shaped existing list.
+     *
+     * 174 (#174): the page became the step-by-step tutorial — title and H1 carry the measured
+     * phrase "MCP server tutorial" (210/mo), the description "self-hosted MCP server"
+     * (110/mo); "run data pipelines locally" and "getting started mcp server" measured zero
+     * and are not targets.
      */
     val HOW_IT_WORKS =
         SitePage(
             path = "/how-it-works",
-            // 115 §A.3's title is 79 chars against the 70 pin, so "the MCP server" tightens
-            // to "MCP"; the keywords and the suffix both stay.
-            title = "How it works — pipelines, federated joins, MCP | datapipelines.co",
-            // 115 §A.3's description is 207 chars against the 155 pin; this is its front half,
-            // which carries the three facts the page exists to state.
+            title = "MCP server tutorial: how it works, step by step | datapipelines.co",
             description =
-                "An agent authors a versioned SQL pipeline over MCP, the platform runs it where the " +
-                    "data lives, and a release becomes a GET endpoint.",
+                "A self-hosted MCP server tutorial: run it locally, connect Claude Code, Cursor or Copilot, " +
+                    "author a pipeline, release it, publish the API, call it.",
             view = "site/how-it-works",
         )
 

@@ -55,8 +55,9 @@ import java.nio.file.StandardCopyOption
  * `-PshotsHeroOut` is optional and produces the two hero copies the poster and the OG image
  * want; without it the hero is captured once, into the page's own image directory.
  *
- * The account must have signed in once already (its personal workspace is what carries the
- * seeded examples) and must not still owe a forced password change.
+ * The account must have signed in once already (logins land in the shipped `demo`
+ * workspace, which is what carries the seeded examples — auth.md §4.2 step 4) and must not
+ * still owe a forced password change.
  *
  * ## Determinism
  *
@@ -95,6 +96,16 @@ import java.nio.file.StandardCopyOption
  * (`-PshotsOnly=review-release`), never at prod. `-PshotsPipeline` names the pipeline the two
  * editor captures photograph and `-PshotsInspectNode` the cross-engine join node
  * `home-no-warehouse` opens — both are read from the target's own explorer, never guessed.
+ *
+ * ## The `tutorial` set (174, #174)
+ *
+ * `-PshotsSet=tutorial` photographs the three screens the `/how-it-works` tutorial steps
+ * embed and no other set covers: `tutorial-login` (the sign-in screen, the one ANONYMOUS
+ * shot — captured before sign-in), `tutorial-release` (the release dialog — [releaseStep]'s
+ * seeding, so a lane instance, never prod) and `tutorial-endpoint-key` (an `endpoint`-kind
+ * key bound to the demo path in the keys table, whose reach cell is the bound path). The
+ * mechanics are the `home` set's — [HOME_SCALE], `-PshotsTheme`, the write audit — but the
+ * set is NOT read-only: the key and the endpoint are its subject, so lane instances only.
  */
 object SiteShotsMain {
     private const val VIEWPORT_W = 1440
@@ -212,6 +223,9 @@ object SiteShotsMain {
      */
     private const val SET_HOME = "home"
 
+    /** 174 (#174): the `/how-it-works` tutorial's captures — see the KDoc section above. */
+    private const val SET_TUTORIAL = "tutorial"
+
     /** The `home` set's device scale factor: 1440x900 CSS → 2880x1800 PNGs. */
     private const val HOME_SCALE = 2.0
 
@@ -292,6 +306,24 @@ object SiteShotsMain {
                         }
                         signIn(page, email, password)
                         Shots(page, ScreenshotScale.DEVICE).captureHome(theme)
+                    }
+                }
+
+                SET_TUTORIAL -> {
+                    val theme = prop("shots.theme", THEME_LIGHT)
+                    require(theme == THEME_LIGHT || theme == THEME_DARK) {
+                        "-PshotsTheme must be $THEME_LIGHT or $THEME_DARK, got '$theme'"
+                    }
+                    withBrowser(homeContextOptions()) { page ->
+                        // The home set's write audit, kept: this set mints a key and publishes
+                        // an endpoint on purpose (lane instances only), and the log says so.
+                        page.onRequest { request ->
+                            if (request.method() != "GET") println("  WRITE ${request.method()} ${request.url()}")
+                        }
+                        val shots = Shots(page, ScreenshotScale.DEVICE)
+                        shots.tutorialLogin() // the one ANONYMOUS shot — before sign-in
+                        signIn(page, email, password)
+                        shots.captureTutorial(theme)
                     }
                 }
 
@@ -532,7 +564,13 @@ object SiteShotsMain {
         return listOf("$APP_DIR/boost-navigation.webm")
     }
 
-    /** Every capture goes through here, so no shot can skip the determinism steps. */
+    /**
+     * Every capture goes through here, so no shot can skip the determinism steps.
+     * `LargeClass` is suppressed (the house pattern: PipelineRepository, TemplateRepository):
+     * the class is the single shutter the shot list's determinism contract lives behind, and
+     * each new capture set (076's app, 175's home, 174's tutorial) lands here by design.
+     */
+    @Suppress("LargeClass")
     internal class Shots(
         private val page: Page,
         /**
@@ -642,6 +680,49 @@ object SiteShotsMain {
                 }
             }
             return written
+        }
+
+        /** 174 (#174): the tutorial's sign-in screen — the one ANONYMOUS capture, before [signIn]. */
+        fun tutorialLogin() {
+            page.navigate("$baseUrl/login")
+            waitFor("#login-email")
+            settle()
+            shoot("tutorial-login.png")
+        }
+
+        /**
+         * 174 (#174): the tutorial's captures. The theme contract is [captureHome]'s: driven
+         * through the settings select, asserted, restored. NOT read-only — lane instances only.
+         */
+        fun captureTutorial(theme: String): List<String> {
+            val previous = currentTheme()
+            if (previous != theme) {
+                println("  theme: the account was on $previous — setting $theme through the settings select")
+                setTheme(theme)
+            }
+            assertTheme(theme)
+            try {
+                if (wanted("release")) releaseStep("tutorial-release.png")
+                if (wanted("endpoint-key")) tutorialEndpointKey()
+            } finally {
+                if (currentTheme() != previous) {
+                    setTheme(previous)
+                    println("  theme: the account is back on $previous")
+                }
+            }
+            return written
+        }
+
+        /** Step 7's capture: the endpoint-kind key in the keys table, its reach cell the bound path. */
+        private fun tutorialEndpointKey() {
+            publishDemoEndpoint()
+            page.navigate("$baseUrl/api-console")
+            waitFor(".ds-table, .ds-empty")
+            mintKeyIfAbsent("tutorial-weather-app", kind = "endpoint", binding = DEMO_ENDPOINT_PATH)
+            page.navigate("$baseUrl/api-console")
+            waitFor(".ds-table")
+            refuseVisibleSecret()
+            shoot("tutorial-endpoint-key.png")
         }
 
         /** The account's current theme, read off the settings screen's resolved stylesheet. */

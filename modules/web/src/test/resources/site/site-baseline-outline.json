@@ -2899,11 +2899,6 @@
     "hiw-title",
     "hiw-mechanism",
     "engines-title",
-    "how-it-works",
-    "how-title",
-    "flow-title",
-    "flow-desc",
-    "dg-arrowhead",
     "capabilities",
     "cap-title",
     "security",
@@ -2911,9 +2906,48 @@
     "next",
     "next-title",
     "faq",
-    "faq-title"
+    "faq-title",
+    "quickstart",
+    "application",
+    "review"
    ],
    "headings": [
+    {
+     "level": "H1",
+     "text": "How it works: the MCP server tutorial, end to end on your laptop"
+    },
+    {
+     "level": "H2",
+     "text": "Run it locally, with sample data"
+    },
+    {
+     "level": "H2",
+     "text": "Mint the agent's key"
+    },
+    {
+     "level": "H2",
+     "text": "Point the agent at /mcp"
+    },
+    {
+     "level": "H2",
+     "text": "The agent authors a pipeline and runs it"
+    },
+    {
+     "level": "H2",
+     "text": "A person releases it"
+    },
+    {
+     "level": "H2",
+     "text": "Publish it as an API"
+    },
+    {
+     "level": "H2",
+     "text": "Scope a key to the endpoint"
+    },
+    {
+     "level": "H2",
+     "text": "Call it, and page the result"
+    },
     {
      "level": "H1",
      "text": "How it works, for the engineer who has to run it"
@@ -2925,30 +2959,6 @@
     {
      "level": "H2",
      "text": "An MCP server for your SQL database"
-    },
-    {
-     "level": "H2",
-     "text": "How it works"
-    },
-    {
-     "level": "H3",
-     "text": "Mint an API key"
-    },
-    {
-     "level": "H3",
-     "text": "Point the agent at /mcp"
-    },
-    {
-     "level": "H3",
-     "text": "Author as a JSON contract"
-    },
-    {
-     "level": "H3",
-     "text": "Execute and watch"
-    },
-    {
-     "level": "H3",
-     "text": "Read row-level results"
     },
     {
      "level": "H2",
@@ -3108,9 +3118,28 @@
     }
    ],
    "retired": {
-    "anchors": {},
+    "anchors": {
+     "how-it-works": "174: the 5-step agent-loop section became the executed eight-step tutorial above it; its content is steps 2-4 now",
+     "how-title": "174: the agent loop's heading; the loop is the tutorial now",
+     "flow-title": "174: the agent-loop SVG's title; retired with the section",
+     "flow-desc": "174: the agent-loop SVG's description; retired with the section",
+     "dg-arrowhead": "174: the agent-loop SVG's marker; retired with the section",
+     "walkthrough": "174: the 145 walkthrough became the numbered tutorial steps",
+     "connect": "174: walkthrough step; connecting is the tutorial's step 3",
+     "learn": "174: walkthrough step; business context is the semantic layer, linked from #next",
+     "deliver": "174: walkthrough step; delivery is the tutorial's steps 6-8",
+     "reuse": "174: the reuse section folded into the tutorial (the year parameter demonstrates it in step 8)",
+     "reuse-title": "174: retired with the reuse section"
+    },
     "headings": {
-     "The operational questions": "145: the FAQ block opens with three practical questions; its heading is 'A few practical questions'"
+     "The operational questions": "145: the FAQ block opens with three practical questions; its heading is 'A few practical questions'",
+     "How it works": "174: the agent-loop H2; the loop became the executed tutorial (steps 2-4)",
+     "Mint an API key": "174: agent-loop step; now tutorial step 2 with the executed transcript",
+     "Author as a JSON contract": "174: agent-loop step; now tutorial step 4",
+     "Execute and watch": "174: agent-loop step; now tutorial step 4",
+     "Read row-level results": "174: agent-loop step; now tutorial steps 4 and 8",
+     "One small demo. No business data required.": "174: the vague quickstart became step 1 with the real output",
+     "The same logic. New inputs. Fresh results.": "174: retired with the reuse section"
     }
    }
   },
