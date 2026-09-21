@@ -2,6 +2,7 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplatePin
 import co.datapipelines.pipeline.through
@@ -32,6 +33,9 @@ class TemplateUsageService(
     private val templates: TemplateRepository,
     private val pipelines: PipelineRepository,
 ) {
+    /** The lensed status read (178b): the façade over the same repository, so the two cannot disagree. */
+    private val reads = TemplateService(templates)
+
     /** The used-by answer for one template version: one [TemplatePin] per pinning NODE. */
     data class UsedBy(
         val templateId: String,
@@ -62,8 +66,15 @@ class TemplateUsageService(
         version: Int,
     ): UsedBy {
         if (!templateLens.admits(id) || !templates.existsId(workspaceId, id)) throw templateNotFound(id)
-        if (templates.findVersionStatus(workspaceId, id, version) == null) throw templateVersionNotFound(id, version)
-        val references = pipelines.findWorkingVersionTemplatePins(workspaceId, id, version).through(pipelineLens) { it.pipelineName }
+        // 178b: through the façade — a DRAFT template version is "version not found" under a
+        // narrowing lens, and a DRAFT pipeline pin (a visible pipeline's pending draft) is
+        // dropped when either lens narrows: a promoter sees released pins of released versions.
+        if (reads.findVersionStatus(workspaceId, templateLens, id, version) == null) throw templateVersionNotFound(id, version)
+        val references =
+            pipelines
+                .findWorkingVersionTemplatePins(workspaceId, id, version)
+                .through(pipelineLens) { it.pipelineName }
+                .filter { (templateLens.isEverything && pipelineLens.isEverything) || it.versionStatus == PipelineVersionStatus.RELEASED }
         return UsedBy(
             templateId = id,
             version = version,
@@ -93,6 +104,22 @@ class TemplateUsageService(
         workspaceId: UUID,
         id: String,
     ): List<TemplatePin> = pipelines.findAnyVersionTemplatePins(workspaceId, id)
+
+    /**
+     * [referencedAnywhere] as a LENSED caller sees it (178b): the pins of pipelines the
+     * [pipelineLens] admits, and — when either lens narrows — RELEASED pipeline versions only,
+     * so a visible pipeline's pending DRAFT pin never shows a promoter a draft's number or
+     * status. Under two [ReadLens.Everything] lenses it is [referencedAnywhere] unchanged.
+     */
+    fun referencedAnywhere(
+        workspaceId: UUID,
+        templateLens: ReadLens,
+        pipelineLens: ReadLens,
+        id: String,
+    ): List<TemplatePin> =
+        referencedAnywhere(workspaceId, id)
+            .through(pipelineLens) { it.pipelineName }
+            .filter { (templateLens.isEverything && pipelineLens.isEverything) || it.versionStatus == PipelineVersionStatus.RELEASED }
 
     /**
      * One entry of the pipeline read's upgrade signal (040 D5): node [node] pins

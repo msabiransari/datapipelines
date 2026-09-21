@@ -91,7 +91,7 @@ class PipelinesExecuteNodeToolTest {
 
     private fun resolverReturns(resolution: NodeSqlResolution) {
         every {
-            resolver.resolve(McpFixtures.WORKSPACE_ID, pipelineId, "fetch", null, null)
+            resolver.resolve(McpFixtures.WORKSPACE_ID, pipelineId, "fetch", null, null, any(), any())
         } returns resolution
     }
 
@@ -230,7 +230,7 @@ class PipelinesExecuteNodeToolTest {
 
     @Test
     fun `an unknown pipeline maps to the execution not-found code`() {
-        every { resolver.resolve(McpFixtures.WORKSPACE_ID, pipelineId, "fetch", null, null) } throws
+        every { resolver.resolve(McpFixtures.WORKSPACE_ID, pipelineId, "fetch", null, null, any(), any()) } throws
             NoSuchElementException("Pipeline $pipelineId not found")
 
         shouldThrow<DatapipelinesException> {

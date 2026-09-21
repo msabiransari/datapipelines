@@ -113,7 +113,9 @@ class PipelineChecksPartialsController(
         version: Int,
     ): List<PipelineCheck> {
         val record = pipelines.findRecord(workspaceId, view, id) ?: throw notFound(id)
-        val executable = pipelines.findExecutable(workspaceId, record, version) ?: throw notFound(id)
+        // 178b: a caller-chosen version that is not RELEASED is, under a narrowing lens, the same
+        // 404 an absent version gets — the guard is the service's, not a status check here.
+        val executable = pipelines.findExecutable(workspaceId, view, record, version) ?: throw notFound(id)
         return executable.pipeline.checks
     }
 

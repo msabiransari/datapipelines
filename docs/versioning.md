@@ -990,8 +990,10 @@ time here (the push closure only implied it): a template is promotable iff it ha
 RELEASED version and the target lacks its id, or holds a different hash at a lower version —
 the four lines above with the template's id for its name. A hidden object answers a promoter
 exactly as an absent one, and a visible object's pending DRAFT is invisible as well — the
-working version a promoter reads (§7) is the current release, never the draft; when the
-target cannot be read the lens shows NOTHING (fail closed) and the screens say why.
+working version a promoter reads (§7) is the current release, never the draft — on every
+read that resolves version content, the node SQL, the checks and the used-by pins included
+(178b); when the target cannot be read the lens shows NOTHING (fail closed) and the screens
+say why.
 
 The delta is computed from the target's inventory: the promotion orchestrator reads the
 target's per-pipeline and per-template `(name, current_version, body_hash)`

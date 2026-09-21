@@ -69,9 +69,12 @@ class PipelineNodeSqlPartialController(
     ): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        // The resolver reads the repository; the lens is applied here, before it, with the
-        // same absence the resolver itself raises for an unknown pipeline.
-        pipelineService.findRecord(workspaceId, lens.viewFor(principal).pipelines, id)
+        // The lens is applied here before the resolver, with the same absence the resolver
+        // itself raises for an unknown pipeline — and travels INTO the resolver (178b): under a
+        // narrowing lens it renders the RELEASED version only, and reads the pinned template
+        // through the façade with the template lens.
+        val view = lens.viewFor(principal)
+        pipelineService.findRecord(workspaceId, view.pipelines, id)
             ?: throw NoSuchElementException("Pipeline $id not found")
 
         // The E5 version default (draft-if-exists) applies here exactly as it does for the
@@ -84,7 +87,16 @@ class PipelineNodeSqlPartialController(
             }
 
             is Overrides.Parsed -> {
-                val resolution = resolver.resolve(workspaceId, id, nodeId, requestedVersion = null, parameterInputs = inputs.inputs)
+                val resolution =
+                    resolver.resolve(
+                        workspaceId,
+                        id,
+                        nodeId,
+                        requestedVersion = null,
+                        parameterInputs = inputs.inputs,
+                        pipelineLens = view.pipelines,
+                        templateLens = view.templates,
+                    )
                 render(resolution, model)
             }
         }

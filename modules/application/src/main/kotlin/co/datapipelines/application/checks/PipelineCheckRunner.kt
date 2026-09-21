@@ -160,7 +160,7 @@ class PipelineCheckRunner(
     ): List<CheckRunOutcome>? {
         val record = pipelines.findRecord(workspaceId, ReadLens.Everything, pipelineId) ?: return null
         val resolved = version ?: pipelines.workingVersion(workspaceId, ReadLens.Everything, record) ?: return null
-        val executable = pipelines.findExecutable(workspaceId, record, resolved) ?: return null
+        val executable = pipelines.findExecutable(workspaceId, ReadLens.Everything, record, resolved) ?: return null
         return run(workspaceId, pipelineId, resolved, executable.pipeline, parameters, via, actor, correlationId)
     }
 

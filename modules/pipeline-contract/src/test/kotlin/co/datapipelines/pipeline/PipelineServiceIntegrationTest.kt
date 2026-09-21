@@ -544,7 +544,7 @@ class PipelineServiceIntegrationTest {
         withClue("the versioned reads compose record, body and detail") {
             service.findVersion(WORKSPACE_ID, ReadLens.Everything, record, 1)?.bodyJson shouldNotBe null
             service.findVersionBody(WORKSPACE_ID, ReadLens.Everything, record.id, 1) shouldNotBe null
-            service.findExecutable(WORKSPACE_ID, record, 1)?.pipeline shouldNotBe null
+            service.findExecutable(WORKSPACE_ID, ReadLens.Everything, record, 1)?.pipeline shouldNotBe null
             service.findDrafts(WORKSPACE_ID, ReadLens.Everything, listOf(record.id)) shouldBe emptyMap()
             service.findCurrentVersion(WORKSPACE_ID, ReadLens.Everything, record.id)?.version shouldBe 1
         }
@@ -747,12 +747,12 @@ class PipelineServiceIntegrationTest {
         // D55: a create lands a DRAFT, so the version to resolve is the WORKING one —
         // `record.currentVersion` is null here, which is the point of the ruling.
         val working = checkNotNull(service.workingVersion(WORKSPACE_ID, ReadLens.Everything, record))
-        val executable = checkNotNull(service.findExecutable(WORKSPACE_ID, record, working))
+        val executable = checkNotNull(service.findExecutable(WORKSPACE_ID, ReadLens.Everything, record, working))
 
         executable.version shouldBe 1
         executable.pipeline.name shouldBe "test/monthly_revenue"
         withClue("an unknown version resolves to null — the surface owns the 404") {
-            service.findExecutable(WORKSPACE_ID, record, UNKNOWN_VERSION).shouldBeNull()
+            service.findExecutable(WORKSPACE_ID, ReadLens.Everything, record, UNKNOWN_VERSION).shouldBeNull()
         }
     }
 

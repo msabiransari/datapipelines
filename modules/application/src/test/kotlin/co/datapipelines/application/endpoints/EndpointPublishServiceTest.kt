@@ -343,7 +343,7 @@ class EndpointPublishServiceTest {
                 updatedBy = null,
                 updatedAt = Instant.EPOCH,
             )
-        every { pipelines.findExecutable(WORKSPACE, record, 1) } returns
+        every { pipelines.findExecutable(WORKSPACE, any(), record, 1) } returns
             PipelineService.ExecutablePipeline(record, 1, "{}", body(writes))
     }
 

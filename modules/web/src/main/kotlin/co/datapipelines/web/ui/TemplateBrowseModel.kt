@@ -5,7 +5,6 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateType
-import co.datapipelines.pipeline.through
 import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
@@ -256,8 +255,8 @@ class TemplateBrowseModel(
         model.addAttribute("excerptTruncated", template.body.lineSequence().count() > EXCERPT_LINES)
         model.addAttribute("interpolations", interpolations(template.body))
 
-        // 178: a hidden pipeline never leaks through the reverse arrow.
-        val pins = usage.referencedAnywhere(workspaceId, id).through(view.pipelines) { it.pipelineName }
+        // 178/178b: neither a hidden pipeline nor a visible one's DRAFT pin leaks through the reverse arrow.
+        val pins = usage.referencedAnywhere(workspaceId, view.templates, view.pipelines, id)
         model.addAttribute("usedBy", pins)
         model.addAttribute("usedByCount", pins.map { it.pipelineId }.distinct().size)
         model.addAttribute("runCount", pins.map { it.pipelineId }.distinct().size)
@@ -290,8 +289,7 @@ class TemplateBrowseModel(
         if (!templates.existsId(workspaceId, view.templates, id)) return fillRunRows(model, emptyList())
         val pipelineIds =
             usage
-                .referencedAnywhere(workspaceId, id)
-                .through(view.pipelines) { it.pipelineName }
+                .referencedAnywhere(workspaceId, view.templates, view.pipelines, id)
                 .map { it.pipelineId }
                 .distinct()
                 .take(USED_BY_FANOUT)

@@ -249,7 +249,7 @@ class EndpointPublishService(
     ): PipelineService.ExecutablePipeline? {
         val detail = pipelines.findCurrentVersion(workspaceId, ReadLens.Everything, record.id) ?: return null
         if (detail.status != PipelineVersionStatus.RELEASED) return null
-        return pipelines.findExecutable(workspaceId, record, detail.version)
+        return pipelines.findExecutable(workspaceId, ReadLens.Everything, record, detail.version)
     }
 
     private fun pipelineNotFound(name: String) =

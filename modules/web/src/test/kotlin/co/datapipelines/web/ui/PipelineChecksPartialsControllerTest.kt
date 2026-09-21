@@ -80,7 +80,7 @@ class PipelineChecksPartialsControllerTest {
     fun `GET renders the partial from the version's definitions and their latest runs`() {
         authenticate(AuthMethod.OIDC)
         every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record()
-        every { pipelines.findExecutable(WORKSPACE, record(), 3) } returns executable()
+        every { pipelines.findExecutable(WORKSPACE, any(), record(), 3) } returns executable()
         every { checkRuns.latestPerCheck(PIPELINE, 3) } returns
             listOf(
                 runRow("share_matches", CheckRunVerdict.PASS),
@@ -103,7 +103,7 @@ class PipelineChecksPartialsControllerTest {
     fun `POST run commissions the fresh run - via ui, the session actor, the correlation id - and renders the same partial`() {
         authenticate(AuthMethod.OIDC)
         every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record()
-        every { pipelines.findExecutable(WORKSPACE, record(), 3) } returns executable()
+        every { pipelines.findExecutable(WORKSPACE, any(), record(), 3) } returns executable()
         val via = slot<CheckRunVia>()
         val actor = slot<UUID>()
         val correlation = slot<String>()
@@ -136,7 +136,7 @@ class PipelineChecksPartialsControllerTest {
     fun `POST run without the footer parameter carries no release footer`() {
         authenticate(AuthMethod.OIDC)
         every { pipelines.findRecord(WORKSPACE, any(), PIPELINE) } returns record()
-        every { pipelines.findExecutable(WORKSPACE, record(), 3) } returns executable()
+        every { pipelines.findExecutable(WORKSPACE, any(), record(), 3) } returns executable()
         every { checkRunner.run(WORKSPACE, PIPELINE, 3, emptyMap(), any(), any(), any()) } returns
             listOf(outcome("share_matches", CheckRunVerdict.FAIL))
 

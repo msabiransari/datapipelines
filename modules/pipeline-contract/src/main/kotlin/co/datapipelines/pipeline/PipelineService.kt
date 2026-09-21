@@ -532,9 +532,16 @@ open class PipelineService(
      */
     open fun findExecutable(
         workspaceId: UUID,
+        lens: ReadLens,
         record: PipelineRecord,
         version: Int,
     ): ExecutablePipeline? {
+        // 178b: under a narrowing lens a version that is not RELEASED does not exist — the
+        // same null an unknown number gets, so a status cannot be probed by number (the
+        // checks partial reads through here with a caller-chosen version).
+        if (!lens.isEverything && pipelines.findVersionDetail(workspaceId, record.id, version)?.status != PipelineVersionStatus.RELEASED) {
+            return null
+        }
         val body = pipelines.findVersionBody(workspaceId, record.id, version) ?: return null
         return ExecutablePipeline(record, version, body, deserializer.readOrThrow(body))
     }

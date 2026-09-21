@@ -161,8 +161,9 @@ Query parameters: `?offset=0&limit=50`. Max `limit` is 200 (configurable).
 only pipelines that are RELEASED and newer than the promotion target's inventory entry
 ([Versioning §10.2](versioning.md#102-the-listing-rule-what-the-ui-shows)) exist for it. A hidden
 pipeline is `404 pipeline.execution.not_found` on every by-id read, exactly as an id from another
-workspace is; the listings, the folder level and its `total` and `pipeline_count` are the lensed
-set. While the promotion target cannot be read the lens fails closed — empty listings, 404s —
+workspace is — and so is a DRAFT version of a visible one, on §5.3's version read and on the
+version's checks read (178b: a status is never probeable by number); the listings, the folder
+level and its `total` and `pipeline_count` are the lensed set. While the promotion target cannot be read the lens fails closed — empty listings, 404s —
 never a `502` on a read. Every other role reads as before.
 
 ### 5.1 Create pipeline

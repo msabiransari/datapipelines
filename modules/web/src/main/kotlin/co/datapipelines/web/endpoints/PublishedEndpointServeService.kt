@@ -291,7 +291,7 @@ class PublishedEndpointServeService(
         val record = pipelines.findRecord(endpoint.workspaceId, ReadLens.Everything, endpoint.pipelineId) ?: return null
         val detail = pipelines.findCurrentVersion(endpoint.workspaceId, ReadLens.Everything, endpoint.pipelineId) ?: return null
         if (!servable(detail.status)) return null
-        return pipelines.findExecutable(endpoint.workspaceId, record, detail.version)
+        return pipelines.findExecutable(endpoint.workspaceId, ReadLens.Everything, record, detail.version)
     }
 
     /** The D63 rule, on its own so a test can read it: released always, a draft in development only. */

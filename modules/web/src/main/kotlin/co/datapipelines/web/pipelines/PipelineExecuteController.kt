@@ -81,7 +81,7 @@ class PipelineExecuteController(
 
         // D6: the version resolution is the aggregate's, shared with `pipelines_execute`.
         val executable =
-            pipelines.findExecutable(workspaceId, record, version)
+            pipelines.findExecutable(workspaceId, ReadLens.Everything, record, version)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), version)
         val parameters: Map<String, JsonNode> = parametersNode.properties().associate { it.key to it.value }
 

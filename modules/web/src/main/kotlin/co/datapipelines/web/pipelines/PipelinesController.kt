@@ -158,9 +158,10 @@ class PipelinesController(
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val record =
-            pipelines.findRecord(workspaceId, lens.viewFor(principal).pipelines, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
-        val executable = pipelines.findExecutable(workspaceId, record, version) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val view = lens.viewFor(principal).pipelines
+        val record = pipelines.findRecord(workspaceId, view, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        // 178b: a DRAFT version is, under a narrowing lens, the same 404 an absent one gets.
+        val executable = pipelines.findExecutable(workspaceId, view, record, version) ?: throw ApiErrors.pipelineNotFound(id.toString())
         return ApiResponse.of(
             PipelineResponses.checksLatest(version, executable.pipeline.checks, checkRuns.latestPerCheck(id, version)),
         )

@@ -167,7 +167,7 @@ class PipelineExecuteTool(
                 ?: throw McpNotFound.pipelineVersion(id, 1)
         // D6: the version resolution is the aggregate's, shared with the REST execute path.
         val executable =
-            pipelines.findExecutable(workspace.id, record, version) ?: throw McpNotFound.pipelineVersion(id, version)
+            pipelines.findExecutable(workspace.id, ReadLens.Everything, record, version) ?: throw McpNotFound.pipelineVersion(id, version)
         // 139 §B — render before you run, at the entry point: only a DRAFT version is
         // checked (RELEASED pins cannot change), and only when THIS is the version being
         // run — the working version when no version argument was given, so an agent

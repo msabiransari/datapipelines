@@ -262,8 +262,69 @@ class PromoterLensSweepTest {
         }
     }
 
+    /**
+     * 178b — the orchestrator's finding: three reads passed the name check and then read draft
+     * CONTENT of a visible object. The visible pipeline `lp/newer` carries a DRAFT v4 whose `n1`
+     * pins the DRAFT template v4 (its SQL is the marker); the checks partial takes a
+     * caller-chosen version; `used_by` lists working-version pins. As the promoter, none of it
+     * shows — and the viewer sees all of it, so the promoter's not seeing it is the lens.
+     */
     @Test
     @Order(3)
+    fun `as the promoter a visible object's DRAFT content is invisible on the node SQL, the checks and the used-by reads`() {
+        ensureSeeded()
+        val promoter = sessionFor(PROMOTER)
+        val viewer = sessionFor(VIEWER)
+        val nodeSql = "/partials/pipelines/$PIPE_NEWER/nodes/n1/sql"
+
+        withClue("fix 1: the node-SQL partial renders the RELEASED n1, never the draft's (which pins the DRAFT template)") {
+            val asPromoter = call(nodeSql, promoter)
+            asPromoter.status shouldBe HTTP_OK
+            withClue(asPromoter.body.take(LEAK_EXCERPT * 4)) {
+                asPromoter.body.contains(DRAFT_MARKER) shouldBe false
+                asPromoter.body.contains("SELECT 1") shouldBe true
+            }
+            val asViewer = call(nodeSql, viewer)
+            withClue("non-vacuity: the viewer's same partial IS the draft's SQL — " + asViewer.body.take(LEAK_EXCERPT * 4)) {
+                asViewer.body.contains(DRAFT_MARKER) shouldBe true
+            }
+        }
+        withClue("fix 2: the checks partial and the REST checks read answer the DRAFT version exactly as an absent one") {
+            val checksRoutes =
+                listOf("/partials/pipelines/$PIPE_NEWER/versions/%d/checks", "/api/v1/pipelines/$PIPE_NEWER/versions/%d/checks")
+            checksRoutes.forEach { route ->
+                val draft = call(route.format(4), promoter)
+                val absent = call(route.format(ABSENT_VERSION), promoter)
+                withClue(route) {
+                    draft.status shouldBe absent.status
+                    draft.fingerprint shouldBe absent.fingerprint
+                    draft.status shouldBe HTTP_NOT_FOUND
+                    call(route.format(4), viewer).status shouldBe HTTP_OK
+                }
+            }
+        }
+        withClue("fix 3: used_by shows no DRAFT pin and no draft version, and the DRAFT template version is not-found") {
+            val used = toolResult(tool("templates_used_by", """{"id":"$T/newer.sql","version":3}""", keyFor(PROMOTER)))
+            val references = used.path("references")
+            references.size() shouldBeGreaterThanOrEqual 1
+            references.map { it.path("pipeline_version_status").asText() }.toSet() shouldBe setOf("RELEASED")
+            references.map { it.path("pipeline_version").asInt() }.contains(4) shouldBe false
+            refused(tool("templates_used_by", """{"id":"$T/newer.sql","version":4}""", keyFor(PROMOTER))) shouldBe true
+            withClue("non-vacuity: the viewer's used_by v3 carries the DRAFT pin") {
+                toolResult(tool("templates_used_by", """{"id":"$T/newer.sql","version":3}""", keyFor(VIEWER)))
+                    .path("references")
+                    .map { it.path("pipeline_version_status").asText() }
+                    .contains("DRAFT") shouldBe true
+            }
+            val usedByPage = call("/partials/templates/versions?name=$T/newer.sql", promoter).body
+            usedByPage.contains("(DRAFT)") shouldBe false
+            usedByPage.contains("v4") shouldBe false
+            call("/partials/templates/versions?name=$T/newer.sql", viewer).body.contains("(DRAFT)") shouldBe true
+        }
+    }
+
+    @Test
+    @Order(4)
     fun `as a viewer the same walk sees everything, and the target is never called`() {
         ensureSeeded()
         val before = stubRequests.size
@@ -293,7 +354,7 @@ class PromoterLensSweepTest {
     }
 
     @Test
-    @Order(4)
+    @Order(5)
     fun `with the target unreachable the promoter sees nothing, is told once per window, and the counter moved`() {
         ensureSeeded()
         val warnings = ListAppender<ILoggingEvent>().also { it.start() }
@@ -559,6 +620,7 @@ class PromoterLensSweepTest {
         private const val CLIENT_CLASS = "co.datapipelines.web.pipelines.PromotionTargetClient"
         private const val LENS_INVENTORY_METRIC = "datapipelines.promotion.lens.inventory"
         private const val ABSENT_UUID = "0d0e0000-0000-0000-0000-0000000000ff"
+        private const val ABSENT_VERSION = 9
         private const val ABSENT_NAME = "nobody/owns_this"
         private val SUCCESS = 200..299
         private val MAPPER = ObjectMapper()
@@ -644,13 +706,21 @@ class PromoterLensSweepTest {
 
         private const val PIPELINE_BODY =
             """{"schema_version":1,"name":"lens","display_name":"Lens","description":"",""" +
-                """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"lt/newer.sql","version":1}}]}"""
+                """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"lt/newer.sql","version":3}}]}"""
 
         /** A visible object's pending DRAFT: its body carries this marker, which no promoter answer may contain. */
         private const val DRAFT_MARKER = "draft_marker_178_never_shown"
+
+        /**
+         * The visible pipeline's DRAFT (v4): `n1` pins the DRAFT template version (v4, whose SQL
+         * is the marker — the node-SQL partial must render the RELEASE's `n1` instead), and `n2`
+         * pins the released template v3, so `templates_used_by v3` carries a DRAFT pipeline pin
+         * the lens must drop (178b).
+         */
         private const val DRAFT_BODY =
             """{"schema_version":1,"name":"lens","display_name":"$DRAFT_MARKER","description":"$DRAFT_MARKER",""" +
-                """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"lt/newer.sql","version":1}}]}"""
+                """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"lt/newer.sql","version":4}},""" +
+                """{"id":"n2","type":"DQL","source":"tempdb","template":{"id":"lt/newer.sql","version":3},"depends_on":["n1"]}]}"""
 
         private fun sessionJwt(
             userId: String,

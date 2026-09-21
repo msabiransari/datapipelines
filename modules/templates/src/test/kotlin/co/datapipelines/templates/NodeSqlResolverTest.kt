@@ -3,6 +3,7 @@ package co.datapipelines.templates
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.NodeSqlResolution.ParameterRejected
 import co.datapipelines.typesystem.DatapipelinesException
@@ -76,7 +77,7 @@ class NodeSqlResolverTest {
     fun `E5 - absent version prefers the DRAFT over the released current`() {
         every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
 
-        val outcome = resolver.resolve(workspaceId, pipelineId, "fetch", null, null)
+        val outcome = resolver.resolve(workspaceId, pipelineId, "fetch", null, null, ReadLens.Everything, ReadLens.Everything)
 
         (outcome as NodeSqlResolution.Rendered).version shouldBe draft
     }
@@ -86,7 +87,7 @@ class NodeSqlResolverTest {
         every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns null
         every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
 
-        val outcome = resolver.resolve(workspaceId, pipelineId, "fetch_v1_renamed", null, null)
+        val outcome = resolver.resolve(workspaceId, pipelineId, "fetch_v1_renamed", null, null, ReadLens.Everything, ReadLens.Everything)
 
         (outcome as NodeSqlResolution.Rendered).version shouldBe released
     }
@@ -97,10 +98,54 @@ class NodeSqlResolverTest {
         every { pipelines.findVersionDetail(workspaceId, pipelineId, 9) } returns null
         every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
 
-        val explicit = resolver.resolve(workspaceId, pipelineId, "fetch_v1_renamed", 1, null)
+        val explicit = resolver.resolve(workspaceId, pipelineId, "fetch_v1_renamed", 1, null, ReadLens.Everything, ReadLens.Everything)
         (explicit as NodeSqlResolution.Rendered).version shouldBe released
 
-        shouldThrow<NoSuchElementException> { resolver.resolve(workspaceId, pipelineId, "fetch", 9, null) }
+        shouldThrow<NoSuchElementException> {
+            resolver.resolve(workspaceId, pipelineId, "fetch", 9, null, ReadLens.Everything, ReadLens.Everything)
+        }
+    }
+
+    @Test
+    fun `178b - under a narrowing pipeline lens the draft does not exist - the release renders, an explicit DRAFT is NoSuchElement`() {
+        val narrowing = ReadLens.Only(setOf("fixture"))
+        every { pipelines.findVersionDetail(workspaceId, pipelineId, 2) } returns draft
+        every { pipelines.findVersionDetail(workspaceId, pipelineId, 1) } returns released
+        every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
+
+        // The E5 default is the RELEASE, never the draft — `findDraftDetail` is not even asked.
+        val outcome = resolver.resolve(workspaceId, pipelineId, "fetch_v1_renamed", null, null, narrowing, ReadLens.Everything)
+        (outcome as NodeSqlResolution.Rendered).version shouldBe released
+        io.mockk.verify(exactly = 0) { pipelines.findDraftDetail(workspaceId, pipelineId) }
+
+        // An explicit DRAFT version is exactly an unknown one: the same exception, no status by number.
+        shouldThrow<NoSuchElementException> { resolver.resolve(workspaceId, pipelineId, "fetch", 2, null, narrowing, ReadLens.Everything) }
+        resolver.resolve(workspaceId, pipelineId, "fetch_v1_renamed", 1, null, narrowing, ReadLens.Everything)::class shouldBe
+            NodeSqlResolution.Rendered::class
+    }
+
+    @Test
+    fun `178b - under a narrowing template lens a hidden or DRAFT pinned template is TemplateMissing, never rendered`() {
+        every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns null
+        every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
+
+        val hidden = resolver.resolve(workspaceId, pipelineId, "fetch_v1_renamed", null, null, ReadLens.Everything, ReadLens.NOTHING)
+        hidden::class shouldBe NodeSqlResolution.TemplateMissing::class
+
+        every { templates.lookupVersion(workspaceId, "test/fetch.sql", 1) } returns
+            version("test/fetch.sql").copy(status = PipelineVersionStatus.DRAFT)
+        val draftPin =
+            resolver.resolve(
+                workspaceId,
+                pipelineId,
+                "fetch_v1_renamed",
+                null,
+                null,
+                ReadLens.Everything,
+                ReadLens.Only(setOf("test/fetch.sql")),
+            )
+        draftPin::class shouldBe NodeSqlResolution.TemplateMissing::class
+        io.mockk.verify(exactly = 0) { engine.render(any(), any(), any()) }
     }
 
     @Test
@@ -118,6 +163,8 @@ class NodeSqlResolverTest {
                     "start_date" to mapper.readTree("\"2026-09-01\""),
                     "limit" to mapper.readTree("5"),
                 ),
+                ReadLens.Everything,
+                ReadLens.Everything,
             ) as NodeSqlResolution.Rendered
 
         assertAll(
@@ -141,6 +188,8 @@ class NodeSqlResolverTest {
                     "fetch",
                     null,
                     mapOf("start_date" to mapper.readTree("\"2026-09-01\"")),
+                    ReadLens.Everything,
+                    ReadLens.Everything,
                 )
             }
 
@@ -151,7 +200,16 @@ class NodeSqlResolverTest {
     fun `an unsupplied required parameter renders from the sample context and is labelled`() {
         every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } returns "SELECT 1"
 
-        val outcome = resolver.resolve(workspaceId, pipelineId, "fetch", null, null) as NodeSqlResolution.Rendered
+        val outcome =
+            resolver.resolve(
+                workspaceId,
+                pipelineId,
+                "fetch",
+                null,
+                null,
+                ReadLens.Everything,
+                ReadLens.Everything,
+            ) as NodeSqlResolution.Rendered
 
         outcome.sampledParameters shouldBe listOf("start_date")
     }
@@ -165,6 +223,8 @@ class NodeSqlResolverTest {
                 "fetch",
                 null,
                 mapOf("limit" to mapper.readTree("\"5\"")),
+                ReadLens.Everything,
+                ReadLens.Everything,
             ) as ParameterRejected
 
         outcome.failures.single().parameter shouldBe "limit"
@@ -173,21 +233,39 @@ class NodeSqlResolverTest {
 
     @Test
     fun `the non-rendered states survive the extraction`() {
-        resolver.resolve(workspaceId, pipelineId, "no_such_node", null, null)::class shouldBe
+        resolver.resolve(workspaceId, pipelineId, "no_such_node", null, null, ReadLens.Everything, ReadLens.Everything)::class shouldBe
             NodeSqlResolution.NodeMissing::class
 
-        val child = resolver.resolve(workspaceId, pipelineId, "run_child", null, null) as NodeSqlResolution.ChildPipeline
+        val child =
+            resolver.resolve(
+                workspaceId,
+                pipelineId,
+                "run_child",
+                null,
+                null,
+                ReadLens.Everything,
+                ReadLens.Everything,
+            ) as NodeSqlResolution.ChildPipeline
         child.childName shouldBe "child_pipe"
         child.childVersion shouldBe 3
 
         every { templates.lookupVersion(workspaceId, "test/fetch.sql", 1) } returns null
-        resolver.resolve(workspaceId, pipelineId, "fetch", null, null)::class shouldBe
+        resolver.resolve(workspaceId, pipelineId, "fetch", null, null, ReadLens.Everything, ReadLens.Everything)::class shouldBe
             NodeSqlResolution.TemplateMissing::class
 
         every { templates.lookupVersion(workspaceId, "test/fetch.sql", 1) } returns version("test/fetch.sql")
         every { engine.render(TemplateRef("test/fetch.sql", 1), any(), any()) } throws
             TemplateRenderException("undefined variable: nope", TemplateRef("test/fetch.sql", 1))
-        val failed = resolver.resolve(workspaceId, pipelineId, "fetch", null, null) as NodeSqlResolution.RenderFailed
+        val failed =
+            resolver.resolve(
+                workspaceId,
+                pipelineId,
+                "fetch",
+                null,
+                null,
+                ReadLens.Everything,
+                ReadLens.Everything,
+            ) as NodeSqlResolution.RenderFailed
         failed.message shouldContain "undefined variable"
     }
 

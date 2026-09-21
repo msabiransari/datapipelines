@@ -68,6 +68,42 @@ class TemplateUsageServiceTest {
     }
 
     @Test
+    fun `178b - a DRAFT pipeline pin is dropped when either lens narrows, and a DRAFT template version is version-not-found`() {
+        every { templates.existsId(workspaceId, "test/t.sql") } returns true
+        every { templates.findVersionStatus(workspaceId, "test/t.sql", 1) } returns PipelineVersionStatus.RELEASED
+        every { templates.findVersionStatus(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.DRAFT
+        every { pipelines.findWorkingVersionTemplatePins(workspaceId, "test/t.sql", 1) } returns
+            listOf(pin("p1", "fetch"), pin("p1", "again", pipelineVersion = 4, status = PipelineVersionStatus.DRAFT), pin("p2", "fetch"))
+        every { pipelines.findAnyVersionTemplatePins(workspaceId, "test/t.sql") } returns
+            listOf(pin("p1", "fetch"), pin("p1", "again", pipelineVersion = 4, status = PipelineVersionStatus.DRAFT))
+
+        // Two Everything lenses: every pin, the draft included (an author's view).
+        service.usedBy(workspaceId, ReadLens.Everything, ReadLens.Everything, "test/t.sql", 1).references.size shouldBe 3
+        service.referencedAnywhere(workspaceId, ReadLens.Everything, ReadLens.Everything, "test/t.sql").size shouldBe 2
+
+        // Either lens narrowing: RELEASED pins only.
+        val templateOnly = service.usedBy(workspaceId, ReadLens.Only(setOf("test/t.sql")), ReadLens.Everything, "test/t.sql", 1)
+        templateOnly.references.map { it.nodeId } shouldBe listOf("fetch", "fetch")
+        val pipelineOnly = service.usedBy(workspaceId, ReadLens.Everything, ReadLens.Only(setOf("p1", "p2")), "test/t.sql", 1)
+        pipelineOnly.references.map { it.versionStatus }.toSet() shouldBe setOf(PipelineVersionStatus.RELEASED)
+        service
+            .referencedAnywhere(
+                workspaceId,
+                ReadLens.Only(setOf("test/t.sql")),
+                ReadLens.Everything,
+                "test/t.sql",
+            ).map { it.nodeId } shouldBe
+            listOf("fetch")
+
+        // A DRAFT template VERSION is "version not found" under a narrowing template lens.
+        val draftVersion =
+            shouldThrow<DatapipelinesException> {
+                service.usedBy(workspaceId, ReadLens.Only(setOf("test/t.sql")), ReadLens.Everything, "test/t.sql", 2)
+            }
+        draftVersion.details["version"] shouldBe 2
+    }
+
+    @Test
     fun `usedBy splits the miss - unknown id versus known id unknown version`() {
         every { templates.existsId(workspaceId, "nope.sql") } returns false
         val idMiss =
