@@ -5,6 +5,7 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
@@ -226,6 +227,24 @@ class WorkspaceInvitationOidcE2eTest {
             Regex("""<form[^>]*\baction="([^"]+)"""", RegexOption.IGNORE_CASE).find(html)
                 ?: error("no login form action in Keycloak page")
         return match.groupValues[1].replace("&amp;", "&")
+    }
+
+    /**
+     * Restores alice's row to the bootstrap placeholder (`provider = 'bootstrap'`,
+     * `provider_subject` = the email — the shape `UserService` pre-provisions and the
+     * identity-reset verb writes). This suite claims that row through ITS provider
+     * registration; the sibling OIDC suite claims it through a differently named one against
+     * the same shared Postgres. Since #187 an identity links ONCE — a login under another
+     * provider name is refused as `identity_mismatch` — so whichever suite runs second would
+     * be refused unless the first hands the placeholder back (MISTAKES: a suite that changes
+     * shared state restores it in @AfterAll).
+     */
+    @AfterAll
+    fun restoreAliceBootstrapIdentity() {
+        jdbc.update(
+            "UPDATE users SET provider = 'bootstrap', provider_subject = email WHERE email = 'alice@datapipelines.co'",
+            emptyMap<String, Any>(),
+        )
     }
 
     private companion object {
