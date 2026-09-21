@@ -67,6 +67,12 @@ dependencies {
     // directly (spring-jdbc is a main dependency — see above).
     // Konsist architecture guard for the web layer (module-structure.md §7.8).
     testImplementation(libs.konsist)
+    // jsoup: the script-block XSS render test (185) parses the rendered editor page to
+    // decide whether the JSON blobs stayed inside their script elements — a parse-level
+    // question a regex over the raw output cannot answer (a script element's content is
+    // raw text, so string content and injected markup are indistinguishable without a
+    // parser). Test scope only; version pinned in libs.versions.toml.
+    testImplementation(libs.jsoup)
 }
 
 // 033 — the spec set ships IN THE JAR: docs served in-product always describe the version

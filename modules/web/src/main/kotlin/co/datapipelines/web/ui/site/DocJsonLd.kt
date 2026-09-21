@@ -39,7 +39,7 @@ object DocJsonLd {
                         crumb(2, title, canonical),
                     ),
             )
-        return listOf(article, breadcrumbs).map { escapeForScript(mapper.writeValueAsString(it)) }
+        return listOf(article, breadcrumbs).map { ScriptSafeJson.forScriptBlock(mapper.writeValueAsString(it)) }
     }
 
     private fun crumb(
@@ -47,9 +47,6 @@ object DocJsonLd {
         name: String,
         item: String,
     ): Map<String, Any> = linkedMapOf("@type" to "ListItem", "position" to position, "name" to name, "item" to item)
-
-    /** The same one rule [FaqJsonLd] applies: a closing-tag sequence cannot appear inside a script body. */
-    private fun escapeForScript(json: String): String = json.replace("</", "<\\/")
 
     private const val SCHEMA_ORG = "https://schema.org"
 

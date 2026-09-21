@@ -55,7 +55,8 @@ object FaqJsonLd {
                     },
             )
         // A closing-tag sequence (less-than, slash) cannot appear inside a script body; Jackson
-        // does not escape it, so it is done here — the one place the block is written.
-        return mapper.writeValueAsString(payload).replace("</", "<\\/")
+        // does not escape it, so it is done here — the one place the block is written. The
+        // rule is [ScriptSafeJson]'s, shared with the docs' JSON-LD and the editor's blobs.
+        return ScriptSafeJson.forScriptBlock(mapper.writeValueAsString(payload))
     }
 }
