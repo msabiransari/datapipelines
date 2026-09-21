@@ -3,6 +3,7 @@ package co.datapipelines.datasources.pooling
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DialectAdapter
 import co.datapipelines.datasources.DialectAdapters
+import co.datapipelines.datasources.JdbcUrlForm
 import co.datapipelines.datasources.LakeViewOutcomeRecorder
 import co.datapipelines.datasources.LakeViewPlan
 import co.datapipelines.typesystem.Dialect
@@ -407,6 +408,13 @@ class ConnectionPoolManager(
                 return HikariConnectionPool(datasource.name, HikariDataSource(config))
             }
             if (datasource.dialect != Dialect.LAKE) {
+                // 186 §A3: an in-process H2 datasource (mem:/file:/bare path) never pools its
+                // REGISTERED credential — its connections run as a freshly minted non-admin
+                // user, staging §9.5's discipline on the datasource path. Server-form H2
+                // (tcp:/ssl:) is a network client like any other and is untouched.
+                if (datasource.dialect == Dialect.H2 && JdbcUrlForm.classify(datasource.dialect, datasource.jdbcUrl).isInProcess) {
+                    return H2InProcessPool.build(datasource, config)
+                }
                 return HikariConnectionPool(datasource.name, HikariDataSource(config))
             }
             val owner = openLakeInstance(config, adapter, datasource, lakeViews)
