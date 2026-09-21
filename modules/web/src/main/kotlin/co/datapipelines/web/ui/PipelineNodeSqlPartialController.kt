@@ -103,7 +103,7 @@ class PipelineNodeSqlPartialController(
                         // #184 — the resolver's not-found (a draft-only pipeline under a
                         // narrowing lens, a body that raced away) is the same 404 the
                         // index-row miss above is, never a 500.
-                        throw notFound(id)
+                        throw notFound(id, e)
                     }
                 render(resolution, model)
             }
@@ -192,12 +192,15 @@ class PipelineNodeSqlPartialController(
      * `UiExceptionHandler` renders as the shared not-found page/toast — never the exception
      * message, so a hidden id and an absent one answer identically (auth.md §11A.1).
      */
-    private fun notFound(id: UUID) =
-        DatapipelinesException(
-            code = PipelineErrorCodes.Execution.NOT_FOUND,
-            message = "Pipeline '$id' not found.",
-            details = mapOf("pipeline_id" to id.toString()),
-        )
+    private fun notFound(
+        id: UUID,
+        cause: Throwable? = null,
+    ) = DatapipelinesException(
+        code = PipelineErrorCodes.Execution.NOT_FOUND,
+        message = "Pipeline '$id' not found.",
+        details = mapOf("pipeline_id" to id.toString()),
+        cause = cause,
+    )
 
     private companion object {
         const val VIEW = "partials/pipeline-node-sql"
