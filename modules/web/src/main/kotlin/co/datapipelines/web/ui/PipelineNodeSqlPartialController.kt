@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
@@ -10,6 +11,7 @@ import co.datapipelines.templates.NodeSqlResolution
 import co.datapipelines.templates.NodeSqlResolver
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.JsonNode
@@ -72,10 +74,9 @@ class PipelineNodeSqlPartialController(
         // The lens is applied here before the resolver, with the same absence the resolver
         // itself raises for an unknown pipeline — and travels INTO the resolver (178b): under a
         // narrowing lens it renders the RELEASED version only, and reads the pinned template
-        // through the façade with the template lens.
+        // through the façade with the template lens. Every absence is the house 404 (#184).
         val view = lens.viewFor(principal)
-        pipelineService.findRecord(workspaceId, view.pipelines, id)
-            ?: throw NoSuchElementException("Pipeline $id not found")
+        pipelineService.findRecord(workspaceId, view.pipelines, id) ?: throw notFound(id)
 
         // The E5 version default (draft-if-exists) applies here exactly as it does for the
         // node-run tool, so the two surfaces cannot disagree about which body the panel and
@@ -88,15 +89,22 @@ class PipelineNodeSqlPartialController(
 
             is Overrides.Parsed -> {
                 val resolution =
-                    resolver.resolve(
-                        workspaceId,
-                        id,
-                        nodeId,
-                        requestedVersion = null,
-                        parameterInputs = inputs.inputs,
-                        pipelineLens = view.pipelines,
-                        templateLens = view.templates,
-                    )
+                    try {
+                        resolver.resolve(
+                            workspaceId,
+                            id,
+                            nodeId,
+                            requestedVersion = null,
+                            parameterInputs = inputs.inputs,
+                            pipelineLens = view.pipelines,
+                            templateLens = view.templates,
+                        )
+                    } catch (e: NoSuchElementException) {
+                        // #184 — the resolver's not-found (a draft-only pipeline under a
+                        // narrowing lens, a body that raced away) is the same 404 the
+                        // index-row miss above is, never a 500.
+                        throw notFound(id, e)
+                    }
                 render(resolution, model)
             }
         }
@@ -177,6 +185,22 @@ class PipelineNodeSqlPartialController(
             val reason: String,
         ) : Overrides
     }
+
+    /**
+     * The house 404, [PipelineChecksPartialsController]'s shape: the same code the REST twin
+     * answers through `ApiErrors.pipelineNotFound` (`ApiErrorCatalog` maps it to 404), which
+     * `UiExceptionHandler` renders as the shared not-found page/toast — never the exception
+     * message, so a hidden id and an absent one answer identically (auth.md §11A.1).
+     */
+    private fun notFound(
+        id: UUID,
+        cause: Throwable? = null,
+    ) = DatapipelinesException(
+        code = PipelineErrorCodes.Execution.NOT_FOUND,
+        message = "Pipeline '$id' not found.",
+        details = mapOf("pipeline_id" to id.toString()),
+        cause = cause,
+    )
 
     private companion object {
         const val VIEW = "partials/pipeline-node-sql"
