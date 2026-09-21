@@ -637,9 +637,11 @@ class WorkspaceIsolationIntegrationTest {
             }
         }
 
-        /** D-R10's reversible switch, flipped directly — the surface under test is the keys', not the admin verb's. */
-
-        /** Deactivates or reactivates [name] the way an operator does — the super admin's REST verb (D-R10). */
+        /**
+         * D-R10's reversible switch, flipped the way an operator flips it — the super admin's
+         * REST verb. Not a direct SQL flip: since 180 the workspace's liveness is cached by id
+         * for the TTL, and `WorkspaceService.deactivate`/`reactivate` are what evict it.
+         */
         private fun setDeactivated(
             port: Int,
             name: String,
