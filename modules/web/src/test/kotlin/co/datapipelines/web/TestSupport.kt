@@ -269,7 +269,12 @@ fun pipelineBrowseModelOver(
     co.datapipelines.web.ui
         .PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats, authoring)
 
-/** The templates twin of [pipelineBrowseModelOver], for the same reason. */
+/**
+ * The templates twin of [pipelineBrowseModelOver], for the same reason. Since 178 the model
+ * reads through the REAL `TemplateService` over the (usually mocked) repository: under the
+ * all-visible lens the service delegates call for call, so a test's repository stubs keep
+ * answering exactly as before.
+ */
 fun templateBrowseModelOver(
     templates: co.datapipelines.templates.TemplateRepository,
     usage: co.datapipelines.templates.TemplateUsageService = io.mockk.mockk(),
@@ -277,7 +282,15 @@ fun templateBrowseModelOver(
     actors: co.datapipelines.web.ui.ActorNames = anonymousActors(),
 ): co.datapipelines.web.ui.TemplateBrowseModel =
     co.datapipelines.web.ui
-        .TemplateBrowseModel(templates, usage, executions, actors)
+        .TemplateBrowseModel(co.datapipelines.templates.TemplateService(templates), usage, executions, actors)
+
+/**
+ * 178 — the promoter lens every controller now takes, as the view every non-promoter gets:
+ * `Everything`, at no cost. A test of the LENS builds its own (see `PromoterLensSweepTest`).
+ */
+val EVERYTHING_LENS: co.datapipelines.application.lens.PromoterLens =
+    co.datapipelines.application.lens
+        .PromoterLens { co.datapipelines.application.lens.LensedView.EVERYTHING }
 
 /**
  * An [co.datapipelines.web.ui.ActorNames] that resolves NOBODY.

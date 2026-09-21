@@ -41,7 +41,14 @@ class PipelineNodeSqlPartialControllerTest {
     private val templateEngines = mockk<WorkspaceTemplateEngines>()
     private val templates = mockk<TemplateRepository>()
     private val engine = mockk<TemplateEngine>()
-    private val controller = PipelineNodeSqlPartialController(pipelines, templateEngines, templates)
+    private val controller =
+        PipelineNodeSqlPartialController(
+            pipelines,
+            templateEngines,
+            templates,
+            co.datapipelines.web.pipelineServiceOver(pipelines),
+            co.datapipelines.web.EVERYTHING_LENS,
+        )
 
     private val pipelineId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -99,6 +106,8 @@ class PipelineNodeSqlPartialControllerTest {
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
         // No draft: the panel's E5 default (draft-if-exists) falls to the released current
         // version, which is what every state test below exercises.
+        // 178: the lens gate resolves the index row before the resolver runs.
+        every { pipelines.findById(any(), pipelineId) } returns record()
         every { pipelines.findDraftDetail(any(), pipelineId) } returns null
         every { pipelines.findCurrentVersionDetail(any(), pipelineId) } returns versionDetail(1)
         every { pipelines.findVersionBody(any(), pipelineId, 1) } returns bodyJson
@@ -223,11 +232,33 @@ class PipelineNodeSqlPartialControllerTest {
 
     @Test
     fun `a pipeline outside the caller's workspace is a 404, not a partial`() {
+        every { pipelines.findById(any(), pipelineId) } returns null
         every { pipelines.findDraftDetail(any(), pipelineId) } returns null
         every { pipelines.findCurrentVersionDetail(any(), pipelineId) } returns null
 
         assertThrows<NoSuchElementException> {
             controller.nodeSql(pipelineId, "trips_by_day", null, ExtendedModelMap())
+        }
+    }
+
+    @Test
+    fun `a pipeline the promoter lens hides is the SAME 404 as an absent one (178)`() {
+        val lensed =
+            PipelineNodeSqlPartialController(
+                pipelines,
+                templateEngines,
+                templates,
+                co.datapipelines.web.pipelineServiceOver(pipelines),
+                co.datapipelines.application.lens.PromoterLens {
+                    co.datapipelines.application.lens.LensedView(
+                        co.datapipelines.pipeline.ReadLens.NOTHING,
+                        co.datapipelines.pipeline.ReadLens.NOTHING,
+                    )
+                },
+            )
+
+        assertThrows<NoSuchElementException> {
+            lensed.nodeSql(pipelineId, "trips_by_day", null, ExtendedModelMap())
         }
     }
 
@@ -249,6 +280,18 @@ class PipelineNodeSqlPartialControllerTest {
         model.getAttribute("state") shouldBe "node-missing"
         io.mockk.verify(exactly = 0) { pipelines.findVersionBody(any(), pipelineId, 1) }
     }
+
+    private fun record() =
+        co.datapipelines.pipeline.PipelineRecord(
+            id = pipelineId,
+            name = "test/nyc",
+            displayName = "NYC",
+            description = "",
+            ownerId = UUID.randomUUID(),
+            currentVersion = 1,
+            createdAt = java.time.Instant.EPOCH,
+            updatedAt = java.time.Instant.EPOCH,
+        )
 
     private fun versionDetail(v: Int) =
         co.datapipelines.pipeline.PipelineVersionDetail(

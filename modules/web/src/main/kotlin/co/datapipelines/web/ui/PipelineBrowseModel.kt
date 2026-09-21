@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.DatasourceRegistry
 import co.datapipelines.pipeline.NodeOutput
@@ -15,6 +16,8 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.through
 import org.springframework.ui.Model
 import java.security.MessageDigest
 import java.time.Instant
@@ -77,6 +80,7 @@ class PipelineBrowseModel(
     fun fillLevel(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         prefix: String?,
         offset: Int,
     ): String {
@@ -97,7 +101,10 @@ class PipelineBrowseModel(
         // "" and absent are the SAME level — the root — so they normalize to one repository
         // call rather than two shapes of the same query. The model keeps the caller's `""`,
         // because that is what the fragment renders its own prefix as.
-        val level = repository.listFolder(workspaceId, prefix?.takeIf { it.isNotEmpty() }, offset = page, limit = PAGE_SIZE)
+        // Through the service since 178, so the promoter lens (`view.pipelines`) narrows the
+        // level and its counts the way it narrows every other read; `Everything` is the same
+        // SQL level this read went to the repository for before.
+        val level = pipelines.browseLevel(workspaceId, view.pipelines, prefix?.takeIf { it.isNotEmpty() }, offset = page, limit = PAGE_SIZE)
         // THE ROOT HOLDS FOLDERS ONLY (§4.1, 077). A pipeline name needs a folder, so the root
         // level renders sub-folders and nothing else, and the fragment's "leaves at the root"
         // branch is gone.
@@ -109,7 +116,8 @@ class PipelineBrowseModel(
         // returned by search (`q`, a flat list of full paths), by `pipelines_list`, and by its
         // own UUID URL, which is how it is opened and run.
         val rendered = if (prefix.isNullOrEmpty()) level.withoutLeaves() else level
-        fillLevelAttributes(model, workspaceId, prefix, page, rendered)
+        fillLevelAttributes(model, workspaceId, view.pipelines, prefix, page, rendered)
+        model.addAttribute(LENS_UNAVAILABLE, view.unavailable)
         return LEVEL_VIEW
     }
 
@@ -118,13 +126,14 @@ class PipelineBrowseModel(
         model: Model,
         prefix: String,
     ): String {
-        fillLevelAttributes(model, workspaceId = null, prefix = prefix, page = 0, level = EMPTY_LEVEL)
+        fillLevelAttributes(model, workspaceId = null, lens = ReadLens.Everything, prefix = prefix, page = 0, level = EMPTY_LEVEL)
         return LEVEL_VIEW
     }
 
     private fun fillLevelAttributes(
         model: Model,
         workspaceId: UUID?,
+        lens: ReadLens,
         prefix: String?,
         page: Int,
         level: PipelineFolderLevel,
@@ -141,7 +150,7 @@ class PipelineBrowseModel(
             if (workspaceId == null || level.pipelines.isEmpty()) {
                 emptyMap()
             } else {
-                pipelines.findDrafts(workspaceId, level.pipelines.map { it.id })
+                pipelines.findDrafts(workspaceId, lens, level.pipelines.map { it.id })
             }
         model.addAttribute("drafts", drafts)
         model.addAttribute("offset", page)
@@ -156,11 +165,13 @@ class PipelineBrowseModel(
     fun fillSearch(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         q: String,
         offset: Int,
     ): String {
         val page = maxOf(0, offset)
-        val result = pipelines.page(workspaceId, q, page, PAGE_SIZE)
+        val result = pipelines.page(workspaceId, view.pipelines, q, page, PAGE_SIZE)
+        model.addAttribute(LENS_UNAVAILABLE, view.unavailable)
         model.addAttribute("searching", true)
         model.addAttribute("pipelines", result.items)
         model.addAttribute("drafts", result.drafts)
@@ -180,13 +191,14 @@ class PipelineBrowseModel(
     fun fillWrapper(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         q: String?,
         offset: Int,
     ): String {
         if (q.isNullOrEmpty()) {
-            fillLevel(model, workspaceId, prefix = null, offset = offset)
+            fillLevel(model, workspaceId, view, prefix = null, offset = offset)
         } else {
-            fillSearch(model, workspaceId, q, offset)
+            fillSearch(model, workspaceId, view, q, offset)
         }
         return WRAPPER_VIEW
     }
@@ -212,6 +224,7 @@ class PipelineBrowseModel(
     fun fillDetail(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         id: UUID,
     ): String {
         // 114 — the verbs this fragment renders are role-gated, so the ROLE arrives in the SAME
@@ -221,7 +234,7 @@ class PipelineBrowseModel(
         // came back with no role attributes at all, so every verb on it silently vanished until
         // the next selection re-fetched the pane. One model call, one answer.
         RoleModel.stamp(model)
-        val record = pipelines.findRecord(workspaceId, id)
+        val record = pipelines.findRecord(workspaceId, view.pipelines, id)
         model.addAttribute("pipelineId", id)
         model.addAttribute("pipeline", record)
         if (record == null) return DETAIL_VIEW
@@ -231,14 +244,14 @@ class PipelineBrowseModel(
         // shows what this pane just showed. A body that fails to parse renders as no chips and
         // no parameters rather than as an error page: the pane reads someone else's authored
         // content and the editor is where a malformed body is repaired.
-        val working = pipelines.findWorking(workspaceId, id)
+        val working = pipelines.findWorking(workspaceId, view.pipelines, id)
         val body = working?.bodyJson?.let { runCatching { deserializer.readOrThrow(it) }.getOrNull() }
-        val versions = pipelines.listVersions(workspaceId, id)
+        val versions = pipelines.listVersions(workspaceId, view.pipelines, id)
 
         model.addAttribute("draftHash", working?.draft?.bodyHash)
         fillIdentity(model, record)
         fillOverview(model, workspaceId, record, body, working?.version?.version ?: record.currentVersion, working?.draft?.version)
-        fillActing(model, workspaceId, record, versions)
+        fillActing(model, workspaceId, view.pipelines, record, versions)
         return DETAIL_VIEW
     }
 
@@ -285,6 +298,7 @@ class PipelineBrowseModel(
     private fun fillActing(
         model: Model,
         workspaceId: UUID,
+        lens: ReadLens,
         record: PipelineRecord,
         versions: List<PipelineVersionRecord>,
     ) {
@@ -331,7 +345,7 @@ class PipelineBrowseModel(
         )
         model.addAttribute("versionCount", versions.size)
         model.addAttribute("runCount", runStats.totalRuns(record.id))
-        model.addAttribute("usageCount", usage(workspaceId, record).total)
+        model.addAttribute("usageCount", usage(workspaceId, lens, record).total)
         // The reading column's Created line chip (V20): the FIRST version's surface.
         model.addAttribute("createdVia", versions.minByOrNull { it.version }?.createdVia)
     }
@@ -346,12 +360,17 @@ class PipelineBrowseModel(
     fun fillRuns(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         pipelineId: UUID,
         userId: UUID,
         isAdmin: Boolean,
     ): String {
         val rows =
-            if (isAdmin) {
+            // 178: a pipeline the lens hides has no runs to show — the executions are the
+            // pipeline's, and the pane must answer for it exactly as for an absent id.
+            if (pipelines.findRecord(workspaceId, view.pipelines, pipelineId) == null) {
+                emptyList()
+            } else if (isAdmin) {
                 executions.findAll(workspaceId, pipelineId, limit = RUNS_LIMIT)
             } else {
                 executions.findByUser(workspaceId, userId, pipelineId, limit = RUNS_LIMIT)
@@ -367,10 +386,11 @@ class PipelineBrowseModel(
     fun fillUsage(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         pipelineId: UUID,
     ): String {
-        val record = pipelines.findRecord(workspaceId, pipelineId)
-        model.addAttribute("usage", record?.let { usage(workspaceId, it) } ?: UsageView(emptyList(), emptyList()))
+        val record = pipelines.findRecord(workspaceId, view.pipelines, pipelineId)
+        model.addAttribute("usage", record?.let { usage(workspaceId, view.pipelines, it) } ?: UsageView(emptyList(), emptyList()))
         return USAGE_VIEW
     }
 
@@ -384,12 +404,15 @@ class PipelineBrowseModel(
      */
     private fun usage(
         workspaceId: UUID,
+        lens: ReadLens,
         record: PipelineRecord,
     ): UsageView {
         val parents =
             repository
                 .listVersions(workspaceId, record.id)
                 .flatMap { repository.findLiveParentsPinningVersion(workspaceId, record.name, it.version) }
+                // 178: a hidden parent must not leak through the reverse arrow.
+                .through(lens) { it.pipelineName }
                 .map { UsageView.ParentUse(it.pipelineId, it.pipelineName, it.pipelineVersion, it.nodeId, it.pinnedVersion) }
         val served =
             endpoints
@@ -445,6 +468,15 @@ class PipelineBrowseModel(
     companion object {
         /** The pipelines screen's page size — the value the flat list has always used. */
         const val PAGE_SIZE = 25
+
+        /**
+         * 178 — the model attribute the list fragments read: non-null (a `LensedView.Unavailable`)
+         * when a lensed principal's list is empty BECAUSE the higher environment could not be
+         * read, so the fragment renders the promotion page's sentence in place of its ordinary
+         * empty state. Every other principal, and a lensed one with a readable target, gets
+         * null and the ordinary state. Shared with the templates browser by name.
+         */
+        const val LENS_UNAVAILABLE = "lensUnavailable"
 
         /**
          * The root level's container id is the screen's long-standing stable swap root, so the

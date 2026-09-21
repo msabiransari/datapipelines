@@ -38,7 +38,10 @@
        child, because its folder was derived from that child (§3.1). 077: a template name
        carries a folder, so this says where to put one rather than implying a bare name is a
        choice the form will accept. -->
-  <th:block th:if="${#lists.isEmpty(folders) and #lists.isEmpty(templates)}">
+  <th:block th:if="${lensUnavailable != null and #lists.isEmpty(folders) and #lists.isEmpty(templates)}">
+    <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(folders) and #lists.isEmpty(templates)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No templates yet</p>
       <p class="ds-empty-description">

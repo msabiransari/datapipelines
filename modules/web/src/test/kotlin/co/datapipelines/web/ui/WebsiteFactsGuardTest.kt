@@ -221,6 +221,8 @@ class WebsiteFactsGuardTest {
                 semanticsService = mockk<co.datapipelines.application.semantics.SemanticsService>(),
                 factEnrichment = co.datapipelines.application.semantics.FactEnrichment.NONE,
                 checkRunner = mockk<co.datapipelines.application.checks.PipelineCheckRunner>(),
+                lens = co.datapipelines.web.EVERYTHING_LENS,
+                templateService = mockk<co.datapipelines.templates.TemplateService>(),
             ).size
     }
 

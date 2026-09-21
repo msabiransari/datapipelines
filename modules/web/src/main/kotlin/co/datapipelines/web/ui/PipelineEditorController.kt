@@ -4,6 +4,7 @@ import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.PipelineResponses
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -45,14 +46,16 @@ class PipelineEditorController(
         request: HttpServletRequest,
     ): String {
         val workspaceId = currentPrincipal().requireWorkspace().id
+        // 178: no lens here by design — the editor is EXECUTE_PIPELINE (auth.md §7.6), which the
+        // interceptor refuses a promoter before this handler runs; the reads below are an author's.
         val record =
-            pipelines.findRecord(workspaceId, id)
+            pipelines.findRecord(workspaceId, ReadLens.Everything, id)
                 ?: throw NoSuchElementException("Pipeline $id not found")
         // versioning §3.5/§7: the editor shows the DRAFT when one exists (that is the
         // working copy a human reviews), with its pending-release affordance; the list
         // keeps showing the released name until lock. The default body of the REST GET
         // stays the released version — this is the editor's load, not the API's.
-        val draft = pipelines.findDraft(workspaceId, record.id)
+        val draft = pipelines.findDraft(workspaceId, ReadLens.Everything, record.id)
         // The working version ([PipelineService.workingVersion]'s rule, with the draft already in
         // hand). Null only when the pipeline's sole draft was discarded (§5.4) and nothing was
         // ever released — there is no body to edit, which is the same 404 an unknown id gets.
@@ -61,12 +64,12 @@ class PipelineEditorController(
                 ?: record.currentVersion
                 ?: throw NoSuchElementException("Pipeline $id has no version to edit")
         val body =
-            pipelines.findVersionBody(workspaceId, record.id, shownVersion)
+            pipelines.findVersionBody(workspaceId, ReadLens.Everything, record.id, shownVersion)
                 ?: throw NoSuchElementException("Pipeline $id version $shownVersion body not found")
         // Deliberately the NARROW reads, not `findVersion`: the editor renders a body whose detail
         // row is absent (no lifecycle badge) where an API read would call that a 404. Same calls
         // this controller made before 056, now through the service.
-        val versionDetail = draft ?: pipelines.findCurrentVersion(workspaceId, record.id)
+        val versionDetail = draft ?: pipelines.findCurrentVersion(workspaceId, ReadLens.Everything, record.id)
         val fullTree = PipelineResponses.full(record, body, versionDetail, draft)
         val pipelineJson = mapper.writeValueAsString(fullTree)
 

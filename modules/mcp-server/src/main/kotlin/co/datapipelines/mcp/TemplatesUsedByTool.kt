@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.templates.TemplateUsageService
 import io.modelcontextprotocol.spec.McpSchema
 
@@ -18,6 +19,8 @@ import io.modelcontextprotocol.spec.McpSchema
  */
 class TemplatesUsedByTool(
     private val usage: TemplateUsageService,
+    /** 178 — both lenses: a hidden template is not-found, hidden pinning pipelines drop out of the answer. */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -28,7 +31,10 @@ class TemplatesUsedByTool(
                     "node id, and the pipeline version carrying the pin — plus the distinct pipeline count. Use it " +
                     "before editing or retiring a template version to see who you would affect. It does not answer " +
                     "'is it safe to delete' (that scan includes historical pipeline versions and lives in the " +
-                    "delete refusal), and it never changes anything.",
+                    "delete refusal), and it never changes anything." +
+                    " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +
+                    "lens); every other template resolves as not-found, and pinning pipelines it cannot see are " +
+                    "left out of the answer.",
             schema =
                 """
                 {
@@ -52,7 +58,8 @@ class TemplatesUsedByTool(
         // Never clamped (the McpArguments.version rule): an off-by-one version must refuse,
         // not silently answer for a neighbouring version.
         val version = args.version() ?: throw McpArguments.invalidParams("Missing required argument 'version'.")
-        val used = usage.usedBy(workspaceId, id, version)
+        val view = lens.viewFor(ctx.principal)
+        val used = usage.usedBy(workspaceId, view.templates, view.pipelines, id, version)
         return mapOf(
             "template" to mapOf("id" to used.templateId, "version" to used.version),
             "scan" to "working_version",

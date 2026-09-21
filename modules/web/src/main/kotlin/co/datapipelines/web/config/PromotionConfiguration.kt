@@ -10,11 +10,13 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.web.pipelines.EndpointPromotion
 import co.datapipelines.web.pipelines.PipelineImportService
+import co.datapipelines.web.pipelines.PromotableViews
 import co.datapipelines.web.pipelines.PromotionInventoryService
 import co.datapipelines.web.pipelines.PromotionReceiveService
 import co.datapipelines.web.pipelines.PromotionService
 import co.datapipelines.web.pipelines.PromotionTargetClient
 import co.datapipelines.web.templates.TemplateImportService
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
@@ -105,8 +107,26 @@ class PromotionConfiguration {
         pipelines: PipelineRepository,
     ): EndpointPromotion = EndpointPromotion(publishing, keys, endpoints, bindings, apiKeys, pipelines)
 
+    /** 178 — the lens's inventory counter rides the real registry; the cache's clock is the JVM's. */
     @Bean
-    fun promotionTargetClient(promotionProperties: PromotionProperties): PromotionTargetClient = PromotionTargetClient(promotionProperties)
+    fun promotionTargetClient(
+        promotionProperties: PromotionProperties,
+        meterRegistry: MeterRegistry,
+    ): PromotionTargetClient = PromotionTargetClient(promotionProperties, meterRegistry = meterRegistry)
+
+    /**
+     * 178 — §10.2 computed once for the promotion page AND the promoter lens. ONE bean: it is
+     * the `application` port ([co.datapipelines.application.lens.PromoterLens]) by type, so the
+     * MCP read tools (which `web` depends on, not the reverse) and every controller resolve
+     * their view through the same object the page plans with — a second `PromoterLens`-typed
+     * bean would make every injection ambiguous (the sweep's context refused to start on one).
+     */
+    @Bean
+    fun promotableViews(
+        pipelines: PipelineRepository,
+        templates: TemplateRepository,
+        client: PromotionTargetClient,
+    ): PromotableViews = PromotableViews(pipelines, templates, client)
 
     @Bean
     fun promotionService(
@@ -115,6 +135,7 @@ class PromotionConfiguration {
         templates: TemplateRepository,
         client: PromotionTargetClient,
         promotionProperties: PromotionProperties,
+        views: PromotableViews,
         // 074 — the endpoints published over the promoted pipelines.
         endpointPromotion: EndpointPromotion,
     ): PromotionService =
@@ -124,6 +145,7 @@ class PromotionConfiguration {
             client = client,
             promotionProperties = promotionProperties,
             deploymentName = deploymentName(environment),
+            views = views,
             endpointPromotion = endpointPromotion,
         )
 

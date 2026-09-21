@@ -1,6 +1,8 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.TemplateRepository
 import org.slf4j.LoggerFactory
 import java.util.UUID
@@ -60,8 +62,20 @@ class NavCounts(
      * template renders the row with no badge at all (`th:if` on the value) — the same
      * "degrade to the previous rendering" posture the vendored fonts take.
      */
-    fun forWorkspace(workspaceId: UUID?): Counts {
+    fun forWorkspace(
+        workspaceId: UUID?,
+        view: LensedView = LensedView.EVERYTHING,
+    ): Counts {
         if (workspaceId == null) return Counts(null, null)
+        // 178: a lensed principal's badges are the SIZE of the admitted sets — the same
+        // names every lensed list shows, so the rail can never say "3 pipelines" beside an
+        // empty explorer. No read, no cache: the view already paid for the answer, and a
+        // per-principal set must not be pinned into a per-workspace entry.
+        val pipelinesLens = view.pipelines
+        val templatesLens = view.templates
+        if (pipelinesLens is ReadLens.Only && templatesLens is ReadLens.Only) {
+            return Counts(pipelinesLens.names.size, templatesLens.names.size)
+        }
         val now = ticker()
         val cached = entries[workspaceId]
         if (cached != null && now - cached.readAt < ttl.inWholeNanoseconds) {

@@ -66,6 +66,21 @@ data class PipelineVersionRecord(
 )
 
 /**
+ * One live pipeline and the version its sticky pointer names — the input of versioning §10.2's
+ * "what is promotable" rule and, since 178, of the promoter lens that applies that rule on
+ * every read. One row per pipeline WITH a current version: a never-released pipeline has no
+ * row here, which is exactly "not a candidate" (D55). The version is RELEASED by the §3.4
+ * invariant (the pointer only ever names a released row), so no status travels.
+ */
+data class CurrentPipelineVersion(
+    val id: UUID,
+    val name: String,
+    val displayName: String,
+    val version: Int,
+    val bodyHash: String,
+)
+
+/**
  * The row-shaped input for creating a pipeline; the body travels beside it as JSON.
  *
  * [id] is supplied rather than left to the database default because §11.3's promotion flow

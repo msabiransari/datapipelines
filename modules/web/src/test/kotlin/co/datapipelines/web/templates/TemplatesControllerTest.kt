@@ -74,6 +74,8 @@ class TemplatesControllerTest {
     private val controller =
         TemplatesController(
             repository,
+            co.datapipelines.templates.TemplateService(repository),
+            co.datapipelines.web.EVERYTHING_LENS,
             validator,
             engines,
             TemplateImportService(repository, validator),
@@ -140,6 +142,8 @@ class TemplatesControllerTest {
         val receiver =
             TemplatesController(
                 repository,
+                co.datapipelines.templates.TemplateService(repository),
+                co.datapipelines.web.EVERYTHING_LENS,
                 validator,
                 engines,
                 TemplateImportService(repository, validator),
@@ -517,6 +521,8 @@ class TemplatesControllerTest {
         val controllerWithRealDrafts =
             TemplatesController(
                 repository,
+                co.datapipelines.templates.TemplateService(repository),
+                co.datapipelines.web.EVERYTHING_LENS,
                 validator,
                 engines,
                 TemplateImportService(repository, validator),

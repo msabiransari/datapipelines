@@ -1,5 +1,7 @@
 package co.datapipelines.web.api
 
+import co.datapipelines.application.lens.LensedView
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.ApiKeyMissingException
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.executor.ExecutionRecord
@@ -16,6 +18,15 @@ import org.springframework.security.core.context.SecurityContextHolder
 fun currentPrincipal(): AuthenticatedPrincipal =
     SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
         ?: throw ApiKeyMissingException()
+
+/**
+ * The current principal's promoter-lens view (roles design §3.1, 178) — what this request may
+ * SEE of the workspace's pipelines and templates, resolved ONCE per handler and passed to
+ * every `PipelineService` / `TemplateService` read it makes. For every role but the promoter
+ * this is [LensedView.EVERYTHING] and costs nothing. Read the principal first when the
+ * handler needs it too, and pass it: `lens.viewFor(principal)`.
+ */
+fun PromoterLens.current(): LensedView = viewFor(currentPrincipal())
 
 /**
  * Execution **ownership** (D11, 2026-09-20; rest-api §7.2, §10.2, §10.4).

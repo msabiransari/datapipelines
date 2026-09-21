@@ -209,13 +209,15 @@ events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
 # STRUCTURED LOG events (094). enums.md §15 catalogues AUDIT events — rows written to the
 # audit log — and a structured log line's `event=` name is a different thing that would be a
 # lie in that table. observability.md is their authority, the way it already is for metric
-# names in check B, and §3.4A / §3.4B / §3.4C name them (mail and LAKE lifecycle events
-# extend the original pool events). Extracted from those sections only, so a typo elsewhere fails: the
-# name has to be DEFINED before it is cited.
+# names in check B, and §3.4A / §3.4B / §3.4C / §3.4D name them (mail, LAKE lifecycle and the
+# promoter-lens events extend the original pool events). Extracted from those sections only, so a
+# typo elsewhere fails: the name has to be DEFINED before it is cited. A name may carry more than
+# one dot (178: `pipeline.promotion.lens_unavailable` sits beside the client's existing
+# `pipeline.promotion.pushing` / `.target_refused` family) — the family is the second segment.
 obs_txt = texts.get("docs/observability.md", "")
 sec34 = re.search(r"^#### 3\.4A\b.*?(?=^### )", obs_txt, re.M | re.S)
 if sec34:
-    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake)\.[a-z0-9_]+)`", sec34.group(0)))
+    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
 # lines stating a removal/rename may cite old spellings
 NEGATION = re.compile(r"removed|renamed|deleted|replaced|superseded|folded|"
                       r"does not exist|no longer|instead of|there is no|no `|"

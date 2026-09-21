@@ -8,6 +8,8 @@ import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionDetail
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.typesystem.DatapipelinesException
@@ -123,6 +125,9 @@ class NodeSqlResolver(
 ) {
     private val deserializer = PipelineDeserializer()
 
+    /** The template reads of 178b go through the façade: a hidden or DRAFT template version is absent under a narrowing lens. */
+    private val templateReads = TemplateService(templates)
+
     /**
      * Resolves [nodeId] of pipeline [pipelineId] in [workspaceId] to rendered SQL.
      *
@@ -130,17 +135,26 @@ class NodeSqlResolver(
      *   exists, else the current released version).
      * @param parameterInputs §6.3 wire-JSON overrides; null means none supplied (required
      *   parameters fall back to the §12.6 dry-render sample context, labelled).
+     * @param pipelineLens the caller's pipeline lens (178b): under a narrowing lens the ONLY
+     *   version that resolves is a RELEASED one — the default is the current release, never
+     *   the draft, and a requested version that is not RELEASED is exactly an absent version.
+     * @param templateLens the caller's template lens (178b): the pinned template version is
+     *   read through `TemplateService` with it before anything renders, so a hidden or DRAFT
+     *   template version is the same `TemplateMissing` an unknown one is.
      * @throws NoSuchElementException unknown pipeline or version — the caller's surface maps
      *   it (404 in REST, the not-found code in MCP).
      */
+    @Suppress("LongParameterList") // two lenses beside the five reads; a holder would exist only to be counted
     fun resolve(
         workspaceId: UUID,
         pipelineId: UUID,
         nodeId: String,
         requestedVersion: Int?,
         parameterInputs: Map<String, JsonNode>?,
+        pipelineLens: ReadLens,
+        templateLens: ReadLens,
     ): NodeSqlResolution {
-        val detail = resolveVersionDetail(workspaceId, pipelineId, requestedVersion)
+        val detail = resolveVersionDetail(workspaceId, pipelineId, requestedVersion, pipelineLens)
         val body =
             pipelines.findVersionBody(workspaceId, pipelineId, detail.version)
                 ?: throw NoSuchElementException("Pipeline $pipelineId version ${detail.version} body not found")
@@ -161,25 +175,40 @@ class NodeSqlResolver(
         // debug panel and the executor cannot disagree about which keys are legal inputs.
         val binder = ParameterBinder(pipeline.parameters, pipeline.calculatorOutputs())
         return when (val binding = binder.bind(parameterInputs ?: emptyMap())) {
-            is ParameterBindingResult.Bound -> render(workspaceId, detail, node, binding.context.asMap(), sampled = emptyList())
-            is ParameterBindingResult.Rejected -> rejected(workspaceId, detail, node, binder, binding.failures)
+            is ParameterBindingResult.Bound -> {
+                render(workspaceId, templateLens, detail, node, binding.context.asMap(), sampled = emptyList())
+            }
+
+            is ParameterBindingResult.Rejected -> {
+                rejected(workspaceId, templateLens, detail, node, binder, binding.failures)
+            }
         }
     }
 
-    /** The E5 version pick: explicit → that version; absent → draft-if-exists, else current released. */
+    /**
+     * The E5 version pick: explicit → that version; absent → draft-if-exists, else current
+     * released. Under a narrowing [pipelineLens] (178b) the draft branch does not exist and an
+     * explicit version that is not RELEASED is thrown exactly as an unknown one — the same
+     * `NoSuchElementException`, so a status cannot be probed by number.
+     */
     private fun resolveVersionDetail(
         workspaceId: UUID,
         pipelineId: UUID,
         requestedVersion: Int?,
-    ): PipelineVersionDetail =
-        requestedVersion
-            ?.let {
-                pipelines.findVersionDetail(workspaceId, pipelineId, it)
+        pipelineLens: ReadLens,
+    ): PipelineVersionDetail {
+        val explicit =
+            requestedVersion?.let {
+                pipelines
+                    .findVersionDetail(workspaceId, pipelineId, it)
+                    ?.takeIf { detail -> pipelineLens.isEverything || detail.status == PipelineVersionStatus.RELEASED }
                     ?: throw NoSuchElementException("Pipeline $pipelineId has no version $it")
             }
-            ?: pipelines.findDraftDetail(workspaceId, pipelineId)
+        return explicit
+            ?: (if (pipelineLens.isEverything) pipelines.findDraftDetail(workspaceId, pipelineId) else null)
             ?: pipelines.findCurrentVersionDetail(workspaceId, pipelineId)
             ?: throw NoSuchElementException("Pipeline $pipelineId not found")
+    }
 
     /**
      * The context outcomes of §8.3: a supplied override that failed §6.3 coercion is named and
@@ -187,8 +216,10 @@ class NodeSqlResolver(
      * SQL); every remaining failure is an unsupplied REQUIRED parameter, so the §12.6
      * dry-render sample context renders instead, labelled with what was sampled.
      */
+    @Suppress("LongParameterList") // the lens rides beside the five values the two outcomes need
     private fun rejected(
         workspaceId: UUID,
+        templateLens: ReadLens,
         detail: PipelineVersionDetail,
         node: Node,
         binder: ParameterBinder,
@@ -207,19 +238,24 @@ class NodeSqlResolver(
             )
         }
         val sampled = failures.mapNotNull { it.details["parameter"]?.toString() }
-        return render(workspaceId, detail, node, binder.sampleContext(), sampled)
+        return render(workspaceId, templateLens, detail, node, binder.sampleContext(), sampled)
     }
 
+    @Suppress("LongParameterList") // the lens rides beside the five values a render needs
     private fun render(
         workspaceId: UUID,
+        templateLens: ReadLens,
         detail: PipelineVersionDetail,
         node: Node,
         context: Map<String, Any?>,
         sampled: List<String>,
     ): NodeSqlResolution {
         val ref = node.template
+        // Through the façade with the caller's lens (178b): a template version the lens does
+        // not admit — hidden by name, or a DRAFT — is `TemplateMissing`, exactly as an unknown
+        // one, BEFORE the engine is asked to render it.
         val templateVersion =
-            templates.lookupVersion(workspaceId, ref.id, ref.version)
+            templateReads.lookupVersion(workspaceId, templateLens, ref.id, ref.version)
                 ?: return NodeSqlResolution.TemplateMissing(detail, ref.id, ref.version)
         return try {
             val sql = engines.engineFor(workspaceId).render(ref, context)

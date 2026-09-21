@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -7,6 +8,7 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.typesystem.Dialect
 import org.springframework.ui.Model
@@ -40,7 +42,7 @@ import java.util.UUID
  * `ArchitectureGuardTest` enforces it.
  */
 class TemplateBrowseModel(
-    private val templates: TemplateRepository,
+    private val templates: TemplateService,
     private val usage: TemplateUsageService,
     private val executions: ExecutionRepository,
     private val actors: ActorNames,
@@ -61,6 +63,7 @@ class TemplateBrowseModel(
     fun fillLevel(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         prefix: String?,
         dialect: Dialect?,
         type: TemplateType?,
@@ -76,7 +79,7 @@ class TemplateBrowseModel(
             return emptyLevel(model, prefix)
         }
         val folderProbe =
-            templates.listChildFolders(workspaceId, prefix, dialect, type, limit = FOLDER_LIMIT + 1)
+            templates.listChildFolders(workspaceId, view.templates, prefix, dialect, type, limit = FOLDER_LIMIT + 1)
         // THE ROOT HOLDS FOLDERS ONLY (§4.1, 077). A template name needs a folder, so the root
         // level has no direct children to fetch — the query is skipped rather than run and
         // discarded, and the fragment's "leaves at the root" branch is gone with it. The
@@ -87,7 +90,7 @@ class TemplateBrowseModel(
             if (root) {
                 emptyList()
             } else {
-                templates.listChildTemplates(workspaceId, prefix, dialect, type, offset = page, limit = PAGE_SIZE + 1)
+                templates.listChildTemplates(workspaceId, view.templates, prefix, dialect, type, offset = page, limit = PAGE_SIZE + 1)
             }
         val leaves = leafProbe.take(PAGE_SIZE)
         model.addAttribute("searching", false)
@@ -96,10 +99,11 @@ class TemplateBrowseModel(
         model.addAttribute("folders", folderProbe.take(FOLDER_LIMIT).map(::TemplateFolderView))
         model.addAttribute("foldersTruncated", folderProbe.size > FOLDER_LIMIT)
         model.addAttribute("templates", leaves)
-        model.addAttribute("drafts", templates.findDrafts(workspaceId, leaves.map { it.id }))
+        model.addAttribute("drafts", templates.findDrafts(workspaceId, view.templates, leaves.map { it.id }))
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", leafProbe.size > PAGE_SIZE)
-        model.addAttribute("total", if (root) 0 else templates.countChildTemplates(workspaceId, prefix, dialect, type))
+        model.addAttribute("total", if (root) 0 else templates.countChildTemplates(workspaceId, view.templates, prefix, dialect, type))
+        model.addAttribute(PipelineBrowseModel.LENS_UNAVAILABLE, view.unavailable)
         return LEVEL_VIEW
     }
 
@@ -128,20 +132,22 @@ class TemplateBrowseModel(
     fun fillSearch(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         q: String,
         dialect: Dialect?,
         type: TemplateType?,
         offset: Int,
     ): String {
         val page = maxOf(0, offset)
-        val probe = templates.list(workspaceId, dialect = dialect, type = type, q = q, offset = page, limit = PAGE_SIZE + 1)
+        val probe = templates.list(workspaceId, view.templates, dialect = dialect, type = type, q = q, offset = page, limit = PAGE_SIZE + 1)
         val items = probe.take(PAGE_SIZE)
         model.addAttribute("searching", true)
         model.addAttribute("templates", items)
-        model.addAttribute("drafts", templates.findDrafts(workspaceId, items.map { it.id }))
+        model.addAttribute("drafts", templates.findDrafts(workspaceId, view.templates, items.map { it.id }))
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", probe.size > PAGE_SIZE)
-        model.addAttribute("total", templates.count(workspaceId, dialect = dialect, type = type, q = q))
+        model.addAttribute("total", templates.count(workspaceId, view.templates, dialect = dialect, type = type, q = q))
+        model.addAttribute(PipelineBrowseModel.LENS_UNAVAILABLE, view.unavailable)
         return SEARCH_VIEW
     }
 
@@ -155,15 +161,16 @@ class TemplateBrowseModel(
     fun fillWrapper(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         q: String?,
         dialect: Dialect?,
         type: TemplateType?,
         offset: Int,
     ): String {
         if (q.isNullOrEmpty()) {
-            fillLevel(model, workspaceId, prefix = null, dialect = dialect, type = type, offset = offset)
+            fillLevel(model, workspaceId, view, prefix = null, dialect = dialect, type = type, offset = offset)
         } else {
-            fillSearch(model, workspaceId, q, dialect, type, offset)
+            fillSearch(model, workspaceId, view, q, dialect, type, offset)
         }
         return WRAPPER_VIEW
     }
@@ -184,6 +191,7 @@ class TemplateBrowseModel(
     fun fillDetail(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         id: String,
     ): String {
         // 114 — the verbs this fragment renders are role-gated, so the ROLE arrives in the SAME
@@ -193,7 +201,7 @@ class TemplateBrowseModel(
         // came back with no role attributes at all, so every verb on it silently vanished until
         // the next selection re-fetched the pane. One model call, one answer.
         RoleModel.stamp(model)
-        val template = templates.findWorking(workspaceId, id)
+        val template = templates.findWorking(workspaceId, view.templates, id)
         model.addAttribute("templateId", id)
         model.addAttribute("template", template)
         if (template == null) return DETAIL_VIEW
@@ -202,14 +210,14 @@ class TemplateBrowseModel(
         model.addAttribute("folderPath", if (cut < 0) "" else id.substring(0, cut + 1))
         model.addAttribute("leafName", if (cut < 0) id else id.substring(cut + 1))
 
-        val draft = templates.findDraftDetail(workspaceId, id)
+        val draft = templates.findDraftDetail(workspaceId, view.templates, id)
         // The CURRENT RELEASE, not the working version: "current" in a version row means the
         // one a pin without a version would resolve to, which a draft never is.
-        val currentRelease = templates.findLatest(workspaceId, id)?.version
+        val currentRelease = templates.findLatest(workspaceId, view.templates, id)?.version
         // The header's Discard names the RESOLVED RELEASE, never the working version — in a
         // {R,D} shape the working version is the draft and discard refuses drafts.
         model.addAttribute("currentReleaseVersion", currentRelease)
-        val versions = templates.listVersions(workspaceId, id)
+        val versions = templates.listVersions(workspaceId, view.templates, id)
         val names = actors.lookup(versions.map { it.createdBy })
         val inUse = usage.inUseCounts(workspaceId, id)
         val now = Instant.now()
@@ -247,7 +255,8 @@ class TemplateBrowseModel(
         model.addAttribute("excerptTruncated", template.body.lineSequence().count() > EXCERPT_LINES)
         model.addAttribute("interpolations", interpolations(template.body))
 
-        val pins = usage.referencedAnywhere(workspaceId, id)
+        // 178/178b: neither a hidden pipeline nor a visible one's DRAFT pin leaks through the reverse arrow.
+        val pins = usage.referencedAnywhere(workspaceId, view.templates, view.pipelines, id)
         model.addAttribute("usedBy", pins)
         model.addAttribute("usedByCount", pins.map { it.pipelineId }.distinct().size)
         model.addAttribute("runCount", pins.map { it.pipelineId }.distinct().size)
@@ -271,13 +280,16 @@ class TemplateBrowseModel(
     fun fillRuns(
         model: Model,
         workspaceId: UUID,
+        view: LensedView,
         id: String,
         userId: UUID,
         isAdmin: Boolean,
     ): String {
+        // 178: no runs for a template the lens hides, and none from pipelines it hides.
+        if (!templates.existsId(workspaceId, view.templates, id)) return fillRunRows(model, emptyList())
         val pipelineIds =
             usage
-                .referencedAnywhere(workspaceId, id)
+                .referencedAnywhere(workspaceId, view.templates, view.pipelines, id)
                 .map { it.pipelineId }
                 .distinct()
                 .take(USED_BY_FANOUT)
@@ -291,6 +303,13 @@ class TemplateBrowseModel(
                     }
                 }.sortedByDescending(ExecutionRecord::startedAt)
                 .take(PipelineBrowseModel.RUNS_LIMIT)
+        return fillRunRows(model, rows)
+    }
+
+    private fun fillRunRows(
+        model: Model,
+        rows: List<ExecutionRecord>,
+    ): String {
         model.addAttribute("runs", rows)
         model.addAttribute("runActors", actors.lookup(rows.map { it.executedBy }))
         val now = Instant.now()

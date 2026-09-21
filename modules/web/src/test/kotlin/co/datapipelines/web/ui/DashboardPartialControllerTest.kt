@@ -33,7 +33,13 @@ class DashboardPartialControllerTest {
     private val executions = mockk<ExecutionRepository>()
     private val pipelines = mockk<PipelineRepository>()
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
-    private val controller = DashboardPartialController(executions, pipelines, pipelineNames)
+    private val controller =
+        DashboardPartialController(
+            executions,
+            co.datapipelines.web.pipelineServiceOver(pipelines),
+            pipelineNames,
+            co.datapipelines.web.EVERYTHING_LENS,
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

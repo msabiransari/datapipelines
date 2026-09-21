@@ -1,6 +1,7 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.PromotionProperties
+import co.datapipelines.pipeline.CurrentPipelineVersion
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
@@ -55,36 +56,45 @@ class PromotionServiceTest {
 
     init {
         every { client.targetBaseUrl } returns TARGET_URL
+        // 178: the push path rebuilds §10.2's view over the FRESH inventory; the ordering tests
+        // below carry roots the target lacks, so an empty local view is the honest default —
+        // the root guard only consults it for a name the target already serves.
+        every { pipelines.findCurrentVersions(workspaceId) } returns emptyList()
+        every { templates.findCurrentVersions(workspaceId) } returns emptyList()
+        every { client.invalidate(workspace) } returns Unit
     }
 
     // ---------------------------------------------------------------- §10.2, the listing rule
 
     @Test
     fun `plan lists released pipelines the target does not already serve, and nothing else`() {
-        // One row per reason §10.2 gives for listing or not listing a pipeline.
+        // One row per reason §10.2 gives for listing or not listing a pipeline. Since 178 the
+        // rule is PromotableView's over the one-join current-version read, which by
+        // construction carries no draft: a draft-only pipeline has no row (D55), see the
+        // never-released test below.
         val newer = record("newer", version = 3)
-        val draft = record("draft", version = 2)
         val same = record("same_hash", version = 4)
         val behind = record("behind", version = 1)
         val absent = record("absent_there", version = 1)
-        every { pipelines.findAll(workspaceId) } returns listOf(newer, draft, same, behind, absent)
-        every { pipelines.findCurrentVersionDetail(workspaceId, newer.id) } returns detail(newer, "hash-newer")
-        every { pipelines.findCurrentVersionDetail(workspaceId, draft.id) } returns
-            detail(draft, "hash-draft", PipelineVersionStatus.DRAFT)
-        every { pipelines.findCurrentVersionDetail(workspaceId, same.id) } returns detail(same, "hash-shared")
-        every { pipelines.findCurrentVersionDetail(workspaceId, behind.id) } returns detail(behind, "hash-behind")
-        every { pipelines.findCurrentVersionDetail(workspaceId, absent.id) } returns detail(absent, "hash-absent")
-        every { client.inventory(workspace) } returns
-            inventory(
-                pipelines =
-                    listOf(
-                        entry("newer", 2, "hash-older"),
-                        entry("draft", 1, "hash-whatever"),
-                        // Same content at a lower number: hash wins, nothing to push (§10.2).
-                        entry("same_hash", 3, "hash-shared"),
-                        // The target is AHEAD — never listed.
-                        entry("behind", 5, "hash-theirs"),
-                    ),
+        every { pipelines.findCurrentVersions(workspaceId) } returns
+            listOf(
+                current(newer, "hash-newer"),
+                current(same, "hash-shared"),
+                current(behind, "hash-behind"),
+                current(absent, "hash-absent"),
+            )
+        every { client.cachedInventory(workspace) } returns
+            present(
+                inventory(
+                    pipelines =
+                        listOf(
+                            entry("newer", 2, "hash-older"),
+                            // Same content at a lower number: hash wins, nothing to push (§10.2).
+                            entry("same_hash", 3, "hash-shared"),
+                            // The target is AHEAD — never listed.
+                            entry("behind", 5, "hash-theirs"),
+                        ),
+                ),
             )
 
         val plan = service.plan(workspaceId, workspace)
@@ -93,18 +103,52 @@ class PromotionServiceTest {
         plan.promotable.single { it.name == "newer" }.targetVersion shouldBe 2
         // A pipeline the target does not have counts as version 0 (§10.2).
         plan.promotable.single { it.name == "absent_there" }.targetVersion shouldBe 0
-        // Every live pipeline was examined, so an empty listing reads as "in sync", not "broken".
-        plan.examined shouldBe 5
+        // Every live pipeline with a current version was examined, so an empty listing reads
+        // as "in sync", not "broken".
+        plan.examined shouldBe 4
         plan.targetDeployment shouldBe "uat"
         plan.workspace shouldBe workspace
     }
 
     @Test
+    fun `plan IS the promotable view - one rule for the page and the lens`() {
+        // Gate 4 (178): the listing the page renders and the set the lens admits are the same
+        // computation, asserted by comparing the plan with the view built from the same rows.
+        val newer = record("newer", version = 3)
+        val behind = record("behind", version = 1)
+        val rows = listOf(current(newer, "hash-newer"), current(behind, "hash-behind"))
+        val inventory = inventory(pipelines = listOf(entry("newer", 2, "hash-older"), entry("behind", 5, "hash-theirs")))
+        every { pipelines.findCurrentVersions(workspaceId) } returns rows
+        every { client.cachedInventory(workspace) } returns present(inventory)
+
+        val plan = service.plan(workspaceId, workspace)
+        val view = PromotableView.of(rows, emptyList(), inventory)
+
+        plan.promotable.map { it.name } shouldContainExactly view.pipelines.map { it.name }
+        view.pipelineLens.admits("newer") shouldBe true
+        view.pipelineLens.admits("behind") shouldBe false
+    }
+
+    @Test
+    fun `plan re-raises an unreadable target as the page's error state, with the reason`() {
+        every { client.cachedInventory(workspace) } returns
+            PromotionTargetClient.CachedInventory.Unreachable(
+                "ConnectException",
+                PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE,
+            )
+
+        val thrown = shouldThrow<ApiException> { service.plan(workspaceId, workspace) }
+
+        thrown.code shouldBe PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE
+        thrown.details["reason"] shouldBe "ConnectException"
+        thrown.details["target"] shouldBe TARGET_URL
+    }
+
+    @Test
     fun `plan skips a pipeline with no current version at all`() {
-        val orphan = record("orphan", version = 1)
-        every { pipelines.findAll(workspaceId) } returns listOf(orphan)
-        every { pipelines.findCurrentVersionDetail(workspaceId, orphan.id) } returns null
-        every { client.inventory(workspace) } returns inventory()
+        // The one-join read has no row for it — the rule never sees it, examined counts it out.
+        every { pipelines.findCurrentVersions(workspaceId) } returns emptyList()
+        every { client.cachedInventory(workspace) } returns present(inventory())
 
         service.plan(workspaceId, workspace).promotable.shouldBeEmptyList()
     }
@@ -114,17 +158,15 @@ class PromotionServiceTest {
         // D55's everyday shape — created, never released, `current_version` null. Promotion still
         // pushes released versions only (D6), so this pipeline simply is not offered; the rule did
         // not change, but the state it excludes is now the one every new pipeline starts in.
-        val fresh = record("fresh", version = 1).copy(currentVersion = null)
-        every { pipelines.findAll(workspaceId) } returns listOf(fresh)
-        every { pipelines.findCurrentVersionDetail(workspaceId, fresh.id) } returns null
-        every { client.inventory(workspace) } returns inventory()
+        // Since 178 that exclusion is the READ's: `findCurrentVersions` joins on the pointer,
+        // so a NULL pointer yields no row, and the view never has to ask a status.
+        every { pipelines.findCurrentVersions(workspaceId) } returns emptyList()
+        every { client.cachedInventory(workspace) } returns present(inventory())
 
         val plan = service.plan(workspaceId, workspace)
 
         plan.promotable.shouldBeEmptyList()
-        withClue("it was examined, so 'nothing to promote' is a finding rather than a blind spot") {
-            plan.examined shouldBe 1
-        }
+        plan.examined shouldBe 0
     }
 
     // ------------------------------------------------------------------ §10.3, the push guards
@@ -166,6 +208,40 @@ class PromotionServiceTest {
 
         thrown.code shouldBe PipelineErrorCodes.Versioning.PROMOTION_NOT_NEWER
         verify(exactly = 0) { client.push(any()) }
+    }
+
+    @Test
+    fun `promote refuses a root whose content the target already serves under a lower number - the page's rule, not a second one`() {
+        // 178: before, the page hid a same-hash root while the push guard let it through. One
+        // rule now — a root the view does not list is not newer, whichever clause dropped it.
+        val level = record("level", version = 5)
+        every { client.inventory(workspace) } returns inventory(pipelines = listOf(entry("level", 3, "hash-shared")))
+        every { pipelines.findCurrentVersions(workspaceId) } returns listOf(current(level, "hash-shared"))
+        every { pipelines.findByName(workspaceId, "level") } returns level
+        every { pipelines.findCurrentVersionDetail(workspaceId, level.id) } returns detail(level, "hash-shared")
+
+        val thrown = shouldThrow<ApiException> { service.promote(workspaceId, workspace, listOf("level")) }
+
+        thrown.code shouldBe PipelineErrorCodes.Versioning.PROMOTION_NOT_NEWER
+        thrown.message.orEmpty().contains("same content") shouldBe true
+        verify(exactly = 0) { client.push(any()) }
+    }
+
+    @Test
+    fun `promote carries a root the target serves at a lower version, and invalidates the lens's cache after the push`() {
+        val ahead = record("ahead", version = 2)
+        stubReleased(ahead, bodyOf("ahead"))
+        every { client.inventory(workspace) } returns inventory(pipelines = listOf(entry("ahead", 1, "hash-older")))
+        every { pipelines.findCurrentVersions(workspaceId) } returns listOf(current(ahead, "hash-ahead"))
+        every { templates.lookupVersion(workspaceId, any(), any()) } returns null
+
+        val batch = capturePush { service.promote(workspaceId, workspace, listOf("ahead")) }
+
+        batch.pipelines.map { it.get("name").asText() } shouldContainExactly listOf("ahead")
+        // The push path read the FRESH inventory, never the lens's cached one …
+        verify(exactly = 0) { client.cachedInventory(any()) }
+        // … and dropped the cached entry so the next lensed read sees the target as it now is.
+        verify(exactly = 1) { client.invalidate(workspace) }
     }
 
     // ------------------------------------------------------- §10.5, datasource pre-validation
@@ -316,6 +392,13 @@ class PromotionServiceTest {
         createdAt = EPOCH,
         updatedAt = EPOCH,
     )
+
+    private fun current(
+        record: PipelineRecord,
+        hash: String,
+    ) = CurrentPipelineVersion(record.id, record.name, record.displayName, checkNotNull(record.currentVersion), hash)
+
+    private fun present(inventory: PromotionWire.Inventory) = PromotionTargetClient.CachedInventory.Present(inventory)
 
     private fun detail(
         record: PipelineRecord,

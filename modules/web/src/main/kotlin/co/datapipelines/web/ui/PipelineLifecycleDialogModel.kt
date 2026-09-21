@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.TemplateUsageService
@@ -185,7 +186,7 @@ class PipelineLifecycleDialogModel(
     ): Int {
         val usedBy =
             try {
-                usage.usedBy(workspaceId, ref.id, ref.version)
+                usage.usedBy(workspaceId, ReadLens.Everything, ReadLens.Everything, ref.id, ref.version)
             } catch (e: DatapipelinesException) {
                 if (e.code != PipelineErrorCodes.Template.NOT_FOUND) throw e
                 return 0

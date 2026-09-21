@@ -1,8 +1,10 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
@@ -10,6 +12,7 @@ import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
@@ -36,6 +39,9 @@ class TemplateEditorController(
     private val templateEngines: WorkspaceTemplateEngines,
     private val themeResolver: ThemeResolver,
     private val drafts: TemplateDraftService,
+    /** 178 — the promoter lens on the two READ_RESOURCES reads (the page, the source partial); the writes are an author's. */
+    private val reads: TemplateService,
+    private val lens: PromoterLens,
 ) {
     @GetMapping("/templates/editor")
     // 143 (T315): the page floors at READ, the pipeline editor's 122 rule — the operation
@@ -55,8 +61,9 @@ class TemplateEditorController(
         val workspaceId = principal.requireWorkspace().id
         // §9.6: the name is a query parameter — it may contain `/`, which can never travel
         // in a URL path segment (the container refuses %2F below routing).
-        val draft = fillSource(model, workspaceId, name, version, RoleModel.roles(principal).canAuthor)
-        model.addAttribute("versions", templates.listVersions(workspaceId, name))
+        val view = lens.viewFor(principal).templates
+        val draft = fillSource(model, workspaceId, view, name, version, RoleModel.roles(principal).canAuthor)
+        model.addAttribute("versions", reads.listVersions(workspaceId, view, name))
         model.addAttribute("hasDraft", draft != null)
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
@@ -79,7 +86,7 @@ class TemplateEditorController(
     ): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        fillSource(model, workspaceId, name, version, RoleModel.roles(principal).canAuthor)
+        fillSource(model, workspaceId, lens.viewFor(principal).templates, name, version, RoleModel.roles(principal).canAuthor)
         RoleModel.stamp(model, principal)
         return "partials/template-source"
     }
@@ -162,12 +169,13 @@ class TemplateEditorController(
     private fun fillSource(
         model: Model,
         workspaceId: UUID,
+        view: ReadLens,
         name: String,
         requested: Int?,
         canAuthor: Boolean,
     ): TemplateVersionDetail? {
-        val draft = templates.findDraftDetail(workspaceId, name)
-        val latest = templates.findLatest(workspaceId, name)
+        val draft = reads.findDraftDetail(workspaceId, view, name)
+        val latest = reads.findLatest(workspaceId, view, name)
         val workingVersion = draft?.version ?: latest?.version
         val selectedVersion = requested ?: workingVersion
         // A `version` naming no stored row (a hand-typed URL) falls back to the current
@@ -177,11 +185,11 @@ class TemplateEditorController(
             when {
                 selectedVersion == null -> null
                 latest != null && selectedVersion == latest.version -> latest
-                else -> templates.findVersion(workspaceId, name, selectedVersion)
+                else -> reads.findVersion(workspaceId, view, name, selectedVersion)
             } ?: latest
         val readOnly = displayed != null && workingVersion != null && (displayed.version != workingVersion || !canAuthor)
         // `readOnly` proves `displayed` non-null; Kotlin's data-flow carries that here.
-        val detail = if (readOnly) templates.findVersionDetail(workspaceId, name, displayed.version) else null
+        val detail = if (readOnly) reads.findVersionDetail(workspaceId, view, name, displayed.version) else null
         model.addAttribute("template", displayed)
         model.addAttribute("templateName", name)
         model.addAttribute("selectedVersion", displayed?.version ?: selectedVersion)

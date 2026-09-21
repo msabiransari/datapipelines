@@ -1,12 +1,13 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.pipeline.DerivedInputs
 import co.datapipelines.pipeline.PipelineNameGrammar
 import co.datapipelines.pipeline.PipelineRecord
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
@@ -46,7 +47,8 @@ internal const val PREFIX_ARG_DESC: String =
  */
 class PipelinesListTool(
     private val pipelines: PipelineService,
-    private val repository: PipelineRepository,
+    /** 178 — the promoter lens; resolved from the KEY's principal, never a thread-local (134). */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -60,7 +62,9 @@ class PipelinesListTool(
                     "resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): " +
                     "pass prefix to BROWSE one level of that tree — prefix:\"\" lists the roots, prefix:\"finance\" lists " +
                     "what is directly under finance — and q to SEARCH across full paths. Start with prefix:\"\" to see " +
-                    "which roots this workspace already uses before creating a pipeline under a new one.",
+                    "which roots this workspace already uses before creating a pipeline under a new one." +
+                    " A promoter's key sees only RELEASED pipelines newer than the promotion target's (the promoter " +
+                    "lens); every other pipeline is absent for it and resolves as not-found by id.",
             schema =
                 """
                 {
@@ -82,20 +86,22 @@ class PipelinesListTool(
     ): Any {
         val limit = args.int("limit", default = DEFAULT_LIMIT, min = 1, max = MAX_LIMIT)
         val workspaceId = ctx.principal.requireWorkspace().id
+        val view = lens.viewFor(ctx.principal).pipelines
         // `has` and not `string`: `prefix: ""` is PRESENT and means the root, while
         // `string("prefix")` normalizes blank to null. The distinction is the whole browse
         // contract — absent is "flat list", empty is "the tree's top level".
-        if (args.has("prefix")) return level(workspaceId, args.string("prefix"), limit)
+        if (args.has("prefix")) return level(workspaceId, view, args.string("prefix"), limit)
         return pipelines
             .list(
                 workspaceId = workspaceId,
+                lens = view,
                 ownerId = args.uuid("owner"),
                 datasourceName = args.string("datasource"),
                 query = args.string("q"),
             ).asSequence()
             .take(limit)
             .toList()
-            .withLifecycle(workspaceId)
+            .withLifecycle(workspaceId, view)
     }
 
     /**
@@ -109,15 +115,17 @@ class PipelinesListTool(
      */
     private fun level(
         workspaceId: java.util.UUID,
+        view: ReadLens,
         prefix: String?,
         limit: Int,
     ): Map<String, Any?> {
         if (prefix != null && !PipelineNameGrammar.matchesPrefix(prefix)) return emptyLevel(prefix)
-        val level = repository.listFolder(workspaceId, prefix, offset = 0, limit = limit)
+        // Through the service since 178 (the lens); `Everything` is the same SQL level.
+        val level = pipelines.browseLevel(workspaceId, view, prefix, offset = 0, limit = limit)
         return mapOf(
             "prefix" to prefix.orEmpty(),
             "folders" to level.folders.map { mapOf("path" to it.path, "segment" to it.segment, "pipeline_count" to it.pipelineCount) },
-            "pipelines" to level.pipelines.withLifecycle(workspaceId),
+            "pipelines" to level.pipelines.withLifecycle(workspaceId, view),
             "total" to level.total,
             "has_more" to level.hasMore,
         )
@@ -143,8 +151,11 @@ class PipelinesListTool(
      *
      * The drafts come from ONE batched query for the whole page, not one per row.
      */
-    private fun List<PipelineRecord>.withLifecycle(workspaceId: java.util.UUID): List<Map<String, Any?>> {
-        val drafts = pipelines.findDrafts(workspaceId, map { it.id })
+    private fun List<PipelineRecord>.withLifecycle(
+        workspaceId: java.util.UUID,
+        view: ReadLens,
+    ): List<Map<String, Any?>> {
+        val drafts = pipelines.findDrafts(workspaceId, view, map { it.id })
         return map { it.toMetadata(drafts[it.id]) }
     }
 
@@ -196,6 +207,8 @@ class PipelinesListTool(
 class PipelinesGetTool(
     private val pipelines: PipelineService,
     private val usage: co.datapipelines.templates.TemplateUsageService,
+    /** 178 — the promoter lens: a hidden id resolves as not-found, exactly as an absent one. */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -207,7 +220,9 @@ class PipelinesGetTool(
                     "body_hash — echo body_hash back as expected_hash on pipelines_update; a draft pointer is present " +
                     "when unreleased edits exist. When a node pins a template version that a newer released version " +
                     "outdates, an upgrade_available array names the node, the template and both versions — an offer " +
-                    "to re-pin via pipelines_update, never an automatic change.",
+                    "to re-pin via pipelines_update, never an automatic change." +
+                    " A promoter's key sees only RELEASED pipelines newer than the promotion target's (the promoter " +
+                    "lens); every other pipeline is absent for it and resolves as not-found by id.",
             schema =
                 """
                 {
@@ -227,7 +242,8 @@ class PipelinesGetTool(
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredUuid("id")
-        val record = pipelines.findRecord(workspaceId, id) ?: throw McpNotFound.pipeline(id)
+        val view = lens.viewFor(ctx.principal).pipelines
+        val record = pipelines.findRecord(workspaceId, view, id) ?: throw McpNotFound.pipeline(id)
         // The explicit argument is validated and wins BEFORE any working-version lookup
         // (B3) — then the working version (§7): the draft if one exists, else
         // current_version. Derived, never stored — current_version keeps meaning
@@ -235,18 +251,19 @@ class PipelinesGetTool(
         val explicit = args.version()
         val version =
             explicit
-                ?: pipelines.workingVersion(workspaceId, record)
+                ?: pipelines.workingVersion(workspaceId, view, record)
                 ?: throw McpNotFound.pipelineVersion(id, 1)
-        return body(workspaceId, record, version)
+        return body(workspaceId, view, record, version)
     }
 
     private fun body(
         workspaceId: UUID,
+        view: ReadLens,
         record: PipelineRecord,
         version: Int,
     ): JsonNode {
         val id = record.id
-        val loaded = pipelines.findVersion(workspaceId, record, version) ?: throw McpNotFound.pipelineVersion(id, version)
+        val loaded = pipelines.findVersion(workspaceId, view, record, version) ?: throw McpNotFound.pipelineVersion(id, version)
         val json = loaded.bodyJson
         val detail = loaded.version
         val tree = McpTools.readTree(json) as? com.fasterxml.jackson.databind.node.ObjectNode ?: error("body of $id is not an object")
@@ -257,7 +274,8 @@ class PipelinesGetTool(
         tree.put("status", detail.status.name)
         tree.put("body_hash", detail.bodyHash)
         val draftPointer = tree.putObject("draft")
-        val draft = pipelines.findDraft(workspaceId, id)
+        // Null under a narrowing lens: a promoter never sees a draft pointer (178).
+        val draft = pipelines.findDraft(workspaceId, view, id)
         if (draft != null) {
             draftPointer
                 .put("version", draft.version)

@@ -30,6 +30,10 @@ class TemplatesConfiguration {
     @Bean
     fun templateRepository(jdbc: NamedParameterJdbcTemplate): TemplateRepository = TemplateRepository(jdbc)
 
+    /** The read façade every template read surface passes through (178) — the lens is applied here, once. */
+    @Bean
+    fun templateService(repository: TemplateRepository): TemplateService = TemplateService(repository)
+
     /**
      * The used-by reverse service (040) — consumed by the template surfaces here (the delete
      * guard, the version list's in-use counts) and constructed inline by `mcp-server`'s tool

@@ -5,6 +5,7 @@ import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.CorrelationId
@@ -62,7 +63,7 @@ class PipelineExecuteController(
     ): SseEmitter {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val record = pipelines.findRecord(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
 
         val tree = parseBody(body)
         // The whole request is read and validated BEFORE anything is looked up: a malformed
@@ -75,12 +76,12 @@ class PipelineExecuteController(
         // discarded, which is the ordinary version-not-found refusal.
         val version =
             explicitVersion
-                ?: pipelines.workingVersion(workspaceId, record)
+                ?: pipelines.workingVersion(workspaceId, ReadLens.Everything, record)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), 1)
 
         // D6: the version resolution is the aggregate's, shared with `pipelines_execute`.
         val executable =
-            pipelines.findExecutable(workspaceId, record, version)
+            pipelines.findExecutable(workspaceId, ReadLens.Everything, record, version)
                 ?: throw ApiErrors.pipelineVersionNotFound(id.toString(), version)
         val parameters: Map<String, JsonNode> = parametersNode.properties().associate { it.key to it.value }
 

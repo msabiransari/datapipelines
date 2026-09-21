@@ -46,7 +46,15 @@ class TemplateEditorControllerTest {
         }
     private val themeResolver = mockk<ThemeResolver>()
     private val drafts = mockk<TemplateDraftService>()
-    private val controller = TemplateEditorController(templates, engines, themeResolver, drafts)
+    private val controller =
+        TemplateEditorController(
+            templates,
+            engines,
+            themeResolver,
+            drafts,
+            co.datapipelines.templates.TemplateService(templates),
+            co.datapipelines.web.EVERYTHING_LENS,
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()

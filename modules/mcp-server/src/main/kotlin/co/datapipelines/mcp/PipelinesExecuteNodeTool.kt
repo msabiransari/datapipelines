@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.NodeSource
 import co.datapipelines.pipeline.NodeType
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionDetail
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.NodeSqlResolution
 import co.datapipelines.templates.NodeSqlResolver
 import co.datapipelines.typesystem.DatapipelinesException
@@ -93,7 +94,8 @@ class PipelinesExecuteNodeTool(
 
         val resolution =
             try {
-                resolver.resolve(workspace.id, pipelineId, nodeId, version, inputs)
+                // An execute-row tool (viewer/author): the interceptor refuses a promoter before here.
+                resolver.resolve(workspace.id, pipelineId, nodeId, version, inputs, ReadLens.Everything, ReadLens.Everything)
             } catch (e: NoSuchElementException) {
                 // Unknown pipeline or explicitly-requested unknown version — the resolver's
                 // detail text already names which.

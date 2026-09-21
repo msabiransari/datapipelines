@@ -1,0 +1,15 @@
+<!-- 178 — the promoter lens's fail-closed state (auth.md §11A.1, ui-screens §4.17). A promoter
+     sees only released, not-yet-promoted pipelines and templates; deciding that needs the
+     higher environment's inventory, and when it cannot be read the lists are EMPTY and say
+     why — the promotion page's own words ("Could not read the target"), so the two screens
+     describe one condition the same way. Rendered by the list fragments in place of their
+     ordinary empty state when `lensUnavailable` is set; every other principal never sees it. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="notice(unavailable)"
+     class="ds-empty app-reading" data-lens-unavailable="">
+  <p class="ds-empty-title">Could not read the target</p>
+  <p class="ds-empty-description">
+    Your role sees only released items newer than the promotion target's, and the target
+    <code th:text="${unavailable.target}">https://uat.example.com</code> could not be read
+    (<code th:text="${unavailable.reason}">ConnectException</code>). Nothing is shown until it can be.
+  </p>
+</div>

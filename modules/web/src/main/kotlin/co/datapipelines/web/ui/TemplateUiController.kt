@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
@@ -26,6 +27,8 @@ import org.springframework.web.bind.annotation.RequestParam
 class TemplateUiController(
     private val browse: TemplateBrowseModel,
     private val themeResolver: ThemeResolver,
+    /** 178 — the promoter lens: the page renders the caller's view. */
+    private val lens: PromoterLens,
 ) {
     @GetMapping("/templates")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -50,9 +53,11 @@ class TemplateUiController(
         model.addAttribute("types", TemplateType.WIRE_VALUES)
         val query = q?.trim()?.takeIf { it.isNotEmpty() }
         model.addAttribute("q", q ?: "")
+        val principal = currentPrincipal()
         browse.fillWrapper(
             model,
-            currentPrincipal().requireWorkspace().id,
+            principal.requireWorkspace().id,
+            lens.viewFor(principal),
             q = query,
             dialect = TemplateFilters.dialect(dialect),
             type = TemplateFilters.type(type),

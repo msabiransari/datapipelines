@@ -1,11 +1,13 @@
 package co.datapipelines.application.endpoints
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import java.time.Instant
 import java.util.UUID
@@ -44,6 +46,13 @@ class EndpointPublishService(
     private val registry: EndpointRegistry,
     private val audit: AuditEventSink,
     private val timeouts: TimeoutBounds,
+    /**
+     * 178 — the promoter lens on the two reads: an endpoint is visible iff its pipeline is
+     * (auth.md §7.6 puts `endpoints_list/get` and `GET /api/v1/endpoints` in the promoter's
+     * `lens` cell), so a hidden pipeline never leaks through the endpoint that publishes it.
+     * Nullable so the deployments and tests wired before 178 keep the unlensed behaviour.
+     */
+    private val lens: PromoterLens? = null,
 ) {
     /** The §5.5 clamp, passed in so `modules/application` reads no configuration itself. */
     data class TimeoutBounds(
@@ -158,16 +167,40 @@ class EndpointPublishService(
     }
 
     /** The endpoints of the caller's workspace (§6's listing). */
-    fun list(principal: AuthenticatedPrincipal): List<PublishedEndpoint> = endpoints.findByWorkspace(principal.requireWorkspace().id)
+    fun list(principal: AuthenticatedPrincipal): List<PublishedEndpoint> {
+        val workspaceId = principal.requireWorkspace().id
+        val all = endpoints.findByWorkspace(workspaceId)
+        val visiblePipelines = visiblePipelineIds(principal, workspaceId) ?: return all
+        return all.filter { it.pipelineId in visiblePipelines }
+    }
 
-    /** One endpoint by path, or null when it does not exist or belongs to another workspace. */
+    /** One endpoint by path, or null when it does not exist, belongs to another workspace, or serves a pipeline the lens hides. */
     fun get(
         principal: AuthenticatedPrincipal,
         pathPattern: String,
-    ): PublishedEndpoint? =
-        endpoints.findByPath(EndpointPath.normalize(pathPattern))?.takeIf {
-            it.workspaceId == principal.requireWorkspace().id || principal.isSuperAdmin
-        }
+    ): PublishedEndpoint? {
+        val found =
+            endpoints.findByPath(EndpointPath.normalize(pathPattern))?.takeIf {
+                it.workspaceId == principal.requireWorkspace().id || principal.isSuperAdmin
+            } ?: return null
+        val visiblePipelines = visiblePipelineIds(principal, found.workspaceId) ?: return found
+        return found.takeIf { it.pipelineId in visiblePipelines }
+    }
+
+    /**
+     * The ids of the pipelines [principal]'s view admits in [workspaceId], or null when the
+     * view is not a narrowing one (every role but the promoter — no read, no cost). An
+     * endpoint names its pipeline by id, the lens by name, so the admitted index rows are
+     * read once and matched by id.
+     */
+    private fun visiblePipelineIds(
+        principal: AuthenticatedPrincipal,
+        workspaceId: UUID,
+    ): Set<UUID>? {
+        val view = lens?.viewFor(principal) ?: return null
+        if (!view.isLensed) return null
+        return pipelines.list(workspaceId, view.pipelines).mapTo(HashSet()) { it.id }
+    }
 
     /** §4.2 — the rule that makes serving over GET defensible, re-checked on every serve too. */
     private fun requireReadOnly(
@@ -214,9 +247,9 @@ class EndpointPublishService(
         workspaceId: UUID,
         record: PipelineRecord,
     ): PipelineService.ExecutablePipeline? {
-        val detail = pipelines.findCurrentVersion(workspaceId, record.id) ?: return null
+        val detail = pipelines.findCurrentVersion(workspaceId, ReadLens.Everything, record.id) ?: return null
         if (detail.status != PipelineVersionStatus.RELEASED) return null
-        return pipelines.findExecutable(workspaceId, record, detail.version)
+        return pipelines.findExecutable(workspaceId, ReadLens.Everything, record, detail.version)
     }
 
     private fun pipelineNotFound(name: String) =

@@ -39,7 +39,16 @@ class SearchControllerTest {
     private val templates = mockk<TemplateRepository>()
     private val executions = mockk<ExecutionRepository>()
     private val pipelineNames = mockk<PipelineNames>().also { every { it.lookup(any(), any()) } returns emptyMap() }
-    private val controller = SearchController(SearchBrowseModel(pipelines, templates, executions, pipelineNames))
+    private val controller =
+        SearchController(
+            SearchBrowseModel(
+                pipelines,
+                co.datapipelines.templates.TemplateService(templates),
+                executions,
+                pipelineNames,
+                co.datapipelines.web.EVERYTHING_LENS,
+            ),
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -108,9 +117,9 @@ class SearchControllerTest {
     fun `a query answers inside the session's workspace and the admin sees the workspace's runs`() {
         authenticate(workspaceAdmin = true)
         val hit = pipeline("nyc/mobility/revenue")
-        every { pipelines.list(workspaceId, query = "revenue") } returns listOf(hit)
+        every { pipelines.list(workspaceId, any(), query = "revenue") } returns listOf(hit)
         every { templates.list(workspaceId, q = "revenue", limit = 9) } returns emptyList()
-        every { pipelines.list(workspaceId) } returns emptyList()
+        every { pipelines.list(workspaceId, any()) } returns emptyList()
         // No status contains "revenue", the candidate list is exactly one pipeline, and the
         // admin fork asks findAll — the history screen's own authorization decision.
         every { executions.findAll(workspaceId, hit.id, null, limit = 9) } returns emptyList()
@@ -126,9 +135,9 @@ class SearchControllerTest {
     fun `a viewer's executions come from their own runs, never the workspace's`() {
         authenticate(workspaceAdmin = false)
         val hit = pipeline("nyc/mobility/revenue")
-        every { pipelines.list(workspaceId, query = "revenue") } returns listOf(hit)
+        every { pipelines.list(workspaceId, any(), query = "revenue") } returns listOf(hit)
         every { templates.list(workspaceId, q = "revenue", limit = 9) } returns emptyList()
-        every { pipelines.list(workspaceId) } returns emptyList()
+        every { pipelines.list(workspaceId, any()) } returns emptyList()
         every { executions.findByUser(workspaceId, userId, hit.id, null, limit = 9) } returns emptyList()
 
         ask("revenue")
@@ -142,9 +151,9 @@ class SearchControllerTest {
     fun `each group caps at 8 and reports hasMore from the overflow row`() {
         authenticate(workspaceAdmin = true)
         val nine = (1..9).map { pipeline("nyc/mobility/p$it") }
-        every { pipelines.list(workspaceId, query = "nyc") } returns nine
+        every { pipelines.list(workspaceId, any(), query = "nyc") } returns nine
         every { templates.list(workspaceId, q = "nyc", limit = 9) } returns (1..9).map { template("acme/t$it") }
-        every { pipelines.list(workspaceId) } returns emptyList()
+        every { pipelines.list(workspaceId, any()) } returns emptyList()
         every { executions.findAll(eq(workspaceId), any(), null, limit = 9) } returns emptyList()
 
         val m = ask("nyc")
@@ -158,9 +167,9 @@ class SearchControllerTest {
     @Test
     fun `no match in any group renders the one-sentence empty state`() {
         authenticate(workspaceAdmin = true)
-        every { pipelines.list(workspaceId, query = "zzz") } returns emptyList()
+        every { pipelines.list(workspaceId, any(), query = "zzz") } returns emptyList()
         every { templates.list(workspaceId, q = "zzz", limit = 9) } returns emptyList()
-        every { pipelines.list(workspaceId) } returns emptyList()
+        every { pipelines.list(workspaceId, any()) } returns emptyList()
         every { executions.findAll(workspaceId, null, null, limit = 9) } returns emptyList()
 
         val m = ask("zzz")
@@ -182,9 +191,9 @@ class SearchControllerTest {
     @Test
     fun `one status named filters by it`() {
         authenticate(workspaceAdmin = true)
-        every { pipelines.list(workspaceId, query = "failed") } returns emptyList()
+        every { pipelines.list(workspaceId, any(), query = "failed") } returns emptyList()
         every { templates.list(workspaceId, q = "failed", limit = 9) } returns emptyList()
-        every { pipelines.list(workspaceId) } returns emptyList()
+        every { pipelines.list(workspaceId, any()) } returns emptyList()
         val failed = List(2) { execution(Instant.EPOCH.plusSeconds(it.toLong())) }
         every { executions.findAll(workspaceId, null, ExecutionStatus.FAILED, limit = 9) } returns failed
 
@@ -198,9 +207,9 @@ class SearchControllerTest {
     fun `a word several statuses contain is not a status filter - it falls through to pipelines`() {
         authenticate(workspaceAdmin = true)
         // "r" is contained by RUNNING and ABORTED — naming NEITHER.
-        every { pipelines.list(workspaceId, query = "r") } returns emptyList()
+        every { pipelines.list(workspaceId, any(), query = "r") } returns emptyList()
         every { templates.list(workspaceId, q = "r", limit = 9) } returns emptyList()
-        every { pipelines.list(workspaceId) } returns emptyList()
+        every { pipelines.list(workspaceId, any()) } returns emptyList()
         every { executions.findAll(workspaceId, null, null, limit = 9) } returns emptyList()
 
         val m = ask("r")
@@ -214,9 +223,9 @@ class SearchControllerTest {
         authenticate(workspaceAdmin = true)
         val byId = pipeline("nyc/mobility/revenue", id = UUID.randomUUID())
         val needle = byId.id.toString().take(8)
-        every { pipelines.list(workspaceId, query = needle) } returns emptyList()
+        every { pipelines.list(workspaceId, any(), query = needle) } returns emptyList()
         every { templates.list(workspaceId, q = needle, limit = 9) } returns emptyList()
-        every { pipelines.list(workspaceId) } returns listOf(pipeline("other/thing"), byId)
+        every { pipelines.list(workspaceId, any()) } returns listOf(pipeline("other/thing"), byId)
         every { executions.findAll(workspaceId, byId.id, null, limit = 9) } returns emptyList()
 
         val m = ask(needle)
@@ -230,9 +239,9 @@ class SearchControllerTest {
         authenticate(workspaceAdmin = true)
         val a = pipeline("nyc/a")
         val b = pipeline("nyc/b")
-        every { pipelines.list(workspaceId, query = "nyc") } returns listOf(a, b)
+        every { pipelines.list(workspaceId, any(), query = "nyc") } returns listOf(a, b)
         every { templates.list(workspaceId, q = "nyc", limit = 9) } returns emptyList()
-        every { pipelines.list(workspaceId) } returns emptyList()
+        every { pipelines.list(workspaceId, any()) } returns emptyList()
         val older = execution(Instant.EPOCH)
         val newer = execution(Instant.EPOCH.plusSeconds(60))
         every { executions.findAll(workspaceId, a.id, null, limit = 9) } returns listOf(older)

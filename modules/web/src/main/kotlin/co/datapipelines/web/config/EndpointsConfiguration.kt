@@ -111,6 +111,9 @@ class EndpointsConfiguration {
      * surface.
      */
     @Bean
+    // A DI factory's arity is the container's business: every parameter is a bean the service
+    // genuinely needs (178 added the promoter lens), and a holder type would exist only to be counted.
+    @Suppress("LongParameterList")
     fun endpointPublishService(
         endpoints: PublishedEndpointRepository,
         pipelines: PipelineService,
@@ -119,6 +122,8 @@ class EndpointsConfiguration {
         registry: EndpointRegistry,
         audit: AuditEventSink,
         properties: EndpointsProperties,
+        // 178 — the promoter lens on the endpoint reads (visible iff the pipeline is).
+        lens: co.datapipelines.application.lens.PromoterLens,
     ): EndpointPublishService =
         EndpointPublishService(
             endpoints = endpoints,
@@ -127,6 +132,7 @@ class EndpointsConfiguration {
             readOnlyRule = readOnlyRule,
             registry = registry,
             audit = audit,
+            lens = lens,
             timeouts =
                 EndpointPublishService.TimeoutBounds(
                     defaultSeconds = properties.timeoutDefaultSeconds,

@@ -56,6 +56,7 @@ class TemplateCreatePartialTest {
             co.datapipelines.web.templateBrowseModelOver(repository, TemplateUsageService(repository, pipelines)),
             validator,
             authoring,
+            co.datapipelines.web.EVERYTHING_LENS,
         )
 
     private val userId = UUID.randomUUID()

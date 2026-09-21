@@ -18,7 +18,7 @@ There are **41 tools**, in `tools/list` order.
 
 Scope `read` · read-only
 
-List the pipelines of the key's pinned workspace, filtered by owner, datasource, or text search. Returns metadata (id, name, display_name, description, version, status, updated_at) — version is the WORKING version and status says DRAFT or RELEASED, so an unreleased pipeline is visible as such. Not the full body. Use pipelines_get for the body; pipelines in other workspaces are absent from this listing and resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): pass prefix to BROWSE one level of that tree — prefix:"" lists the roots, prefix:"finance" lists what is directly under finance — and q to SEARCH across full paths. Start with prefix:"" to see which roots this workspace already uses before creating a pipeline under a new one.
+List the pipelines of the key's pinned workspace, filtered by owner, datasource, or text search. Returns metadata (id, name, display_name, description, version, status, updated_at) — version is the WORKING version and status says DRAFT or RELEASED, so an unreleased pipeline is visible as such. Not the full body. Use pipelines_get for the body; pipelines in other workspaces are absent from this listing and resolve as not-found by id. Pipeline names are FOLDER PATHS (finance/payments/daily_settlement): pass prefix to BROWSE one level of that tree — prefix:"" lists the roots, prefix:"finance" lists what is directly under finance — and q to SEARCH across full paths. Start with prefix:"" to see which roots this workspace already uses before creating a pipeline under a new one. A promoter's key sees only RELEASED pipelines newer than the promotion target's (the promoter lens); every other pipeline is absent for it and resolves as not-found by id.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -32,7 +32,7 @@ List the pipelines of the key's pinned workspace, filtered by owner, datasource,
 
 Scope `read` · read-only
 
-Get the full definition of a pipeline (the working version by default — the draft when unreleased edits exist, else the latest released version — or a specific version). Use this to read the pipeline body before executing or modifying it. The result carries the version, its status and body_hash — echo body_hash back as expected_hash on pipelines_update; a draft pointer is present when unreleased edits exist. When a node pins a template version that a newer released version outdates, an upgrade_available array names the node, the template and both versions — an offer to re-pin via pipelines_update, never an automatic change.
+Get the full definition of a pipeline (the working version by default — the draft when unreleased edits exist, else the latest released version — or a specific version). Use this to read the pipeline body before executing or modifying it. The result carries the version, its status and body_hash — echo body_hash back as expected_hash on pipelines_update; a draft pointer is present when unreleased edits exist. When a node pins a template version that a newer released version outdates, an upgrade_available array names the node, the template and both versions — an offer to re-pin via pipelines_update, never an automatic change. A promoter's key sees only RELEASED pipelines newer than the promotion target's (the promoter lens); every other pipeline is absent for it and resolves as not-found by id.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -107,7 +107,7 @@ Update an existing pipeline by writing its DRAFT — the first update after a re
 
 Scope `read` · read-only
 
-List the templates of the key's pinned workspace. Templates are reusable generators authored in Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are unique per workspace — another workspace's template resolves as not-found.
+List the templates of the key's pinned workspace. Templates are reusable generators authored in Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -122,7 +122,7 @@ List the templates of the key's pinned workspace. Templates are reusable generat
 
 Scope `read` · read-only
 
-Get the body and metadata of a template version, including its imports array (the library macros it can call). Defaults to the working version — the draft when unreleased edits exist, else the latest released.
+Get the body and metadata of a template version, including its imports array (the library macros it can call). Defaults to the working version — the draft when unreleased edits exist, else the latest released. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -133,7 +133,7 @@ Get the body and metadata of a template version, including its imports array (th
 
 Scope `read` · read-only
 
-Which pipelines pin a given template version in their working version (the draft when unreleased edits exist, else the latest released). Returns one reference per node — pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct pipeline count. Use it before editing or retiring a template version to see who you would affect. It does not answer 'is it safe to delete' (that scan includes historical pipeline versions and lives in the delete refusal), and it never changes anything.
+Which pipelines pin a given template version in their working version (the draft when unreleased edits exist, else the latest released). Returns one reference per node — pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct pipeline count. Use it before editing or retiring a template version to see who you would affect. It does not answer 'is it safe to delete' (that scan includes historical pipeline versions and lives in the delete refusal), and it never changes anything. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found, and pinning pipelines it cannot see are left out of the answer.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -395,7 +395,7 @@ Publish a released pipeline as a GET endpoint at /api/<category>/<version>/<path
 
 Scope `read` · read-only
 
-List the published endpoints of the key's workspace: path, pipeline name, timeout, whether it is enabled, and the path variables it binds. A disabled endpoint answers 404 exactly like an unpublished one, so this listing is the only way to see that it exists.
+List the published endpoints of the key's workspace: path, pipeline name, timeout, whether it is enabled, and the path variables it binds. A disabled endpoint answers 404 exactly like an unpublished one, so this listing is the only way to see that it exists. A promoter's key lists only the endpoints of pipelines it can see (the promoter lens: released, newer than the promotion target's).
 
 No arguments.
 
@@ -403,7 +403,7 @@ No arguments.
 
 Scope `read` · read-only
 
-One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}').
+One published endpoint by its path (the pattern, not a request URL — '/finance/v1/revenue/{region}'). For a promoter's key an endpoint over a pipeline it cannot see resolves as not-found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|

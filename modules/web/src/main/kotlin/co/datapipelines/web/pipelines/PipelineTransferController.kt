@@ -1,5 +1,6 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineDeserializer
@@ -52,6 +53,8 @@ class PipelineTransferController(
     private val pipelines: PipelineRepository,
     private val templates: TemplateRepository,
     private val importService: PipelineImportService,
+    /** 178 — the promoter lens on the export read: a hidden pipeline exports as an absent one. */
+    private val lens: PromoterLens,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     /**
@@ -92,8 +95,15 @@ class PipelineTransferController(
         @PathVariable id: UUID,
         @RequestParam(name = "include_templates", required = false) includeTemplates: Boolean = true,
     ): ApiResponse<Map<String, Any?>> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
-        val record = pipelines.findById(workspaceId, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
+        // The bundle's referenced templates are the pipeline's PINNED dependencies and ride
+        // with it whatever the template lens says — the same rule the push closure follows
+        // (§10.4: a dependency is what the parent runs, not a listing) — so only the root is
+        // lensed here.
+        val record =
+            pipelines.findById(workspaceId, id)?.takeIf { lens.viewFor(principal).pipelines.admits(it.name) }
+                ?: throw ApiErrors.pipelineNotFound(id.toString())
         // Released only, and deliberately: an export bundle is what a promotion import consumes,
         // and §9.2 lands it RELEASED on the target. Since D55 a never-released pipeline is an
         // ordinary state rather than an impossible one, so it gets a NAMED refusal instead of the

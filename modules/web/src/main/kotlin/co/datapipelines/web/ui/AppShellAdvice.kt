@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserRepository
@@ -46,6 +47,8 @@ import org.springframework.web.bind.annotation.ModelAttribute
 class AppShellAdvice(
     private val userRepository: UserRepository,
     private val navCounts: NavCounts,
+    /** 178 — the promoter lens: a lensed principal's rail badges count the admitted sets. */
+    private val lens: PromoterLens,
 ) {
     @ModelAttribute("currentUser")
     fun currentUser(): User? = principal()?.let { userRepository.findById(it.userId) }
@@ -71,7 +74,10 @@ class AppShellAdvice(
     // @ModelAttribute accessors would each call the cache — harmless, but it would make the
     // cold path look like two reads to anyone tracing it.
     @ModelAttribute("navCounts")
-    fun navCounts(): NavCounts.Counts = navCounts.forWorkspace(principal()?.workspace?.id)
+    fun navCounts(): NavCounts.Counts {
+        val principal = principal() ?: return navCounts.forWorkspace(null)
+        return navCounts.forWorkspace(principal.workspace?.id, lens.viewFor(principal))
+    }
 
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal

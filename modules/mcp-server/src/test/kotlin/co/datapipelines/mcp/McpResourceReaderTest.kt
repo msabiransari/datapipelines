@@ -39,7 +39,15 @@ class McpResourceReaderTest {
     private val auditSink = RecordingAuditSink()
 
     private val reader =
-        McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events, auditSink)
+        McpResourceReader(
+            McpFixtures.pipelineService(pipelines),
+            McpFixtures.templateService(templates),
+            datasources,
+            executions,
+            events,
+            auditSink,
+            McpFixtures.EVERYTHING_LENS,
+        )
 
     private fun contents(uri: String): McpSchema.TextResourceContents =
         reader.read(uri, ctx).contents().single() as McpSchema.TextResourceContents
@@ -299,10 +307,11 @@ class McpResourceReaderTest {
 
         val catalog =
             McpResourceCatalog(
-                pipelines,
-                templates,
+                McpFixtures.pipelineService(pipelines),
+                McpFixtures.templateService(templates),
                 datasources,
                 executions,
+                McpFixtures.EVERYTHING_LENS,
                 Clock.fixed(Instant.parse("2026-08-09T12:00:00Z"), ZoneOffset.UTC),
             )
         val templateUris =

@@ -36,7 +36,8 @@ import java.util.UUID
 class PipelinePartialControllerTest {
     private val repository = mockk<PipelineRepository>()
     private val service = co.datapipelines.web.pipelineServiceOver(repository)
-    private val controller = PipelinePartialController(co.datapipelines.web.pipelineBrowseModelOver(repository, service))
+    private val controller =
+        PipelinePartialController(co.datapipelines.web.pipelineBrowseModelOver(repository, service), co.datapipelines.web.EVERYTHING_LENS)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -283,6 +284,7 @@ class PipelinePartialControllerTest {
                     datasources = registry,
                     runStats = runStats,
                 ),
+                co.datapipelines.web.EVERYTHING_LENS,
             )
 
         detailController.detail(model, id) shouldBe "partials/pipeline-detail"
@@ -331,9 +333,14 @@ class PipelinePartialControllerTest {
         // strict mock means calling `findAll` instead would fail rather than pass quietly.
         val id = UUID.randomUUID()
         val executions = mockk<co.datapipelines.executor.ExecutionRepository>()
+        // 178: the runs pane resolves the pipeline through the caller's view before reading runs.
+        every { repository.findById(workspaceId, id) } returns record("acme/runs", id = id)
         every { executions.findByUser(workspaceId, userId, id, null, null, null, 20, 0) } returns emptyList()
         val runsController =
-            PipelinePartialController(co.datapipelines.web.pipelineBrowseModelOver(repository, service, executions = executions))
+            PipelinePartialController(
+                co.datapipelines.web.pipelineBrowseModelOver(repository, service, executions = executions),
+                co.datapipelines.web.EVERYTHING_LENS,
+            )
 
         runsController.runs(model, id) shouldBe "partials/pipeline-runs"
 

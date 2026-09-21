@@ -156,6 +156,16 @@ Query parameters: `?offset=0&limit=50`. Max `limit` is 200 (configurable).
 
 ## 5. Pipeline Endpoints
 
+**The promoter lens (178).** Every read in this section — §5.2, §5.3, §5.4, §5.7 (both shapes),
+§5.9 and the checks read — answers a **promoter** (session or key) through the lens ([Auth §11A.1](auth.md#11a1-the-404-rule)):
+only pipelines that are RELEASED and newer than the promotion target's inventory entry
+([Versioning §10.2](versioning.md#102-the-listing-rule-what-the-ui-shows)) exist for it. A hidden
+pipeline is `404 pipeline.execution.not_found` on every by-id read, exactly as an id from another
+workspace is — and so is a DRAFT version of a visible one, on §5.3's version read and on the
+version's checks read (178b: a status is never probeable by number); the listings, the folder
+level and its `total` and `pipeline_count` are the lensed set. While the promotion target cannot be read the lens fails closed — empty listings, 404s —
+never a `502` on a read. Every other role reads as before.
+
 ### 5.1 Create pipeline
 
 ```
@@ -969,6 +979,12 @@ Registry of record: [Pipeline Contract §13.10](pipeline-contract.md#1310-result
 ## 8. Template Endpoints
 
 Templates are first-class entities. See [Templates spec](templates.md) for the entity model.
+
+**The promoter lens (178)** applies to every read here as it does in §5: a **promoter** sees only
+templates with a current RELEASED version newer than the promotion target's ([Auth §11A.1](auth.md#11a1-the-404-rule),
+[Versioning §10.2](versioning.md#102-the-listing-rule-what-the-ui-shows) — the template arm); a hidden
+template is `404 template.not_found` by name (§8.2, §8.3), and absent from §8.5's page, level,
+`total` and `template_count`. Fail closed while the target is unreadable; every other role unchanged.
 
 **Addressing (v2.0 — template-hierarchy-design §9.6): the template name NEVER travels in a URL
 path segment.** Since v2.0 a name may contain `/` (`acme/finance/monthly_revenue`), and an
@@ -1820,6 +1836,8 @@ What this deployment already holds in `{name}` — the sender's whole delta inpu
 }
 ```
 
+**The sender caches this answer (178).** The promoter lens evaluates §10.2 on every read a promoter makes, so the sender reads this endpoint through a per-workspace cache (`datapipelines.deployment.promotion.inventory-cache-ttl-seconds`, default 60 s — [Configuration §3.19](configuration.md#319-deployment)); an unreachable answer is remembered for the same window, a successful push invalidates the entry, and the push path itself always reads fresh (§10.3).
+
 `current_version` needs no status filter: by the version lifecycle's invariant it IS the latest RELEASED version (a draft never moves it), so its hash is the hash of what this deployment serves. `authoring_enabled` lets a sender refuse a misconfigured target before building a batch instead of after pushing one.
 
 Workspaces are addressed by **name**, because names are a global namespace and ids are not — a name is the one identifier that means the same thing on both deployments. An unknown name is `404 workspace.not_found`, not the no-oracle `403` an ordinary caller gets (§17): the peer is a trusted deployment, and "you do not have that workspace" is the answer its operator needs.
@@ -1981,7 +1999,10 @@ is fine, and the answer is coming.
 
 `POST` / `GET` / `DELETE /api/v1/endpoints` (`author`), addressed by `?path=` — never by a path
 segment, because a `path_pattern` contains `/` and an encoded `%2F` is refused below routing on
-the pinned Tomcat (the measured reason §8 moved templates to query addressing).
+the pinned Tomcat (the measured reason §8 moved templates to query addressing). The `GET` listing
+answers a **promoter** through the lens (178, [Auth §11A.1](auth.md#11a1-the-404-rule)): an endpoint is
+listed iff its pipeline is visible to that principal, so a hidden pipeline never leaks through
+the endpoint that publishes it.
 
 Bindings are `POST` / `DELETE /api/v1/endpoints/bindings`, naming the key by NAME and requiring
 the key's **owner**. Binding another user's key is not offered in v1: `api_keys.name` carries no
@@ -2019,6 +2040,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v2.22 | 178 (#178) roles R2 | **The promoter lens** ([Auth §11A.1](auth.md#11a1-the-404-rule)) on every pipeline, template and endpoint read (§5, §8, §19.5): a promoter's session or key sees released objects newer than the promotion target's and nothing else; hidden ones are the same `404` an id from another workspace gets; listings, levels and counts are the lensed set; fail closed (never a `502` on a read) while the target is unreadable. §18.1: the sender caches the inventory per workspace (`inventory-cache-ttl-seconds`). No wire shape changed. |
 | 2026-09-20 | v2.21 | 177 (#177) roles R1 | **Two deliberate breaks under the ratified [roles design](superpowers/specs/2026-09-20-roles-permissions-design.md)**, both on surfaces whose only callers are the product's own UI and E2E suites: (1) §17 — the membership wire says **`role`** (`viewer` \| `author` \| `promoter` \| `workspace_admin`), replacing the `author`/`promoter`/`admin` booleans on §17.1, §17.6, §17.7 (request and both responses) and §17.10 (renamed *Set a member's role*; body `{"role"}`); an unknown role is a 400. §17.2/§17.6 are a workspace admin's reads (D13); §17.1 (list-own) stays every member's on the switcher's row. (2) §10 — `triggered_by` → **`executed_by`** on the list and read projections, plus **`executed_by_key_kind`** (`user` \| `endpoint` \| `server` \| null); `triggered_via` documents `ENDPOINT`. Ownership rewritten to D11: own unless workspace admin, promoter refused by role, endpoint-key runs admin-only. `/promotion` (UI) is readable by authors too (rule 13). |
 | 2026-09-19 | v2.20 | 172 (#172) | **§19 re-rooted (BREAKING for a surface with zero callers)**: published endpoints serve at `/api/<category>/<version>/<path…>` — at least three segments; the category is the engineer's namespace with `v[0-9]+` and `api` reserved (`400 endpoint.path_reserved`, re-checked when the serve registry is built); the version is one free-form literal segment; variables live after it. One `/api` prefix on a submitted pattern is normalised away, never stored. The catch-all mapping constrains the category, so `/api/v1/…` stays the product's — its unknown paths answer the product's 404, not `endpoint.not_found`. Create/read responses gain the full served `url`. Prod held zero published endpoints at the ruling, so nothing migrates. |
 | 2026-09-18 | v2.19 | 171 (#171) | §19.2: a published endpoint's `DML`/`DDL` node is allowed when its `source` is `tempdb` (the execution's own in-memory H2, discarded with the run) and refused, naming the datasource, for any registered datasource — previously every `DML`/`DDL` node was refused regardless of source. Re-checked at serve (§5.1/§19.4) through the same rule; no wire or status-code changes. |

@@ -137,6 +137,11 @@ class McpServerAutoConfigurationTest {
         // this suite is about the registration beans, not about what a tool does.
         @Bean fun pipelineService(): co.datapipelines.pipeline.PipelineService = mockk()
 
+        // 178 — the promoter lens port (`web` declares the real bean) and the template read façade.
+        @Bean fun promoterLens(): co.datapipelines.application.lens.PromoterLens = McpFixtures.EVERYTHING_LENS
+
+        @Bean fun templateService(): co.datapipelines.templates.TemplateService = mockk()
+
         @Bean fun templateValidator(): TemplateValidator = mockk()
 
         @Bean fun workspaceTemplateEngines(): WorkspaceTemplateEngines = mockk()

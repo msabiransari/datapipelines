@@ -15,7 +15,10 @@
      (ui-screens.md §4.5). The `oob` flag is set ONLY by the create-success path. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="results" id="template-list-wrapper"
      th:attr="hx-swap-oob=${oob}">
-  <th:block th:if="${#lists.isEmpty(templates)}">
+  <th:block th:if="${lensUnavailable != null and #lists.isEmpty(templates)}">
+    <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(templates)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No templates match your search</p>
       <div class="ds-empty-actions">

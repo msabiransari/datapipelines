@@ -42,7 +42,10 @@
        child, because its folder was derived from that child (§3.1). R10: pipelines are
        authored through MCP/agents, so this says how to get one rather than offering a button
        that does not exist. -->
-  <th:block th:if="${#lists.isEmpty(folders) and #lists.isEmpty(pipelines)}">
+  <th:block th:if="${lensUnavailable != null and #lists.isEmpty(folders) and #lists.isEmpty(pipelines)}">
+    <div th:replace="~{partials/lens-unavailable :: notice(${lensUnavailable})}"></div>
+  </th:block>
+  <th:block th:if="${lensUnavailable == null and #lists.isEmpty(folders) and #lists.isEmpty(pipelines)}">
     <div class="ds-empty">
       <p class="ds-empty-title">No pipelines yet</p>
       <p class="ds-empty-description">

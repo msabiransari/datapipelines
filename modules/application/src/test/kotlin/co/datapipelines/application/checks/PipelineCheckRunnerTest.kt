@@ -282,9 +282,9 @@ class PipelineCheckRunnerTest {
         val record = record()
         val pipelines =
             mockk<PipelineService> {
-                every { findRecord(WORKSPACE, PIPELINE_ID) } returns record
-                every { workingVersion(WORKSPACE, record) } returns 2
-                every { findExecutable(WORKSPACE, record, 2) } returns
+                every { findRecord(WORKSPACE, any(), PIPELINE_ID) } returns record
+                every { workingVersion(WORKSPACE, any(), record) } returns 2
+                every { findExecutable(WORKSPACE, any(), record, 2) } returns
                     PipelineService.ExecutablePipeline(record, 2, "{}", body)
             }
         datasources.register("main")
@@ -302,7 +302,7 @@ class PipelineCheckRunnerTest {
     fun `the resolving overload returns null for an unknown pipeline - the surface owns the 404`() {
         val pipelines =
             mockk<PipelineService> {
-                every { findRecord(WORKSPACE, PIPELINE_ID) } returns null
+                every { findRecord(WORKSPACE, any(), PIPELINE_ID) } returns null
             }
 
         PipelineCheckRunner(pipelines, datasources, probe, runs)

@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
@@ -7,7 +8,7 @@ import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.templates.Template
-import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateService
 import org.springframework.ui.Model
 import java.util.UUID
 
@@ -47,9 +48,11 @@ import java.util.UUID
  */
 class SearchBrowseModel(
     private val pipelines: PipelineService,
-    private val templates: TemplateRepository,
+    private val templates: TemplateService,
     private val executions: ExecutionRepository,
     private val pipelineNames: PipelineNames,
+    /** 178 — the promoter lens: all three groups are the caller's view (executions through the pipeline arm). */
+    private val lens: PromoterLens,
 ) {
     /**
      * Fills [model] with the three groups [principal] may open in [rawQuery]'s workspace, and
@@ -85,12 +88,14 @@ class SearchBrowseModel(
         model.addAttribute("asked", true)
 
         val workspaceId = workspace.id
+        val view = lens.viewFor(principal)
+        model.addAttribute(PipelineBrowseModel.LENS_UNAVAILABLE, view.unavailable)
 
-        val pipelineProbe = pipelines.list(workspaceId, query = q)
+        val pipelineProbe = pipelines.list(workspaceId, view.pipelines, query = q)
         model.addAttribute("pipelineHits", pipelineProbe.take(GROUP_LIMIT))
         model.addAttribute("pipelinesMore", pipelineProbe.size > GROUP_LIMIT)
 
-        val templateProbe = templates.list(workspaceId, q = q, limit = GROUP_LIMIT + 1)
+        val templateProbe = templates.list(workspaceId, view.templates, q = q, limit = GROUP_LIMIT + 1)
         model.addAttribute("templateHits", templateProbe.take(GROUP_LIMIT))
         model.addAttribute("templatesMore", templateProbe.size > GROUP_LIMIT)
 
@@ -103,9 +108,9 @@ class SearchBrowseModel(
         // name / display name / description): a pasted pipeline UUID has no name to contain
         // it. One extra in-memory scan over THIS workspace's rows, deduplicated with the
         // service's own matches — no second copy of the name matching, no third query shape.
-        val byIdPrefix = pipelines.list(workspaceId).filter { it.matchesIdPrefix(needle) }
+        val byIdPrefix = pipelines.list(workspaceId, view.pipelines).filter { it.matchesIdPrefix(needle) }
         val candidates =
-            (pipelines.list(workspaceId, query = q) + byIdPrefix)
+            (pipelines.list(workspaceId, view.pipelines, query = q) + byIdPrefix)
                 .distinctBy { it.id }
                 .sortedBy(PipelineRecord::name)
         val rows =

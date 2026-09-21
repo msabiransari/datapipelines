@@ -40,13 +40,14 @@ class DocsToolsTest {
     private val resourceReader =
         McpResourceReader(
             McpFixtures.pipelineService(pipelines),
-            templates,
+            McpFixtures.templateService(templates),
             datasources,
             executions,
             events,
             // The resource-read audit (120) is not this suite's subject; the dispatcher row for
             // docs_get IS, and it has a recording sink below.
             mockk<co.datapipelines.auth.AuditEventSink>(relaxed = true),
+            McpFixtures.EVERYTHING_LENS,
         )
 
     @Test

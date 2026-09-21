@@ -6,6 +6,8 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.JsonNode
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.slf4j.LoggerFactory
 import java.io.IOException
 import java.net.URI
@@ -14,6 +16,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The SENDER's HTTP client for its one configured target (versioning §10, §10.6).
@@ -41,6 +44,10 @@ class PromotionTargetClient(
             .connectTimeout(CONNECT_TIMEOUT)
             .followRedirects(HttpClient.Redirect.NEVER)
             .build(),
+    /** The lens's inventory counter (§4.1) — a real registry in production and in tests, never a strict mock. */
+    private val meterRegistry: MeterRegistry = SimpleMeterRegistry(),
+    /** Injected so the cache's TTL can be tested without sleeping — `AuthCache`'s shape. */
+    private val nowNanos: () -> Long = System::nanoTime,
 ) {
     private val log = LoggerFactory.getLogger(PromotionTargetClient::class.java)
 
@@ -50,11 +57,86 @@ class PromotionTargetClient(
     /** The configured target's base URL, for display. Never the key. */
     val targetBaseUrl: String get() = promotionProperties.target.baseUrl.orEmpty()
 
-    /** §18.1 — the target's inventory for [workspace]. */
+    /** §18.1 — the target's inventory for [workspace], FRESH: the push path's read (§10.3 guards against a fresh inventory). */
     fun inventory(workspace: String): PromotionWire.Inventory {
         val uri = uri("/api/v1/promotion/inventory?workspace=" + java.net.URLEncoder.encode(workspace, StandardCharsets.UTF_8))
         val request = authorized(HttpRequest.newBuilder(uri).GET()).build()
         return read(send(request), PromotionWire.Inventory::class.java)
+    }
+
+    /**
+     * The inventory as the promoter LENS reads it (178, roles design §3.1): one target call
+     * per workspace per `inventory-cache-ttl-seconds` window, and never a throw.
+     *
+     * A failed probe — unreachable, malformed, a refusal, no target configured — is
+     * [CachedInventory.Unreachable], remembered for the SAME window: the lens then shows
+     * nothing (fail closed), and a dead target costs one probe and one WARN per window rather
+     * than one per read a promoter makes. `event=pipeline.promotion.lens_unavailable` is that
+     * WARN, logged on the probe and not on the cached answers, so it is once per window by
+     * construction. The counter's `outcome` is a closed set: `hit` (served from the window),
+     * `miss` (probed, answered), `unreachable` (probed, failed).
+     *
+     * `0` disables the cache: every call probes. [invalidate] drops a workspace's entry after
+     * a successful push so the next read sees the target as it now is.
+     */
+    fun cachedInventory(workspace: String): CachedInventory {
+        val ttl = promotionProperties.inventoryCacheTtlSeconds * NANOS_PER_SECOND
+        val now = nowNanos()
+        val cached = inventories[workspace]
+        if (ttl > 0 && cached != null && now - cached.readAt < ttl) {
+            count(OUTCOME_HIT)
+            return cached.value
+        }
+        val fresh =
+            try {
+                CachedInventory.Present(inventory(workspace)).also { count(OUTCOME_MISS) }
+            } catch (e: ApiException) {
+                // Every failure the fresh read can raise is an ApiException carrying the §13
+                // code and a `reason` — the transport ones from unreachable()/malformed(),
+                // the target's own refusal from targetRefused(), the unconfigured target from
+                // uri(). The reason is what the operator needs; the key is never in it.
+                val reason = (e.details["reason"] as? String) ?: e.code
+                log.warn(
+                    "event=pipeline.promotion.lens_unavailable target={} reason={} workspace={} code={}",
+                    targetBaseUrl,
+                    reason,
+                    workspace,
+                    e.code,
+                )
+                count(OUTCOME_UNREACHABLE)
+                CachedInventory.Unreachable(reason, e.code)
+            }
+        if (ttl > 0) inventories[workspace] = Entry(fresh, now)
+        return fresh
+    }
+
+    /** Drops [workspace]'s cached inventory — after a successful push, so the next lens read is current. */
+    fun invalidate(workspace: String) {
+        inventories.remove(workspace)
+    }
+
+    /** What [cachedInventory] remembers: the target's answer, or why there is none. */
+    sealed interface CachedInventory {
+        data class Present(
+            val inventory: PromotionWire.Inventory,
+        ) : CachedInventory
+
+        /** [reason] is the transport/config reason (`ConnectException`, `no_target_configured`, …); [code] the §13 code. */
+        data class Unreachable(
+            val reason: String,
+            val code: String,
+        ) : CachedInventory
+    }
+
+    private class Entry(
+        val value: CachedInventory,
+        val readAt: Long,
+    )
+
+    private val inventories = ConcurrentHashMap<String, Entry>()
+
+    private fun count(outcome: String) {
+        meterRegistry.counter(LENS_INVENTORY_METRIC, "outcome", outcome).increment()
     }
 
     /** §18.2 — push one batch. All of it lands on the target, or none of it does. */
@@ -172,13 +254,21 @@ class PromotionTargetClient(
             mapOf("target" to targetBaseUrl, "target_status" to response.statusCode(), "reason" to "malformed_response"),
         )
 
-    private companion object {
-        val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(10)
+    companion object {
+        /** `datapipelines.promotion.lens.inventory{outcome=hit|miss|unreachable}` (observability §4.1). */
+        const val LENS_INVENTORY_METRIC = "datapipelines.promotion.lens.inventory"
+        const val OUTCOME_HIT = "hit"
+        const val OUTCOME_MISS = "miss"
+        const val OUTCOME_UNREACHABLE = "unreachable"
+
+        private const val NANOS_PER_SECOND = 1_000_000_000L
+
+        private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(10)
 
         /** A batch is one request; a large closure over a slow link needs more than a default. */
-        val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(120)
+        private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(120)
 
-        val SUCCESS = 200..299
-        val MAPPER = PipelineJson.objectMapper()
+        private val SUCCESS = 200..299
+        private val MAPPER = PipelineJson.objectMapper()
     }
 }

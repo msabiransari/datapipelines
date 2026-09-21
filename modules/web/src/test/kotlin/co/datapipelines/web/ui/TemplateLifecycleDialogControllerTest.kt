@@ -75,7 +75,7 @@ class TemplateLifecycleDialogControllerTest {
 
     @Test
     fun `release - Shape A with the toast and the lifecycle-changed payload`() {
-        every { browse.fillDetail(any(), WORKSPACE, PATH) } returns "partials/template-detail"
+        every { browse.fillDetail(any(), WORKSPACE, any(), PATH) } returns "partials/template-detail"
         // The draft exists FOR the release and is GONE after it — the payload reads post-state.
         every { templates.findDraftDetail(WORKSPACE, PATH) } returns draftDetail() andThen null
         every { releases.release(WORKSPACE, PATH, "h2", USER) } returns

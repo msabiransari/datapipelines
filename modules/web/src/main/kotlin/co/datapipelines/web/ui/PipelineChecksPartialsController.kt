@@ -3,6 +3,7 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.checks.PipelineCheckRun
 import co.datapipelines.application.checks.PipelineCheckRunRepository
 import co.datapipelines.application.checks.PipelineCheckRunner
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.RequiredScope
@@ -14,6 +15,7 @@ import co.datapipelines.pipeline.CheckRunVia
 import co.datapipelines.pipeline.PipelineCheck
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.api.currentPrincipal
@@ -52,6 +54,8 @@ class PipelineChecksPartialsController(
     private val pipelines: PipelineService,
     private val checkRunner: PipelineCheckRunner,
     private val checkRuns: PipelineCheckRunRepository,
+    /** 178 — the promoter lens on the checks read (the GET is READ_RESOURCES; the POST is an author's). */
+    private val lens: PromoterLens,
 ) {
     @GetMapping("/partials/pipelines/{id}/versions/{version}/checks")
     @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
@@ -60,8 +64,9 @@ class PipelineChecksPartialsController(
         @PathVariable id: UUID,
         @PathVariable version: Int,
     ): String {
-        val workspaceId = requireChecksSession().requireWorkspace().id
-        val definitions = definitions(workspaceId, id, version)
+        val principal = requireChecksSession()
+        val workspaceId = principal.requireWorkspace().id
+        val definitions = definitions(workspaceId, lens.viewFor(principal).pipelines, id, version)
         val latest = checkRuns.latestPerCheck(id, version).associateBy { it.checkId }
         fill(model, id, version, definitions.map { CheckEntryView.of(it, latest[it.id]) }, releaseFooter = false)
         return VIEW
@@ -89,7 +94,7 @@ class PipelineChecksPartialsController(
             ) ?: throw notFound(id)
         // The outcome carries no datasource name (a run never echoes the definition back), so
         // the rows are zipped against the same body the runner just read — one read, one truth.
-        val byId = definitions(workspaceId, id, version).associateBy { it.id }
+        val byId = definitions(workspaceId, lens.viewFor(principal).pipelines, id, version).associateBy { it.id }
         fill(
             model,
             id,
@@ -103,11 +108,14 @@ class PipelineChecksPartialsController(
     /** The version's declared checks, or the house 404 ([notFound] below). */
     private fun definitions(
         workspaceId: UUID,
+        view: ReadLens,
         id: UUID,
         version: Int,
     ): List<PipelineCheck> {
-        val record = pipelines.findRecord(workspaceId, id) ?: throw notFound(id)
-        val executable = pipelines.findExecutable(workspaceId, record, version) ?: throw notFound(id)
+        val record = pipelines.findRecord(workspaceId, view, id) ?: throw notFound(id)
+        // 178b: a caller-chosen version that is not RELEASED is, under a narrowing lens, the same
+        // 404 an absent version gets — the guard is the service's, not a status check here.
+        val executable = pipelines.findExecutable(workspaceId, view, record, version) ?: throw notFound(id)
         return executable.pipeline.checks
     }
 

@@ -19,6 +19,7 @@ import co.datapipelines.pipeline.ParameterWireEncoder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineCheck
 import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.json.JsonMapper
@@ -157,9 +158,9 @@ class PipelineCheckRunner(
         actor: UUID,
         correlationId: String? = null,
     ): List<CheckRunOutcome>? {
-        val record = pipelines.findRecord(workspaceId, pipelineId) ?: return null
-        val resolved = version ?: pipelines.workingVersion(workspaceId, record) ?: return null
-        val executable = pipelines.findExecutable(workspaceId, record, resolved) ?: return null
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, pipelineId) ?: return null
+        val resolved = version ?: pipelines.workingVersion(workspaceId, ReadLens.Everything, record) ?: return null
+        val executable = pipelines.findExecutable(workspaceId, ReadLens.Everything, record, resolved) ?: return null
         return run(workspaceId, pipelineId, resolved, executable.pipeline, parameters, via, actor, correlationId)
     }
 

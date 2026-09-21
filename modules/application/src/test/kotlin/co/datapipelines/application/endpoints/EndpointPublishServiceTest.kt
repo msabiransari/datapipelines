@@ -1,5 +1,7 @@
 package co.datapipelines.application.endpoints
 
+import co.datapipelines.application.lens.LensedView
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
@@ -18,6 +20,7 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
@@ -49,16 +52,66 @@ class EndpointPublishServiceTest {
     private val registry = mockk<EndpointRegistry>(relaxed = true)
     private val audit = mockk<AuditEventSink>(relaxed = true)
 
-    private fun service(readOnly: Boolean = true) =
-        EndpointPublishService(
-            endpoints = endpoints,
-            pipelines = pipelines,
-            pipelineRepository = pipelineRepository,
-            readOnlyRule = ReadOnlyPipelineRule(PipelineResolver { _, _, _ -> null }, MAX_DEPTH),
-            registry = registry,
-            audit = audit,
-            timeouts = EndpointPublishService.TimeoutBounds(defaultSeconds = 30, minSeconds = 1, maxSeconds = 300),
-        ).also { if (!readOnly) stubPipeline(writes = true) }
+    private fun service(
+        readOnly: Boolean = true,
+        lens: PromoterLens? = null,
+    ) = EndpointPublishService(
+        endpoints = endpoints,
+        pipelines = pipelines,
+        pipelineRepository = pipelineRepository,
+        readOnlyRule = ReadOnlyPipelineRule(PipelineResolver { _, _, _ -> null }, MAX_DEPTH),
+        registry = registry,
+        audit = audit,
+        timeouts = EndpointPublishService.TimeoutBounds(defaultSeconds = 30, minSeconds = 1, maxSeconds = 300),
+        lens = lens,
+    ).also { if (!readOnly) stubPipeline(writes = true) }
+
+    // ------------------------------------------------------------------ 178, the promoter lens
+
+    @Test
+    fun `list and get see every endpoint without a lens, and with an all-visible view - no pipeline read`() {
+        val mine = endpoint()
+        every { endpoints.findByWorkspace(WORKSPACE) } returns listOf(mine)
+        every { endpoints.findByPath("/mine/v1/x") } returns mine
+
+        service().list(principal()).map { it.pathPattern } shouldBe listOf("/mine/v1/x")
+        service().get(principal(), "/mine/v1/x")?.pathPattern shouldBe "/mine/v1/x"
+        val everything = PromoterLens { LensedView.EVERYTHING }
+        service(lens = everything).list(principal()).map { it.pathPattern } shouldBe listOf("/mine/v1/x")
+        service(lens = everything).get(principal(), "/mine/v1/x")?.pathPattern shouldBe "/mine/v1/x"
+        // A strict mock: had the all-visible view read the index rows, `pipelines.list` would have thrown.
+        verify(exactly = 0) { pipelines.list(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `under a narrowing lens an endpoint is visible iff its pipeline is`() {
+        val hiddenPipeline = UUID.fromString("00000000-0000-0000-0000-0000000000e6")
+        val visible = endpoint()
+        val hidden = endpoint().copy(id = UUID.randomUUID(), pathPattern = "/mine/v1/hidden", pipelineId = hiddenPipeline)
+        every { endpoints.findByWorkspace(WORKSPACE) } returns listOf(visible, hidden)
+        every { endpoints.findByPath("/mine/v1/x") } returns visible
+        every { endpoints.findByPath("/mine/v1/hidden") } returns hidden
+        val lens = ReadLens.Only(setOf(PIPELINE_NAME))
+        every { pipelines.list(WORKSPACE, lens, null, null, null) } returns
+            listOf(
+                PipelineRecord(
+                    id = PIPELINE_ID,
+                    name = PIPELINE_NAME,
+                    displayName = PIPELINE_NAME,
+                    description = "",
+                    ownerId = ACTOR,
+                    currentVersion = 1,
+                    createdAt = Instant.EPOCH,
+                    updatedAt = Instant.EPOCH,
+                ),
+            )
+        val lensed = service(lens = PromoterLens { LensedView(lens, ReadLens.NOTHING) })
+
+        lensed.list(principal()).map { it.pathPattern } shouldBe listOf("/mine/v1/x")
+        lensed.get(principal(), "/mine/v1/x")?.pathPattern shouldBe "/mine/v1/x"
+        // A hidden pipeline's endpoint is the same null an unknown path gets — never a 403.
+        lensed.get(principal(), "/mine/v1/hidden") shouldBe null
+    }
 
     @Test
     fun `a malformed path is refused before the pipeline is even looked up`() {
@@ -156,7 +209,7 @@ class EndpointPublishServiceTest {
                 createdAt = Instant.EPOCH,
                 updatedAt = Instant.EPOCH,
             )
-        every { pipelines.findCurrentVersion(WORKSPACE, PIPELINE_ID) } returns null
+        every { pipelines.findCurrentVersion(WORKSPACE, any(), PIPELINE_ID) } returns null
 
         val refused = shouldThrow<DatapipelinesException> { service().publish(principal(), "/a/v1/b", PIPELINE_NAME, null, "") }
 
@@ -277,7 +330,7 @@ class EndpointPublishServiceTest {
                 updatedAt = Instant.EPOCH,
             )
         every { pipelineRepository.findByName(WORKSPACE, PIPELINE_NAME) } returns record
-        every { pipelines.findCurrentVersion(WORKSPACE, PIPELINE_ID) } returns
+        every { pipelines.findCurrentVersion(WORKSPACE, any(), PIPELINE_ID) } returns
             PipelineVersionDetail(
                 pipelineId = PIPELINE_ID,
                 version = 1,
@@ -290,7 +343,7 @@ class EndpointPublishServiceTest {
                 updatedBy = null,
                 updatedAt = Instant.EPOCH,
             )
-        every { pipelines.findExecutable(WORKSPACE, record, 1) } returns
+        every { pipelines.findExecutable(WORKSPACE, any(), record, 1) } returns
             PipelineService.ExecutablePipeline(record, 1, "{}", body(writes))
     }
 

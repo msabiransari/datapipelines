@@ -51,6 +51,8 @@ class PromotionService(
     private val client: PromotionTargetClient,
     private val promotionProperties: PromotionProperties,
     private val deploymentName: String,
+    /** 178 — §10.2 computed once for the page and the lens; the page reads THIS, never its own copy of the rule. */
+    private val views: PromotableViews = PromotableViews(pipelines, templates, client),
     /**
      * 074 — the endpoints published over the pipelines being promoted. Nullable so a deployment
      * wired before 074 (and every unit test that predates it) keeps building endpoint-free
@@ -82,36 +84,42 @@ class PromotionService(
         val examined: Int,
     )
 
-    /** §10.2 — what this workspace could promote to the configured target, right now. */
+    /**
+     * §10.2 — what this workspace could promote to the configured target, right now.
+     *
+     * Since 178 the rule lives in [PromotableView] and the inventory comes through the
+     * lens's cache (`inventory-cache-ttl-seconds`): the listing a promoter sees here and the
+     * set the lens admits on every other screen are one computation. An unreadable target is
+     * still this page's error state — the one place a promoter is TOLD the target is down
+     * rather than shown an empty list — so it is re-raised with the code and reason the
+     * client recorded.
+     */
     fun plan(
         workspaceId: UUID,
         workspaceName: String,
     ): Plan {
-        val inventory = client.inventory(workspaceName)
-        val onTarget = inventory.pipelineByName()
-        val local = pipelines.findAll(workspaceId)
-        val promotable =
-            local.mapNotNull { record ->
-                val version = pipelines.findCurrentVersionDetail(workspaceId, record.id) ?: return@mapNotNull null
-                if (version.status != PipelineVersionStatus.RELEASED) return@mapNotNull null
-                val target = onTarget[record.name]
-                // Same hash ⇒ nothing to push, whatever the numbers say (§10.2).
-                if (target != null && target.bodyHash == version.bodyHash) return@mapNotNull null
-                if (target != null && version.version <= target.currentVersion) return@mapNotNull null
-                // `version.version` and not `record.currentVersion`: they are the same number by
-                // the §3.4 invariant (this row IS the one the pointer names), and since D55 the
-                // pointer is nullable while the row we just read is not — a never-released
-                // pipeline is filtered out two lines above by having no current version at all,
-                // which is exactly "a never-released pipeline is not a candidate".
-                Candidate(record.name, record.displayName, version.version, target?.currentVersion ?: 0)
+        val computed = views.compute(workspaceId, workspaceName)
+        val (view, inventory) =
+            when (computed) {
+                is PromotableViews.Computed.Ready -> {
+                    computed.view to computed.inventory
+                }
+
+                is PromotableViews.Computed.Unavailable -> {
+                    throw ApiException(
+                        computed.code,
+                        "The promotion target at ${client.targetBaseUrl} could not be read: ${computed.reason}.",
+                        mapOf("target" to client.targetBaseUrl, "reason" to computed.reason),
+                    )
+                }
             }
         return Plan(
             targetBaseUrl = client.targetBaseUrl,
             targetDeployment = inventory.deployment,
             targetAuthoringEnabled = inventory.authoringEnabled,
             workspace = workspaceName,
-            promotable = promotable.sortedBy { it.name },
-            examined = local.size,
+            promotable = view.pipelines.map { Candidate(it.name, it.displayName, it.localVersion, it.targetVersion) },
+            examined = view.examinedPipelines,
         )
     }
 
@@ -128,10 +136,12 @@ class PromotionService(
         names: List<String>,
     ): PromotionWire.Applied {
         require(names.isNotEmpty()) { "promote() needs at least one pipeline name" }
+        // FRESH, never the lens's cached copy: §10.3's guards run against the target as it is
+        // now, and the same view the page computes is rebuilt over that fresh answer.
         val inventory = client.inventory(workspaceName)
         refuseAuthoringTarget(inventory)
 
-        val closure = Closure(workspaceId)
+        val closure = Closure(workspaceId, views.compute(workspaceId, inventory))
         names.distinct().forEach { name -> closure.addRoot(name, inventory) }
         verifyDatasources(closure, inventory)
 
@@ -153,7 +163,7 @@ class PromotionService(
             batch.pipelines.size,
             batch.endpoints.size,
         )
-        return client.push(batch)
+        return client.push(batch).also { client.invalidate(workspaceName) }
     }
 
     /**
@@ -207,6 +217,8 @@ class PromotionService(
      */
     private inner class Closure(
         private val workspaceId: UUID,
+        /** §10.2 over the FRESH inventory — the root guard's "is it newer" answer (178: one rule, page and push). */
+        private val view: PromotableView,
     ) {
         /** Pinned pipeline versions, children before parents. Key is `name@version`. */
         private val pipelineOrder = LinkedHashMap<String, PinnedPipeline>()
@@ -251,11 +263,16 @@ class PromotionService(
                 throw notReleased(name, version.version, "its current version is ${version.status}")
             }
             val target = inventory.pipelineByName()[name]
-            if (target != null && version.version <= target.currentVersion) {
+            // The page's rule, not a second spelling of it: a root the view does not list is
+            // not newer — a lower or equal version, OR the same content under a higher number
+            // (§10.2: hash is for machines). Both were "nothing to push" on the page.
+            if (target != null && view.pipeline(name) == null) {
                 throw ApiException(
                     PipelineErrorCodes.Versioning.PROMOTION_NOT_NEWER,
                     "Pipeline '$name' is at version ${version.version} here and the target already serves " +
-                        "version ${target.currentVersion}. Same-version pushes are a bug, not a no-op.",
+                        "version ${target.currentVersion}" +
+                        (if (target.bodyHash == version.bodyHash) " with the same content" else "") +
+                        ". Same-version pushes are a bug, not a no-op.",
                     mapOf("pipeline" to name, "version" to version.version, "target_version" to target.currentVersion),
                 )
             }

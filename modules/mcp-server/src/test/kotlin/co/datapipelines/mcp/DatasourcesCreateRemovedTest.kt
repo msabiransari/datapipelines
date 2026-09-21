@@ -80,8 +80,24 @@ class DatasourcesCreateRemovedTest {
             transport = transport,
             dispatcher = McpToolDispatcher(realShippedTools(), auditLogger),
             prompts = McpPromptCatalog(),
-            catalog = McpResourceCatalog(pipelines, templates, datasources, executions),
-            reader = McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events, auditLogger),
+            catalog =
+                McpResourceCatalog(
+                    McpFixtures.pipelineService(pipelines),
+                    McpFixtures.templateService(templates),
+                    datasources,
+                    executions,
+                    McpFixtures.EVERYTHING_LENS,
+                ),
+            reader =
+                McpResourceReader(
+                    McpFixtures.pipelineService(pipelines),
+                    McpFixtures.templateService(templates),
+                    datasources,
+                    executions,
+                    events,
+                    auditLogger,
+                    McpFixtures.EVERYTHING_LENS,
+                ),
             version = "1.0.0",
         )
 
@@ -129,8 +145,24 @@ class DatasourcesCreateRemovedTest {
             transport = transport,
             dispatcher = McpToolDispatcher(realShippedTools(), auditLogger),
             prompts = McpPromptCatalog(),
-            catalog = McpResourceCatalog(pipelines, templates, datasources, executions),
-            reader = McpResourceReader(McpFixtures.pipelineService(pipelines), templates, datasources, executions, events, auditLogger),
+            catalog =
+                McpResourceCatalog(
+                    McpFixtures.pipelineService(pipelines),
+                    McpFixtures.templateService(templates),
+                    datasources,
+                    executions,
+                    McpFixtures.EVERYTHING_LENS,
+                ),
+            reader =
+                McpResourceReader(
+                    McpFixtures.pipelineService(pipelines),
+                    McpFixtures.templateService(templates),
+                    datasources,
+                    executions,
+                    events,
+                    auditLogger,
+                    McpFixtures.EVERYTHING_LENS,
+                ),
             version = "1.0.0",
         )
 
