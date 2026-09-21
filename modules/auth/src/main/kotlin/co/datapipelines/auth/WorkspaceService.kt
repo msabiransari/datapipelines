@@ -110,7 +110,12 @@ class WorkspaceService(
     /** [userId]'s memberships in SELECTABLE workspaces — what the switcher lists (design §6). */
     fun activeMemberships(userId: UUID): List<WorkspaceMembership> = memberships(userId).filter { it.workspaceActive }
 
-    override fun isActive(workspaceId: UUID): Boolean = workspaceRepository.findById(workspaceId)?.isActive == true
+    /**
+     * Through the liveness cache since 180 (D15): this is the read `PrincipalLiveness` makes
+     * on every key validation, so it costs zero queries within the TTL, and
+     * [deactivate]/[reactivate] evict it so the answer changes on this instance at once.
+     */
+    override fun isActive(workspaceId: UUID): Boolean = authCache.isWorkspaceActive(workspaceId) { workspaceRepository.findById(it) }
 
     /**
      * Resolves a `DP-Workspace` switch (design §5.1) to the context the request runs in,
@@ -318,7 +323,7 @@ class WorkspaceService(
                 // The row vanished between read() and the write: the 404 rule answers the race
                 // the same way it answers everything else.
                 ?: throw WorkspaceNotFoundException(name)
-        authCache.invalidateWorkspace(name)
+        authCache.invalidateWorkspace(updated)
         audit(principal, "auth.workspace.updated", name, mapOf("workspace" to name))
         return updated
     }
@@ -394,7 +399,7 @@ class WorkspaceService(
         val members = workspaceRepository.findMembersOf(workspace.id)
         workspaceRepository.softDelete(workspace.id)
         members.forEach { authCache.invalidateMemberships(it.userId) }
-        authCache.invalidateWorkspace(name)
+        authCache.invalidateWorkspace(workspace)
         audit(principal, "auth.workspace.deleted", name, mapOf("workspace" to name))
         val stranded = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
         if (stranded.isNotEmpty()) {
@@ -798,7 +803,7 @@ class WorkspaceService(
 
     private fun invalidateEveryone(workspace: Workspace) {
         workspaceRepository.findMembersOf(workspace.id).forEach { authCache.invalidateMemberships(it.userId) }
-        authCache.invalidateWorkspace(workspace.name)
+        authCache.invalidateWorkspace(workspace)
     }
 
     /**

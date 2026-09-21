@@ -54,6 +54,11 @@ class AuthCache(
     private val memberships = ConcurrentHashMap<UUID, Entry<List<WorkspaceMembership>>>()
     private val workspacesByName = ConcurrentHashMap<String, Entry<Workspace>>()
 
+    // 180 (D15): the per-request workspace-liveness read `PrincipalLiveness` makes for a key's
+    // pin. Keyed by id because that is what the key record and the principal carry; the
+    // by-name map above serves the header/claim path. Both are evicted by the same call.
+    private val workspacesById = ConcurrentHashMap<UUID, Entry<Workspace>>()
+
     /** key id → SHA-256 digest of the secret whose Argon2id verification succeeded. */
     private val verifiedSecrets = ConcurrentHashMap<String, Entry<ByteArray>>()
 
@@ -146,9 +151,29 @@ class AuthCache(
         memberships.remove(userId)
     }
 
-    /** Immediate local eviction after a workspace row mutation (rename does not exist in v1; delete lands with 021). */
-    fun invalidateWorkspace(name: String) {
-        workspacesByName.remove(name)
+    /**
+     * The workspace row for [id] — the liveness read behind [isWorkspaceActive] — cached per
+     * TTL like everything else here, a miss never cached.
+     */
+    fun workspaceById(
+        id: UUID,
+        loader: (UUID) -> Workspace?,
+    ): Workspace? = readThrough(workspacesById, id, loader)
+
+    /** Convenience over [workspaceById]: `Workspace.isActive` (absent/gone workspace → not active). */
+    fun isWorkspaceActive(
+        id: UUID,
+        loader: (UUID) -> Workspace?,
+    ): Boolean = workspaceById(id, loader)?.isActive == true
+
+    /**
+     * Immediate local eviction after a workspace row mutation (display-name update, soft
+     * delete, deactivate/reactivate) — BOTH entries, by name and by id, so a deactivation is
+     * visible to the next key validation on this instance rather than at TTL expiry (D13).
+     */
+    fun invalidateWorkspace(workspace: Workspace) {
+        workspacesByName.remove(workspace.name)
+        workspacesById.remove(workspace.id)
     }
 
     /**
@@ -162,7 +187,7 @@ class AuthCache(
     }
 
     /** Live entry count across all maps — the bound this cache promises, observable in tests. */
-    fun size(): Int = users.size + keyRecords.size + verifiedSecrets.size + memberships.size + workspacesByName.size
+    fun size(): Int = users.size + keyRecords.size + verifiedSecrets.size + memberships.size + workspacesByName.size + workspacesById.size
 
     private fun <K : Any, V : Any> readThrough(
         map: ConcurrentHashMap<K, Entry<V>>,

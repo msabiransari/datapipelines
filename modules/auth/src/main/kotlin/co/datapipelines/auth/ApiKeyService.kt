@@ -30,6 +30,8 @@ class ApiKeyService(
     private val secretHasher: SecretHasher,
     private val authProperties: AuthProperties,
     private val workspaceService: WorkspaceService,
+    /** 180 (D15) — the ONE liveness predicate, judged here for every key kind (§7.3 step 8). */
+    private val principalLiveness: PrincipalLiveness,
     /**
      * The sealer for the login-minted key's plaintext (D16/§3.3). Optional so auth-only
      * test slices construct the service without the encryptor; the application always
@@ -188,33 +190,29 @@ class ApiKeyService(
     }
 
     /**
-     * The pinned workspace as this key's ISSUER can currently act in it (D-R12) — the fourth
-     * of the four per-request re-reads (key active, issuer active, issuer still holds the role,
-     * workspace active), all inside the same `AuthCache` TTL.
+     * The pinned workspace as this key's ISSUER can currently act in it (D-R12) — the last of
+     * the four per-request re-reads (key active, issuer active, workspace active — the middle
+     * two are [liveOwner]'s predicate — and issuer still holds the role), all inside the same
+     * `AuthCache` TTL.
      *
      * A removed issuer resolves to no role, which becomes VIEWER rather than a refusal: the
      * key still authenticates and every permission above viewer then refuses with
      * `auth.key_issuer_role_lost`, which is the answer the caller can act on. Refusing the
      * credential outright would report "your key is invalid" for a key that is entirely valid.
-     *
-     * A DEACTIVATED workspace is different and does refuse here: design §6 says its keys are
-     * refused, full stop, and there is no operation left to scope.
      */
     private fun pinnedContext(
         record: ApiKey,
         owner: User,
-    ): WorkspaceContext {
-        if (!workspaceService.isActive(record.workspaceId)) {
-            throw KeyWorkspaceInactiveException(record.workspaceName)
-        }
-        return workspaceService.issuerContext(owner.id, owner.isAdmin, record.workspaceId, record.workspaceName)
+    ): WorkspaceContext =
+        workspaceService.issuerContext(owner.id, owner.isAdmin, record.workspaceId, record.workspaceName)
             ?: WorkspaceContext(record.workspaceId, record.workspaceName, WorkspaceRole.VIEWER)
-    }
 
     /**
      * Validates a presented key as the promotion peer's credential (§7.7, versioning §10.6):
-     * the same shape gate, record read, revocation/expiry re-check, Argon2id verify and owner
-     * liveness check [validate] applies — and then the kind, which is the whole point.
+     * the same shape gate, record read, revocation/expiry re-check, Argon2id verify and
+     * liveness predicate [validate] applies (owner active AND pinned workspace active — 180
+     * closed the gap where only the owner was read here) — and then the kind, which is the
+     * whole point.
      *
      * A key of any other kind is refused with the SAME [ApiKeyInvalidException] a wrong key
      * gets, because `PromotionServerKeyFilter` answers every refusal with one code: a caller
@@ -273,10 +271,16 @@ class ApiKeyService(
         if (!verified) throw ApiKeyInvalidException()
     }
 
-    /** D13 owner-liveness re-check via the cached snapshot (§7.3 step 8). */
+    /**
+     * §7.3 step 8 — the owner snapshot the principal is built from, and the D13/D15 liveness
+     * re-check through [PrincipalLiveness]: a deactivated owner is `auth.principal_deactivated`,
+     * a deactivated pin `auth.key_workspace_inactive` (the 404 rule), both within the cache TTL.
+     * An owner row that is GONE is not a person who was deactivated — that stays the plain
+     * invalid-key answer.
+     */
     private fun liveOwner(record: ApiKey): User {
         val owner = userService.snapshot(record.userId) ?: throw ApiKeyInvalidException()
-        if (!owner.isActive) throw ApiKeyInvalidException()
+        principalLiveness.require(owner.id, PrincipalLiveness.Pin(record.workspaceId, record.workspaceName))
         return owner
     }
 

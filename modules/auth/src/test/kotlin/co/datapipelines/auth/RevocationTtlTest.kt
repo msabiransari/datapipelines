@@ -29,7 +29,17 @@ class RevocationTtlTest {
                 WorkspaceContext(thirdArg(), arg(3), WorkspaceRole.AUTHOR)
             }
         }
-    private val service = ApiKeyService(repo, userService, cache, auditLogger, Argon2SecretHasher(), AuthProperties(), workspaceService)
+    private val service =
+        ApiKeyService(
+            repo,
+            userService,
+            cache,
+            auditLogger,
+            Argon2SecretHasher(),
+            AuthProperties(),
+            workspaceService,
+            PrincipalLiveness(userService, workspaceService),
+        )
 
     private val ownerId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -53,6 +63,7 @@ class RevocationTtlTest {
         every { repo.insert(any(), ownerId, any(), capture(hash), any(), any(), any()) } answers {
             ApiKey(firstArg(), ownerId, thirdArg(), hash.captured, arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
         }
+        every { userService.isActive(ownerId) } returns true
         every { userService.snapshot(ownerId) } returns
             User(ownerId, "o@c.com", "O", null, "kc", "s", true, false, Instant.now(), Instant.now(), null)
         return service.issue(issuerPrincipal, ownerId, "k", setOf(Scope.READ), workspaceId)

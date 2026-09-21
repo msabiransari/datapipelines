@@ -46,6 +46,8 @@ class JwtAuthenticationFilter(
     private val jwtService: JwtService,
     private val userService: UserService,
     private val clientAddressResolver: ClientAddressResolver,
+    /** 180 (D15) — the ONE liveness predicate; a session judges its user, it pins no workspace. */
+    private val principalLiveness: PrincipalLiveness,
 ) : OncePerRequestFilter() {
     private val log = LoggerFactory.getLogger(JwtAuthenticationFilter::class.java)
 
@@ -79,10 +81,17 @@ class JwtAuthenticationFilter(
         try {
             val claims = jwtService.validate(jwt)
             val userId = UUID.fromString(claims.subject)
-            // The live user row, not just its liveness: `is_admin` is the ONE global capability
-            // left (D-R1) and it is read here, per request, through the same 60s cache. A JWT
-            // claim would keep a revoked super admin super for the token's whole 8h life.
-            val user = userService.snapshot(userId)?.takeIf { it.isActive } ?: throw PrincipalDeactivatedException(userId)
+            // Liveness FIRST, through the one predicate every credential is judged by (D15):
+            // a deactivated user's valid token is `auth.principal_deactivated`, cookie cleared.
+            // A session pins no workspace — the one it resolves to is chosen downstream from
+            // its ACTIVE memberships (`WorkspaceResolutionFilter`), so there is no pin to judge.
+            principalLiveness.require(userId, pin = null)
+            // Then the live user row, not just its liveness: `is_admin` is the ONE global
+            // capability left (D-R1) and it is read here, per request, through the same 60s
+            // cache. A JWT claim would keep a revoked super admin super for the token's whole
+            // 8h life. The predicate just read this row, so this is a cache hit; a row that
+            // vanished between the two reads is a token for nobody, not a deactivated person.
+            val user = userService.snapshot(userId) ?: throw SessionInvalidException("Session subject no longer exists")
             val principal =
                 AuthenticatedPrincipal(
                     userId = userId,
@@ -133,8 +142,9 @@ class JwtAuthenticationFilter(
         response.addCookie(clearedSessionCookie())
         request.setAttribute(AuthAttributes.AUTH_ERROR, cause)
         log.info(
-            "dp_session rejected reason={} user_id={} path={} client={} cause={}",
+            "dp_session rejected reason={} code={} user_id={} path={} client={} cause={}",
             reason,
+            cause.code,
             userId,
             request.requestURI,
             clientAddressResolver.clientAddressOf(request),

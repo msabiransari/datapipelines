@@ -226,6 +226,33 @@ class PromotionServerKeyFilterTest {
         verify(exactly = 0) { apiKeyRepository.touchUsage(any(), any(), any()) }
     }
 
+    /**
+     * 180 (D15): the liveness predicate now refuses a server key whose OWNER is deactivated
+     * (`auth.principal_deactivated`) or whose PIN is deactivated (`auth.key_workspace_inactive`,
+     * the gap closed in 180) — two catalogued codes elsewhere, folded into the ONE answer here.
+     * A caller holding a stolen server key must not learn which liveness failed.
+     */
+    @Test
+    fun `a deactivated owner and a deactivated pin are the one answer too, and neither code leaks`() {
+        listOf(
+            PrincipalDeactivatedException(java.util.UUID.randomUUID()),
+            KeyWorkspaceInactiveException("acme"),
+        ).forEach { livenessRefusal ->
+            val response = MockHttpServletResponse()
+            val chain = MockFilterChain()
+
+            filter(configuredKey = KEY, refusal = livenessRefusal)
+                .doFilter(promotionRequest(header = "dpk_ZZZZZZZZZZZZ.$SECRET_HALF"), response, chain)
+
+            response.status shouldBe 401
+            errorCodeOf(response) shouldBe AuthErrorCodes.PROMOTION_KEY_INVALID
+            response.contentAsString.contains(livenessRefusal.code) shouldBe false
+            response.contentAsString.contains("acme") shouldBe false
+            chain.request shouldBe null
+            SecurityContextHolder.clearContext()
+        }
+    }
+
     @Test
     fun `a key the store refuses is refused here, with the one answer and no stamp`() {
         // Wrong kind, revoked, expired, unknown, malformed, deactivated owner — the store
@@ -342,10 +369,11 @@ class PromotionServerKeyFilterTest {
     private fun filter(
         configuredKey: String?,
         stored: ApiKey? = null,
+        refusal: AuthException = ApiKeyInvalidException(),
     ): PromotionServerKeyFilter {
         val keyService = mockk<ApiKeyService>()
         if (stored == null) {
-            every { keyService.validateServerKey(any()) } throws ApiKeyInvalidException()
+            every { keyService.validateServerKey(any()) } throws refusal
         } else {
             every { keyService.validateServerKey(stored.plaintextFixture()) } returns stored
             every { keyService.validateServerKey(neq(stored.plaintextFixture())) } throws ApiKeyInvalidException()

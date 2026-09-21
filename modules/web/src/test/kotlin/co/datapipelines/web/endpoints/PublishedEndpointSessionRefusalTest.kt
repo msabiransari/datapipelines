@@ -9,6 +9,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -52,6 +53,7 @@ class PublishedEndpointSessionRefusalTest {
             audit = mockk(relaxed = true),
             authoring = AuthoringGuard(enabled = true),
             scope = CoroutineScope(Dispatchers.Default),
+            workspaceLiveness = WorkspaceLiveness { true },
         )
 
     @Test

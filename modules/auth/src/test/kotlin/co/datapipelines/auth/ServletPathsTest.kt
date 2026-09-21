@@ -75,7 +75,8 @@ class ServletPathsTest {
             jwtService.issue(
                 User(userId, "u@c.com", "U", null, "kc", "s", true, false, Instant.now(), Instant.now(), null),
             )
-        val filter = JwtAuthenticationFilter(jwtService, mockk<UserService>(), ClientAddressResolver(emptyList()))
+        val filter =
+            JwtAuthenticationFilter(jwtService, mockk<UserService>(), ClientAddressResolver(emptyList()), mockk<PrincipalLiveness>())
 
         val request =
             request("/dp", "/dp/mcp").apply {

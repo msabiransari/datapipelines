@@ -11,6 +11,7 @@ import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
@@ -182,6 +183,9 @@ class EndpointsConfiguration {
         audit: AuditEventSink,
         executionScope: WebSurfaceConfiguration.ExecutionCoroutineScope,
         authoringGuard: AuthoringGuard,
+        // 180 (D15): `WorkspaceService` is the one implementation — the auth liveness cache
+        // answers, so a deactivated workspace's endpoint is unknown within the same TTL as its keys.
+        workspaceLiveness: WorkspaceLiveness,
     ): PublishedEndpointServeService =
         PublishedEndpointServeService(
             registry = registry,
@@ -197,6 +201,7 @@ class EndpointsConfiguration {
             audit = audit,
             authoring = authoringGuard,
             scope = executionScope,
+            workspaceLiveness = workspaceLiveness,
         )
 
     @Bean

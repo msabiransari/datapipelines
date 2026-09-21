@@ -26,7 +26,14 @@ class JwtFilterLivenessTest {
     private val secret = Base64.getEncoder().encodeToString(ByteArray(32) { (it + 7).toByte() })
     private val jwtService = JwtService(JwtProperties(secret), AuthProperties())
     private val userService = mockk<UserService>()
-    private val filter = JwtAuthenticationFilter(jwtService, userService, ClientAddressResolver(emptyList()))
+    private val workspaceService = mockk<WorkspaceService>()
+    private val filter =
+        JwtAuthenticationFilter(
+            jwtService,
+            userService,
+            ClientAddressResolver(emptyList()),
+            PrincipalLiveness(userService, workspaceService),
+        )
 
     private val userId = UUID.randomUUID()
     private val token =
@@ -53,6 +60,7 @@ class JwtFilterLivenessTest {
 
     @Test
     fun `an active user's valid session authenticates, carrying NO scopes (D-R1)`() {
+        every { userService.isActive(userId) } returns true
         every { userService.snapshot(userId) } returns user(userId, isActive = true)
 
         run(token)
@@ -68,6 +76,7 @@ class JwtFilterLivenessTest {
 
     @Test
     fun `a deactivated user's valid session is rejected with auth principal_deactivated and the cookie is cleared`() {
+        every { userService.isActive(userId) } returns false
         every { userService.snapshot(userId) } returns user(userId, isActive = false)
 
         val request = MockHttpServletRequest("GET", "/api/v1/pipelines")

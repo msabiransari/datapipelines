@@ -145,11 +145,50 @@ class AuthCacheTest {
         }
         loads.get() shouldBe 1
 
-        cache.invalidateWorkspace("acme")
+        cache.invalidateWorkspace(workspace)
         cache.workspaceByName("acme") {
             loads.incrementAndGet()
             null
         } shouldBe null
         loads.get() shouldBe 2
+    }
+
+    /**
+     * 180 (D15) — the workspace-liveness read `PrincipalLiveness` makes per request: cached by
+     * id under the same TTL, a miss never cached, evicted by the same call that evicts the
+     * by-name entry so deactivate/reactivate take effect on this instance immediately.
+     */
+    @Test
+    fun `workspace liveness by id is cached per TTL, a miss is not cached, and mutation evicts it`() {
+        val id = UUID.randomUUID()
+        val active = Workspace(id, "acme", "Acme", false, null, false, Instant.now())
+        val loads = AtomicInteger()
+
+        repeat(2) {
+            cache.isWorkspaceActive(id) {
+                loads.incrementAndGet()
+                active
+            } shouldBe true
+        }
+        loads.get() shouldBe 1
+
+        cache.invalidateWorkspace(active)
+        val deactivated = active.copy(deactivatedAt = Instant.now())
+        cache.isWorkspaceActive(id) {
+            loads.incrementAndGet()
+            deactivated
+        } shouldBe false
+        loads.get() shouldBe 2
+
+        nowNanos += (ttlSeconds + 1) * 1_000_000_000L
+        cache.isWorkspaceActive(id) {
+            loads.incrementAndGet()
+            null
+        } shouldBe false
+        cache.isWorkspaceActive(id) {
+            loads.incrementAndGet()
+            null
+        } shouldBe false
+        loads.get() shouldBe 4
     }
 }

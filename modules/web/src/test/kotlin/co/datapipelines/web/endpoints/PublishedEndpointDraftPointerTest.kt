@@ -4,6 +4,7 @@ import co.datapipelines.application.endpoints.EndpointAuthorizer
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
+import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -37,6 +38,7 @@ class PublishedEndpointDraftPointerTest {
             audit = mockk(relaxed = true),
             authoring = AuthoringGuard(enabled = development),
             scope = CoroutineScope(Dispatchers.Default),
+            workspaceLiveness = WorkspaceLiveness { true },
         )
 
     @Test
