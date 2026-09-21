@@ -6,7 +6,8 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 
 | Code | Meaning | Agent response |
 |---|---|---|
-| `auth.api_key.missing` / `auth.api_key.invalid` | Credential problem | Ask the user for a fresh key |
+| `auth.api_key.missing` / `auth.api_key.invalid` | Credential problem — absent, unknown, revoked or expired | Ask the user for a fresh key |
+| `auth.principal_deactivated` (401) | The key's OWNER has been deactivated; the key itself is intact and comes back when an administrator reactivates the account | Nothing to retry and no key to ask for — say the account is deactivated and stop |
 | `auth.scope.insufficient` | Key lacks the required scope | Ask for a broader key, or change what you asked |
 | `auth.role_required` | Your key's issuer lacks the ROLE for this action in this workspace — a different axis from scope, and a broader key will not help | Ask a workspace admin to grant the role, or do the part you can do. `details.required` / `details.held` name both sides |
 | `auth.key_issuer_role_lost` | The key was valid; its issuer's role changed | Retrying will never work — a NEW key from someone who still holds the role is the fix. Say so plainly; do not loop |

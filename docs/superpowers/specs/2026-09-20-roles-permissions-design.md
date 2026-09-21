@@ -153,7 +153,9 @@ Alternative (larger): fold the axis for user kinds. Recommend the former for thi
    and nothing at or below the target's version; non-vacuity: the fixture holds ≥1 of each hidden kind.
 6. New `ExecutionsVisibilityTest`: own-only for viewer/author/promoter, all for admins, via REST and MCP.
 7. New `DeactivationSweepTest`: every route and tool as a deactivated user / in a deactivated workspace
-   / with keys pinned to either → `auth.principal_deactivated`, nothing else leaks.
+   / with keys pinned to either → exactly the code §3.5's table owes each (`auth.principal_deactivated`
+   for the user, the 404 rule for the workspace, the promotion peer's one answer), nothing else leaks;
+   the deactivated-vs-unknown differential is zero on every route.
 8. `RoleVisibilityRenderTest`'s "route-guarded exemption" list shrinks to zero: every verb control is
    inside a role guard.
 9. PROCESS gate: (a) the store's prompt template gains a mandatory "Roles" section — every lane prompt

@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v2.26 (revised — see Change Log)
+**Status:** v2.27 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-09-19
@@ -137,7 +137,7 @@ The `provider` field stores the **OIDC registration name** as configured by the 
 
 **Subsequent logins:** Same flow — user record updated, JWT reissued.
 
-**Account deactivation:** Admin marks user `is_active: false` via UI. Subsequent OIDC logins are rejected with `auth.login.user_inactive`. Existing sessions and API keys stop working within the liveness-cache TTL (~60s): every authenticated request re-checks `is_active` through the cache (§6.3, §7.3), so a deactivated user's JWT and keys are dead within a minute, not at the 8h JWT expiry. API keys additionally remain individually revocable.
+**Account deactivation:** Admin marks user `is_active: false` via UI. Subsequent OIDC logins are rejected with `auth.login.user_inactive`. Existing sessions and API keys stop working within the liveness-cache TTL (~60s): every authenticated request re-checks `is_active` through the cache (`PrincipalLiveness`, [§11A.3](#11a3-deactivation)), so a deactivated user's JWT and keys are dead within a minute, not at the 8h JWT expiry — refused with `auth.principal_deactivated` (401; a page navigation lands on `/login?error=inactive`). Nothing is revoked: reactivation restores them. API keys additionally remain individually revocable.
 
 ### 4.3 Email domain allowlist
 
@@ -582,9 +582,9 @@ Passwords are compared only through `SecretHasher.verify` (constant-time-ish at 
 
 ### 5A.6 The login flow
 
-`POST /login` (form fields `email`, `password`, plus the `dp_csrf` double-submit token — §8.4) is public (§8.3) and metered by the same per-IP `LoginRateLimitFilter` as the OIDC paths (`/login` prefix). It is deliberately **not** under a scope-governed path: it is the authentication ceremony itself, so no principal exists for the ScopeInterceptor to check yet — exactly like the OIDC callback it mirrors.
+`POST /login` (form fields `email`, `password`, plus the `_csrf` double-submit token — Spring's field name; the COOKIE is `dp_csrf` and the header `DP-CSRF-Token`, §8.4) is public (§8.3) and metered by the same per-IP `LoginRateLimitFilter` as the OIDC paths (`/login` prefix). It is deliberately **not** under a scope-governed path: it is the authentication ceremony itself, so no principal exists for the ScopeInterceptor to check yet — exactly like the OIDC callback it mirrors.
 
-On success the flow converges with OIDC: the same `JwtService.issue` mints the same `dp_session` cookie, the same §4.2-step-4 workspace resolution runs (`auto-per-user` provisioning included), the same `auth.login.success` audit event is written (with `provider: "local"` in the details), and `is_active` is re-checked exactly as on the OIDC path (a deactivated account with the correct password gets the `inactive` banner — safe to reveal because the caller just proved the password). The `must_change_password` flag does not block the login; it engages the §5A.4 gate after it.
+On success the flow converges with OIDC: the same `JwtService.issue` mints the same `dp_session` cookie, the same §4.2-step-4 workspace resolution runs (`workspaceForLogin`: last-used, else first active membership, else the D-R11 `demo` join — the pre-113 `auto-per-user` clause no longer exists), the same `auth.login.success` audit event is written (with `provider: "local"` in the details), and `is_active` is re-checked exactly as on the OIDC path (a deactivated account with the correct password gets the `inactive` banner — safe to reveal because the caller just proved the password). The `must_change_password` flag does not block the login; it engages the §5A.4 gate after it.
 
 ### 5A.7 Credential minting is session-only
 
@@ -691,11 +691,10 @@ class JwtAuthenticationFilter(
                 val claims = jwtService.validate(jwt)
                 val userId = UUID.fromString(claims.subject)
 
-                // Liveness re-check: cached (60s TTL, same cache infra as §7.3) Postgres
-                // lookup of users.is_active. Deactivation kills the session within ~1 min.
-                if (!userLivenessCache.isActive(userId)) {
-                    throw DeactivatedUserException(userId)
-                }
+                // Liveness re-check through the ONE predicate (§11A.3): cached (60s TTL,
+                // same cache infra as §7.3) lookup of users.is_active. Deactivation kills
+                // the session within ~1 min — `auth.principal_deactivated`.
+                principalLiveness.require(userId, pin = null)
 
                 val principal = AuthenticatedPrincipal(
                     userId = userId,
@@ -769,8 +768,10 @@ Argon2id hash (same as before). Schema in [Metadata DB spec](metadata-db.md).
 5. expires_at < now → 401 auth.api_key.expired.
 6. Argon2id.verify(key_hash, full_key).
 7. Verify fails → 401 auth.api_key.invalid.
-8. Check the key owner's users.is_active (cached, 60s TTL).
-   Inactive → 401 auth.api_key.invalid.
+8. PrincipalLiveness (§11A.3), cached, 60s TTL: the owner's users.is_active
+   → inactive is 401 auth.principal_deactivated; the pinned workspace's
+   liveness → deactivated is 404 auth.key_workspace_inactive. A server key
+   on the promotion route folds both into 401 auth.promotion.key_invalid.
 9. Update last_used_at, last_used_ip (async).
 10. Build principal with userId + scopes from key record.
 ```
@@ -1416,15 +1417,28 @@ A deactivated workspace is not selectable by a super admin either: [§11A.3](#11
 
 ### 11A.3 Deactivation
 
-**Deactivate, never delete** (D-R10). A deactivated workspace has five effects and purges nothing, ever:
+**Deactivate, never delete** (D-R10, D15). Deactivation — of a USER (`users.is_active`, §4.2) or of a WORKSPACE (`workspaces.deactivated_at`) — purges nothing and revokes nothing; it is reversible, and reactivation restores every credential. What it does is make the principal or the workspace **served nothing**, through ONE predicate.
+
+**The predicate.** `PrincipalLiveness` answers "user active ∧ (pinned workspace active, when the credential pins one)", both reads through the §11.4 liveness cache (so a valid request costs zero extra queries, and a deactivation takes effect on the instance that performed it at once and everywhere else within one TTL, ~60 s by default). It is judged where each credential BECOMES a principal — the earliest point a refusal can happen, and the one every surface passes through because the security chain is global, so no boundary downstream restates it and no new surface can forget it:
+
+| where | credential | deactivated USER | deactivated WORKSPACE |
+|---|---|---|---|
+| `JwtAuthenticationFilter` | session | `auth.principal_deactivated` 401 on the API; a page navigation is sent to `/login?error=inactive`, cookie cleared either way | a session never resolves one: the stamped claim falls through to another active membership (§5), `DP-Workspace` naming it is `workspace.not_found` 404 |
+| `ApiKeyService.validate` — REST, `/mcp`, published endpoints | `user` key, `endpoint` key | `auth.principal_deactivated` 401 (the owner) | `auth.key_workspace_inactive` 404 (the pin) |
+| `ApiKeyService.validateServerKey` — `/api/v1/promotion/**` | `server` key | `auth.promotion.key_invalid` 401 — the peer's ONE answer, whatever failed | `auth.promotion.key_invalid` 401 (the pin, closed in 180) |
+| `PublishedEndpointServeService` | any key, the ENDPOINT's own workspace | — | the unknown-path 404, byte-identical, before the pipeline is read |
+
+The USER case has one code on every surface but the promotion peer. The WORKSPACE case keeps the older 404 rule ([§11A.1](#11a1-the-404-rule)): a deactivated workspace is indistinguishable from one that does not exist — `auth.key_workspace_inactive` stays distinct only because a key's holder is a member by construction and already knows the pin.
+
+**A deactivated workspace's five effects**, all consequences of readers consulting `Workspace.isActive` (or its cached form, the predicate):
 
 1. it cannot be selected — the switcher hides it, and `DP-Workspace` naming it answers 404 like a non-membership;
-2. its published endpoints answer 404;
-3. API keys pinned to it are refused with `auth.key_workspace_inactive` (404 — a deactivated workspace answers not-found on every surface, D-R10 as ruled 2026-09-14);
-4. its schedules do not fire (the scheduler consults `WorkspaceLiveness`);
+2. its published endpoints are unknown paths — to every caller, not only to keys pinned there;
+3. API keys pinned to it are refused with `auth.key_workspace_inactive` (404), server keys with the promotion peer's one answer;
+4. `WorkspaceLiveness` answers false for it — the question a scheduler will ask (no consumer exists yet; the interface is the hook);
 5. a super admin's listing shows it greyed with the date.
 
-To a MEMBER a deactivated workspace is indistinguishable from one that never existed, so deactivation is not a signal anybody can read. Reactivation is a super-admin verb and is audited.
+To a MEMBER a deactivated workspace is indistinguishable from one that never existed, so deactivation is not a signal anybody can read. Reactivation is a super-admin verb and is audited. `DeactivationSweepTest` proves the whole table on the live server: every route and every tool, for a deactivated session and for `user`/`endpoint`/`server` keys with a deactivated owner or pin, plus the differential (deactivated vs unknown workspace: same body on every route) and the promotion peer's one body.
 
 There is deliberately NO last-active-workspace guard: decommissioning the final workspace is a legitimate operator act, and it is recoverable — with zero active workspaces the super admin's session resolves no workspace at all, and §11A.1's second null-context exception (#113) keeps the instance verbs, reactivation included, available to exactly that principal.
 
@@ -1512,6 +1526,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v2.27 | 180 (#180) roles R4 — deactivation | **D15, the liveness round.** §11A.3 rewritten around ONE predicate (`PrincipalLiveness`: user active ∧ pinned workspace active, through the §11.4 cache) judged where each credential becomes a principal — `JwtAuthenticationFilter`, `ApiKeyService.validate`, `validateServerKey` — with the serve path refusing a deactivated workspace's endpoint as an unknown path to every caller (before, only keys pinned there were refused). NEW code `auth.principal_deactivated` (401, §9, §13.7's registry) for a deactivated USER on every surface but the promotion peer; `auth.api_key.invalid` no longer means "owner deactivated"; a deactivated session's page navigation lands on `/login?error=inactive`. The WORKSPACE case keeps the 404 rule (`auth.key_workspace_inactive`, `workspace.not_found`). Gap closed: a `server` key pinned to a deactivated workspace authenticated on `/api/v1/promotion/**`. Gate 7 (`DeactivationSweepTest`) proves every route and tool. §4.2, §6.3, §7.3 steps updated; §5A.6's form field corrected to `_csrf` and its dead `auto-per-user` clause removed (#182). |
 | 2026-09-21 | v2.26 | 179 (#179) roles R3 — keys | **D16/D17, the keys round.** §7.4 rewritten: a `user` key is minted by the login/switch hook, one per user per workspace (V31's partial unique index), scopes derived from the role, the plaintext SEALED (`secret_sealed`, the credential-encryption key, AAD = the key id) so the top bar can serve a copy; rotation is delete + sign in again; a user who owes a password change is minted nothing until after it. On-demand `user` minting is refused on every surface — `auth.key_kind_not_mintable` (400, §9, §13.7's registry). §7.6: `MANAGE_OWN_API_KEYS` is RENAMED **`VIEW_OWN_MCP_KEY`** (the self surface: list, `/mine`, the top bar's copy and delete-to-rotate) and creation left it; NEW row **`MANAGE_API_KEYS`** (ws_admin + super admin, `author` scope) takes `POST /api/v1/auth/api-keys`, the `/api-keys` page and its partials, and the endpoint-bindings routes — which moved OUT of `MANAGE_ENDPOINTS` (association is the admin's verb; the by-name request shape is kept, and `api_key_id` joins it). §7.7's kind table restates who mints each kind. §11A.4 rewritten. The console (`/api-console`) is read-only again: the keys card moved to `/api-keys`; the MCP connection card stays, and the top bar's chip links to it. |
 | 2026-09-21 | v2.25 | 178 (#178) roles R2 | **The promoter lens lands** (roles design §3.1, D5): the `lens` cell in §7.6 now has behaviour — a promoter reads pipelines, templates and endpoints through `PromotableView`, [Versioning §10.2](versioning.md#102-the-listing-rule-what-the-ui-shows)'s rule applied on every read surface (REST, UI pages and partials, the rail counts, search, MCP tools and resources); §11A.1 gains the **lens clause** (a hidden object is an absent one; fail closed when the target cannot be read; the rule travels as a value, never a thread-local). The cell alphabet and the §11A role table say so in the present tense. New guard `PromoterLensSweepTest`; new knob `datapipelines.deployment.promotion.inventory-cache-ttl-seconds` ([Configuration §3.19](configuration.md#319-deployment)); new WARN `pipeline.promotion.lens_unavailable` and counter `datapipelines.promotion.lens.inventory` ([Observability §3.4D](observability.md#34d-the-promoter-lens-event-178)). No matrix row changed. |
 | 2026-09-20 | v2.24 | 177 (#177) roles R1 | **§7.6 rewritten role-first** from the ratified [roles design](superpowers/specs/2026-09-20-roles-permissions-design.md) §2: five role columns per row (viewer \| author \| promoter \| ws_admin \| super_admin), every REST row naming its `RestOperation` constant, the key-scope axis as its own smaller table per surface; `ScopeMatrixSpecDriftTest` parses the new shape (a cell alphabet of ✓ ✗ own all lens, a reserved-row list). Rows that changed: `RELEASE_VERSION` and `SWITCH_SERVED_VERSION` promoter → **author** (D8); `EXECUTE_PIPELINE`, `CANCEL_EXECUTION`, the execution reads and `TEST_DATASOURCE` lose the **promoter** (D5; the connection test follows execute — ratified); `TEST_DATASOURCE` ws_admin → execute; `INTROSPECT_DATASOURCE` author → every role ("introspection is reading" — ratified); `WORKSPACES_READ` every member → **ws_admin** (D13). New rows: **`READ_EXECUTIONS`** (D11: own unless workspace admin, promoter none — the execution reads leave `READ_RESOURCES`), **`WORKSPACE_SWITCH`** (the switcher stays every member's), **`PROMOTION_READ`** (owner rule 13: the page is the author's too); a **reserved** audit-log row (D12 — no surface exists). `MUTATE_DATASOURCES` REMOVED: no handler ever declared it (the instance-datasource rule is `DatasourceWorkspaceRules`' on the same route) — the reachability gate's first finding. §11A rewritten to the five roles: ONE role per membership (V29, `WorkspaceRole`), `Capability` → `Permission` (D21), the vocabulary rule; §4.6 and §10.1 say role, not flags (`workspace.member_flags_changed` → `workspace.member_role_changed`). §4.4/§7.4 keys unchanged (R3). |

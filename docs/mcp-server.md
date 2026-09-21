@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.44 (frozen contract — additive-only changes after this point)
+**Status:** v1.45 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-16
@@ -119,8 +119,12 @@ Missing credential (no `DP-API-Key` header and no Bearer `dpk_` token):
   ```
 - MCP session is not established.
 
-Invalid, revoked, expired, or deactivated-owner key:
+Invalid, revoked or expired key:
 - HTTP `401 Unauthorized` with `auth.api_key.invalid` (or `auth.api_key.expired`).
+
+Deactivated owner or deactivated pinned workspace (180, [Auth §11A.3](auth.md#11a3-deactivation)) — judged at validation, so no MCP session is established and even `tools/list` is refused:
+- HTTP `401 Unauthorized` with `auth.principal_deactivated` (the OWNER is deactivated; reactivation restores the key);
+- HTTP `404 Not Found` with `auth.key_workspace_inactive` (the WORKSPACE the key is pinned to is deactivated).
 
 Insufficient scope (e.g., a `read` key calling `pipelines_create`):
 - The transport-level answer is HTTP `403 Forbidden` with `auth.scope.insufficient` when the credential is rejected before dispatch. Once a session is established and a tool is dispatched, a scope failure is returned as a tool result with `isError: true` carrying the same `auth.scope.insufficient` code (§9.2) — agents must handle both.
@@ -1939,7 +1943,8 @@ The error payload inside the tool result matches the [REST API `error` object](r
 
 ### 9.3 Transport errors
 
-- HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked, expired, or its owner was deactivated. Retrying does not help; the user must supply a new key.
+- HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked or expired. Retrying does not help; the user must supply a new key.
+- HTTP 401 (`auth.principal_deactivated`) → the key's owner was deactivated; HTTP 404 (`auth.key_workspace_inactive`) → the workspace the key is pinned to was deactivated. Neither is a key problem: an administrator reactivating the user or the workspace restores the same key.
 - HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Retrying does not help: since 179 a user key's scope IS the owner's role, so the fix is a higher role in that workspace, not a new key.
 - HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
 - HTTP 429 (`rate_limit.unavailable`) → the limiter could not decide and refused the call (fail closed, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Not your budget: honor `Retry-After` and retry, and do not treat it as a signal to reduce your request rate permanently.
@@ -2141,6 +2146,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.45 | 180 (#180) | No tool, no schema, no permission change. §4.2 and §9.3: a deactivated OWNER is `401 auth.principal_deactivated` (new §13.7 code; was folded into `auth.api_key.invalid`), a deactivated PIN `404 auth.key_workspace_inactive`; both refused at validation, so `tools/list` is refused too ([Auth §11A.3](auth.md#11a3-deactivation)). |
 | 2026-09-21 | v1.44 | 179 (#179) | No tool, no schema, no permission change on the MCP surface. The KEY an agent presents changed how it is born: §1/§2/§3 (authentication model, principle 3, the key bullet list) now say the user's key is minted at sign-in (D16) and copied from the top bar, one per workspace, its reach the owner's role re-read per request; the "Agent / API key" form label is gone with on-demand minting. §4.2's troubleshooting line points at the role, not a re-mint. |
 | 2026-09-19 | v1.43 | 172 (#172) | §6.2.23 `endpoints_create` description and `path` schema text: published endpoints serve at `/api/<category>/<version>/<path…>` (R-EP5) — the category is the caller's namespace with `v[0-9]+` and `api` reserved (`endpoint.path_reserved`), the version free-form, one leading `/api` prefix normalised away; `endpoints_*` responses' `url` carries the full served URL. No tool added, removed or renamed; no scope change. |
 | 2026-09-18 | v1.42 | 171 (#171) | No new tools, no schema change (`inputSchema` unaffected). **§6.2.23 `endpoints_create`** description text updated: a `DML`/`DDL` node whose `source` is `tempdb` is now side-effect-free and publishable — previously every `DML`/`DDL` node was refused regardless of source. Same rule, same code (`endpoint.pipeline_not_readonly`), same service both REST and this tool call ([REST API §19.2](rest-api.md#192-what-may-be-published)). |
