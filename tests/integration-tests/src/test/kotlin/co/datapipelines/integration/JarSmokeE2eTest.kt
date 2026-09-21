@@ -333,6 +333,7 @@ class JarSmokeE2eTest {
 
     // ------------------------------------------------------------------ seeding + auth
 
+    @Suppress("LongMethod") // the seed IS the fixture: one statement per table, spelled out
     private fun seed() {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { c ->
             c.createStatement().use { s ->

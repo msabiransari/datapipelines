@@ -385,7 +385,8 @@ class PromotionTwoDeploymentE2eTest {
         // slot for the admin, so the wrong-kind probe gets its own owner.
         uatJdbc.execute(
             "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)" +
-                " VALUES ('$WRONG_KIND_USER_ID', 'e2e-wrong-kind@datapipelines.test', 'E2E WrongKind', 'test', 'e2e-wrong-sub', TRUE, FALSE)",
+                " VALUES ('$WRONG_KIND_USER_ID', 'e2e-wrong-kind@datapipelines.test', 'E2E WrongKind'," +
+                " 'test', 'e2e-wrong-sub', TRUE, FALSE)",
         )
         val wrongKind = seedServerKeyOnUat("an ordinary agent key", kind = "user", ownerId = WRONG_KIND_USER_ID)
         val revoked = seedServerKeyOnUat("revoked receiver", revoked = true)
