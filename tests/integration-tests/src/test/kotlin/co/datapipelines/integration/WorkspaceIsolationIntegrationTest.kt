@@ -280,11 +280,14 @@ class WorkspaceIsolationIntegrationTest {
         // of that workspace by construction (keys are issued by members and pinned there),
         // so it reveals nothing, and it is what an operator greps the audit log for.
         //
-        // A FRESH key, seeded here and never validated before, so no AuthCache entry can
-        // serve this test a pre-deactivation world.
+        // A FRESH key, seeded here and never validated before, so no AuthCache key entry can
+        // serve this test a pre-deactivation world — and the flip goes through the PRODUCT's
+        // verb (a super admin's `POST …/deactivate`), because since 180 the workspace's
+        // liveness is cached by id for the TTL and `WorkspaceService.deactivate` is what
+        // evicts it. A raw SQL flip models a world the service never produces.
         ensureSeeded()
         seedKey(GLOBEX_INACTIVE_KEY, WS_GLOBEX)
-        setDeactivated(WS_GLOBEX, true)
+        setDeactivated(port, "globex", true).statusCode(200)
         try {
             // (i) REST
             given()
@@ -311,7 +314,7 @@ class WorkspaceIsolationIntegrationTest {
                 .statusCode(404)
                 .body("error.code", org.hamcrest.Matchers.equalTo("auth.key_workspace_inactive"))
         } finally {
-            setDeactivated(WS_GLOBEX, false)
+            setDeactivated(port, "globex", false)
         }
 
         // (iii) D-R10's "deactivate, never delete" — the KDoc's promise is that
@@ -375,6 +378,9 @@ class WorkspaceIsolationIntegrationTest {
         // 179 (V31): one live `user` key per (user, workspace) — the deactivation test's
         // second globex key needs its OWN owner, a globex member.
         private const val DAVE = "ddd00000-0000-0000-0000-000000000004"
+
+        /** The instance's super admin (no membership anywhere) — the one principal who may deactivate a workspace. */
+        private const val EVE = "eee00000-0000-0000-0000-000000000005"
         private const val WS_ACME = "aca00000-0000-0000-0000-000000000001"
         private const val WS_GLOBEX = "b0b00000-0000-0000-0000-000000000002"
         private const val PIPE_ACME = "a1b00000-0000-0000-0000-000000000001"
@@ -485,7 +491,8 @@ class WorkspaceIsolationIntegrationTest {
                         ('$ALICE', 'alice@acme.test', 'Alice', 'test', 'alice-sub', TRUE, FALSE),
                         ('$BOB', 'bob@globex.test', 'Bob', 'test', 'bob-sub', TRUE, FALSE),
                         ('$CAROL', 'carol@nowhere.test', 'Carol', 'test', 'carol-sub', TRUE, FALSE),
-                        ('$DAVE', 'dave@globex.test', 'Dave', 'test', 'dave-sub', TRUE, FALSE)
+                        ('$DAVE', 'dave@globex.test', 'Dave', 'test', 'dave-sub', TRUE, FALSE),
+                        ('$EVE', 'eve@instance.test', 'Eve', 'test', 'eve-sub', TRUE, TRUE)
                     """.trimIndent(),
                 )
                 statement.execute(
@@ -631,17 +638,24 @@ class WorkspaceIsolationIntegrationTest {
         }
 
         /** D-R10's reversible switch, flipped directly — the surface under test is the keys', not the admin verb's. */
+
+        /** Deactivates or reactivates [name] the way an operator does — the super admin's REST verb (D-R10). */
         private fun setDeactivated(
-            workspaceId: String,
+            port: Int,
+            name: String,
             deactivated: Boolean,
-        ) {
-            DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-                connection.createStatement().use { statement ->
-                    statement.execute(
-                        "UPDATE workspaces SET deactivated_at = ${if (deactivated) "NOW()" else "NULL"} WHERE id = '$workspaceId'",
-                    )
-                }
-            }
+        ): io.restassured.response.ValidatableResponse {
+            val csrf = "test-csrf-token"
+            return given()
+                .port(port)
+                .cookie(SESSION_COOKIE, sessionJwt(EVE, "eve@instance.test", null))
+                .cookie(CSRF_COOKIE, csrf)
+                .header(CSRF_HEADER, csrf)
+                .contentType(ContentType.JSON)
+                .body("{}")
+                .`when`()
+                .post("/api/v1/workspaces/$name/${if (deactivated) "deactivate" else "reactivate"}")
+                .then()
         }
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
