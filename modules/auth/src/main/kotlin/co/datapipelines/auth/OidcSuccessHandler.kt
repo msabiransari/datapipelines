@@ -115,11 +115,18 @@ class OidcSuccessHandler(
             rejectOidc(request, response, registrationId, reason = "email_not_verified", email = email)
             return true
         }
-        if (claims["email_verified"] == null && trustWithoutClaim) {
+        if (trustWithoutClaim && !isVerifiedClaim(claims["email_verified"])) {
+            // The knob carried the decision — absent claim OR a shape this code does not
+            // recognise. Both are "the provider did not vouch", and both are audited.
             auditLogger.log(
                 event = "auth.login.email_verified_assumed",
                 sourceIp = clientAddressResolver.clientAddressOf(request),
-                details = mapOf("provider" to registrationId, "email" to email),
+                details =
+                    mapOf(
+                        "provider" to registrationId,
+                        "email" to email,
+                        "claim" to if (claims["email_verified"] == null) "absent" else "unrecognized",
+                    ),
             )
         }
         return false
@@ -216,8 +223,9 @@ class OidcSuccessHandler(
      * `trust-email-without-verified-claim` knob (§5.1), which this function takes as
      * [trustWithoutVerifiedClaim]. A claim that is PRESENT and false is refused whatever
      * the knob says. The claim arrives as a JSON boolean from most providers and as the
-     * string `"false"` from a few, so both are honored; an unrecognized shape is treated
-     * as absent (knob-aware) rather than guessed about.
+     * string `"true"`/`"false"` from a few, so both are honored; any other shape — a
+     * number, an object, a string such as `"yes"` — is treated as absent (knob-aware),
+     * never as verified.
      */
     private fun isEmailUnverified(
         claim: Any?,
@@ -226,9 +234,28 @@ class OidcSuccessHandler(
         when (claim) {
             null -> !trustWithoutVerifiedClaim
             is Boolean -> !claim
-            is String -> claim.equals("false", ignoreCase = true)
+            is String -> stringClaimUnverified(claim, trustWithoutVerifiedClaim)
             else -> !trustWithoutVerifiedClaim
         }
+
+    /**
+     * `"true"` verifies, `"false"` refuses; any other string (`"yes"`, `"0"`, `""`) is not a
+     * verification — knob-aware like an absent claim, never read as verified (#187 review).
+     */
+    private fun stringClaimUnverified(
+        claim: String,
+        trustWithoutVerifiedClaim: Boolean,
+    ): Boolean =
+        if (claim.equals("true", ignoreCase = true)) {
+            false
+        } else if (claim.equals("false", ignoreCase = true)) {
+            true
+        } else {
+            !trustWithoutVerifiedClaim
+        }
+
+    /** The two shapes that mean "verified": JSON `true` or the string `"true"`. */
+    private fun isVerifiedClaim(claim: Any?): Boolean = claim == true || (claim is String && claim.equals("true", ignoreCase = true))
 
     private fun rejectOidc(
         request: HttpServletRequest,

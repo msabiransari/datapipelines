@@ -224,6 +224,22 @@ class AuthLayoutRenderTest {
      * the form carries is not the one the filter expects.
      */
     @Test
+    fun `a refused identity link lands on a banner that says what to do (#187 review)`() {
+        val html =
+            engine.process(
+                "login",
+                webContext().apply {
+                    fillLogin()
+                    setVariable("error", "identity_mismatch")
+                },
+            )
+
+        html shouldContain "already linked to a different sign-in identity"
+        html shouldContain "Ask an administrator to reset it"
+        html shouldNotContain "Your account is inactive"
+    }
+
+    @Test
     fun `the login form renders exactly one csrf hidden input`() {
         val html = engine.process("login", securityWebContext().apply { fillLogin() })
 

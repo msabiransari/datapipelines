@@ -122,6 +122,51 @@ class OidcSuccessHandlerTest {
     }
 
     @Test
+    fun `a string claim that is not true or false is refused by default - it is not a verification (#187 review)`() {
+        for (shape in listOf("yes", "0", "", "verified")) {
+            val response = run(baseClaims(extra = mapOf("email_verified" to shape)))
+
+            response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldBeNull()
+            response.redirectedUrl shouldBe "/login?error=oidc_error"
+        }
+        verify(exactly = 0) { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an unrecognized claim shape is accepted only under the knob, and the assumption is audited (#187 review)`() {
+        every { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) } returns
+            UserService.Provisioned(user(), created = false)
+        every { jwtService.issue(any(), any(), any()) } returns "jwt"
+        val props =
+            authPropertiesWithProvider(
+                AuthProperties.Provider(
+                    name = "keycloak",
+                    clientId = "dp-client",
+                    clientSecret = "dp-secret",
+                    issuerUri = "https://sso.test",
+                    trustEmailWithoutVerifiedClaim = true,
+                ),
+            )
+
+        val response = run(baseClaims(extra = mapOf("email_verified" to 1)), props)
+
+        response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldNotBeNull()
+        verify(exactly = 1) { auditLogger.log("auth.login.email_verified_assumed", any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `the string true is a verification - no knob needed, nothing assumed (#187 review)`() {
+        every { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) } returns
+            UserService.Provisioned(user(), created = false)
+        every { jwtService.issue(any(), any(), any()) } returns "jwt"
+
+        val response = run(baseClaims(extra = mapOf("email_verified" to "TRUE")))
+
+        response.getCookie(OidcSuccessHandler.SESSION_COOKIE).shouldNotBeNull()
+        verify(exactly = 0) { auditLogger.log("auth.login.email_verified_assumed", any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `a claim that is PRESENT and false is refused whatever the knob says (#187)`() {
         val props =
             authPropertiesWithProvider(

@@ -141,6 +141,9 @@
         <div th:if="${#strings.equals(error, 'locked')}" class="app-alert app-alert-danger u-mb-md">
           This account is temporarily locked. Try again later or contact an administrator.
         </div>
+        <div th:if="${#strings.equals(error, 'identity_mismatch')}" class="app-alert app-alert-danger u-mb-md">
+          This email is already linked to a different sign-in identity. Ask an administrator to reset it.
+        </div>
       </th:block>
 
       <!-- Local password form (auth.md §5A) — rendered only when local accounts are
