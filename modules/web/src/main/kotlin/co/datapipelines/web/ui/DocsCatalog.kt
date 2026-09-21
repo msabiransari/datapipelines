@@ -133,6 +133,14 @@ class DocsCatalog(
             HtmlRenderer
                 .builder()
                 .extensions(EXTENSIONS)
+                // #190: raw HTML in a doc renders as TEXT. The output reaches `th:utext` in
+                // docs/doc.html and doc-public.html — the last place that trusted a file's
+                // markup verbatim — and every table the specs need is a Markdown table (the
+                // GFM extension above). Measured before the flip (188, the render diff in
+                // its evidence): across the 23 packaged docs the only output that changed
+                // was three bare placeholders in prose — `<time>`, `<main>`, `<cur>` —
+                // which the old renderer had emitted as raw TAGS; they now read as text.
+                .escapeHtml(true)
                 .attributeProviderFactory { HeadingIdProvider(seen, anchors) }
                 .build()
         val html = renderer.render(document)
