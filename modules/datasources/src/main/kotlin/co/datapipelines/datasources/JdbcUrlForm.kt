@@ -63,12 +63,29 @@ object JdbcUrlForm {
     ): Form {
         val subName = connectPartOf(JdbcUrlGuard.subNameOf(jdbcUrl))
         return when (dialect) {
-            Dialect.H2 -> h2(subName)
-            Dialect.DUCKDB -> if (subName.isBlank() || subName.equals(":memory:", ignoreCase = true)) Form.InProcessMemory else duckdb(subName)
-            Dialect.SQLITE -> sqlite(subName)
+            Dialect.H2 -> {
+                h2(subName)
+            }
+
+            Dialect.DUCKDB -> {
+                if (subName.isBlank() ||
+                    subName.equals(":memory:", ignoreCase = true)
+                ) {
+                    Form.InProcessMemory
+                } else {
+                    duckdb(subName)
+                }
+            }
+
+            Dialect.SQLITE -> {
+                sqlite(subName)
+            }
+
             // Server dialects — and LAKE, whose DuckDB engine is the dp-lake posture (§4.1) and
             // whose registration rules this classification is not the authority for.
-            else -> Form.Server
+            else -> {
+                Form.Server
+            }
         }
     }
 
@@ -76,11 +93,15 @@ object JdbcUrlForm {
         val lower = subName.lowercase()
         return when {
             lower.startsWith("mem:") -> Form.InProcessMemory
+
             lower.startsWith("file:") -> Form.InProcessFile(subName.substring("file:".length))
+
             lower.startsWith("tcp:") || lower.startsWith("ssl:") -> Form.Server
+
             // A `<word>:` prefix this classification does not know — the H2 file-system
             // pseudo-protocols and anything a driver upgrade adds — is refused, never guessed.
             subName.matches(H2_PREFIXED) -> Form.Unknown(subName.substringBefore(':'))
+
             // What remains is a bare path (absolute, relative, or `~`-prefixed) — H2 treats it
             // as a file database, so the file rules decide whether it is acceptable.
             else -> Form.InProcessFile(subName)
@@ -98,8 +119,14 @@ object JdbcUrlForm {
     private fun sqlite(subName: String): Form {
         val lower = subName.lowercase()
         return when {
-            lower == ":memory:" -> Form.InProcessMemory
-            lower.startsWith(":resource:") -> Form.Unknown(":resource:")
+            lower == ":memory:" -> {
+                Form.InProcessMemory
+            }
+
+            lower.startsWith(":resource:") -> {
+                Form.Unknown(":resource:")
+            }
+
             // The xerial driver honours SQLite's `file:` URI form — the same path rules apply
             // to what follows it.
             lower.startsWith("file:") -> {
@@ -107,7 +134,9 @@ object JdbcUrlForm {
                 if (rest.equals(":memory:", ignoreCase = true)) Form.InProcessMemory else Form.InProcessFile(rest)
             }
 
-            else -> Form.InProcessFile(subName)
+            else -> {
+                Form.InProcessFile(subName)
+            }
         }
     }
 

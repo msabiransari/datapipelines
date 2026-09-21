@@ -144,7 +144,8 @@ class SqlProbe(
         // The scratch user gets NO grants: a probe runs one classified SELECT, which needs none.
         H2RestrictedSession
             .open(scratch.jdbcUrl, user = SCRATCH_USER)
-            .firstConnection.use { connection ->
+            .firstConnection
+            .use { connection ->
                 try {
                     connection.prepareStatement(positionalSql).use { prepared ->
                         prepared.queryTimeout = timeout

@@ -86,7 +86,8 @@ class SqlProbeScratchContainmentTest {
         // The other half of the trade: containment that broke the scratch check would be no fix.
         val outcome = probe.probeScratch("SELECT t.hr FROM (VALUES (0),(1),(2)) AS t(hr) ORDER BY t.hr")
 
-        (outcome as ScratchProbeOutcome.Rows).result.rows.rows.size shouldBe 3
+        (outcome as ScratchProbeOutcome.Rows)
+            .result.rows.rows.size shouldBe 3
     }
 
     @Test
@@ -100,16 +101,20 @@ class SqlProbeScratchContainmentTest {
         val secret = kotlin.io.path.createTempFile("probe-scratch", ".txt")
         try {
             secret.toFile().writeText(token)
-            DriverManager.getConnection("jdbc:h2:mem:probe_control_${UUID.randomUUID()}", "sa", "").use { admin ->
-                admin.createStatement().use { st ->
-                    st.executeQuery("SELECT FILE_READ('${secret.toAbsolutePath()}', 'UTF-8')").use { rows ->
-                        rows.next()
-                        rows.getString(1) shouldContain token
-                    }
-                }
-            }
+            readAsAdmin("SELECT FILE_READ('${secret.toAbsolutePath()}', 'UTF-8')") shouldContain token
         } finally {
             secret.toFile().delete()
         }
     }
+
+    /** Runs [sql] on a throwaway `sa` session — the privilege level the scratch used to run as. */
+    private fun readAsAdmin(sql: String): String =
+        DriverManager.getConnection("jdbc:h2:mem:probe_control_${UUID.randomUUID()}", "sa", "").use { admin ->
+            admin.createStatement().use { st ->
+                st.executeQuery(sql).use { rows ->
+                    rows.next()
+                    rows.getString(1)
+                }
+            }
+        }
 }

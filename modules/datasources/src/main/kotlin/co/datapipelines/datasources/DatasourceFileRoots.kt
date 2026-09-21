@@ -46,33 +46,74 @@ class DatasourceFileRoots(
      * The reason text names the CONFIG KEY an operator would change, never a path the caller
      * was not told about — the caller wrote the path; the roots are the deployment's.
      */
-    fun refusalFor(rawPath: String): String? {
-        if (rawPath.isBlank()) {
-            return "a file-backed URL must carry a path"
-        }
-        if (rawPath.startsWith("~")) {
-            return "a file-backed URL path may not begin with '~' (the driver's home-directory expansion is not evaluated)"
-        }
-        if (CONTAINS_ENCODED_SEPARATOR.containsMatchIn(rawPath)) {
-            return "a file-backed URL path may not carry URL-encoded separators (%2F, %5C)"
-        }
-        if (rawPath.split('/', '\\').any { it == ".." }) {
-            return "a file-backed URL path may not contain '..' segments"
-        }
-        val path =
-            try {
-                Path.of(rawPath)
-            } catch (e: java.nio.file.InvalidPathException) {
-                return "the file-backed URL path is not a valid path: ${e.reason}"
+    fun refusalFor(rawPath: String): String? = shapeRefusal(rawPath) ?: containmentRefusal(rawPath)
+
+    /** The raw-text checks — every one a known escape shape, refused before normalization is trusted. */
+    private fun shapeRefusal(rawPath: String): String? =
+        when {
+            rawPath.isBlank() -> {
+                "a file-backed URL must carry a path"
             }
-        if (!path.isAbsolute) {
-            return "a file-backed URL path must be absolute, not '$rawPath'"
+
+            rawPath.startsWith("~") -> {
+                "a file-backed URL path may not begin with '~' (the driver's home-directory expansion is not evaluated)"
+            }
+
+            CONTAINS_ENCODED_SEPARATOR.containsMatchIn(rawPath) -> {
+                "a file-backed URL path may not carry URL-encoded separators (%2F, %5C)"
+            }
+
+            rawPath.split('/', '\\').any { it == ".." } -> {
+                "a file-backed URL path may not contain '..' segments"
+            }
+
+            else -> {
+                null
+            }
         }
-        if (roots.isEmpty()) {
-            return "no datasource file roots are declared — set ${DatasourceFileRootsProperties.CONFIG_KEY} " +
-                "to register file-backed datasources (H2 file:, SQLite, DuckDB); without it only server URLs and in-memory engines are registrable"
+
+    /** The filesystem checks: absolute, an existing parent (symlinks resolved), under a declared root. */
+    private fun containmentRefusal(rawPath: String): String? {
+        val path = pathOrNull(rawPath)
+        val parent = path?.parent
+        return when {
+            path == null -> {
+                "the file-backed URL path is not a valid path"
+            }
+
+            !path.isAbsolute -> {
+                "a file-backed URL path must be absolute, not '$rawPath'"
+            }
+
+            roots.isEmpty() -> {
+                "no datasource file roots are declared — set ${DatasourceFileRootsProperties.CONFIG_KEY} " +
+                    "to register file-backed datasources (H2 file:, SQLite, DuckDB); " +
+                    "without it only server URLs and in-memory engines are registrable"
+            }
+
+            parent == null -> {
+                "a file-backed URL path must name a file below a directory"
+            }
+
+            else -> {
+                underRootRefusal(path, parent, rawPath)
+            }
         }
-        val parent = path.parent ?: return "a file-backed URL path must name a file below a directory"
+    }
+
+    private fun pathOrNull(rawPath: String): Path? =
+        try {
+            Path.of(rawPath)
+        } catch (_: java.nio.file.InvalidPathException) {
+            null
+        }
+
+    /** The parent must EXIST (its symlinks are resolved); the resolved file must sit under a root. */
+    private fun underRootRefusal(
+        path: Path,
+        parent: Path,
+        rawPath: String,
+    ): String? {
         val realParent =
             try {
                 parent.toRealPath()

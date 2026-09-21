@@ -74,7 +74,8 @@ class H2InProcessPoolTest {
         try {
             ConnectionPoolManager.buildHikariPool(datasource).use { pool ->
                 pool.leaseConnection().use { connection ->
-                    val read = shouldThrow<SQLException> { query(connection, "SELECT FILE_READ('${secret.absolutePathString()}', 'UTF-8')") }
+                    val read =
+                        shouldThrow<SQLException> { query(connection, "SELECT FILE_READ('${secret.absolutePathString()}', 'UTF-8')") }
                     val alias =
                         shouldThrow<SQLException> {
                             connection

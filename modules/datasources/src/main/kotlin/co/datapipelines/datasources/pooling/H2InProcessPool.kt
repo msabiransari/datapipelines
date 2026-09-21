@@ -79,7 +79,12 @@ internal object H2InProcessPool {
             val pool = HikariDataSource(config)
             session.firstConnection.close()
             return HikariConnectionPool(datasource.name, pool)
-        } catch (e: RuntimeException) {
+        } catch (
+            // HikariDataSource construction and PoolInitializationException are RuntimeExceptions
+            // (the §8.1 probe catches the same family for the same reason): whichever half failed,
+            // the session's first connection must not outlive a pool that never came up.
+            @Suppress("TooGenericExceptionCaught") e: RuntimeException,
+        ) {
             session.firstConnection.close()
             throw e
         }

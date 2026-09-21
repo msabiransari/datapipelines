@@ -76,12 +76,21 @@ class DatasourceInProcessRegistrationE2eTest {
                 val (status, body) = response
                 val outcome =
                     when {
-                        status == 201 -> RoleOutcome.ACCEPT
-                        expected == RoleOutcome.REFUSE_ROOTS && body.contains("datasource.validation.jdbc_url_malformed") ->
-                            RoleOutcome.REFUSE_ROOTS
+                        status == 201 -> {
+                            RoleOutcome.ACCEPT
+                        }
 
-                        body.contains("datasource.validation.workspace_forbidden") -> RoleOutcome.REFUSE
-                        else -> RoleOutcome.UNEXPECTED
+                        expected == RoleOutcome.REFUSE_ROOTS && body.contains("datasource.validation.jdbc_url_malformed") -> {
+                            RoleOutcome.REFUSE_ROOTS
+                        }
+
+                        body.contains("datasource.validation.workspace_forbidden") -> {
+                            RoleOutcome.REFUSE
+                        }
+
+                        else -> {
+                            RoleOutcome.UNEXPECTED
+                        }
                     }
                 if (outcome == RoleOutcome.ACCEPT) acceptances++ else refusals++
                 matrix.append("  %-18s %-12s -> %d %s\n".format(case.label, role, status, outcome))
@@ -171,8 +180,7 @@ class DatasourceInProcessRegistrationE2eTest {
                     mapper.writeValueAsString(
                         mapOf("name" to name, "dialect" to "H2", "jdbc_url" to jdbcUrl, "username" to "sa"),
                     ),
-                )
-                .`when`()
+                ).`when`()
                 .put("/api/v1/datasources/$name")
                 .thenReturn()
         return response.statusCode() to response.body().asString()

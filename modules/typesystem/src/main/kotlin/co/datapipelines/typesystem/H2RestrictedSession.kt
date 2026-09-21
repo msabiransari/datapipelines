@@ -138,6 +138,10 @@ class H2RestrictedSession internal constructor(
             return bytes.joinToString("") { byte -> "%02x".format(byte) }
         }
 
+        // The swallow is the point, not an oversight: the raw message carries the cleartext
+        // password (H2 quotes the failing statement); the sanitized rethrow keeps SQLState +
+        // vendor code and drops the text.
+        @Suppress("SwallowedException")
         private fun createRestrictedUser(
             bootstrap: Connection,
             user: String,

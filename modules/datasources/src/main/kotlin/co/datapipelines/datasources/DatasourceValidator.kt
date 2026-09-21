@@ -216,7 +216,7 @@ class DatasourceValidator(
         errors: MutableList<ValidationError>,
     ) {
         when (val form = JdbcUrlForm.classify(datasource.dialect, datasource.jdbcUrl)) {
-            is JdbcUrlForm.Form.Unknown ->
+            is JdbcUrlForm.Form.Unknown -> {
                 errors +=
                     error(
                         DatasourceErrorCodes.JDBC_URL_MALFORMED,
@@ -225,13 +225,18 @@ class DatasourceValidator(
                             "supported in-process forms are H2 mem:/file:/tcp:/ssl:, DuckDB :memory:/file, " +
                             "SQLite :memory:/file; unrecognised forms are refused rather than guessed.",
                     )
+            }
 
-            is JdbcUrlForm.Form.InProcessFile ->
+            is JdbcUrlForm.Form.InProcessFile -> {
                 fileRoots.refusalFor(form.rawPath)?.let { reason ->
                     errors += error(DatasourceErrorCodes.JDBC_URL_MALFORMED, "jdbc_url", reason)
                 }
+            }
 
-            else -> Unit
+            // Server and in-memory forms carry no file path to check — an empty branch is what
+            // makes the `when` exhaustive over the sealed form type rather than defaulted.
+            else -> {
+            }
         }
     }
 
