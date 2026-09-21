@@ -569,6 +569,18 @@ class TaxiVsRideshareFourEngineE2eTest {
     ) {
         val pg = metadata
         DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
+            // 179 (D16/V31): `firstLogin` minted the user's login key in this workspace
+            // already, and one live `user` key per (user, workspace) is a UNIQUE INDEX now.
+            // The fixture's known-plaintext key replaces it (revoke, never delete:
+            // audit_log.key_id keeps resolving).
+            connection
+                .prepareStatement(
+                    "UPDATE api_keys SET is_revoked = TRUE WHERE user_id = ? AND workspace_id = ? AND kind = 'user' AND is_revoked = FALSE",
+                ).use { ps ->
+                    ps.setObject(1, userId)
+                    ps.setObject(2, workspaceId)
+                    ps.executeUpdate()
+                }
             // D-R12: this key can do at most what its ISSUER can do in the pinned workspace.
             // The issuer is the freshly joined VIEWER of `demo` (D-R11), and a viewer executes
             // (D-R3) — which is the whole capability this suite needs from it.
