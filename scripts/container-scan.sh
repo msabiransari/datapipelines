@@ -6,8 +6,10 @@
 #
 # Tool: trivy, PINNED. Version verified 2026-08-15 against the GitHub releases
 # API (aquasecurity/trivy, latest release). Install method: release tarball
-# downloaded into .tools/ (git-ignored, OUTSIDE build/ so `gradlew clean` does
-# not force a re-download), SHA256-checked against the release's own checksums
+# downloaded into the machine-level scanner cache (scan_tools_dir in
+# scripts/lib/scan-tools.sh — shared by every checkout and worktree since #193;
+# OUTSIDE build/ so `gradlew clean` does not force a re-download),
+# SHA256-checked against the release's own checksums
 # file, reused on later runs. Bump by editing TRIVY_VERSION after verifying the
 # new release the same way.
 #

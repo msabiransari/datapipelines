@@ -7,9 +7,11 @@
 #
 # Tool: gitleaks, PINNED. Version verified 2026-08-15 against the GitHub
 # releases API (gitleaks/gitleaks, latest release). Install method: the release
-# tarball is downloaded from the release page into .tools/ (git-ignored,
-# OUTSIDE build/ so `gradlew clean` does not force a re-download — and does not
-# break offline commits: the pre-commit hook execs this script),
+# tarball is downloaded from the release page into the machine-level scanner
+# cache (scan_tools_dir in scripts/lib/scan-tools.sh — shared by every checkout
+# and worktree since #193; OUTSIDE build/ so `gradlew clean` does not force a
+# re-download — and does not break offline commits: the pre-commit hook execs
+# this script),
 # SHA256-checked against the release's own checksums file, and reused on later
 # runs. Bump by editing GITLEAKS_VERSION after verifying the new release the
 # same way.
