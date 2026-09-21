@@ -47,6 +47,9 @@ class ApiKeyRows(
     ) {
         /** A key that can still authenticate — the only kind with a revoke affordance. */
         val isLive: Boolean get() = !isRevoked && !isExpired
+
+        /** D17: the UI name — `endpoint` reads "API key" everywhere a person looks. */
+        val kindLabel: String get() = if (kind == ApiKeyKind.ENDPOINT.wire) "API key" else "Server key"
     }
 
     /**

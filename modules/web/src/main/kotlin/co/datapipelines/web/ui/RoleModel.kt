@@ -171,7 +171,8 @@ object RoleModel {
         )
     }
 
-    private val NO_SHELL = Shell(adminUsers = false, adminMembers = false, executions = false, promotion = false, workspaces = false, apiKeys = false)
+    private val NO_SHELL =
+        Shell(adminUsers = false, adminMembers = false, executions = false, promotion = false, workspaces = false, apiKeys = false)
 
     /**
      * Stamps [roles] into [model] under the names every template reads. Called by each screen's

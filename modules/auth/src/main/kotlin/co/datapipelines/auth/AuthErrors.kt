@@ -182,7 +182,7 @@ class ApiKeyInvalidException(
         AuthErrorCodes.API_KEY_INVALID,
         HTTP_UNAUTHORIZED,
         reason,
-        "That API key is not valid. Generate a new one from the API Keys page.",
+        "That key is not valid. Your MCP key rotates by deleting it in the top bar and signing in again; an API key is created on /api-keys by a workspace admin.",
     )
 
 /**
@@ -208,7 +208,7 @@ class ApiKeyExpiredException :
         AuthErrorCodes.API_KEY_EXPIRED,
         HTTP_UNAUTHORIZED,
         "API key past expiration",
-        "That API key has expired. Generate a new one from the API Keys page.",
+        "That key has expired. Your MCP key rotates by deleting it in the top bar and signing in again; an API key is created on /api-keys by a workspace admin.",
     )
 
 class SessionInvalidException(

@@ -36,6 +36,7 @@
       <thead>
       <tr>
         <th>Key</th>
+        <th>Kind</th>
         <th>Created by</th>
         <th>Associated endpoints</th>
         <th>Created</th>
@@ -47,7 +48,7 @@
       <tbody id="keys-table-body">
       <th:block th:fragment="keyRows(keys)">
         <tr th:if="${keys == null || keys.isEmpty()}">
-          <td colspan="7">
+          <td colspan="8">
             <div class="app-empty">
               <b>No API keys</b>
               An API key is how a program calls this workspace's published endpoints. Create one with
@@ -60,6 +61,7 @@
             <span class="app-name" th:text="${k.name}">ci</span>
             <span class="app-path ds-mono" th:text="${k.prefix}">dpk_RGAXQ7T2…</span>
           </td>
+          <td><span class="app-chip app-chip-mono" th:text="${k.kindLabel}">API key</span></td>
           <td><span th:text="${k.createdBy}">Alice</span></td>
           <td>
             <!-- The root binding reads as the whole-tree wildcard, not a doubled slash: it
@@ -68,7 +70,8 @@
               <span class="app-chip app-chip-mono" th:each="p : ${k.boundPaths}"
                     th:text="${p == '/'} ? '/**' : ${p} + '/**'">/nyc/**</span>
             </span>
-            <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths)}">none — authorises nothing</span>
+            <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths) and k.kind == 'endpoint'}">none — authorises nothing</span>
+            <span class="app-card-note" th:if="${k.kind == 'server'}">promotion routes</span>
           </td>
           <td><span th:title="${k.createdAbsolute}" th:text="${k.createdRelative}">3 days ago</span></td>
           <td>
@@ -83,7 +86,7 @@
             <!-- The verbs render only for the roles the route admits anyway
                  (MANAGE_API_KEYS: ws_admin + super admin) — belt and braces for a fragment
                  that could one day render off its route. -->
-            <details class="app-assoc" th:if="${k.isLive and (canAdminWorkspace == true or isSuperAdmin == true)}">
+            <details class="app-assoc" th:if="${k.isLive and k.kind == 'endpoint' and (canAdminWorkspace == true or isSuperAdmin == true)}">
               <summary class="ds-button ds-button-ghost ds-button-sm">Edit associations</summary>
               <form class="app-assoc-form" th:if="${canAdminWorkspace == true or isSuperAdmin == true}"
                     th:attr="hx-post=@{/partials/api-keys/{id}/bindings(id=${k.id})}"

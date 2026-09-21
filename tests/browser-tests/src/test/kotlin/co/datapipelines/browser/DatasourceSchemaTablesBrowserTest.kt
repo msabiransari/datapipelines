@@ -34,9 +34,11 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
     fun `a viewer opens a discovered-schema datasource's tables and columns, and the LAKE registry`() {
         startTrace()
         val admin = seedLocalUser(uniqueEmail("dst-admin-" + suffix()), generatedPassword("pw"), mustChange = false)
+        // 179 (V31): the fixture key exists BEFORE the login — the login's own mint then
+        // loses the unique-index race by design and this key stays the suite's credential.
+        val key = seedApiKey(admin.email)
         login(admin.email, admin.oneTimePassword)
         page.waitForURL("**/dashboard")
-        val key = seedApiKey(admin.email)
 
         val sqliteName = "sqlite-" + suffix()
         registerSqliteDatasource(key, sqliteName, sqliteFile)
@@ -104,7 +106,9 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
         )
         val columnNames = page.locator(".tpl-leaf-static .tpl-label").allInnerTexts()
         columnNames shouldContainExactly listOf("location_id", "borough", "zone")
-        page.locator("[data-verb]").count() shouldBe 0
+        // 179: the screen's verbs — the top bar's MCP-key chip (every role, own key) is
+        // chrome, not this screen, so the count reads the main region only.
+        page.locator("#app-main [data-verb]").count() shouldBe 0
         screenshot(page, "dst-sqlite-columns")
     }
 
@@ -135,7 +139,7 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
         )
         val trips = page.locator(".tpl-leaf-static", Page.LocatorOptions().setHasText("trips")).first()
         trips.locator(".tpl-label").innerText() shouldBe "trips"
-        page.locator("[data-verb]").count() shouldBe 0
+        page.locator("#app-main [data-verb]").count() shouldBe 0
         screenshot(page, "dst-lake-registry")
     }
 
@@ -164,6 +168,18 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
                             rs.next()
                             rs.getObject(1, UUID::class.java)
                         }
+                    }
+                // 179 (V31): the sign-in minted the user's login key in this workspace
+                // already (one live `user` key per pair is a UNIQUE INDEX now) — the
+                // fixture's key replaces it. Revoke, never delete: audit_log.key_id keeps
+                // resolving.
+                connection
+                    .prepareStatement(
+                        "UPDATE api_keys SET is_revoked = TRUE WHERE user_id = ? AND kind = 'user' AND is_revoked = FALSE" +
+                            " AND workspace_id = 'defa0000-0000-0000-0000-000000000001'",
+                    ).use { ps ->
+                        ps.setObject(1, userId)
+                        ps.executeUpdate()
                     }
                 connection
                     .prepareStatement(

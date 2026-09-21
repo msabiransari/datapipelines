@@ -177,9 +177,10 @@ class EndpointsController(
     ): ApiKey {
         if (apiKeyId != null) {
             val key = apiKeys.findById(apiKeyId)
-            if (key == null || key.kind != ApiKeyKind.ENDPOINT || key.isRevoked ||
-                key.workspaceId != currentPrincipal().requireWorkspace().id
-            ) {
+            val foreign =
+                key == null || key.kind != ApiKeyKind.ENDPOINT || key.isRevoked ||
+                    key.workspaceId != currentPrincipal().requireWorkspace().id
+            if (foreign) {
                 throw ApiException(
                     PipelineErrorCodes.Endpoint.NOT_FOUND,
                     "No API key with that id in this workspace.",

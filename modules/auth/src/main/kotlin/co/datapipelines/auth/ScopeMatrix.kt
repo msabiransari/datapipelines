@@ -120,7 +120,7 @@ object ScopeMatrix {
         /**
          * "Get current principal — any authenticated" (§7.6 v2.5, `GET /api/v1/auth/me`,
          * rest-api §16.2). Same [Scope.READ] floor and same reasoning as
-         * [MANAGE_OWN_API_KEYS]: `read` is the weakest scope the §7.5 hierarchy can
+         * [VIEW_OWN_MCP_KEY]: `read` is the weakest scope the §7.5 hierarchy can
          * express, so requiring it IS "any authenticated principal".
          */
         CURRENT_PRINCIPAL(Scope.READ, Permission.VIEW),
@@ -128,7 +128,7 @@ object ScopeMatrix {
         /**
          * "Set own theme preference" (§7.6, `PATCH /partials/profile/theme`): a mutation
          * of the caller's OWN user row and nothing else — the sibling of
-         * [MANAGE_OWN_API_KEYS]. [Scope.READ] is the §7.5 floor, so this IS "any
+         * [VIEW_OWN_MCP_KEY]. [Scope.READ] is the §7.5 floor, so this IS "any
          * authenticated principal": the operation writes only the principal's own row
          * (the handler resolves the caller's userId; there is no payload-chosen target),
          * so no scope above `read` is meaningful and none weaker exists to express.
@@ -181,7 +181,7 @@ object ScopeMatrix {
         /**
          * "Change own password — any authenticated" (§7.6, §5A.4): the honest floor
          * is [Scope.READ], the "any authenticated principal" convention of
-         * [MANAGE_OWN_API_KEYS] — every session may rotate its OWN credential. The
+         * [VIEW_OWN_MCP_KEY] — every session may rotate its OWN credential. The
          * real guards live in the handler and `LocalPasswordService`: the current
          * password is verified (a hijacked session cannot rotate), and the account
          * is the principal's own by construction.

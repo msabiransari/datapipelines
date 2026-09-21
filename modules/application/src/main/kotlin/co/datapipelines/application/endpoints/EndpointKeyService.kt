@@ -48,7 +48,7 @@ class EndpointKeyService(
      * @throws KeyKindNotMintableException `auth.key_kind_not_mintable` for `kind = user` —
      *   since 179 (D16) a user key is minted by the login hook only, never on demand.
      */
-    @Suppress("LongParameterList") // the issuance contract, mirroring ApiKeyService.issue
+    @Suppress("LongParameterList", "ThrowsCount") // the issuance contract; each refusal has its own catalogued code
     fun issue(
         principal: AuthenticatedPrincipal,
         name: String,

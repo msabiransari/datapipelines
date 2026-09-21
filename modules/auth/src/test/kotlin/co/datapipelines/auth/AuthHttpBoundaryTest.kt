@@ -199,7 +199,9 @@ class AuthHttpBoundaryTest {
         // live, and the revoked one is inserted live BEFORE its revoke, so it cannot share
         // an owner either.
         val deadKeyOwner = UserRepository(jdbc).insert("agent-dead@company.com", "Agent Dead", null, "keycloak", "sub-2", isAdmin = false)
-        val revokedKeyOwner = UserRepository(jdbc).insert("agent-revoked@company.com", "Agent Revoked", null, "keycloak", "sub-3", isAdmin = false)
+        val revokedKeyOwner =
+            UserRepository(jdbc)
+                .insert("agent-revoked@company.com", "Agent Revoked", null, "keycloak", "sub-3", isAdmin = false)
         readKey =
             apiKeyService
                 .issue(superAdminIssuer, user.id, "read-key", setOf(Scope.READ), DEFAULT_WORKSPACE_ID)

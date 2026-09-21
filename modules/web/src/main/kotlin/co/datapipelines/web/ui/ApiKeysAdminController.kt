@@ -181,17 +181,26 @@ class ApiKeysAdminController(
         RoleModel.stamp(model, principal)
     }
 
+    /**
+     * The page lists the two ADMIN kinds (D17/D18): `endpoint` keys (the page's subject) and
+     * `server` keys (the super admin's promotion credential — mintable here, and a table that
+     * hid it would be lying about what the form just did). `user` keys are the top bar's, never
+     * this table's.
+     */
     private fun rows(principal: AuthenticatedPrincipal) =
         keyRows.of(
-            apiKeyRepository.findByWorkspaceAndKind(principal.requireWorkspace().id, ApiKeyKind.ENDPOINT),
+            ApiKeyKind.entries
+                .filter { it != ApiKeyKind.USER }
+                .flatMap { apiKeyRepository.findByWorkspaceAndKind(principal.requireWorkspace().id, it) },
             Instant.now(),
             ownerLabels = ownerLabels(principal.requireWorkspace().id),
         )
 
     /** owner id → display label, one lookup per distinct owner — the "Created by" column. */
     private fun ownerLabels(workspaceId: UUID): Map<UUID, String> =
-        apiKeyRepository
-            .findByWorkspaceAndKind(workspaceId, ApiKeyKind.ENDPOINT)
+        ApiKeyKind.entries
+            .filter { it != ApiKeyKind.USER }
+            .flatMap { apiKeyRepository.findByWorkspaceAndKind(workspaceId, it) }
             .map { it.userId }
             .distinct()
             .associateWith { userId ->

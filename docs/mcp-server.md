@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.43 (frozen contract — additive-only changes after this point)
+**Status:** v1.44 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-16
@@ -2139,6 +2139,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.44 | 179 (#179) | No tool, no schema, no permission change on the MCP surface. The KEY an agent presents changed how it is born: §1/§2/§3 (authentication model, principle 3, the key bullet list) now say the user's key is minted at sign-in (D16) and copied from the top bar, one per workspace, its reach the owner's role re-read per request; the "Agent / API key" form label is gone with on-demand minting. §4.2's troubleshooting line points at the role, not a re-mint. |
 | 2026-09-19 | v1.43 | 172 (#172) | §6.2.23 `endpoints_create` description and `path` schema text: published endpoints serve at `/api/<category>/<version>/<path…>` (R-EP5) — the category is the caller's namespace with `v[0-9]+` and `api` reserved (`endpoint.path_reserved`), the version free-form, one leading `/api` prefix normalised away; `endpoints_*` responses' `url` carries the full served URL. No tool added, removed or renamed; no scope change. |
 | 2026-09-18 | v1.42 | 171 (#171) | No new tools, no schema change (`inputSchema` unaffected). **§6.2.23 `endpoints_create`** description text updated: a `DML`/`DDL` node whose `source` is `tempdb` is now side-effect-free and publishable — previously every `DML`/`DDL` node was refused regardless of source. Same rule, same code (`endpoint.pipeline_not_readonly`), same service both REST and this tool call ([REST API §19.2](rest-api.md#192-what-may-be-published)). |
 | 2026-09-16 | v1.41 | 147 incomplete tempdb validation (#119) | No new tools, no argument change. **§6.2.34 `sql_probe`, `name: "tempdb"`**: a missing staged table is an INCOMPLETE validation, not a pass — the payload gains **`validation_status`** (`"incomplete"` \| `"executed"`) and `parsed` becomes `null` on the incomplete branch (present, not omitted; `true` only when the statement executed); the note says what was NOT checked and names the two ways to finish (a self-contained `VALUES` restatement, or a run with the real staged inputs). Measured on H2 2.3.232: a missing table stops preparation before a later syntax error, so the pre-#119 "parsed, every self-defined name resolved" claim was false (an acceptance run matched a passing probe's SQL hash to its failing execution). Tool and `name` descriptions updated (drift-pinned); guards `SqlProbeH2Test` (real engine, with the tables-present counterexample) and `SqlProbeTempdbWireTest` (real dispatcher, real JSON). Errors, binds, limits, cleanup, scope and the hash-only audit unchanged. |

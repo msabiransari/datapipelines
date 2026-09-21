@@ -130,6 +130,7 @@ class AuthConfiguration {
             instanceDatasourceGrants.getIfAvailable() ?: InstanceDatasourceGrants.NONE,
         )
 
+    @Suppress("LongParameterList") // the wiring bean — every parameter is an @Bean reference (019 precedent)
     @Bean
     fun apiKeyService(
         apiKeyRepository: ApiKeyRepository,
