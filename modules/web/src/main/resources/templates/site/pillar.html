@@ -16,7 +16,7 @@
       <p class="eyebrow">MCP server · <span th:text="${facts.toolCount}">30</span> tools · <span th:text="${facts.engineCountWord}">eight</span> engines · AGPL-3.0</p>
       <p class="kicker">MCP server for SQL databases</p>
       <h1 id="pillar-title" class="ds-display" th:text="|One SQL MCP server for ${facts.engineCountWord} database engines|">One SQL MCP server for eight database engines</h1>
-      <p class="section-lede" th:text="|${facts.engines} behind one MCP endpoint — read-only by default, one scoped key per agent, every call written to an audit log. Self-hosted, AGPL-3.0.|">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB behind one MCP endpoint — read-only by default, one scoped key per agent, every call written to an audit log. Self-hosted, AGPL-3.0.</p>
+      <p class="section-lede" th:text="|${facts.engines} behind one MCP endpoint — read-only by default, one key per person that carries their role, every call written to an audit log. Self-hosted, AGPL-3.0.|">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB behind one MCP endpoint — read-only by default, one key per person that carries their role, every call written to an audit log. Self-hosted, AGPL-3.0.</p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Add it to Claude Code or Cursor</a>
         <a class="btn btn-secondary" href="https://github.com/msabiransari/datapipelines">GitHub</a>
@@ -41,7 +41,7 @@
   <section class="section band" aria-labelledby="gov-title">
     <div class="container">
       <p class="kicker">What "governed" means here</p>
-      <h2 id="gov-title" class="ds-headline">Read-only by default, scoped keys, every call audited</h2>
+      <h2 id="gov-title" class="ds-headline">Read-only by default, one key per person, every call audited</h2>
       <div class="features-grid">
         <article class="card">
           <!-- claim: docs/datasources.md §5.7 -->
@@ -55,8 +55,8 @@
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §7.1–7.6 -->
-          <h3>One scoped key per agent</h3>
-          <p>Keys are shown once, stored Argon2id-hashed, pinned to one workspace, and carry hierarchical scopes — <code>read</code>, <code>execute</code>, <code>author</code> (admin is for people, never issued to a key). A key's scopes can never exceed its creator's at issue time.</p>
+          <h3>One key per person, per workspace</h3>
+          <p>Your MCP key is created when you sign in to a workspace and shown in the top bar, where you can copy it or delete it to rotate. It is stored as an Argon2id hash, pinned to that workspace, and it carries your role there: viewer, author, promoter or workspace admin. Instance administration stays with signed-in people and is never granted to a key. Change someone's role and their key follows within a minute.</p>
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §7.3, docs/auth.md §11.4 -->

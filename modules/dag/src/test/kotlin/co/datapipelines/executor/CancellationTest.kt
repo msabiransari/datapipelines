@@ -562,7 +562,7 @@ class CancellationTest {
      * The body holds the statement open until the canceller has RETURNED (`cancelled` latch), not
      * for a fixed 2 ms: on a loaded box (the 2-vCPU CI runner, every run 2026-09-11; laptops at
      * load 20+, T163) the canceller thread was scheduled later than the body finished, and a body
-     * that completed before any cancel was issued reported `-1` — a scheduling artefact, not the
+     * that completed before any cancel was issued reported `-1` — a scheduling artifact, not the
      * race under test. With the latch, `-1` can only mean the cancel ran and the registered
      * statement was not cancelled: the defect, and nothing else.
      */

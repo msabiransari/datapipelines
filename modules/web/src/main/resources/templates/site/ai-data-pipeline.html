@@ -18,7 +18,7 @@
       <h1 id="ai-title" class="ds-display">An AI data pipeline you would let someone else run</h1>
       <p class="section-lede">
         An agent writing SQL in a chat window produces an answer. An AI <em>data pipeline</em> has to produce
-        something else: an artefact your team can read, review, version, rerun next month, and explain to whoever
+        something else: an artifact your team can read, review, version, rerun next month, and explain to whoever
         asks. Four things make the difference, and none of them is the model.
       </p>
     </div>
@@ -43,10 +43,10 @@
     </div>
   </section>
 
-  <section class="section band" aria-labelledby="artefact-title">
+  <section class="section band" aria-labelledby="artifact-title">
     <div class="container">
       <p class="kicker">Two</p>
-      <h2 id="artefact-title" class="ds-headline">What it produces is a JSON contract, not a transcript</h2>
+      <h2 id="artifact-title" class="ds-headline">What it produces is a JSON contract, not a transcript</h2>
       <!-- claim: docs/pipeline-contract.md §3.1 -->
       <p class="section-lede">
         A pipeline is declarative JSON: nodes, their dependencies, their parameters, where each one reads and where
@@ -124,7 +124,7 @@
       <h2 id="not-title" class="ds-headline">What this is not</h2>
       <ul class="fact-list fact-list-plain">
         <li><strong>Not an ETL tool.</strong> Nothing is moved on a schedule into a warehouse you then have to keep in sync. Sources are read where they live.</li>
-        <li><strong>Not a no-code builder.</strong> The artefact is SQL and JSON, on purpose, because that is what survives review.</li>
+        <li><strong>Not a no-code builder.</strong> The artifact is SQL and JSON, on purpose, because that is what survives review.</li>
         <li><strong>Not a model.</strong> Bring your own agent. This is the surface it works against and the governance it works under.</li>
       </ul>
       <p><a th:href="@{/text-to-sql-agent}">How this compares with a text-to-SQL tool &rarr;</a> &middot;
@@ -141,7 +141,7 @@
       <p class="section-lede">
         Most data pipeline tools were built for a person at a keyboard and gained an AI feature later. This one is
         agent-native: the authoring surface is the MCP tool set, the person's job is review and release, and the
-        artefact is designed to be read by both. Call it an AI-native data platform if the phrase helps, with two
+        artifact is designed to be read by both. Call it an AI-native data platform if the phrase helps, with two
         honest limits — it runs SQL and nothing else, and it runs on demand, so an orchestrator still owns the
         schedule. Beside an orchestrator (<a th:href="@{/compare/airflow}">Airflow</a>,
         <a th:href="@{/compare/dagster-vs-airflow}">Dagster or Prefect</a>) it is the governed SQL step they call;
@@ -169,7 +169,7 @@
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
         Bring up the demo sources, describe a question in your own words, and read what the agent drafts — then
-        release it, or don't. The artefact either way is a pipeline you can read.
+        release it, or don't. The artifact either way is a pipeline you can read.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/deployment}">Run the demo</a>

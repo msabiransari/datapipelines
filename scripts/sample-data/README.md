@@ -229,7 +229,7 @@ LaGuardia therefore reports **32.29 miles** for a ride that is about ten. The sh
 scans (`od_pairs.sql`, `daily_by_zone.sql`) keep only `0 < distance < 100` miles and
 `0 < total < 1000` USD — **98.1 % of the trips** — and the same average comes out at
 **10.45 miles**. The filter is in the templates, in the open, and named in each template's
-description: it is what makes an average a fact instead of an artefact of one bad row.
+description: it is what makes an average a fact instead of an artifact of one bad row.
 
 **A share needs its denominator drawn from its own population.** `borough_baseline.sql`
 computes the per-borough denominator from the *same* staged table as the numerator. Taking

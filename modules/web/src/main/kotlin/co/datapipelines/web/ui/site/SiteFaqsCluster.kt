@@ -120,19 +120,19 @@ object SiteFaqsCluster {
             ),
         )
 
-    /** The text-to-SQL page's four: the honest no, the artefact, the failure, the cross-engine join. */
+    /** The text-to-SQL page's four: the honest no, the artifact, the failure, the cross-engine join. */
     val TEXT_TO_SQL: List<FaqEntry> =
         listOf(
             FaqEntry(
                 "Does datapipelines generate the SQL?",
                 "No — your agent does that, and the page says so in its first sentence. What the server adds is " +
-                    "everything on either side: the real schema going in, and a versioned, reviewable artefact " +
+                    "everything on either side: the real schema going in, and a versioned, reviewable artifact " +
                     "coming out. The grounding tools are docs/mcp-server.md §6.1.",
                 "docs/mcp-server.md §6.1",
             ),
             FaqEntry(
                 "What happens to the query after it answers once?",
-                "It becomes an artefact: the SQL is saved as a template referenced by a pipeline in declarative " +
+                "It becomes an artifact: the SQL is saved as a template referenced by a pipeline in declarative " +
                     "JSON — named, parameterised, diffable — so anyone can rerun it without asking the agent " +
                     "again. The pipeline shape is docs/pipeline-contract.md §3.1.",
                 "docs/pipeline-contract.md §3.1",

@@ -14,13 +14,13 @@
   <section class="section page-hero" aria-labelledby="engine-title">
     <div class="container">
       <!-- claim: docs/datasources.md §7, docs/auth.md §7.5, docs/auth.md §10 -->
-      <p class="eyebrow">Read-only by default · one scoped key per agent · every call audited</p>
+      <p class="eyebrow">Read-only by default · one key per person, per workspace · every call audited</p>
       <p class="kicker" th:text="|${engine.dialect} dialect|">DIALECT</p>
       <h1 id="engine-title" class="ds-display" th:text="|${engine.displayName} MCP server|">Engine MCP server</h1>
       <p class="section-lede">
         Give Claude Code, Cursor or any MCP client a
         <span th:text="|${engine.article} ${engine.displayName}|">an Oracle</span> connection it cannot abuse: read-only by default,
-        one scoped key per agent, every call audited, and the database password never leaves your deployment.
+        one key per person that carries their role, every call audited, and the database password never leaves your deployment.
       </p>
       <!--/* 173 §A: the searcher's other name for this engine ("PostgreSQL", "MSSQL"), one sentence
            from the row's searchAliases; a row with none renders no paragraph. */-->
@@ -111,7 +111,7 @@
       <p class="demo-note">
         The endpoint and the header are ours and specified above; the surrounding file shape belongs to each
         client and is what its own documentation prescribes. <a th:href="@{/add-mcp-server-to-claude-code}">The
-        full walkthrough</a> covers minting the key and checking that the tool list came back.
+        full walkthrough</a> covers copying the key and checking that the tool list came back.
       </p>
     </div>
   </section>
@@ -193,8 +193,8 @@
       <h2 id="cta-title" class="ds-headline">Connect an agent to this engine today</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
-        Register the datasource, mint a scoped key, paste one config block — the setup page walks all of it, and the
-        demo stack gives you a safe place to try the whole loop first.
+        Register the datasource, copy your key from the top bar, paste one config block. The setup page walks
+        through all of it, and the demo stack gives you a safe place to try the whole loop first.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Client setup, step by step</a>

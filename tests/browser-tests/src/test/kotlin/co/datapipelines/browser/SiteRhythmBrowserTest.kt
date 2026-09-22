@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Test
  *    may never push what the buyer came for off the first screen (145: the proof strip
  *    became the worked example; the invariant is the same);
  *  - **(e)** no page scrolls sideways (`scrollWidth == clientWidth` on the document) — the
- *    phone check that pins the "390 was the window-minimum artefact" finding.
+ *    phone check that pins the "390 was the window-minimum artifact" finding.
  *
  * Anonymous throughout: the site's pages are public by construction, so no seeding.
  */

@@ -47,14 +47,13 @@
       <h2 id="step2-title" class="ds-headline">Copy your MCP key from the top bar</h2>
       <!-- claim: docs/ui-screens.md §3.4 (the top bar's chip), docs/auth.md §7.4 -->
       <p class="section-lede">
-        Sign in — that is the whole mint. Your MCP key is created for you the moment you enter a workspace,
-        one per workspace, and waits in the <strong>top bar</strong> on the right: the <code>dpk_…</code> chip beside
-        your account menu. <strong>Copy</strong> fetches the full key (it is served on the click, never sitting in the
-        page) and puts it on your clipboard. The chip is also where you rotate: delete it, and your next sign-in
-        mints a fresh one.
+        Sign in. That is all it takes to get a key. Your MCP key is created for you the moment you enter a
+        workspace, one per workspace, and waits in the <strong>top bar</strong> on the right: the <code>dpk_…</code>
+        chip beside your account menu. <strong>Copy</strong> fetches the full key on the click and puts it on your
+        clipboard; it never sits in the page. The chip is also where you rotate: delete it, and your next sign-in
+        creates a fresh one.
       </p>
-      <!-- claim: docs/auth.md §7.4 (the key carries the role), §7.5 (the ladder) -->
-      <p>The key carries YOUR role in that workspace — there is no scope to pick:</p>
+      <p>The key carries your role in that workspace. There is no scope to pick:</p>
       <table class="facts-table">
         <caption>What the key may do, by the role you hold in its workspace.</caption>
         <thead>
@@ -68,10 +67,9 @@
         </tbody>
       </table>
       <!-- claim: docs/auth.md §7.5 — admin is not a key scope; §11A.4 — the issuer's role is re-read per request -->
-      <p>Administration of the INSTANCE is for signed-in people — no key can hold it. And the key's reach is re-read
-        against your role on every request: a demotion narrows the key within about a minute, no reissue needed.</p>
-      <!-- claim: docs/auth.md §7.4 (rotation) -->
-      <p>Rotating is delete-to-rotate on the chip and your next sign-in; it takes effect within about a minute. No shared password to rotate.</p>
+      <p>Administration of the instance is for signed-in people; no key can hold it. The key's reach is re-read
+        against your role on every request, so a demotion narrows the key within about a minute with no reissue needed.</p>
+      <p>Rotating means deleting the key on the chip and signing in again; it takes effect within about a minute. There is no shared password to rotate.</p>
     </div>
   </section>
 

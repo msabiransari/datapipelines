@@ -1248,7 +1248,7 @@ Content: a single static page (`templates/site/index.html` + `static/site/**`), 
 | `/mcp-server-for-sql-databases` | `site/pillar.html` | The cluster pillar: the credential problem in the searcher's words, the engines, the governance guarantees, the full MCP tool list |
 | `/mcp-server/{engine}` — one per dialect | `site/engine.html` | ONE template over the `SitePages.ENGINES` rows: dialect, driver, license, whether the driver is in the published image, client config, the seeded pipeline that reads that engine |
 | `/add-mcp-server-to-claude-code` | `site/add-mcp-server.html` | The four-step client setup — run a server, mint a scoped key, paste one config block, check the tool list — with the 401/403 troubleshooting table |
-| `/ai-data-pipeline` | `site/ai-data-pipeline.html` | What an agent-authored pipeline is here: real schemas in, a versioned JSON artefact out, run governed |
+| `/ai-data-pipeline` | `site/ai-data-pipeline.html` | What an agent-authored pipeline is here: real schemas in, a versioned JSON artifact out, run governed |
 | `/text-to-sql-agent` | `site/text-to-sql-agent.html` | The after-state a text-to-SQL tool leaves out. States plainly that we do not generate SQL |
 | `/compare/airflow`, `/compare/dbt` | `site/compare-airflow.html`, `site/compare-dbt.html` | Honest comparisons, each leading with "use them instead when…" |
 | `/compare/dagster-vs-airflow` | `site/compare-dagster-vs-airflow.html` | An EDITORIAL comparison (173 §B): what Dagster, Airflow and Prefect are for, in their own documentation's words (every product claim cites its source URL in the claim comment), when a team chooses each, and datapipelines named once as the thing that composes with any of them. `SiteFaqsCluster.COMPARE_DAGSTER_AIRFLOW` |

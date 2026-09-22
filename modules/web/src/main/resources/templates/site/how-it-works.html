@@ -74,7 +74,7 @@
       <p class="kicker">Step 2</p>
       <h2 id="step-key-title" class="ds-headline">Copy your MCP key from the top bar</h2>
       <!-- claim: docs/ui-screens.md §3.4 (the top bar's MCP-key chip), docs/auth.md §7.4 (login-minted issuance), §7.5 (admin is not a key scope) -->
-      <p class="section-lede"><strong>What you do.</strong> Sign in — that is the whole mint. Your MCP key is waiting in the <strong>top bar</strong>, right side: the <code>dpk_…</code> chip beside your account menu. <strong>Copy</strong> puts the full key on your clipboard; paste it into the client config in step 3.</p>
+      <p class="section-lede"><strong>What you do.</strong> Sign in. That is all it takes to get a key: your MCP key is created for you and waits in the <strong>top bar</strong>, on the right, as the <code>dpk_…</code> chip beside your account menu. <strong>Copy</strong> puts the full key on your clipboard; paste it into the client config in step 3.</p>
       <div>
         <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Top bar</span><span class="tag">Screenshot</span></div>
@@ -84,7 +84,7 @@
       </div>
       <p><strong>What you see.</strong> Exactly one key per workspace per person — the demo login's role there is admin, so its reach is <code>read</code>, <code>execute</code> and <code>author</code>: the whole ladder an authoring agent needs. A viewer's key would carry read and execute; the role decides, never a form.</p>
       <!-- claim: docs/auth.md §7.4 (minted at login; pinned to the workspace; rotation is delete + sign in), docs/rest-api.md §16.1 (the /mine read) -->
-      <p><strong>What just happened.</strong> The key was minted when you signed in, pinned to the workspace you entered — <code>demo</code> here — and sealed at rest so the top bar can open it for a copy. There is no mint endpoint for it, on purpose: <code>GET /api/v1/auth/api-keys/mine</code> reads it, and rotating it is delete (the chip's button) plus your next sign-in. Administration stays with signed-in people — no key can hold it.</p>
+      <p><strong>What just happened.</strong> The key was created when you signed in and pinned to the workspace you entered, <code>demo</code> here. It is sealed at rest so the top bar can open it for a copy. There is no endpoint that creates one, on purpose: <code>GET /api/v1/auth/api-keys/mine</code> reads it, and rotating it means deleting it with the chip's button and signing in again. Administration stays with signed-in people; no key can hold it.</p>
     </div>
   </section>
 
@@ -411,7 +411,7 @@ anything. Stop after reporting.</code></pre>
       <p class="kicker" th:text="|One server, ${facts.engineCountWord} engines|">One server, eight engines</p>
       <h2 id="engines-title" class="ds-headline">An MCP server for your SQL database</h2>
       <!-- claim: docs/datasources.md §4.1, docs/deployment.md §3.5 -->
-      <p class="section-lede" th:text="|${facts.engines}, through one endpoint and one set of scoped keys. Each page has that engine's driver facts and a copy-paste client config.|">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB, through one endpoint and one set of scoped keys. Each page has that engine's driver facts and a copy-paste client config.</p>
+      <p class="section-lede" th:text="|${facts.engines}, through one endpoint and one key per person. Each page has that engine's driver facts and a copy-paste client config.|">Postgres, MySQL, SQL Server, Oracle, SQLite and DuckDB, through one endpoint and one key per person. Each page has that engine's driver facts and a copy-paste client config.</p>
       <ul class="engine-links">
         <li th:each="e : ${engines}"><a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a></li>
       </ul>

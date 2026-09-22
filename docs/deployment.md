@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.27
+**Status:** v1.28
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-19
@@ -812,8 +812,9 @@ or drop the jar into `lib/`. `./app.sh --start --demo nyc[,trade[,lake]]` does t
    `demo` workspace — workspaces are created by super admins, not provisioned per
    user ([Auth §4.2](auth.md#42-user-provisioning) step 4, D-R11) — which is where
    the example pipelines are seeded.
-2. **Mint an API key** from the UI (or `POST /api/v1/auth/api-keys`). The secret
-   is shown exactly once.
+2. **Copy your MCP key** from the top bar. It is created when you sign in to the
+   workspace, one per person per workspace, and the chip's Copy button puts it on your
+   clipboard (`GET /api/v1/auth/api-keys/mine` reads it; there is no endpoint that creates one).
 3. **Give the agent the MCP endpoint** `http://localhost:8080/mcp` and that key.
    It can list the seeded pipelines, read the three sample datasources' schemas,
    and execute `nyc/mobility/revenue_by_borough` or `nyc/mobility/rainy_vs_dry_ridership` immediately —
@@ -1021,6 +1022,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-22 | v1.28 | key wording | Appendix B step 2 says what the product does since R3: the MCP key is created at sign-in and copied from the top bar; nothing is "minted" by hand and there is no create endpoint. `app.sh`'s demo message says the same. |
 | 2026-09-22 | v1.27 | #207 relative redirects | §8 edge contract: every app `Location` is RELATIVE (`server.tomcat.use-relative-redirects=true`), so the public scheme never leaks into a redirect and the edge needs no `X-Forwarded-Proto` handling for them. Behind a TLS-terminating edge the absolute `http://` Locations Tomcat built by default were refused by the browser (CSP `form-action` on plain forms, mixed content on htmx requests) after the server had already acted — logout, workspace switch and member removal on datapipelines.co, 2026-09-22. |
 | 2026-09-21 | v1.26 | 199 (#196) the Redis password leaves argv | §4.2.1 gains "Where the password lives": the reference redis services (`deploy/compose.yml`, `deploy/compose.laptop-infra.yml`, Appendix A) start `redis-server -` — configuration from stdin, `requirepass` fed by a heredoc from `REDISCLI_AUTH`, `exec` so the server stays PID 1, `user: redis` because the wrapper is `sh` — so no argv, and no file, carries the value; `--maxmemory`/`noeviction` stay on argv. §9's argv line closes the "tracked separately" remainder and names the two commands that check it. Operators: the next start recreates the Redis container (§7 says what a restart loses). Numbered on base db12e043; the merger renumbers if another lane took v1.26. |
 | 2026-09-21 | v1.25 | 188 (#188) the app states its headers | §6.2 gains "What the edge sets, and what it must not touch": the header table the app sends on every response (an enforced CSP with no `'unsafe-inline'`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`; the editor route's `'unsafe-eval'` exception, #195), why the app sends no HSTS, and the four things the product expects of an edge (HSTS one year without preload, headers passed through unweakened, TLS + redirect, the forwarded address). §9: two checklist lines for the same. |

@@ -36,7 +36,7 @@ gate-logs/
 .vscode/
 *.swp
 
-# --- JVM crash / profiling artefacts ---
+# --- JVM crash / profiling artifacts ---
 hs_err_pid*.log
 replay_pid*.log
 *.hprof

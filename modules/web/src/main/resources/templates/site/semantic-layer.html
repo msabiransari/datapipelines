@@ -322,7 +322,7 @@
           <span th:text="|${#strings.capitalize(facts.semanticsToolCountWord)} tools, from|">Three tools, from</span> <code>tools/list</code>: <code>semantics_record</code> — one fact, its structural
           references, its optional evidence SQL; <code>semantics_list</code> — the facts on a datasource, with trust,
           drift and provenance, filtered by table, scope or time; <code>semantics_retire</code> — one id, one reason,
-          no delete. Recording needs an <code>author</code>-scoped key; viewing needs none beyond the datasource's
+          no delete. Recording needs a key held by an author; viewing needs none beyond the datasource's
           visibility — <strong>authors record, viewers never</strong>. Every record lands a
           <code>semantics.recorded</code> audit row with kind, scope, refs and whether evidence ran.
         </p>

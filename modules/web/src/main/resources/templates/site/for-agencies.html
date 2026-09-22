@@ -110,9 +110,9 @@
           <p>Each database the client's reporting reads becomes a datasource, marked read-only unless the engagement explicitly includes writing. Credentials are encrypted on the server; the agent never sees one.</p>
         </li>
         <li>
-          <h3>Mint the working keys</h3>
-          <!-- claim: docs/auth.md §7.5 -->
-          <p>One key per agent and per analyst, scoped to the smallest set that does the job, pinned to this workspace, revocable without touching any other client's access.</p>
+          <h3>Get each person their key</h3>
+          <!-- claim: docs/auth.md §7.4 -->
+          <p>Everyone who works the engagement signs in to the client's workspace and finds their own key in the top bar: one per person, carrying the role you gave them, and revocable on its own without touching any other client's access.</p>
         </li>
         <li>
           <h3>Let the agent draft, run, and compare</h3>
@@ -143,7 +143,7 @@
         <p>
           It also changes the retainer conversation. "Maintenance" stops being a euphemism for re-running things by
           hand: a schema change upstream is a new draft your agent produces, a diff your reviewer reads, and a
-          release your client's invoice can reference. The engagement's artefacts are versioned all the way down —
+          release your client's invoice can reference. The engagement's artifacts are versioned all the way down —
           which is what "professional services" was always supposed to mean.
         </p>
       </div>

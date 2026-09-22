@@ -141,7 +141,7 @@
     },
     {
      "level": "H2",
-     "text": "Read-only by default, scoped keys, every call audited"
+     "text": "Read-only by default, one key per person, every call audited"
     },
     {
      "level": "H3",
@@ -153,7 +153,7 @@
     },
     {
      "level": "H3",
-     "text": "One scoped key per agent"
+     "text": "One key per person, per workspace"
     },
     {
      "level": "H3",
@@ -1037,7 +1037,7 @@
    "anchors": [
     "ai-title",
     "schema-title",
-    "artefact-title",
+    "artifact-title",
     "version-title",
     "run-title",
     "not-title",
@@ -1137,7 +1137,7 @@
     },
     {
      "level": "H2",
-     "text": "Real schemas, a versioned artefact, readable failures, history"
+     "text": "Real schemas, a versioned artifact, readable failures, history"
     },
     {
      "level": "H3",
@@ -1145,7 +1145,7 @@
     },
     {
      "level": "H3",
-     "text": "The answer becomes an artefact"
+     "text": "The answer becomes an artifact"
     },
     {
      "level": "H3",
@@ -2411,7 +2411,7 @@
    "status": "unchanged",
    "anchors": [
     "tp-title",
-    "tp-artefact",
+    "tp-artifact",
     "tp-six",
     "tp-better",
     "tp-migrate",
@@ -2426,7 +2426,7 @@
     },
     {
      "level": "H2",
-     "text": "Same job, different artefact — and the artefact decides the second week"
+     "text": "Same job, different artifact — and the artifact decides the second week"
     },
     {
      "level": "H2",
@@ -2651,7 +2651,7 @@
     },
     {
      "level": "H3",
-     "text": "Mint the working keys"
+     "text": "Get each person their key"
     },
     {
      "level": "H3",

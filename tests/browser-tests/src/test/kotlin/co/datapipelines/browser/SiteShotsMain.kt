@@ -335,7 +335,7 @@ object SiteShotsMain {
                     } + heroExtras(email, password)
                 }
             }
-        println("siteShots: wrote ${taken.size} artefacts to ${outDir.toAbsolutePath()}")
+        println("siteShots: wrote ${taken.size} artifacts to ${outDir.toAbsolutePath()}")
         taken.forEach { println("  $it") }
     }
 
@@ -1357,7 +1357,7 @@ object SiteShotsMain {
         /**
          * Two FULL-PAGE captures of the marketing page itself — desktop and phone — for the
          * reviewer who has to decide whether the page still lays out. They are review
-         * artefacts, not shipped assets, so they land under `build/` and are never referenced
+         * artifacts, not shipped assets, so they land under `build/` and are never referenced
          * by the page: a layout regression is a thing to LOOK at, and 059's lesson was that
          * nobody looks unless the images are produced for them.
          */
