@@ -13,7 +13,9 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
 
@@ -44,6 +46,9 @@ class WorkspaceMembershipIntegrationTest {
 
     @BeforeEach
     fun setUp() {
+        // The audit double is class-scoped (PER_CLASS instance); its recorded calls must not
+        // leak across tests, or an `exactly = 1` in one test counts another test's event.
+        io.mockk.clearMocks(auditLogger)
         users = UserRepository(jdbc)
         workspaces = WorkspaceRepository(jdbc)
         apiKeys = ApiKeyRepository(jdbc)
@@ -61,12 +66,12 @@ class WorkspaceMembershipIntegrationTest {
         admin = users.insert("root@company.com", "Root", null, "google", "sub-2", isAdmin = true)
     }
 
-    private fun service() =
+    private fun service(cache: AuthCache = AuthCache(AuthProperties())) =
         WorkspaceService(
             workspaces,
             apiKeys,
             users,
-            AuthCache(AuthProperties()),
+            cache,
             null,
             auditLogger,
             WorkspaceInvitationRepository(jdbc),
@@ -194,6 +199,75 @@ class WorkspaceMembershipIntegrationTest {
         }
         // A second sweep finds nothing live to revoke — the statement is idempotent.
         apiKeys.revokeUserKeyForWorkspace(alice.id, ws.id).shouldBeNull()
+    }
+
+    @Test
+    fun `evictions outlive the commit - a reload racing the removal cannot re-cache a live key (#200 review M1)`() {
+        val cache = AuthCache(AuthProperties())
+        val svc = service(cache)
+        val actor = principal(admin, superAdmin = true)
+        val ws = svc.create(actor, "acme", "Acme")
+        svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
+        val key = mintedKey(ws.id)
+        // The racer: a key validation on ANOTHER connection (a fresh DataSource is never bound
+        // to this thread's transaction), exactly what a request in flight does.
+        val racer = ApiKeyRepository(NamedParameterJdbcTemplate(dataSource()))
+        val tx = TransactionTemplate(DataSourceTransactionManager(jdbc.jdbcTemplate.dataSource!!))
+
+        tx.execute {
+            svc.removeMember(actor, "acme", alice.id)
+            // Inside the transaction the UPDATE is uncommitted: the racer's read is READ
+            // COMMITTED and sees the row as live, and the cache admits it — the window.
+            cache
+                .keyRecord(key.id) { racer.findById(it) }
+                .shouldNotBeNull()
+                .isRevoked
+                .shouldBeFalse()
+        }
+
+        // After the commit the stale admission must be gone: the next read reloads and sees
+        // the revoke. Red without the after-commit eviction (the stale live record would be
+        // served for the cache TTL); green with it.
+        cache
+            .keyRecord(key.id) { racer.findById(it) }
+            .shouldNotBeNull()
+            .isRevoked
+            .shouldBeTrue()
+        cache.memberships(alice.id) { workspaces.membershipsOf(it) }.shouldBe(emptyList())
+    }
+
+    @Test
+    fun `an admin of one workspace cannot reach another workspace member key - 404, key stays live (#200 review L2)`() {
+        val svc = service()
+        val root = principal(admin, superAdmin = true)
+        // alice is acme's ADMIN and no member of globex; bob is globex's author with a live key.
+        val bob = users.insert("bob@company.com", "Bob", null, "google", "sub-3", isAdmin = false)
+        svc.create(root, "acme", "Acme")
+        svc.addMember(root, "acme", alice.email, WorkspaceRole.WORKSPACE_ADMIN)
+        val globex = svc.create(root, "globex", "Globex")
+        svc.addMember(root, "globex", bob.email, WorkspaceRole.AUTHOR)
+        val bobKey =
+            apiKeys.insert(
+                id = "dpk_GLOBEXKEY01",
+                userId = bob.id,
+                name = "mcp/globex",
+                keyHash = "\$argon2id\$fixture",
+                scopes = setOf(Scope.READ, Scope.EXECUTE),
+                expiresAt = null,
+                workspaceId = globex.id,
+                kind = ApiKeyKind.USER,
+            )
+
+        shouldThrow<WorkspaceNotFoundException> { svc.revokeMemberKey(principal(alice), "globex", bob.id) }
+        shouldThrow<WorkspaceNotFoundException> { svc.removeMember(principal(alice), "globex", bob.id) }
+        shouldThrow<WorkspaceNotFoundException> { svc.liveUserKeyOwnerIds(principal(alice), "globex") }
+
+        apiKeys
+            .findById(bobKey.id)
+            .shouldNotBeNull()
+            .isRevoked
+            .shouldBeFalse()
+        workspaces.findMemberRow(globex.id, bob.id).shouldNotBeNull()
     }
 
     @Test

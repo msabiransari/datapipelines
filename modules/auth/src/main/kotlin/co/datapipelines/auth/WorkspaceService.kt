@@ -2,6 +2,8 @@ package co.datapipelines.auth
 
 import org.slf4j.LoggerFactory
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.UUID
 
 /**
@@ -645,8 +647,17 @@ open class WorkspaceService(
         // §3.7 ruling 1 — the key the membership minted dies with it. Null when the member
         // held no live key (never minted, already rotated): nothing to evict, nothing to audit.
         val revokedKeyId = apiKeyRepository.revokeUserKeyForWorkspace(userId, workspace.id)
-        authCache.invalidateMemberships(userId)
-        revokedKeyId?.let { authCache.invalidateKey(it) }
+        // Evicted now AND again after the commit. This method runs inside one metadata
+        // transaction, so a validation racing the removal on another connection reads the
+        // still-live row (READ COMMITTED never blocks on the uncommitted UPDATE) and would
+        // re-admit it for the cache's TTL; the after-commit eviction is the one that wins the
+        // race, the immediate one keeps the common path short (#200 review M1).
+        val evict: () -> Unit = {
+            authCache.invalidateMemberships(userId)
+            revokedKeyId?.let { authCache.invalidateKey(it) }
+        }
+        evict()
+        afterCommitOrNow(evict)
         audit(
             principal,
             "workspace.member_removed",
@@ -705,8 +716,8 @@ open class WorkspaceService(
 
     /**
      * Which members of [name] hold a live login-minted key (#200) — the members row's
-     * "has a key" state. The caller is the members surface (admin-only, `WORKSPACES_READ`),
-     * so the answer never leaves the admin's own workspace, and it carries owner ids only:
+     * "has a key" state. Admin-only here in the service, not only at the callers (#200 review
+     * L1): the answer never leaves the admin's own workspace, and it carries owner ids only —
      * no key id, no prefix, no plaintext (the members row is not a key listing).
      */
     open fun liveUserKeyOwnerIds(
@@ -714,7 +725,25 @@ open class WorkspaceService(
         name: String,
     ): Set<UUID> {
         val workspace = read(principal, name)
+        requirePermission(principal, workspace, Permission.WS_ADMIN)
         return apiKeyRepository.liveUserKeyOwnerIds(workspace.id)
+    }
+
+    /**
+     * The house pattern (`MailNotifier`): inside a transaction, after its commit; otherwise
+     * now. Cache evictions that must outlive a transactional write go through here — an
+     * eviction that runs before the commit can be undone by a concurrent reload.
+     */
+    private fun afterCommitOrNow(task: () -> Unit) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(
+                object : TransactionSynchronization {
+                    override fun afterCommit() = task()
+                },
+            )
+        } else {
+            task()
+        }
     }
 
     /**
