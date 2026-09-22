@@ -69,7 +69,7 @@ class LocalLoginE2eTest {
         val response = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
 
         response.statusCode shouldBe 302
-        response.location shouldBe "http://localhost:$port/dashboard"
+        response.location shouldBe "/dashboard"
         val session = response.sessionCookie()
         // The session a local login mints authenticates exactly like an OIDC one.
         given()
@@ -96,7 +96,7 @@ class LocalLoginE2eTest {
         unknownEmail.location shouldBe wrongPassword.location
         oidcOnly.statusCode shouldBe wrongPassword.statusCode
         oidcOnly.location shouldBe wrongPassword.location
-        wrongPassword.location shouldBe "http://localhost:$port/login?error=credentials"
+        wrongPassword.location shouldBe "/login?error=credentials"
         // Neither minted a session.
         wrongPassword.sessionCookieOrNull() shouldBe null
         unknownEmail.sessionCookieOrNull() shouldBe null
@@ -129,7 +129,7 @@ class LocalLoginE2eTest {
         val locked = postLogin(LOCKOUT_EMAIL, LOCKOUT_PASSWORD)
 
         locked.statusCode shouldBe 302
-        locked.location shouldBe "http://localhost:$port/login?error=locked"
+        locked.location shouldBe "/login?error=locked"
         locked.sessionCookieOrNull() shouldBe null
     }
 
@@ -139,7 +139,7 @@ class LocalLoginE2eTest {
         val response = postLogin(INACTIVE_EMAIL, LOCAL_PASSWORD)
 
         response.statusCode shouldBe 302
-        response.location shouldBe "http://localhost:$port/login?error=inactive"
+        response.location shouldBe "/login?error=inactive"
         response.sessionCookieOrNull() shouldBe null
     }
 
@@ -189,6 +189,64 @@ class LocalLoginE2eTest {
      * The real browser flow: GET /login for the `dp_csrf` cookie and the form's hidden
      * token, then POST the form with both (the double-submit, auth.md §8.4).
      */
+    @Test
+    fun `logout and workspace switch redirect with a RELATIVE Location - the scheme is the browser's, never the container's (#207)`() {
+        seedLocalUsers()
+        val login = postLogin(LOCAL_EMAIL, LOCAL_PASSWORD)
+        login.statusCode shouldBe 302
+        // A signed-in page carries the CSRF field every th:action form posts; read it from
+        // the rendered dashboard exactly as a browser would.
+        val dashboard =
+            given()
+                .port(port)
+                .cookies(mapOf("dp_session" to login.sessionCookie()))
+                .`when`()
+                .get("/dashboard")
+                .then()
+                .statusCode(200)
+                .extract()
+        val csrf = checkNotNull(CSRF_FIELD.find(dashboard.asString())) { "no _csrf hidden input on the dashboard" }.groupValues[1]
+        // The rail names the active workspace (`<b th:text="${activeWorkspace}">`); switching to
+        // it is a membership the user certainly holds, so the answer is the /dashboard bounce.
+        val active =
+            checkNotNull(Regex("""app-workspace-label[\s\S]{0,400}?<b>([a-z0-9_-]+)</b>""").find(dashboard.asString())) {
+                "no active workspace in the rail"
+            }.groupValues[1]
+        val cookies =
+            mapOf("dp_session" to login.sessionCookie()) +
+                dashboard.detailedCookies().asList().associate { it.name to it.value }
+
+        // Behind a TLS-terminating edge the container sees plain http; an absolute Location
+        // would carry that scheme and the browser would refuse the redirect (CSP form-action
+        // for plain forms, mixed content for htmx). Relative resolves against the origin used.
+        val switch =
+            given()
+                .port(port)
+                .cookies(cookies)
+                .contentType(ContentType.URLENC)
+                .formParam("_csrf", csrf)
+                .formParam("name", active)
+                .redirects()
+                .follow(false)
+                .`when`()
+                .post("/workspace/switch")
+        switch.statusCode shouldBe 302
+        switch.headers.getValue("Location") shouldBe "/dashboard"
+
+        val logout =
+            given()
+                .port(port)
+                .cookies(cookies)
+                .contentType(ContentType.URLENC)
+                .formParam("_csrf", csrf)
+                .redirects()
+                .follow(false)
+                .`when`()
+                .post("/logout")
+        logout.statusCode shouldBe 302
+        logout.headers.getValue("Location") shouldBe "/login"
+    }
+
     private fun postLogin(
         email: String,
         password: String,

@@ -127,7 +127,7 @@ class MailNoticesE2eTest {
         // The mailed password is the credential: it logs the user in (and the gate engages).
         val userLogin = postLogin(CREATED_EMAIL, oneTime)
         userLogin.statusCode shouldBe 302
-        userLogin.location shouldBe "http://localhost:$port/dashboard"
+        userLogin.location shouldBe "/dashboard"
 
         // The claim rows and the audit rows — and the password in none of them.
         awaitClaimStatuses(CREATED_EMAIL, mapOf("welcome" to "sent", "new_user" to "sent"))

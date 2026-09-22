@@ -75,12 +75,12 @@ class LocalAdminSeedE2eTest {
     /** (3) — the seeded credential logs in, and the §5A.4 gate engages immediately. */
     private fun assertGateEngaged(adminLogin: LoginResponse) {
         adminLogin.statusCode shouldBe 302
-        adminLogin.location shouldBe "http://localhost:$port/dashboard"
+        adminLogin.location shouldBe "/dashboard"
         val adminSession = adminLogin.sessionCookie()
 
         val gated = getNoFollow("/", adminSession)
         gated.statusCode shouldBe 302
-        gated.headers.getValue("Location") shouldBe "http://localhost:$port/settings/password"
+        gated.headers.getValue("Location") shouldBe "/settings/password"
         // The allowlisted screen itself answers.
         given()
             .port(port)

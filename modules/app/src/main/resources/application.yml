@@ -66,6 +66,19 @@ server:
   # of cutting them off. The execution drain itself is ExecutionDrainLifecycle, which stops
   # FIRST (higher SmartLifecycle phase), so cancellations flush while the server is still up.
   shutdown: graceful
+  tomcat:
+    # #207: every redirect the app sends is a RELATIVE `Location` (`/dashboard`, never
+    # `http://host/dashboard`). Behind a TLS-terminating edge the container only ever sees
+    # plain http, so the absolute URL Tomcat builds by default carries the WRONG scheme —
+    # and a browser then refuses to follow it: the CSP `form-action 'self'` blocks a form's
+    # redirect to another origin (Chrome applies it to redirects), and an htmx request's
+    # redirect to `http://` from an https page is mixed content. The server had already
+    # acted; the page just never moved (logout, workspace switch, member removal on
+    # datapipelines.co, 2026-09-22). A relative Location resolves against the request's own
+    # origin (RFC 7231 §7.1.2) — the rule AuthEntryPoint already applies by hand — and it
+    # also closes the Host-header-poisoned absolute redirect. Pinned by the redirect
+    # assertions in LocalLoginE2eTest / LocalAdminSeedE2eTest / MailNoticesE2eTest.
+    use-relative-redirects: true
 
 # Actuator: the HealthEndpoint bean backs the root-level /health, /ready and /info
 # controllers (observability.md §6). NO /actuator path is reachable on the

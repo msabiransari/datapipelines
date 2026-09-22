@@ -66,5 +66,17 @@ class WorkspaceSwitcherBrowserTest : BrowserSuite() {
                 .WaitForSelectorOptions()
                 .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED),
         )
+
+        // #207: the Workspaces PAGE's own Switch button is the same act and must move the
+        // SHELL too — the rail's workspace name and its switcher. It used to be an htmx-boosted
+        // form whose swap replaced only #app-main, so the rail kept naming the workspace just
+        // left until a manual reload. Assert the page a person sees after the click, not the
+        // status code of the POST.
+        page.navigate("$baseUrl/workspaces")
+        page.locator("tr:has-text('" + second + "') button[data-verb='workspace-switch']").click()
+        page.waitForURL("**/dashboard")
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.LOAD)
+        page.locator(".app-ws b").innerText().trim() shouldBe second
+        page.locator("#workspace-switcher").inputValue() shouldBe second
     }
 }

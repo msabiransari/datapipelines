@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.26
+**Status:** v1.27
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-19
@@ -266,7 +266,13 @@ front of it:
   MUST NOT relax `X-Frame-Options` beyond `SAMEORIGIN` or drop `frame-ancestors`. An
   edge that sets its own `Referrer-Policy` should set the same value, not a looser one.
 - **TLS termination and redirect:** HTTP → HTTPS redirect at the edge; the app is reached
-  over the private network only.
+  over the private network only. The app never needs to know the public scheme for its own
+  redirects: every `Location` it sends is RELATIVE (`/dashboard`, `/login?error=…` —
+  `server.tomcat.use-relative-redirects`, #207) and resolves against the origin the browser
+  used, so no `X-Forwarded-Proto` handling is required for redirects, and an edge that
+  forwards it changes nothing. (Before #207 the container built absolute `http://` Locations
+  behind the edge, and the browser refused to follow them: `form-action 'self'` for plain
+  forms, mixed content for htmx requests.)
 - Forward the client address (`X-Forwarded-For`) and declare the edge in
   `datapipelines.auth.trusted-proxies` — the paragraph above.
 
@@ -1015,6 +1021,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-22 | v1.27 | #207 relative redirects | §8 edge contract: every app `Location` is RELATIVE (`server.tomcat.use-relative-redirects=true`), so the public scheme never leaks into a redirect and the edge needs no `X-Forwarded-Proto` handling for them. Behind a TLS-terminating edge the absolute `http://` Locations Tomcat built by default were refused by the browser (CSP `form-action` on plain forms, mixed content on htmx requests) after the server had already acted — logout, workspace switch and member removal on datapipelines.co, 2026-09-22. |
 | 2026-09-21 | v1.26 | 199 (#196) the Redis password leaves argv | §4.2.1 gains "Where the password lives": the reference redis services (`deploy/compose.yml`, `deploy/compose.laptop-infra.yml`, Appendix A) start `redis-server -` — configuration from stdin, `requirepass` fed by a heredoc from `REDISCLI_AUTH`, `exec` so the server stays PID 1, `user: redis` because the wrapper is `sh` — so no argv, and no file, carries the value; `--maxmemory`/`noeviction` stay on argv. §9's argv line closes the "tracked separately" remainder and names the two commands that check it. Operators: the next start recreates the Redis container (§7 says what a restart loses). Numbered on base db12e043; the merger renumbers if another lane took v1.26. |
 | 2026-09-21 | v1.25 | 188 (#188) the app states its headers | §6.2 gains "What the edge sets, and what it must not touch": the header table the app sends on every response (an enforced CSP with no `'unsafe-inline'`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`; the editor route's `'unsafe-eval'` exception, #195), why the app sends no HSTS, and the four things the product expects of an edge (HSTS one year without preload, headers passed through unweakened, TLS + redirect, the forwarded address). §9: two checklist lines for the same. |
 | 2026-09-21 | v1.24 | 188 (#189) Redis credentials | §9: the hardened posture refuses a passwordless non-loopback Redis; the reference compose files pass the healthcheck password as `REDISCLI_AUTH` (environment), never `redis-cli -a` (argv); the server's `--requirepass` argv named as the remaining exposure. |

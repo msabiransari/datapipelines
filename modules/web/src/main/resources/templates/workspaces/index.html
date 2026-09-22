@@ -55,7 +55,11 @@
                members table print, rather than a third inline ternary (114). -->
           <td th:text="${ws.roleLabel}">author</td>
           <td class="num">
-            <form th:action="@{/workspace/switch}" method="post" class="u-inline" th:if="${ws.active}">
+            <!-- #207: a FULL navigation (hx-boost="false"), like the rail's own switcher. Switching
+                 changes the SHELL — the rail's workspace name, role badge and key chip — and a boosted
+                 swap replaces only #app-main, so the rail kept showing the workspace you had just
+                 left until a manual reload. -->
+            <form th:action="@{/workspace/switch}" method="post" class="u-inline" th:if="${ws.active}" hx-boost="false">
               <input type="hidden" name="name" th:value="${ws.name}">
               <button type="submit" data-verb="workspace-switch" class="ds-button ds-button-secondary ds-button-sm"
                       th:disabled="${ws.current}">Switch</button>
