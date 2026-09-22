@@ -515,7 +515,7 @@ class ApiKeysAdminControllerTest {
         // /nyc was already bound (idempotent), /lending is added, /old is removed.
         verify(exactly = 1) { bindingRepository.insert(match { it.pathPrefix == "/lending" }) }
         verify(exactly = 0) { bindingRepository.insert(match { it.pathPrefix == "/nyc" }) }
-        verify(exactly = 1) { bindingRepository.delete("/old", "dpk_abc123") }
+        verify(exactly = 1) { bindingRepository.delete("/old", "dpk_abc123", workspaceId) }
     }
 
     @Test

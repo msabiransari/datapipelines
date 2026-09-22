@@ -158,9 +158,12 @@ class DatasourceWorkspaceRules(
         dialect: Dialect,
         jdbcUrl: String,
     ) {
-        if (!principal.isSuperAdmin && JdbcUrlForm.classify(dialect, jdbcUrl).isInProcess) {
+        // LAKE is the same embedded DuckDB with external access ON (it reads object storage in
+        // place) and no local-filesystem lock, so it is an in-process engine for this rule
+        // whatever its URL form says (186 review M1).
+        if (!principal.isSuperAdmin && (dialect == Dialect.LAKE || JdbcUrlForm.classify(dialect, jdbcUrl).isInProcess)) {
             throw workspaceForbidden(
-                "in-process engines (H2 mem/file, DuckDB, SQLite) are registered by a super admin — " +
+                "in-process engines (H2 mem/file, DuckDB, SQLite, LAKE) are registered by a super admin — " +
                     "their SQL runs inside the server's own process",
             )
         }

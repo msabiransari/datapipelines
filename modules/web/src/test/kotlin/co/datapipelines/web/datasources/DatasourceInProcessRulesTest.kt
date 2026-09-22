@@ -58,6 +58,10 @@ class DatasourceInProcessRulesTest {
             { refused(member, Dialect.DUCKDB, "jdbc:duckdb:/data/app.duckdb") },
             { refused(member, Dialect.SQLITE, "jdbc:sqlite::memory:") },
             { refused(member, Dialect.SQLITE, "jdbc:sqlite:/data/app.db") },
+            // LAKE: the same embedded DuckDB with external access ON — gated whatever the URL
+            // form says, because the form classifies it as Server (186 review M1).
+            { refused(member, Dialect.LAKE, "jdbc:duckdb::memory:") },
+            { refused(member, Dialect.LAKE, "jdbc:duckdb:/data/lake.duckdb") },
         )
     }
 
@@ -88,6 +92,11 @@ class DatasourceInProcessRulesTest {
             {
                 shouldNotThrow<ApiException> {
                     rules.resolveCreateBinding(admin, null, null, Dialect.SQLITE, "jdbc:sqlite:/data/app.db")
+                }
+            },
+            {
+                shouldNotThrow<ApiException> {
+                    rules.resolveCreateBinding(admin, null, null, Dialect.LAKE, "jdbc:duckdb::memory:")
                 }
             },
         )
