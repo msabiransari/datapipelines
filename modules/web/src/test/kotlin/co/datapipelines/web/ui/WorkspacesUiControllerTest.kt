@@ -120,12 +120,15 @@ class WorkspacesUiControllerTest {
         val target = UUID.randomUUID()
         val row = WorkspaceMemberRow(target, "bob@acme.test", "Bob", WorkspaceRole.AUTHOR, Instant.EPOCH)
         every { workspaceService.setMemberRole(principal, "acme", target, WorkspaceRole.AUTHOR) } returns row
+        every { workspaceService.liveUserKeyOwnerIds(principal, "acme") } returns emptySet()
         val model = ExtendedModelMap()
 
         controller.setMemberRole(model, "acme", target, role = "author") shouldBe "partials/workspace-member-row :: saved"
 
         verify { workspaceService.setMemberRole(principal, "acme", target, WorkspaceRole.AUTHOR) }
         (model["member"] as MemberRowView).role shouldBe WorkspaceRole.AUTHOR
+        // #200 — the swapped-in row carries the key state the page drew (here: none).
+        (model["member"] as MemberRowView).hasKey shouldBe false
         model["toastVariant"] shouldBe "success"
         val html =
             engine().process(
@@ -260,7 +263,7 @@ class WorkspacesUiControllerTest {
                     fillLayoutChrome()
                     setVariable("own", listOf(WorkspaceRowView.of(membership, "acme", superAdmin = false)))
                     setVariable("canCreate", false)
-                    setVariable("managed", mapOf("acme" to listOf(MemberRowView.of(memberRow()))))
+                    setVariable("managed", mapOf("acme" to listOf(MemberRowView.of(memberRow(), hasKey = true))))
                     setVariable("workspaceRoles", WorkspaceRole.entries)
                 },
             )
@@ -416,6 +419,15 @@ class WorkspacesUiControllerTest {
         controller.removeMember("acme", target) shouldBe "redirect:/workspaces?error=in_use"
     }
 
+    /** #200 — the members-row verb posts through the ONE service method the REST twin calls. */
+    @Test
+    fun `revokeMemberKey redirects ok=member_key_revoked`() {
+        authenticate()
+        val target = UUID.randomUUID()
+        every { workspaceService.revokeMemberKey(principal, "acme", target) } returns Unit
+        controller.revokeMemberKey("acme", target) shouldBe "redirect:/workspaces?ok=member_key_revoked"
+    }
+
     @Test
     fun `delete redirects ok=deleted - and owning content is the in_use banner`() {
         authenticate()
@@ -507,7 +519,7 @@ class WorkspacesUiControllerTest {
      * and a `read` key driving a workspace delete violates that outright.
      */
     @Test
-    fun `an API-key principal cannot create, add, change roles, remove, deactivate or delete`() {
+    fun `an API-key principal cannot create, add, change roles, remove, revoke keys, deactivate or delete`() {
         authenticateWithApiKey()
         val refusal = "redirect:/workspaces?error=session_required"
 
@@ -517,6 +529,7 @@ class WorkspacesUiControllerTest {
         val partial = controller.setMemberRole(ExtendedModelMap(), "globex", UUID.randomUUID(), role = "author")
         (partial as org.springframework.http.ResponseEntity<*>).statusCode.value() shouldBe 403
         controller.removeMember("globex", UUID.randomUUID()) shouldBe refusal
+        controller.revokeMemberKey("globex", UUID.randomUUID()) shouldBe refusal
         controller.renameDisplay("globex", "Globex") shouldBe refusal
         controller.deactivate("globex") shouldBe refusal
         controller.reactivate("globex") shouldBe refusal
@@ -527,6 +540,7 @@ class WorkspacesUiControllerTest {
         verify(exactly = 0) { workspaceService.addMember(any(), any(), any(), any()) }
         verify(exactly = 0) { workspaceService.setMemberRole(any(), any(), any(), any()) }
         verify(exactly = 0) { workspaceService.removeMember(any(), any(), any()) }
+        verify(exactly = 0) { workspaceService.revokeMemberKey(any(), any(), any()) }
         verify(exactly = 0) { workspaceService.updateDisplayName(any(), any(), any()) }
         verify(exactly = 0) { workspaceService.deactivate(any(), any()) }
         verify(exactly = 0) { workspaceService.reactivate(any(), any()) }

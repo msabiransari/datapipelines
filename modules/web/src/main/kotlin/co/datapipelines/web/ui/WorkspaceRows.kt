@@ -19,6 +19,11 @@ import java.util.UUID
  * Since D22 (2026-09-20) a member row carries ONE [role], rendered as the selected option of the
  * role dropdown; the SERVER decides the value set (`WorkspaceRole`, and the database CHECK
  * behind it), so the template lists `WorkspaceRole.entries` and never spells a role name.
+ *
+ * Since #200 (2026-09-21) it also carries [hasKey] — whether the member holds a live
+ * login-minted key in this workspace. The state shows for every row ("has a key" / "no key")
+ * and gates the row's Revoke-key verb; it is the admin's own workspace's fact, owner-id
+ * derived, and never a key id or prefix.
  */
 data class MemberRowView(
     val userId: UUID,
@@ -26,15 +31,20 @@ data class MemberRowView(
     val displayName: String,
     val role: WorkspaceRole,
     val roleLabel: String,
+    val hasKey: Boolean,
 ) {
     companion object {
-        fun of(row: WorkspaceMemberRow): MemberRowView =
+        fun of(
+            row: WorkspaceMemberRow,
+            hasKey: Boolean,
+        ): MemberRowView =
             MemberRowView(
                 userId = row.userId,
                 email = row.email,
                 displayName = row.displayName,
                 role = row.role,
                 roleLabel = RoleModel.labelOf(row.role),
+                hasKey = hasKey,
             )
     }
 }

@@ -860,7 +860,7 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 | Read the promotion page — `PROMOTION_READ` | `GET /promotion` (owner rule 13): the author who released sees what is promotable; the promote verb on the page renders by role | ✗ | ✓ | ✓ | ✓ | ✓ |
 | Promote to the higher environment — `PROMOTE_VERSION` | `POST /promotion/promote` ([Versioning §10](versioning.md)) — the promoter's one verb (D5). The RECEIVING side is not this row — a promotion arrives on the server-key route family (§7.7) | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Create / deactivate / reactivate a workspace — `MANAGE_INSTANCE_WORKSPACES` | `POST /api/v1/workspaces/{name}/deactivate`, `.../reactivate`, `DELETE`, and their form twins (D-R10 — deactivate, never delete) | ✗ | ✗ | ✗ | ✗ | ✓ |
-| Add / remove members, set their role, invite — `MANAGE_WORKSPACE_MEMBERS` | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}` (`{"role": …}`), `DELETE .../members/{user_id}`, `DELETE .../invitations/{email}`, the members forms and the role partial (D22) — the last admin cannot be removed or demoted (`workspace.last_admin`) | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Add / remove members, set their role, invite — `MANAGE_WORKSPACE_MEMBERS` | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}` (`{"role": …}`), `DELETE .../members/{user_id}`, `DELETE .../members/{user_id}/key` (#200 — revoke the member's login-minted key without removing them; idempotent `204`), `DELETE .../invitations/{email}`, the members forms (Remove, Revoke key) and the role partial (D22) — the last admin cannot be removed or demoted (`workspace.last_admin`); removing a member revokes the `user` key they hold here in the same act (roles record §3.7, ruling 1) | ✗ | ✗ | ✗ | ✓ | ✓ |
 | Grant / revoke a datasource to a workspace — `MANAGE_DATASOURCE_GRANTS` | `POST`/`DELETE /api/v1/datasources/{name}/grants/{workspace}` (D-R7) — the verb that decides who can SEE a datasource at all | ✗ | ✗ | ✗ | ✗ | ✓ |
 | Read the audit log — **reserved** (D12) | no surface yet: `audit_log` has no page and no endpoint (verified 2026-09-20 — the only reads are the serve/MCP existence checks and the tool learnings, none caller-facing). When one lands it declares a new constant on this row | ✗ | ✗ | ✗ | ✓ | ✓ |
 
@@ -1231,6 +1231,7 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |
+| `auth.api_key.revoked_by_admin` | A member's login-minted key was revoked by a workspace admin or super admin (#200; roles record §3.7) — because their membership ended (`details.reason: member_removed`, the same act that removes them) or as an explicit act that keeps the member (`reason: admin_revoked`). `details` carry workspace, `target_user_id` and reason; `key_id` is the revoked key |
 | `auth.api_key.used` | API key validated (sampled 1/100) |
 | `auth.api_key.rejected` | API key validation failed |
 | `auth.scope.denied` | Request rejected for insufficient scope |

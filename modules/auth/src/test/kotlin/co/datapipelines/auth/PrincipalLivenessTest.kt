@@ -24,7 +24,16 @@ class PrincipalLivenessTest {
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val userService = UserService(userRepository, cache, AuthProperties(), auditLogger)
     private val workspaceService =
-        WorkspaceService(workspaceRepository, userRepository, cache, null, auditLogger, mockk(relaxed = true), AuthProperties())
+        WorkspaceService(
+            workspaceRepository,
+            mockk(relaxed = true),
+            userRepository,
+            cache,
+            null,
+            auditLogger,
+            mockk(relaxed = true),
+            AuthProperties(),
+        )
     private val liveness = PrincipalLiveness(userService, workspaceService)
 
     private val userId = UUID.randomUUID()

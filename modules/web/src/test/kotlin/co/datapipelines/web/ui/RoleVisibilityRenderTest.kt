@@ -225,6 +225,28 @@ class RoleVisibilityRenderTest {
     }
 
     /**
+     * #200 — the members row carries the member's key state, and the Revoke-key verb only
+     * when a live key exists. A button over "no key" would revoke nothing and say otherwise;
+     * a key id or prefix never renders here (the members row is not a key listing).
+     */
+    @Test
+    fun `a member with a key shows the state and the Revoke-key verb - one without shows no key and no verb`() {
+        val withKey = render("workspaces/index") { workspacesModel() }
+        withKey shouldContain "· has a key"
+        withKey shouldContain "data-verb=\"member-key-revoke\""
+        withKey shouldContain "/workspaces/acme/members/11111111-1111-1111-1111-111111111111/key/revoke"
+
+        val withoutKey =
+            render("workspaces/index") {
+                workspacesModel(hasKey = false)
+            }
+        withoutKey shouldContain "· no key"
+        withoutKey shouldNotContain "data-verb=\"member-key-revoke\""
+        // The state text is not a key identifier: no id-shaped token ever rides the row.
+        withoutKey shouldNotContain "dpk_"
+    }
+
+    /**
      * §C.3(a) — the no-workspace page. It is NOT an error page: nothing failed, and `error/403`
      * would tell someone their credential is wrong when their membership is simply absent.
      *
@@ -592,7 +614,10 @@ class RoleVisibilityRenderTest {
         setVariable("plan", PROMOTION_PLAN)
     }
 
-    private fun WebContext.workspacesModel(active: Boolean = true) {
+    private fun WebContext.workspacesModel(
+        active: Boolean = true,
+        hasKey: Boolean = true,
+    ) {
         chrome()
         setVariable("canCreate", true)
         setVariable("workspaceRoles", co.datapipelines.auth.WorkspaceRole.entries)
@@ -619,6 +644,7 @@ class RoleVisibilityRenderTest {
                             displayName = "Alice",
                             role = co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN,
                             roleLabel = "workspace admin",
+                            hasKey = hasKey,
                         ),
                     ),
             ),

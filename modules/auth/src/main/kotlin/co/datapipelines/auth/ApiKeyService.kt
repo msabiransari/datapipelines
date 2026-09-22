@@ -199,6 +199,14 @@ class ApiKeyService(
      * key still authenticates and every permission above viewer then refuses with
      * `auth.key_issuer_role_lost`, which is the answer the caller can act on. Refusing the
      * credential outright would report "your key is invalid" for a key that is entirely valid.
+     *
+     * Since #200 (roles record §3.7, ruling 1) the REMOVED-MEMBER case no longer reaches this
+     * fallback: removing a membership revokes the member's `user` key in the same act, so
+     * [usableRecord] refuses it with `auth.api_key.invalid` long before a context is asked
+     * for. The fallback stays as the totality branch — a resolution that finds nothing must
+     * still produce a principal — but a key landing here today means its membership ended
+     * without the revocation that is supposed to accompany it, which is a defect, not a
+     * posture (the viewer floor keeps even that hypothetical to reads).
      */
     private fun pinnedContext(
         record: ApiKey,

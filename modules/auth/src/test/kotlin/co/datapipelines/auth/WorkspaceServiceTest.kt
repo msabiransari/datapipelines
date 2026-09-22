@@ -37,6 +37,7 @@ class WorkspaceServiceTest {
     private fun service() =
         WorkspaceService(
             repository,
+            mockk(relaxed = true),
             userRepository,
             cache,
             lastUsed,
@@ -397,6 +398,7 @@ class WorkspaceServiceTest {
         val allowlisted =
             WorkspaceService(
                 repository,
+                mockk(relaxed = true),
                 userRepository,
                 cache,
                 lastUsed,

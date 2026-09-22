@@ -1,7 +1,7 @@
 <!-- One member of the ACTIVE workspace (ui-screens.md §4.13, D22): identity, the role
-     dropdown with the current role selected, Save, Remove. Rendered by the page for every
-     member AND by the role partial's response, so the row a Save swaps in IS the row the
-     page drew — never a second copy of the markup.
+     dropdown with the current role selected, Save, the key state with its Revoke-key verb
+     (#200), Remove. Rendered by the page for every member AND by the role partial's response,
+     so the row a Save swaps in IS the row the page drew — never a second copy of the markup.
 
      Model: `workspaceName`, `workspaceRoles` (WorkspaceRole.entries), `member` (MemberRowView). -->
 <th:block xmlns:th="http://www.thymeleaf.org">
@@ -9,6 +9,11 @@
     <td>
       <span th:text="${member.displayName}">Alice</span>
       <span class="u-secondary u-text-xs" th:text="' ' + ${member.email}">alice@example.com</span>
+      <!-- #200 — the member's login-minted key, as a fact the admin administers: the state
+           shows for EVERY row; the key id and prefix never do (the members row is not the
+           key listing, and no plaintext exists to show). -->
+      <span class="u-secondary u-text-xs" data-member-key
+            th:text="${member.hasKey} ? ' · has a key' : ' · no key'"> · has a key</span>
     </td>
     <!-- ONE role per membership (D1). The <select> lists the server's roles, the member's
          current one selected; Save posts it through the one htmx partial on this screen and
@@ -27,9 +32,17 @@
       </form>
     </td>
     <td class="num">
+      <!-- #200 — revoke the member's login-minted key without removing them. Only drawn
+           when a live key exists: a button over "no key" would revoke nothing and say
+           otherwise. The member's session is untouched; their next sign-in mints fresh. -->
+      <form th:if="${canAdminWorkspace == true and member.hasKey}"
+            th:action="@{/workspaces/{name}/members/{userId}/key/revoke(name=${workspaceName}, userId=${member.userId})}"
+            method="post" class="u-inline">
+        <button type="submit" data-verb="member-key-revoke" class="ds-button ds-button-ghost ds-button-sm">Revoke key</button>
+      </form>
       <!-- The last-admin rule is the SERVER's (workspace.last_admin, 409); hiding the
            button for every admin would also hide it for the ones who can be removed. -->
-      <form th:action="@{/workspaces/{name}/members/{userId}/remove(name=${workspaceName}, userId=${member.userId})}" method="post">
+      <form th:action="@{/workspaces/{name}/members/{userId}/remove(name=${workspaceName}, userId=${member.userId})}" method="post" class="u-inline">
         <button th:if="${canAdminWorkspace == true}" type="submit" data-verb="member-remove" class="ds-button ds-button-ghost ds-button-sm">Remove</button>
       </form>
     </td>

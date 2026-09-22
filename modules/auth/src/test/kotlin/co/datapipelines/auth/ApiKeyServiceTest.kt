@@ -172,6 +172,21 @@ class ApiKeyServiceTest {
     }
 
     @Test
+    fun `a revoked pinned key is refused BEFORE the removed-member viewer fallback (#200)`() {
+        echoInsert()
+        val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)
+        // The removed-member answer: no membership resolves, so the fallback WOULD hand a
+        // viewer context — reading and running in the workspace they were removed from, the
+        // exact defect #200 closes. The revocation must refuse the key upstream of it.
+        every { workspaceService.issuerContext(any(), any(), any(), any()) } returns null
+        every { repo.findById(issued.record.id) } returns issued.record.copy(isRevoked = true)
+        every { userService.snapshot(ownerId) } returns activeOwner()
+
+        shouldThrow<ApiKeyInvalidException> { service.validate(issued.plaintext) }
+        io.mockk.verify(exactly = 0) { workspaceService.issuerContext(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `an expired key maps to api_key expired`() {
         echoInsert()
         val issued = service.issue(issuer, ownerId, "Claude", setOf(Scope.READ), workspaceId)

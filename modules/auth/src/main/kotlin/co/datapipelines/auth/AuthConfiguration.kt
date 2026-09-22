@@ -79,6 +79,7 @@ class AuthConfiguration {
     @Bean
     fun workspaceService(
         workspaceRepository: WorkspaceRepository,
+        apiKeyRepository: ApiKeyRepository,
         userRepository: UserRepository,
         authCache: AuthCache,
         lastUsedWorkspaceStore: ObjectProvider<LastUsedWorkspaceStore>,
@@ -91,6 +92,7 @@ class AuthConfiguration {
     ): WorkspaceService =
         WorkspaceService(
             workspaceRepository,
+            apiKeyRepository,
             userRepository,
             authCache,
             lastUsedWorkspaceStore.getIfAvailable(),

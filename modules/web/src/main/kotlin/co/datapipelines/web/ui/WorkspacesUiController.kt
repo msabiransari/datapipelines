@@ -101,7 +101,23 @@ class WorkspacesUiController(
                         runCatching { workspaceService.membersWithInvitations(principal, membership.workspaceName) }
                             .getOrNull()
                 }
-        model.addAttribute("managed", listings.mapValues { (_, l) -> l?.members?.map(MemberRowView::of) ?: emptyList() })
+        // #200 — which members hold a live login-minted key: the row's "has a key" state and
+        // the revoke verb's affordance. Owner ids only (no key id, no prefix — the members row
+        // is not a key listing), resolved through the same service the verbs call.
+        val keyOwners =
+            listings.mapValues { (name, listing) ->
+                if (listing == null) {
+                    emptySet()
+                } else {
+                    runCatching { workspaceService.liveUserKeyOwnerIds(principal, name) }.getOrDefault(emptySet())
+                }
+            }
+        model.addAttribute(
+            "managed",
+            listings.mapValues { (name, l) ->
+                l?.members?.map { MemberRowView.of(it, hasKey = it.userId in keyOwners.getValue(name)) } ?: emptyList()
+            },
+        )
         // 113 — invitations are ghost rows under the members, keyed the same way, never merged
         // into `managed`: a template that counts members must not count people who have not
         // signed in yet.
@@ -224,11 +240,15 @@ class WorkspacesUiController(
             WorkspaceRole.fromWireOrNull(role)
                 ?: return refusedToast(HttpStatus.BAD_REQUEST, "Role not changed", "Unknown workspace role '$role'.")
         return try {
-            val row = workspaceService.setMemberRole(requireSessionPrincipal(), name, userId, workspaceRole)
+            val principal = requireSessionPrincipal()
+            val row = workspaceService.setMemberRole(principal, name, userId, workspaceRole)
             RoleModel.stamp(model)
             model.addAttribute("workspaceName", name)
             model.addAttribute("workspaceRoles", WorkspaceRole.entries)
-            model.addAttribute("member", MemberRowView.of(row))
+            // The swapped-in row shows the SAME key state the page drew (#200) — the role
+            // change cannot have moved it, but the fragment needs the attribute to render it.
+            val hasKey = userId in workspaceService.liveUserKeyOwnerIds(principal, name)
+            model.addAttribute("member", MemberRowView.of(row, hasKey = hasKey))
             model.addAttribute("toastVariant", "success")
             model.addAttribute("toastTitle", "Role changed")
             model.addAttribute("toastMessage", "${row.email} is now ${row.role.label} in $name.")
@@ -251,6 +271,20 @@ class WorkspacesUiController(
         @PathVariable name: String,
         @PathVariable userId: UUID,
     ): String = action("member_removed") { workspaceService.removeMember(requireSessionPrincipal(), name, userId) }
+
+    /**
+     * A workspace admin revokes a member's login-minted key (#200; roles record §3.7, ruling
+     * 3) — the members-row verb beside Remove, through the SAME [WorkspaceService.revokeMemberKey]
+     * the REST `DELETE .../members/{userId}/key` calls. Removal is a different act with a
+     * different toast: the member stays, their key stops answering (`auth.api_key.invalid`),
+     * and the next sign-in mints a fresh one.
+     */
+    @PostMapping("/workspaces/{name}/members/{userId}/key/revoke")
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    fun revokeMemberKey(
+        @PathVariable name: String,
+        @PathVariable userId: UUID,
+    ): String = action("member_key_revoked") { workspaceService.revokeMemberKey(requireSessionPrincipal(), name, userId) }
 
     /** The workspace's display name — a workspace admin's verb (section 7.6, `MANAGE_WORKSPACE`). */
     @PostMapping("/workspaces/{name}/display-name")
