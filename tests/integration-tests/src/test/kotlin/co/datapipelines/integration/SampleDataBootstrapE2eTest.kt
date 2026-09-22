@@ -356,10 +356,16 @@ class SampleDataBootstrapE2eTest {
         val context =
             workspaceService.javaClass.methods
                 .first { it.name == "workspaceForLogin" }
-                .invoke(workspaceService, user, email)
+                // #210: the hook takes the sign-in method; a seeded local user signs in by password.
+                // Resolved reflectively like the hook itself — this module does not depend on auth.
+                .invoke(workspaceService, user, email, loginMethodPwd())
         val workspaceId = context.javaClass.getMethod("getId").invoke(context) as UUID
         return userId to workspaceId
     }
+
+    /** `co.datapipelines.auth.LoginMethod.PWD`, without a compile-time dependency on the auth module. */
+    private fun loginMethodPwd(): Any =
+        Class.forName("co.datapipelines.auth.LoginMethod").enumConstants.first { (it as Enum<*>).name == "PWD" }
 
     /**
      * Removes the `demo` workspace so the next boot CREATES it — and therefore seeds.
