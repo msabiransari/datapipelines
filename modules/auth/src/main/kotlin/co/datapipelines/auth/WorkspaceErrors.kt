@@ -95,6 +95,7 @@ object WorkspaceErrorCodes {
             SESSION_REQUIRED,
             NOT_FOUND,
             LAST_ADMIN,
+            SELF_MEMBERSHIP,
             INACTIVE,
             INVITATION_NOT_FOUND,
             NAME_INVALID,

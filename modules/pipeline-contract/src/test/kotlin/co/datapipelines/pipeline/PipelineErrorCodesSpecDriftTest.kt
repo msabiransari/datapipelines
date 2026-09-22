@@ -174,6 +174,8 @@ class PipelineErrorCodesSpecDriftTest {
                 // 112 — the workspace domain's two: "the last admin" and "deactivated" are
                 // states of the WORKSPACE, with no entity dimension under it.
                 PipelineErrorCodes.Workspace.LAST_ADMIN,
+                // #208 — the own-membership refusal, same two-segment shape as its workspace siblings.
+                PipelineErrorCodes.Workspace.SELF_MEMBERSHIP,
                 PipelineErrorCodes.Workspace.INACTIVE,
                 PipelineErrorCodes.Template.NOT_FOUND,
                 PipelineErrorCodes.Template.IN_USE,

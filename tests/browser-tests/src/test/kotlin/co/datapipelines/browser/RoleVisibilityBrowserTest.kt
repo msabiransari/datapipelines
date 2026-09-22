@@ -304,16 +304,28 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
         val workspace = "rbv-last-" + suffix()
         val adminUser = seedRoleUser("rbv-last-admin", role = "viewer")
         seedWorkspaceAdministeredBy(workspace, adminUser.email)
+        // #208: nobody administers their OWN row, so the only admin cannot be the one who
+        // demotes them — a super admin holding a viewer membership here is.
+        val rootUser = seedLocalUser(uniqueEmail("rbv-last-root-" + suffix()), generatedPassword("pw"), mustChange = false)
+        addMember(workspace, rootUser.email, "viewer")
+
         val admin = openSession(adminUser)
         admin.switchTo(workspace)
+        val ownRow = "section[data-workspace='$workspace'] tr[data-member='${admin.email}']"
+        admin.page.waitForSelector("$ownRow select[data-member-role]")
+        admin.page.locator("$ownRow [data-verb='member-role']").count() shouldBe 0
+        admin.page.locator("$ownRow [data-verb='member-remove']").count() shouldBe 0
+        admin.close()
 
-        val row = "section[data-workspace='$workspace'] tr[data-member='${admin.email}']"
-        admin.page.waitForSelector("$row select[data-member-role]")
-        admin.page.selectOption("$row select[data-member-role]", "author")
-        admin.page.click("$row [data-verb='member-role']")
+        val root = openSession(rootUser)
+        root.switchTo(workspace)
+        val row = "section[data-workspace='$workspace'] tr[data-member='${adminUser.email}']"
+        root.page.waitForSelector("$row select[data-member-role]")
+        root.page.selectOption("$row select[data-member-role]", "author")
+        root.page.click("$row [data-verb='member-role']")
 
-        admin.page.waitForSelector(".ds-toast-danger")
-        admin.page
+        root.page.waitForSelector(".ds-toast-danger")
+        root.page
             .locator(".ds-toast-danger")
             .first()
             .innerText()
@@ -321,8 +333,8 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
             .contains("last workspace admin") shouldBe true
 
         // The row is untouched: a refused write must not half-apply.
-        roleOf(workspace, admin.email) shouldBe "workspace_admin"
-        admin.close()
+        roleOf(workspace, adminUser.email) shouldBe "workspace_admin"
+        root.close()
     }
 
     // ------------------------------------------------------------------ helpers
@@ -434,6 +446,26 @@ class RoleVisibilityBrowserTest : BrowserSuite() {
                     SELECT w.id, u.id, 'workspace_admin'
                       FROM workspaces w, users u
                      WHERE w.name = '$name' AND u.email = '$adminEmail'
+                    """.trimIndent(),
+                )
+            }
+        }
+
+    /** Adds [email] to [workspace] with [role] — the #208 tests need a second, differently placed actor. */
+    private fun addMember(
+        workspace: String,
+        email: String,
+        role: String,
+    ) = DriverManager
+        .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
+        .use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    INSERT INTO workspace_members (workspace_id, user_id, role)
+                    SELECT w.id, u.id, '$role'
+                      FROM workspaces w, users u
+                     WHERE w.name = '$workspace' AND u.email = '$email'
                     """.trimIndent(),
                 )
             }

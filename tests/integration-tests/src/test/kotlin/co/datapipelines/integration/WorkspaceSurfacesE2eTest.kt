@@ -384,12 +384,24 @@ class WorkspaceSurfacesE2eTest {
             .then()
             .statusCode(204)
 
-        // Alice is acme's only admin. Removing her is `workspace.last_admin` — its own code
-        // rather than the old `in_use`, because the caller's next step is "promote somebody
-        // else first", which is a different instruction from "empty the workspace first".
+        // #208: Alice addressing her OWN membership is `workspace.self_membership`, whatever
+        // else would have applied — nobody administers their own row.
         given()
             .port(port)
             .header(API_KEY_HEADER, aliceKey)
+            .`when`()
+            .delete("/api/v1/workspaces/acme/members/$ALICE")
+            .then()
+            .statusCode(409)
+            .body("error.code", Matchers.equalTo("workspace.self_membership"))
+        // Alice is acme's only admin. Somebody ELSE removing her is `workspace.last_admin` — its
+        // own code rather than the old `in_use`, because the caller's next step is "promote
+        // somebody else first", which is a different instruction from "empty the workspace first".
+        given()
+            .port(port)
+            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+            .cookie(CSRF_COOKIE, "surfaces-csrf")
+            .header(CSRF_HEADER, "surfaces-csrf")
             .`when`()
             .delete("/api/v1/workspaces/acme/members/$ALICE")
             .then()
