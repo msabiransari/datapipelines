@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.23 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
+**Status:** v2.24 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-21
@@ -2028,7 +2028,10 @@ unambiguous, workspace-scoped, `endpoint` kind required) or, kept for REST compa
 **`api_key_name`** — which resolves within the caller's OWN keys only, exactly as before:
 `api_keys.name` carries no uniqueness constraint, so "the key named `ci`" is ambiguous
 deployment-wide and a surface that resolved it across owners would pick one person's credential
-to widen. Promotion carries endpoint rows and their bindings **by key name**; a target missing
+to widen. Promotion carries endpoint rows and their bindings **of the source workspace, by key
+name** — the bindings are read with the workspace predicate in the query (2026-09-21, #199), so a
+neighbouring workspace's key bound at an equal node (legal: only the exact `path_pattern` is
+unique deployment-wide, path trees may overlap) never rides into the batch; a target missing
 that key name refuses the batch with `endpoint.promotion.key_missing` before anything is pushed.
 The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool-definitions)).
 
@@ -2061,6 +2064,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v2.24 | 199 (#199) | Security, no wire change. §19.5: a promotion batch carries the bindings **of the source workspace** only — the sender read every workspace's `endpoint_key_bindings` rows and matched by node, so a neighbouring workspace's key bound at a node equal to a promoted pattern rode into the batch by NAME and, on the target, bound the target's key of that name or refused the whole batch for a name the source never chose. The read is now filtered by `workspace_id` in the query (the #191 rule for the serve path, applied to the sender). Numbered on base db12e043; the merger renumbers if another lane took v2.24. |
 | 2026-09-21 | v2.23 | 180 (#180) roles R4 | Additive. §16.3: user deactivation names its effect — every session and key of the user answers `401 auth.principal_deactivated` within the liveness window (new §13.7 code; `auth.api_key.invalid` no longer means "owner deactivated"). New §17.5a documents the existing `POST /workspaces/{name}/deactivate` and `/reactivate` routes (super admin) and the 404 rule they keep. |
 | 2026-09-21 | v2.22 | 178 (#178) roles R2 | **The promoter lens** ([Auth §11A.1](auth.md#11a1-the-404-rule)) on every pipeline, template and endpoint read (§5, §8, §19.5): a promoter's session or key sees released objects newer than the promotion target's and nothing else; hidden ones are the same `404` an id from another workspace gets; listings, levels and counts are the lensed set; fail closed (never a `502` on a read) while the target is unreadable. §18.1: the sender caches the inventory per workspace (`inventory-cache-ttl-seconds`). No wire shape changed. |
 | 2026-09-20 | v2.21 | 177 (#177) roles R1 | **Two deliberate breaks under the ratified [roles design](superpowers/specs/2026-09-20-roles-permissions-design.md)**, both on surfaces whose only callers are the product's own UI and E2E suites: (1) §17 — the membership wire says **`role`** (`viewer` \| `author` \| `promoter` \| `workspace_admin`), replacing the `author`/`promoter`/`admin` booleans on §17.1, §17.6, §17.7 (request and both responses) and §17.10 (renamed *Set a member's role*; body `{"role"}`); an unknown role is a 400. §17.2/§17.6 are a workspace admin's reads (D13); §17.1 (list-own) stays every member's on the switcher's row. (2) §10 — `triggered_by` → **`executed_by`** on the list and read projections, plus **`executed_by_key_kind`** (`user` \| `endpoint` \| `server` \| null); `triggered_via` documents `ENDPOINT`. Ownership rewritten to D11: own unless workspace admin, promoter refused by role, endpoint-key runs admin-only. `/promotion` (UI) is readable by authors too (rule 13). |

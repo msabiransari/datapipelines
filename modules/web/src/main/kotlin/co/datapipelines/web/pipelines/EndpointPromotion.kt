@@ -46,13 +46,21 @@ class EndpointPromotion(
      * Scoped to the batch's pipelines rather than the whole workspace on purpose: promoting one
      * pipeline must not drag along endpoints over pipelines the operator did not select, which
      * would push URLs whose pipelines the target does not have.
+     *
+     * The bindings are the SOURCE WORKSPACE's only, filtered in the query (#199, the D11 rule).
+     * Only the exact `path_pattern` is globally unique (V11); path trees may overlap, so a
+     * neighbouring workspace may legitimately bind at a node of its own tree that equals one
+     * of these patterns. Reading every workspace's rows and matching by node carried that
+     * neighbour's key NAME into this batch — and on the target, [apply] would bind the target's
+     * key of that name to this path, or [refuseIfKeysMissing] would refuse the whole batch for
+     * a name this workspace never chose.
      */
     fun entriesFor(
         workspaceId: UUID,
         promotedPipelineNames: List<String>,
     ): List<PromotionWire.EndpointEntry> {
         val promotedIds = promotedPipelineNames.mapNotNull { pipelines.findByName(workspaceId, it)?.id }.toSet()
-        val allBindings = bindings.findAll()
+        val allBindings = bindings.findByWorkspace(workspaceId)
         return endpoints
             .findByWorkspace(workspaceId)
             .filter { it.pipelineId in promotedIds }

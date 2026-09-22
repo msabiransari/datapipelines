@@ -43,6 +43,18 @@ class EndpointKeyBindingRepository(
         )
     }
 
+    /**
+     * Every binding of ONE workspace — what its tree screen, its endpoint detail and its
+     * promotion batch may see.
+     *
+     * The same D11 rule as [findByPrefixes] (#199): the predicate is in the query, so a
+     * neighbour's row bound at an equal node — legal, since only the exact `path_pattern` is
+     * globally unique (V11) while path trees may overlap — never reaches a reader that would
+     * carry its key name into another workspace's batch.
+     */
+    fun findByWorkspace(workspaceId: UUID): List<EndpointKeyBinding> =
+        jdbc.query("$SELECT_COLUMNS WHERE workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId), MAPPER)
+
     /** Every binding on the deployment — the tree screen renders inheritance from this. */
     fun findAll(): List<EndpointKeyBinding> = jdbc.query(SELECT_COLUMNS, MAPPER)
 
