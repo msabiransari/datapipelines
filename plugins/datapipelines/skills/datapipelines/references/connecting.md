@@ -52,7 +52,10 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   own scope, and the ROLE its ISSUER holds in the pinned workspace **right now**. So a key can
   do at most what the person who minted it can do today, and if their role changes the key
   starts refusing with `auth.key_issuer_role_lost` within about a minute. That one is not
-  retryable at any scope — the fix is a new key from somebody who still holds the role.
+  retryable at any scope — the fix is a new key from somebody who still holds the role. The
+  key is also TIED to that membership: if the issuer is removed from the workspace, the key
+  stops working with `auth.api_key.invalid` — not retryable either; ask a workspace admin for
+  a re-invite, sign in again, and a fresh key is minted.
 
 - **A key whose issuer is now only a viewer can still read and run; it cannot author**
   (viewers never mint keys — this is the demoted-issuer case). `auth.role_required` means the

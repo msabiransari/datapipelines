@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.65
+**Status:** v1.66
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-19 (173)
@@ -720,7 +720,7 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Promotion (§4.17) | the page itself | `canReadPromotion` — author, promoter, admins (owner rule 13) | `PROMOTION_READ` |
 | Promotion (§4.17) | Promote — and, since 143, the whole submission form (Send column, selection boxes) | `canPromote` in the SOURCE workspace; an author gets the plan as a plain table | `PROMOTE_VERSION` |
 | Workspaces (§4.13) | the page itself | `canAdminWorkspace` or `isSuperAdmin` (D13) — the switcher in the chrome stays every member's | `WORKSPACES_READ` / `WORKSPACE_SWITCH` |
-| Workspaces (§4.13) | Members: add (with a role), change role (the dropdown's Save — one htmx partial), remove, revoke invitation | `canAdminWorkspace`, **in the ACTIVE workspace** | `MANAGE_WORKSPACE_MEMBERS` |
+| Workspaces (§4.13) | Members: add (with a role), change role (the dropdown's Save — one htmx partial), revoke the member's key (#200, only when one is live), remove, revoke invitation | `canAdminWorkspace`, **in the ACTIVE workspace** | `MANAGE_WORKSPACE_MEMBERS` |
 | Workspaces | Display name | `canAdminWorkspace` | `MANAGE_WORKSPACE` |
 | Workspaces | Create, Deactivate, Reactivate, Delete | `isSuperAdmin` | `WORKSPACE_CREATE` / `MANAGE_INSTANCE_WORKSPACES` |
 | Execution detail (§4.9) | Cancel | `canExecute` **and** the execution is RUNNING | `CANCEL_EXECUTION` |
@@ -1156,15 +1156,18 @@ which is why neither carries a typed confirm. The role label is the membership's
 (`viewer` / `author` / `promoter` / `workspace admin`) printed by the same `RoleModel.labelOf` the
 shell badge and the members table use — the row's own word ([`WorkspaceRole`](enums.md#8c-workspacerole--the-one-role-a-membership-holds), D1).
 
-**Members of the ACTIVE workspace** (114 §C.1; the row rewritten by 177, D22) — one section:
-name/email, **one role dropdown** per member (`<select name="role">`, the four workspace roles,
-the member's current role selected) with a Save, and Remove. Each row is the
-`partials/workspace-member-row` fragment — the same markup the Save's response swaps back in, so
-the page and the response cannot drift. The add form at the foot carries the same dropdown
+**Members of the ACTIVE workspace** (114 §C.1; the row rewritten by 177, D22; the key state and
+verb by #200) — one section: name/email plus the member's KEY state ("has a key" / "no key" —
+the login-minted credential's existence, never an id or prefix), **one role dropdown** per member
+(`<select name="role">`, the four workspace roles, the member's current role selected) with a Save,
+**Revoke key** (only when a live key exists — a button over "no key" would revoke nothing and say
+otherwise; the member's session is untouched and their next sign-in mints fresh), and Remove. Each
+row is the `partials/workspace-member-row` fragment — the same markup the Save's response swaps back
+in, so the page and the response cannot drift. The add form at the foot carries the same dropdown
 (defaulting to `viewer`), so a member arrives with the role the operator meant: before 114 it
-posted `email` only and every member added from the UI was a viewer. Both verbs go through the SAME
-`WorkspaceService` methods the REST surface calls (`addMember`, `setMemberRole`) — there is no
-second code path, so the last-admin rule is enforced once.
+posted `email` only and every member added from the UI was a viewer. Every verb goes through the SAME
+`WorkspaceService` methods the REST surface calls (`addMember`, `setMemberRole`, `revokeMemberKey`,
+`removeMember`) — there is no second code path, so the last-admin rule is enforced once.
 
 - Changing a role is a **REPLACE** of one value: the dropdown shows the role the server holds, Save
   posts the selected one, and the swapped-in row shows what the database now holds. A role outside
@@ -1613,6 +1616,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.66 | 200 (#200) membership-bound keys | §4.13 members row: the member's key state ("has a key" / "no key" — never an id or prefix) and a **Revoke key** verb, drawn only when a live key exists, inside the same `canAdminWorkspace` guard; posts `POST /workspaces/{name}/members/{userId}/key/revoke` through the ONE `WorkspaceService.revokeMemberKey` the REST twin calls, and toasts `member_key_revoked` (the member stays; the next sign-in mints fresh). §4.3e's members row lists the verb. |
 | 2026-09-21 | v1.65 | 191 (#187) — OIDC identity | Login page gains `?error=identity_mismatch` (the email is already linked to a different sign-in identity; nothing changed, ask an administrator). §4.12 gains the **Reset identity** verb — its own literal route and `USER_IDENTITY_RESET` row, rendering the shared row-swap + toast. |
 | 2026-09-21 | v1.64 | 188 (#188) security headers + CSP | Doc-only for the screens (no visible behaviour changes). §3.4: the rail's first-paint script is `/js/rail.js`, not an inline block — the enforced CSP (`script-src 'self'; style-src 'self'`, no `'unsafe-inline'`) forbids every inline script, `on*=` handler and `style=` attribute in a template; the five page scripts and twenty-three handlers moved into `/js` (`api-keys.js`, `datasources.js`, `template-create-modal.js`, `password-card.js`, `rail.js`; the rest into `shell.js` and `template-editor/lifecycle.js` as `data-action` controls), the executions rows navigate by `data-href`, and the type-coloured editor elements carry `data-type` instead of a style attribute. The pipeline editor's route alone allows `'unsafe-eval'` for Alpine (#195). Guards: `InlineScriptAuditTest`, the browser suite's zero-violation rule, `SecurityHeadersTest`. |
 | 2026-09-21 | v1.63 | 180 (#180) roles R4 — deactivation | Doc-only. §4.11: `?error=inactive` is also where a session deactivated mid-life lands (cookie cleared by the filter, redirect by the entry point). §4.12: the deactivation window sentence names the knob and the new code `auth.principal_deactivated`; nothing is revoked, Activate restores. |
