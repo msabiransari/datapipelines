@@ -237,7 +237,8 @@ class H2InProcessPoolTest {
 
     /** The H2 database files under the test JVM's working directory — the "the driver created a file" witness. */
     private fun mvDbUnderCwd(): Set<String> =
-        java.io.File(".")
+        java.io
+            .File(".")
             .walkTopDown()
             .maxDepth(4)
             .filter { it.isFile && it.name.endsWith(".mv.db") }

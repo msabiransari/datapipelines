@@ -63,39 +63,8 @@ class DatasourceInProcessRegistrationE2eTest {
         // while the sweep runs — a mixed-case URL that slipped the classifier would create one.
         val mvDbBefore = mvDbUnderCwd()
 
-        // (label, dialect, jdbc_url) — one row per cell of the brief's sweep.
-        val cases =
-            listOf(
-                Case("h2-mem", "H2", "jdbc:h2:mem:sweep186mem", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
-                Case("h2-file-in", "H2", "jdbc:h2:file:$underRoot/app", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
-                Case("h2-file-out", "H2", "jdbc:h2:file:/etc/sweep186", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
-                Case("h2-file-dotdot", "H2", "jdbc:h2:file:$underRoot/../escape", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
-                Case("h2-tcp", "H2", "jdbc:h2:tcp://127.0.0.1:9/sweep186", RoleOutcome.ACCEPT, RoleOutcome.ACCEPT),
-                // 186b: mixed-case prefixes are Unknown forms — refused for BOTH roles by the
-                // validator (jdbc_url_malformed), never re-read as the lower-case form.
-                Case("h2-mem-mixed", "H2", "jdbc:h2:MEM:sweep186mixed", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
-                Case("h2-tcp-mixed", "H2", "jdbc:h2:TCP://127.0.0.1:9/sweep186x", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
-                Case("h2-ssl-mixed", "H2", "jdbc:h2:SSL://127.0.0.1/sweep186x", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
-                Case("h2-file-mixed", "H2", "jdbc:h2:FILE:$underRoot/app", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
-                Case("duckdb-mem", "DUCKDB", "jdbc:duckdb::memory:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
-                Case("duckdb-file", "DUCKDB", "jdbc:duckdb:$underRoot/app.duckdb", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
-                Case("duckdb-file-out", "DUCKDB", "jdbc:duckdb:/etc/sweep186.duckdb", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
-                // The driver matches :memory: case-insensitively (probed, 186b) — and md: is
-                // refused in both cases (it reaches the network on connect).
-                Case("duckdb-mem-mixed", "DUCKDB", "jdbc:duckdb::MEMORY:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
-                Case("duckdb-md-mixed", "DUCKDB", "jdbc:duckdb:MD:sweep186", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
-                Case("sqlite-mem", "SQLITE", "jdbc:sqlite::memory:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
-                Case("sqlite-file", "SQLITE", "jdbc:sqlite:$underRoot/app.db", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
-                Case("sqlite-file-out", "SQLITE", "jdbc:sqlite:/etc/sweep186.db", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
-                // The xerial driver is case-SENSITIVE (probed, 186b): :MEMORY: is a literal
-                // FILE named ":MEMORY:", so the form is InProcessFile — gated for the workspace
-                // admin, roots-refused for the super admin (a relative path names no root).
-                Case("sqlite-mem-mixed", "SQLITE", "jdbc:sqlite::MEMORY:", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
-                Case("pg-server", "POSTGRES", "jdbc:postgresql://db:5432/app", RoleOutcome.ACCEPT, RoleOutcome.ACCEPT),
-            )
-
         val matrix = StringBuilder("registration matrix (186):\n")
-        for (case in cases) {
+        for (case in cases(underRoot)) {
             for ((role, key) in listOf("ws_admin" to WSADMIN_KEY.plaintext, "super_admin" to ADMIN_KEY.plaintext)) {
                 val expected = if (role == "ws_admin") case.wsAdmin else case.superAdmin
                 val response = register(key, "${case.label}-$role", case.dialect, case.jdbcUrl)
@@ -225,9 +194,41 @@ class DatasourceInProcessRegistrationE2eTest {
 
     private enum class RoleOutcome { ACCEPT, REFUSE, REFUSE_ROOTS, REFUSE_FORM, UNEXPECTED }
 
+    /** (label, dialect, jdbc_url) — one row per cell of the brief's sweep, 186b's mixed-case rows included. */
+    private fun cases(underRoot: java.nio.file.Path): List<Case> =
+        listOf(
+            Case("h2-mem", "H2", "jdbc:h2:mem:sweep186mem", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
+            Case("h2-file-in", "H2", "jdbc:h2:file:$underRoot/app", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
+            Case("h2-file-out", "H2", "jdbc:h2:file:/etc/sweep186", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
+            Case("h2-file-dotdot", "H2", "jdbc:h2:file:$underRoot/../escape", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
+            Case("h2-tcp", "H2", "jdbc:h2:tcp://127.0.0.1:9/sweep186", RoleOutcome.ACCEPT, RoleOutcome.ACCEPT),
+            // 186b: mixed-case prefixes are Unknown forms — refused for BOTH roles by the
+            // validator (jdbc_url_malformed), never re-read as the lower-case form.
+            Case("h2-mem-mixed", "H2", "jdbc:h2:MEM:sweep186mixed", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
+            Case("h2-tcp-mixed", "H2", "jdbc:h2:TCP://127.0.0.1:9/sweep186x", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
+            Case("h2-ssl-mixed", "H2", "jdbc:h2:SSL://127.0.0.1/sweep186x", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
+            Case("h2-file-mixed", "H2", "jdbc:h2:FILE:$underRoot/app", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
+            Case("duckdb-mem", "DUCKDB", "jdbc:duckdb::memory:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
+            Case("duckdb-file", "DUCKDB", "jdbc:duckdb:$underRoot/app.duckdb", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
+            Case("duckdb-file-out", "DUCKDB", "jdbc:duckdb:/etc/sweep186.duckdb", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
+            // The driver matches :memory: case-insensitively (probed, 186b) — and md: is
+            // refused in both cases (it reaches the network on connect).
+            Case("duckdb-mem-mixed", "DUCKDB", "jdbc:duckdb::MEMORY:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
+            Case("duckdb-md-mixed", "DUCKDB", "jdbc:duckdb:MD:sweep186", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
+            Case("sqlite-mem", "SQLITE", "jdbc:sqlite::memory:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
+            Case("sqlite-file", "SQLITE", "jdbc:sqlite:$underRoot/app.db", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
+            Case("sqlite-file-out", "SQLITE", "jdbc:sqlite:/etc/sweep186.db", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
+            // The xerial driver is case-SENSITIVE (probed, 186b): :MEMORY: is a literal
+            // FILE named ":MEMORY:", so the form is InProcessFile — gated for the workspace
+            // admin, roots-refused for the super admin (a relative path names no root).
+            Case("sqlite-mem-mixed", "SQLITE", "jdbc:sqlite::MEMORY:", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
+            Case("pg-server", "POSTGRES", "jdbc:postgresql://db:5432/app", RoleOutcome.ACCEPT, RoleOutcome.ACCEPT),
+        )
+
     /** The H2 database files under the process's working directory — 186b's "the driver created a file" witness. */
     private fun mvDbUnderCwd(): Set<String> =
-        java.io.File(".")
+        java.io
+            .File(".")
             .walkTopDown()
             .maxDepth(4)
             .filter { it.isFile && it.name.endsWith(".mv.db") }
