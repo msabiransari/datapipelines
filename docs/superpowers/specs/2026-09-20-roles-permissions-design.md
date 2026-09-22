@@ -139,6 +139,26 @@ endpoint and server keys. Proposal: keep `Scope` and the two-axis `ScopeMatrix` 
 are sound) but stop issuing user keys with chosen scopes; document that user-key scope = role.
 Alternative (larger): fold the axis for user kinds. Recommend the former for this round.
 
+### 3.7 Keys and membership (owner rulings, 2026-09-21; lane #200)
+A login-minted `user` key is tied to its user AND its workspace — it is the credential the membership
+mints, not a possession that outlives it (§3.3):
+
+1. **When a user is removed from a workspace, their `user` key pinned there is removed as well.**
+   Removal revokes the key in the same act (one transaction; a failure removes nothing and revokes
+   nothing). Before this ruling a removed member's key kept authenticating — the §3.3 viewer fallback
+   let `Permission.EXECUTE` read pipelines, run them and read results in the workspace they had been
+   removed from. The viewer fallback stays for totality (a super admin without a membership resolves
+   through `issuerContext`, never through it), but the removed-member case no longer reaches it.
+2. **No automatic rotation on password or identity events.** The product cannot tell a forgotten
+   password from a compromise, so a login that stops working is not a security signal. Recovery is an
+   admin act — removing the user from the workspace, or explicitly removing their key (ruling 3).
+3. **A workspace admin can remove a member or remove that member's key**, in addition to a super admin
+   doing either. The key revoke is a separate verb from member removal: revoking the key is not
+   deactivation — the member's session keeps working, and their next login or workspace entry mints a
+   fresh key. `MANAGE_WORKSPACE_MEMBERS` carries both verbs (its §7.6 row already admits ws_admin and
+   super admin to every member management act); the audit names which act happened
+   (`auth.api_key.revoked_by_admin`, reason `member_removed` | `admin_revoked`).
+
 ## 4. Gates (mechanical; every one falsified at birth)
 1. `RequiredScopeCoverageTest`/Konsist twin/`MutatingHandlerScopeFloorTest`/`PublicRouteWalkerTest`
    scan EVERY module that declares a controller (today only `co.datapipelines.web`).
