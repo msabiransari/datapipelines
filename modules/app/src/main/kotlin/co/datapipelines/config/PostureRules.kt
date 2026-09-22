@@ -223,7 +223,7 @@ internal object PostureRules {
                 "datapipelines.redis.password is empty while datapipelines.redis.host is '$redisHost' " +
                 "under ${DeploymentEnv.POSTURE_KEY}=${DeploymentEnv.HARDENED} (env '$env', §3.23). " +
                 "A hardened deployment does not run a passwordless Redis off loopback " +
-                "(DATAPIPELINES_REDIS_PASSWORD; the compose files start Redis with --requirepass from it)."
+                "(DATAPIPELINES_REDIS_PASSWORD; the compose files set Redis's requirepass from it)."
         }
     }
 }

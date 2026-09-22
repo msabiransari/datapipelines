@@ -81,7 +81,7 @@ class ApiConsoleController(
         // EFFECTIVE authorization — that walks ancestors and takes the nearest node with any
         // binding (EndpointAuthorizer), and zero bindings does not mean nobody can call the
         // endpoint: a `user` key pinned to this workspace with `execute` still may.
-        val allBindings = bindings.findAll().filter { it.workspaceId == workspaceId }
+        val allBindings = bindings.findByWorkspace(workspaceId)
         val boundByPath = allBindings.groupBy { it.pathPrefix }
         // 179: the column names the keys, so the key ids resolve to names in one batch —
         // the workspace's API keys, not the caller's.

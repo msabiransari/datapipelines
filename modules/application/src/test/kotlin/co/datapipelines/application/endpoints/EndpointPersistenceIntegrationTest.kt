@@ -205,7 +205,7 @@ class EndpointPersistenceIntegrationTest {
 
         bindings.findByKey(keyId).map { it.pathPrefix } shouldContainExactlyInAnyOrder listOf("/lending", "/lending/home")
         bindings.findByKey("dpk_absent").shouldBeEmpty()
-        bindings.findAll() shouldHaveSize 2
+        bindings.findByWorkspace(workspaceId) shouldHaveSize 2
 
         bindings.delete("/lending", keyId) shouldBe true
         bindings.delete("/lending", keyId) shouldBe false
@@ -213,7 +213,7 @@ class EndpointPersistenceIntegrationTest {
     }
 
     @Test
-    fun `findByPrefixes answers only the asked workspace's bindings (#191)`() {
+    fun `findByPrefixes and findByWorkspace answer only the asked workspace's bindings (#191, #199)`() {
         bindings.insert(binding("/lending")) shouldBe true
         bindings.insert(binding("/lending/home")) shouldBe true
 
@@ -244,6 +244,12 @@ class EndpointPersistenceIntegrationTest {
             listOf(keyId)
         bindings.findByPrefixes(listOf("/lending", "/"), foreignWorkspace).map { it.apiKeyId } shouldBe listOf(foreignKey)
         bindings.findByPrefixes(listOf("/lending", "/"), UUID.randomUUID()).shouldBeEmpty()
+
+        // #199: the whole-workspace read — what a promotion batch is built from — keeps the
+        // same predicate, so the foreign row bound at the equal node stays out of the answer.
+        bindings.findByWorkspace(workspaceId).map { it.pathPrefix } shouldContainExactlyInAnyOrder listOf("/lending", "/lending/home")
+        bindings.findByWorkspace(foreignWorkspace).map { it.apiKeyId } shouldBe listOf(foreignKey)
+        bindings.findByWorkspace(UUID.randomUUID()).shouldBeEmpty()
     }
 
     @Test
@@ -254,7 +260,7 @@ class EndpointPersistenceIntegrationTest {
         // leaving its bindings behind would make the tree screen show a binding to nothing.
         jdbc.update("DELETE FROM api_keys WHERE id = :id", mapOf("id" to keyId))
 
-        bindings.findAll().shouldBeEmpty()
+        bindings.findByWorkspace(workspaceId).shouldBeEmpty()
     }
 
     // -------------------------------------------------------------------- serve audit

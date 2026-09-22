@@ -933,6 +933,8 @@ datapipelines/
 │   ├── secret-scan.sh          ← gitleaks secret scan (full history / --staged for the hook)
 │   ├── vuln-scan.sh            ← OSV-Scanner over the committed lockfiles (§10.2)
 │   ├── container-scan.sh       ← trivy config + image scan (§10.2)
+│   ├── compose-env-audit.sh    ← env contract: application.yml ⇄ compose ⇄ the two env files (on every build)
+│   ├── compose-argv-secrets-audit.sh ← no secret VALUE on any compose service's argv (#196; on every build)
 │   └── lib/
 │       └── scan-tools.sh       ← shared pinned-scanner install/verify machinery (sourced)
 ├── modules/
