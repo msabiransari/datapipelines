@@ -58,9 +58,53 @@ class JdbcUrlFormTest {
     }
 
     @Test
+    fun `H2 - the prefixes are case-sensitive exactly as the driver reads them - mixed case is unknown`() {
+        // ConnectionInfo.parseName() (h2-2.3.232 ll. 197-219) matches the four prefixes
+        // case-SENSITIVELY and treats anything else as a persistent file named literally —
+        // `jdbc:h2:TCP://h/x` opens ./TCP:/h/x.mv.db (pinned against the real jar, 186b). A
+        // lowercasing classifier would read that file shape as a network client and skip the
+        // gate, the roots check AND the de-privileged pool; mixed case is therefore Unknown.
+        assertAll(
+            {
+                JdbcUrlForm
+                    .classify(Dialect.H2, "jdbc:h2:TCP://h/x")
+                    .shouldBeInstanceOf<JdbcUrlForm.Form.Unknown>()
+            },
+            {
+                JdbcUrlForm
+                    .classify(Dialect.H2, "jdbc:h2:Tcp://h/x")
+                    .shouldBeInstanceOf<JdbcUrlForm.Form.Unknown>()
+            },
+            {
+                JdbcUrlForm
+                    .classify(Dialect.H2, "jdbc:h2:SSL://h/x")
+                    .shouldBeInstanceOf<JdbcUrlForm.Form.Unknown>()
+            },
+            {
+                JdbcUrlForm
+                    .classify(Dialect.H2, "jdbc:h2:MEM:x")
+                    .shouldBeInstanceOf<JdbcUrlForm.Form.Unknown>()
+            },
+            {
+                JdbcUrlForm
+                    .classify(Dialect.H2, "jdbc:h2:Mem:x")
+                    .shouldBeInstanceOf<JdbcUrlForm.Form.Unknown>()
+            },
+            {
+                JdbcUrlForm
+                    .classify(Dialect.H2, "jdbc:h2:FILE:/p/x")
+                    .shouldBeInstanceOf<JdbcUrlForm.Form.Unknown>()
+            },
+        )
+    }
+
+    @Test
     fun `DuckDB - memory is in-process memory, a file is an in-process file, MotherDuck is unknown`() {
         assertAll(
             { JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb::memory:") shouldBe JdbcUrlForm.Form.InProcessMemory },
+            // The driver itself matches :memory: case-INSENSITIVELY (probed against
+            // duckdb_jdbc 1.5.5.1: :MEMORY: opened no file) — the classifier follows it.
+            { JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb::MEMORY:") shouldBe JdbcUrlForm.Form.InProcessMemory },
             { JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb:") shouldBe JdbcUrlForm.Form.InProcessMemory },
             {
                 JdbcUrlForm.classify(Dialect.DUCKDB, "jdbc:duckdb:/srv/sample/us_trade.duckdb") shouldBe
@@ -69,6 +113,12 @@ class JdbcUrlFormTest {
             {
                 JdbcUrlForm
                     .classify(Dialect.DUCKDB, "jdbc:duckdb:md:mydb")
+                    .shouldBeInstanceOf<JdbcUrlForm.Form.Unknown>()
+            },
+            // md: reaches the network on connect — refused in both cases, fail-closed.
+            {
+                JdbcUrlForm
+                    .classify(Dialect.DUCKDB, "jdbc:duckdb:MD:mydb")
                     .shouldBeInstanceOf<JdbcUrlForm.Form.Unknown>()
             },
         )
@@ -92,6 +142,28 @@ class JdbcUrlFormTest {
                 JdbcUrlForm
                     .classify(Dialect.SQLITE, "jdbc:sqlite::resource:seed.db")
                     .shouldBeInstanceOf<JdbcUrlForm.Form.Unknown>()
+            },
+        )
+    }
+
+    @Test
+    fun `SQLite - the driver is case-sensitive - mixed case names a literal file, roots-vetted as such`() {
+        // Probed against xerial sqlite-jdbc 3.49.1.0 (186b): `jdbc:sqlite::MEMORY:` creates a
+        // literal file named `:MEMORY:`, `jdbc:sqlite:FILE:x` one named `FILE:x`. The driver
+        // never strips a mixed-case prefix, so the classifier must not either — the raw path
+        // the roots check vets IS the whole sub-name.
+        assertAll(
+            {
+                JdbcUrlForm.classify(Dialect.SQLITE, "jdbc:sqlite::MEMORY:") shouldBe
+                    JdbcUrlForm.Form.InProcessFile(":MEMORY:")
+            },
+            {
+                JdbcUrlForm.classify(Dialect.SQLITE, "jdbc:sqlite:FILE:/p/x.db") shouldBe
+                    JdbcUrlForm.Form.InProcessFile("FILE:/p/x.db")
+            },
+            {
+                JdbcUrlForm.classify(Dialect.SQLITE, "jdbc:sqlite:file::MEMORY:") shouldBe
+                    JdbcUrlForm.Form.InProcessFile(":MEMORY:")
             },
         )
     }

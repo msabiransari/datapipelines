@@ -31,6 +31,14 @@ import java.util.UUID
  * Falsified at birth: with the gate line in `DatasourceWorkspaceRules` reverted, the seven
  * in-process ws-admin cells go 201 and the floor fails. The update leg is the same rule one
  * route over: re-pointing an existing datasource's URL at an in-process form is a registration.
+ *
+ * 186b adds the case-sensitivity cells: the H2 driver reads the four prefixes case-SENSITIVELY
+ * (`ConnectionInfo.parseName`, h2-2.3.232 ll. 197-219) and opens `jdbc:h2:TCP://h/x` as a
+ * literal FILE under the process's working directory — so every mixed-case prefix is an
+ * Unknown form, refused by the VALIDATOR for BOTH roles (the refusal is not the workspace
+ * gate's; it binds super admins too), and the sweep proves no `.mv.db` file appears under the
+ * process's working directory while it runs. Non-vacuity for that walk: the lower-case `mem:`
+ * arm still registers (the acceptance floor below).
  */
 @SpringBootTest(
     classes = [co.datapipelines.DatapipelinesApplication::class],
@@ -51,6 +59,10 @@ class DatasourceInProcessRegistrationE2eTest {
         val underRoot = FILE_ROOT.resolve("under-${UUID.randomUUID()}")
         Files.createDirectories(underRoot)
 
+        // 186b: no H2 file database may materialize under the process's working directory
+        // while the sweep runs — a mixed-case URL that slipped the classifier would create one.
+        val mvDbBefore = mvDbUnderCwd()
+
         // (label, dialect, jdbc_url) — one row per cell of the brief's sweep.
         val cases =
             listOf(
@@ -59,12 +71,26 @@ class DatasourceInProcessRegistrationE2eTest {
                 Case("h2-file-out", "H2", "jdbc:h2:file:/etc/sweep186", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
                 Case("h2-file-dotdot", "H2", "jdbc:h2:file:$underRoot/../escape", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
                 Case("h2-tcp", "H2", "jdbc:h2:tcp://127.0.0.1:9/sweep186", RoleOutcome.ACCEPT, RoleOutcome.ACCEPT),
+                // 186b: mixed-case prefixes are Unknown forms — refused for BOTH roles by the
+                // validator (jdbc_url_malformed), never re-read as the lower-case form.
+                Case("h2-mem-mixed", "H2", "jdbc:h2:MEM:sweep186mixed", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
+                Case("h2-tcp-mixed", "H2", "jdbc:h2:TCP://127.0.0.1:9/sweep186x", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
+                Case("h2-ssl-mixed", "H2", "jdbc:h2:SSL://127.0.0.1/sweep186x", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
+                Case("h2-file-mixed", "H2", "jdbc:h2:FILE:$underRoot/app", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
                 Case("duckdb-mem", "DUCKDB", "jdbc:duckdb::memory:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
                 Case("duckdb-file", "DUCKDB", "jdbc:duckdb:$underRoot/app.duckdb", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
                 Case("duckdb-file-out", "DUCKDB", "jdbc:duckdb:/etc/sweep186.duckdb", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
+                // The driver matches :memory: case-insensitively (probed, 186b) — and md: is
+                // refused in both cases (it reaches the network on connect).
+                Case("duckdb-mem-mixed", "DUCKDB", "jdbc:duckdb::MEMORY:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
+                Case("duckdb-md-mixed", "DUCKDB", "jdbc:duckdb:MD:sweep186", RoleOutcome.REFUSE_FORM, RoleOutcome.REFUSE_FORM),
                 Case("sqlite-mem", "SQLITE", "jdbc:sqlite::memory:", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
                 Case("sqlite-file", "SQLITE", "jdbc:sqlite:$underRoot/app.db", RoleOutcome.REFUSE, RoleOutcome.ACCEPT),
                 Case("sqlite-file-out", "SQLITE", "jdbc:sqlite:/etc/sweep186.db", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
+                // The xerial driver is case-SENSITIVE (probed, 186b): :MEMORY: is a literal
+                // FILE named ":MEMORY:", so the form is InProcessFile — gated for the workspace
+                // admin, roots-refused for the super admin (a relative path names no root).
+                Case("sqlite-mem-mixed", "SQLITE", "jdbc:sqlite::MEMORY:", RoleOutcome.REFUSE, RoleOutcome.REFUSE_ROOTS),
                 Case("pg-server", "POSTGRES", "jdbc:postgresql://db:5432/app", RoleOutcome.ACCEPT, RoleOutcome.ACCEPT),
             )
 
@@ -78,6 +104,10 @@ class DatasourceInProcessRegistrationE2eTest {
                     when {
                         status == 201 -> {
                             RoleOutcome.ACCEPT
+                        }
+
+                        expected == RoleOutcome.REFUSE_FORM && body.contains("not supported for dialect") -> {
+                            RoleOutcome.REFUSE_FORM
                         }
 
                         expected == RoleOutcome.REFUSE_ROOTS && body.contains("datasource.validation.jdbc_url_malformed") -> {
@@ -104,6 +134,13 @@ class DatasourceInProcessRegistrationE2eTest {
         withClue("non-vacuity: the sweep refused AND accepted (matrix below)\n$matrix") {
             refusals shouldBeGreaterThanOrEqualTo 12
             acceptances shouldBeGreaterThanOrEqualTo 3
+        }
+
+        // 186b: the mixed-case cells were all refusals at the VALIDATOR, so nothing ever
+        // connected — prove it: no H2 database file appeared under the process's working
+        // directory (the driver's answer to a prefix it does not match case-sensitively).
+        withClue("no .mv.db created under the working directory by any sweep cell") {
+            (mvDbUnderCwd() - mvDbBefore) shouldBe emptySet()
         }
     }
 
@@ -186,7 +223,16 @@ class DatasourceInProcessRegistrationE2eTest {
         return response.statusCode() to response.body().asString()
     }
 
-    private enum class RoleOutcome { ACCEPT, REFUSE, REFUSE_ROOTS, UNEXPECTED }
+    private enum class RoleOutcome { ACCEPT, REFUSE, REFUSE_ROOTS, REFUSE_FORM, UNEXPECTED }
+
+    /** The H2 database files under the process's working directory — 186b's "the driver created a file" witness. */
+    private fun mvDbUnderCwd(): Set<String> =
+        java.io.File(".")
+            .walkTopDown()
+            .maxDepth(4)
+            .filter { it.isFile && it.name.endsWith(".mv.db") }
+            .map { it.path }
+            .toSet()
 
     private data class Case(
         val label: String,

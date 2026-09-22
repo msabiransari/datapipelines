@@ -154,7 +154,14 @@ form; H2's `zip:`/`nio:`/`async:`-family prefixes and SQLite's `:resource:` are 
 — is registered or re-pointed (a URL change on update is a registration) by a **super admin
 only**, whatever `member-datasources-enabled` says: with an in-process engine, author SQL is one
 `FILE_READ` from the server's own environment. A server-reachable H2 (`tcp:`/`ssl:`) is a network
-client like any other datasource and follows the ordinary gate. File-backed forms additionally
+client like any other datasource and follows the ordinary gate. **The four H2 prefixes are
+matched case-sensitively, exactly as the driver reads them (#186b)** — H2's
+`ConnectionInfo.parseName` treats any sub-name not starting with the lower-case prefix as a
+persistent file named literally (`jdbc:h2:TCP://h/x` would open `./TCP:/h/x.mv.db` under the
+process's working directory), so a mixed-case prefix is an unknown form and refused, for every
+role; SQLite's `:memory:`/`file:` are likewise case-sensitive (the xerial driver opens
+`FILE:x` as a literal file), while DuckDB's `:memory:` matches case-insensitively because its
+driver does. File-backed forms additionally
 need their path under a declared root — [`datapipelines.datasources.file-roots`](configuration.md#326-datasource-pools),
 default empty = refused for everyone. And because the registered credential to such an engine is
 its admin, the pool never uses it: connections to an in-process H2 datasource run as a freshly
@@ -217,7 +224,11 @@ The `Dialect` value set is owned by [Type System §5](type-system.md#5-source-to
 **In-process dialects (#186).** H2, DuckDB and SQLite run their engine INSIDE the server JVM
 (`LAKE` is the dp-lake offering — same engine family, its own posture, not this rule's). For H2
 the URL form decides: `mem:`/`file:`/bare path are in-process; `tcp:`/`ssl:` are network clients
-of an H2 server and are not. In-process and file-backed registrations are **super-admin-only**
+of an H2 server and are not. The four prefixes are read **case-sensitively, exactly as the
+driver reads them** (#186b) — a mixed-case `MEM:`/`FILE:`/`TCP:`/`SSL:` is not the lower-case
+form, it is an unknown form and refused for every role, because the driver would otherwise open
+it as a literal file under the process's working directory. In-process and file-backed
+registrations are **super-admin-only**
 (§3, "who may register what"), file paths must sit under `datapipelines.datasources.file-roots`
 (§9), and an in-process H2 datasource's pool connections run as a de-privileged per-build user
 (§4.2A). DuckDB and SQLite carry their own connect-time hardening — `enable_external_access =
@@ -323,9 +334,14 @@ which the workload needs and which a driver pin in `H2InProcessPoolTest` proves)
 operational connections authenticate as that user. Author SQL through a node or `sql_probe`
 against such a datasource is then refused H2's admin surface (`FILE_READ`, `CREATE ALIAS`, …) with
 SQLState `90040` — classified as permission-denied, answered as `datasource.table_forbidden` on
-the probe wire, never a 500. One mechanical detail: H2 executes a URL's `DB_CLOSE_DELAY` as an
-admin-gated `SET` on every session open, so the bootstrap URL keeps it (it applies once,
-database-scoped) and operational connections open against the URL with it stripped.
+the probe wire, never a 500. Two mechanical details: H2 executes a URL's admin-gated settings
+(`DB_CLOSE_DELAY`, `CACHE_SIZE`, `TRACE_LEVEL_FILE` and the rest of `Set.java`'s
+`checkAdmin()`-guarded family — H2 2.3.232) as `SET` commands on every session open, so the
+bootstrap URL keeps them (they apply once, database-scoped) and operational connections open
+against the URL with them stripped (#186b — before it, only `DB_CLOSE_DELAY` was stripped and a
+datasource carrying any other admin-gated setting could not open a pooled connection); and a
+rotation over a pre-existing file database clears the ADMIN flag a stored `DP_H2_RESTRICTED` may
+carry (`ALTER USER … ADMIN FALSE`), not merely re-passwords it.
 
 ### 4.3 Type mapper integration
 
@@ -1443,7 +1459,7 @@ Every rule below runs on **create and update**, before the row is written (§2 p
 |---|---|
 | `datasource.validation.name_invalid` | `name` matches `[a-z0-9_-]+`, length 1–63 |
 | `datasource.validation.dialect_invalid` | `dialect` is a value of the [Type System §5](type-system.md#5-source-to-canonical-mapping-tables) dialect set |
-| `datasource.validation.jdbc_url_malformed` | URL parses, matches the dialect's expected pattern (`DialectAdapter.validateJdbcUrl`), and carries no server-managed, refused (§5.6), or credential key in its query/property segment. Since 186 the row also covers the in-process FORM rules: an unknown sub-name form (H2's `zip:`/`nio:`/`async:` family, SQLite's `:resource:`, DuckDB's `md:`) is refused fail-closed, and a file-backed path must resolve under a declared [`datapipelines.datasources.file-roots`](configuration.md#326-datasource-pools) root — raw-text escape shapes (`..` segments, a leading `~`, URL-encoded separators, a relative path) are refused before any normalization is trusted, the parent directory must exist, and an empty roots list refuses every file-backed registration |
+| `datasource.validation.jdbc_url_malformed` | URL parses, matches the dialect's expected pattern (`DialectAdapter.validateJdbcUrl`), and carries no server-managed, refused (§5.6), or credential key in its query/property segment. Since 186 the row also covers the in-process FORM rules: an unknown sub-name form (H2's `zip:`/`nio:`/`async:` family, SQLite's `:resource:`, DuckDB's `md:`) is refused fail-closed, and a file-backed path must resolve under a declared [`datapipelines.datasources.file-roots`](configuration.md#326-datasource-pools) root — raw-text escape shapes (`..` segments, a leading `~`, URL-encoded separators, a relative path) are refused before any normalization is trusted, the parent directory must exist, and an empty roots list refuses every file-backed registration. Since 186b the H2/SQLite prefixes are matched case-sensitively exactly as the drivers read them, so a mixed-case `TCP:`/`MEM:`/`FILE:` prefix is the same refused unknown form (the driver would otherwise open it as a literal file under the process's working directory) |
 | `datasource.validation.jdbc_url_scheme_invalid` | URL begins with `jdbc:{dialect}:` |
 | `datasource.validation.password_missing` | The credential SECRET is required on create, for every `credential.kind` but `none` — and on an UPDATE that changes the kind, since keeping the stored secret would relabel it (§3.4). The code keeps its pre-087 spelling — the catalog ([Pipeline Contract §13.8](pipeline-contract.md#138-datasource)) is the authority for concrete codes and this rule did not gain one; its meaning is widened, not moved. |
 | `datasource.validation.properties_invalid` | The **test pool build** (§5.4) succeeded: `properties.hikari.*` names/values are accepted by `HikariConfig`, `properties.jdbc.*` is a flat string map, no server-managed key (`jdbcUrl`, `username`, `password`, `driverClassName`, `dataSourceClassName`, `poolName`, `exceptionOverrideClassName`, …) is present under `hikari`, no refused key (§5.6) or server-managed/credential key is present under `jdbc`, and `properties` contains no namespace other than `hikari` / `jdbc`; and `introspection_include_schemas`, when present, lists exact schema names over the legal-identifier alphabet of the supported dialects — letters, digits, `_`, `$`, `#`, lowercase (entries outside the alphabet are rejected; §3.3). Also the §3.4 credential-shape rules: `credential.kind` is one this dialect's driver accepts, `username` is present exactly when the kind allows it, and `secret` is absent for `kind: none`; and a payload carrying both `credential` and the legacy `username`/`password` pair. The offending field and the underlying Hikari/driver message are returned in `details`. |
@@ -1660,6 +1676,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v2.42 | 186b H2 URL form case-sensitivity (#186) | **The in-process classification now matches the prefixes case-sensitively, exactly as the drivers read them.** H2's `ConnectionInfo.parseName` matches `mem:`/`file:`/`tcp:`/`ssl:` case-sensitively and opens ANY other sub-name as a persistent file named literally — `jdbc:h2:TCP://h/x` creates `./TCP:/h/x.mv.db` under the process's working directory — so a mixed-case prefix is an unknown form, refused at registration for every role (REST and UI partial alike, the validator's call) and backstopped at pool build (`ConnectionPoolManager` refuses to pool an unknown form rather than open it with the registered credential). SQLite is the same shape (xerial opens `:MEMORY:`/`FILE:x` as literal files, so mixed case lands in the roots-vetted file form); DuckDB's `:memory:` stays case-insensitive because its driver matches it so. §4.2A gains the two review LOWs: the operational URL is stripped of EVERY admin-gated setting H2 runs as a session-open `SET` (not only `DB_CLOSE_DELAY` — the bootstrap applies them once, database-scoped, so availability is preserved), and a pool rotation over a pre-existing file database runs `ALTER USER … ADMIN FALSE`, so a squatting `DP_H2_RESTRICTED` with admin rights is de-escalated, not just re-passworded. |
 | 2026-09-21 | v2.41 | 186 in-process containment (#186) | **In-process and file-backed datasources are contained, three layers.** §3: registration and update of an in-process engine (H2 `mem:`/`file:`/bare path, DuckDB, SQLite) is **super-admin-only**, whatever `member-datasources-enabled` says — the URL's form is classified (`JdbcUrlForm`), unknown forms (H2's `zip:`/`nio:`/`async:` family, SQLite `:resource:`, DuckDB `md:`) are refused outright, and file-backed paths must sit under the new `datapipelines.datasources.file-roots` (§9, configuration §3.26; default empty = refused for everyone, bootstrap entries included — `app.sh --demo` exports the sample volume's root). §4.2A: an in-process H2 datasource's pool runs de-privileged — the registered credential bootstraps a per-build non-admin user (`DP_H2_RESTRICTED`, staging §9.5's shape shared through `H2RestrictedSession`), so author SQL through nodes or `sql_probe` gets 90040 on the admin surface. §7D: the `tempdb` scratch probe opens the same de-privileged way — it was the one in-process H2 the product opened as admin. |
 | 2026-09-17 | v2.40 | 158 (#129) | **§8C.2 — the all-refused registry is refused at the pool build**: the search-path postlude is now emitted only when the single registered namespace has at least one emission-healthy table (the prelude creates no schema for an all-refused namespace; the postlude naming it failed every physical connection — `Too many dots` / `No catalog + schema named …` — the all-tables-down outcome 109 §A removed, arriving through the session init). A registry whose EVERY table is emission-refused no longer builds a pool: each refusal is recorded on its registry row and the build fails with the catalogued `datasource.validation.lake_no_healthy_tables` (400, pipeline-contract §13.8) naming every table and its reason. Partial refusals are unchanged — per-table isolation is exactly that case. |
 | 2026-09-17 | v2.39 | 123 §7D probe timeout code (#123) | **§7D's clamps paragraph corrected**: a probe statement timeout is the catalogued `pipeline.node.query_timeout` (since T202 — `SqlProbeTool.probing`, MCP §6.2.34 already agreed), not `pipeline.node.query_execution_failed` with `reason: "timeout"`; the other-driver-refusal sentence keeps `query_execution_failed`. Docs-only; the codes agree across datasources.md, mcp-server.md and the contract. |

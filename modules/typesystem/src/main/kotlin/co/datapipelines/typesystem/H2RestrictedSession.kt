@@ -91,7 +91,9 @@ class H2RestrictedSession internal constructor(
          * bare `CREATE USER` fails loudly. `true` (a file-backed datasource, 186 §A3): the user
          * persists in the file across pool builds, so the open is idempotent —
          * `CREATE USER IF NOT EXISTS` + `ALTER USER … SET PASSWORD` brings the stored password
-         * to this generation's random value.
+         * to this generation's random value, and `ALTER USER … ADMIN FALSE` (186b) clears the
+         * ADMIN flag a pre-existing file's user of that name may carry — a rotation that only
+         * re-passworded would leave the de-privileged identity an admin.
          *
          * @param grants trusted constant DDL statements run on the bootstrap after the user
          *   exists (e.g. staging's `GRANT ALTER ANY SCHEMA TO STAGING_EXEC`). Never
@@ -154,6 +156,10 @@ class H2RestrictedSession internal constructor(
                     if (rotateIfExists) {
                         st.execute("CREATE USER IF NOT EXISTS $user PASSWORD '$password'")
                         st.execute("ALTER USER $user SET PASSWORD '$password'")
+                        // The rotation must also DE-ESCALATE: a pre-existing file may carry a
+                        // user of this name with ADMIN TRUE (created outside the product), and
+                        // re-passwording alone would leave the restricted identity an admin.
+                        st.execute("ALTER USER $user ADMIN FALSE")
                     } else {
                         st.execute("CREATE USER $user PASSWORD '$password'")
                     }

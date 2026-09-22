@@ -106,4 +106,42 @@ class DatasourceFileRootsTest {
         noRoots.map { it.code } shouldBe listOf(DatasourceErrorCodes.JDBC_URL_MALFORMED)
         noRoots.single().message shouldContain DatasourceFileRootsProperties.CONFIG_KEY
     }
+
+    @Test
+    fun `the validator refuses a mixed-case H2 prefix - the driver reads it as a literal file, not a known form`() {
+        // 186b: the driver matches mem:/file:/tcp:/ssl: case-SENSITIVELY
+        // (ConnectionInfo.parseName, h2-2.3.232 ll. 197-219), so `TCP://h/x` is a FILE named
+        // "TCP:/h/x", not a network client. A lowercasing classifier would wave it past the
+        // gate, the roots check and the de-privileged pool — the refusal is the validator's,
+        // role-blind, so BOTH registration surfaces (REST and the UI partial run the same
+        // validator through registry.save) refuse it for every role.
+        val withRoots =
+            DatasourceValidator(
+                driverAvailable = { true },
+                fileRoots = DatasourceFileRoots(listOf(root)),
+            )
+        val underRoot = root.absolutePathString()
+
+        assertAll(
+            { mixedCaseRefused(withRoots, "jdbc:h2:TCP://db.internal:9092/app", "TCP") },
+            { mixedCaseRefused(withRoots, "jdbc:h2:Tcp://db.internal/app", "Tcp") },
+            { mixedCaseRefused(withRoots, "jdbc:h2:SSL://db.internal/app", "SSL") },
+            { mixedCaseRefused(withRoots, "jdbc:h2:MEM:appdata", "MEM") },
+            { mixedCaseRefused(withRoots, "jdbc:h2:Mem:appdata", "Mem") },
+            { mixedCaseRefused(withRoots, "jdbc:h2:FILE:$underRoot/app", "FILE") },
+        )
+    }
+
+    private fun mixedCaseRefused(
+        validator: DatasourceValidator,
+        jdbcUrl: String,
+        prefix: String,
+    ) {
+        val errors = validator.validate(Fixtures.h2(name = "h2case", jdbcUrl = jdbcUrl), isCreate = true).errors
+        assertAll(
+            { errors.map { it.code } shouldBe listOf(DatasourceErrorCodes.JDBC_URL_MALFORMED) },
+            { errors.single().message shouldContain prefix },
+            { errors.single().message shouldContain "not supported" },
+        )
+    }
 }

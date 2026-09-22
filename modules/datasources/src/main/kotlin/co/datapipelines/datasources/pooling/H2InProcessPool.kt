@@ -61,10 +61,10 @@ internal object H2InProcessPool {
                 user = RESTRICTED_USER,
                 grants = grants(RESTRICTED_USER),
                 rotateIfExists = true,
-                // H2 runs a URL's `DB_CLOSE_DELAY` as an admin-gated `SET` on EVERY session open
-                // (pinned: 90040 under the restricted user on 2.3.232) — the bootstrap applies it
-                // once, and operational connections open against the URL without it. The setting
-                // is database-scoped, not session-scoped, so the keep-alive semantics survive.
+                // H2 runs a URL's admin-gated settings as `SET` commands on EVERY session open
+                // (pinned: 90040 under the restricted user on 2.3.232) — the bootstrap applies
+                // them once, and operational connections open against the URL without them. The
+                // settings are database-scoped, not session-scoped, so their effect survives.
                 operationalUrl = stripSessionAdminSettings(datasource.jdbcUrl),
                 bootstrapUser = datasource.username ?: H2RestrictedSession.BOOTSTRAP_USER,
                 bootstrapPassword = datasource.secret ?: H2RestrictedSession.BOOTSTRAP_PASSWORD,
@@ -91,8 +91,26 @@ internal object H2InProcessPool {
     }
 
     /**
-     * The URL without the session-open admin settings — today exactly `DB_CLOSE_DELAY` — from
-     * the `;`-separated H2 property tail (the same separator `JdbcUrlGuard` tokenizes on).
+     * The URL without the admin-gated settings H2 runs as `SET` commands on every session open
+     * (186b: the full set, not only `DB_CLOSE_DELAY`) — from the `;`-separated H2 property tail
+     * (the same separator `JdbcUrlGuard` tokenizes on).
+     *
+     * The stripped set is the admin-gated list of H2 2.3.232's `Set` command
+     * (`org/h2/command/dml/Set.java` — every `case` whose body calls `checkAdmin()`), minus
+     * `IGNORE_CATALOGS`, which is a `DbSettings` key and so never reaches the session-open SET
+     * loop (`Engine.openSession` skips it), and minus `DB_CLOSE_ON_EXIT` and the other
+     * connection-level settings, which the parser turns into a `NoOperation`
+     * (`ConnectionInfo.isIgnoredByParser`) — they are never admin-gated and need no stripping.
+     * Every stripped setting is database-scoped (stored via `addOrUpdateSetting`, or set on the
+     * shared `Database`/`TraceSystem` object), so the admin bootstrap's one application carries
+     * the effect and operational connections lose nothing — the same contract `DB_CLOSE_DELAY`
+     * had. The alternative, refusing these settings at registration, was rejected: `CACHE_SIZE`
+     * and friends are legitimate tuning a super admin may want, and this is an availability
+     * question (an unstripped setting fails every pooled open with 90040), not an exposure one
+     * — the SET fails closed under the restricted user.
+     *
+     * Key comparison is case-insensitive because H2 uppercases URL setting keys
+     * (`ConnectionInfo.readSettingsFromURL` → `StringUtils.toUpperEnglish`).
      */
     private fun stripSessionAdminSettings(url: String): String {
         val cut = url.indexOf(';')
@@ -102,7 +120,46 @@ internal object H2InProcessPool {
                 .substring(cut + 1)
                 .split(';')
                 .filter { it.isNotBlank() }
-                .filterNot { it.substringBefore('=').trim().equals("DB_CLOSE_DELAY", ignoreCase = true) }
+                .filterNot { it.substringBefore('=').trim().uppercase() in SESSION_ADMIN_SETTINGS }
         return listOf(listOf(url.substring(0, cut)), kept).flatten().joinToString(";")
     }
+
+    /**
+     * The admin-gated settings of H2 2.3.232's session-open SET loop — see
+     * [stripSessionAdminSettings] for provenance and the two deliberate exclusions.
+     */
+    private val SESSION_ADMIN_SETTINGS =
+        setOf(
+            "ALLOW_LITERALS",
+            "AUTHENTICATOR",
+            "BUILTIN_ALIAS_OVERRIDE",
+            "CACHE_SIZE",
+            "CLUSTER",
+            "COLLATION",
+            "CREATE_BUILD",
+            "DATABASE_EVENT_LISTENER",
+            "DB_CLOSE_DELAY",
+            "DEFAULT_LOCK_TIMEOUT",
+            "DEFAULT_NULL_ORDERING",
+            "DEFAULT_TABLE_TYPE",
+            "EXCLUSIVE",
+            "IGNORECASE",
+            "JAVA_OBJECT_SERIALIZER",
+            "LOCK_MODE",
+            "MAX_LENGTH_INPLACE_LOB",
+            "MAX_LOG_SIZE",
+            "MAX_MEMORY_ROWS",
+            "MAX_MEMORY_UNDO",
+            "MAX_OPERATION_MEMORY",
+            "MODE",
+            "OPTIMIZE_REUSE_RESULTS",
+            "QUERY_STATISTICS",
+            "QUERY_STATISTICS_MAX_ENTRIES",
+            "REFERENTIAL_INTEGRITY",
+            "RETENTION_TIME",
+            "TRACE_LEVEL_FILE",
+            "TRACE_LEVEL_SYSTEM_OUT",
+            "TRACE_MAX_FILE_SIZE",
+            "WRITE_DELAY",
+        )
 }

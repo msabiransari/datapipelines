@@ -412,8 +412,19 @@ class ConnectionPoolManager(
                 // REGISTERED credential — its connections run as a freshly minted non-admin
                 // user, staging §9.5's discipline on the datasource path. Server-form H2
                 // (tcp:/ssl:) is a network client like any other and is untouched.
-                if (datasource.dialect == Dialect.H2 && JdbcUrlForm.classify(datasource.dialect, datasource.jdbcUrl).isInProcess) {
+                val form = JdbcUrlForm.classify(datasource.dialect, datasource.jdbcUrl)
+                if (datasource.dialect == Dialect.H2 && form.isInProcess) {
                     return H2InProcessPool.build(datasource, config)
+                }
+                // 186b: the runtime backstop to registration's refusal. A stored row can never
+                // carry an Unknown form (the validator refuses it), so reaching this line with
+                // one means the row predates the rule or a caller bypassed it — and a plain
+                // pool would then open the URL with the REGISTERED credential as H2's admin,
+                // or (H2's case-sensitive prefixes) create a literal file under the process's
+                // working directory. Fail closed here too.
+                require(form !is JdbcUrlForm.Form.Unknown) {
+                    "datasource '${datasource.name}' carries a URL form this product refuses to pool " +
+                        "(unrecognised in-process prefix); re-register it with a supported URL form"
                 }
                 return HikariConnectionPool(datasource.name, HikariDataSource(config))
             }

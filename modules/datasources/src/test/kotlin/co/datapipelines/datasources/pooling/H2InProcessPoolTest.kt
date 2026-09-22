@@ -122,6 +122,97 @@ class H2InProcessPoolTest {
         }
     }
 
+    @Test
+    fun `a pre-existing DP_H2_RESTRICTED carrying ADMIN is de-escalated, not just re-passworded`() {
+        // 186b LOW (a): the restricted identity persists in a FILE database across pool builds.
+        // If a database arrives with a user of that name carrying ADMIN (created outside the
+        // product), a rotation that only re-passwords leaves the pool's identity an admin and
+        // A3 is gone. The rotation therefore runs ALTER USER … ADMIN FALSE as well.
+        val dbFile = scratch.resolve("squatter-${UUID.randomUUID()}.mv.db").absolutePathString().removeSuffix(".mv.db")
+        val url = "jdbc:h2:file:$dbFile"
+        // The hostile pre-existing file: DP_H2_RESTRICTED exists, WITH admin rights.
+        DriverManager.getConnection(url, "sa", "").use { admin ->
+            admin.createStatement().use {
+                it.execute("CREATE USER ${H2InProcessPool.RESTRICTED_USER} PASSWORD 'squatter' ADMIN")
+            }
+        }
+        val datasource = h2(url, username = "sa", secret = "")
+
+        val token = "squatter-token-${UUID.randomUUID()}"
+        val secret = scratch.resolve("squatter-secret.txt").also { it.writeText(token) }
+        try {
+            ConnectionPoolManager.buildHikariPool(datasource).use { pool ->
+                pool.leaseConnection().use { connection ->
+                    val read =
+                        shouldThrow<SQLException> { query(connection, "SELECT FILE_READ('${secret.absolutePathString()}', 'UTF-8')") }
+                    read.sqlState shouldBe "90040"
+                }
+            }
+            // And the flag itself reads FALSE in the database — the rotation de-escalated the
+            // stored user, it did not merely fail this generation's privilege probe.
+            DriverManager.getConnection(url, "sa", "").use { admin ->
+                query(
+                    admin,
+                    "SELECT IS_ADMIN FROM INFORMATION_SCHEMA.USERS WHERE USER_NAME = '${H2InProcessPool.RESTRICTED_USER}'",
+                ) shouldBe "FALSE"
+            }
+        } finally {
+            secret.deleteIfExists()
+        }
+    }
+
+    @Test
+    fun `a mixed-case H2 URL is never pooled - no file database appears under the working directory`() {
+        // 186b: H2's parseName matches the four prefixes case-SENSITIVELY, so
+        // `jdbc:h2:TCP://h/x` is a literal FILE the driver creates under the process's working
+        // directory. Registration refuses the form; this is the runtime backstop — the pool
+        // refuses it too, and nothing materializes on disk. Falsifiable: with the classifier's
+        // case-sensitivity reverted, the URL classifies Server, the plain pool OPENS it (as the
+        // registered credential, H2's admin on a fresh file) and the .mv.db appears.
+        val before = mvDbUnderCwd()
+        val datasource = h2("jdbc:h2:TCP://localhost:9/depool_case", username = "sa", secret = "sa")
+
+        try {
+            shouldThrow<IllegalArgumentException> { ConnectionPoolManager.buildHikariPool(datasource) }
+        } finally {
+            val created = mvDbUnderCwd() - before
+            try {
+                created shouldBe emptySet()
+            } finally {
+                // A regression's litter must not survive into the next run's `before` snapshot.
+                created.forEach { java.io.File(it).deleteRecursively() }
+                java.io.File("./TCP:").deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `admin-gated URL settings are applied once by the bootstrap and stripped from operational opens`() {
+        // 186b LOW (b): H2 runs a URL's admin-gated settings as SET commands on EVERY session
+        // open (Engine.openSession), and the restricted user cannot run them — before this
+        // round every pooled open of such a datasource failed with 90040. The bootstrap (the
+        // registered, admin credential) applies them once; they are database-scoped, so the
+        // effect survives into the stripped operational URL. Falsifiable: drop CACHE_SIZE from
+        // the strip set and this pool never comes up.
+        val dbName = "depool_${UUID.randomUUID().toString().replace("-", "")}"
+        val url = "jdbc:h2:mem:$dbName;DB_CLOSE_DELAY=-1;CACHE_SIZE=8192;WRITE_DELAY=2000"
+        val datasource = h2(url, username = "sa", secret = "sa")
+
+        ConnectionPoolManager.buildHikariPool(datasource).use { pool ->
+            pool.leaseConnection().use { connection ->
+                assertAll(
+                    { currentUser(connection) shouldBe H2InProcessPool.RESTRICTED_USER },
+                    {
+                        query(
+                            connection,
+                            "SELECT SETTING_VALUE FROM INFORMATION_SCHEMA.SETTINGS WHERE SETTING_NAME = 'CACHE_SIZE'",
+                        ) shouldBe "8192"
+                    },
+                )
+            }
+        }
+    }
+
     private fun h2(
         url: String,
         username: String?,
@@ -143,6 +234,15 @@ class H2InProcessPoolTest {
     )
 
     private fun currentUser(connection: java.sql.Connection): String = query(connection, "SELECT CURRENT_USER")
+
+    /** The H2 database files under the test JVM's working directory — the "the driver created a file" witness. */
+    private fun mvDbUnderCwd(): Set<String> =
+        java.io.File(".")
+            .walkTopDown()
+            .maxDepth(4)
+            .filter { it.isFile && it.name.endsWith(".mv.db") }
+            .map { it.path }
+            .toSet()
 
     private fun query(
         connection: java.sql.Connection,

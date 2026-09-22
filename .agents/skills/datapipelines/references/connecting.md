@@ -67,7 +67,9 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   description, and a description is not a control, so it was removed.) One nuance worth passing
   along: in-process engines — H2 `mem:`/`file:`, DuckDB, SQLite — are registered by a **super
   admin** only, and file-backed ones only under the deployment's declared file roots, so for
-  those the right person to ask is a super admin, not a workspace admin.
+  those the right person to ask is a super admin, not a workspace admin. The H2 prefixes are
+  matched case-sensitively, exactly as the driver reads them — `jdbc:h2:MEM:x` or
+  `jdbc:h2:TCP://h/x` are refused as unknown forms, not read as the lower-case forms.
 
 - **Which datasources can my key see? The ones GRANTED to its workspace — nothing else.**
   There is no such thing as a global datasource any more. A datasource is registered once and
