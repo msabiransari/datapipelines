@@ -162,7 +162,7 @@ class EndpointKeyService(
         pathPrefix: String,
     ): Boolean {
         val prefix = normalizeBinding(pathPrefix)
-        val removed = bindings.delete(prefix, apiKeyId)
+        val removed = bindings.delete(prefix, apiKeyId, principal.requireWorkspace().id)
         audit.log(
             event = AUDIT_UNBOUND,
             userId = principal.userId,

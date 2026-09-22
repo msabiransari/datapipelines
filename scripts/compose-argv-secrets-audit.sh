@@ -31,9 +31,12 @@ audit() { # audit <file>... → exit 1 naming every offending line
   python3 - "$@" <<'PY'
 import re, sys
 
-SECRET = re.compile(r"(PASSWORD|SECRET|TOKEN|_KEY$|_KEY_)")
-# `${NAME`, `${NAME:-…}`, `$NAME` — but not `$$NAME` (a literal `$` for the shell).
-INTERP = re.compile(r"(?<!\$)\$\{?([A-Za-z_][A-Za-z0-9_]*)")
+SECRET = re.compile(r"(PASSWORD|SECRET|TOKEN|_KEY$|_KEY_|_PWD|_PASS$|_PASS_|CREDENTIAL)")
+# A run of `$` before `{NAME` / `NAME`: Compose pairs `$$` into a literal `$`, so an EVEN run
+# leaves the name for the container's shell and an ODD run interpolates the value here —
+# `$NAME`, `${NAME}`, `${NAME:-…}` and `$$${NAME}` (a literal `$` glued to the VALUE) all
+# interpolate; `$$NAME` does not.
+INTERP = re.compile(r"(?<!\$)(\$+)\{?([A-Za-z_][A-Za-z0-9_]*)")
 ARGV_KEYS = ("command", "entrypoint")
 
 def indent(line):
@@ -75,8 +78,8 @@ for path in sys.argv[1:]:
         for lineno, text in body:
             code = text.split("#", 1)[0]
             for m in INTERP.finditer(code):
-                if SECRET.search(m.group(1)):
-                    failures.append(f"{path}:{lineno}: service '{service}' {key} interpolates the secret {m.group(1)} into argv: {text.strip()}")
+                if len(m.group(1)) % 2 == 1 and SECRET.search(m.group(2)):
+                    failures.append(f"{path}:{lineno}: service '{service}' {key} interpolates the secret {m.group(2)} into argv: {text.strip()}")
 
 if failures:
     print("compose-argv-secrets-audit: FAILED — a credential's VALUE is on a container command line:", file=sys.stderr)
@@ -112,18 +115,21 @@ cases = {
     "healthcheck": src.replace('test: ["CMD", "redis-cli", "ping"]', 'test: ["CMD", "redis-cli", "-a", "${DATAPIPELINES_REDIS_PASSWORD}", "ping"]'),
     # 3. a brace-less `$VAR`, which Compose interpolates just the same
     "bare": src.replace(anchor, "        requirepass $DATAPIPELINES_REDIS_PASSWORD\n"),
+    # 4. `$$${VAR}`: Compose renders a literal `$` followed by the VALUE — the shape a
+    #    lookbehind on one `$` would wave through (the #199 review's false negative)
+    "double_dollar": src.replace(anchor, "        requirepass $$${DATAPIPELINES_REDIS_PASSWORD}\n"),
 }
 for name, text in cases.items():
     assert text != src, f"self-test case {name} changed nothing"
     d = os.path.join(tmp, name, "deploy"); os.makedirs(d)
     open(os.path.join(d, "compose.yml"), "w").write(text)
 PY
-  for case in argv healthcheck bare; do
+  for case in argv healthcheck bare double_dollar; do
     if (cd "$tmp/$case" && audit deploy/compose.yml >/dev/null 2>&1); then
       echo "SELF-TEST FAILED: doctored compose ($case) passed the audit" >&2; exit 1
     fi
   done
-  echo "self-test OK: 3 doctored compose files correctly fail the audit"; exit 0
+  echo "self-test OK: 4 doctored compose files correctly fail the audit"; exit 0
 fi
 
 audit "${FILES[@]}"

@@ -84,14 +84,19 @@ class EndpointKeyBindingRepository(
             ),
         ) > 0
 
-    /** Unbinds one key from one node. */
+    /**
+     * Unbinds one key from one node — inside [workspaceId] only. Every caller already pins
+     * the key to the active workspace before it gets here; the predicate makes that a
+     * property of the statement rather than of the callers (D11, the #199 review).
+     */
     fun delete(
         pathPrefix: String,
         apiKeyId: String,
+        workspaceId: UUID,
     ): Boolean =
         jdbc.update(
-            "DELETE FROM endpoint_key_bindings WHERE path_prefix = :prefix AND api_key_id = :keyId",
-            mapOf("prefix" to pathPrefix, "keyId" to apiKeyId),
+            "DELETE FROM endpoint_key_bindings WHERE path_prefix = :prefix AND api_key_id = :keyId AND workspace_id = :workspaceId",
+            mapOf("prefix" to pathPrefix, "keyId" to apiKeyId, "workspaceId" to workspaceId),
         ) > 0
 
     private companion object {

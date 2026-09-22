@@ -185,7 +185,7 @@ class EndpointKeyServiceTest {
     @Test
     fun `bind and unbind are audited with the node they touched`() {
         every { bindings.insert(any()) } returns true
-        every { bindings.delete("/nyc", KEY_ID) } returns true
+        every { bindings.delete("/nyc", KEY_ID, any()) } returns true
 
         assertAll(
             { service.bind(principal(), KEY_ID, "/nyc") shouldBe true },

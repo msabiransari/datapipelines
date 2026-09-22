@@ -207,8 +207,11 @@ class EndpointPersistenceIntegrationTest {
         bindings.findByKey("dpk_absent").shouldBeEmpty()
         bindings.findByWorkspace(workspaceId) shouldHaveSize 2
 
-        bindings.delete("/lending", keyId) shouldBe true
-        bindings.delete("/lending", keyId) shouldBe false
+        // The DELETE carries the workspace predicate (#199 review): a foreign workspace id
+        // removes nothing, the owning one removes exactly the row, and a repeat is false.
+        bindings.delete("/lending", keyId, UUID.randomUUID()) shouldBe false
+        bindings.delete("/lending", keyId, workspaceId) shouldBe true
+        bindings.delete("/lending", keyId, workspaceId) shouldBe false
         bindings.findByKey(keyId).map { it.pathPrefix } shouldContainExactly listOf("/lending/home")
     }
 
