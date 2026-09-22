@@ -189,7 +189,7 @@ class OidcSuccessHandler(
         // §4.2 step 4 (design §5.1/§7): resolve the workspace the JWT stamps — last-used,
         // else first membership, else the freshly provisioned personal workspace
         // (auto-per-user only; the hook is a no-op in the other modes).
-        val activeWorkspace = workspaceService.workspaceForLogin(user, email)
+        val activeWorkspace = workspaceService.workspaceForLogin(user, email, LoginMethod.OIDC)
         // §5A.8: sys-ops hears about a FIRST social login — the branch that inserted the row,
         // which `findOrCreateByEmail` reports as `created`. A returning user sends nothing.
         // After the workspace resolution, so the notice can name where the account landed.

@@ -6,6 +6,7 @@ import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.ClientAddressResolver
 import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.LocalAuthService
+import co.datapipelines.auth.LoginMethod
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceService
@@ -83,7 +84,7 @@ class LocalLoginControllerTest {
     fun `a correct password mints the session and lands on the dashboard`() {
         val user = user()
         stubAuthenticate(LocalAuthService.LocalLoginResult.Success(user))
-        every { workspaceService.workspaceForLogin(user, user.email) } returns
+        every { workspaceService.workspaceForLogin(user, user.email, LoginMethod.PWD) } returns
             co.datapipelines.auth.WorkspaceContext(UUID.randomUUID(), "acme")
         every { jwtService.issue(user, "acme") } returns "jwt-token"
 
@@ -155,7 +156,7 @@ class LocalLoginControllerTest {
     fun `the controller passes the submission through - normalization is the service's boundary`() {
         val user = user()
         stubAuthenticate(LocalAuthService.LocalLoginResult.Success(user))
-        every { workspaceService.workspaceForLogin(user, user.email) } returns null
+        every { workspaceService.workspaceForLogin(user, user.email, LoginMethod.PWD) } returns null
         every { jwtService.issue(user, null) } returns "jwt"
 
         val (request, response) = post("  LOCAL@X.TEST ", "pw")

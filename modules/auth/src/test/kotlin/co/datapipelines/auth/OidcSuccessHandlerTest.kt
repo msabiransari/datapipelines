@@ -31,7 +31,7 @@ class OidcSuccessHandlerTest {
 
     private val workspaceService =
         mockk<WorkspaceService> {
-            every { workspaceForLogin(any(), any()) } returns null
+            every { workspaceForLogin(any(), any(), any()) } returns null
         }
 
     private val notices = RecordingNotices()
@@ -278,7 +278,7 @@ class OidcSuccessHandlerTest {
     fun `a FIRST social login sends the sys-ops new-user notice naming the provider and the workspace`() {
         every { userService.findOrCreateByEmail(any(), any(), any(), any(), any()) } returns UserService.Provisioned(user(), created = true)
         every { jwtService.issue(any(), any(), any()) } returns "jwt"
-        every { workspaceService.workspaceForLogin(any(), any()) } returns
+        every { workspaceService.workspaceForLogin(any(), any(), any()) } returns
             WorkspaceContext(UUID.randomUUID(), "demo")
 
         run(baseClaims(extra = mapOf("email_verified" to true)))

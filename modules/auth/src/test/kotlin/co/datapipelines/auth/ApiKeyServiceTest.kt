@@ -6,6 +6,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
 import io.mockk.every
@@ -534,7 +535,7 @@ class ApiKeyServiceTest {
         val mintedAtLogin = captureMint()
         every { repo.findLiveUserKey(ownerId, workspaceId) } returns null
 
-        val minted = mintingService.mintLoginKey(owner(), contextOf(WorkspaceRole.AUTHOR))!!
+        val minted = mintingService.mintLoginKey(owner(), contextOf(WorkspaceRole.AUTHOR), LoginMethod.PWD)!!
 
         mintedAtLogin.captured shouldBe true
         minted.name shouldBe "mcp/acme"
@@ -546,7 +547,7 @@ class ApiKeyServiceTest {
 
         // Second call: the key exists, nothing happens.
         every { repo.findLiveUserKey(ownerId, workspaceId) } returns minted
-        mintingService.mintLoginKey(owner(), contextOf(WorkspaceRole.AUTHOR)) shouldBe null
+        mintingService.mintLoginKey(owner(), contextOf(WorkspaceRole.AUTHOR), LoginMethod.PWD) shouldBe null
     }
 
     @Test
@@ -557,7 +558,7 @@ class ApiKeyServiceTest {
         fun scopesFor(
             role: WorkspaceRole,
             superAdmin: Boolean = false,
-        ) = mintingService.mintLoginKey(owner(superAdmin = superAdmin), contextOf(role))!!.scopes
+        ) = mintingService.mintLoginKey(owner(superAdmin = superAdmin), contextOf(role), LoginMethod.PWD)!!.scopes
 
         scopesFor(WorkspaceRole.VIEWER) shouldBe Scope.EXECUTE.expand()
         scopesFor(WorkspaceRole.PROMOTER) shouldBe setOf(Scope.READ)
@@ -569,8 +570,22 @@ class ApiKeyServiceTest {
 
     @Test
     fun `a user owing a password change gets no key`() {
-        mintingService.mintLoginKey(owner(mustChange = true), contextOf(WorkspaceRole.AUTHOR)) shouldBe null
+        mintingService.mintLoginKey(owner(mustChange = true), contextOf(WorkspaceRole.AUTHOR), LoginMethod.PWD) shouldBe null
         io.mockk.verify(exactly = 0) { repo.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    /**
+     * #210 — the flag belongs to the LOCAL credential: an OIDC session is not gated by it
+     * (ForcedPasswordChangeInterceptor) and gets its key like any other entry. A Google user
+     * whose bootstrap-seeded local password was never changed spent four sign-ins keyless
+     * on datapipelines.co (2026-09-22) because the mint did not make the distinction.
+     */
+    @Test
+    fun `an OIDC sign-in mints the key even while a local password change is owed`() {
+        val mintedAtLogin = captureMint()
+        every { repo.findLiveUserKey(ownerId, workspaceId) } returns null
+        mintingService.mintLoginKey(owner(mustChange = true), contextOf(WorkspaceRole.AUTHOR), LoginMethod.OIDC).shouldNotBeNull()
+        mintedAtLogin.captured shouldBe true
     }
 
     @Test
@@ -579,7 +594,7 @@ class ApiKeyServiceTest {
         every { repo.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } throws
             org.springframework.dao.DuplicateKeyException("api_keys_one_live_user_key")
 
-        mintingService.mintLoginKey(owner(), contextOf(WorkspaceRole.AUTHOR)) shouldBe null
+        mintingService.mintLoginKey(owner(), contextOf(WorkspaceRole.AUTHOR), LoginMethod.PWD) shouldBe null
     }
 
     @Test

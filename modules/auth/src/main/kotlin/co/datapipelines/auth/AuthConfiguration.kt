@@ -108,7 +108,7 @@ class AuthConfiguration {
             // membership guard), so the port closes over a PROVIDER and resolves the service
             // on the first login, never at construction: the cycle that would otherwise exist
             // between these two beans stays unrolled.
-            McpKeyMint { user, context -> apiKeyService.getObject().mintLoginKey(user, context) },
+            McpKeyMint { user, context, loginMethod -> apiKeyService.getObject().mintLoginKey(user, context, loginMethod) },
         )
 
     /**

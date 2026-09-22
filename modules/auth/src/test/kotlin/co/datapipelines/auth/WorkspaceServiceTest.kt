@@ -217,7 +217,7 @@ class WorkspaceServiceTest {
         every { lastUsed.lastUsed(userId) } returns "beta"
         principal(memberships = listOf(membership(wsA), membership(wsB)))
 
-        service().workspaceForLogin(user(), "alice@company.com")?.id shouldBe wsB.id
+        service().workspaceForLogin(user(), "alice@company.com", LoginMethod.PWD)?.id shouldBe wsB.id
     }
 
     @Test
@@ -225,7 +225,7 @@ class WorkspaceServiceTest {
         every { lastUsed.lastUsed(userId) } returns "long-gone"
         principal(memberships = listOf(membership(wsA)))
 
-        service().workspaceForLogin(user(), "alice@company.com")?.id shouldBe wsA.id
+        service().workspaceForLogin(user(), "alice@company.com", LoginMethod.PWD)?.id shouldBe wsA.id
     }
 
     @Test
@@ -235,7 +235,7 @@ class WorkspaceServiceTest {
         val demo = WorkspaceContext(UUID.randomUUID(), "demo", WorkspaceRole.VIEWER)
         every { demoSeeder.joinDemoIfUnaffiliated(userId) } returns demo
 
-        service().workspaceForLogin(user(), "alice@company.com") shouldBe demo
+        service().workspaceForLogin(user(), "alice@company.com", LoginMethod.PWD) shouldBe demo
     }
 
     @Test
@@ -244,7 +244,7 @@ class WorkspaceServiceTest {
         principal(memberships = emptyList())
         every { demoSeeder.joinDemoIfUnaffiliated(userId) } returns null
 
-        service().workspaceForLogin(user(), "alice@company.com").shouldBeNull()
+        service().workspaceForLogin(user(), "alice@company.com", LoginMethod.PWD).shouldBeNull()
     }
 
     @Test
@@ -252,7 +252,7 @@ class WorkspaceServiceTest {
         every { lastUsed.lastUsed(userId) } returns null
         principal(memberships = listOf(membership(wsA)))
 
-        service().workspaceForLogin(user(), "alice@company.com")?.id shouldBe wsA.id
+        service().workspaceForLogin(user(), "alice@company.com", LoginMethod.PWD)?.id shouldBe wsA.id
         verify(exactly = 0) { demoSeeder.joinDemoIfUnaffiliated(any()) }
     }
 
@@ -271,7 +271,7 @@ class WorkspaceServiceTest {
         principal(memberships = listOf(membership(wsA, role = invitedRole)))
 
         val stamped =
-            service().workspaceForLogin(user(), "alice@company.com")
+            service().workspaceForLogin(user(), "alice@company.com", LoginMethod.PWD)
                 ?: error("an invited user's first login must stamp the invited workspace")
 
         stamped.id shouldBe wsA.id
@@ -297,7 +297,7 @@ class WorkspaceServiceTest {
         every { lastUsed.lastUsed(userId) } returns null
         principal(memberships = listOf(membership(wsA)))
 
-        service().workspaceForLogin(user(), "  alice@company.com  ")
+        service().workspaceForLogin(user(), "  alice@company.com  ", LoginMethod.PWD)
 
         verify {
             auditLogger.log(

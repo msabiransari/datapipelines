@@ -51,10 +51,16 @@ fun interface WorkspaceLiveness {
  * owner's rule is about LOGGING IN, not about which provider did it.
  */
 fun interface McpKeyMint {
-    /** Mints the login key for [user] in [context]'s workspace when none is live; a no-op otherwise. */
+    /**
+     * Mints the login key for [user] in [context]'s workspace when none is live; a no-op
+     * otherwise. [loginMethod] is how THIS session got in: the must-change-password rule
+     * gates a PASSWORD session, never an OIDC one (ForcedPasswordChangeInterceptor), and the
+     * mint follows the same line — a Google sign-in with a stale local flag still gets its key.
+     */
     fun mint(
         user: User,
         context: WorkspaceContext,
+        loginMethod: LoginMethod,
     )
 }
 
@@ -205,6 +211,7 @@ open class WorkspaceService(
     open fun workspaceForLogin(
         user: User,
         email: String,
+        loginMethod: LoginMethod,
     ): WorkspaceContext? {
         val normalized = email.trim().lowercase()
         val materialised = invitationRepository.materialiseFor(normalized, user.id)
@@ -230,13 +237,13 @@ open class WorkspaceService(
         }
         val memberships = activeMemberships(user.id)
         lastUsedWorkspaceStore?.lastUsed(user.id)?.let { last ->
-            memberships.firstOrNull { it.workspaceName == last }?.let { return minted(user, context(it)) }
+            memberships.firstOrNull { it.workspaceName == last }?.let { return minted(user, context(it), loginMethod) }
         }
-        memberships.firstOrNull()?.let { return minted(user, context(it)) }
+        memberships.firstOrNull()?.let { return minted(user, context(it), loginMethod) }
         return demoWorkspaceSeeder
             ?.joinDemoIfUnaffiliated(user.id)
             ?.also { authCache.invalidateMemberships(user.id) }
-            ?.let { minted(user, it) }
+            ?.let { minted(user, it, loginMethod) }
     }
 
     /**
@@ -247,16 +254,18 @@ open class WorkspaceService(
     open fun mintMcpKeyOnEntry(
         user: User,
         context: WorkspaceContext,
+        loginMethod: LoginMethod,
     ) {
-        mcpKeyMint?.mint(user, context)
+        mcpKeyMint?.mint(user, context, loginMethod)
     }
 
     /** Resolution plus the D16 mint — the one shape every login answer takes. */
     private fun minted(
         user: User,
         context: WorkspaceContext,
+        loginMethod: LoginMethod,
     ): WorkspaceContext {
-        mintMcpKeyOnEntry(user, context)
+        mintMcpKeyOnEntry(user, context, loginMethod)
         return context
     }
 

@@ -385,8 +385,14 @@ class ApiKeyService(
     fun mintLoginKey(
         user: User,
         context: WorkspaceContext,
+        loginMethod: LoginMethod,
     ): ApiKey? {
-        if (user.mustChangePassword) return null
+        // The must-change flag belongs to the LOCAL credential (§5A.4): a password session is
+        // gated until the change and gets no key; an OIDC session is not gated — the
+        // interceptor lets it through — and gets its key like any other entry. A Google user
+        // whose bootstrap-seeded local password was never changed spent four sign-ins keyless
+        // on datapipelines.co (2026-09-22) because this line did not make the distinction.
+        if (loginMethod != LoginMethod.OIDC && user.mustChangePassword) return null
         if (apiKeyRepository.findLiveUserKey(user.id, context.id) != null) return null
 
         val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
