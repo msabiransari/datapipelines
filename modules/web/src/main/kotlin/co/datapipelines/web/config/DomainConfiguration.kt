@@ -295,12 +295,15 @@ class DomainConfiguration {
         environment: Environment,
         poolMetrics: PoolLifecycleMetrics,
         datasourcesProperties: DatasourcesProperties,
+        fileRootsProperties: co.datapipelines.datasources.DatasourceFileRootsProperties,
         executorProperties: ExecutorProperties,
     ): DatasourceRegistry =
         DefaultDatasourceRegistry(
             repository = repository,
             encryptor = encryptor,
-            validator = DatasourceValidator(),
+            // #186: the declared file roots for in-process file-backed URLs — an empty list
+            // (the default) refuses every file-backed registration at the save boundary.
+            validator = DatasourceValidator(fileRoots = fileRootsProperties.toFileRoots()),
             references = references,
             auditSink = DatasourceAuditSink.NONE,
             cache = DatasourceMetadataCache(),

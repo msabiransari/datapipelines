@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.26 (single source of truth for every config key)
+**Status:** v1.27 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-17
 
@@ -241,7 +241,7 @@ Workspaces are created by **super admins** ([auth.md §4.2/§5.6](auth.md#56-wor
 
 | YAML path | Default | Description |
 |---|---|---|
-| `datapipelines.workspaces.member-datasources-enabled` | `true` | May a workspace ADMIN register a datasource bound to their own workspace? `false` makes datasource registration a super-admin-only act instance-wide. Visibility is still the grant either way ([auth.md §11A](auth.md#11a-roles)) |
+| `datapipelines.workspaces.member-datasources-enabled` | `false` | May a workspace ADMIN register a datasource bound to their own workspace? `false` makes datasource registration a super-admin-only act instance-wide. Visibility is still the grant either way ([auth.md §11A](auth.md#11a-roles)). **In-process engines (H2 `mem:`/`file:`, DuckDB, SQLite) and any file-backed URL are super-admin-only regardless of this flag (#186)** — see [`file-roots`](#326-datasource-pools) |
 
 **Removed in RBAC round 1** (`provisioning-mode`, `open-join`). Capability moved onto the workspace membership, and with it went the modes that decided who could create a workspace: `auto-per-user` (a personal workspace per login), `self-serve` (anyone creates) and `closed` (admin only), plus `open-join` (anyone self-joins). **Both keys are refused BY NAME at startup** (§7) rather than ignored — a deployment that still says `auto-per-user` is a deployment expecting a personal workspace per user, and silently giving it something else is how an operator finds out from a user. Delete the key; there is no replacement to set, because the behaviour is no longer a knob.
 
@@ -427,6 +427,7 @@ How long a **retired** connection pool may keep connections out before it is clo
 | YAML path | Default | Description |
 |---|---|---|
 | `datapipelines.datasources.retire-ceiling-seconds` | `derived` | Seconds a retired pool may hold connections before it is hard-closed. **`derived` means `datapipelines.executor.node-query-timeout-seconds` + 30** (so `90` with the shipped defaults) — the longest a well-behaved node statement can run, plus slack for it to return its connection. Set it explicitly only when this deployment's datasources carry their own longer `query_timeout_seconds` |
+| `datapipelines.datasources.file-roots` | (none) | Comma-separated absolute directories a **file-backed** in-process datasource (H2 `file:`/bare path, SQLite, DuckDB file) may live under (#186). **Empty = no file-backed datasource is registrable by anyone, super admin included** — in-process engines run their SQL inside the server's JVM, so their files live only where the deployment declares. Each root must exist and be a directory or startup refuses, naming the key. Registration normalizes the path (symlinked parents resolved, the parent must exist; `..`, `~` and URL-encoded separators are refused before normalization is trusted) and requires it under a root. The demo's sample datasources need the read-only sample volume: `app.sh --demo …` exports `/srv/sample` for you ([Datasources §9](datasources.md#9-validation-rules)) |
 
 **Why the default is derived rather than a number.** The ceiling and the node query timeout are the same fact seen twice: a deployment that raises `node-query-timeout-seconds` to 600 and leaves a literal `90` here would start hard-closing pools out from under statements that are still legitimately running, and nothing would tell it. Deriving makes the two move together; an explicit value opts out.
 
@@ -595,7 +596,7 @@ datapipelines:
       inventory-cache-ttl-seconds: ${DATAPIPELINES_DEPLOYMENT_PROMOTION_INVENTORY_CACHE_TTL_SECONDS:60}
 
   workspaces:
-    member-datasources-enabled: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}
+    member-datasources-enabled: ${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:false}
 
   staging:
     h2:
@@ -786,6 +787,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.27 | 186 in-process datasource containment (#186) | §3.26 gains `datapipelines.datasources.file-roots` (default **empty** = no file-backed in-process datasource is registrable by anyone; each root must be an existing directory at boot). §3.17's `member-datasources-enabled` default flips to **`false`**, matching the shipped posture (`deploy/env/defaults.env` has shipped `false` since the workspaces round) — a documented default must match the shipped posture, and the drift guards now pin all three to the same value. §3.17's row also states the flag-independent rule: in-process engines (H2 `mem:`/`file:`, DuckDB, SQLite) are super-admin-only regardless. |
 | 2026-09-21 | v1.26 | 188 (#189) | §3.23's posture table and the §7 rule list gain the Redis-password row: passwordless Redis off loopback stays a WARN under `development` and is a REFUSAL under `hardened` (`PostureRules.checkHardenedRedisPassword`, check 26); the §3 Redis row says so. |
 | 2026-09-21 | v1.25 | 180 (#180, #182) | Doc-only, no key change. §3.18's `examples-file` row, its cross-key paragraph and the three §7 bullets (`provisioning-mode` value, open-join/mode agreement, examples-file/mode) described rules `ConfigValidator` dropped in v1.9 — the document contradicted its own §3.17 and v1.9 row. Each now states that the rule was dropped and why (the seeder runs at `demo`'s creation in every deployment). |
 | 2026-09-19 | v1.24 | 172 (#172) | §3.22: the published-endpoint surface re-rooted to `/api/<category>/<version>/<path…>` (R-EP5); the `datapipelines.endpoints.*` keys and their bounds are unchanged. |

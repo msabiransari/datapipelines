@@ -354,13 +354,16 @@ class McpSaveWorkspaceDatasourceE2eTest {
         fun seedAuthRows() {
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
                 connection.createStatement().use { statement ->
+                    // 186: the foreign user is a super admin because the fixture registers an
+                    // in-process H2 datasource, which is super-admin-only now; the suite's subject
+                    // (cross-workspace visibility) is grant-based and unaffected.
                     statement.execute(
                         """
                         INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
                             ('$ADMIN_USER_ID', 'e2e-134-default@datapipelines.test', 'E2E 134 Default', 'test',
                              'e2e-134-default-sub', TRUE, TRUE),
                             ('$FOREIGN_USER_ID', 'e2e-134-foreign@datapipelines.test', 'E2E 134 Foreign', 'test',
-                             'e2e-134-foreign-sub', TRUE, FALSE)
+                             'e2e-134-foreign-sub', TRUE, TRUE)
                         """.trimIndent(),
                     )
                     statement.execute(

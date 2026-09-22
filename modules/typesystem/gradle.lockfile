@@ -11,6 +11,7 @@ com.fasterxml.jackson.module:jackson-module-kotlin:2.21.5=compileClasspath,runti
 com.fasterxml.jackson:jackson-bom:2.21.5=compileClasspath,runtimeClasspath,testCompileClasspath,testRuntimeClasspath
 com.github.ajalt.clikt:clikt-jvm:5.0.3=ktlint
 com.github.ajalt.clikt:clikt:5.0.3=ktlint
+com.h2database:h2:2.3.232=testCompileClasspath,testRuntimeClasspath
 com.pinterest.ktlint:ktlint-cli-reporter-baseline:1.8.0=ktlint,ktlintBaselineReporter
 com.pinterest.ktlint:ktlint-cli-reporter-checkstyle:1.8.0=ktlint
 com.pinterest.ktlint:ktlint-cli-reporter-core:1.8.0=ktlint,ktlintBaselineReporter

@@ -32,7 +32,9 @@ class DatasourceUiControllerTest {
     private val rules =
         co.datapipelines.web.datasources.DatasourceWorkspaceRules(
             mockk(relaxed = true),
-            co.datapipelines.auth.WorkspacesProperties(),
+            // The register cases are this suite's subject, so the member gate is ON (the 186
+            // shipped default is false) — exactly the gate state they exercise.
+            co.datapipelines.auth.WorkspacesProperties(memberDatasourcesEnabled = true),
         )
     private val controller =
         DatasourceUiController(

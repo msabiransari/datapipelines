@@ -133,6 +133,36 @@ class SqlProbeTempdbWireTest {
         )
     }
 
+    /**
+     * #186 — the scratch is de-privileged, and the WIRE says so: a SELECT-shaped host read
+     * (`FILE_READ`) reaches H2's restricted scratch session and comes back as the probe's
+     * existing not-permitted answer — `datasource.table_forbidden` inside an `isError` envelope,
+     * never a 500 — with the file's token nowhere in the response. The file is a temp file this
+     * test writes, carrying a random token; the control half lives in
+     * `SqlProbeScratchContainmentTest`, which shows the same statement SUCCEED on an admin
+     * session (so this refusal is about privilege, not SQL shape).
+     */
+    @Test
+    fun `a host read through the scratch is the not-permitted envelope, and the content never travels`() {
+        val token = "wire-token-${UUID.randomUUID()}"
+        val secret = kotlin.io.path.createTempFile("probe-wire", ".txt")
+        try {
+            secret.toFile().writeText(token)
+
+            val result = call("SELECT FILE_READ('${secret.toAbsolutePath()}', 'UTF-8')")
+
+            @Suppress("UNCHECKED_CAST")
+            val error = json(result)["error"] as Map<String, Any?>
+            assertAll(
+                { result.isError().shouldBeTrue() },
+                { error["code"] shouldBe PipelineErrorCodes.Datasource.TABLE_FORBIDDEN },
+                { text(result) shouldNotContain token },
+            )
+        } finally {
+            secret.toFile().delete()
+        }
+    }
+
     /** The audit row records the hash and length of the SQL, never the text (107, unchanged by #119). */
     @Test
     fun `the tempdb call is audited by sql hash and length only`() {

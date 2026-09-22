@@ -266,10 +266,14 @@ class EmbeddedDialectBehaviorTest {
     fun `DS-SEC-20 - hardening does not break a legitimate DuckDB datasource`() {
         // Over-hardening would be its own defect: a file-backed datasource is the normal production
         // shape, and `enable_external_access=false` must not stop DuckDB opening its OWN database.
+        // #186: a file-backed URL additionally needs its path under a declared root — the
+        // validator here declares the temp directory, exactly as a deployment's
+        // `datapipelines.datasources.file-roots` would.
         val fileDb = File.createTempFile("dp-duckdb-hardened", ".db").also { it.delete() }
         val datasource = embedded(Dialect.DUCKDB, "duckdb_file_hardened", "jdbc:duckdb:$fileDb")
         try {
-            DatasourceValidator().validate(datasource, isCreate = true).errors shouldBe emptyList()
+            val roots = DatasourceFileRoots(listOf(fileDb.toPath().parent))
+            DatasourceValidator(fileRoots = roots).validate(datasource, isCreate = true).errors shouldBe emptyList()
             onDuckdb(datasource) { connection ->
                 connection.createStatement().use { it.execute("CREATE TABLE t (n INTEGER)") }
                 connection.createStatement().use { it.execute("INSERT INTO t VALUES (7)") }

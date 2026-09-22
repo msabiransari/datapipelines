@@ -196,7 +196,7 @@ class DatasourcePartialControllerTest {
 
     @Test
     fun `register resolves the binding through the shared rules and saves the trimmed row`() {
-        every { rules.resolveCreateBinding(any(), any(), any()) } returns workspaceId
+        every { rules.resolveCreateBinding(any(), any(), any(), any(), any()) } returns workspaceId
         every { datasources.exists("warehouse") } returns false
         every { datasources.listVisible(null, workspaceId) } returns emptyList()
 
@@ -236,7 +236,7 @@ class DatasourcePartialControllerTest {
     fun `registering through the form GRANTS the datasource to its own workspace - D-R7`() {
         // Without this the form registers a datasource its own author cannot see: visibility is
         // the grant, so every read (the REST twin included) answers 404 on a row that exists.
-        every { rules.resolveCreateBinding(any(), any(), any()) } returns workspaceId
+        every { rules.resolveCreateBinding(any(), any(), any(), any(), any()) } returns workspaceId
         every { datasources.exists("granted") } returns false
         every { datasources.listVisible(null, workspaceId) } returns emptyList()
 
@@ -260,7 +260,7 @@ class DatasourcePartialControllerTest {
 
     @Test
     fun `an INSTANCE datasource is granted to nothing - a super admin grants it out loud`() {
-        every { rules.resolveCreateBinding(any(), any(), any()) } returns null
+        every { rules.resolveCreateBinding(any(), any(), any(), any(), any()) } returns null
         every { datasources.exists("instance-wide") } returns false
         every { datasources.listVisible(null, workspaceId) } returns emptyList()
 
@@ -306,7 +306,7 @@ class DatasourcePartialControllerTest {
 
     @Test
     fun `a duplicate name is the inline refusal`() {
-        every { rules.resolveCreateBinding(any(), any(), any()) } returns workspaceId
+        every { rules.resolveCreateBinding(any(), any(), any(), any(), any()) } returns workspaceId
         every { datasources.exists("dupe") } returns true
 
         val response =
@@ -331,7 +331,7 @@ class DatasourcePartialControllerTest {
 
     @Test
     fun `a member refused by the workspace gate gets the refusal html - not an error page`() {
-        every { rules.resolveCreateBinding(any(), any(), any()) } throws
+        every { rules.resolveCreateBinding(any(), any(), any(), any(), any()) } throws
             DatapipelinesException("datasource.workspace_gate", "Members cannot register datasources")
 
         val response =
@@ -415,6 +415,7 @@ class DatasourcePartialControllerTest {
         every { rules.requireMemberDatasourcesGate(any()) } returns Unit
         every { rules.requireGlobalFlagWriteAllowed(any(), any()) } returns Unit
         every { rules.resolveUpdateBinding(any(), any(), any(), any()) } returns workspaceId
+        every { rules.requireInProcessDatasourceAllowed(any(), any()) } returns Unit
         val saved = slot<Datasource>()
         every { datasources.save(capture(saved), userId) } answers { saved.captured }
 
@@ -444,6 +445,7 @@ class DatasourcePartialControllerTest {
         every { rules.requireMemberDatasourcesGate(any()) } returns Unit
         every { rules.requireGlobalFlagWriteAllowed(any(), any()) } returns Unit
         every { rules.resolveUpdateBinding(any(), any(), any(), any()) } returns workspaceId
+        every { rules.requireInProcessDatasourceAllowed(any(), any()) } returns Unit
         val saved = slot<Datasource>()
         every { datasources.save(capture(saved), userId) } answers { saved.captured }
 
@@ -473,6 +475,7 @@ class DatasourcePartialControllerTest {
         every { rules.requireMemberDatasourcesGate(any()) } returns Unit
         every { rules.requireGlobalFlagWriteAllowed(any(), any()) } returns Unit
         every { rules.resolveUpdateBinding(any(), any(), any(), any()) } returns workspaceId
+        every { rules.requireInProcessDatasourceAllowed(any(), any()) } returns Unit
         val saved = slot<Datasource>()
         every { datasources.save(capture(saved), userId) } answers { saved.captured }
 

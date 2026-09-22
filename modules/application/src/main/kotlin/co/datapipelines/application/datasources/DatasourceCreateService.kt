@@ -6,6 +6,7 @@ import co.datapipelines.datasources.DatasourceGrantRepository
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.databind.JsonNode
 import java.util.UUID
 
@@ -22,12 +23,17 @@ import java.util.UUID
 fun interface DatasourceCreateBinding {
     /**
      * Resolves the workspace a new datasource binds to, or `null` for a global one, applying
-     * the D8 gates (member gate, admin-only `global`, accessible `workspace`).
+     * the D8 gates (member gate, admin-only `global`, accessible `workspace`) and the #186
+     * in-process gate: [dialect] + [jdbcUrl] decide whether the registration runs an engine
+     * inside the server's own process (H2 mem/file, DuckDB, SQLite), which is a
+     * **super-admin-only** act whatever `member-datasources-enabled` says.
      */
     fun resolve(
         principal: AuthenticatedPrincipal,
         global: Boolean?,
         workspaceName: String?,
+        dialect: Dialect,
+        jdbcUrl: String,
     ): UUID?
 }
 
@@ -84,14 +90,21 @@ class DatasourceCreateService(
         body: JsonNode,
         principal: AuthenticatedPrincipal,
     ): Datasource {
-        val datasource =
+        val bound =
             DatasourcePayloadBinder.bind(body, requirePassword = true).copy(
                 isReadonly = DatasourcePayloadBinder.booleanFlag(body, "readonly") ?: false,
+            )
+        val datasource =
+            bound.copy(
                 ownerWorkspaceId =
                     binding.resolve(
                         principal,
                         DatasourcePayloadBinder.booleanFlag(body, "global"),
                         DatasourcePayloadBinder.workspaceNameOf(body),
+                        // The #186 in-process gate reads what the registration WOULD run — the
+                        // bound dialect and URL, not the request's raw strings.
+                        bound.dialect,
+                        bound.jdbcUrl,
                     ),
             )
         if (datasources.exists(datasource.name)) {

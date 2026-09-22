@@ -67,7 +67,7 @@ class DatasourceCreateServiceTest {
     private val bindingCalls = mutableListOf<Triple<Boolean?, String?, UUID?>>()
 
     private val binding =
-        DatasourceCreateBinding { caller, global, workspaceName ->
+        DatasourceCreateBinding { caller, global, workspaceName, dialect, jdbcUrl ->
             val resolved =
                 when {
                     global == true -> null
@@ -177,7 +177,7 @@ class DatasourceCreateServiceTest {
         val refusing =
             DatasourceCreateService(
                 registry,
-                { _, _, _ -> throw DatapipelinesException(PipelineErrorCodes.Datasource.WORKSPACE_FORBIDDEN, "nope") },
+                { _, _, _, _, _ -> throw DatapipelinesException(PipelineErrorCodes.Datasource.WORKSPACE_FORBIDDEN, "nope") },
                 grants,
             )
 

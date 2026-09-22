@@ -92,7 +92,7 @@ class OrgConfigKeysSpecDriftTest {
         shipped["datapipelines.ui.theme"] shouldBe "\${DATAPIPELINES_UI_THEME:dark}"
         shipped["datapipelines.executions.error-detail"] shouldBe "\${DATAPIPELINES_EXECUTIONS_ERROR_DETAIL:full}"
         shipped["datapipelines.workspaces.member-datasources-enabled"] shouldBe
-            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:true}"
+            "\${DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED:false}"
         shipped["datapipelines.jwt.secret"] shouldBe "\${DATAPIPELINES_JWT_SECRET}"
 
         // 075 appended env/posture/demo after the whole tree, for the same reason. If THAT

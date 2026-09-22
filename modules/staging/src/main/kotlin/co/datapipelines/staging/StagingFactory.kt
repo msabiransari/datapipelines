@@ -1,7 +1,7 @@
 package co.datapipelines.staging
 
 import co.datapipelines.typesystem.DatapipelinesException
-import java.security.SecureRandom
+import co.datapipelines.typesystem.H2RestrictedSession
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.SQLException
@@ -68,14 +68,21 @@ interface StagingFactory {
  * `DATAPIPELINES_JWT_SECRET`, `CREATE ALIAS` loads arbitrary JVM classes — turning "may write
  * tempdb SQL" into "owns every datasource credential and can forge sessions".
  *
- * So creation is two-phase: a **transient** `sa` bootstrap connection creates the database and
- * the restricted user, the first operational connection is opened as that user, and only then
- * does the bootstrap close. The overlap is mandatory, not incidental — with default in-memory
- * semantics (§3.1) the database is discarded the moment its *last* connection closes, so a
- * bootstrap that closed first would take the database with it. Every later pool connection is
- * opened with the same URL, mode, folding and restricted credential, and only while at least
- * one operational connection is already open — so no connection ever creates a database, and
- * every one lands in the execution's.
+ * So creation is two-phase — [H2RestrictedSession.open] (the helper the probe's scratch engine
+ * and the H2 datasource pool share since 186): a **transient** `sa` bootstrap connection creates
+ * the database and the restricted user, the first operational connection is opened as that user,
+ * and only then does the bootstrap close. The overlap is mandatory, not incidental — with
+ * default in-memory semantics (§3.1) the database is discarded the moment its *last* connection
+ * closes, so a bootstrap that closed first would take the database with it. Every later pool
+ * connection is opened with the same URL, mode, folding and restricted credential, and only
+ * while at least one operational connection is already open — so no connection ever creates a
+ * database, and every one lands in the execution's.
+ *
+ * What the helper does *not* claim: the database's own `sa` account still exists with an empty
+ * password for the database's lifetime. That is not reachable from the threat this class defends
+ * against — author SQL cannot open a JDBC connection at all, since `LINK_SCHEMA` and
+ * `CREATE ALIAS` are exactly what the restricted user is refused — but it does mean the
+ * containment is against *author SQL*, not against arbitrary code already running in this JVM.
  *
  * @param config the already-resolved effective properties (see [H2StagingProperties] — the
  *   per-pipeline `max_memory_mb` override is applied by the caller before construction).
@@ -112,34 +119,34 @@ class H2StagingFactory(
 
     /**
      * Bootstraps the database as `sa`, opens the first **restricted** operational connection
-     * (§9.5) and builds the pool around it. Any failure in any phase — the admin connect, the
-     * user creation, the restricted connect, or the pool's own capture of the session defaults —
-     * is one catalogued `creation_failed` (§3.1); the caller cannot act on the difference, and
-     * the phase leaks nothing useful into the message. A failure AFTER the operational
-     * connection opened closes it, so the half-built database dies with the failure instead of
-     * outliving it.
+     * (§9.5) and builds the pool around it — the two-phase open itself is
+     * [H2RestrictedSession.open], the helper the `sql_probe` scratch engine and the H2
+     * datasource pool share; what stays here is the error SHAPING: any failure in any phase —
+     * the admin connect, the user creation, the restricted connect, or the pool's own capture
+     * of the session defaults — is one catalogued `creation_failed` (§3.1); the caller cannot
+     * act on the difference, and the phase leaks nothing useful into the message. A failure
+     * AFTER the operational connection opened closes it, so the half-built database dies with
+     * the failure instead of outliving it.
      */
     private fun openPool(
         jdbcUrl: String,
         executionId: UUID,
     ): Staging =
         try {
-            val password = newExecUserPassword()
-            // `use` closes the bootstrap on every path, including the one where opening the
-            // operational connection throws — and it closes it only AFTER that connection exists,
-            // which is what keeps the in-memory database alive across the handover.
-            val first =
-                connect(jdbcUrl, BOOTSTRAP_USER, BOOTSTRAP_PASSWORD).use { bootstrap ->
-                    createExecUser(bootstrap, password, executionId)
-                    connect(jdbcUrl, EXEC_USER, password)
-                }
+            val session =
+                H2RestrictedSession.open(
+                    url = jdbcUrl,
+                    user = EXEC_USER,
+                    grants = listOf("GRANT ALTER ANY SCHEMA TO $EXEC_USER"),
+                    connect = connect,
+                )
             val pool =
                 try {
-                    // The opener retains the credential in this closure and nowhere else: it is
-                    // what lets the pool grow on demand as the restricted user (§9.5).
-                    H2ConnectionPool(executionId, first, { connect(jdbcUrl, EXEC_USER, password) }, properties.maxConnections)
+                    // The opener retains the credential inside the session object and nowhere
+                    // else: it is what lets the pool grow on demand as the restricted user (§9.5).
+                    H2ConnectionPool(executionId, session.firstConnection, session::openConnection, properties.maxConnections)
                 } catch (e: SQLException) {
-                    first.close()
+                    session.firstConnection.close()
                     throw e
                 }
             H2Staging(executionId, pool, properties)
@@ -149,7 +156,11 @@ class H2StagingFactory(
 
     /**
      * The catalogued `creation_failed` (§3.1, §7.2). [detail] is the only driver text that
-     * reaches the caller, so every call site decides deliberately what may be quoted.
+     * reaches the caller, so every call site decides deliberately what may be quoted. The one
+     * phase whose raw driver text is NEVER quoted is the user setup: H2 appends the failing
+     * statement to its message, and `CREATE USER … PASSWORD '<hex>'` would put the cleartext
+     * credential into a user-visible error — which is why [H2RestrictedSession] sanitizes that
+     * phase to SQLState + vendor code before it can reach here.
      */
     private fun creationFailed(
         executionId: UUID,
@@ -163,79 +174,7 @@ class H2StagingFactory(
             cause = cause,
         )
 
-    /**
-     * Creates the non-admin user the module operates as (§9.5).
-     *
-     * `ALTER ANY SCHEMA` is the **one** grant that makes `CREATE`/`INSERT`/`SELECT`/`DROP TABLE`
-     * work for a non-admin user in the `PUBLIC` schema — verified empirically against the pinned
-     * driver (2.3.232): `GRANT ALL ON SCHEMA PUBLIC` alone leaves `CREATE TABLE` refused with
-     * SQLState 90096, and adds nothing on top of this one. It is a schema-DDL right, **not** an
-     * admin right: under it every host-reaching function is still refused with SQLState 90040
-     * (`FILE_READ`, `FILE_WRITE`, `CSVREAD`, `CSVWRITE`, `CREATE ALIAS`, `RUNSCRIPT`,
-     * `LINK_SCHEMA`, `CREATE TRIGGER … AS`), as are `ALTER USER … ADMIN TRUE` and `CREATE USER`.
-     * `H2StagingPrivilegeTest` is the standing guard on that claim.
-     *
-     * `SwallowedException` is suppressed deliberately — it is the point here, not an oversight.
-     * The original exception carries the cleartext password in its message (see the `catch`), so
-     * it must not become the `cause` nor be quoted; the SQLState and vendor code are lifted onto
-     * a clean exception so the failure stays diagnosable without the credential riding along.
-     */
-    @Suppress("SwallowedException")
-    private fun createExecUser(
-        bootstrap: Connection,
-        password: String,
-        executionId: UUID,
-    ) {
-        try {
-            bootstrap.createStatement().use { st ->
-                // H2 has no parameter binding for CREATE USER, so the password is inlined — safely
-                // by construction: newExecUserPassword() emits hex digits only, so no quote,
-                // backslash, or statement separator can occur in it. The user name is a constant.
-                st.execute("CREATE USER $EXEC_USER PASSWORD '$password'")
-                st.execute("GRANT ALTER ANY SCHEMA TO $EXEC_USER")
-            }
-        } catch (e: SQLException) {
-            // This phase's driver text is the one place that must NEVER be quoted: H2 appends the
-            // failing statement to its message, and for `CREATE USER … PASSWORD '<hex>'` that puts
-            // the cleartext credential into a user-visible catalogued error (and into any log that
-            // prints the cause chain). Report the SQLState and vendor code — enough to diagnose a
-            // bootstrap failure — and drop the message and the original exception entirely.
-            throw creationFailed(
-                executionId,
-                "restricted-user setup failed (SQLState ${e.sqlState}, error ${e.errorCode})",
-                SQLException("restricted-user setup failed", e.sqlState, e.errorCode),
-            )
-        }
-    }
-
-    /**
-     * A fresh 256-bit password per execution, hex-encoded. It is never stored on the factory,
-     * logged, or returned. It IS retained — privately, inside the pool's opener closure — for
-     * the life of that execution's staging, because the pool opens further restricted sessions
-     * on demand (§9); the closure is reachable from nothing an author's SQL can touch, and it
-     * dies with the pool.
-     *
-     * Note what this does *not* claim: the database's own `sa` account still exists with an empty
-     * password for the database's lifetime. That is not reachable from the threat this class
-     * defends against — author SQL cannot open a JDBC connection at all, since `LINK_SCHEMA` and
-     * `CREATE ALIAS` are exactly what the restricted user is refused — but it does mean the
-     * containment is against *author SQL*, not against arbitrary code already running in this JVM.
-     */
-    private fun newExecUserPassword(): String {
-        val bytes = ByteArray(PASSWORD_BYTES)
-        SECURE_RANDOM.nextBytes(bytes)
-        return bytes.joinToString("") { byte -> "%02x".format(byte) }
-    }
-
     private companion object {
-        /**
-         * The transient bootstrap identity (§9.5). H2 creates `sa` with an empty password on the
-         * first connection to a fresh in-memory database; that connection exists only long enough
-         * to create [EXEC_USER] and is closed before any author SQL can run.
-         */
-        const val BOOTSTRAP_USER = "sa"
-        const val BOOTSTRAP_PASSWORD = ""
-
         /** The non-admin identity every staging operation and all author SQL runs as (§9.5). */
         const val EXEC_USER = "STAGING_EXEC"
 
@@ -244,8 +183,5 @@ class H2StagingFactory(
          * correctness invariant of the staged identifier scheme and not a configuration key.
          */
         const val LOWER_FOLDING = "DATABASE_TO_LOWER=TRUE"
-
-        const val PASSWORD_BYTES = 32
-        val SECURE_RANDOM = SecureRandom()
     }
 }

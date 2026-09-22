@@ -167,8 +167,12 @@ class WorkspaceSurfacesE2eTest {
             .port(port)
             .contentType(ContentType.JSON)
             .header(API_KEY_HEADER, bobKey)
-            .body("""{"name": "$DS_ACME", "dialect": "H2", "jdbc_url": "$H2_GLOBEX_URL", "username": "sa", "password": "sa"}""")
-            .`when`()
+            // #186: the dialect is a SERVER one — an in-process engine is refused at the
+            // super-admin gate one step EARLIER, and this case's subject is the name collision.
+            .body(
+                """{"name": "$DS_ACME", "dialect": "POSTGRES",""" +
+                    """ "jdbc_url": "jdbc:postgresql://db:5432/app", "username": "sa", "password": "sa"}""",
+            ).`when`()
             .post("/api/v1/datasources")
             .then()
             .statusCode(409)
@@ -615,14 +619,19 @@ class WorkspaceSurfacesE2eTest {
      * Datasources are registered over REST (idempotent, once): the registry's save path
      * builds a REAL pool, so the H2 in-memory URLs make the test pool build succeed, and
      * the encryption key is random per boot — SQL seeding cannot produce valid ciphertext.
-     * Alice binds to her ACTIVE workspace (the default binding), bob names his explicitly
-     * (the member gate is ON by default), and the admin creates the global one.
+     * The workspace-bound rows are bound to their owning workspace explicitly by the super
+     * admin (#186: in-process engines register as the super admin; the member gate is ON in
+     * this suite's context — the 186 shipped default is false — because member registrations
+     * are part of what this suite exercises).
      */
     private fun ensureDatasourcesRegistered() {
         if (datasourcesRegistered) return
         datasourcesRegistered = true
-        register(ALICE_KEY.plaintext, DS_ACME, H2_ACME_URL)
-        register(BOB_KEY.plaintext, DS_GLOBEX, H2_GLOBEX_URL)
+        // #186: in-process engines register as the super admin — the workspace-bound rows go
+        // through the root session with an explicit workspace binding (the same ownership shape
+        // Alice's and Bob's keys produced before).
+        registerWorkspaceDatasource(DS_ACME, H2_ACME_URL, "acme")
+        registerWorkspaceDatasource(DS_GLOBEX, H2_GLOBEX_URL, "globex")
         registerInstanceDatasource(DS_GLOBAL, H2_GLOBAL_URL)
         // Granted HERE, once, rather than inside the visibility case: a test that grants makes
         // every later test's answer depend on execution order, and the paging total is exactly
@@ -639,39 +648,46 @@ class WorkspaceSurfacesE2eTest {
         name: String,
         jdbcUrl: String,
     ) {
-        given()
-            .port(port)
-            .contentType(ContentType.JSON)
-            .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
-            .cookie(CSRF_COOKIE, "surfaces-csrf")
-            .header(CSRF_HEADER, "surfaces-csrf")
-            .body(
-                """{"name": "$name", "display_name": "Surfaces $name", "dialect": "H2",
+        val response =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+                .cookie(CSRF_COOKIE, "surfaces-csrf")
+                .header(CSRF_HEADER, "surfaces-csrf")
+                .body(
+                    """{"name": "$name", "display_name": "Surfaces $name", "dialect": "H2",
                    "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD","global":true}""",
-            ).`when`()
-            .post("/api/v1/datasources")
-            .then()
-            .statusCode(201)
+                ).`when`()
+                .post("/api/v1/datasources")
+                .thenReturn()
+        if (response.statusCode() != 201) {
+            throw AssertionError("register-global $name failed (status=${response.statusCode()}): ${response.body().asString()}")
+        }
     }
 
-    private fun register(
-        key: String,
+    /** #186: a workspace-OWNED in-process datasource — registered by the super admin into the named workspace. */
+    private fun registerWorkspaceDatasource(
         name: String,
         jdbcUrl: String,
-        global: Boolean = false,
+        workspace: String,
     ) {
-        val globalFlag = if (global) ",\"global\":true" else ""
-        given()
-            .port(port)
-            .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, key)
-            .body(
-                """{"name": "$name", "display_name": "Surfaces $name", "dialect": "H2",
-                   "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD"$globalFlag}""",
-            ).`when`()
-            .post("/api/v1/datasources")
-            .then()
-            .statusCode(201)
+        val response =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .cookie(SESSION_COOKIE, sessionJwt(ROOT, "root@company.test", "acme"))
+                .cookie(CSRF_COOKIE, "surfaces-csrf")
+                .header(CSRF_HEADER, "surfaces-csrf")
+                .body(
+                    """{"name": "$name", "display_name": "Surfaces $name", "dialect": "H2",
+                       "jdbc_url": "$jdbcUrl", "username": "$H2_USER", "password": "$H2_PASSWORD","workspace":"$workspace"}""",
+                ).`when`()
+                .post("/api/v1/datasources")
+                .thenReturn()
+        if (response.statusCode() != 201) {
+            throw AssertionError("register $name failed (status=${response.statusCode()}): ${response.body().asString()}")
+        }
     }
 
     companion object {
@@ -876,6 +892,9 @@ class WorkspaceSurfacesE2eTest {
 
             // T33's http half is provable on the wire only with an http base-url.
             registry.add("datapipelines.auth.base-url") { "http://localhost:8080" }
+
+            // The suite exercises member registration flows; the 186 shipped default is false.
+            registry.add("datapipelines.workspaces.member-datasources-enabled") { "true" }
         }
 
         private val oidc = OidcDiscoveryStub()

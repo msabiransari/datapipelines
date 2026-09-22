@@ -206,8 +206,6 @@ DEFAULTS_ENV_OVERRIDES = {
         "compose.laptop-infra.yml publishes 6381 (6379 collides with other local stacks)",
     "DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT":
         "console is readable on a terminal; a log collector sets json in secrets.env",
-    "DATAPIPELINES_WORKSPACES_MEMBER_DATASOURCES_ENABLED":
-        "an open datasource form on a reachable server is an SSRF primitive (sample-data §7)",
 }
 
 def active(path):

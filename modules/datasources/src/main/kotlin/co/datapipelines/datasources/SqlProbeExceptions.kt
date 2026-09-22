@@ -79,6 +79,13 @@ private const val QUERY_CANCELED_STATE = "57014"
  *   runtime-error state `72000`. `ORA-00942` (`942`, under `42000`) is deliberately NOT
  *   here — "table or view does not exist" is ambiguous between absent and invisible, so it
  *   stays on the not-found path.
+ * - **H2** (186) — SQLState `90040`, "Admin rights are required for this operation": the shape
+ *   a host-reaching function (`FILE_READ`, `CSVREAD`, `CREATE ALIAS`, …) takes when author SQL
+ *   meets a DE-PRIVILEGED in-process session — the staging user (§9.5), the `sql_probe` scratch
+ *   user, or a restricted H2 datasource pool user. H2 reports no `42501`; its SQLState IS the
+ *   vendor code. This is the one classification that fires on the SCRATCH path (no table was
+ *   ever listed), which is exactly the intent: the refusal means "the engine refused this
+ *   statement on privilege grounds", and the probe's not-permitted envelope is the right answer.
  *
  * Public (unlike [isStatementTimeout]) because the classification lives in this module while
  * two of the boundaries that apply it — the `sql_probe` and preview-rows error mappings —
@@ -103,6 +110,7 @@ private fun SQLException.isPermissionDeniedShape(): Boolean =
         sqlState == INSUFFICIENT_PRIVILEGE_STATE -> true
         sqlState == SYNTAX_OR_ACCESS_STATE && errorCode in PERMISSION_VENDOR_CODES_UNDER_42000 -> true
         sqlState == ORACLE_RUNTIME_STATE && errorCode == ORACLE_INSUFFICIENT_PRIVILEGES -> true
+        sqlState == H2_ADMIN_RIGHTS_STATE -> true
         else -> false
     }
 
@@ -120,3 +128,6 @@ private const val ORACLE_RUNTIME_STATE = "72000"
 
 /** ORA-01031 `insufficient privileges`. ORA-00942 (942) is deliberately NOT classified — see the KDoc above. */
 private const val ORACLE_INSUFFICIENT_PRIVILEGES = 1031
+
+/** H2's "Admin rights are required for this operation" — its SQLState IS the vendor code (pinned 2.3.232). */
+private const val H2_ADMIN_RIGHTS_STATE = "90040"
