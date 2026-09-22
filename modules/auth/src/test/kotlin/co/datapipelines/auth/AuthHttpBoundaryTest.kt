@@ -5,8 +5,10 @@ import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotBeBlank
 import jakarta.servlet.ServletContext
 import org.junit.jupiter.api.BeforeAll
@@ -276,6 +278,25 @@ class AuthHttpBoundaryTest {
     private fun code(response: ResponseEntity<String>): Any? = error(response)["code"]
 
     // ------------------------------------------------------------- public path
+
+    @Test
+    fun `the csrf cookie lives as long as the session cookie and is SameSite=Lax (#202)`() {
+        // A browser restart drops session cookies; dp_session persists for jwt.ttl-hours. If
+        // dp_csrf were a session cookie (Spring's default) a restored tab would fail every POST
+        // with "missing", then "mismatch" — the 2026-09-21 logout/switch report.
+        // The repository writes the cookie when the deferred token is first resolved: this test
+        // app renders no login page, so the shortest path that resolves it is a CSRF-guarded
+        // POST without a token — the filter loads (and therefore mints) the expected token
+        // before it refuses, which is exactly how the live 403 handed the owner a fresh cookie.
+        val response = call(HttpMethod.POST, "/login")
+
+        response.statusCode.value() shouldBe 403
+        val csrf = response.headers[HttpHeaders.SET_COOKIE].orEmpty().firstOrNull { it.startsWith("dp_csrf=") }
+        csrf.shouldNotBeNull()
+        csrf shouldContain "Max-Age=${8 * 3600}"
+        csrf shouldContain "SameSite=Lax"
+        csrf shouldContain "Path=/"
+    }
 
     @Test
     fun `the health probe is anonymous and 200`() {

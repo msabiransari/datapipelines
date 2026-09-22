@@ -216,6 +216,14 @@ class SecurityConfig(
             setCookieName(CSRF_COOKIE)
             setHeaderName(CSRF_HEADER)
             setSecure(authProperties.secureCookies())
+            // #202: the token cookie lives exactly as long as the session cookie it guards
+            // (`dp_session`, jwt.ttl-hours). Spring's default is a browser-session cookie, so a
+            // browser restart dropped `dp_csrf` while `dp_session` survived — every POST from a
+            // tab restored from before the restart was then refused (missing, then mismatch on
+            // the retry) until the page was reloaded. `SameSite=Lax` is stated rather than left
+            // to the browser default: the double-submit pair is same-site by construction.
+            setCookieMaxAge((authProperties.jwt.ttlHours * SECONDS_PER_HOUR).toInt())
+            setCookieCustomizer { it.sameSite("Lax") }
         }
 
     /**
@@ -246,6 +254,7 @@ class SecurityConfig(
     companion object {
         /** D10 — the CSRF cookie and header names (auth.md §8.4, rest-api §3.6). */
         const val CSRF_COOKIE = "dp_csrf"
+        private const val SECONDS_PER_HOUR = 3600L
         const val CSRF_HEADER = "DP-CSRF-Token"
     }
 }

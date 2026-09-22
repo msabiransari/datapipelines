@@ -64,7 +64,36 @@ class SitePublicRoutesBrowserTest : BrowserSuite() {
         withClue("console or page errors") { errors.shouldBeEmpty() }
     }
 
+    @Test
+    fun `the nav's primary button renders in the button ink, not the nav's secondary ink (#203)`() {
+        page.navigate("$baseUrl/")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+
+        @Suppress("UNCHECKED_CAST")
+        val colours = page.evaluate(BUTTON_INK_JS) as Map<String, String>
+        withClue("header .btn-primary colour vs the --site-accent-btn-ink token (probe on a .btn-primary outside the nav)") {
+            colours["button"] shouldBe colours["token"]
+        }
+    }
+
     private companion object {
+        /**
+         * The nav button's computed colour beside the token's, resolved the same way: a probe
+         * element with only `.btn-primary`, appended outside the nav, computes the ink the token
+         * stands for in the active theme (no hand-parsing of `var(--…)`).
+         */
+        const val BUTTON_INK_JS =
+            """
+            () => {
+              const btn = document.querySelector('.nav-wide > a.btn-primary');
+              const probe = document.createElement('a');
+              probe.className = 'btn btn-primary';
+              document.body.appendChild(probe);
+              const out = { button: btn ? getComputedStyle(btn).color : 'missing', token: getComputedStyle(probe).color };
+              probe.remove();
+              return out;
+            }
+            """
         val LOC = Regex("""<loc>([^<]+)</loc>""")
         val VIEWPORTS = listOf(320 to 568, 390 to 844, 768 to 1024, 1440 to 900)
 
