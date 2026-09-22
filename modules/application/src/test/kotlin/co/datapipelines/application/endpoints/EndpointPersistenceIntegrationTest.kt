@@ -205,7 +205,7 @@ class EndpointPersistenceIntegrationTest {
 
         bindings.findByKey(keyId).map { it.pathPrefix } shouldContainExactlyInAnyOrder listOf("/lending", "/lending/home")
         bindings.findByKey("dpk_absent").shouldBeEmpty()
-        bindings.findAll() shouldHaveSize 2
+        bindings.findByWorkspace(workspaceId) shouldHaveSize 2
 
         bindings.delete("/lending", keyId) shouldBe true
         bindings.delete("/lending", keyId) shouldBe false
@@ -260,7 +260,7 @@ class EndpointPersistenceIntegrationTest {
         // leaving its bindings behind would make the tree screen show a binding to nothing.
         jdbc.update("DELETE FROM api_keys WHERE id = :id", mapOf("id" to keyId))
 
-        bindings.findAll().shouldBeEmpty()
+        bindings.findByWorkspace(workspaceId).shouldBeEmpty()
     }
 
     // -------------------------------------------------------------------- serve audit
