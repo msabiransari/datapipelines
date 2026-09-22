@@ -626,6 +626,13 @@ code {
   white-space: nowrap;
 }
 
+/* #203: the nav ink above (0,1,1) used to beat `.btn-primary` (0,1,0) for the one button that
+   sits directly in the nav — the sign-in/demo call to action rendered in the muted secondary
+   ink on amber. A button in the nav keeps the button's ink. */
+.nav-wide > a.btn-primary {
+  color: var(--site-accent-btn-ink);
+}
+
 /* The underline: a link draws it with ::after; the summary keeps ::after for its chevron
    and draws the same line with ::before. */
 .nav-wide > a:not(.btn)::after,
