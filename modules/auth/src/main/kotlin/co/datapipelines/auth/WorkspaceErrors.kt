@@ -51,6 +51,14 @@ object WorkspaceErrorCodes {
     const val LAST_ADMIN = "workspace.last_admin"
 
     /**
+     * 409 — the caller addressed their OWN membership (#208, owner ruling 2026-09-22): a
+     * signed-in member cannot change their own role, revoke their own login-minted key or
+     * remove themselves from the members list. Somebody else — another workspace admin or a
+     * super admin — does that. Its own code rather than [LAST_ADMIN]: the remedy is different.
+     */
+    const val SELF_MEMBERSHIP = "workspace.self_membership"
+
+    /**
      * 404 — the workspace is DEACTIVATED (D-R10). A member selecting it gets this, not a
      * distinct code: to a member a deactivated workspace and a workspace that never existed
      * must look the same, or deactivation becomes a signal. A KEY pinned to it gets
@@ -166,6 +174,20 @@ class WorkspaceLastAdminException(
         HTTP_CONFLICT,
         "Workspace '$name' must keep at least one admin.",
         "A workspace needs at least one admin. Give someone else the admin role first.",
+        details = mapOf("workspace" to name),
+    )
+
+/**
+ * The caller addressed their own membership in [name] (#208) — refused at the service on every
+ * surface (REST, the members row's partial, the members row's verbs), so no path can reach it.
+ */
+class WorkspaceSelfMembershipException(
+    name: String,
+) : AuthException(
+        WorkspaceErrorCodes.SELF_MEMBERSHIP,
+        HTTP_CONFLICT,
+        "A member cannot change their own membership in workspace '$name'.",
+        "You cannot change your own role, revoke your own key or remove yourself. Ask another workspace admin.",
         details = mapOf("workspace" to name),
     )
 

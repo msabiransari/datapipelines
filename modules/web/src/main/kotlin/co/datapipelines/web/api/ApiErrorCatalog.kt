@@ -248,6 +248,7 @@ object ApiErrorCatalog {
             // 113 §13.12: the workspace resolved; the invitation addressed did not exist.
             PipelineErrorCodes.Workspace.INVITATION_NOT_FOUND to HttpStatus.NOT_FOUND,
             PipelineErrorCodes.Workspace.LAST_ADMIN to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Workspace.SELF_MEMBERSHIP to HttpStatus.CONFLICT,
             PipelineErrorCodes.Workspace.NAME_INVALID to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Workspace.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Workspace.IN_USE to HttpStatus.CONFLICT,

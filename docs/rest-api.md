@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.25 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
+**Status:** v2.26 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-21
@@ -1784,7 +1784,7 @@ A missing or non-textual `email` is the surface's generic bad-parameter 400 (`pi
 ```
 DELETE /workspaces/{name}/members/{user_id}
 ```
-Workspace admin or super admin. Removing the LAST workspace admin is refused with `409 workspace.last_admin` — a workspace with no admin is unmanageable, and the caller's next step is "give someone else the workspace admin role first" (§13.12). A `user_id` that names no member of the workspace is the workspace's own 404 (`workspace.not_found`), so the member list cannot be probed one id at a time. The member's login-minted key pinned to this workspace is revoked in the same act (§17.11's effect, reason `member_removed`; [Auth §7.4](auth.md#74-issuance)) — a key is tied to user + workspace.
+Workspace admin or super admin. Removing YOURSELF is refused with `409 workspace.self_membership` (#208 — nobody administers their own membership; another admin does). Removing the LAST workspace admin is refused with `409 workspace.last_admin` — a workspace with no admin is unmanageable, and the caller's next step is "give someone else the workspace admin role first" (§13.12). A `user_id` that names no member of the workspace is the workspace's own 404 (`workspace.not_found`), so the member list cannot be probed one id at a time. The member's login-minted key pinned to this workspace is revoked in the same act (§17.11's effect, reason `member_removed`; [Auth §7.4](auth.md#74-issuance)) — a key is tied to user + workspace.
 
 ### 17.9 Revoke an invitation
 
@@ -1799,7 +1799,7 @@ Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`). Removes a pending i
 PUT /workspaces/{name}/members/{user_id}
 {"role": "promoter"}
 ```
-Workspace admin or super admin. REPLACES the membership's ONE role (D1, 2026-09-20; the three booleans of the flags era are gone from this body — see the change log). `role` is one of the four; absent = `viewer`, unknown = the §17.7 400. Demoting the LAST workspace admin is `409 workspace.last_admin`. Returns the §17.6 member row. The audit event is `workspace.member_role_changed` (`from`, `to`).
+Workspace admin or super admin. REPLACES the membership's ONE role (D1, 2026-09-20; the three booleans of the flags era are gone from this body — see the change log). `role` is one of the four; absent = `viewer`, unknown = the §17.7 400. Changing your OWN role is `409 workspace.self_membership` (#208). Demoting the LAST workspace admin is `409 workspace.last_admin`. Returns the §17.6 member row. The audit event is `workspace.member_role_changed` (`from`, `to`).
 
 ### 17.11 Revoke a member's key
 
@@ -2073,6 +2073,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-22 | v2.26 | #208 self-membership | Additive. §17.8 / §17.10 / §17.11: a caller addressing their OWN membership — role, login-minted key, removal — is refused with the new `409 workspace.self_membership` (pipeline-contract §13.12); another workspace admin or a super admin does it. |
 | 2026-09-21 | v2.25 | 200 (#200) membership-bound keys | Additive. NEW §17.11 `DELETE /workspaces/{name}/members/{user_id}/key` — a workspace admin or super admin revokes a member's login-minted key without removing them (idempotent `204`; the member's session keeps working, the next login mints fresh; [Auth §7.4](auth.md#74-issuance)). §17.8 states the removal path's new effect: the member's key is revoked in the same act (`auth.api_key.revoked_by_admin`, reason `member_removed` \| `admin_revoked`). |
 | 2026-09-21 | v2.24 | 199 (#199) | Security, no wire change. §19.5: a promotion batch carries the bindings **of the source workspace** only — the sender read every workspace's `endpoint_key_bindings` rows and matched by node, so a neighbouring workspace's key bound at a node equal to a promoted pattern rode into the batch by NAME and, on the target, bound the target's key of that name or refused the whole batch for a name the source never chose. The read is now filtered by `workspace_id` in the query (the #191 rule for the serve path, applied to the sender). Numbered on base db12e043; the merger renumbers if another lane took v2.24. |
 | 2026-09-21 | v2.23 | 180 (#180) roles R4 | Additive. §16.3: user deactivation names its effect — every session and key of the user answers `401 auth.principal_deactivated` within the liveness window (new §13.7 code; `auth.api_key.invalid` no longer means "owner deactivated"). New §17.5a documents the existing `POST /workspaces/{name}/deactivate` and `/reactivate` routes (super admin) and the 404 rule they keep. |

@@ -32,6 +32,11 @@ data class MemberRowView(
     val role: WorkspaceRole,
     val roleLabel: String,
     val hasKey: Boolean,
+    /**
+     * #208: an instance super admin's row reads "super admin" and carries no role dropdown —
+     * the membership role is not what the row shows.
+     */
+    val superAdmin: Boolean,
 ) {
     companion object {
         fun of(
@@ -43,8 +48,9 @@ data class MemberRowView(
                 email = row.email,
                 displayName = row.displayName,
                 role = row.role,
-                roleLabel = RoleModel.labelOf(row.role),
+                roleLabel = if (row.isSuperAdmin) "super admin" else RoleModel.labelOf(row.role),
                 hasKey = hasKey,
+                superAdmin = row.isSuperAdmin,
             )
     }
 }

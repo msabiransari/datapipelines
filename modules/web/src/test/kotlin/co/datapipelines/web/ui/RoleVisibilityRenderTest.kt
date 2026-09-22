@@ -247,6 +247,46 @@ class RoleVisibilityRenderTest {
     }
 
     /**
+     * #208 — the caller's OWN row draws none of the three member verbs (the service refuses them
+     * anyway with `workspace.self_membership`); every other row keeps them.
+     */
+    @Test
+    fun `the caller's own member row draws no Save, Revoke-key or Remove - other rows keep all three`() {
+        val other = render("workspaces/index") { workspacesModel() }
+        other shouldContain "data-verb=\"member-role\""
+        other shouldContain "data-verb=\"member-key-revoke\""
+        other shouldContain "data-verb=\"member-remove\""
+
+        val own =
+            render("workspaces/index") {
+                workspacesModel(currentUserId = java.util.UUID.fromString("11111111-1111-1111-1111-111111111111"))
+            }
+        own shouldNotContain "data-verb=\"member-role\""
+        own shouldNotContain "data-verb=\"member-key-revoke\""
+        own shouldNotContain "data-verb=\"member-remove\""
+        // The row itself, its key state and the dropdown still render — only the verbs are gone.
+        own shouldContain "data-member=\"alice@acme.test\""
+        own shouldContain "· has a key"
+    }
+
+    /**
+     * #208 (owner ruling 2026-09-22) — an instance super admin's row reads "super admin" and
+     * carries no role dropdown: the instance authority outranks the membership role.
+     */
+    @Test
+    fun `a super admin's member row reads super admin and has no role dropdown`() {
+        val html = render("workspaces/index") { workspacesModel(superAdmin = true) }
+        html shouldContain "data-member-role-fixed=\"super_admin\""
+        html shouldContain ">super admin<"
+        // No dropdown on the ROW: its role form (the partial's hx-post) is gone; the page's own
+        // add-member form keeps its role select, and the badge keeps its marker attribute.
+        html shouldNotContain "hx-post=\"/partials/workspaces/acme/members/11111111-1111-1111-1111-111111111111/role\""
+        html shouldNotContain "data-verb=\"member-role\""
+        // Removal and key revocation are still an admin's verbs over a super admin member.
+        html shouldContain "data-verb=\"member-remove\""
+    }
+
+    /**
      * §C.3(a) — the no-workspace page. It is NOT an error page: nothing failed, and `error/403`
      * would tell someone their credential is wrong when their membership is simply absent.
      *
@@ -617,9 +657,12 @@ class RoleVisibilityRenderTest {
     private fun WebContext.workspacesModel(
         active: Boolean = true,
         hasKey: Boolean = true,
+        currentUserId: java.util.UUID = java.util.UUID.fromString("99999999-9999-9999-9999-999999999999"),
+        superAdmin: Boolean = false,
     ) {
         chrome()
         setVariable("canCreate", true)
+        setVariable("currentUserId", currentUserId)
         setVariable("workspaceRoles", co.datapipelines.auth.WorkspaceRole.entries)
         setVariable(
             "own",
@@ -643,8 +686,9 @@ class RoleVisibilityRenderTest {
                             email = "alice@acme.test",
                             displayName = "Alice",
                             role = co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN,
-                            roleLabel = "workspace admin",
+                            roleLabel = if (superAdmin) "super admin" else "workspace admin",
                             hasKey = hasKey,
+                            superAdmin = superAdmin,
                         ),
                     ),
             ),

@@ -597,6 +597,7 @@ open class WorkspaceService(
         val workspace = read(principal, name)
         requirePermission(principal, workspace, Permission.WS_ADMIN)
         val target = workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
+        requireNotSelf(principal, workspace, userId)
         if (target.role == WorkspaceRole.WORKSPACE_ADMIN && role != WorkspaceRole.WORKSPACE_ADMIN) {
             requireAnotherAdmin(workspace, userId)
         }
@@ -642,6 +643,7 @@ open class WorkspaceService(
         val workspace = read(principal, name)
         requirePermission(principal, workspace, Permission.WS_ADMIN)
         val target = workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
+        requireNotSelf(principal, workspace, userId)
         if (target.role == WorkspaceRole.WORKSPACE_ADMIN) requireAnotherAdmin(workspace, userId)
         workspaceRepository.removeMember(workspace.id, userId)
         // §3.7 ruling 1 — the key the membership minted dies with it. Null when the member
@@ -697,6 +699,7 @@ open class WorkspaceService(
         val workspace = read(principal, name)
         requirePermission(principal, workspace, Permission.WS_ADMIN)
         workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
+        requireNotSelf(principal, workspace, userId)
         val revokedKeyId = apiKeyRepository.revokeUserKeyForWorkspace(userId, workspace.id)
         if (revokedKeyId != null) {
             authCache.invalidateKey(revokedKeyId)
@@ -889,6 +892,19 @@ open class WorkspaceService(
         if (!principal.isSuperAdmin) {
             throw RoleRequiredException(Permission.SUPER_ADMIN, emptySet())
         }
+    }
+
+    /**
+     * #208 (owner ruling 2026-09-22): nobody administers their OWN membership — not their role,
+     * not their login-minted key, not their removal. Judged AFTER the 404 rule so a non-member
+     * super admin addressing themselves still gets the workspace's own not-found.
+     */
+    private fun requireNotSelf(
+        principal: AuthenticatedPrincipal,
+        workspace: Workspace,
+        userId: UUID,
+    ) {
+        if (userId == principal.userId) throw WorkspaceSelfMembershipException(workspace.name)
     }
 
     private fun requirePermission(

@@ -222,7 +222,7 @@ class ApiErrorCatalogSpecDriftTest {
          * the SAME commit as its constants (both mirrors), its exception class and its catalog
          * row. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 182
+        const val SECTION_13_ROW_COUNT = 183
 
         /**
          * §12's distinct validation codes.

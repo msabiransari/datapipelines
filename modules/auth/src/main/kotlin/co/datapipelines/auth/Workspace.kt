@@ -55,6 +55,8 @@ data class WorkspaceMemberRow(
     val displayName: String,
     val role: WorkspaceRole,
     val joinedAt: Instant,
+    /** The USER's instance authority (`users.is_admin`), not a membership fact — the members list shows it (#208). */
+    val isSuperAdmin: Boolean = false,
 )
 
 /**

@@ -513,6 +513,7 @@
              cannot be repaired from inside it, so the instruction is "promote someone first",
              not "try again". Matches WorkspaceLastAdminException's own userMessage. -->
         <th:block th:if="${code == 'last_admin'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'A workspace needs at least one workspace admin. Give another member the workspace admin role first.')}"></div></th:block>
+        <th:block th:if="${code == 'self_membership'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'You cannot change your own role, revoke your own key or remove yourself. Ask another workspace admin.')}"></div></th:block>
         <th:block th:if="${code == 'unknown_role'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'That is not a workspace role. Choose viewer, author, promoter or workspace admin.')}"></div></th:block>
         <th:block th:if="${code == 'role_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'You do not have the role needed for this action in this workspace.')}"></div></th:block>
         <th:block th:if="${code == 'inactive'}"><div th:replace="~{partials/toast :: toast('danger', 'Workspace action refused', 'That workspace is deactivated. Reactivate it first.')}"></div></th:block>

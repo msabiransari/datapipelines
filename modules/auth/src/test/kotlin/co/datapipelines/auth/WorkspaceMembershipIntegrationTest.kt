@@ -138,7 +138,10 @@ class WorkspaceMembershipIntegrationTest {
     fun `the last admin cannot be removed or demoted, against the real row count`() {
         val svc = service()
         val ws = svc.create(principal(admin, superAdmin = true), "acme", "Acme")
-        val actor = principal(admin, superAdmin = true)
+        // #208: nobody addresses their OWN row, so the last-admin rule is exercised by a SECOND
+        // super admin acting on the workspace's only admin member (the creator).
+        val root2 = users.insert("root2@company.com", "Root Two", null, "google", "sub-9", isAdmin = true)
+        val actor = principal(root2, superAdmin = true)
 
         shouldThrow<WorkspaceLastAdminException> { svc.removeMember(actor, "acme", admin.id) }
         shouldThrow<WorkspaceLastAdminException> {
@@ -388,6 +391,49 @@ class WorkspaceMembershipIntegrationTest {
         )
 
         service().memberships(alice.id).map { it.workspaceName } shouldContainExactly listOf("zeta", "alpha")
+    }
+
+    @Test
+    fun `nobody administers their OWN membership - role, key and removal are refused and nothing changes (#208)`() {
+        val svc = service()
+        val root = principal(admin, superAdmin = true)
+        val ws = svc.create(root, "acme", "Acme")
+        svc.addMember(root, "acme", alice.email, WorkspaceRole.WORKSPACE_ADMIN)
+        val key = mintedKey(ws.id)
+        val self = principal(alice)
+
+        shouldThrow<WorkspaceSelfMembershipException> { svc.setMemberRole(self, "acme", alice.id, WorkspaceRole.VIEWER) }
+        shouldThrow<WorkspaceSelfMembershipException> { svc.revokeMemberKey(self, "acme", alice.id) }
+        shouldThrow<WorkspaceSelfMembershipException> { svc.removeMember(self, "acme", alice.id) }
+        // A super admin is a member like any other on their own row.
+        svc.addMember(root, "acme", admin.email, WorkspaceRole.VIEWER)
+        shouldThrow<WorkspaceSelfMembershipException> { svc.removeMember(root, "acme", admin.id) }
+
+        workspaces.findMemberRow(ws.id, alice.id).shouldNotBeNull().role shouldBe WorkspaceRole.WORKSPACE_ADMIN
+        apiKeys
+            .findById(key.id)
+            .shouldNotBeNull()
+            .isRevoked
+            .shouldBeFalse()
+        // Another admin still can — the rule is about the caller, not the target.
+        svc.setMemberRole(root, "acme", alice.id, WorkspaceRole.AUTHOR)
+        workspaces.findMemberRow(ws.id, alice.id).shouldNotBeNull().role shouldBe WorkspaceRole.AUTHOR
+    }
+
+    @Test
+    fun `the member row carries the user's instance-admin flag - a super admin member reads as such (#208)`() {
+        val svc = service()
+        val root = principal(admin, superAdmin = true)
+        val ws = svc.create(root, "acme", "Acme")
+        svc.addMember(root, "acme", alice.email, WorkspaceRole.AUTHOR)
+        val rows = workspaces.findMembersOf(ws.id).associateBy { it.email }
+        rows.getValue(admin.email).isSuperAdmin.shouldBeTrue()
+        rows.getValue(alice.email).isSuperAdmin.shouldBeFalse()
+        workspaces
+            .findMemberRow(ws.id, admin.id)
+            .shouldNotBeNull()
+            .isSuperAdmin
+            .shouldBeTrue()
     }
 
     @Test

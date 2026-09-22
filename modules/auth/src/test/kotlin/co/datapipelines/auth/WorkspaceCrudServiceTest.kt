@@ -245,7 +245,8 @@ class WorkspaceCrudServiceTest {
         every { repository.findMembersOf(ws.id) } returns
             listOf(memberRow(adminId, wsAdminRole), memberRow(memberB, authorRole))
 
-        val refusal = shouldThrow<WorkspaceLastAdminException> { service.removeMember(wsAdmin(), "acme", adminId) }
+        // #208: an actor never addresses their own row, so the last-admin rule is judged for another caller.
+        val refusal = shouldThrow<WorkspaceLastAdminException> { service.removeMember(superAdmin(), "acme", adminId) }
         refusal.code shouldBe WorkspaceErrorCodes.LAST_ADMIN
         verify(exactly = 0) { repository.removeMember(any(), any()) }
     }
@@ -257,7 +258,7 @@ class WorkspaceCrudServiceTest {
         every { repository.findMembersOf(ws.id) } returns listOf(memberRow(adminId, wsAdminRole))
 
         shouldThrow<WorkspaceLastAdminException> {
-            service.setMemberRole(wsAdmin(), "acme", adminId, WorkspaceRole.AUTHOR)
+            service.setMemberRole(superAdmin(), "acme", adminId, WorkspaceRole.AUTHOR)
         }
         verify(exactly = 0) { repository.setRole(any(), any(), any()) }
     }
@@ -269,10 +270,10 @@ class WorkspaceCrudServiceTest {
         every { repository.findMembersOf(ws.id) } returns
             listOf(memberRow(adminId, wsAdminRole), memberRow(memberB, wsAdminRole))
 
-        service.setMemberRole(wsAdmin(), "acme", adminId, authorRole)
+        service.setMemberRole(superAdmin(), "acme", adminId, authorRole)
 
         verify { repository.setRole(ws.id, adminId, authorRole) }
-        verify { auditLogger.log("workspace.member_role_changed", adminId, null, null, null, any()) }
+        verify { auditLogger.log("workspace.member_role_changed", any(), null, null, null, any()) }
     }
 
     @Test

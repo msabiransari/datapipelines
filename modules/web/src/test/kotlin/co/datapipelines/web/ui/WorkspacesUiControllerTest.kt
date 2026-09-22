@@ -15,6 +15,7 @@ import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.auth.WorkspaceSelfMembershipException
 import co.datapipelines.auth.WorkspaceService
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -417,6 +418,22 @@ class WorkspacesUiControllerTest {
         every { workspaceService.removeMember(principal, "acme", target) } throws
             WorkspaceInUseException("acme", emptyMap(), blockedBy = "owner_membership")
         controller.removeMember("acme", target) shouldBe "redirect:/workspaces?error=in_use"
+    }
+
+    /** #208 — one's own row: the service's refusal reaches the page as the `self_membership` banner and the partial as a 409 toast. */
+    @Test
+    fun `a self-membership refusal is the self_membership banner on the verbs and a 409 toast on the role partial`() {
+        authenticate()
+        every { workspaceService.removeMember(principal, "acme", principal.userId) } throws WorkspaceSelfMembershipException("acme")
+        controller.removeMember("acme", principal.userId) shouldBe "redirect:/workspaces?error=self_membership"
+        every { workspaceService.revokeMemberKey(principal, "acme", principal.userId) } throws WorkspaceSelfMembershipException("acme")
+        controller.revokeMemberKey("acme", principal.userId) shouldBe "redirect:/workspaces?error=self_membership"
+
+        every { workspaceService.setMemberRole(principal, "acme", principal.userId, WorkspaceRole.VIEWER) } throws
+            WorkspaceSelfMembershipException("acme")
+        val response = controller.setMemberRole(ExtendedModelMap(), "acme", principal.userId, role = "viewer")
+        (response as org.springframework.http.ResponseEntity<*>).statusCode.value() shouldBe 409
+        response.body.toString() shouldContain "Ask another workspace admin"
     }
 
     /** #200 — the members-row verb posts through the ONE service method the REST twin calls. */

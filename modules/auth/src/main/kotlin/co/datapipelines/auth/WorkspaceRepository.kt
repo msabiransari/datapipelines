@@ -115,7 +115,7 @@ class WorkspaceRepository(
     fun findMembersOf(workspaceId: UUID): List<WorkspaceMemberRow> =
         jdbc.query(
             """
-            SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at
+            SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at, u.is_admin
               FROM workspace_members m
               JOIN users u ON u.id = m.user_id
              WHERE m.workspace_id = :ws
@@ -190,7 +190,7 @@ class WorkspaceRepository(
         jdbc
             .query(
                 """
-                SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at
+                SELECT m.user_id, u.email, u.display_name, m.role, m.joined_at, u.is_admin
                   FROM workspace_members m
                   JOIN users u ON u.id = m.user_id
                  WHERE m.workspace_id = :ws AND m.user_id = :uid
@@ -345,6 +345,7 @@ class WorkspaceRepository(
                     displayName = rs.getString("display_name"),
                     role = rs.role(),
                     joinedAt = rs.getObject("joined_at", OffsetDateTime::class.java).toInstant(),
+                    isSuperAdmin = rs.getBoolean("is_admin"),
                 )
             }
     }

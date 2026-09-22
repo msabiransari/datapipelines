@@ -12,6 +12,7 @@ import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceLastAdminException
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.auth.WorkspaceSelfMembershipException
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspaceSessionRequiredException
 import co.datapipelines.auth.sessionCookie
@@ -65,6 +66,8 @@ class WorkspacesUiController(
         // D22: the role dropdown's options — the four workspace roles, in doc order. Listed by
         // the server so the template never spells a role name.
         model.addAttribute("workspaceRoles", WorkspaceRole.entries)
+        // #208: the members row hides its verbs on the caller's OWN row (the service refuses them too).
+        model.addAttribute("currentUserId", principal.userId)
         val memberships = workspaceService.listOwn(principal)
         model.addAttribute(
             "own",
@@ -245,6 +248,7 @@ class WorkspacesUiController(
             RoleModel.stamp(model)
             model.addAttribute("workspaceName", name)
             model.addAttribute("workspaceRoles", WorkspaceRole.entries)
+            model.addAttribute("currentUserId", principal.userId)
             // The swapped-in row shows the SAME key state the page drew (#200) — the role
             // change cannot have moved it, but the fragment needs the attribute to render it.
             val hasKey = userId in workspaceService.liveUserKeyOwnerIds(principal, name)
@@ -253,6 +257,8 @@ class WorkspacesUiController(
             model.addAttribute("toastTitle", "Role changed")
             model.addAttribute("toastMessage", "${row.email} is now ${row.role.label} in $name.")
             "partials/workspace-member-row :: saved"
+        } catch (e: WorkspaceSelfMembershipException) {
+            refusedToast(HttpStatus.CONFLICT, "Role not changed", e.userMessage)
         } catch (_: WorkspaceLastAdminException) {
             refusedToast(
                 HttpStatus.CONFLICT,

@@ -906,6 +906,9 @@ object PipelineErrorCodes {
         /** §13.12 — the membership change would leave the workspace with no admin. */
         const val LAST_ADMIN = "workspace.last_admin"
 
+        /** §13.12 — the caller addressed their OWN membership (role, key, removal); somebody else does that (#208). */
+        const val SELF_MEMBERSHIP = "workspace.self_membership"
+
         /** §13.12 — a super admin addressed a DEACTIVATED workspace on a path that must refuse it. */
         const val INACTIVE = "workspace.inactive"
 
