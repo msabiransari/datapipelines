@@ -671,21 +671,6 @@ class MembershipBoundKeysE2eTest {
          * to the seed credential with its forced change owed, for whatever suite shares this
          * JVM next (the 191 gate's test-state discipline).
          */
-        /**
-         * The admin as a settled LOCAL account — created here, not by the boot seeder: a
-         * reused container may hold ANOTHER suite's bootstrap actor, and the seeder rightly
-         * seeds once per database and refuses to re-seed (§5A.2).
-         */
-        private fun seedAdmin(statement: java.sql.Statement) {
-            val adminHash = E2eAuth.argon2Hash(ADMIN_PASSWORD)
-            statement.execute(
-                "INSERT INTO users (email, display_name, provider, provider_subject, is_active, is_admin, " +
-                    "password_hash, password_changed_at, must_change_password) " +
-                    "VALUES ('$ADMIN_EMAIL', 'Keybound Admin', 'local', 'kbound-admin', TRUE, TRUE, " +
-                    "'$adminHash', NOW(), FALSE)",
-            )
-        }
-
         private fun ensureCleanSlate() {
             if (cleaned) return
             cleaned = true
@@ -766,6 +751,21 @@ class MembershipBoundKeysE2eTest {
         private val redis get() = SharedE2e.redis
 
         private fun randomSecret(): String = Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
+
+        /**
+         * The admin as a settled LOCAL account — created here, not by the boot seeder: a
+         * reused container may hold ANOTHER suite's bootstrap actor, and the seeder rightly
+         * seeds once per database and refuses to re-seed (§5A.2).
+         */
+        private fun seedAdmin(statement: java.sql.Statement) {
+            val adminHash = E2eAuth.argon2Hash(ADMIN_PASSWORD)
+            statement.execute(
+                "INSERT INTO users (email, display_name, provider, provider_subject, is_active, is_admin, " +
+                    "password_hash, password_changed_at, must_change_password) " +
+                    "VALUES ('$ADMIN_EMAIL', 'Keybound Admin', 'local', 'kbound-admin', TRUE, TRUE, " +
+                    "'$adminHash', NOW(), FALSE)",
+            )
+        }
 
         /**
          * Test-state discipline (the 191 gate's lesson): this suite changes the SHARED
