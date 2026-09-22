@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v2.31 (revised — see Change Log)
+**Status:** v2.32 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-09-19
@@ -786,9 +786,11 @@ In-memory cache (`datapipelines.auth.api-keys.cache-ttl-seconds`, default 60s) f
 
 ### 7.4 Issuance
 
-Since 179 (roles design D16/D17, 2026-09-20) there is exactly ONE way each kind comes into being:
+Since 179 (roles design D16/D17, 2026-09-20) there is exactly ONE way each kind comes into being; and since #200 (roles record [§3.7](superpowers/specs/2026-09-20-roles-permissions-design.md), owner rulings 2026-09-21) a `user` key's LIFETIME is the membership it was minted by:
 
 - **A `user` key is minted by the login hook and nowhere else.** Every login and every workspace switch (`WorkspaceService.workspaceForLogin`, and the switch handler after it) checks whether the user holds a live `user` key in the workspace being entered; if none exists — and the user does not owe a forced password change (§5A.4) — one is minted: name `mcp/<workspace>`, no expiry, scopes = the role's reach on the credential axis (an author-or-above membership gets `author`, a viewer `execute`, a promoter `read`), `minted_at_login = TRUE`. V31's partial unique index makes "one live `user` key per (user, workspace)" a database fact and is the arbiter of concurrent logins — a lost race re-reads the winner's row. **Rotation is delete + sign in again**: the user deletes the key from the top bar (`VIEW_OWN_MCP_KEY`), and the next login or switch mints a fresh one. No request surface mints a `user` key: REST and the htmx partials refuse `kind = "user"` with `auth.key_kind_not_mintable` (400) for EVERY role.
+- **The key ends with its membership** (#200, §3.7 ruling 1): a `user` key is tied to its user AND its workspace, so removing the member removes the key in the same act — one transaction, audited `auth.api_key.revoked_by_admin` with reason `member_removed`. A workspace admin can also revoke a member's key WITHOUT removing them (`DELETE /api/v1/workspaces/{name}/members/{user_id}/key` and the members-row verb, `MANAGE_WORKSPACE_MEMBERS`, reason `admin_revoked`) — the member's session keeps working, and their next login or workspace entry mints a fresh key.
+- **No automatic rotation on password or identity events** (#200, §3.7 ruling 2): the product cannot tell a forgotten password from a compromise, so a login that stops working is not a security signal. Recovery is an admin act — removing the user from the workspace, or explicitly removing their key.
 - **An `endpoint` key (shown in the UI as an "API key", D17) is created by a workspace admin or super admin** on `/api-keys` or over REST (`POST /api/v1/auth/api-keys`, `MANAGE_API_KEYS`), with its endpoint associations in the same request or added later from the page.
 - **A `server` key is minted by a super admin** (unchanged, D18).
 
@@ -860,7 +862,7 @@ The two axes are not the same ordering and neither is redundant. `execute` is th
 | Read the promotion page — `PROMOTION_READ` | `GET /promotion` (owner rule 13): the author who released sees what is promotable; the promote verb on the page renders by role | ✗ | ✓ | ✓ | ✓ | ✓ |
 | Promote to the higher environment — `PROMOTE_VERSION` | `POST /promotion/promote` ([Versioning §10](versioning.md)) — the promoter's one verb (D5). The RECEIVING side is not this row — a promotion arrives on the server-key route family (§7.7) | ✗ | ✗ | ✓ | ✓ | ✓ |
 | Create / deactivate / reactivate a workspace — `MANAGE_INSTANCE_WORKSPACES` | `POST /api/v1/workspaces/{name}/deactivate`, `.../reactivate`, `DELETE`, and their form twins (D-R10 — deactivate, never delete) | ✗ | ✗ | ✗ | ✗ | ✓ |
-| Add / remove members, set their role, invite — `MANAGE_WORKSPACE_MEMBERS` | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}` (`{"role": …}`), `DELETE .../members/{user_id}`, `DELETE .../invitations/{email}`, the members forms and the role partial (D22) — the last admin cannot be removed or demoted (`workspace.last_admin`) | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Add / remove members, set their role, invite — `MANAGE_WORKSPACE_MEMBERS` | `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{user_id}` (`{"role": …}`), `DELETE .../members/{user_id}`, `DELETE .../members/{user_id}/key` (#200 — revoke the member's login-minted key without removing them; idempotent `204`), `DELETE .../invitations/{email}`, the members forms (Remove, Revoke key) and the role partial (D22) — the last admin cannot be removed or demoted (`workspace.last_admin`); removing a member revokes the `user` key they hold here in the same act (roles record §3.7, ruling 1) | ✗ | ✗ | ✗ | ✓ | ✓ |
 | Grant / revoke a datasource to a workspace — `MANAGE_DATASOURCE_GRANTS` | `POST`/`DELETE /api/v1/datasources/{name}/grants/{workspace}` (D-R7) — the verb that decides who can SEE a datasource at all | ✗ | ✗ | ✗ | ✗ | ✓ |
 | Read the audit log — **reserved** (D12) | no surface yet: `audit_log` has no page and no endpoint (verified 2026-09-20 — the only reads are the serve/MCP existence checks and the tool learnings, none caller-facing). When one lands it declares a new constant on this row | ✗ | ✗ | ✗ | ✓ | ✓ |
 
@@ -1231,6 +1233,7 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |
+| `auth.api_key.revoked_by_admin` | A member's login-minted key was revoked by a workspace admin or super admin (#200; roles record §3.7) — because their membership ended (`details.reason: member_removed`, the same act that removes them) or as an explicit act that keeps the member (`reason: admin_revoked`). `details` carry workspace, `target_user_id` and reason; `key_id` is the revoked key |
 | `auth.api_key.used` | API key validated (sampled 1/100) |
 | `auth.api_key.rejected` | API key validation failed |
 | `auth.scope.denied` | Request rejected for insufficient scope |
@@ -1537,6 +1540,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v2.32 | 200 (#200) membership-bound keys | **A `user` key now ends with the membership it is pinned to, and a workspace admin can revoke it** (roles record §3.7, owner rulings 2026-09-21). §7.4 rewritten on the three rulings: removing a member revokes their `user` key in the same act (one transaction; reason `member_removed`); a workspace admin can revoke a member's key WITHOUT removing them — NEW `DELETE /api/v1/workspaces/{name}/members/{user_id}/key` and the members-row verb, on the existing `MANAGE_WORKSPACE_MEMBERS` row (§7.6), idempotent `204`, reason `admin_revoked`, the member's SESSION untouched and the next login minting fresh; NO automatic rotation on password or identity events (a login that stops working is not a security signal — recovery is an admin act). Before this round a removed member's key kept authenticating through the issuer check's viewer fallback, which admitted EXECUTE. NEW audit event `auth.api_key.revoked_by_admin` (§10.1, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)). |
 | 2026-09-21 | v2.31 | 186b (#186) H2 URL form case-sensitivity | §7.6's `MUTATE_WORKSPACE_DATASOURCES` row (unchanged cells, extended description): the in-process H2 prefixes are matched **case-sensitively, exactly as the driver reads them** — a mixed-case `TCP:`/`MEM:`/`FILE:` is an unknown URL form the driver would open as a literal file, and is refused for every role. No operation, route or role cell changed; the super-admin rule of v2.30 is unchanged — this closes the spelling bypass of it. |
 | 2026-09-21 | v2.30 | 186 (#186) in-process datasource containment | §7.6's `MUTATE_WORKSPACE_DATASOURCES` row (unchanged cells, extended description): registering or re-pointing an IN-PROCESS or file-backed datasource (H2 `mem:`/`file:`, DuckDB, SQLite) is **super-admin-only** even where `member-datasources-enabled` admits workspace admins — decided in `DatasourceWorkspaceRules` on the same route, like the instance-datasource rule. No operation or role cell changed; the row's ws_admin ✓ now reads as "server-form datasources". The runtime halves (file roots, the de-privileged H2 pool and probe scratch) are [Datasources §3/§4.2A/§9](datasources.md#9-validation-rules). |
 | 2026-09-21 | v2.29 | #202 csrf cookie lifetime | §8.4: `dp_csrf` now carries the session's lifetime (`Max-Age` = `jwt.ttl-hours`) and an explicit `SameSite=Lax`. It was a browser-session cookie while `dp_session` persisted for 8 h, so a tab restored after a browser restart failed every POST (`missing`, then `mismatch` on the retry — the logout / workspace-switch report) until reloaded. Pinned by `AuthHttpBoundaryTest`. |

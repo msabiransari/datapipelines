@@ -314,6 +314,10 @@ class MutatingHandlerScopeFloorTest {
                     "verb an admin repeats down a table, where a full-page reload per row lost the scroll.)",
                 "WorkspacesUiController#removeMember" to
                     "NO-JS: the sibling of addMember, same form, same banner",
+                "WorkspacesUiController#revokeMemberKey" to
+                    "NO-JS: the fifth member verb (#200) — revoking a member's login-minted key from " +
+                    "the same administration row, a plain form POST beside removeMember with the same " +
+                    "banner the row's verbs share",
                 "WorkspacesUiController#revokeInvitation" to
                     "NO-JS: the fourth member verb (113) — revoking a pending invitation, same form and " +
                     "same toast stack as the member rows it sits beneath",

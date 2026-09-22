@@ -163,7 +163,48 @@ class ApiKeyRepository(
             MapSqlParameterSource().addValue("id", id).addValue("wid", workspaceId).addValue("kind", kind.wire),
         ) > 0
 
-    /** Soft revoke. Returns true if a live key was flipped. Owner check enforced by caller. */
+    /**
+     * The ONE live `user` key [userId] holds in [workspaceId] — revoked (roles record §3.7,
+     * ruling 1/3, #200): a key is tied to user + workspace, so ending the membership — or an
+     * admin's explicit revoke — ends the key.
+     *
+     * The predicates ARE the safety rail, all four in the one statement: `user_id` AND
+     * `workspace_id` AND `kind = 'user'` AND live. The statement can never touch an
+     * endpoint/server key or another workspace's key, and there is no id-alone form and no
+     * read-then-revoke to drift into. Returns the revoked key's id (the caller evicts the
+     * [AuthCache] entry and audits), or null when no live key existed — "already gone" is the
+     * idempotent success the callers report as nothing-to-revoke, never an error.
+     */
+    fun revokeUserKeyForWorkspace(
+        userId: UUID,
+        workspaceId: UUID,
+    ): String? =
+        jdbc
+            .query(
+                "UPDATE api_keys SET is_revoked = TRUE " +
+                    "WHERE user_id = :uid AND workspace_id = :wid AND kind = 'user' AND is_revoked = FALSE " +
+                    "RETURNING id",
+                MapSqlParameterSource("uid", userId).addValue("wid", workspaceId),
+            ) { rs, _ -> rs.getString("id") }
+            .firstOrNull()
+
+    /**
+     * Which users of [workspaceId] hold a live `user` key (#200) — the members row's
+     * "has a key" state on the admin's own members table. Owner IDS only, deliberately: a
+     * key id or prefix is the key listing's business (`/api-keys`), never the members row's,
+     * and no plaintext exists to show (§7.4 — sealed, opened only by the owner's top bar).
+     */
+    fun liveUserKeyOwnerIds(workspaceId: UUID): Set<UUID> =
+        jdbc
+            .query(
+                "SELECT user_id FROM api_keys WHERE workspace_id = :wid AND kind = 'user' AND is_revoked = FALSE",
+                MapSqlParameterSource("wid", workspaceId),
+            ) { rs, _ -> rs.getObject("user_id", UUID::class.java) }
+            .toSet()
+
+    /**
+     * Soft revoke. Returns true if a live key was flipped. Owner check enforced by caller.
+     */
     fun revoke(
         id: String,
         userId: UUID,

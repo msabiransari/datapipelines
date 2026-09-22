@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import org.slf4j.LoggerFactory
+import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
 /**
@@ -82,10 +83,22 @@ fun interface McpKeyMint {
  * when they hold no explicit membership — which is what the `acting_via=super_admin` audit
  * flag reads. Being a super admin does not make a DEACTIVATED workspace selectable; it makes
  * it visible.
+ *
+ * ## Why this class and EVERY public method on it are `open`
+ * [removeMember] is a multi-statement metadata write carried by
+ * `@Transactional("metadataTransactionManager")` — the pipeline-contract (S3) rule. The
+ * named manager is the one Spring transaction resource (the metadata database); the
+ * annotation opens the class to CGLIB, which `kotlin("plugin.spring")` does NOT do for a
+ * method-level annotation, so the class and every public method are `open` by hand: a final
+ * method on a CGLIB proxy runs on the proxy with null fields and dies at first use — the
+ * silent trap `TransactionRollbackIntegrationTest` guards (it asserts every transactional
+ * bean is proxied AND declares no final public method). Private members stay final: they are
+ * reached from inside an already-delegated `open` method.
  */
 @Suppress("TooManyFunctions") // the workspace surface IS this class: resolution + CRUD + members + deactivation
-class WorkspaceService(
+open class WorkspaceService(
     private val workspaceRepository: WorkspaceRepository,
+    private val apiKeyRepository: ApiKeyRepository,
     private val userRepository: UserRepository,
     private val authCache: AuthCache,
     private val lastUsedWorkspaceStore: LastUsedWorkspaceStore?,
@@ -105,10 +118,10 @@ class WorkspaceService(
     private val log = LoggerFactory.getLogger(WorkspaceService::class.java)
 
     /** [userId]'s memberships through the liveness cache (the D13 window). */
-    fun memberships(userId: UUID): List<WorkspaceMembership> = authCache.memberships(userId) { workspaceRepository.membershipsOf(it) }
+    open fun memberships(userId: UUID): List<WorkspaceMembership> = authCache.memberships(userId) { workspaceRepository.membershipsOf(it) }
 
     /** [userId]'s memberships in SELECTABLE workspaces — what the switcher lists (design §6). */
-    fun activeMemberships(userId: UUID): List<WorkspaceMembership> = memberships(userId).filter { it.workspaceActive }
+    open fun activeMemberships(userId: UUID): List<WorkspaceMembership> = memberships(userId).filter { it.workspaceActive }
 
     /**
      * Through the liveness cache since 180 (D15): this is the read `PrincipalLiveness` makes
@@ -122,7 +135,7 @@ class WorkspaceService(
      * role included. Unknown, non-member and deactivated are one [WorkspaceNotFoundException]
      * (D-R5), so the header can probe nothing.
      */
-    fun resolveSwitch(
+    open fun resolveSwitch(
         principal: AuthenticatedPrincipal,
         name: String,
     ): WorkspaceContext = contextFor(principal, name) ?: throw WorkspaceNotFoundException(name)
@@ -138,7 +151,7 @@ class WorkspaceService(
      * convenience, not an entitlement, and a workspace deactivated since login must not lock a
      * user out of the ones they can still reach.
      */
-    fun resolveForSession(
+    open fun resolveForSession(
         principal: AuthenticatedPrincipal,
         claimName: String?,
     ): WorkspaceContext? {
@@ -187,7 +200,7 @@ class WorkspaceService(
      * second login mints nothing. A user who owes a password change gets nothing until the
      * first login or switch after it (the mint's own gate).
      */
-    fun workspaceForLogin(
+    open fun workspaceForLogin(
         user: User,
         email: String,
     ): WorkspaceContext? {
@@ -229,7 +242,7 @@ class WorkspaceService(
      * mints exactly as login does. Called by the switch handler once the target has
      * resolved (a refused switch mints nothing — the resolution threw).
      */
-    fun mintMcpKeyOnEntry(
+    open fun mintMcpKeyOnEntry(
         user: User,
         context: WorkspaceContext,
     ) {
@@ -252,7 +265,7 @@ class WorkspaceService(
      * route). The creator enters as the workspace ADMIN.
      */
     @Suppress("ThrowsCount") // a boundary maps each distinct refusal to its own catalogued code
-    fun create(
+    open fun create(
         principal: AuthenticatedPrincipal,
         name: String,
         displayName: String,
@@ -278,7 +291,7 @@ class WorkspaceService(
      * (D-R8), deactivated ones included and marked — design §6 puts them in the listing
      * greyed with their date, and hiding them would hide the only screen that can reactivate.
      */
-    fun listOwn(principal: AuthenticatedPrincipal): List<WorkspaceMembership> =
+    open fun listOwn(principal: AuthenticatedPrincipal): List<WorkspaceMembership> =
         if (principal.isSuperAdmin) {
             workspaceRepository.findAll().map {
                 WorkspaceMembership(
@@ -299,7 +312,7 @@ class WorkspaceService(
      * One workspace by name when the principal may see it, else the 404 (D-R5). Super admins
      * see any workspace, deactivated included.
      */
-    fun read(
+    open fun read(
         principal: AuthenticatedPrincipal,
         name: String,
     ): Workspace {
@@ -311,7 +324,7 @@ class WorkspaceService(
     }
 
     /** Renames the display name (`name` is immutable v1). Workspace admin or super admin. */
-    fun updateDisplayName(
+    open fun updateDisplayName(
         principal: AuthenticatedPrincipal,
         name: String,
         displayName: String,
@@ -337,7 +350,7 @@ class WorkspaceService(
      * Every member's membership snapshot is invalidated so the disappearance is immediate on
      * this instance rather than a 60s surprise.
      */
-    fun deactivate(
+    open fun deactivate(
         principal: AuthenticatedPrincipal,
         name: String,
     ): Workspace {
@@ -355,7 +368,7 @@ class WorkspaceService(
     }
 
     /** Reactivates a workspace (design §6, super admin, audited). */
-    fun reactivate(
+    open fun reactivate(
         principal: AuthenticatedPrincipal,
         name: String,
     ): Workspace {
@@ -387,7 +400,7 @@ class WorkspaceService(
      * a post-delete recount emits `auth.workspace.stranded_content` instead of leaving the
      * strand silent. Best-effort — a commit landing after the recount still strands silently.
      */
-    fun delete(
+    open fun delete(
         principal: AuthenticatedPrincipal,
         name: String,
     ) {
@@ -419,7 +432,7 @@ class WorkspaceService(
     }
 
     /** The member listing: any member of the workspace, or a super admin. */
-    fun members(
+    open fun members(
         principal: AuthenticatedPrincipal,
         name: String,
     ): List<WorkspaceMemberRow> {
@@ -432,7 +445,7 @@ class WorkspaceService(
      * returns the two arrays separately, because a client that counts members must not count
      * ghosts. [members] stays the members-only read for the UI's per-workspace count.
      */
-    fun membersWithInvitations(
+    open fun membersWithInvitations(
         principal: AuthenticatedPrincipal,
         name: String,
     ): MemberListing {
@@ -460,7 +473,7 @@ class WorkspaceService(
      * of tidying a super admin inside a greyed workspace is for. Members cannot reach the
      * workspace at all (the 404 rule), so nothing leaks.
      */
-    fun revokeInvitation(
+    open fun revokeInvitation(
         principal: AuthenticatedPrincipal,
         name: String,
         email: String,
@@ -506,7 +519,7 @@ class WorkspaceService(
      * their role to the request's — changing an existing member's role is [setMemberRole],
      * which the last-admin rule guards.
      */
-    fun addMember(
+    open fun addMember(
         principal: AuthenticatedPrincipal,
         name: String,
         email: String,
@@ -573,7 +586,7 @@ class WorkspaceService(
      * [WorkspaceLastAdminException] — a workspace with no admin is unmanageable, and the
      * refusal names the fix ("give someone else the admin role first") rather than the rule.
      */
-    fun setMemberRole(
+    open fun setMemberRole(
         principal: AuthenticatedPrincipal,
         name: String,
         userId: UUID,
@@ -609,8 +622,17 @@ class WorkspaceService(
      * A user id that names no member of this workspace answers with the workspace's own 404
      * (D-R5): "there is no such member here" and "there is no such workspace for you" must not
      * be distinguishable, or the member list becomes probeable one id at a time.
+     *
+     * **The member's login-minted key ends with the membership** (roles record §3.7, ruling 1,
+     * #200): a key is tied to user + workspace, so the membership row's removal revokes the
+     * `user` key pinned here in the SAME act, audited `auth.api_key.revoked_by_admin` with
+     * reason `member_removed`. Before #200 a removed member's key kept authenticating through
+     * `ApiKeyService.pinnedContext`'s viewer fallback — reading, running and reading results
+     * in a workspace they had been removed from. The whole sequence is ONE metadata
+     * transaction: a failure removes nothing and revokes nothing.
      */
-    fun removeMember(
+    @Transactional("metadataTransactionManager")
+    open fun removeMember(
         principal: AuthenticatedPrincipal,
         name: String,
         userId: UUID,
@@ -620,13 +642,79 @@ class WorkspaceService(
         val target = workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
         if (target.role == WorkspaceRole.WORKSPACE_ADMIN) requireAnotherAdmin(workspace, userId)
         workspaceRepository.removeMember(workspace.id, userId)
+        // §3.7 ruling 1 — the key the membership minted dies with it. Null when the member
+        // held no live key (never minted, already rotated): nothing to evict, nothing to audit.
+        val revokedKeyId = apiKeyRepository.revokeUserKeyForWorkspace(userId, workspace.id)
         authCache.invalidateMemberships(userId)
+        revokedKeyId?.let { authCache.invalidateKey(it) }
         audit(
             principal,
             "workspace.member_removed",
             name,
             mapOf("workspace" to name, "member_user_id" to userId.toString()),
         )
+        revokedKeyId?.let {
+            audit(
+                principal,
+                "auth.api_key.revoked_by_admin",
+                name,
+                mapOf(
+                    "workspace" to name,
+                    "target_user_id" to userId.toString(),
+                    "reason" to "member_removed",
+                ),
+                keyId = it,
+            )
+        }
+    }
+
+    /**
+     * Revokes a member's login-minted key WITHOUT removing them (roles record §3.7, ruling 3,
+     * #200) — the admin's recovery lever beside [removeMember], and the one answer to a lost
+     * or leaked credential that needs no identity event: no password reset fires, no rotation
+     * is scheduled (§3.7 ruling 2), the member's SESSION keeps working, and their next login
+     * or workspace entry mints a fresh key. Workspace admin or super admin
+     * (`MANAGE_WORKSPACE_MEMBERS`, the members row of §7.6); the same 404 rule for a
+     * non-member. Idempotent: a member with no live key is already in the state the verb asks
+     * for, so nothing is revoked and nothing audited.
+     */
+    open fun revokeMemberKey(
+        principal: AuthenticatedPrincipal,
+        name: String,
+        userId: UUID,
+    ) {
+        val workspace = read(principal, name)
+        requirePermission(principal, workspace, Permission.WS_ADMIN)
+        workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
+        val revokedKeyId = apiKeyRepository.revokeUserKeyForWorkspace(userId, workspace.id)
+        if (revokedKeyId != null) {
+            authCache.invalidateKey(revokedKeyId)
+            audit(
+                principal,
+                "auth.api_key.revoked_by_admin",
+                name,
+                mapOf(
+                    "workspace" to name,
+                    "target_user_id" to userId.toString(),
+                    "reason" to "admin_revoked",
+                ),
+                keyId = revokedKeyId,
+            )
+        }
+    }
+
+    /**
+     * Which members of [name] hold a live login-minted key (#200) — the members row's
+     * "has a key" state. The caller is the members surface (admin-only, `WORKSPACES_READ`),
+     * so the answer never leaves the admin's own workspace, and it carries owner ids only:
+     * no key id, no prefix, no plaintext (the members row is not a key listing).
+     */
+    open fun liveUserKeyOwnerIds(
+        principal: AuthenticatedPrincipal,
+        name: String,
+    ): Set<UUID> {
+        val workspace = read(principal, name)
+        return apiKeyRepository.liveUserKeyOwnerIds(workspace.id)
     }
 
     /**
@@ -650,7 +738,7 @@ class WorkspaceService(
      * super admin included: design §6's first effect has no exception, and a super admin who
      * needs to act inside one reactivates it first — an audited, reversible step.
      */
-    fun contextFor(
+    open fun contextFor(
         principal: AuthenticatedPrincipal,
         name: String,
     ): WorkspaceContext? {
@@ -680,7 +768,7 @@ class WorkspaceService(
      * [RoleRequiredException] for the viewer.
      */
     @Suppress("ThrowsCount") // three distinct refusals: unknown workspace, unreachable, wrong role
-    fun requireIssuancePermission(
+    open fun requireIssuancePermission(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,
     ): WorkspaceContext {
@@ -697,7 +785,7 @@ class WorkspaceService(
      * the workspace is unreachable for them now (D-R12: removed issuer, deactivated workspace).
      * Read per request through the cache, which is what bounds the demotion window at one TTL.
      */
-    fun issuerContext(
+    open fun issuerContext(
         issuerId: UUID,
         issuerIsSuperAdmin: Boolean,
         workspaceId: UUID,
@@ -712,13 +800,13 @@ class WorkspaceService(
     }
 
     /** True when [principal] may operate in [workspaceId] — member or super admin (D-R8). */
-    fun canAccess(
+    open fun canAccess(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,
     ): Boolean = canAccess(principal.userId, principal.isSuperAdmin, workspaceId)
 
     /** As [canAccess], for callers holding the identity as data. */
-    fun canAccess(
+    open fun canAccess(
         userId: UUID,
         isSuperAdmin: Boolean,
         workspaceId: UUID,
@@ -816,6 +904,7 @@ class WorkspaceService(
         event: String,
         workspaceName: String,
         details: Map<String, Any?>,
+        keyId: String? = null,
     ) {
         val actingVia =
             if (principal.isSuperAdmin && roleIn(workspaceIdOf(workspaceName), principal.userId) == null) {
@@ -823,7 +912,7 @@ class WorkspaceService(
             } else {
                 emptyMap<String, Any?>()
             }
-        auditLogger.log(event = event, userId = principal.userId, details = details + actingVia)
+        auditLogger.log(event = event, userId = principal.userId, keyId = keyId, details = details + actingVia)
     }
 
     /** The id behind an already-resolved name; a vanished row audits without the membership probe. */

@@ -30,6 +30,7 @@ class WorkspaceCrudServiceTest {
     private val service =
         WorkspaceService(
             repository,
+            mockk(relaxed = true),
             userRepository,
             AuthCache(AuthProperties()),
             null,

@@ -378,6 +378,7 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 | `auth.logout` | User logged out (cookie cleared) |
 | `auth.api_key.created` | New API key issued |
 | `auth.api_key.revoked` | API key revoked |
+| `auth.api_key.revoked_by_admin` | A workspace admin or super admin revoked a member's login-minted key — with the membership's removal (`reason: member_removed`) or as an explicit act that keeps the member (`reason: admin_revoked`; the member's session keeps working, the next sign-in mints fresh) (#200, [Auth §7.4](auth.md#74-issuance)) |
 | `auth.api_key.used` | API key validated (sampled 1/100) |
 | `auth.api_key.rejected` | API key validation failed |
 | `auth.scope.denied` | Request rejected for insufficient scope |

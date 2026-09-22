@@ -180,6 +180,8 @@ class WorkspacesController(
     /**
      * §17.8 — remove a member. Workspace admin or super admin; removing the LAST admin is
      * `workspace.last_admin` (409), because a workspace with no admin is unmanageable.
+     * The member's login-minted key pinned to this workspace is revoked in the same act
+     * (roles record §3.7, ruling 1) — a key is tied to user + workspace.
      */
     @DeleteMapping("/{name}/members/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -189,6 +191,27 @@ class WorkspacesController(
         @PathVariable userId: UUID,
     ) {
         workspaces.removeMember(currentPrincipal(), name, userId)
+    }
+
+    /**
+     * §17.11 — revoke a member's login-minted key WITHOUT removing them (#200; roles record
+     * §3.7, ruling 3). Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`, the same
+     * row the member verbs sit on). The member's SESSION is untouched — revoking the key is
+     * not deactivation — and their next login or workspace entry mints a fresh key. `204`
+     * also when the member holds no live key: the verb is IDEMPOTENT, "already revoked" is
+     * the success it reports rather than an error, so an admin retrying after a timeout
+     * cannot turn cleanup into a failure. A `user_id` that names no member is the workspace's
+     * own 404 (`workspace.not_found`, the §17.8 rule). The audit event is
+     * `auth.api_key.revoked_by_admin` with `reason: admin_revoked`.
+     */
+    @DeleteMapping("/{name}/members/{userId}/key")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    fun revokeMemberKey(
+        @PathVariable name: String,
+        @PathVariable userId: UUID,
+    ) {
+        workspaces.revokeMemberKey(currentPrincipal(), name, userId)
     }
 
     /**

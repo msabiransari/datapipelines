@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
@@ -30,6 +31,7 @@ class WorkspaceMembershipIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
     private lateinit var users: UserRepository
     private lateinit var workspaces: WorkspaceRepository
+    private lateinit var apiKeys: ApiKeyRepository
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
 
     private lateinit var alice: User
@@ -44,6 +46,7 @@ class WorkspaceMembershipIntegrationTest {
     fun setUp() {
         users = UserRepository(jdbc)
         workspaces = WorkspaceRepository(jdbc)
+        apiKeys = ApiKeyRepository(jdbc)
         // The CASCADE also reaches workspaces (created_by), so V4's `default` is re-seeded
         // after every truncate. `demo` is re-seeded here too — not because a migration ships
         // it (V23 deliberately does not; `DemoWorkspaceSeeder` owns it at boot) but because
@@ -61,6 +64,7 @@ class WorkspaceMembershipIntegrationTest {
     private fun service() =
         WorkspaceService(
             workspaces,
+            apiKeys,
             users,
             AuthCache(AuthProperties()),
             null,
@@ -141,6 +145,119 @@ class WorkspaceMembershipIntegrationTest {
         workspaces.adminCount(ws.id) shouldBe 2
         svc.removeMember(actor, "acme", admin.id)
         workspaces.adminCount(ws.id) shouldBe 1
+    }
+
+    /** Alice's login-minted key, as V31 holds it: one live `user` row pinned to `acme`. */
+    private fun mintedKey(workspaceId: java.util.UUID): ApiKey =
+        apiKeys.insert(
+            id = "dpk_MEMBERKEY01",
+            userId = alice.id,
+            name = "mcp/acme",
+            keyHash = "\$argon2id\$fixture",
+            scopes = setOf(Scope.READ, Scope.EXECUTE),
+            expiresAt = null,
+            workspaceId = workspaceId,
+            kind = ApiKeyKind.USER,
+        )
+
+    @Test
+    fun `removing a member revokes their pinned user key in the same act (#200)`() {
+        val svc = service()
+        val actor = principal(admin, superAdmin = true)
+        val ws = svc.create(actor, "acme", "Acme")
+        svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
+        val key = mintedKey(ws.id)
+        apiKeys.findLiveUserKey(alice.id, ws.id).shouldNotBeNull()
+
+        svc.removeMember(actor, "acme", alice.id)
+
+        // The membership is gone AND the key with it — REVOKED, never deleted, so
+        // `audit_log.key_id` keeps resolving (metadata-db §4.2).
+        workspaces.findMemberRow(ws.id, alice.id).shouldBeNull()
+        apiKeys.findLiveUserKey(alice.id, ws.id).shouldBeNull()
+        apiKeys
+            .findById(key.id)
+            .shouldNotBeNull()
+            .isRevoked
+            .shouldBeTrue()
+        // The key event names the removal as its reason, against the revoked key's id.
+        io.mockk.verify {
+            auditLogger.log(
+                event = "auth.api_key.revoked_by_admin",
+                userId = admin.id,
+                keyId = key.id,
+                details =
+                    match {
+                        it["reason"] == "member_removed" && it["target_user_id"] == alice.id.toString()
+                    },
+            )
+        }
+        // A second sweep finds nothing live to revoke — the statement is idempotent.
+        apiKeys.revokeUserKeyForWorkspace(alice.id, ws.id).shouldBeNull()
+    }
+
+    @Test
+    fun `revokeMemberKey ends the key and KEEPS the member (#200 ruling 3) - and a member with no key is a no-op`() {
+        val svc = service()
+        val actor = principal(admin, superAdmin = true)
+        val ws = svc.create(actor, "acme", "Acme")
+        svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
+        val key = mintedKey(ws.id)
+
+        svc.revokeMemberKey(actor, "acme", alice.id)
+
+        // The member stays; only the credential dies.
+        workspaces.findMemberRow(ws.id, alice.id).shouldNotBeNull()
+        apiKeys.findLiveUserKey(alice.id, ws.id).shouldBeNull()
+        io.mockk.verify {
+            auditLogger.log(
+                event = "auth.api_key.revoked_by_admin",
+                userId = admin.id,
+                keyId = key.id,
+                details = match { it["reason"] == "admin_revoked" },
+            )
+        }
+        // Idempotent: no live key means nothing revoked, nothing audited again.
+        svc.revokeMemberKey(actor, "acme", alice.id)
+        io.mockk.verify(exactly = 1) {
+            auditLogger.log(event = "auth.api_key.revoked_by_admin", any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `a member's key of another kind or another workspace survives both verbs (#200)`() {
+        val svc = service()
+        val actor = principal(admin, superAdmin = true)
+        val ws = svc.create(actor, "acme", "Acme")
+        svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
+        val other = workspaces.create("other", "Other", isPersonal = false, createdBy = admin.id)
+        // An ENDPOINT key pinned to acme and a USER key pinned elsewhere — neither is the
+        // credential a membership mints, so neither may a membership revoke.
+        val endpointKey =
+            apiKeys.insert(
+                id = "dpk_ENDPOINTK01",
+                userId = alice.id,
+                name = "ci",
+                keyHash = "\$argon2id\$fixture",
+                scopes = emptySet(),
+                expiresAt = null,
+                workspaceId = ws.id,
+                kind = ApiKeyKind.ENDPOINT,
+            )
+        val foreignUserKey = mintedKey(other.id)
+
+        svc.removeMember(actor, "acme", alice.id)
+
+        apiKeys
+            .findById(endpointKey.id)
+            .shouldNotBeNull()
+            .isRevoked
+            .shouldBeFalse()
+        apiKeys
+            .findById(foreignUserKey.id)
+            .shouldNotBeNull()
+            .isRevoked
+            .shouldBeFalse()
     }
 
     @Test
