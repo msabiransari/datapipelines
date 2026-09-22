@@ -260,10 +260,28 @@ val composeEnvAudit = tasks.register<Exec>("composeEnvAudit") {
     }
 }
 
-// Every `build` runs the layering check and the env-contract audit.
+// #196: no secret's VALUE is interpolated into any service's command, entrypoint or
+// healthcheck across deploy/compose*.yml — a `${VAR}` there lands on the container's argv,
+// which `docker inspect` and `ps` show; `$$VAR` (a name for the shell) and the environment
+// are the two allowed homes (deployment.md §4.2.1, §9). Born red on the pre-#196 tree.
+val composeArgvSecretsAudit = tasks.register<Exec>("composeArgvSecretsAudit") {
+    group = "verification"
+    description = "Fails if a compose service's command, entrypoint or healthcheck interpolates a secret's value."
+    val script = layout.projectDirectory.file("scripts/compose-argv-secrets-audit.sh")
+    inputs.file(script)
+    inputs.files(layout.projectDirectory.dir("deploy").asFileTree.matching { include("compose*.yml") })
+    outputs.file(layout.buildDirectory.file("compose-argv-secrets-audit.ok"))
+    val stamp = layout.buildDirectory.file("compose-argv-secrets-audit.ok")
+    commandLine("bash", script.asFile.absolutePath)
+    doLast {
+        stamp.get().asFile.apply { parentFile.mkdirs() }.writeText("ok\n")
+    }
+}
+
+// Every `build` runs the layering check and the two compose audits.
 subprojects {
     plugins.withId("java") {
-        tasks.named("check").configure { dependsOn(verifyModuleDependencies, composeEnvAudit) }
+        tasks.named("check").configure { dependsOn(verifyModuleDependencies, composeEnvAudit, composeArgvSecretsAudit) }
     }
 }
 
@@ -294,5 +312,5 @@ tasks.register("browserTest") {
 tasks.register("verify") {
     group = "verification"
     description = "lint + test + build — the pre-push gate (DEVELOPMENT.md §13)."
-    dependsOn(tasks.named("build"), verifyModuleDependencies, composeEnvAudit)
+    dependsOn(tasks.named("build"), verifyModuleDependencies, composeEnvAudit, composeArgvSecretsAudit)
 }
