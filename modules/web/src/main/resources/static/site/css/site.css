@@ -3982,3 +3982,25 @@ code {
     animation: none;
   }
 }
+
+/* ============================================================
+   #211 — the design system's stagger grid (`.ds-stagger-children`, motion.css)
+   hides every child with a STATIC `opacity: 0` and lets the `ds-slide-up`
+   entrance bring it to 1. A renderer that never runs CSS animations — Chrome's
+   print/PDF pipeline, some capture tools — therefore shows an EMPTY grid: the
+   "What's in the box" cards on /how-it-works vanished from a print capture
+   (2026-09-22). Content is never hidden statically here: the children are
+   visible by default, and `animation-fill-mode: both` still shows the
+   from-frame during the stagger delay, so the on-screen entrance is unchanged.
+   Print gets no animation at all. SiteStaggerGridVisibilityTest pins the
+   order: this override must follow the vendor rule in the built bundle.
+   ============================================================ */
+.ds-stagger-children > * {
+  opacity: 1;
+  animation-fill-mode: both;
+}
+@media print {
+  .ds-stagger-children > * {
+    animation: none;
+  }
+}
