@@ -368,18 +368,30 @@ services:
 
   redis:
     image: redis:7-alpine
+    # The wrapper below is `sh`, and the image's entrypoint drops to the redis user only
+    # when argv[0] is `redis-server` — so the drop is declared here (#196). The image's
+    # /data is already redis-owned; nothing else is written.
+    user: redis
     environment:
-      # The healthcheck's credential (#189). redis-cli reads REDISCLI_AUTH from its
-      # environment, so the password never sits on a command line: an argv password is
-      # readable in `ps` by every process in the container (the MySQL sibling's rule,
-      # MYSQL_PWD below). The server's own `--requirepass` argv is the remaining
-      # exposure; a stdin config would close it and is tracked separately.
+      # The password's ONE home in this container (#189, #196): the environment. redis-cli
+      # reads REDISCLI_AUTH for the healthcheck, and the server reads its `requirepass`
+      # from the same variable through stdin below — so it is never on any command line,
+      # which `ps` shows to every process in the container (the MySQL sibling's rule,
+      # MYSQL_PWD below), and never in a file.
       REDISCLI_AUTH: ${DATAPIPELINES_REDIS_PASSWORD}
-    command: >
-      redis-server
-      --requirepass ${DATAPIPELINES_REDIS_PASSWORD}
-      --maxmemory 512mb
-      --maxmemory-policy noeviction
+    # `redis-server -` reads its config from STDIN; the heredoc feeds it `requirepass` from
+    # the environment. `$$` is Compose's escape for a literal `$`, so the shell — not
+    # Compose — expands the variable, and the container's argv carries only its NAME
+    # (`docker inspect … {{.Config.Cmd}}` shows the script text, no value). `exec` keeps
+    # redis-server as PID 1 so `docker stop` reaches it. The two argv options are read
+    # after stdin and win, exactly as they did on the old command line.
+    command:
+      - sh
+      - -c
+      - |
+        exec redis-server - --maxmemory 512mb --maxmemory-policy noeviction <<EOF
+        requirepass $$REDISCLI_AUTH
+        EOF
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

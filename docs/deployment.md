@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.25
+**Status:** v1.26
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-19
@@ -115,6 +115,8 @@ Connection keys are defined in [Configuration §2 / §3.1](configuration.md#2-re
 - an evicted **event-log entry** silently truncates SSE replay.
 
 Every key the app writes carries an explicit TTL, so `noeviction` does not leak: the store drains on its own schedule. Under genuine memory exhaustion the app fails loudly (`result.storage_unavailable` on the write path) rather than corrupting semantics quietly.
+
+**Where the password lives (#189, #196).** In the reference compose files the Redis password has one home inside the container: the service's **environment** (`REDISCLI_AUTH`). The healthcheck's `redis-cli` reads it from there, and the server reads its `requirepass` from the same variable through **stdin** — `redis-server -` takes its configuration from standard input, and a `sh -c` wrapper feeds it a heredoc, then `exec`s so `redis-server` stays PID 1. Nothing carries the value on a command line (`docker inspect … {{.Config.Cmd}}` and `ps` inside the container show the variable's NAME only), and nothing writes it to a file. `--maxmemory` and `--maxmemory-policy noeviction` stay on argv; options after `-` are read after stdin and win. The wrapper is `sh`, so the service declares `user: redis` — the image's entrypoint drops privileges only when argv[0] is `redis-server`. Operators: the next `app.sh --start` (or `docker compose up -d`) after this change **recreates** the Redis container; what that loses is exactly what any Redis restart loses (§7: unexpired results, idempotency records, cancellation flags, the event log — all volatile by design).
 
 #### 4.2.2 Sizing
 
@@ -564,7 +566,7 @@ lifecycle:
 - [ ] `DATAPIPELINES_JWT_SECRET` is high-entropy (≥ 32 bytes random).
 - [ ] `DATAPIPELINES_DB_ENCRYPTION_KEY` is high-entropy (32 bytes random) and stored in a secret manager, not a plaintext env file.
 - [ ] Redis password set if Redis is networked (`requirepass` on the server, `datapipelines.redis.password` on every app instance — they must match). Under the `hardened` posture an empty password with a non-loopback Redis host is REFUSED at boot ([Configuration §3.23](configuration.md#323-environment-and-posture), #189); `development` warns.
-- [ ] No credential on a command line inside a container: the reference compose files give `redis-cli` its password through `REDISCLI_AUTH` in the redis service's environment and `mysqladmin` through `MYSQL_PWD` — an argv password is readable in `ps` by every process in the container. The Redis server's own `--requirepass` argument is the one remaining argv credential in the reference stack (tracked separately).
+- [ ] No credential on a command line inside a container: the reference compose files give `redis-cli` its password through `REDISCLI_AUTH` in the redis service's environment, the Redis **server** its `requirepass` from that same variable through stdin (`redis-server -`, §4.2.1 — #196 took the last argv credential off the reference stack), and `mysqladmin` through `MYSQL_PWD` — an argv password is readable in `ps` by every process in the container. Check it: `docker inspect <redis> --format '{{.Config.Cmd}}'` and `docker exec <redis> ps -o args` name the variable, never its value.
 - [ ] Redis `maxmemory-policy noeviction` (§4.2.1) — correctness, not tuning.
 - [ ] OIDC client secrets from a secret manager, not a plaintext env file; at least one provider configured (§5.1).
 - [ ] NetworkPolicy restricts app's egress.
@@ -656,12 +658,25 @@ services:
   redis:
     image: redis:7-alpine
     # noeviction is REQUIRED (§4.2.1): eviction silently destroys results,
-    # idempotency keys, and cancellation flags. Same password as the app above.
-    command: >
-      redis-server
-      --requirepass ${DATAPIPELINES_REDIS_PASSWORD}
-      --maxmemory 512mb
-      --maxmemory-policy noeviction
+    # idempotency keys, and cancellation flags. Same password as the app above,
+    # in the environment only: the server reads it from stdin, redis-cli from
+    # REDISCLI_AUTH — never on argv (§4.2.1, #196). `$$` keeps the expansion in
+    # the shell; `user: redis` because the wrapper is sh, not redis-server.
+    user: redis
+    environment:
+      REDISCLI_AUTH: ${DATAPIPELINES_REDIS_PASSWORD}
+    command:
+      - sh
+      - -c
+      - |
+        exec redis-server - --maxmemory 512mb --maxmemory-policy noeviction <<EOF
+        requirepass $$REDISCLI_AUTH
+        EOF
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
 volumes:
@@ -1000,6 +1015,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-21 | v1.26 | 199 (#196) the Redis password leaves argv | §4.2.1 gains "Where the password lives": the reference redis services (`deploy/compose.yml`, `deploy/compose.laptop-infra.yml`, Appendix A) start `redis-server -` — configuration from stdin, `requirepass` fed by a heredoc from `REDISCLI_AUTH`, `exec` so the server stays PID 1, `user: redis` because the wrapper is `sh` — so no argv, and no file, carries the value; `--maxmemory`/`noeviction` stay on argv. §9's argv line closes the "tracked separately" remainder and names the two commands that check it. Operators: the next start recreates the Redis container (§7 says what a restart loses). Numbered on base db12e043; the merger renumbers if another lane took v1.26. |
 | 2026-09-21 | v1.25 | 188 (#188) the app states its headers | §6.2 gains "What the edge sets, and what it must not touch": the header table the app sends on every response (an enforced CSP with no `'unsafe-inline'`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`; the editor route's `'unsafe-eval'` exception, #195), why the app sends no HSTS, and the four things the product expects of an edge (HSTS one year without preload, headers passed through unweakened, TLS + redirect, the forwarded address). §9: two checklist lines for the same. |
 | 2026-09-21 | v1.24 | 188 (#189) Redis credentials | §9: the hardened posture refuses a passwordless non-loopback Redis; the reference compose files pass the healthcheck password as `REDISCLI_AUTH` (environment), never `redis-cli -a` (argv); the server's `--requirepass` argv named as the remaining exposure. |
 | 2026-09-19 | v1.23 | 173 (#173) the agent surface before indexing | §6.7: `/llms.txt`, `/llms-full.txt` and `/docs/{slug}.md` listed beside the crawler surfaces; the Search Console note says llms.txt needs no submission; the sitemap bullet corrected — `lastmod` has been absent since 145, not read from `build-info.properties`. |

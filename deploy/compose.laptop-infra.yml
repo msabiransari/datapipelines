@@ -82,11 +82,20 @@ services:
     # unauthenticated Redis that configuration.md §7 warns about, kept alive by the very
     # file that made the two disagree. The dev default is fixed and public, like the
     # database's; deploy/secrets.env's generated value wins when the file is loaded.
-    command: >
-      redis-server
-      --requirepass ${DATAPIPELINES_REDIS_PASSWORD:-datapipelines}
-      --maxmemory 256mb
-      --maxmemory-policy noeviction
+    #
+    # The password lives in the environment only (#196): the server reads `requirepass`
+    # from stdin (`redis-server -`) and redis-cli reads REDISCLI_AUTH — nothing on argv,
+    # nothing in a file. `$$` keeps the expansion in the shell; `user: redis` because the
+    # entrypoint only drops privileges for an argv[0] of `redis-server`. Same shape as
+    # deploy/compose.yml's redis service, which explains each line.
+    user: redis
+    command:
+      - sh
+      - -c
+      - |
+        exec redis-server - --maxmemory 256mb --maxmemory-policy noeviction <<EOF
+        requirepass $$REDISCLI_AUTH
+        EOF
     environment:
       REDISCLI_AUTH: ${DATAPIPELINES_REDIS_PASSWORD:-datapipelines}
     ports:
