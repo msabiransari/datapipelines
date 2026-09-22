@@ -198,8 +198,13 @@ internal object DialectRefusalSets {
             "servercertificate",
         )
 
-    /** H2 — `INIT` runs arbitrary SQL at connect (`RUNSCRIPT FROM '…'`); `RUNSCRIPT` is its verb. */
-    val H2 = setOf("init", "runscript")
+    /**
+     * H2 — `INIT` runs arbitrary SQL at connect (`RUNSCRIPT FROM '…'`); `RUNSCRIPT` is its verb.
+     * `AUTO_SERVER=TRUE` makes the embedded engine start a TCP listener with `-tcpAllowOthers`
+     * (`org.h2.engine.Database`, 2.3.232) — an unannounced network port on the host, opened by a
+     * datasource row, is not a connection property but a deployment change.
+     */
+    val H2 = setOf("init", "runscript", "auto_server")
 
     /**
      * DuckDB 1.5.5.1 — two families.

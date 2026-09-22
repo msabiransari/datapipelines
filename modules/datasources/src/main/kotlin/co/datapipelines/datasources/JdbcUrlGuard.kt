@@ -80,13 +80,30 @@ internal object JdbcUrlGuard {
         )
     }
 
-    /** Lowercased property keys appearing as `key=` after any `?`, `&`, or `;` separator. */
+    /**
+     * Lowercased property keys appearing as `key=` after any `?`, `&`, or `;` separator.
+     *
+     * A backslash never survives into a key. H2 splits its settings tail with an escape
+     * (`StringUtils.arraySplit`, 2.3.232: a `\\` is dropped and the next character kept), so
+     * the driver reads `I\\NIT=` as `INIT=` — the key this guard compares must be the key
+     * the driver will see, or the refusal is spelled around. No driver in the pinned set gives
+     * a backslash any other meaning inside a property NAME, so dropping it everywhere only
+     * makes the guard stricter.
+     */
     fun propertyKeys(subName: String): Set<String> =
         subName
             .split(TOKEN_SEPARATORS)
             .mapNotNull { token ->
                 val eq = token.indexOf('=')
-                if (eq <= 0) null else token.substring(0, eq).trim().lowercase()
+                if (eq <= 0) {
+                    null
+                } else {
+                    token
+                        .substring(0, eq)
+                        .replace("\\", "")
+                        .trim()
+                        .lowercase()
+                }
             }.toSet()
 
     /**

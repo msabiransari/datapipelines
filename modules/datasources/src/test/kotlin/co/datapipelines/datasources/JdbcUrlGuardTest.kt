@@ -90,6 +90,21 @@ class JdbcUrlGuardTest {
     }
 
     @Test
+    fun `h2's backslash escape in the settings tail does not spell INIT past the guard`() {
+        // H2's arraySplit drops a backslash and keeps the next character, so the driver reads
+        // `I\NIT` as `INIT` and runs the script. The guard must compare the key the driver sees.
+        JdbcUrlGuard.propertyKeys("mem:evil;I\\NIT=RUNSCRIPT FROM '/etc/passwd'") shouldBe setOf("init")
+        JdbcUrlGuard.refusalErrors("jdbc:h2:file:/srv/x;I\\NIT=RUNSCRIPT FROM '/etc/passwd'", h2Keys) shouldNotBe null
+        JdbcUrlGuard.refusalErrors("jdbc:h2:file:/srv/x;\\INIT=RUNSCRIPT FROM '/etc/passwd'", h2Keys) shouldNotBe null
+    }
+
+    @Test
+    fun `h2 AUTO_SERVER is refused - a datasource row must not open a TCP listener`() {
+        JdbcUrlGuard.refusalErrors("jdbc:h2:file:/srv/x;AUTO_SERVER=TRUE", h2Keys) shouldNotBe null
+        JdbcUrlGuard.refusalErrors("jdbc:h2:file:/srv/x;auto_server=true;AUTO_SERVER_PORT=9092", h2Keys) shouldNotBe null
+    }
+
+    @Test
     fun `the semicolon separator carries mssql trustServerCertificate`() {
         JdbcUrlGuard.refusalErrors("jdbc:sqlserver://h;encrypt=true;trustServerCertificate=true", mssqlKeys) shouldNotBe null
     }

@@ -113,7 +113,7 @@ class DialectRefusalSetsTest {
     @Test
     fun `the SQLITE and H2 sets are exactly their reviewed sets`() {
         DialectRefusalSets.SQLITE shouldBe setOf("enable_load_extension", "temp_store_directory", "limit_attached")
-        DialectRefusalSets.H2 shouldBe setOf("init", "runscript")
+        DialectRefusalSets.H2 shouldBe setOf("init", "runscript", "auto_server")
     }
 
     @Test

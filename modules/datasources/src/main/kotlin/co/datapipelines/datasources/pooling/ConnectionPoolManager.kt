@@ -405,17 +405,16 @@ class ConnectionPoolManager(
                 config.connectionInitSql =
                     listOfNotNull(config.connectionInitSql, additionalConnectionInit.joinToString("; "))
                         .joinToString("; ")
-                return HikariConnectionPool(datasource.name, HikariDataSource(config))
             }
             if (datasource.dialect != Dialect.LAKE) {
                 // 186 §A3: an in-process H2 datasource (mem:/file:/bare path) never pools its
                 // REGISTERED credential — its connections run as a freshly minted non-admin
                 // user, staging §9.5's discipline on the datasource path. Server-form H2
-                // (tcp:/ssl:) is a network client like any other and is untouched.
+                // (tcp:/ssl:) is a network client like any other and is untouched. The
+                // classification runs BEFORE any caller-supplied init SQL can choose a plain
+                // pool: an in-process form never has an admin-credentialed path, whatever the
+                // caller passed (186 review L1).
                 val form = JdbcUrlForm.classify(datasource.dialect, datasource.jdbcUrl)
-                if (datasource.dialect == Dialect.H2 && form.isInProcess) {
-                    return H2InProcessPool.build(datasource, config)
-                }
                 // 186b: the runtime backstop to registration's refusal. A stored row can never
                 // carry an Unknown form (the validator refuses it), so reaching this line with
                 // one means the row predates the rule or a caller bypassed it — and a plain
@@ -426,6 +425,15 @@ class ConnectionPoolManager(
                     "datasource '${datasource.name}' carries a URL form this product refuses to pool " +
                         "(unrecognised in-process prefix); re-register it with a supported URL form"
                 }
+                if (datasource.dialect == Dialect.H2 && form.isInProcess) {
+                    return H2InProcessPool.build(datasource, config)
+                }
+                return HikariConnectionPool(datasource.name, HikariDataSource(config))
+            }
+            if (additionalConnectionInit.isNotEmpty()) {
+                // The legacy strict composition for a lake — the views ride in the init SQL and
+                // each connection is its own instance: a plain pool with no generation owner,
+                // exactly as before the classification moved above this line.
                 return HikariConnectionPool(datasource.name, HikariDataSource(config))
             }
             val owner = openLakeInstance(config, adapter, datasource, lakeViews)

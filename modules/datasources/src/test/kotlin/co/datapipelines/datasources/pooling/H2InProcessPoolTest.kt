@@ -187,6 +187,29 @@ class H2InProcessPoolTest {
     }
 
     @Test
+    fun `caller-supplied init SQL does not buy an in-process form a plain admin pool`() {
+        // 186 review L1: the init-SQL branch used to return a plain pool before the form was
+        // classified, so a future caller passing init statements would have re-opened the
+        // registered-credential path for a mem:/file: URL (or pooled an Unknown form). The
+        // classification now precedes it: the Unknown form is refused with init SQL present too.
+        val before = mvDbUnderCwd()
+        val datasource = h2("jdbc:h2:MEM:depool_init", username = "sa", secret = "sa")
+        try {
+            shouldThrow<IllegalArgumentException> {
+                ConnectionPoolManager.buildHikariPool(datasource, additionalConnectionInit = listOf("SELECT 1"))
+            }.message shouldContain "refuses to pool"
+        } finally {
+            val created = mvDbUnderCwd() - before
+            try {
+                created shouldBe emptySet()
+            } finally {
+                created.forEach { java.io.File(it).deleteRecursively() }
+                java.io.File("./MEM:").deleteRecursively()
+            }
+        }
+    }
+
+    @Test
     fun `admin-gated URL settings are applied once by the bootstrap and stripped from operational opens`() {
         // 186b LOW (b): H2 runs a URL's admin-gated settings as SET commands on EVERY session
         // open (Engine.openSession), and the restricted user cannot run them — before this
