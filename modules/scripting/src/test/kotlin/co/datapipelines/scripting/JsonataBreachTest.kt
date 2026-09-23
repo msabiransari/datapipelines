@@ -11,8 +11,8 @@ import java.time.Duration
 /**
  * The JSONata breach suite (transform-nodes design §4.5, R7): every bomb the record
  * lists, under one budget, with a three-way outcome record — REFUSED (a typed refusal),
- * BOUNDED (the caller's timeout fired on time, the thread ended inside the grace, and
- * the pool served the next call — or the body completed inside every budget, which is
+ * BOUNDED (the caller's timeout fired on time and the thread ended inside the grace,
+ * returning its slot — or the body completed inside every budget, which is
  * the "resistant" shape the regex case measures), UNBOUNDED (the abandoned thread was
  * still alive at the grace, or the heap blew past the JVM).
  *

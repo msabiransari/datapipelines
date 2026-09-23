@@ -21,7 +21,7 @@ package co.datapipelines.scripting
  * @property interruptible true when the engine observes `Thread.interrupt()`. The
  *   JSONata engine never reads the flag (no `Thread.interrupted()` anywhere in its
  *   sources), so an abandoned evaluation's thread lives until its work ends on its own;
- *   the pool replaces it instead of joining it.
+ *   the pool abandons it instead of joining it, and the thread keeps its slot until it ends.
  */
 data class EngineCapabilities(
     val boundsWallClockBetweenSteps: Boolean,

@@ -69,7 +69,7 @@ class JsonataEngineBoundsTest {
         // `$eval` inherits the evaluation's timebox, but a single builtin that never
         // returns reaches no step boundary - the pool's abandonment is the bound §4.3
         // names for exactly this shape. (The eval'd pad bomb's thread stays alive;
-        // it is a daemon and the pool has already replaced it.)
+        // it is a daemon and keeps this pool's one slot until it ends.)
         val pool = ScriptEvaluationPool(1, 1, Duration.ofMillis(250), ScriptEvaluationPool.SYSTEM)
         val caught =
             java.util.concurrent.atomic

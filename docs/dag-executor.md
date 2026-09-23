@@ -594,12 +594,16 @@ node lands (7c). What is already true and binding:
   (4/64 are the design's defaults; 7c lands the configuration block), and a refused submission
   is a typed pool-exhausted refusal (the catalog row arrives with that lane). Each admitted
   evaluation gets its OWN daemon thread
-  (`script-eval-N`) — a thread whose evaluation outlives its budget is abandoned (the JSONata
-  engine never reads `Thread.interrupted()`), logged at ERROR, counted
-  (`transform.evaluations.abandoned` is the record's meter name) and NEVER reused; the next
-  evaluation gets a fresh thread immediately. This is the same discipline §5.3's statement
-  abandonment applies to drivers that ignore `Statement.cancel()` — here it is the DESIGN, not
-  the fallback, because the engine cannot be interrupted at all.
+  (`script-eval-N`) — a thread whose evaluation outlives its budget is abandoned by its caller
+  (the JSONata engine never reads `Thread.interrupted()`), logged at ERROR, counted
+  (`transform.evaluations.abandoned` is the record's meter name) and never handed new work —
+  and it **keeps its slot until it ends**: the thread, not the caller, returns the permits, so
+  at most `size` evaluation threads are alive at any moment, abandoned ones included. A caller
+  waits for a slot at most its own wall clock, then gets the pool-exhausted refusal. This is the
+  bulkhead §5.3's statement abandonment already applies (an abandoned statement keeps its
+  `dag-executor-N` thread): a runaway degrades transform capacity, never the rest of the JVM.
+  (Corrected at the 7a merge: the first cut returned the slot at abandonment, which let every
+  runaway add one more live thread with no ceiling.)
 - **The engine's bounds are between expression steps** (the library's `Timebox` checks wall
   clock and depth in its evaluate entry/exit callbacks), so a single builtin call that overruns
   is caught only by the pool's abandonment. The honest-bounds table below is GENERATED from the
@@ -610,7 +614,7 @@ node lands (7c). What is already true and binding:
 | Breach case (record §4.5 corpus) | Measured outcome | The bound that held |
 |---|---|---|
 | range bomb (`[1..1e7]` — tripled to exhaust a 512m JVM; one alone costs ~240 MB and survives) | UNBOUNDED — `OutOfMemoryError` | none in-process; the caller's input/output caps are the bound |
-| pad bomb (`$pad("x", 1e8)` — a quadratic builtin loop) | UNBOUNDED — caller timed out on budget; the abandoned thread outlived the grace | the pool: the caller failed on time, the thread was counted and replaced |
+| pad bomb (`$pad("x", 1e8)` — a quadratic builtin loop) | UNBOUNDED — caller timed out on budget; the abandoned thread outlived the grace | the pool: the caller failed on time; the thread was counted and held its slot until it ended |
 | join bomb (`$join` over the range) | REFUSED — the library's own argument cap refuses before any work | the library |
 | regex bomb (`$match(…!, /^(a+)+$/)` on `java.util.regex`) | BOUNDED — resistant: fails fast, no catastrophic backtracking measured; no bound fired | n/a (measured resistant) |
 | deep recursion (self-recursive lambda, depth 100 000) | BOUNDED — `ScriptTimeoutException` on budget; the thread ended inside the grace. **Measured correction:** the library's depth counter skips lambda calls (they mark `isParallelCall`), so TIME, not depth, catches lambda recursion | the engine's between-steps timebox |
@@ -1497,6 +1501,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-23 | v1.16 | 7a merge review (#7) | §5.3 "The script engine seam": the evaluation pool is a **bulkhead** — an abandoned evaluation's thread keeps its slot until it ends (the thread, not the caller, returns the permits), so at most `size` evaluation threads are alive, abandoned ones included; a caller waits for a slot at most its own wall clock, then gets the pool-exhausted refusal. The v1.15 wording ("the next evaluation gets a fresh thread immediately") described a pool that released the slot at abandonment, which let every runaway add one more live thread with no ceiling. The pad-bomb row's "bound that held" reads accordingly. |
 | 2026-09-23 | v1.15 | 7a transform engine seam (#7) | §5.3 gains "The script engine seam": the `modules/scripting` library seam (7a) and the evaluation-pool contract the TRANSFORM node (7c) will wire in — every production evaluation on its own bounded, abandoning, thread-replacing pool; the honest-bounds table GENERATED from the breach suite's measured record (2026-09-23, jsonata 0.9.10, 512m JVM), including the measured corrections: lambda recursion is caught by TIME (the library's depth counter skips `isParallelCall` frames), `$join` is refused by the library's own argument cap, and the record's regex bomb is measured resistant on `java.util.regex`. The in-process honesty sentence is the record's own: a heap bound is not enforceable in-process; input and output caps bound a well-formed evaluation; a malicious body can still exhaust the heap. |
 |---|---|---|---|
 | 2026-09-17 | v1.14 | #143/#130 live-stream delivery | §15 grace row: on a CANCELLED execution the unwind's body wait is bounded by the cancel machinery's re-issue horizon (the window `Statement.cancel()` is still being re-issued, 086 A1) in addition to `cancel-grace-seconds` — a body the cancel cannot stop (e.g. a staging drain) no longer holds the `execution_aborted` frame behind the full abandonment grace. Timeout and ancestor paths keep the full grace; the abandon WARN and the statement abandonment itself are unchanged. Delivery guarantee stated in [REST API §10.4](rest-api.md#104-cancel-execution). |

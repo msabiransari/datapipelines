@@ -346,14 +346,21 @@ int/long/double by `Utils.convertNumber` — the reason §6 keeps the type syste
   evaluation thread to the pool's own bound rather than joining it, and the node fails on
   time regardless.
 - **The pool (R7)** — every evaluation (node, test runner, `templates_evaluate`) runs on one
-  dedicated bounded executor, `datapipelines.transform.pool-size` (default 4) threads with a
-  queue of `datapipelines.transform.pool-queue` (default 64); a submission that cannot be
-  queued is `pipeline.transform.pool_exhausted` (503 on the tool/route, a node failure in a
-  run). An evaluation that outlives its wall clock by `datapipelines.transform.abandon-grace-seconds`
-  (default 30) is logged at ERROR with the template id and version, counted
-  (`transform.evaluations.abandoned`), and the thread is left to finish or die with the JVM —
-  it is never reused: the pool replaces it. The executor's own threads are never the ones
-  that evaluate.
+  dedicated bounded pool: at most `datapipelines.transform.pool-size` (default 4) evaluations
+  run at once, and `datapipelines.transform.pool-queue` (default 64) bounds the evaluations
+  ADMITTED in total, running plus waiting (so 4/64 refuses the 65th concurrent submission —
+  lane 7a's reading, kept). A submission that cannot be admitted, or that waits its own whole
+  wall clock without a running slot, is `pipeline.transform.pool_exhausted` (503 on the
+  tool/route, a node failure in a run). An evaluation that outlives its wall clock by
+  `datapipelines.transform.abandon-grace-seconds` (default 30) is logged at ERROR with the
+  template id and version, counted (`transform.evaluations.abandoned`) and abandoned by its
+  caller; its thread is left to finish or die with the JVM, is never handed new work, and
+  **keeps its slot until it ends** — the bulkhead: at most `pool-size` evaluation threads are
+  ever alive, abandoned ones included, so a runaway degrades transform capacity and never the
+  rest of the JVM. (Corrected at the 7a merge, 2026-09-23: v0.3 said "the pool replaces it",
+  which released the slot at abandonment and let every runaway add one more live thread with
+  no ceiling. R7 bounds JSONata like the executor's own fixed pool, which keeps a thread for an
+  abandoned statement.) The executor's own threads are never the ones that evaluate.
 - **Rows** — `table`/`value` refuse when any table input exceeds
   `datapipelines.transform.max-input-rows` (default 100 000) BEFORE loading
   (`input_too_large`); `row` mode streams and has no cap on the input, but its invariants do
@@ -404,10 +411,12 @@ Read from the GraalVM sandboxing and embedding guides on 2026-09-09, re-read 202
 | Bound | Library | Executor's answer |
 |---|---|---|
 | Wall clock | `Timebox.checkRunnaway()` runs in the evaluate entry/exit callbacks: a step that overruns is caught at the NEXT step boundary. A single builtin call (`$pad(s, 1e9)`, `$join` over a large array, `$match`/`$replace` with a backtracking regex on `java.util.regex`) runs to completion first. | The pool + abandon rule (§4.3): the node fails on time; the thread is abandoned, counted and replaced. Documented in dag-executor.md as "bounded between steps". |
-| Depth | `maxRecursionDepth` — enforced at every step. | `datapipelines.transform.max-depth` (default 100, the library default). |
+| Depth | `maxRecursionDepth` — enforced on nested EXPRESSIONS. **Measured at 7a:** the library's `Timebox` skips calls marked `isParallelCall`, which includes lambda calls, so a recursive lambda is caught by the wall clock, not by depth. | `datapipelines.transform.max-depth` (default 100, the library default); time catches recursive lambdas. |
 | Memory | None. The range operator caps a sequence at 1e7 elements (`Jsonata.java:1214`; the D2014 message says 1e6 — a library inconsistency, not ours); nothing else is capped, and `maxHeapBytes` cannot be enforced in-process. | Input caps (`max-input-rows`, batch size in `row` mode) and output caps (`max-value-bytes`, `max-string-bytes`) bound what a well-formed evaluation can allocate; a malicious body can still exhaust the heap. The docs say so; `EngineCapabilities.boundsHeap = false`. Round two's isolate has `MaxHeapMemory`; the day JSONata needs the same guarantee it moves behind the same isolate story (§11). |
 | Interrupt | The engine never reads `Thread.interrupted()` (grep of `Jsonata.java`, `Functions.java`, `Timebox.java`: none). | `EngineCapabilities.interruptible = false`; the executor does not join the evaluation. |
 | Host access | No host entry points unless a Java function is registered; none is. `$eval` evaluates a string as a JSONata expression under the SAME Timebox. | The conformance suite proves no builtin reaches the filesystem, network, clock or environment (`$now()` and `$millis()` ARE clock reads — the executor pins them: `$now`/`$millis` return the execution's `current_timestamp` from the platform tier, so a template is reproducible; the lane says how the library lets a caller supply them, or refuses bodies that use them). |
+
+**Measured at 7a (2026-09-23, `docs/dag-executor.md` §5.3 carries the generated table):** the range bomb is lazy and survives 512 MB alone (tripled, it exhausts the heap: unbounded); the pad bomb and an eval'd builtin overrun are unbounded (the thread outlives the grace; the pool bounds the caller and, since the bulkhead, the thread count); `$join` over the range is refused by the library's own argument cap; the backtracking regex is resistant on `java.util.regex` at these sizes; `$now()` is pinned or refused; `$eval` cannot parse bind expressions (`:=`).
 
 **The JSONata breach suite** (lane 7a, mirrors §4.4's list): a range bomb (`[1..1e7]`), a pad
 bomb (`$pad("x", 1e8)`), a join bomb, a regex bomb (`$match("aaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", /^(a+)+$/)`),
@@ -815,3 +824,4 @@ Round two (#8, the JavaScript engine) and the parameter engine follow the schedu
 | 2026-09-09 | v0.1 | orchestrator, after the owner's brainstorm | Initial record: six decisions; engine and sandbox facts verified against graalvm.org and Maven Central; decimal-as-string rule. |
 | 2026-09-17 | v0.2 | orchestrator, after the owner's second brainstorm | Rewritten in place. Pure function only — no tempdb handle, no `emit` (D-T4); one Context namespace, `params`/`context` removed from the input object (D-T10); `meta` block; mode moves to the template's contract; **contract, invariants, tests on the version inside the body hash** (D-T7), a scoped D3 exception (D-T8); no Freemarker on transform bodies (D-T9); rejects + strict (D-T11); exact canonical equality + invariants on every case (D-T12); invariants always JSONata (D-T13); `implements` + `needs_review` drift + discovery (§8); `templates_evaluate` returns invariants; two rounds, JSONata first (D-T14); the `UNTRUSTED` host-collection rule and its JSON-text consequence recorded for round two (§4.4); `values` in the result payload considered and dropped (dashboards are a separate runtime); v0.1's O-1..O-5 resolved. |
 | 2026-09-23 | v0.3 | orchestrator, after the pre-dispatch review and the owner's rulings R1–R9 | Ratified for dispatch. Corrections against the tree at `be0305b3` (§0.2): `LogicalType` vocabulary replaces the invented type table (D-T5, §6); the body hash is the SQL `jsonb_build_object` expression, extended, with export/import carrying the blocks (§2.2); `execute_node` refuses a TRANSFORM (§9.1); `engine` type-conditional, `imports`/`is_library` refused (§2.1); textarea panes (§9.3); one save-time `type_unsupported`; nullability always scanned (§5.1). Rulings: `DECIMAL` rounding at the gate (R1, §5.3); row-mode cases mirror production (R2, §2.2); no JSON result bodies, value mode writes a key only (R3, §3.1, §9.6, §11); object keys readable by TRANSFORM only (R4, §3.1, §7); rejects-on-caller refused (R5); the roles table (R6, §9.4); D-T15 + §4.5 the honest JSONata bounds, the evaluation pool, the caps, the breach suite (R7); build order transforms → scheduler → parameters (R8); `implements` in round one as lane 7e (R9). New §9.2 REST, §9.5 Security, §14 lane split. |
+| 2026-09-23 | v0.3.1 | orchestrator, at the 7a merge | §4.3 pool: the bulkhead — an abandoned evaluation keeps its slot until its thread ends; `pool-queue` bounds total admissions; a caller waits at most its own wall clock. §4.5: depth catches expression nesting, time catches recursive lambdas; the breach suite's measured outcomes recorded. |

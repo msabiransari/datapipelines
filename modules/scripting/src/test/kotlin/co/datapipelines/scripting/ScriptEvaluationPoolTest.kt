@@ -12,9 +12,10 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * The pool's contract (A.4): bounded admission, abandonment past budget + grace, the
- * pool still serving the next evaluation while an abandoned thread lives on, and the
- * `LongAdder` a caller scrapes into its meter.
+ * The pool's contract (A.4, corrected at the 7a merge): bounded admission, abandonment
+ * past budget + grace, the bulkhead — an abandoned runaway keeps its slot until its thread
+ * ends, and a caller waits for a slot at most its own wall clock — and the `LongAdder` a
+ * caller scrapes into its meter.
  */
 class ScriptEvaluationPoolTest {
     private fun pool(
@@ -33,7 +34,7 @@ class ScriptEvaluationPoolTest {
     }
 
     @Test
-    fun `an overrun evaluation times out, is counted, and the pool still serves the next call fast`() {
+    fun `an abandoned evaluation keeps its slot until its thread ends - the bulkhead`() {
         val p = pool(size = 1, queue = 1, grace = Duration.ofMillis(250))
         val release = CountDownLatch(1)
         val started = CountDownLatch(1)
@@ -56,13 +57,56 @@ class ScriptEvaluationPoolTest {
         started.await(10, TimeUnit.SECONDS) shouldBe true
         overrunThread.join(10_000)
 
+        // The caller failed on time and the abandonment was counted …
         timeout.get().shouldNotBeNull().code shouldBe "pipeline.transform.timeout"
-
-        val nextStart = System.nanoTime()
-        p.run(limits(Duration.ofSeconds(5)), "next@1") { "served" } shouldBe "served"
-        val servedMs = (System.nanoTime() - nextStart) / 1_000_000
-        (servedMs <= 50) shouldBe true
         p.abandoned.sum() shouldBe 1
+        p.abandonedThreadsAlive() shouldBe 1
+
+        // … but the runaway still holds its slot: a 1/1 pool refuses the next submission
+        // while the abandoned thread lives. At most `size` evaluation threads are alive,
+        // abandoned ones included — a runaway never adds a thread the pool did not count.
+        val refused = runCatching { p.run(limits(Duration.ofSeconds(5)), "next@1") { "served" } }.exceptionOrNull()
+        (refused.shouldNotBeNull() as ScriptPoolExhaustedException).code shouldBe "pipeline.transform.pool_exhausted"
+
+        // The slot comes back when the runaway's thread ends, and the next call is served.
+        release.countDown()
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (p.abandonedThreadsAlive() > 0 && System.nanoTime() < deadline) {
+            Thread.sleep(5)
+        }
+        p.abandonedThreadsAlive() shouldBe 0
+        p.run(limits(Duration.ofSeconds(5)), "next@2") { "served" } shouldBe "served"
+    }
+
+    @Test
+    fun `a caller waits for a held slot at most its own wall clock, then is refused`() {
+        val p = pool(size = 1, queue = 2, grace = Duration.ofSeconds(5))
+        val release = CountDownLatch(1)
+        val started = CountDownLatch(1)
+        val holder =
+            Thread {
+                p.run(limits(Duration.ofSeconds(20)), "holder@1") {
+                    started.countDown()
+                    release.await()
+                    1
+                }
+            }
+        holder.isDaemon = true
+        holder.start()
+        try {
+            started.await(10, TimeUnit.SECONDS) shouldBe true
+            val waitStart = System.nanoTime()
+            val refused =
+                runCatching { p.run(limits(Duration.ofMillis(300)), "waiter@1") { "served" } }.exceptionOrNull()
+            val waitedMs = (System.nanoTime() - waitStart) / 1_000_000
+            refused.shouldNotBeNull() as ScriptPoolExhaustedException
+            (waitedMs in 250..5_000) shouldBe true
+        } finally {
+            release.countDown()
+            holder.join(10_000)
+        }
+        // The waiter's admission permit came back with its refusal: the pool is whole again.
+        p.run(limits(Duration.ofSeconds(5)), "after@1") { "served" } shouldBe "served"
     }
 
     @Test

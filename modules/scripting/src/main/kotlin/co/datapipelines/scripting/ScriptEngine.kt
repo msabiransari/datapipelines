@@ -18,9 +18,10 @@ import java.time.Duration
  * thread for up to the whole wall-clock budget and — because the JSONata engine is not
  * interruptible inside a builtin — an overrun evaluation keeps its thread alive past
  * the budget. **Never call evaluate on an executor thread you cannot afford to lose;
- * use [ScriptEvaluationPool]**, which bounds concurrency, abandons overruns and
- * replaces their threads. This is the same discipline the DAG executor applies to
- * blocking JDBC calls.
+ * use [ScriptEvaluationPool]**, which bounds concurrency, abandons overruns and keeps
+ * each runaway's slot held until its thread ends, so at most `size` evaluation threads
+ * are ever alive. This is the same discipline the DAG executor applies to blocking JDBC
+ * calls.
  *
  * Refusals are typed; callers map them to catalog codes (the exceptions carry the
  * record §7 mapping in their `code`): [ScriptSyntaxException],

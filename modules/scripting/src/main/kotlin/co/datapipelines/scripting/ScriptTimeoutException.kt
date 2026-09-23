@@ -8,7 +8,8 @@ package co.datapipelines.scripting
  * evaluation pool when the budget plus abandonment grace is overrun. Note the honesty
  * rule the capabilities table states: a single builtin call that overruns is NOT
  * interruptible, so this exception can arrive while the evaluation thread is still
- * running — the pool counts and replaces such threads, it never joins them. Carries
+ * running — the pool counts such threads and never joins them; each keeps its pool slot
+ * until it ends (the bulkhead). Carries
  * the `pipeline.transform.timeout` code.
  */
 class ScriptTimeoutException(

@@ -31,11 +31,20 @@ fun interface ScriptClock {
  *    submissions are ADMITTED at all (running + waiting together — the same reading
  *    the record fixes: on a 4/64 pool the 65th concurrent submission is refused). A
  *    refused submission is [ScriptPoolExhaustedException], immediately.
- *  - **One thread per evaluation.** Each admitted evaluation runs on a FRESH daemon
- *    thread named `script-eval-N` — the abandoned thread is never reused, which is the
- *    replacement guarantee §4.3 states: an evaluation outliving its budget (a builtin
- *    the library cannot interrupt, say) keeps its thread until the work ends on its
- *    own or the JVM dies, and the next evaluation gets a new thread immediately.
+ *  - **One thread per evaluation, and the thread owns its slot.** Each admitted
+ *    evaluation runs on a FRESH daemon thread named `script-eval-N`, and it is that
+ *    THREAD — not the caller — that returns the running and admission permits, when the
+ *    work actually ends. An evaluation outliving its budget (a builtin the library cannot
+ *    interrupt, say) is abandoned by its caller but keeps its slot until its thread
+ *    finishes: at most [size] evaluation threads are alive at any moment, abandoned ones
+ *    included. This is the bulkhead (record §4.3 as corrected at the 7a merge, R7 — the
+ *    executor's own fixed pool holds a `dag-executor` thread for an abandoned statement the
+ *    same way): a runaway degrades transform capacity, never the rest of the JVM. The
+ *    first reading of §4.3 released the slot at abandonment, which let every abandoned
+ *    runaway add one more live thread with no ceiling.
+ *  - **A caller waits for a slot at most its own wall clock**, then gets
+ *    [ScriptPoolExhaustedException] — a saturated pool (runaways holding every slot) is a
+ *    fast, typed refusal, never a caller hung behind someone else's evaluation.
  *  - **Abandonment.** `run` awaits at most `limits.wallClock + [abandonGrace]`
  *    (§4.3: an evaluation is abandoned once it has outlived its wall clock BY the
  *    grace). Past that: `Future.cancel(true)` — whose interrupt reaches nothing in
@@ -46,9 +55,9 @@ fun interface ScriptClock {
  *    none to build on); [abandoned] is the `LongAdder` a caller scrapes into its own
  *    meter (`transform.evaluations.abandoned` is the record's name).
  *
- * NOT a `ThreadPoolExecutor`: a fixed worker pool cannot honour the replacement rule —
- * its worker would sit blocked inside the abandoned evaluation forever, starving every
- * later submission. The fixed resource here is the CAPACITY, not a worker set.
+ * NOT a `ThreadPoolExecutor`: the fixed resource here is the CAPACITY, not a worker set —
+ * an abandoned evaluation's thread is never handed new work, and its slot comes back only
+ * when that thread ends.
  */
 class ScriptEvaluationPool(
     val size: Int,
@@ -78,7 +87,8 @@ class ScriptEvaluationPool(
     /**
      * Runs [work] under [limits], throwing [ScriptTimeoutException] when the budget
      * plus [abandonGrace] is overrun and [ScriptPoolExhaustedException] when the pool
-     * is full. [label] names the script in the abandonment log (the caller passes its
+     * is full — admission refused at once, or no running slot freed within the caller's
+     * own wall clock (every slot held, abandoned runaways included). [label] names the script in the abandonment log (the caller passes its
      * template id@version; "script" when it has none). Errors from [work] propagate
      * unchanged when they are [ScriptingException]s; anything else is wrapped in
      * [ScriptEvaluationException].
@@ -92,23 +102,73 @@ class ScriptEvaluationPool(
         limits: EvaluationLimits,
         label: String = DEFAULT_LABEL,
         work: () -> T,
-    ): T =
-        try {
-            if (!admission.tryAcquire()) throw ScriptPoolExhaustedException(size, queue)
+    ): T {
+        acquireSlot(limits)
+        // From here the evaluation THREAD owns both permits: it returns them when the work
+        // ends — normally, by failure, or long after its caller abandoned it (the bulkhead).
+        val task = FutureTask(work)
+        val thread = slotOwningThread(task)
+        return try {
+            await(task, thread, limits, label)
+        } catch (err: InterruptedException) {
+            throw awaitInterrupted(err)
+        }
+    }
+
+    /** Admission first (immediate refusal when full), then a running slot within the caller's wall clock. */
+    private fun acquireSlot(limits: EvaluationLimits) {
+        val admitted = admission.tryAcquire() && acquireRunning(limits)
+        if (!admitted) throw ScriptPoolExhaustedException(size, queue)
+    }
+
+    /** Waits at most [limits]' wall clock for a running slot; gives the admission permit back when none comes. */
+    private fun acquireRunning(limits: EvaluationLimits): Boolean {
+        val slot =
             try {
-                running.acquire()
-                try {
-                    await(limits, label, work)
-                } finally {
-                    running.release()
-                }
-            } finally {
+                running.tryAcquire(limits.wallClock.toMillis(), TimeUnit.MILLISECONDS)
+            } catch (err: InterruptedException) {
+                admission.release()
+                throw awaitInterrupted(err)
+            }
+        if (!slot) admission.release()
+        return slot
+    }
+
+    /** Starts the evaluation's own daemon thread, which returns both permits when [task] ends. */
+    private fun <T> slotOwningThread(task: FutureTask<T>): Thread {
+        val thread =
+            Thread(
+                null,
+                {
+                    try {
+                        task.run()
+                    } finally {
+                        running.release()
+                        admission.release()
+                    }
+                },
+                "script-eval-${counter.incrementAndGet()}",
+            )
+        thread.isDaemon = true
+        var started = false
+        try {
+            thread.start()
+            started = true
+        } finally {
+            // A thread that never ran never reaches its own finally — return the permits here.
+            if (!started) {
+                running.release()
                 admission.release()
             }
-        } catch (err: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw ScriptEvaluationException("evaluation await interrupted", err)
         }
+        return thread
+    }
+
+    /** The caller was interrupted while waiting — restore the flag; never report it as the script's timeout. */
+    private fun awaitInterrupted(err: InterruptedException): ScriptEvaluationException {
+        Thread.currentThread().interrupt()
+        return ScriptEvaluationException("evaluation await interrupted", err)
+    }
 
     /**
      * How many abandoned evaluations' threads are still alive right now — the breach
@@ -121,16 +181,13 @@ class ScriptEvaluationPool(
     }
 
     private fun <T> await(
+        task: FutureTask<T>,
+        thread: Thread,
         limits: EvaluationLimits,
         label: String,
-        work: () -> T,
     ): T {
-        val task = FutureTask(work)
-        val thread = Thread(null, task, "script-eval-${counter.incrementAndGet()}")
-        thread.isDaemon = true
         val deadline =
             clock.currentTimeMillis() + limits.wallClock.toMillis() + abandonGrace.toMillis()
-        thread.start()
         try {
             return task.get(deadline - clock.currentTimeMillis(), TimeUnit.MILLISECONDS)
         } catch (
@@ -143,7 +200,7 @@ class ScriptEvaluationPool(
             log.error(
                 "event=script_evaluation_abandoned script={} budget_ms={} grace_ms={} - the " +
                     "engine cannot interrupt a running evaluation; the thread is left to " +
-                    "finish or die with the JVM and the pool has already replaced it",
+                    "finish or die with the JVM and keeps its pool slot until it ends",
                 label,
                 limits.wallClock.toMillis(),
                 abandonGrace.toMillis(),
