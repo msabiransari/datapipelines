@@ -179,6 +179,14 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Workspace.INACTIVE,
                 PipelineErrorCodes.Template.NOT_FOUND,
                 PipelineErrorCodes.Template.IN_USE,
+                // 7b (#7) — the transform blocks' codes are bare `template.*` (the record's §7
+                // names them without the `validation.` infix): the domain has no entity
+                // dimension for these — each is about the version's own content.
+                PipelineErrorCodes.Template.CONTRACT_INVALID,
+                PipelineErrorCodes.Template.INVARIANT_INVALID,
+                PipelineErrorCodes.Template.TEST_FAILED,
+                PipelineErrorCodes.Template.BLOCKS_NOT_ALLOWED,
+                PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,
                 PipelineErrorCodes.Limits.RATE_LIMIT_UNAVAILABLE,
                 PipelineErrorCodes.Result.EXECUTION_NOT_FOUND,

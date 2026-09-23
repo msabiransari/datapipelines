@@ -78,6 +78,17 @@ data class Template(
     /** The version's SHA-256 content hash (versioning §4) — the mutation precondition token. */
     @field:JsonProperty("body_hash") @get:JsonProperty("body_hash") @param:JsonProperty("body_hash")
     val bodyHash: String = "",
+    /**
+     * The three transform blocks (7b, transform-nodes design §2.2) — present exactly when
+     * [type] is a transform type; null on `sql`/`html`. They are part of the version's content
+     * (inside `body_hash`), so the export/import and promotion shapes carry them.
+     */
+    @field:JsonProperty("contract") @get:JsonProperty("contract") @param:JsonProperty("contract")
+    val contract: TransformContract? = null,
+    @field:JsonProperty("invariants") @get:JsonProperty("invariants") @param:JsonProperty("invariants")
+    val invariants: List<TransformInvariant>? = null,
+    @field:JsonProperty("tests") @get:JsonProperty("tests") @param:JsonProperty("tests")
+    val tests: List<TransformTestCase>? = null,
 ) {
     companion object {
         /** The only `schema_version` v1 accepts (templates.md §3.2). */
@@ -137,6 +148,15 @@ data class TemplateVersion(
      */
     val bodyHash: String = "",
     val updatedAt: Instant? = null,
+    /**
+     * The three transform blocks as stored jsonb text (7b) — non-null exactly when [type] is a
+     * transform type. Text, not the bound model: this record serves the engine seam's callers
+     * (the test runner, `templates_evaluate`), which bind through [TransformBlocks] exactly
+     * once, and the row's own hash was computed over the stored text.
+     */
+    val contractJson: String? = null,
+    val invariantsJson: String? = null,
+    val testsJson: String? = null,
 ) {
     /** The registry lookup key, `"{id}@{version}"`. */
     val key: String get() = "$id@$version"

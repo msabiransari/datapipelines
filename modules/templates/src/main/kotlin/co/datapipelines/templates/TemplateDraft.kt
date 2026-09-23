@@ -56,4 +56,14 @@ data class TemplateDraft(
     val body: String,
     @field:JsonProperty("is_library") @get:JsonProperty("is_library") @param:JsonProperty("is_library")
     val isLibrary: Boolean = false,
+    /**
+     * The three transform blocks (7b, transform-nodes design §2.2) — non-null exactly when
+     * [type] is a transform type (`chk_transform_blocks`); always null on `sql`/`html`.
+     */
+    @field:JsonProperty("contract") @get:JsonProperty("contract") @param:JsonProperty("contract")
+    val contract: TransformContract? = null,
+    @field:JsonProperty("invariants") @get:JsonProperty("invariants") @param:JsonProperty("invariants")
+    val invariants: List<TransformInvariant>? = null,
+    @field:JsonProperty("tests") @get:JsonProperty("tests") @param:JsonProperty("tests")
+    val tests: List<TransformTestCase>? = null,
 )

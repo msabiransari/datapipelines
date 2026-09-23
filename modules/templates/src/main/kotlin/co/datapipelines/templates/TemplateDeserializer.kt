@@ -66,11 +66,15 @@ class TemplateDeserializer(
         }
         val dialect = tree.get("dialect")?.takeIf { it.isTextual }?.asText()
         val typed = type?.let { TemplateType.fromWire(it) }
+        // Presence of a NON-NULL dialect is the offense: an explicit `"dialect": null` carries
+        // no value and reads as absent (an export serialized by a mapper that writes nulls must
+        // re-import cleanly).
+        val dialectPresent = tree.get("dialect")?.let { !it.isNull } == true
         if (typed != null && !TemplateTypeBehaviour.of(typed).requiresDialect) {
             // html and the transform types declare NO dialect; presence is the offense (046 §7,
             // transform-nodes §2.1), so the value is irrelevant — including an invalid one,
             // which could not make it "more present".
-            if (tree.has("dialect")) {
+            if (dialectPresent) {
                 return TemplateDeserializationOutcome.Rejected(
                     TemplateValidationResult(
                         listOf(

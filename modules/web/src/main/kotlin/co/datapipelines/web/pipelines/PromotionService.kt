@@ -15,6 +15,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.JsonNode
@@ -381,6 +382,11 @@ class PromotionService(
             node.put("description", stored.description)
             node.put("body", stored.body)
             node.put("is_library", stored.isLibrary)
+            // 7b: the transform blocks are version content (inside the hash the receiver
+            // recomputes), so the payload carries them exactly when the type is a transform.
+            stored.contract?.let { node.set<JsonNode>("contract", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
+            stored.invariants?.let { node.set<JsonNode>("invariants", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
+            stored.tests?.let { node.set<JsonNode>("tests", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
             node.put("version", stored.version)
             node.put("body_hash", stored.bodyHash)
             val imports = node.putArray("imports")

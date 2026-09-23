@@ -11,6 +11,12 @@ import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersion
+import co.datapipelines.templates.ContractColumn
+import co.datapipelines.templates.TransformContract
+import co.datapipelines.templates.TransformInput
+import co.datapipelines.templates.TransformMode
+import co.datapipelines.templates.TransformOutput
+import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.api.ApiException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
@@ -348,6 +354,54 @@ class PromotionServiceTest {
         batch.workspace shouldBe workspace
         batch.keyFingerprint.startsWith("sha256:") shouldBe true
         batch.keyFingerprint.contains("sender-side-secret") shouldBe false
+    }
+
+    // ----------------------------------------------------------------- 7b: the transform blocks
+
+    @Test
+    fun `a transform template's payload carries its contract, invariants and tests`() {
+        // 7b §A.3(4): the payload is built field by field, so the three blocks ride only
+        // because templatePayloadOf sets them — and the receiver's hash guard recomputes
+        // over them, so a dropped block is a refused import, not a silent loss.
+        val root = record("root", version = 1)
+        stubReleased(root, bodyOf("root", template = "test/xform.jsonata" to 1))
+        every { templates.lookupVersion(workspaceId, "test/xform.jsonata", 1) } returns
+            TemplateVersion(
+                id = "test/xform.jsonata",
+                version = 1,
+                type = co.datapipelines.pipeline.TemplateType.JSONATA,
+                isLibrary = false,
+                imports = emptyList(),
+                body = "rows",
+                createdAt = EPOCH,
+                createdBy = UUID.randomUUID(),
+            )
+        val contract =
+            TransformContract(
+                mode = TransformMode.ROW,
+                inputs = mapOf("orders" to TransformInput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER)))),
+                output = TransformOutput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
+            )
+        val stored =
+            storedTemplate("test/xform.jsonata", 1).copy(
+                type = co.datapipelines.pipeline.TemplateType.JSONATA,
+                engine = Template.NONE_ENGINE,
+                contract = contract,
+                invariants = emptyList(),
+                tests = emptyList(),
+            )
+        every { templates.findVersion(workspaceId, "test/xform.jsonata", 1) } returns stored
+        every { client.inventory(workspace) } returns inventory()
+
+        val batch = capturePush { service.promote(workspaceId, workspace, listOf("root")) }
+
+        val payload = batch.templates.single()
+        payload["type"].asText() shouldBe "jsonata"
+        payload["engine"].asText() shouldBe "none"
+        payload["contract"]["mode"].asText() shouldBe "row"
+        payload["contract"]["inputs"]["orders"]["kind"].asText() shouldBe "table"
+        payload["invariants"].isArray shouldBe true
+        payload["tests"].isArray shouldBe true
     }
 
     // ------------------------------------------------------------------------------- fixtures

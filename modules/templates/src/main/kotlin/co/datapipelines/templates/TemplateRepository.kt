@@ -670,18 +670,27 @@ class TemplateRepository(
         isLibrary: Boolean,
         importsJson: String,
         body: String,
+        contractJson: String? = null,
+        invariantsJson: String? = null,
+        testsJson: String? = null,
     ): String =
         checkNotNull(
             jdbc.queryForObject(
-                "SELECT encode(sha256(convert_to(jsonb_build_object('engine', :engine, 'dialect', :dialect," +
+                "SELECT encode(sha256(convert_to((jsonb_build_object('engine', :engine, 'dialect', CAST(:dialect AS TEXT)," +
                     " 'is_library', :isLibrary, 'imports', CAST(:importsJson AS jsonb), 'body', :body)" +
-                    "::text, 'UTF8')), 'hex')",
+                    " || CASE WHEN CAST(:contractJson AS jsonb) IS NOT NULL" +
+                    " THEN jsonb_build_object('contract', CAST(:contractJson AS jsonb)," +
+                    " 'invariants', CAST(:invariantsJson AS jsonb), 'tests', CAST(:testsJson AS jsonb))" +
+                    " ELSE '{}'::jsonb END)::text, 'UTF8')), 'hex')",
                 mapOf(
                     "engine" to engine,
                     "dialect" to dialect,
                     "isLibrary" to isLibrary,
                     "importsJson" to importsJson,
                     "body" to body,
+                    "contractJson" to contractJson,
+                    "invariantsJson" to invariantsJson,
+                    "testsJson" to testsJson,
                 ),
                 String::class.java,
             ),
@@ -1047,6 +1056,11 @@ class TemplateRepository(
             "isLibrary" to draft.isLibrary,
             "importsJson" to TemplateJson.writeImports(draft.imports),
             "body" to draft.body,
+            // 7b: the three transform blocks (transform-nodes §2.2) — null on sql/html, which
+            // is exactly what keeps the hash's CASE arm off those rows (chk_transform_blocks).
+            "contractJson" to TransformBlocks.writeContract(draft.contract),
+            "invariantsJson" to TransformBlocks.writeInvariants(draft.invariants),
+            "testsJson" to TransformBlocks.writeTests(draft.tests),
             "actor" to actor,
         )
 
@@ -1110,7 +1124,9 @@ class TemplateRepository(
             """
             SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json::TEXT AS imports_json,
-                   v.body, v.created_at, v.created_by AS version_created_by, v.status, v.body_hash
+                   v.body, v.contract_json::TEXT AS contract_json, v.invariants_json::TEXT AS invariants_json,
+                   v.tests_json::TEXT AS tests_json,
+                   v.created_at, v.created_by AS version_created_by, v.status, v.body_hash
               FROM templates t
               JOIN template_versions v ON v.template_id = t.id
             """.trimIndent()
@@ -1181,7 +1197,8 @@ class TemplateRepository(
          */
         private const val SELECT_VERSION =
             "SELECT t.name AS template_id, v.version, v.engine, v.type, v.dialect, v.is_library, " +
-                "v.imports_json::TEXT AS imports_json, v.body, v.created_at, v.created_by, " +
+                "v.imports_json::TEXT AS imports_json, v.body, v.contract_json::TEXT AS contract_json, " +
+                "v.invariants_json::TEXT AS invariants_json, v.tests_json::TEXT AS tests_json, v.created_at, v.created_by, " +
                 "v.status, v.body_hash, v.updated_at " +
                 "FROM template_versions v JOIN templates t ON t.id = v.template_id"
 
@@ -1203,9 +1220,12 @@ class TemplateRepository(
          * parameter both build a JSON string, and both build JSON null from null.
          */
         private const val TEMPLATE_HASH_EXPR =
-            "encode(sha256(convert_to(jsonb_build_object('engine', :engine, 'dialect', CAST(:dialect AS TEXT)," +
+            "encode(sha256(convert_to((jsonb_build_object('engine', :engine, 'dialect', CAST(:dialect AS TEXT)," +
                 " 'is_library', :isLibrary, 'imports', CAST(:importsJson AS jsonb), 'body', :body)" +
-                "::text, 'UTF8')), 'hex')"
+                " || CASE WHEN CAST(:contractJson AS jsonb) IS NOT NULL" +
+                " THEN jsonb_build_object('contract', CAST(:contractJson AS jsonb)," +
+                " 'invariants', CAST(:invariantsJson AS jsonb), 'tests', CAST(:testsJson AS jsonb))" +
+                " ELSE '{}'::jsonb END)::text, 'UTF8')), 'hex')"
 
         /** The version-detail column list, `t.name AS template_id` for the human id. */
         private const val DETAIL_COLS_PLAIN =
@@ -1253,15 +1273,19 @@ class TemplateRepository(
             ), new_version AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, type, dialect, is_library, imports_json, body,
+                     contract_json, invariants_json, tests_json,
                      status, body_hash, created_by, updated_by, updated_at, created_via, updated_via)
                 SELECT id, 1, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       CAST(:contractJson AS jsonb), CAST(:invariantsJson AS jsonb), CAST(:testsJson AS jsonb),
                        'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW(), :via, :via
                   FROM new_template
                 RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
-                          body, created_at, created_by
+                          body, contract_json::TEXT AS contract_json, invariants_json::TEXT AS invariants_json,
+                          tests_json::TEXT AS tests_json, created_at, created_by
             )
             SELECT t.name AS id, t.display_name, t.description,
-                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
+                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body,
+                   v.contract_json, v.invariants_json, v.tests_json, v.created_at,
                    v.created_by AS version_created_by, 'DRAFT' AS status, $TEMPLATE_HASH_EXPR AS body_hash
               FROM new_template t
               JOIN new_version v ON v.template_id = t.id
@@ -1276,15 +1300,19 @@ class TemplateRepository(
             ), new_version AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, type, dialect, is_library, imports_json, body,
+                     contract_json, invariants_json, tests_json,
                      status, body_hash, created_by, released_by, released_at)
                 SELECT id, 1, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       CAST(:contractJson AS jsonb), CAST(:invariantsJson AS jsonb), CAST(:testsJson AS jsonb),
                        'RELEASED', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
                   FROM new_template
                 RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
-                          body, created_at, created_by
+                          body, contract_json::TEXT AS contract_json, invariants_json::TEXT AS invariants_json,
+                          tests_json::TEXT AS tests_json, created_at, created_by
             )
             SELECT t.name AS id, t.display_name, t.description,
-                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
+                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body,
+                   v.contract_json, v.invariants_json, v.tests_json, v.created_at,
                    v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash
               FROM new_template t
               JOIN new_version v ON v.template_id = t.id
@@ -1314,11 +1342,14 @@ class TemplateRepository(
             ), draft AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, type, dialect, is_library, imports_json, body,
+                     contract_json, invariants_json, tests_json,
                      status, body_hash, created_by, updated_by, updated_at, created_via, updated_via)
                 SELECT v.template_id,
                        (SELECT COALESCE(MAX(d2.version), 0) + 1 FROM template_versions d2 WHERE d2.template_id = v.template_id),
                        :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary,
-                       CAST(:importsJson AS jsonb), :body, 'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW(), :via, :via
+                       CAST(:importsJson AS jsonb), :body,
+                       CAST(:contractJson AS jsonb), CAST(:invariantsJson AS jsonb), CAST(:testsJson AS jsonb),
+                       'DRAFT', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW(), :via, :via
                   FROM template_versions v JOIN templates t ON t.id = v.template_id
                  WHERE t.name = :name AND t.workspace_id = :workspaceId AND $TEMPLATE_LIVE_T
                    AND v.version = t.current_version AND v.status = 'RELEASED'
@@ -1367,6 +1398,8 @@ class TemplateRepository(
                    SET engine = :engine, type = CAST(:type AS TEXT), dialect = CAST(:dialect AS TEXT),
                        is_library = :isLibrary,
                        imports_json = CAST(:importsJson AS jsonb), body = :body,
+                       contract_json = CAST(:contractJson AS jsonb), invariants_json = CAST(:invariantsJson AS jsonb),
+                       tests_json = CAST(:testsJson AS jsonb),
                        body_hash = $TEMPLATE_HASH_EXPR,
                        updated_by = :actor, updated_at = NOW(), updated_via = :via
                   FROM templates t
@@ -1431,13 +1464,16 @@ class TemplateRepository(
             ), new_version AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, type, dialect, is_library, imports_json, body,
+                     contract_json, invariants_json, tests_json,
                      status, body_hash, created_by, released_by, released_at)
                 SELECT t.id, alloc.next, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       CAST(:contractJson AS jsonb), CAST(:invariantsJson AS jsonb), CAST(:testsJson AS jsonb),
                        'RELEASED', $TEMPLATE_HASH_EXPR, :actor, :actor, NOW()
                   FROM templates t, alloc
                  WHERE t.name = :name AND t.workspace_id = :workspaceId
                 RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
-                          body, created_at, created_by
+                          body, contract_json::TEXT AS contract_json, invariants_json::TEXT AS invariants_json,
+                          tests_json::TEXT AS tests_json, created_at, created_by
             ), bumped AS (
                 UPDATE templates
                    SET current_version = COALESCE(current_version, (SELECT version FROM new_version)),
@@ -1449,7 +1485,8 @@ class TemplateRepository(
                 RETURNING id, name, display_name, description, current_version
             )
             SELECT t.name AS id, t.display_name, t.description,
-                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
+                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body,
+                   v.contract_json, v.invariants_json, v.tests_json, v.created_at,
                    v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash
               FROM bumped t
               JOIN new_version v ON v.template_id = t.id
@@ -1465,15 +1502,19 @@ class TemplateRepository(
             ), new_version AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, type, dialect, is_library, imports_json, body,
+                     contract_json, invariants_json, tests_json,
                      status, body_hash, created_by, released_by, released_at)
                 SELECT id, :version, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       CAST(:contractJson AS jsonb), CAST(:invariantsJson AS jsonb), CAST(:testsJson AS jsonb),
                        'RELEASED', :bodyHash, :actor, :actor, COALESCE(:releasedAt, NOW())
                   FROM new_template
                 RETURNING template_id, version, engine, type, dialect, is_library, imports_json::TEXT AS imports_json,
-                          body, created_at, created_by
+                          body, contract_json::TEXT AS contract_json, invariants_json::TEXT AS invariants_json,
+                          tests_json::TEXT AS tests_json, created_at, created_by
             )
             SELECT t.name AS id, t.display_name, t.description,
-                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body, v.created_at,
+                   v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body,
+                   v.contract_json, v.invariants_json, v.tests_json, v.created_at,
                    v.created_by AS version_created_by, 'RELEASED' AS status, :bodyHash AS body_hash
               FROM new_template t
               JOIN new_version v ON v.template_id = t.id
@@ -1490,8 +1531,10 @@ class TemplateRepository(
             WITH ins AS (
                 INSERT INTO template_versions
                     (template_id, version, engine, type, dialect, is_library, imports_json, body,
+                     contract_json, invariants_json, tests_json,
                      status, body_hash, created_by, released_by, released_at)
                 SELECT t.id, :version, :engine, CAST(:type AS TEXT), CAST(:dialect AS TEXT), :isLibrary, CAST(:importsJson AS jsonb), :body,
+                       CAST(:contractJson AS jsonb), CAST(:invariantsJson AS jsonb), CAST(:testsJson AS jsonb),
                        'RELEASED', :bodyHash, :actor, :actor, COALESCE(:releasedAt, NOW())
                   FROM templates t
                  WHERE t.name = :name AND t.workspace_id = :workspaceId
@@ -1667,6 +1710,9 @@ class TemplateRepository(
                     description = rs.getString("description"),
                     imports = TemplateJson.readImports(rs.getString("imports_json")),
                     body = rs.getString("body"),
+                    contract = TransformBlocks.readContract(rs.getString("contract_json")),
+                    invariants = TransformBlocks.readInvariants(rs.getString("invariants_json")),
+                    tests = TransformBlocks.readTests(rs.getString("tests_json")),
                     isLibrary = rs.getBoolean("is_library"),
                     createdAt = rs.getObject("created_at", OffsetDateTime::class.java).toInstant(),
                     createdBy = rs.getObject("version_created_by", UUID::class.java),
@@ -1711,6 +1757,9 @@ class TemplateRepository(
                     status = PipelineVersionStatus.fromWire(rs.getString("status")),
                     bodyHash = rs.getString("body_hash"),
                     updatedAt = rs.getObject("updated_at", OffsetDateTime::class.java)?.toInstant(),
+                    contractJson = rs.getString("contract_json"),
+                    invariantsJson = rs.getString("invariants_json"),
+                    testsJson = rs.getString("tests_json"),
                 )
             }
     }

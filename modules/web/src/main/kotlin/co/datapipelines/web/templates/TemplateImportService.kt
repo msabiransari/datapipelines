@@ -9,6 +9,7 @@ import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateJson
+import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateTypeRule
 import co.datapipelines.templates.TemplateValidationException
@@ -155,6 +156,9 @@ class TemplateImportService(
                 isLibrary = draft.isLibrary,
                 importsJson = TemplateJson.writeImports(draft.imports),
                 body = draft.body,
+                contractJson = TransformBlocks.writeContract(draft.contract),
+                invariantsJson = TransformBlocks.writeInvariants(draft.invariants),
+                testsJson = TransformBlocks.writeTests(draft.tests),
             )
         val declared = preserved.bodyHash
         if (declared == null || declared != recomputed) {
