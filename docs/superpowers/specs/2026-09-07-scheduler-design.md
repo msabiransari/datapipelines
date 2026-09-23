@@ -1,4 +1,11 @@
-# Design: the scheduler — schedules in folders, fired exactly once across instances, with every run a first-class execution
+# Historical design: the scheduler — September 7 decisions
+
+> **Superseded implementation details (2026-09-22):** use the
+> [scheduler design revision](2026-09-22-scheduler-design-revision.md) for current direction,
+> open recommendations and stale-detail corrections. The exactly-once claim below is not
+> an end-to-end guarantee; old migration numbers, MCP surfaces and creator-only authorization
+> are historical. Do not dispatch prompt 092 unchanged. Delivery is tracked in
+> [issue #9](https://github.com/msabiransari/datapipelines/issues/9).
 
 **Status:** RATIFIED 2026-09-07 (owner rulings R-S1–R-S5); implementation prompt 092. Requirements and the technology
 comparison live in the orchestration store (`design-records/2026-09-07-scheduler-requirements.md`).

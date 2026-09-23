@@ -80,7 +80,7 @@ done when a customer can use it end to end from the browser, not when the contra
 | **Full implementation of the template editor, per type** — one authoring surface per `TemplateType` (SQL/Freemarker today; JSONata and JavaScript once they exist), with Save | Already listed (§2 CRUD row); the per-type shape is new | ui-screens §4.7, template-hierarchy-design; the TRANSFORM-nodes design record for the two new types |
 | **Full support of JSONata** | Designed: `docs/superpowers/specs/2026-09-09-transform-nodes-design.md` (D-T1–D-T6; `com.dashjoin:jsonata` 0.9.10), prompt to write after the tag; O-1..O-5 open for the owner | §3.2 *Non-SQL node types* is superseded by that record |
 | **Full support of JavaScript, on GraalJS** | Designed in the same record (GraalJS polyglot isolate, `SandboxPolicy.UNTRUSTED`, pure functions v1) | same |
-| **Full support of the scheduler, INCLUDING a UI** | Design ratified (D49), prompt `092` written; the UI screen (schedules list, next runs, pause/resume, run history) is NOT in 092 — add it as 092's second round | §3.2 *Pipeline-level scheduling*; the public roadmap's "Scheduler" |
+| **Full support of the scheduler, INCLUDING a UI** | Tracked in [#9](https://github.com/msabiransari/datapipelines/issues/9), the status authority. Design for Fable review: pipeline-agnostic scheduler module, UI/application REST creation, hierarchical names, no schedule release/promotion lifecycle, author/admin modification, reusable scheduler keys, operational blocking and lifecycle emails. Pipeline executor owns `current` and keyword resolution. No new human role. Historical prompt `092` needs replacement; owner lock required before implementation. | [Scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md); §3.2 *Pipeline scheduling* |
 | **Full support of dashboards** | Already listed (§2 *Result visualization & dashboards*); order after the scheduler per the dp-lake thesis: created by the agent, embedded in the customer's product, fed by released pipelines, filtered per viewer (embed RLS, D-T6) | §2 row; the public roadmap's "Dashboards" |
 | **Full support of report generation** | NEW. Templated reports (a document, not a chart) rendered over released pipelines' results on a schedule and delivered — email first. Design pending; depends on the scheduler and on email | this row |
 | **Full support of email** | Partly listed (§3.2 `output.target: email`; the public roadmap's "Email alerts"); the owner's bar is one email capability that serves alerts, report delivery and output targets alike, configured once | §3.2 row; this row |
@@ -116,7 +116,7 @@ Larger feature work, multi-spec scope. Planned but not scheduled.
 | **Conditional execution** — skip nodes based on a Context expression (`when: "${include_cancelled} == true"`) | pipeline-contract §18, dag-executor §13 |
 | **Per-node retry policies** (`{"retries": 3, "backoff": "exponential"}`) | pipeline-contract §18, dag-executor §13 |
 | **Streaming between nodes** — pipe rows instead of full materialization | pipeline-contract §18, dag-executor §13, staging §14 |
-| **Pipeline-level scheduling** — cron-style declarations | pipeline-contract §18 |
+| **Pipeline scheduling** — workspace-scoped hierarchical schedules created through UI/application REST, never released or promoted; generic scheduler passes opaque payload/time context to an executor; pipeline executor resolves `current` and parameter keywords; cron + timezone, reusable keys, operational blocking, execution history and lifecycle email notifications | [Scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md); [#9](https://github.com/msabiransari/datapipelines/issues/9) |
 | **Additional `output.target` values** — `kafka`, `s3`, `email`, `webhook` | pipeline-contract §18, enums §3 |
 | **Partial-result mode** — return whatever data was staged before a node failed | dag-executor §13 |
 | **UI pipeline edit mode** — graph authoring/drag-drop in the editor (v1 authoring is LLM/MCP-first) | pipeline-editor §11 |
@@ -124,7 +124,7 @@ Larger feature work, multi-spec scope. Planned but not scheduled.
 | **Redis pub/sub cancellation fan-out** — push-based cross-instance cancel (v1 polls the cancel flag on heartbeat ticks) | dag-executor §8.3.1 |
 | **MCP progress notifications + cancel tool** — richer long-execution UX over MCP | mcp-server §12 |
 | **Cycle support (iterative pipelines)** — bounded loops for ML convergence algorithms | dag-executor §13 |
-| **Async / scheduled execution** — trigger pipelines, return immediately, deliver via webhook later | dag-executor §13 |
+| **Async / scheduled execution** — durable background admission with execution history; webhook delivery is not in the initial scheduler scope | [Scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md); [#9](https://github.com/msabiransari/datapipelines/issues/9) |
 
 ### 3.3 Templates
 
