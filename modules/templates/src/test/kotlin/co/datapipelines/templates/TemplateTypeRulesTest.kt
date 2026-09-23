@@ -35,11 +35,32 @@ class TemplateTypeRulesTest {
         val imports: List<TemplateImport> = emptyList(),
         val isLibrary: Boolean = false,
         val body: String = "SELECT 1",
+        /** A transform row needs its blocks to be accepted at all (§2.2); the type-rule rows do not touch them. */
+        val contract: TransformContract? = null,
+        val invariants: List<TransformInvariant>? = null,
+        val tests: List<TransformTestCase>? = null,
         /** The expected refusal codes — empty means the row must be accepted. */
         val codes: List<String> = emptyList(),
         /** Every expected `freemarker_forbidden` carries its rule in details. */
         val detailRule: String? = null,
     )
+
+    private val legalContract =
+        TransformContract(
+            mode = TransformMode.ROW,
+            inputs =
+                mapOf(
+                    "orders" to TransformInput.Table(listOf(ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER))),
+                ),
+            output = TransformOutput.Table(listOf(ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER))),
+        )
+
+    private val legalCase =
+        TransformTestCase(
+            name = "empty",
+            input = TransformTestInput(rows = emptyList(), inputs = emptyMap()),
+            expect = TransformTestExpect(output = TransformBlocks.mapper.readTree("""{"rows": []}""")),
+        )
 
     private val rows =
         listOf(
@@ -90,6 +111,9 @@ class TemplateTypeRulesTest {
                 engine = Template.NONE_ENGINE,
                 dialect = null,
                 body = "rows",
+                contract = legalContract,
+                invariants = emptyList(),
+                tests = listOf(legalCase),
             ),
             Row(
                 name = "jsonata + freemarker → engine_unsupported",
@@ -175,6 +199,9 @@ class TemplateTypeRulesTest {
                             imports = row.imports,
                             isLibrary = row.isLibrary,
                             body = row.body,
+                            contract = row.contract,
+                            invariants = row.invariants,
+                            tests = row.tests,
                         ),
                         workspaceId,
                     ).failures

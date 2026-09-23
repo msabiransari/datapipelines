@@ -5,7 +5,9 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.scripting.JsonataEngine
 import co.datapipelines.scripting.ScriptEngine
 import co.datapipelines.scripting.ScriptLanguage
+import co.datapipelines.scripting.ScriptSyntaxException
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.typesystem.LogicalType
 
 /**
  * Runs the templates.md §7 checks — the save-time gate (D2: nothing invalid ever stored).
@@ -84,6 +86,7 @@ class TemplateValidator(
         addSchemaVersionFailure(draft, failures)
         addTypeDialectFailures(draft, failures)
         addTransformFieldFailures(draft, failures)
+        addTransformBlockFailures(draft, failures)
         addHtmlEntityFailure(draft, failures)
         addBodyFailures(draft, failures, trace)
         libraryResolver.validate(workspaceId, draft.imports, failures, trace)
@@ -280,12 +283,320 @@ class TemplateValidator(
         failures += TemplateTypeBehaviour.of(draft.type ?: TemplateType.SQL).validateBody(draft, scriptEngines, trace)
     }
 
+    /**
+     * The transform blocks' model rules (transform-nodes design §2.2, in §8.1's save order —
+     * the body parse is [addBodyFailures]', this is contract → invariants → tests; the suite
+     * itself is [TransformTestRunner]'s, run by the service):
+     *
+     *  - `sql`/`html` carry no blocks (`template.blocks_not_allowed`); a transform type carries
+     *    all three (the `chk_transform_blocks` twin, reported as `template.contract_invalid`
+     *    with `blocks_missing`).
+     *  - contract: at least one input (`inputs_empty`); input names are §6.1-shaped
+     *    (`name_invalid`); `row` mode requires exactly one table input (`row_mode_inputs`);
+     *    BINARY/NULL are refused as declared types (`type_unsupported`); precision/scale follow
+     *    type-system.md §4 (`precision_scale_invalid`); mode and output.kind agree
+     *    (`mode_output_mismatch`); `rejects` only with a table output (`rejects_without_table`).
+     *  - invariants: every `expr` compiles through the JSONata engine (`invariant_invalid`).
+     *  - tests: the mandatory empty case (`empty_case_missing`); a `row`-mode case lists no
+     *    table under `inputs` (`row_case_lists_table`, R2); `expect` is exactly one of
+     *    `output`/`refusal` (`expect_shape`).
+     */
+    private fun addTransformBlockFailures(
+        draft: TemplateDraft,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        val type = draft.type ?: TemplateType.SQL
+        if (!type.isTransform) {
+            listOfNotNull(
+                "contract".takeIf { draft.contract != null },
+                "invariants".takeIf { draft.invariants != null },
+                "tests".takeIf { draft.tests != null },
+            ).forEach { block ->
+                failures +=
+                    TemplateValidationFailure(
+                        code = PipelineErrorCodes.Template.BLOCKS_NOT_ALLOWED,
+                        message =
+                            "An '$block' block belongs to a transform template; type '${type.wire}' " +
+                                "declares none (transform-nodes design §2.2).",
+                        details = mapOf("block" to block, "type" to type.wire),
+                    )
+            }
+            return
+        }
+
+        val contract = draft.contract
+        if (contract == null || draft.invariants == null || draft.tests == null) {
+            val missing =
+                listOfNotNull(
+                    "contract".takeIf { contract == null },
+                    "invariants".takeIf { draft.invariants == null },
+                    "tests".takeIf { draft.tests == null },
+                )
+            failures +=
+                TemplateValidationFailure(
+                    code = PipelineErrorCodes.Template.CONTRACT_INVALID,
+                    message =
+                        "A transform template carries contract, invariants and tests; missing: " +
+                            missing.joinToString(", ") + " (transform-nodes design §2.2).",
+                    details = mapOf("rule" to "blocks_missing", "missing" to missing),
+                )
+            return
+        }
+        validateContract(contract, failures)
+        validateInvariants(draft.invariants, failures)
+        validateTests(contract, draft.tests, failures)
+    }
+
+    private fun contractFailure(
+        rule: String,
+        message: String,
+        extra: Map<String, Any?> = emptyMap(),
+    ) = TemplateValidationFailure(
+        code = PipelineErrorCodes.Template.CONTRACT_INVALID,
+        message = message,
+        details = mapOf("rule" to rule) + extra,
+    )
+
+    private fun validateContract(
+        contract: TransformContract,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        if (contract.inputs.isEmpty()) {
+            failures += contractFailure("inputs_empty", "A transform contract declares at least one input.")
+        }
+        contract.inputs.keys.filterNot { INPUT_NAME.matches(it) }.forEach { name ->
+            failures +=
+                contractFailure(
+                    "name_invalid",
+                    "Input name '$name' must match ${INPUT_NAME.pattern} (the §6.1 identifier rule).",
+                    mapOf("input" to name),
+                )
+        }
+        val tableInputs = contract.inputs.filterValues { it is TransformInput.Table }
+        if (contract.mode == TransformMode.ROW && tableInputs.size != 1) {
+            failures +=
+                contractFailure(
+                    "row_mode_inputs",
+                    "A row-mode contract requires exactly one table input; found ${tableInputs.size} " +
+                        "(${tableInputs.keys.sorted()}).",
+                    mapOf("mode" to contract.mode.wire, "table_inputs" to tableInputs.keys.sorted()),
+                )
+        }
+        contract.inputs.forEach { (name, input) -> validateDeclaredType("inputs.$name", input.typeOf(), input.precisionOf(), input.scaleOf(), failures) }
+        validateDeclaredType("output", contract.output.typeOf(), contract.output.precisionOf(), contract.output.scaleOf(), failures)
+        val outputColumns = (contract.output as? TransformOutput.Table)?.columns.orEmpty()
+        outputColumns.forEach { column ->
+            validateDeclaredType("output.${column.name}", column.type, column.precision, column.scale, failures)
+        }
+        contract.inputs.forEach { (name, input) ->
+            (input as? TransformInput.Table)?.columns?.forEach { column ->
+                validateDeclaredType("inputs.$name.${column.name}", column.type, column.precision, column.scale, failures)
+            }
+        }
+        val modeOutputOk =
+            when (contract.mode) {
+                TransformMode.ROW, TransformMode.TABLE -> contract.output is TransformOutput.Table
+                TransformMode.VALUE -> contract.output is TransformOutput.Value || contract.output is TransformOutput.Obj
+            }
+        if (!modeOutputOk) {
+            failures +=
+                contractFailure(
+                    "mode_output_mismatch",
+                    "Mode '${contract.mode.wire}' does not admit output kind '${contract.output.kind}' " +
+                        "(row/table produce a table; value produces a value or an object).",
+                    mapOf("mode" to contract.mode.wire, "output_kind" to contract.output.kind),
+                )
+        }
+        if (contract.rejects && contract.output !is TransformOutput.Table) {
+            failures +=
+                contractFailure(
+                    "rejects_without_table",
+                    "rejects: true requires a table output — the rejected rows must have columns to be checked against.",
+                    mapOf("output_kind" to contract.output.kind),
+                )
+        }
+    }
+
+    private fun TransformInput.typeOf(): LogicalType? = (this as? TransformInput.Value)?.type
+
+    private fun TransformInput.precisionOf(): Int? = (this as? TransformInput.Value)?.precision
+
+    private fun TransformInput.scaleOf(): Int? = (this as? TransformInput.Value)?.scale
+
+    private fun TransformOutput.typeOf(): LogicalType? = (this as? TransformOutput.Value)?.type
+
+    private fun TransformOutput.precisionOf(): Int? = (this as? TransformOutput.Value)?.precision
+
+    private fun TransformOutput.scaleOf(): Int? = (this as? TransformOutput.Value)?.scale
+
+    /** type-system.md §4 applied to a declared (not inferred) contract type. */
+    private fun validateDeclaredType(
+        path: String,
+        type: LogicalType?,
+        precision: Int?,
+        scale: Int?,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        if (type == null) return // Jackson binding refused or the caller's own failure — not this rule's.
+        if (type == LogicalType.BINARY || type == LogicalType.NULL) {
+            failures +=
+                contractFailure(
+                    "type_unsupported",
+                    "Declared type ${type.wire} at '$path' is not supported in a transform contract " +
+                        "(transform-nodes design §6).",
+                    mapOf("path" to path, "type" to type.wire),
+                )
+            return
+        }
+        val decimal = type == LogicalType.DECIMAL || type == LogicalType.BIGDECIMAL
+        if (!decimal && (precision != null || scale != null)) {
+            failures +=
+                contractFailure(
+                    "precision_scale_invalid",
+                    "'$path' declares ${type.wire} but carries precision/scale, which only " +
+                        "DECIMAL/BIGDECIMAL take (type-system.md §4).",
+                    mapOf("path" to path, "type" to type.wire),
+                )
+            return
+        }
+        if (decimal) {
+            if (scale != null && precision == null) {
+                failures +=
+                    contractFailure(
+                        "precision_scale_invalid",
+                        "'$path' declares a scale without a precision (type-system.md §4).",
+                        mapOf("path" to path, "type" to type.wire),
+                    )
+            }
+            if (type == LogicalType.BIGDECIMAL && precision != null && scale == null) {
+                failures +=
+                    contractFailure(
+                        "precision_scale_invalid",
+                        "'$path' declares BIGDECIMAL($precision) without a scale — BIGDECIMAL's scale is " +
+                            "declared or the type means unbounded-and-unknown with both omitted (type-system.md §4).",
+                        mapOf("path" to path, "type" to type.wire),
+                    )
+            }
+            if (type == LogicalType.DECIMAL && precision != null && precision > 15) {
+                failures +=
+                    contractFailure(
+                        "precision_scale_invalid",
+                        "'$path' declares DECIMAL($precision) — past 15 digits the type is BIGDECIMAL " +
+                            "(type-system.md §4).",
+                        mapOf("path" to path, "type" to type.wire),
+                    )
+            }
+            if (precision != null && precision < 1) {
+                failures +=
+                    contractFailure(
+                        "precision_scale_invalid",
+                        "'$path' declares precision $precision — the minimum is 1 (type-system.md §7.1).",
+                        mapOf("path" to path, "type" to type.wire),
+                    )
+            }
+            if (precision != null && scale != null && scale > precision) {
+                failures +=
+                    contractFailure(
+                        "precision_scale_invalid",
+                        "'$path' declares scale $scale above precision $precision.",
+                        mapOf("path" to path, "type" to type.wire),
+                    )
+            }
+        }
+    }
+
+    private fun validateInvariants(
+        invariants: List<TransformInvariant>,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        val engine = scriptEngines.getValue(ScriptLanguage.JSONATA)
+        invariants.forEach { invariant ->
+            try {
+                engine.compile(invariant.expr)
+            } catch (err: ScriptSyntaxException) {
+                failures +=
+                    TemplateValidationFailure(
+                        code = PipelineErrorCodes.Template.INVARIANT_INVALID,
+                        message =
+                            "Invariant '${invariant.name}' does not compile: ${err.message ?: "syntax error"}",
+                        details =
+                            mapOf(
+                                "invariant" to invariant.name,
+                                "line" to err.line,
+                                "column" to err.column,
+                            ),
+                    )
+            }
+        }
+    }
+
+    private fun validateTests(
+        contract: TransformContract,
+        tests: List<TransformTestCase>,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        val hasEmptyCase =
+            tests.any { case ->
+                val rowsEmpty = case.input.rows.isNullOrEmpty()
+                val tablesEmpty =
+                    when (contract.mode) {
+                        // R2: in row mode the table rides `rows`; `inputs` lists no table.
+                        TransformMode.ROW -> true
+                        // Every declared table input is listed AND empty.
+                        TransformMode.TABLE, TransformMode.VALUE ->
+                            contract.inputs
+                                .filterValues { it is TransformInput.Table }
+                                .keys
+                                .all { name -> (case.input.inputs?.get(name) as? List<*>)?.isEmpty() == true }
+                    }
+                rowsEmpty && tablesEmpty
+            }
+        if (tests.isEmpty() || !hasEmptyCase) {
+            failures +=
+                contractFailure(
+                    "empty_case_missing",
+                    "A transform declares a test case whose every table input and rows are empty — " +
+                        "a transform with no test for zero rows does not save (transform-nodes design §2.2).",
+                )
+        }
+        if (contract.mode == TransformMode.ROW) {
+            val tableName = contract.inputs.filterValues { it is TransformInput.Table }.keys.singleOrNull()
+            tests.forEach { case ->
+                if (tableName != null && case.input.inputs?.containsKey(tableName) == true) {
+                    failures +=
+                        contractFailure(
+                            "row_case_lists_table",
+                            "Test case '${case.name}' lists the table input '$tableName' under inputs — in row " +
+                                "mode the batch is `rows` and `inputs` holds value inputs only (R2).",
+                            mapOf("case" to case.name, "input" to tableName),
+                        )
+                }
+            }
+        }
+        tests.forEach { case ->
+            val hasOutput = case.expect.output != null
+            val hasRefusal = case.expect.refusal != null
+            if (hasOutput == hasRefusal) {
+                failures +=
+                    contractFailure(
+                        "expect_shape",
+                        "Test case '${case.name}' declares ${if (hasOutput) "both output and refusal" else "neither output nor refusal"} — " +
+                            "expect is exactly one of the two (D-T12).",
+                        mapOf("case" to case.name),
+                    )
+            }
+        }
+    }
+
     companion object {
         /** The five entities a SQL body can only have acquired by being HTML-escaped. */
         private val HTML_ENTITY = Regex("&(lt|gt|amp|quot|#39);")
 
         /** D-T9's forbidden Freemarker constructs in a transform body: interpolation or a directive. */
         private val FREEMARKER_CONSTRUCT = Regex("""\$\{|<#|<@""")
+
+        /** A transform contract's input name — pipeline-contract §6.1's identifier rule. */
+        private val INPUT_NAME = Regex("[a-z_][a-z0-9_]*")
 
         /**
          * `datapipelines.templates.max-body-chars` (configuration.md §3.9) — mirrored here for

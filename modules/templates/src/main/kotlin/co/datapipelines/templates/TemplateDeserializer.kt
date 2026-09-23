@@ -104,7 +104,37 @@ class TemplateDeserializer(
                 ),
             )
         }
-        val parsed = mapper.treeToValue(tree, TemplateDraft::class.java)
+        val parsed =
+            try {
+                mapper.treeToValue(tree, TemplateDraft::class.java)
+            } catch (err: com.fasterxml.jackson.databind.JsonMappingException) {
+                // The transform blocks are strict interior (the model's KDoc): a typo is a
+                // refusal, never a silently dropped section. Jackson reports it in two shapes —
+                // an unknown key directly (UnrecognizedPropertyException), or the missing
+                // creator parameter the typo leaves behind (the Kotlin module's null check);
+                // both are the same author error, so both carry `unknown_field` with the path.
+                val field =
+                    (err as? com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException)?.propertyName
+                        ?: err.pathReference
+                return TemplateDeserializationOutcome.Rejected(
+                    TemplateValidationResult(
+                        listOf(
+                            TemplateValidationFailure(
+                                code = PipelineErrorCodes.Template.CONTRACT_INVALID,
+                                message =
+                                    "The transform blocks do not bind: ${err.originalMessage}. " +
+                                        "A typo is a refusal, never a silent drop.",
+                                details =
+                                    mapOf(
+                                        "rule" to "unknown_field",
+                                        "field" to field,
+                                        "path" to err.pathReference,
+                                    ),
+                            ),
+                        ),
+                    ),
+                )
+            }
         // An omitted engine on a transform type means 'none' (transform-nodes design §2.1) —
         // the DTO's own default is freemarker, which would refuse a create that simply omitted
         // the field. Stated values still go through the validator's type-conditional rule.
