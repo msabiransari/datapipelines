@@ -113,6 +113,12 @@ allprojects {
 //
 // Adding an edge means editing module-structure.md §4.2 FIRST, then this map.
 // That ordering is the review gate; this task is what makes it non-optional.
+//
+// #214: the map is also compared against the §4.2 TABLE ITSELF (parsed from
+// docs/module-structure.md) in both directions — a hand copy compared to
+// nothing drifts silently, and did (the §4.1 diagram omitted calculators and
+// scripting for two rounds). And every module the table names must appear in
+// §4.1's diagram block; edge fidelity there stays a human read.
 // ---------------------------------------------------------------------------
 val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ":modules:typesystem" to emptySet(),
@@ -192,9 +198,51 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
 // `implementation(project(":modules:x"))` inside x itself.
 val koverPlumbingConfigurations = setOf("kover", "koverExternalArtifacts")
 
+// #214 — the §4.2 table and the §4.1 diagram, parsed out of the doc so the
+// normative text and this map cannot drift apart. Map keys are Gradle paths
+// (`:modules:templates`); the table names modules plainly (`templates`,
+// `tests/integration-tests`).
+fun String.toLayeringTableName(): String =
+    removePrefix(":").replace(":", "/").removePrefix("modules/")
+
+fun parseLayeringTable(docText: String): Map<String, Set<String>> {
+    require(docText.contains("### 4.2 The dependency rule")) {
+        "docs/module-structure.md has no '### 4.2 The dependency rule' section"
+    }
+    val section = docText
+        .substringAfter("### 4.2 The dependency rule")
+        .substringBefore("### 4.3")
+    val rowPattern = Regex("""^\| `([^`]+)` \| (.+) \|$""")
+    val table = section.lineSequence()
+        .mapNotNull { rowPattern.find(it.trim())?.destructured }
+        .associate { (module, depsCell) ->
+            module to Regex("""`([^`]+)`""").findAll(depsCell)
+                .map { it.groupValues[1] }
+                .toSet()
+        }
+    require(table.isNotEmpty()) {
+        "docs/module-structure.md §4.2 yielded no table rows — the parse is broken, not the table"
+    }
+    return table
+}
+
+fun parseLayeringDiagram(docText: String): String {
+    require(docText.contains("### 4.1 Layered dependency graph")) {
+        "docs/module-structure.md has no '### 4.1 Layered dependency graph' section"
+    }
+    return docText
+        .substringAfter("### 4.1 Layered dependency graph")
+        .substringBefore("### 4.2")
+        .substringAfter("```")
+        .substringBefore("```")
+}
+
 val verifyModuleDependencies = tasks.register("verifyModuleDependencies") {
     group = "verification"
-    description = "Fails if any module declares a project dependency outside its module-structure.md §4.2 row."
+    description = "Fails if any module declares a project dependency outside its module-structure.md §4.2 row, if the §4.2 table and this build's map disagree, or if a §4.2 module is absent from the §4.1 diagram."
+
+    val moduleStructureDoc = layout.projectDirectory.file("docs/module-structure.md")
+    inputs.file(moduleStructureDoc)
 
     // Snapshot at configuration time: Gradle 9 forbids cross-project state access from task actions.
     // (The registration action itself runs at task realization — after all projects are
@@ -235,6 +283,95 @@ val verifyModuleDependencies = tasks.register("verifyModuleDependencies") {
             )
         }
         logger.lifecycle("§4.2 dependency table: ${declared.size} modules checked, 0 violations.")
+
+        // #214, part one: the §4.2 table (normative) vs the map above (enforcement).
+        val docText = moduleStructureDoc.asFile.readText()
+        val table = parseLayeringTable(docText)
+        val mapAsTable = allowed.mapKeys { (path, _) -> path.toLayeringTableName() }
+            .mapValues { (_, deps) -> deps.map { it.toLayeringTableName() }.toSet() }
+        val drift = mutableListOf<String>()
+        (table.keys + mapAsTable.keys).toSortedSet().forEach { module ->
+            val inTable = table[module]
+            val inMap = mapAsTable[module]
+            when {
+                inTable == null -> drift += "$module is in build.gradle.kts's allowedInternalDependencies but NOT in the §4.2 table"
+                inMap == null -> drift += "$module is in the §4.2 table but NOT in build.gradle.kts's allowedInternalDependencies"
+                inTable != inMap -> drift += "$module's §4.2 row $inTable disagrees with its map entry $inMap"
+            }
+        }
+        if (drift.isNotEmpty()) {
+            throw GradleException(
+                "module-structure.md §4.2 table and build.gradle.kts's allowedInternalDependencies disagree " +
+                    "(the table is normative; edit it first, then the map):\n" +
+                    drift.joinToString("\n") { "  - $it" },
+            )
+        }
+
+        // #214, part two: every module the table names has its own box in §4.1's
+        // diagram. The name must appear between box borders — an occurrence in
+        // another module's `←` edge list is an edge, not presence. Edge fidelity
+        // stays a human read — ASCII arrows cannot be parsed honestly; module
+        // presence can.
+        val diagram = parseLayeringDiagram(docText)
+        val absent = table.keys.filter { name ->
+            !diagram.contains(Regex("""│\s*${Regex.escape(name)}\s*│"""))
+        }
+        if (absent.isNotEmpty()) {
+            throw GradleException(
+                "module-structure.md §4.1's diagram does not name these §4.2 modules " +
+                    "(the diagram is a rendering of the table; redraw it):\n" +
+                    absent.joinToString("\n") { "  - $it" },
+            )
+        }
+        logger.lifecycle("§4.2 table ↔ map ↔ §4.1 diagram: ${table.size} modules consistent.")
+    }
+}
+
+// #214 — DEVELOPMENT.md §6.3 owns the rationale for hand-verified
+// verification-metadata components, because `--write-verification-metadata`
+// rewrites the XML and drops hand comments from it. This check fails when the
+// XML contains a comment at all (its home is §6.3) and when a component the
+// §6.3 table lists is absent from the XML.
+val verifyVerificationMetadataDocs = tasks.register("verifyVerificationMetadataDocs") {
+    group = "verification"
+    description = "Fails when verification-metadata.xml carries a hand comment, or a DEVELOPMENT.md §6.3 hand-verified component is absent from it."
+
+    val metadata = layout.projectDirectory.file("gradle/verification-metadata.xml")
+    val developmentDoc = layout.projectDirectory.file("DEVELOPMENT.md")
+    inputs.file(metadata)
+    inputs.file(developmentDoc)
+
+    doLast {
+        val xml = metadata.asFile.readText()
+        if (xml.contains("<!--")) {
+            throw GradleException(
+                "gradle/verification-metadata.xml contains a hand-written XML comment; " +
+                    "the checksum regeneration drops comments. The rationale's home is " +
+                    "DEVELOPMENT.md §6.3 (Hand-verified entries) — move it there.",
+            )
+        }
+        val docText = developmentDoc.asFile.readText()
+        require(docText.contains("#### Hand-verified entries")) {
+            "DEVELOPMENT.md §6.3 has no 'Hand-verified entries' table — the home of every hand-verified checksum's rationale"
+        }
+        val section = docText
+            .substringAfter("#### Hand-verified entries")
+            .substringBefore("\n---")
+        val componentPattern = Regex("""^\| `([^`]+:[^`]+:[^`]+)` \|""")
+        val components = section.lineSequence()
+            .mapNotNull { componentPattern.find(it.trim())?.groupValues?.get(1) }
+            .toList()
+        val missing = components.filter { coordinate ->
+            val (group, name, version) = coordinate.split(":")
+            !xml.contains("""<component group="$group" name="$name" version="$version"""")
+        }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "DEVELOPMENT.md §6.3 lists hand-verified components absent from gradle/verification-metadata.xml:\n" +
+                    missing.joinToString("\n") { "  - $it" },
+            )
+        }
+        logger.lifecycle("verification-metadata.xml: comment-free; ${components.size} hand-verified component(s) present.")
     }
 }
 
@@ -287,7 +424,9 @@ val composeArgvSecretsAudit = tasks.register<Exec>("composeArgvSecretsAudit") {
 // Every `build` runs the layering check and the two compose audits.
 subprojects {
     plugins.withId("java") {
-        tasks.named("check").configure { dependsOn(verifyModuleDependencies, composeEnvAudit, composeArgvSecretsAudit) }
+        tasks.named("check").configure {
+            dependsOn(verifyModuleDependencies, verifyVerificationMetadataDocs, composeEnvAudit, composeArgvSecretsAudit)
+        }
     }
 }
 
@@ -318,5 +457,11 @@ tasks.register("browserTest") {
 tasks.register("verify") {
     group = "verification"
     description = "lint + test + build — the pre-push gate (DEVELOPMENT.md §13)."
-    dependsOn(tasks.named("build"), verifyModuleDependencies, composeEnvAudit, composeArgvSecretsAudit)
+    dependsOn(
+        tasks.named("build"),
+        verifyModuleDependencies,
+        verifyVerificationMetadataDocs,
+        composeEnvAudit,
+        composeArgvSecretsAudit,
+    )
 }

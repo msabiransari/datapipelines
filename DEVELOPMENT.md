@@ -300,6 +300,22 @@ This resolves every configuration (the point of `resolveAndLockAll`) and
 records each artifact's checksum. Review the diff like the lockfile diff:
 new entries must be exactly the artifacts your change introduced.
 
+#### Hand-verified entries
+
+The regeneration above **rewrites `gradle/verification-metadata.xml` and drops
+any hand-written XML comment in it** — a comment is where a regeneration cannot
+carry rationale. The rationale therefore lives HERE, not in the XML: the root
+build's `verifyVerificationMetadataDocs` check (wired into `check`, beside
+`verifyModuleDependencies`) fails the build when the XML contains `<!--` at all,
+and when a component listed in this table is absent from the XML. An entry is
+hand-verified when Gradle cannot fetch the artifact itself (a platform POM read
+off the metadata graph, never a classpath) and someone computed the checksum by
+hand; add one row per component, and never write the reason into the XML.
+
+| Component | Why it is needed | Where the checksum came from | Date |
+|---|---|---|---|
+| `io.netty:netty-bom:4.2.17.Final` | jsoup 1.23.x's own POM imports netty-bom for ITS integration tests; Gradle reads the platform, which never lands on any classpath (the repo's netty stays locked at 4.1.137.Final) but its POM must verify | computed over the artifact fetched from repo1.maven.org | 2026-09-21 |
+
 ---
 
 ## 7. Verify
