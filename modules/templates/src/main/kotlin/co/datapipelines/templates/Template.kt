@@ -83,8 +83,11 @@ data class Template(
         /** The only `schema_version` v1 accepts (templates.md §3.2). */
         const val SUPPORTED_SCHEMA_VERSION = 1
 
-        /** The only `engine` v1 supports (enums.md §6). */
+        /** The `engine` of an `sql`/`html` template (enums.md §6). */
         const val FREEMARKER_ENGINE = "freemarker"
+
+        /** The `engine` of a transform template (transform-nodes design §2.1: no rendering engine). */
+        const val NONE_ENGINE = "none"
     }
 }
 

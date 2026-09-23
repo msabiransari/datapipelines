@@ -221,8 +221,14 @@ class ApiErrorCatalogSpecDriftTest {
          * the deactivated-user refusal on every surface but the promotion peer), landed in
          * the SAME commit as its constants (both mirrors), its exception class and its catalog
          * row. Re-derived from the document's own parse.
+         *
+         * 183 → 189 with 7b (#7, the transform template types): §13.9 gains
+         * `template.validation.freemarker_forbidden` and the five block/surface codes
+         * (`contract_invalid`, `invariant_invalid`, `test_failed`, `blocks_not_allowed`,
+         * `render_not_applicable`), all 400, landed in the SAME commit as their constants and
+         * their catalog rows. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 183
+        const val SECTION_13_ROW_COUNT = 189
 
         /**
          * §12's distinct validation codes.

@@ -134,7 +134,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // engine a route to I/O that the purity test and the breach suite do not fence.
     ":modules:scripting" to setOf(":modules:typesystem"),
     ":modules:pipeline-contract" to setOf(":modules:typesystem", ":modules:calculators"),
-    ":modules:templates" to setOf(":modules:typesystem", ":modules:pipeline-contract"),
+    ":modules:templates" to setOf(":modules:typesystem", ":modules:pipeline-contract", ":modules:scripting"),
     ":modules:datasources" to setOf(":modules:typesystem"),
     ":modules:staging" to setOf(":modules:typesystem"),
     ":modules:auth" to setOf(":modules:typesystem"),

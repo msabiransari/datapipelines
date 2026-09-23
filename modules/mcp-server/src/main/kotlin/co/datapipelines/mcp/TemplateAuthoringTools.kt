@@ -82,7 +82,10 @@ private const val RENDER_CONTEXT_DESC =
 /** §6.2.8 — the `type` field's description, kept off the schema line for length. */
 private const val TYPE_FIELD_DESC =
     "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes " +
-        "(requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."
+        "(requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); " +
+        "'jsonata' and 'javascript' are transform types — the body is one expression evaluated as a pure function " +
+        "of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests " +
+        "blocks are required. 'javascript' is refused at save until round two."
 
 /** §6.2.36 — `type` on an UPDATE: inherited from the working version when absent (136 §D / T289b). */
 private const val UPDATE_TYPE_FIELD_DESC =
@@ -91,8 +94,8 @@ private const val UPDATE_TYPE_FIELD_DESC =
 
 /** §6.2.8 — the `dialect` description, stating the type/dialect rule (046 §10). */
 private const val DIALECT_FIELD_DESC =
-    "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html " +
-        "template declares no dialect."
+    "SQL execution target. Required when type is 'sql' (the default); forbidden otherwise — html and the " +
+        "transform types declare no dialect."
 
 /**
  * §6.2.36 — the update tool's `id` description. It is REQUIRED here (§9.6 — the name never
@@ -120,6 +123,19 @@ private const val EXPECTED_HASH_DESC =
     "The body_hash of the version this edit is based on — templates_get, or a previous " +
         "templates_create/templates_update result. A mismatch is a 409 template.version.conflict; " +
         "re-read and rebase, never retry blindly."
+
+/** §6.2.8/§6.2.36 — the two engine values the model admits (record §2.1: freemarker iff sql/html, none iff a transform type). */
+private val ENGINE_VALUES = setOf(Template.FREEMARKER_ENGINE, Template.NONE_ENGINE)
+
+/** §6.2.8 — the `engine` description, stating the type-conditional rule (record §2.1). */
+private const val ENGINE_FIELD_DESC =
+    "Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types " +
+        "('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused " +
+        "with template.validation.engine_unsupported."
+
+/** The engine an omitted `engine` argument means: the type's one legal value (record §2.1). */
+private fun defaultEngineFor(type: TemplateType?): String =
+    if (type?.isTransform == true) Template.NONE_ENGINE else Template.FREEMARKER_ENGINE
 
 /**
  * `templates_create` (mcp-server.md §6.2.8). Scope: `author`.
@@ -174,7 +190,9 @@ class TemplatesCreateTool(
         val draft =
             TemplateDraft(
                 id = args.string("id"),
-                engine = args.enumString("engine", setOf(Template.FREEMARKER_ENGINE), Template.FREEMARKER_ENGINE)!!,
+                // The omitted-engine default follows the type (record §2.1): a transform create
+                // that names no engine means 'none', not the sql/html default.
+                engine = args.enumString("engine", ENGINE_VALUES, defaultEngineFor(type))!!,
                 type = type,
                 // Null is legal only for html — the validator's type/dialect consistency pair
                 // refuses a missing dialect on sql and a present one on html, with the same
@@ -208,10 +226,10 @@ class TemplatesCreateTool(
               "properties": {
                 "id": {"type": "string", "pattern": "${TemplateNameGrammar.pattern}", "description": "$ID_ARG_DESC"},
                 "engine": {
-                  "type": "string", "enum": ["freemarker"], "default": "freemarker",
-                  "description": "Template engine. v1 supports freemarker only."
+                  "type": "string", "enum": $TEMPLATE_ENGINE_ENUM_JSON, "default": "freemarker",
+                  "description": "$ENGINE_FIELD_DESC"
                 },
-                "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "$TYPE_FIELD_DESC"},
+                "type": {"type": "string", "enum": $TEMPLATE_TYPE_ENUM_JSON, "default": "sql", "description": "$TYPE_FIELD_DESC"},
                 "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON, "description": "$DIALECT_FIELD_DESC"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string", "description": "$DESCRIPTION_FIELD_DESC"},
@@ -314,7 +332,7 @@ class TemplatesUpdateTool(
         val draft =
             TemplateDraft(
                 id = id,
-                engine = args.enumString("engine", setOf(Template.FREEMARKER_ENGINE), Template.FREEMARKER_ENGINE)!!,
+                engine = args.enumString("engine", ENGINE_VALUES, defaultEngineFor(suppliedType ?: working.type))!!,
                 type = suppliedType ?: working.type,
                 // Null is legal only for html — the validator's type/dialect consistency pair
                 // refuses a missing dialect on sql and a present one on html, with the same
@@ -395,10 +413,10 @@ class TemplatesUpdateTool(
                 "id": {"type": "string", "pattern": "${TemplateNameGrammar.pattern}", "description": "$UPDATE_ID_ARG_DESC"},
                 "expected_hash": {"type": "string", "description": "$EXPECTED_HASH_DESC"},
                 "engine": {
-                  "type": "string", "enum": ["freemarker"], "default": "freemarker",
-                  "description": "Template engine. v1 supports freemarker only."
+                  "type": "string", "enum": $TEMPLATE_ENGINE_ENUM_JSON, "default": "freemarker",
+                  "description": "$ENGINE_FIELD_DESC"
                 },
-                "type": {"type": "string", "enum": ["sql", "html"], "description": "$UPDATE_TYPE_FIELD_DESC"},
+                "type": {"type": "string", "enum": $TEMPLATE_TYPE_ENUM_JSON, "description": "$UPDATE_TYPE_FIELD_DESC"},
                 "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON, "description": "$UPDATE_DIALECT_DESC"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string", "description": "$DESCRIPTION_FIELD_DESC"},

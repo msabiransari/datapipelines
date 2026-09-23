@@ -65,10 +65,11 @@ class TemplateDeserializer(
             )
         }
         val dialect = tree.get("dialect")?.takeIf { it.isTextual }?.asText()
-        if (type == TemplateType.HTML.wire) {
-            // An html template declares NO dialect; presence is the offense (046 §7), so the
-            // value is irrelevant — including an invalid one, which could not make it "more
-            // present".
+        val typed = type?.let { TemplateType.fromWire(it) }
+        if (typed != null && typed != TemplateType.SQL) {
+            // html and the transform types declare NO dialect; presence is the offense (046 §7,
+            // transform-nodes §2.1), so the value is irrelevant — including an invalid one,
+            // which could not make it "more present".
             if (tree.has("dialect")) {
                 return TemplateDeserializationOutcome.Rejected(
                     TemplateValidationResult(
@@ -76,9 +77,9 @@ class TemplateDeserializer(
                             TemplateValidationFailure(
                                 code = PipelineErrorCodes.Template.DIALECT_NOT_ALLOWED,
                                 message =
-                                    "A template of type 'html' declares no dialect, but the payload carries " +
+                                    "A template of type '${typed.wire}' declares no dialect, but the payload carries " +
                                         "'${dialect.truncateForError()}'.",
-                                details = mapOf("type" to TemplateType.HTML.wire, "dialect" to dialect.truncateForError()),
+                                details = mapOf("type" to typed.wire, "dialect" to dialect.truncateForError()),
                             ),
                         ),
                     ),
@@ -99,7 +100,17 @@ class TemplateDeserializer(
                 ),
             )
         }
-        return TemplateDeserializationOutcome.Parsed(mapper.treeToValue(tree, TemplateDraft::class.java))
+        val parsed = mapper.treeToValue(tree, TemplateDraft::class.java)
+        // An omitted engine on a transform type means 'none' (transform-nodes design §2.1) —
+        // the DTO's own default is freemarker, which would refuse a create that simply omitted
+        // the field. Stated values still go through the validator's type-conditional rule.
+        val normalized =
+            if (typed?.isTransform == true && !tree.has("engine")) {
+                parsed.copy(engine = Template.NONE_ENGINE)
+            } else {
+                parsed
+            }
+        return TemplateDeserializationOutcome.Parsed(normalized)
     }
 
     /** As [read], but throws [TemplateValidationException] instead of returning a rejection. */

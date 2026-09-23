@@ -150,23 +150,26 @@ These are **not** `(reserved)` values in the enums.md sense: all five are accept
 
 | Value | Description |
 |---|---|
-| `freemarker` | Apache Freemarker template engine. Default and only supported engine in v1. |
+| `freemarker` | Apache Freemarker template engine — the engine of `sql` and `html` templates. |
+| `none` | No rendering engine — the engine of the transform types (`jsonata`, `javascript`), whose body is evaluated by the scripting engine seam as a pure function of its input (transform-nodes design §2.1, since 7b). The pairing is enforced both ways: `engine` must match the template's `type` (`template.validation.engine_unsupported`). |
 
-**Reserved for future:** `pebble`, `handlebars`, `thymeleaf-sql`, `none` (raw SQL with no template processing — see [ROADMAP](ROADMAP.md)).
+**Reserved for future:** `pebble`, `handlebars`, `thymeleaf-sql` (see [ROADMAP](ROADMAP.md)).
 
 ---
 
 ## 6A. `TemplateType` — template kind
 
-**Source:** [Template Hierarchy §5](template-hierarchy-design.md)
+**Source:** [Template Hierarchy §5](template-hierarchy-design.md); the transform types: [transform-nodes design §2.1](superpowers/specs/2026-09-09-transform-nodes-design.md) (7b)
 **Used by:** templates (engine-configuration dispatch, type/dialect consistency), pipeline-contract (reference legality).
 
 | Value | Description |
 |---|---|
 | `sql` | The template renders SQL for pipeline nodes. Requires a `dialect`. Default, and the only kind that existed before 2026-09-02 (046) — every stored template backfilled to it. |
 | `html` | The template renders HTML through a second, auto-escaping engine configuration (design §6). Declares no `dialect`; **no pipeline node may reference it** (`pipeline.validation.template_type_mismatch`). |
+| `jsonata` | A transform: the body is one JSONata expression evaluated as a pure function of its input object (7b). `engine: none`, no `dialect`, no `imports`, `is_library` false; the version carries `contract` / `invariants` / `tests` blocks inside its `body_hash`. |
+| `javascript` | A transform in JavaScript (GraalJS isolate) — the enum value, the CHECKs and the wire vocabulary are final, but **save is refused with `transform.js.unavailable` until round two's engine ships** (7b; §4.4 of the record). |
 
-Fixed at template **create** and identical on every version of a template (`template.validation.type_immutable`). Serialization is the lowercase wire value (`"sql"` / `"html"`), per the case convention above. There are no reserved future values — component sub-typing (kpi, aggrid, svg, form, …) belongs to the future dashboard abstraction and is deliberately absent here (design §2).
+Fixed at template **create** and identical on every version of a template (`template.validation.type_immutable`). Serialization is the lowercase wire value (`"sql"` / `"html"` / `"jsonata"` / `"javascript"`), per the case convention above. There are no reserved future values — component sub-typing (kpi, aggrid, svg, form, …) belongs to the future dashboard abstraction and is deliberately absent here (design §2).
 
 ---
 

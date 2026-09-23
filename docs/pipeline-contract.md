@@ -1097,12 +1097,13 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.validation.dangerous_construct` | 400 | Forbidden Freemarker construct (SSTI hardening, Templates §4.2) |
 | `template.validation.id_invalid` | 400 | Template `id` fails the identifier rules |
 | `template.validation.new_root_requires_confirmation` | 400 | **The AGENT surface only** (094): `templates_create` refuses an `id` whose ROOT segment has no templates under it yet, unless the call carries `confirm_new_root: true`. Same `details.root` / `details.existing_roots` shape, same `test/` exemption and same REST/UI exemption as `pipeline.validation.new_root_requires_confirmation` |
-| `template.validation.dialect_invalid` | 400 | `dialect` not in the supported enum — or absent on a template whose type is not `html` (046: a dialect is required unless the type is `html`) |
-| `template.validation.type_invalid` | 400 | `type` not one of `sql`, `html` (046, template-hierarchy-design §5.4) |
-| `template.validation.dialect_not_allowed` | 400 | `dialect` is present on a `type='html'` template — an html template declares no dialect (046, template-hierarchy-design §7). Deliberately distinct from `dialect_invalid`: presence on the wrong type and an unknown value are different failures |
+| `template.validation.dialect_invalid` | 400 | `dialect` not in the supported enum — or absent on a `sql` template (a dialect is required on `sql` and forbidden on every other type; 046, extended in 7b) |
+| `template.validation.type_invalid` | 400 | `type` not one of `sql`, `html`, `jsonata`, `javascript` (046, template-hierarchy-design §5.4; the transform types since 7b) |
+| `template.validation.dialect_not_allowed` | 400 | `dialect` is present on a template whose type declares none — `html`, `jsonata` or `javascript` (046, template-hierarchy-design §7; extended to the transform types in 7b). Deliberately distinct from `dialect_invalid`: presence on the wrong type and an unknown value are different failures |
 | `template.validation.type_immutable` | 400 | A payload attempted to change a template's `type`, which is chosen at create and identical on every version (046, template-hierarchy-design §5.3) |
 | `template.validation.html_entity` | 400 | The body contains an HTML entity where a SQL operator belongs (`&lt;`, `&gt;`, `&amp;`, `&quot;`, `&#39;`) — the body was HTML-escaped between the author and the server (an agent client, a copy from a rendered page). Refused at save with `details.entity` and the first line it appears on, because at execution it surfaces as an opaque driver syntax error far from its cause (2026-09-11). |
-| `template.validation.engine_unsupported` | 400 | `engine` not a value v1 supports (only `freemarker`) |
+| `template.validation.engine_unsupported` | 400 | `engine` does not match the template's type — `freemarker` iff `sql`/`html`, `none` iff `jsonata`/`javascript` (type-conditional since 7b, transform-nodes design §2.1) |
+| `template.validation.freemarker_forbidden` | 400 | A transform-typed template carried `imports` or `is_library: true`, or its body contains a Freemarker construct (`${`, `<#`, `<@`) — a transform body is evaluated, never rendered (7b, D-T9); `details.rule` names which (`imports` / `is_library` / `body`) |
 | `template.validation.schema_version_unsupported` | 400 | `schema_version` not a value v1 supports (only `1`) |
 | `template.validation.is_library_without_macros` | 400 | `is_library: true` but body has no macro definitions or has output outside them |
 | `template.validation.import_not_found` | 400 | `imports` entry references a missing template id/version |
@@ -1122,6 +1123,11 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.version.not_eligible` | 409 | Manual switch targeted a template version that is not live and posture-eligible (101, [Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) |
 | `template.version.confirm_mismatch` | 400 | The typed-confirm guard on the irreversible template purge dialogs (102): the `confirm` form field did not name what the dialog asked the user to type — the version (`v4`) on a version purge, the template's name on the entity purge. Checked BEFORE the lifecycle service runs ([UI §5.1](ui-screens.md#51-standard-states) typed-confirm) |
 | `template.authoring.disabled` | 403 | An authoring write (create, update/draft, release, discard, delete) on a server with `datapipelines.deployment.authoring-enabled=false` — the template mirror of `pipeline.authoring.disabled` ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)); reads, execution and import are unaffected |
+| `template.contract_invalid` | 400 | A transform template's `contract` block failed a §2.2 rule (transform-nodes design); `details.rule` names which (`row_mode_inputs`, `type_unsupported`, `mode_output_mismatch`, `empty_case_missing`, `row_case_lists_table`, `unknown_field`, …) (7b) |
+| `template.invariant_invalid` | 400 | A transform template's invariant does not compile as JSONata, or produced a non-boolean on a test case; `details` names the invariant (and the case) (7b) |
+| `template.test_failed` | 400 | A transform template's test case failed at save or at release (the suite runs on both — §8.1); `details` names the case, the assertion, and a diff bounded to 2 000 chars (7b) |
+| `template.blocks_not_allowed` | 400 | `contract` / `invariants` / `tests` on an `sql` / `html` template — the blocks belong to the transform types only (7b) |
+| `template.render_not_applicable` | 400 | `templates_render` / `POST /api/v1/templates/render` on a transform type — there is nothing to render; `details.use` points at `templates_evaluate` (7b) |
 
 ### 13.10 Result retrieval
 

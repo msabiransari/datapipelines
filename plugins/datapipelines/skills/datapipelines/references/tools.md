@@ -107,12 +107,12 @@ Update an existing pipeline by writing its DRAFT — the first update after a re
 
 Scope `read` · read-only
 
-List the templates of the key's pinned workspace. Templates are reusable generators authored in Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
+List the templates of the key's pinned workspace. Templates are reusable generators referenced by id+version — sql/html bodies are authored in Freemarker, transform bodies are script expressions; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none, and the transform types ('jsonata', 'javascript') evaluate the body as a pure function of its input and declare neither. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
 | `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional |  |
-| `type` | string (`sql` \| `html`) | optional | Filter by template kind: 'sql' (pipeline-referenced SQL) or 'html' (rendered output). |
+| `type` | string (`sql` \| `html` \| `jsonata` \| `javascript`) | optional | Filter by template kind: 'sql' (pipeline-referenced SQL), 'html' (rendered output), or a transform type ('jsonata', 'javascript' — a pure function over its input, never rendered). |
 | `q` | string | optional |  |
 | `prefix` | string | optional | Browse ONE level of the folder tree instead of listing flat: returns that prefix's direct sub-folders (with counts) and its direct children. An empty string is the root. Use this to discover which roots and folders exist; use q to search across full paths. |
 | `is_library` | boolean | optional | Filter to library templates (macro collections) or executable templates. |
@@ -149,9 +149,9 @@ Create a new template. Templates use Freemarker syntax. A template declares NO p
 | Argument | Type | | What it is |
 |---|---|---|---|
 | `id` | string | optional | Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (acme/finance/daily_orders.sql). A FOLDER IS REQUIRED — a bare 'daily_orders.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now. |
-| `engine` | string (`freemarker`), default `"freemarker"` | optional | Template engine. v1 supports freemarker only. |
-| `type` | string (`sql` \| `html`), default `"sql"` | optional | Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'). |
-| `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional | SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect. |
+| `engine` | string (`freemarker` \| `none`), default `"freemarker"` | optional | Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types ('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused with template.validation.engine_unsupported. |
+| `type` | string (`sql` \| `html` \| `jsonata` \| `javascript`), default `"sql"` | optional | Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); 'jsonata' and 'javascript' are transform types — the body is one expression evaluated as a pure function of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests blocks are required. 'javascript' is refused at save until round two. |
+| `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional | SQL execution target. Required when type is 'sql' (the default); forbidden otherwise — html and the transform types declare no dialect. |
 | `display_name` | string | required |  |
 | `description` | string | required | Free text. State the variables the body expects and their types — the template declares none. |
 | `imports` | array of object | optional | Library templates whose macros this body calls. Aliases must be unique within the template; each referenced template must exist at that exact version and be is_library=true. |
@@ -169,8 +169,8 @@ Update an existing template by writing its DRAFT — the first update after a re
 |---|---|---|---|
 | `id` | string | required | Template to update — the FOLDER PATH id it was created under (acme/finance/daily_orders.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found. |
 | `expected_hash` | string | required | The body_hash of the version this edit is based on — templates_get, or a previous templates_create/templates_update result. A mismatch is a 409 template.version.conflict; re-read and rebase, never retry blindly. |
-| `engine` | string (`freemarker`), default `"freemarker"` | optional | Template engine. v1 supports freemarker only. |
-| `type` | string (`sql` \| `html`) | optional | Template kind — fixed at creation, so on an update it is OPTIONAL: omitted, the working version's is inherited; stated, it must equal it (template.validation.type_immutable otherwise). |
+| `engine` | string (`freemarker` \| `none`), default `"freemarker"` | optional | Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types ('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused with template.validation.engine_unsupported. |
+| `type` | string (`sql` \| `html` \| `jsonata` \| `javascript`) | optional | Template kind — fixed at creation, so on an update it is OPTIONAL: omitted, the working version's is inherited; stated, it must equal it (template.validation.type_immutable otherwise). |
 | `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional | Optional on update: omit it and the working version's dialect is inherited. When present it must be the dialect the template already has — a different one is refused with template.validation.dialect_invalid (a template pinned by pipeline nodes cannot change engine; create a new template instead). Never present for an html template. |
 | `display_name` | string | required |  |
 | `description` | string | required | Free text. State the variables the body expects and their types — the template declares none. |

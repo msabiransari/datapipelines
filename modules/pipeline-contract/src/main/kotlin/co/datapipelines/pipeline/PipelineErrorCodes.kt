@@ -837,6 +837,46 @@ object PipelineErrorCodes {
          * `pipeline.authoring.disabled`.
          */
         const val AUTHORING_DISABLED = "template.authoring.disabled"
+
+        /**
+         * §13.9 (7b, transform-nodes design §2.1 / D-T9) — a transform-typed template
+         * (`jsonata` / `javascript`) carried `imports` or `is_library`, or its body contains a
+         * Freemarker construct (`${`, `<#`, `<@`). A transform body is evaluated, never
+         * rendered; `details` names which (`imports`, `is_library`, `body`).
+         */
+        const val FREEMARKER_FORBIDDEN = "template.validation.freemarker_forbidden"
+
+        /**
+         * §13.9 (7b, transform-nodes design §2.2) — the `contract` block failed a §2.2 rule;
+         * `details.rule` names which (`row_mode_inputs`, `type_unsupported`,
+         * `mode_output_mismatch`, `empty_case_missing`, `row_case_lists_table`, …).
+         */
+        const val CONTRACT_INVALID = "template.contract_invalid"
+
+        /**
+         * §13.9 (7b, transform-nodes design §2.2) — an invariant does not compile, or produced
+         * a non-boolean on a test case; `details` names the invariant (and the case).
+         */
+        const val INVARIANT_INVALID = "template.invariant_invalid"
+
+        /**
+         * §13.9 (7b, transform-nodes design §8.1) — a test case failed at save or release:
+         * `details` names the case, the assertion, and a diff bounded to 2 000 chars.
+         */
+        const val TEST_FAILED = "template.test_failed"
+
+        /**
+         * §13.9 (7b, transform-nodes design §2.2) — `contract` / `invariants` / `tests` on an
+         * `sql` / `html` template: the blocks belong to the transform types only.
+         */
+        const val BLOCKS_NOT_ALLOWED = "template.blocks_not_allowed"
+
+        /**
+         * §13.9 (7b, transform-nodes design §9.1) — `templates_render` / `POST
+         * /api/v1/templates/render` on a transform type; `details.use` points at
+         * `templates_evaluate`.
+         */
+        const val RENDER_NOT_APPLICABLE = "template.render_not_applicable"
     }
 
     /** §13.10 — result retrieval. Defined in rest-api.md §7; cataloged here (D5/D9). */

@@ -2,6 +2,10 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.scripting.JsonataEngine
+import co.datapipelines.scripting.ScriptEngine
+import co.datapipelines.scripting.ScriptLanguage
+import co.datapipelines.scripting.ScriptSyntaxException
 import co.datapipelines.typesystem.Dialect
 import freemarker.core.TemplateElement
 
@@ -41,6 +45,8 @@ import freemarker.core.TemplateElement
 class TemplateValidator(
     private val libraryResolver: LibraryResolver,
     private val maxBodyChars: Int = DEFAULT_MAX_BODY_CHARS,
+    private val scriptEngines: Map<ScriptLanguage, ScriptEngine> =
+        mapOf(ScriptLanguage.JSONATA to JsonataEngine()),
 ) {
     /**
      * Runs §7 against [draft] and returns every failure. Imports resolve within
@@ -79,6 +85,7 @@ class TemplateValidator(
         addEngineFailure(draft, failures)
         addSchemaVersionFailure(draft, failures)
         addTypeDialectFailures(draft, failures)
+        addTransformFieldFailures(draft, failures)
         addHtmlEntityFailure(draft, failures)
         addBodyFailures(draft, failures, trace)
         libraryResolver.validate(workspaceId, draft.imports, failures, trace)
@@ -96,8 +103,9 @@ class TemplateValidator(
     }
 
     /**
-     * templates.md §3.2/§7: v1 supports only `"freemarker"`, and an unsupported `engine` is
-     * **rejected at save**, never stored.
+     * templates.md §3.2/§7: `engine` must match the template's type (transform-nodes design
+     * §2.1) — `freemarker` iff `sql`/`html`, `none` iff `jsonata`/`javascript`. An unsupported
+     * pairing is **rejected at save**, never stored.
      *
      * The gap this closes is a silent one: without the check, a template declaring
      * `engine: "pebble"` would be stored happily and then rendered by [TemplateEngine] as
@@ -108,6 +116,25 @@ class TemplateValidator(
         draft: TemplateDraft,
         failures: MutableList<TemplateValidationFailure>,
     ) {
+        val type = draft.type ?: TemplateType.SQL
+        if (type.isTransform) {
+            if (draft.engine == Template.NONE_ENGINE) return
+            failures +=
+                TemplateValidationFailure(
+                    code = PipelineErrorCodes.Template.ENGINE_UNSUPPORTED,
+                    message =
+                        "Engine '${draft.engine.truncateForError()}' is not supported for type '${type.wire}'; " +
+                            "a transform template's engine is '${Template.NONE_ENGINE}' — the body is evaluated, " +
+                            "never rendered.",
+                    details =
+                        mapOf(
+                            "engine" to draft.engine.truncateForError(),
+                            "type" to type.wire,
+                            "supported" to listOf(Template.NONE_ENGINE),
+                        ),
+                )
+            return
+        }
         if (draft.engine == Template.FREEMARKER_ENGINE) return
         failures +=
             TemplateValidationFailure(
@@ -166,15 +193,16 @@ class TemplateValidator(
         draft: TemplateDraft,
         failures: MutableList<TemplateValidationFailure>,
     ) {
-        if (draft.type == TemplateType.HTML) {
+        val type = draft.type ?: TemplateType.SQL
+        if (type == TemplateType.HTML || type.isTransform) {
             if (draft.dialect != null) {
                 failures +=
                     TemplateValidationFailure(
                         code = PipelineErrorCodes.Template.DIALECT_NOT_ALLOWED,
                         message =
-                            "A template of type 'html' declares no dialect, but the payload carries " +
+                            "A template of type '${type.wire}' declares no dialect, but the payload carries " +
                                 "'${draft.dialect.wire}'.",
-                        details = mapOf("type" to TemplateType.HTML.wire, "dialect" to draft.dialect.wire),
+                        details = mapOf("type" to type.wire, "dialect" to draft.dialect.wire),
                     )
             }
         } else if (draft.dialect == null) {
@@ -189,16 +217,62 @@ class TemplateValidator(
     }
 
     /**
+     * D-T9 / transform-nodes design §2.1 — a transform type has no Freemarker at all:
+     * `imports` and `is_library` are refused (there is no Freemarker to import into), and a
+     * body containing a Freemarker construct (`${`, `<#`, `<@`) is refused, all with
+     * `template.validation.freemarker_forbidden`, the detail naming which.
+     */
+    private fun addTransformFieldFailures(
+        draft: TemplateDraft,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        val type = draft.type ?: TemplateType.SQL
+        if (!type.isTransform) return
+        if (draft.imports.isNotEmpty()) {
+            failures +=
+                TemplateValidationFailure(
+                    code = PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN,
+                    message =
+                        "A template of type '${type.wire}' declares no imports — there is no Freemarker " +
+                            "to import into on a transform template.",
+                    details = mapOf("rule" to "imports", "type" to type.wire),
+                )
+        }
+        if (draft.isLibrary) {
+            failures +=
+                TemplateValidationFailure(
+                    code = PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN,
+                    message =
+                        "A template of type '${type.wire}' cannot be a library — a library is a Freemarker " +
+                            "macro collection, and a transform body is evaluated, never rendered.",
+                    details = mapOf("rule" to "is_library", "type" to type.wire),
+                )
+        }
+        val construct = FREEMARKER_CONSTRUCT.find(draft.body)
+        if (construct != null) {
+            failures +=
+                TemplateValidationFailure(
+                    code = PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN,
+                    message =
+                        "The body contains the Freemarker construct '${construct.value}' — a transform body is " +
+                            "evaluated by the script engine, never rendered (D-T9).",
+                    details = mapOf("rule" to "body", "type" to type.wire, "match" to construct.value),
+                )
+        }
+    }
+
+    /**
      * `template.validation.html_entity` — a body carrying `&lt;`/`&gt;`/`&amp;`/`&quot;`/`&#39;`
      * was HTML-escaped on its way here and can never be the SQL its author meant. Named so the
      * fix is one edit, not a full run ending in a driver syntax error (pipeline-3 audit).
-     * Applies to `sql` templates only: an `html` template may legitimately emit entities.
+     * Applies to `sql` templates only: an `html` template may legitimately emit entities, and a
+     * transform body is not SQL.
      */
     private fun addHtmlEntityFailure(
         draft: TemplateDraft,
         failures: MutableList<TemplateValidationFailure>,
     ) {
-        if (draft.type == TemplateType.HTML) return
+        if ((draft.type ?: TemplateType.SQL) != TemplateType.SQL) return
         val match = HTML_ENTITY.find(draft.body) ?: return
         val line = draft.body.substring(0, match.range.first).count { it == '\n' } + 1
         failures +=
@@ -231,6 +305,12 @@ class TemplateValidator(
                 )
             // Deliberately no parse: the cap exists to keep an adversarial body away from the
             // parser, so honouring it must mean not parsing.
+            return
+        }
+
+        val type = draft.type ?: TemplateType.SQL
+        if (type.isTransform) {
+            addTransformBodyFailures(draft, type, failures)
             return
         }
 
@@ -308,9 +388,47 @@ class TemplateValidator(
             )
     }
 
+    /**
+     * The transform body checks (transform-nodes design §2.1/§8.1): the body is parsed through
+     * the scripting engine — never through Freemarker — and a `javascript` body is refused
+     * outright until round two's isolate ships (`transform.js.unavailable`; the type exists so
+     * the enum, the CHECKs and the docs are final). The D-T9 Freemarker-construct refusal is
+     * [addTransformFieldFailures]'s, so both a construct and a syntax error surface in one pass.
+     */
+    private fun addTransformBodyFailures(
+        draft: TemplateDraft,
+        type: TemplateType,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        if (type == TemplateType.JAVASCRIPT) {
+            failures +=
+                TemplateValidationFailure(
+                    code = TransformCodes.JS_UNAVAILABLE,
+                    message =
+                        "A 'javascript' template cannot be saved yet: the GraalJS isolate engine ships in " +
+                            "round two (transform-nodes design §4.4). Only 'jsonata' saves today.",
+                    details = mapOf("type" to type.wire),
+                )
+            return
+        }
+        try {
+            scriptEngines.getValue(ScriptLanguage.JSONATA).compile(draft.body)
+        } catch (err: ScriptSyntaxException) {
+            failures +=
+                TemplateValidationFailure(
+                    code = PipelineErrorCodes.Template.SYNTAX_ERROR,
+                    message = err.message ?: "the body does not parse",
+                    details = mapOf("line" to err.line, "column" to err.column),
+                )
+        }
+    }
+
     companion object {
         /** The five entities a SQL body can only have acquired by being HTML-escaped. */
         private val HTML_ENTITY = Regex("&(lt|gt|amp|quot|#39);")
+
+        /** D-T9's forbidden Freemarker constructs in a transform body: interpolation or a directive. */
+        private val FREEMARKER_CONSTRUCT = Regex("""\$\{|<#|<@""")
 
         /**
          * `datapipelines.templates.max-body-chars` (configuration.md §3.9) — mirrored here for

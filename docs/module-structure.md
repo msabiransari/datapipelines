@@ -114,7 +114,7 @@ layer 2
 
 layer 3
 ┌──────────────┐
-│  templates   │  ← typesystem, pipeline-contract
+│  templates   │  ← typesystem, pipeline-contract, scripting
 └──────────────┘
 
 layer 4
@@ -165,7 +165,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `calculators` | `typesystem` |
 | `scripting` | `typesystem` |
 | `pipeline-contract` | `typesystem`, `calculators` |
-| `templates` | `typesystem`, `pipeline-contract` |
+| `templates` | `typesystem`, `pipeline-contract`, `scripting` |
 | `datasources` | `typesystem` |
 | `staging` | `typesystem` |
 | `auth` | `typesystem` |
@@ -242,7 +242,7 @@ Some concerns touch every module:
 
 ### 5.3 `templates`
 
-**Dependencies (internal):** `typesystem`, `pipeline-contract` (for `Parameter` shape).
+**Dependencies (internal):** `typesystem`, `pipeline-contract` (for `Parameter` shape), `scripting` (transform bodies parse and evaluate through its seam, never through Freemarker — transform-nodes design §2.1, D-T9).
 
 **Dependencies (external):**
 - `org.freemarker:freemarker` (pinned).

@@ -414,12 +414,12 @@ List templates.
 ```json
 {
   "name": "templates_list",
-  "description": "List the templates of the key's pinned workspace. Templates are reusable generators authored in Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.",
+  "description": "List the templates of the key's pinned workspace. Templates are reusable generators referenced by id+version — sql/html bodies are authored in Freemarker, transform bodies are script expressions; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none, and the transform types ('jsonata', 'javascript') evaluate the body as a pure function of its input and declare neither. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"]},
-      "type": {"type": "string", "enum": ["sql", "html"], "description": "Filter by template kind: 'sql' (pipeline-referenced SQL) or 'html' (rendered output)."},
+      "type": {"type": "string", "enum": ["sql", "html", "jsonata", "javascript"], "description": "Filter by template kind: 'sql' (pipeline-referenced SQL), 'html' (rendered output), or a transform type ('jsonata', 'javascript' — a pure function over its input, never rendered)."},
       "q": {"type": "string"},
       "prefix": {"type": "string", "description": "Browse ONE level of the folder tree instead of listing flat: returns that prefix's direct sub-folders (with counts) and its direct children. An empty string is the root. Use this to discover which roots and folders exist; use q to search across full paths."},
       "is_library": {"type": "boolean", "description": "Filter to library templates (macro collections) or executable templates."},
@@ -486,9 +486,9 @@ Create a new template.
     "required": ["display_name", "description", "body"],
     "properties": {
       "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (acme/finance/daily_orders.sql). A FOLDER IS REQUIRED — a bare 'daily_orders.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now."},
-      "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
-      "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."},
-      "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"], "description": "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect."},
+      "engine": {"type": "string", "enum": ["freemarker", "none"], "default": "freemarker", "description": "Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types ('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused with template.validation.engine_unsupported."},
+      "type": {"type": "string", "enum": ["sql", "html", "jsonata", "javascript"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); 'jsonata' and 'javascript' are transform types — the body is one expression evaluated as a pure function of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests blocks are required. 'javascript' is refused at save until round two."},
+      "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"], "description": "SQL execution target. Required when type is 'sql' (the default); forbidden otherwise — html and the transform types declare no dialect."},
       "display_name": {"type": "string"},
       "description": {"type": "string", "description": "Free text. State the variables the body expects and their types — the template declares none."},
       "imports": {
@@ -1407,8 +1407,8 @@ Update an existing template by writing its DRAFT (versioning §3.2/§5.1/§5.2) 
     "properties": {
       "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template to update — the FOLDER PATH id it was created under (acme/finance/daily_orders.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found."},
       "expected_hash": {"type": "string", "description": "The body_hash of the version this edit is based on — templates_get, or a previous templates_create/templates_update result. A mismatch is a 409 template.version.conflict; re-read and rebase, never retry blindly."},
-      "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
-      "type": {"type": "string", "enum": ["sql", "html"], "description": "Template kind — fixed at creation, so on an update it is OPTIONAL: omitted, the working version's is inherited; stated, it must equal it (template.validation.type_immutable otherwise)."},
+      "engine": {"type": "string", "enum": ["freemarker", "none"], "default": "freemarker", "description": "Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types ('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused with template.validation.engine_unsupported."},
+      "type": {"type": "string", "enum": ["sql", "html", "jsonata", "javascript"], "description": "Template kind — fixed at creation, so on an update it is OPTIONAL: omitted, the working version's is inherited; stated, it must equal it (template.validation.type_immutable otherwise)."},
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"], "description": "Optional on update: omit it and the working version's dialect is inherited. When present it must be the dialect the template already has — a different one is refused with template.validation.dialect_invalid (a template pinned by pipeline nodes cannot change engine; create a new template instead). Never present for an html template."},
       "display_name": {"type": "string"},
       "description": {"type": "string", "description": "Free text. State the variables the body expects and their types — the template declares none."},
