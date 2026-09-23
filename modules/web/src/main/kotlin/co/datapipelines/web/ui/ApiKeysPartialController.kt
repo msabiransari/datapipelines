@@ -26,9 +26,11 @@ import org.springframework.web.bind.annotation.ResponseBody
  * resolved from the request context so no payload chooses a target.
  *
  * The secret is served by [secret] and NOWHERE ELSE: it is fetched on the copy click
- * (shell.js), never rendered into a page. A key minted before R3 has no sealed secret, so
- * [secret] answers 404 and the bar's copy button is not rendered for it — the prefix chip
- * says "delete and sign in again" instead.
+ * (shell.js), never rendered into a page. Since #213 the serve is ONE-SHOT: the open destroys
+ * the sealed copy in the same statement, so a second click answers 404 — and a key minted
+ * before R3 never carried one. The bar's copy button is gone for both (the chip swaps itself
+ * out through [chip] after a successful copy) and the prefix says "delete and sign in again"
+ * instead.
  */
 @Controller
 class ApiKeysPartialController(
@@ -37,9 +39,16 @@ class ApiKeysPartialController(
 ) {
     /**
      * The caller's own MCP key's plaintext, as `text/plain` for the copy handler. 404 when
-     * there is nothing copyable — no live key in the active workspace, or one minted before
-     * the sealed store existed. A 404 discloses nothing here that the chip did not already
-     * show: the caller is the key's owner, asking about their own credential.
+     * there is nothing copyable — no live key in the active workspace, or one whose copy was
+     * already read (#213: the first successful GET is the last). A 404 discloses nothing here
+     * that the chip did not already show: the caller is the key's owner, asking about their
+     * own credential.
+     *
+     * A GET with a side effect, deliberately: the open AND the clear are one SQL statement
+     * behind it (owner-scoped, idempotent-after-first-call — a retried GET is a 404, never a
+     * second reveal), the response is `no-store`, and the verb is what the chip's existing
+     * copy fetch already makes. A POST would buy no CSRF cover the session's SameSite cookie
+     * and the owner-scope do not already give.
      */
     @GetMapping("/partials/mcp-key/secret", produces = [MediaType.TEXT_PLAIN_VALUE])
     @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
@@ -54,6 +63,23 @@ class ApiKeysPartialController(
             // anywhere along the way.
             .header("Cache-Control", "no-store")
             .body(plaintext)
+    }
+
+    /**
+     * The chip re-rendered from the server's CURRENT state (#213): after a successful copy the
+     * sealed secret is gone, so the swapped chip comes back with `copyable = false` and no Copy
+     * button — the server, not the click handler, decides when the chip stops offering the key.
+     * The copy fetch drives this through `htmx.ajax` (shell.js), the same fragment and target
+     * delete-to-rotate swaps.
+     */
+    @GetMapping("/partials/mcp-key/chip")
+    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
+    fun chip(model: Model): String {
+        val principal = requirePrincipal()
+        val key = principal.workspace?.let { apiKeyRepository.findLiveUserKey(principal.userId, it.id) }
+        model.addAttribute("mcpKey", key?.let(McpKeyChip::of))
+        RoleModel.stamp(model, principal)
+        return "partials/mcp-key-chip"
     }
 
     /**

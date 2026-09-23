@@ -1142,7 +1142,13 @@
        login-minted key in the active workspace, opened from its sealed store), puts it on
        the clipboard and toasts the outcome. The fetch carries the layout's CSRF header
        contract like every mutating call — a GET needs no token, so none is sent. A 4xx
-       (the key was rotated in another tab) is a toast, not a silent no-op. */
+       (the key was rotated in another tab — or copied already, #213) is a toast, not a
+       silent no-op.
+
+       #213 (show-once): the successful fetch destroyed the server's copyable copy in the
+       same act that served it, so the chip is re-rendered from the server right after the
+       clipboard write — Copy disappears without a reload. The swap reuses the rotate flow's
+       fragment and target; the server, not this handler, decides the chip has no Copy. */
     doc.body.addEventListener("click", function (evt) {
       var copy = evt.target.closest && evt.target.closest("[data-mcp-copy]");
       if (!copy) return;
@@ -1157,11 +1163,12 @@
         })
         .then(function (secret) {
           return navigator.clipboard.writeText(secret).then(function () {
-            if (toast) toast.show("success", "MCP key copied", "The full key is on your clipboard.");
+            if (toast) toast.show("success", "MCP key copied", "The full key is on your clipboard — this was the one copy; rotate for a new one.");
+            if (window.htmx) window.htmx.ajax("GET", "/partials/mcp-key/chip", { target: "#app-mcpkey", swap: "outerHTML" });
           });
         })
         .catch(function () {
-          if (toast) toast.show("danger", "Copy failed", "The key could not be read — it may have been rotated. Reload and try again.");
+          if (toast) toast.show("danger", "Copy failed", "The key could not be read — it may have been rotated or copied already. Reload and try again.");
         });
     });
 

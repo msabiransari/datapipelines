@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceMembership
@@ -67,7 +68,7 @@ class UiWorkspaceAdvice(
         val principal = principal() ?: return null
         val workspace = principal.workspace ?: return null
         val key = apiKeyRepository.findLiveUserKey(principal.userId, workspace.id) ?: return null
-        return McpKeyChip(prefix = key.id.take(ApiKeyRows.PREFIX_CHARS) + "…", copyable = key.hasSealedSecret)
+        return McpKeyChip.of(key)
     }
 
     /**
@@ -142,13 +143,19 @@ class UiWorkspaceAdvice(
 }
 
 /**
- * The top bar's MCP-key chip (179, D16): the display prefix, and whether the key carries a
- * sealed secret the copy endpoint can open (false for keys minted before V31 — they show
- * the prefix with the "delete and sign in again" hint and no Copy). The id and the secret
- * never appear here: deletion needs no id (one key per user per workspace, resolved
- * server-side) and the secret is fetched on the click.
+ * The top bar's MCP-key chip (179, D16): the display prefix, and whether the key still
+ * carries its sealed secret the copy endpoint can open (false for keys minted before V31,
+ * and since #213 for every key whose Copy was pressed once — the first read destroyed the
+ * copy). Both shapes show the prefix with the "delete and sign in again" hint and no Copy.
+ * The id and the secret never appear here: deletion needs no id (one key per user per
+ * workspace, resolved server-side) and the secret is fetched on the click.
  */
 data class McpKeyChip(
     val prefix: String,
     val copyable: Boolean,
-)
+) {
+    companion object {
+        /** The chip for [key] — the one construction, shared by the advice and the chip partial. */
+        fun of(key: ApiKey): McpKeyChip = McpKeyChip(prefix = key.id.take(ApiKeyRows.PREFIX_CHARS) + "…", copyable = key.hasSealedSecret)
+    }
+}
