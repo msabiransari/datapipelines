@@ -10,11 +10,13 @@ API humans use.
 
 ## Status
 
-**Public beta since September 15, 2026.** The safety properties are production-standard
-— the pipeline lifecycle (draft, human release, immutable versions), API keys
-and the role-based scope matrix, purge/discard/restore, and promotion between
-deployments are all gated. What a beta population finds is the breadth: UI
-paths and agent behaviour on unusual data.
+**First release, v0.0.1rc, September 23, 2026 — under heavy development, not yet
+production-grade.** Expect bugs and rough edges, and tell us about them. The
+guarded core is in place: the pipeline lifecycle (draft, human release, immutable
+versions), roles and the login-minted keys, purge/discard/restore, and promotion
+between deployments each carry their tests. What a first release finds is the
+breadth: UI paths, agent behaviour on unusual data, and the flows nobody has
+clicked through yet.
 
 - **Known limitations** — [the roadmap's list](https://datapipelines.co/roadmap#known-limitations)
   (source: [`docs/ROADMAP.md` §2.2](docs/ROADMAP.md)).
