@@ -13,6 +13,7 @@ import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.ResponseBody
 
 /**
@@ -47,13 +48,26 @@ class ApiKeysPartialController(
      * A GET with a side effect, deliberately: the open AND the clear are one SQL statement
      * behind it (owner-scoped, idempotent-after-first-call — a retried GET is a 404, never a
      * second reveal), the response is `no-store`, and the verb is what the chip's existing
-     * copy fetch already makes. A POST would buy no CSRF cover the session's SameSite cookie
-     * and the owner-scope do not already give.
+     * copy fetch already makes.
+     *
+     * **Fetch-metadata guard (7a/213 merge review).** `dp_session` is `SameSite=Lax`, and Lax
+     * cookies ride a cross-site top-level GET navigation — so without this guard a hostile page
+     * could navigate a signed-in user here and DESTROY their one copy (it could never read the
+     * body; the harm is a forced rotation). A browser stamps every request with
+     * `Sec-Fetch-Site` / `Sec-Fetch-Mode`: the chip's copy fetch is `same-origin` + `cors`, a
+     * cross-site link or `window.open` is `cross-site` + `navigate`, the address bar is `none`
+     * + `navigate`. Anything that is not a same-origin, non-navigation request is refused 403
+     * BEFORE the open, so the copy survives it. A client that sends neither header is not a
+     * browser and cannot carry the user's session cookie from someone else's page.
      */
     @GetMapping("/partials/mcp-key/secret", produces = [MediaType.TEXT_PLAIN_VALUE])
     @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
     @ResponseBody
-    fun secret(): ResponseEntity<String> {
+    fun secret(
+        @RequestHeader(name = SEC_FETCH_SITE, required = false) fetchSite: String? = null,
+        @RequestHeader(name = SEC_FETCH_MODE, required = false) fetchMode: String? = null,
+    ): ResponseEntity<String> {
+        if (!isSameOriginFetch(fetchSite, fetchMode)) return ResponseEntity.status(HttpStatus.FORBIDDEN).build()
         val principal = requirePrincipal()
         val workspace = principal.workspace ?: return ResponseEntity.notFound().build()
         val plaintext = apiKeyService.openOwnMcpKey(principal.userId, workspace.id) ?: return ResponseEntity.notFound().build()
@@ -104,4 +118,22 @@ class ApiKeysPartialController(
     private fun requirePrincipal(): AuthenticatedPrincipal =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
             ?: error("No authenticated principal")
+
+    private companion object {
+        const val SEC_FETCH_SITE = "Sec-Fetch-Site"
+        const val SEC_FETCH_MODE = "Sec-Fetch-Mode"
+
+        /**
+         * True when the request may open the one-shot secret: no fetch metadata at all (not a
+         * browser), or a same-origin request that is not a navigation.
+         */
+        fun isSameOriginFetch(
+            fetchSite: String?,
+            fetchMode: String?,
+        ): Boolean {
+            val crossSite = fetchSite != null && !fetchSite.equals("same-origin", ignoreCase = true)
+            val navigation = fetchMode != null && fetchMode.equals("navigate", ignoreCase = true)
+            return !crossSite && !navigation
+        }
+    }
 }

@@ -187,6 +187,27 @@ class ApiKeysPartialControllerTest {
     }
 
     @Test
+    fun `the secret endpoint refuses a cross-site or navigating request before it opens anything`() {
+        authenticate()
+        every { apiKeyService.openOwnMcpKey(userId, workspaceId) } returns "dpk_abc123.supersecret"
+
+        // A hostile page's link or window.open, a sibling subdomain, the address bar: all 403,
+        // and the one-shot open never runs — the copy survives for the real Copy click.
+        controller.secret("cross-site", "navigate").statusCode shouldBe HttpStatus.FORBIDDEN
+        controller.secret("cross-site", "no-cors").statusCode shouldBe HttpStatus.FORBIDDEN
+        controller.secret("same-site", "cors").statusCode shouldBe HttpStatus.FORBIDDEN
+        controller.secret("none", "navigate").statusCode shouldBe HttpStatus.FORBIDDEN
+        controller.secret("same-origin", "navigate").statusCode shouldBe HttpStatus.FORBIDDEN
+        verify(exactly = 0) { apiKeyService.openOwnMcpKey(any(), any()) }
+
+        // The chip's own copy fetch (same-origin, cors) opens it.
+        val response = controller.secret("same-origin", "cors")
+        response.statusCode shouldBe HttpStatus.OK
+        response.body shouldBe "dpk_abc123.supersecret"
+        verify(exactly = 1) { apiKeyService.openOwnMcpKey(userId, workspaceId) }
+    }
+
+    @Test
     fun `rotate revokes the caller's own key in the active workspace and re-renders the chip`() {
         authenticate()
         every { apiKeyRepository.findLiveUserKey(userId, workspaceId) } returns liveKey
