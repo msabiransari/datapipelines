@@ -19,8 +19,7 @@ import java.time.Instant
 
 /**
  * [UserRepository], [ApiKeyRepository] and [AuditLogger] against a real Postgres
- * running the **shipped** migrations V1 + V4 + V5 (metadata-db §4.1/§4.2/§4.3 — V4 adds the
- * `api_keys.workspace_id` pin, V5 the local password auth columns). The migrations are executed off disk rather than via Flyway —
+ * running the **shipped** migrations, every one in version order off disk rather than via Flyway —
  * domain modules carry no Flyway dependency (module-structure §3.1 rule 2), the same
  * discipline as the sibling `PipelineRepositoryIntegrationTest`.
  */
