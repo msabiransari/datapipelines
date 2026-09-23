@@ -29,9 +29,10 @@ data class ApiKey(
      */
     val kind: ApiKeyKind = ApiKeyKind.DEFAULT,
     /**
-     * Whether `api_keys.secret_sealed` holds the openable plaintext (V31, D16). The flag
-     * travels on the model — the top bar renders Copy from it — while the sealed BLOB never
-     * does: [ApiKeyRepository.sealedSecretOf] is the only read that touches the column.
+     * Whether `api_keys.secret_sealed` holds the openable plaintext (V31, D16; show-once since
+     * #213 — the flag reads false from the first Copy on). The flag travels on the model — the
+     * top bar renders Copy from it — while the sealed BLOB never does:
+     * [ApiKeyRepository.openAndClearSealedSecret] is the only read that touches the column.
      */
     val hasSealedSecret: Boolean = false,
     /** True when the login/switch hook minted this key rather than a person on demand (D16). */

@@ -598,17 +598,20 @@ class ApiKeyServiceTest {
     }
 
     @Test
-    fun `the copy path opens only the owner's live key's sealed secret`() {
+    fun `the copy path opens only the owner's live key's sealed secret - exactly once`() {
         val key = record(id = "dpk_SEALED000001")
         every { repo.findLiveUserKey(ownerId, workspaceId) } returns key
         val fullKey = "dpk_SEALED000001.${"A".repeat(48)}"
-        every { repo.sealedSecretOf(key.id) } returns sealer.seal(fullKey, key.id)
+        every { repo.openAndClearSealedSecret(key.id, ownerId) } returns sealer.seal(fullKey, key.id)
 
         mintingService.openOwnMcpKey(ownerId, workspaceId) shouldBe fullKey
+        // The open is owner-scoped: the caller's id, never just the key's, reaches the clear.
+        io.mockk.verify { repo.openAndClearSealedSecret(key.id, ownerId) }
 
-        // A pre-V31 key (nothing sealed) and no key at all both answer null — the chip shows
-        // the prefix without a copy button for the first and is absent for the second.
-        every { repo.sealedSecretOf(key.id) } returns null
+        // #213: the first read destroyed the copy — the repository answers null from then on,
+        // exactly as it does for a pre-V31 key (nothing sealed). The chip shows the prefix
+        // without a copy button; with no key at all it is absent.
+        every { repo.openAndClearSealedSecret(key.id, ownerId) } returns null
         mintingService.openOwnMcpKey(ownerId, workspaceId) shouldBe null
         every { repo.findLiveUserKey(ownerId, workspaceId) } returns null
         mintingService.openOwnMcpKey(ownerId, workspaceId) shouldBe null
