@@ -703,9 +703,18 @@ only in the same commits as their implementations and drift guards.
 
 Recorded so they are not lost. **Nothing in this section is a decision**; recommendations are
 labelled as such. Checked against main at `be0305b3` (v0.0.1rc) and against the db-scheduler
-16.12.0 sources and jar. The owner will discuss permissions before deciding anything about the
-scheduler, so the permission items in §9.2 and the §4.2 matrix stay open until then. Item ids
-are stable for discussion.
+16.12.0 sources and jar. Item ids are stable for discussion.
+
+**Permissions come first (owner, 2026-09-23).** The permission discussion produced its own design
+record, [permissions and keys](2026-09-23-permissions-and-keys-design.md) (#215), which lands before
+the scheduler. Its §8 lists what the scheduler inherits:
+- A scheduler key is its own identity, with the `viewer` role, created by authors and above. This
+  settles B4, B5 and B6 below.
+- Schedule permissions are named `schedule.*`.
+- Under D2, any author may modify any schedule unless ruled otherwise, which conflicts with the
+  "own" column in §4.2.
+- B7 (the application credential for schedule management) and B14 (what viewers see) stay open for
+  the scheduler round.
 
 ### 9.1 Statements to correct against main (no ruling needed)
 

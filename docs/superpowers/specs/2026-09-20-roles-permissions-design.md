@@ -1,5 +1,10 @@
 # Roles and permissions — design record (2026-09-20, RATIFIED by the owner the same day; draft 2 carries the three settled cells and the lane split as four)
 
+> **Proposed amendment (2026-09-23, draft pending ratification, #215):** named
+> `<functionality>.<permission>` permissions and keys that carry a role with their own identity —
+> [permissions and keys](2026-09-23-permissions-and-keys-design.md). Once ratified it replaces this
+> record's "no permission strings" principle (§6) and §3.6; everything else here stands.
+
 Owner's intent (2026-09-20): "introduce the permissions now … add gates to always test authorization
 has been used in any new implementation." This record turns the owner's thirteen rules and eight
 rulings into decisions, a role-by-action matrix over the EXISTING action catalogue (26 REST operation
