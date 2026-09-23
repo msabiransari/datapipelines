@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.26 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
+**Status:** v2.27 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-21
@@ -119,7 +119,7 @@ Every 4xx and 5xx response uses this shape:
     "details": {
       "cycle_path": ["fetch_orders", "revenue", "fetch_orders"]
     },
-    "doc_url": "https://docs.datapipelines.co/errors/pipeline-validation-cycle-detected"
+    "doc_url": "https://datapipelines.co/docs/pipeline-contract#131-pipeline-validation-write-time"
   }
 }
 ```
@@ -128,7 +128,7 @@ Every 4xx and 5xx response uses this shape:
 - `message` — technical message for developers. English. Includes specifics.
 - `user_message` — non-technical message safe to display to end users. May be localized in future.
 - `details` — structured, code-specific. Each error code documents its `details` shape.
-- `doc_url` — link to the public docs page for this error code.
+- `doc_url` — link to the public docs: the [Pipeline Contract §13 catalog](pipeline-contract.md#13-error-code-catalog) at the anchor of the section listing the code's family (there is no per-code page).
 
 ### 4.3 Pagination envelope
 
@@ -685,7 +685,7 @@ The `error` object is the **failure record** (057/T85): one object, completed on
       "datasource_name": "pg-prod",
       "underlying_error": "java.net.ConnectException: Connection refused"
     },
-    "doc_url": "https://docs.datapipelines.co/errors/pipeline-node-datasource-connection-failed",
+    "doc_url": "https://datapipelines.co/docs/pipeline-contract#134-node-execution",
     "correlation_id": "corr-uuid",
     "node": {
       "id": "fetch_orders",
@@ -2073,6 +2073,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-22 | v2.27 | #212 doc_url | §4.2: `doc_url` is `https://datapipelines.co/docs/pipeline-contract#<section anchor>` — the catalog page at the code's §13 section. The previous shape (`https://docs.datapipelines.co/errors/<code>`) named a host that does not exist. |
 | 2026-09-22 | v2.26 | #208 self-membership | Additive. §17.8 / §17.10 / §17.11: a caller addressing their OWN membership — role, login-minted key, removal — is refused with the new `409 workspace.self_membership` (pipeline-contract §13.12); another workspace admin or a super admin does it. |
 | 2026-09-21 | v2.25 | 200 (#200) membership-bound keys | Additive. NEW §17.11 `DELETE /workspaces/{name}/members/{user_id}/key` — a workspace admin or super admin revokes a member's login-minted key without removing them (idempotent `204`; the member's session keeps working, the next login mints fresh; [Auth §7.4](auth.md#74-issuance)). §17.8 states the removal path's new effect: the member's key is revoked in the same act (`auth.api_key.revoked_by_admin`, reason `member_removed` \| `admin_revoked`). |
 | 2026-09-21 | v2.24 | 199 (#199) | Security, no wire change. §19.5: a promotion batch carries the bindings **of the source workspace** only — the sender read every workspace's `endpoint_key_bindings` rows and matched by node, so a neighbouring workspace's key bound at a node equal to a promoted pattern rode into the batch by NAME and, on the target, bound the target's key of that name or refused the whole batch for a name the source never chose. The read is now filtered by `workspace_id` in the query (the #191 rule for the serve path, applied to the sender). Numbered on base db12e043; the merger renumbers if another lane took v2.24. |

@@ -119,7 +119,7 @@ class ApiExceptionHandlerTest {
             .andExpect(jsonPath("$.schema_version").value(1))
             .andExpect(jsonPath("$.error.code").value(PipelineErrorCodes.Execution.NOT_FOUND))
             .andExpect(jsonPath("$.error.user_message").exists())
-            .andExpect(jsonPath("$.error.doc_url").value("https://docs.datapipelines.co/errors/pipeline-execution-not-found"))
+            .andExpect(jsonPath("$.error.doc_url").value("https://datapipelines.co/docs/pipeline-contract#133-pipeline-execution-run-time"))
             .andExpect(jsonPath("$.correlation_id").exists())
     }
 

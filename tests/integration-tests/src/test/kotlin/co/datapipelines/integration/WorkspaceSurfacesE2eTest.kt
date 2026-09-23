@@ -558,7 +558,7 @@ class WorkspaceSurfacesE2eTest {
         val expected =
             """{"schema_version":1,"correlation_id":"$FIXED_CORRELATION","error":{"code":"auth.api_key.missing",""" +
                 """"message":"No credentials provided","user_message":"You are not signed in. Sign in and try again.",""" +
-                """"details":{},"doc_url":"https://docs.datapipelines.co/errors/auth-api-key-missing"}}"""
+                """"details":{},"doc_url":"https://datapipelines.co/docs/pipeline-contract#137-authentication--authorization"}}"""
         body shouldBe expected
     }
 

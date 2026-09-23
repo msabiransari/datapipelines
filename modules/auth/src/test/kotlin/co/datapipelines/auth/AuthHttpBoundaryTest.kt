@@ -362,7 +362,7 @@ class AuthHttpBoundaryTest {
         val error = error(response)
         error["code"] shouldBe "auth.api_key.missing"
         error["user_message"] shouldBe "You are not signed in. Sign in and try again."
-        error["doc_url"] shouldBe "https://docs.datapipelines.co/errors/auth-api-key-missing"
+        error["doc_url"] shouldBe "https://datapipelines.co/docs/pipeline-contract#137-authentication--authorization"
         mapper.readValue(response.body, Map::class.java)["correlation_id"] shouldBe correlationId
         response.headers.getFirst(AuthErrorWriter.CORRELATION_HEADER) shouldBe correlationId
     }

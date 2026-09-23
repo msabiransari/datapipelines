@@ -157,13 +157,53 @@ object AuthErrorCodes {
         )
 
     /**
-     * The public docs page for an error code ([REST API §4.2] `doc_url`): dots and
-     * underscores collapse to hyphens, so `auth.api_key.missing` becomes
-     * `…/errors/auth-api-key-missing`.
+     * The public docs page for an error code ([REST API §4.2] `doc_url`): the error-code
+     * catalog, pipeline-contract §13, at the anchor of the section that lists the code's
+     * family — `auth.api_key.missing` → `…/docs/pipeline-contract#137-authentication--authorization`.
+     * There is no per-code page and no `docs.` host (there never was — the previous derivation
+     * pointed at a hostname that does not resolve, #212). The anchors are the docs renderer's
+     * heading ids; `AuthErrorSpecDriftTest` derives them from the doc and checks every
+     * catalogued code lands on its own section. A code outside every family lands on the
+     * catalog's top. Longest prefix wins: `pipeline.execution.datasource_unreachable` is listed
+     * under §13.8 Datasource, not §13.3.
+     *
+     * Follow-up (#212): the host is the public site; a self-hosted deployment serves the same
+     * docs under its own base URL, which the emitters could prefer once it reaches them.
      */
-    fun docUrl(code: String): String = "$DOC_BASE${code.replace('.', '-').replace('_', '-')}"
+    fun docUrl(code: String): String = "$DOC_PAGE#${anchorFor(code)}"
 
-    private const val DOC_BASE = "https://docs.datapipelines.co/errors/"
+    private fun anchorFor(code: String): String =
+        SECTION_ANCHORS.firstOrNull { (prefix, _) -> code.startsWith(prefix) }?.second ?: CATALOG_ANCHOR
+
+    private const val DOC_PAGE = "https://datapipelines.co/docs/pipeline-contract"
+    private const val CATALOG_ANCHOR = "13-error-code-catalog"
+
+    /** Code prefix → §13 section anchor, longest prefix first (order is the tie-break). */
+    private val SECTION_ANCHORS: List<Pair<String, String>> =
+        listOf(
+            "pipeline.execution.datasource_unreachable" to "138-datasource",
+            "pipeline.validation." to "131-pipeline-validation-write-time",
+            "pipeline.import." to "132-pipeline-import",
+            "pipeline.execution." to "133-pipeline-execution-run-time",
+            "pipeline.node." to "134-node-execution",
+            "pipeline.staging." to "135-staging",
+            "pipeline.authoring." to "1313-versioning--draft-release-lifecycle--promotion",
+            "pipeline.promotion." to "1313-versioning--draft-release-lifecycle--promotion",
+            "pipeline.release." to "1313-versioning--draft-release-lifecycle--promotion",
+            "pipeline.version." to "1313-versioning--draft-release-lifecycle--promotion",
+            "pipeline.check." to "1317-release-checks",
+            "type_mapping." to "136-type-mapping",
+            "auth." to "137-authentication--authorization",
+            "datasource." to "138-datasource",
+            "template." to "139-template",
+            "result." to "1310-result-retrieval",
+            "rate_limit." to "1311-rate-limiting--idempotency",
+            "idempotency." to "1311-rate-limiting--idempotency",
+            "workspace." to "1312-workspace-resolution",
+            "endpoint." to "1314-published-endpoints",
+            "semantics." to "1315-learned-semantics",
+            "mcp." to "1316-mcp-surface",
+        )
 }
 
 /**

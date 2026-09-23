@@ -45,7 +45,7 @@ class AuthErrorWriterTest {
         error["message"] shouldBe "No credentials provided"
         error["user_message"] shouldBe "You are not signed in. Sign in and try again."
         error["details"] shouldBe emptyMap<String, Any>()
-        error["doc_url"] shouldBe "https://docs.datapipelines.co/errors/auth-api-key-missing"
+        error["doc_url"] shouldBe "https://datapipelines.co/docs/pipeline-contract#137-authentication--authorization"
     }
 
     @Test
@@ -56,7 +56,7 @@ class AuthErrorWriterTest {
         val error = body["error"] as Map<*, *>
         error["code"] shouldBe "auth.scope.insufficient"
         error["user_message"] shouldBe "You do not have permission to perform this action."
-        error["doc_url"] shouldBe "https://docs.datapipelines.co/errors/auth-scope-insufficient"
+        error["doc_url"] shouldBe "https://datapipelines.co/docs/pipeline-contract#137-authentication--authorization"
         (error["details"] as Map<*, *>)["required"] shouldBe "admin"
         (error["details"] as Map<*, *>)["held"] shouldBe listOf("read")
     }
@@ -119,8 +119,9 @@ class AuthErrorWriterTest {
     }
 
     @Test
-    fun `doc urls collapse dots and underscores to hyphens`() {
-        AuthErrorCodes.docUrl("auth.api_key.expired") shouldBe "https://docs.datapipelines.co/errors/auth-api-key-expired"
-        AuthErrorCodes.docUrl("rate_limit.exceeded") shouldBe "https://docs.datapipelines.co/errors/rate-limit-exceeded"
+    fun `doc urls point at the catalog section that lists the code`() {
+        val page = "https://datapipelines.co/docs/pipeline-contract"
+        AuthErrorCodes.docUrl("auth.api_key.expired") shouldBe "$page#137-authentication--authorization"
+        AuthErrorCodes.docUrl("rate_limit.exceeded") shouldBe "$page#1311-rate-limiting--idempotency"
     }
 }

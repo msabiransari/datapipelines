@@ -37,7 +37,7 @@ class ApiEnvelopeSerializationTest {
         val error = mapper.readTree(mapper.writeValueAsString(response)).get("error")
         error.get("code").asText() shouldBe "pipeline.validation.cycle_detected"
         error.get("user_message").asText().isNotBlank() shouldBe true
-        error.get("doc_url").asText() shouldBe "https://docs.datapipelines.co/errors/pipeline-validation-cycle-detected"
+        error.get("doc_url").asText() shouldBe "https://datapipelines.co/docs/pipeline-contract#131-pipeline-validation-write-time"
         error.get("details").get("cycle_path").size() shouldBe 3
     }
 

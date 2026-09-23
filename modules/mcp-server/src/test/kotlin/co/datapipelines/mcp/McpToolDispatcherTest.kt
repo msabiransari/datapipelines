@@ -187,7 +187,7 @@ class McpToolDispatcherTest {
             { result.isError() shouldBe true },
             { error["code"].asText() shouldBe PipelineErrorCodes.Execution.NOT_FOUND },
             { error["details"]["pipeline_id"].asText() shouldBe "p1" },
-            { error["doc_url"].asText() shouldBe "https://docs.datapipelines.co/errors/pipeline-execution-not-found" },
+            { error["doc_url"].asText() shouldBe "https://datapipelines.co/docs/pipeline-contract#133-pipeline-execution-run-time" },
             { result.meta()[McpToolResults.META_CORRELATION_ID] shouldBe McpFixtures.CORRELATION_ID.toString() },
         )
     }

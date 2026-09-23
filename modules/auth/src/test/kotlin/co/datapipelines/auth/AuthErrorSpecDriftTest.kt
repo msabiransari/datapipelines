@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -77,6 +78,49 @@ class AuthErrorSpecDriftTest {
             (code to status) shouldBe (code to docStatus.getValue(code))
         }
     }
+
+    /**
+     * #212 — `doc_url` is the catalog page at the anchor of the section that lists the code.
+     * The anchors are derived here exactly as the docs renderer derives heading ids
+     * (lowercase, dots dropped, anything but letters, digits, spaces and hyphens dropped,
+     * spaces to hyphens — `13.7 Authentication / authorization` →
+     * `137-authentication--authorization`), so a renamed heading or a code moved between
+     * sections goes red here, not in a customer's 404.
+     */
+    @Test
+    fun `every catalogued code's doc_url lands on its own section of pipeline-contract §13`() {
+        val doc = RepoFiles.read(RepoFiles.PIPELINE_CONTRACT_PATH)
+        val start = doc.indexOf("## 13. Error Code Catalog")
+        val end = doc.indexOf("## 14.", start)
+        require(start >= 0 && end > start) { "§13 not found" }
+        val heading = Regex("""^### (13\.\d+ .+)$""", RegexOption.MULTILINE)
+        val row = Regex("""^\|\s*`([a-z_]+(?:\.[a-z_]+)+)`\s*\|""", RegexOption.MULTILINE)
+        val checked = mutableListOf<String>()
+        val sections = heading.findAll(doc.substring(start, end)).toList()
+        sections.forEachIndexed { i, h ->
+            val from = start + h.range.last
+            val to = if (i + 1 < sections.size) start + sections[i + 1].range.first else end
+            val anchor = headingId(h.groupValues[1])
+            row.findAll(doc.substring(from, to)).forEach { r ->
+                val code = r.groupValues[1]
+                withClue("$code is listed under §${h.groupValues[1]}") {
+                    AuthErrorCodes.docUrl(code) shouldBe "https://datapipelines.co/docs/pipeline-contract#$anchor"
+                }
+                checked += code
+            }
+        }
+        withClue("the walk must cover the catalog") { (checked.size >= 100) shouldBe true }
+        // Outside every family: the catalog's top, never a 404.
+        AuthErrorCodes.docUrl("nothing.like_this") shouldBe "https://datapipelines.co/docs/pipeline-contract#13-error-code-catalog"
+    }
+
+    /** The docs renderer's heading-id rule (DocsController's markdown anchors), replicated. */
+    private fun headingId(heading: String): String =
+        heading
+            .lowercase()
+            .replace(".", "")
+            .filter { it.isLetterOrDigit() || it == ' ' || it == '-' }
+            .replace(' ', '-')
 
     private fun parseSection(
         startMarker: String,

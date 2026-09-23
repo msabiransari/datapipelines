@@ -63,7 +63,7 @@ class SseEventProjectionTest {
         val error = payload["error"] as Map<String, Any?>
         error["code"] shouldBe "pipeline.node.query_execution_failed"
         error["user_message"] shouldBe "A step in the pipeline failed while it was running."
-        error["doc_url"] shouldBe "https://docs.datapipelines.co/errors/pipeline-node-query-execution-failed"
+        error["doc_url"] shouldBe "https://datapipelines.co/docs/pipeline-contract#134-node-execution"
     }
 
     @Test
