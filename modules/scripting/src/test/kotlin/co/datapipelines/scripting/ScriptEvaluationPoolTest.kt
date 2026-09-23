@@ -45,7 +45,11 @@ class ScriptEvaluationPoolTest {
                 try {
                     p.run(limits(Duration.ofMillis(200)), "test-script@1") {
                         started.countDown()
-                        release.await() // a while-equivalent the interrupt cannot reach
+                        // Uninterruptible, like the JSONata engine: the pool's cancel(true)
+                        // interrupts this thread, and a spin that never reads the flag keeps
+                        // running — CountDownLatch.await() would die on the interrupt and free
+                        // the slot, which is not the runaway this case is about.
+                        while (release.count > 0) Thread.onSpinWait()
                         1
                     }
                 } catch (err: ScriptTimeoutException) {
