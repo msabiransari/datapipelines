@@ -119,6 +119,9 @@ class FlywayMigrationIntegrationTest {
                 // 179 — D16: the login-minted MCP key (sealed secret, the flag, one live
                 // `user` key per (user, workspace)).
                 "31|login minted mcp keys|true",
+                // 213 — show-once (D16 amended 2026-09-23): every pre-amendment sealed copy
+                // cleared, the fleet hash-only; data-only, no DDL.
+                "32|mcp key sealed copy cleared|true",
             )
     }
 
