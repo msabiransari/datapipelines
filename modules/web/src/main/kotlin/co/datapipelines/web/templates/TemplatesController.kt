@@ -16,6 +16,7 @@ import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
+import co.datapipelines.templates.TemplateTypeBehaviour
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
@@ -559,11 +560,15 @@ class TemplatesController(
         // A supplied token that is no dialect at all is the deserializer's own `dialect_invalid`
         // ("not one of …"); only a KNOWN, different one is the fixed-dialect refusal.
         val parsed = supplied?.let { token -> Dialect.entries.firstOrNull { it.wire == token } }
-        // An html body (inherited or stated) declares no dialect — never fold one in: a
-        // stated `html` on a sql template stays the draft service's `type_immutable`.
-        val html = tree.get("type")?.takeIf { it.isTextual }?.asText() == TemplateType.HTML.wire
+        // A known type folds the established dialect only when the type declares one (sql);
+        // html and the transform types declare none. An unknown wire value keeps the pre-7b
+        // reading (fold) — the deserializer's own type_invalid refusal catches it downstream.
+        val declaresDialect =
+            tree.get("type")?.takeIf { it.isTextual }?.asText()
+                ?.let { TemplateType.fromWire(it) }
+                ?.let { TemplateTypeBehaviour.of(it).requiresDialect } ?: true
         when {
-            !tree.has("dialect") && established != null && !html -> {
+            !tree.has("dialect") && established != null && declaresDialect -> {
                 tree.put("dialect", established.wire)
             }
 

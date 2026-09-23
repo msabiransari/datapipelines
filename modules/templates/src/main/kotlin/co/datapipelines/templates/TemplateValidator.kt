@@ -5,9 +5,7 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.scripting.JsonataEngine
 import co.datapipelines.scripting.ScriptEngine
 import co.datapipelines.scripting.ScriptLanguage
-import co.datapipelines.scripting.ScriptSyntaxException
 import co.datapipelines.typesystem.Dialect
-import freemarker.core.TemplateElement
 
 /**
  * Runs the templates.md §7 checks — the save-time gate (D2: nothing invalid ever stored).
@@ -105,7 +103,8 @@ class TemplateValidator(
     /**
      * templates.md §3.2/§7: `engine` must match the template's type (transform-nodes design
      * §2.1) — `freemarker` iff `sql`/`html`, `none` iff `jsonata`/`javascript`. An unsupported
-     * pairing is **rejected at save**, never stored.
+     * pairing is **rejected at save**, never stored. The rule is the type's
+     * [TemplateTypeBehaviour]; the refusal text is its too, because the fix differs by type.
      *
      * The gap this closes is a silent one: without the check, a template declaring
      * `engine: "pebble"` would be stored happily and then rendered by [TemplateEngine] as
@@ -116,38 +115,9 @@ class TemplateValidator(
         draft: TemplateDraft,
         failures: MutableList<TemplateValidationFailure>,
     ) {
-        val type = draft.type ?: TemplateType.SQL
-        if (type.isTransform) {
-            if (draft.engine == Template.NONE_ENGINE) return
-            failures +=
-                TemplateValidationFailure(
-                    code = PipelineErrorCodes.Template.ENGINE_UNSUPPORTED,
-                    message =
-                        "Engine '${draft.engine.truncateForError()}' is not supported for type '${type.wire}'; " +
-                            "a transform template's engine is '${Template.NONE_ENGINE}' — the body is evaluated, " +
-                            "never rendered.",
-                    details =
-                        mapOf(
-                            "engine" to draft.engine.truncateForError(),
-                            "type" to type.wire,
-                            "supported" to listOf(Template.NONE_ENGINE),
-                        ),
-                )
-            return
-        }
-        if (draft.engine == Template.FREEMARKER_ENGINE) return
-        failures +=
-            TemplateValidationFailure(
-                code = PipelineErrorCodes.Template.ENGINE_UNSUPPORTED,
-                message =
-                    "Engine '${draft.engine.truncateForError()}' is not supported; " +
-                        "v1 supports only '${Template.FREEMARKER_ENGINE}'.",
-                details =
-                    mapOf(
-                        "engine" to draft.engine.truncateForError(),
-                        "supported" to listOf(Template.FREEMARKER_ENGINE),
-                    ),
-            )
+        val behaviour = TemplateTypeBehaviour.of(draft.type ?: TemplateType.SQL)
+        if (draft.engine == behaviour.engine) return
+        failures += behaviour.engineRefusal(draft)
     }
 
     /**
@@ -194,7 +164,7 @@ class TemplateValidator(
         failures: MutableList<TemplateValidationFailure>,
     ) {
         val type = draft.type ?: TemplateType.SQL
-        if (type == TemplateType.HTML || type.isTransform) {
+        if (!TemplateTypeBehaviour.of(type).requiresDialect) {
             if (draft.dialect != null) {
                 failures +=
                     TemplateValidationFailure(
@@ -227,7 +197,7 @@ class TemplateValidator(
         failures: MutableList<TemplateValidationFailure>,
     ) {
         val type = draft.type ?: TemplateType.SQL
-        if (!type.isTransform) return
+        if (TemplateTypeBehaviour.of(type).allowsFreemarker) return
         if (draft.imports.isNotEmpty()) {
             failures +=
                 TemplateValidationFailure(
@@ -272,7 +242,7 @@ class TemplateValidator(
         draft: TemplateDraft,
         failures: MutableList<TemplateValidationFailure>,
     ) {
-        if ((draft.type ?: TemplateType.SQL) != TemplateType.SQL) return
+        if (!TemplateTypeBehaviour.of(draft.type ?: TemplateType.SQL).scansHtmlEntities) return
         val match = HTML_ENTITY.find(draft.body) ?: return
         val line = draft.body.substring(0, match.range.first).count { it == '\n' } + 1
         failures +=
@@ -286,11 +256,10 @@ class TemplateValidator(
     }
 
     /**
-     * Every body-derived §7 check: the length cap, the source-level refusals, the parse, the
-     * §4.2 AST scan and the `is_library` structure check — in that order, because each stage's
-     * cost is only bounded once the previous one has passed.
+     * The shared length cap, then the type's own body pipeline ([TemplateTypeBehaviour] —
+     * the Freemarker scan/parse for `sql`/`html`, the engine compile for `jsonata`, the
+     * round-two refusal for `javascript`).
      */
-    @Suppress("DEPRECATION") // freemarker.core.TemplateElement — see FreemarkerAst
     private fun addBodyFailures(
         draft: TemplateDraft,
         failures: MutableList<TemplateValidationFailure>,
@@ -308,119 +277,7 @@ class TemplateValidator(
             return
         }
 
-        val type = draft.type ?: TemplateType.SQL
-        if (type.isTransform) {
-            addTransformBodyFailures(draft, type, failures)
-            return
-        }
-
-        val sourceFindings = ForbiddenConstructScanner.scanSource(draft.body)
-        if (sourceFindings.isNotEmpty()) {
-            addDangerousConstructFailures(sourceFindings, failures)
-            // Deliberately no parse, for the same reason as the length cap above. A source-level
-            // refusal exists precisely because parsing the construct is itself the harm: a leading
-            // `<#ftl attributes={…}>` evaluates its expressions AT PARSE TIME on this thread, so
-            // reporting it and then parsing anyway would still burn the CPU the refusal exists to
-            // save (measured ~1.6s from a 65-byte body). The body is already rejected; additional
-            // parse diagnostics for it are not worth handing an attacker the parse.
-            return
-        }
-
-        when (val parse = TemplateBodyParser.parse(draft.body, trace)) {
-            is BodyParse.SyntaxError -> {
-                failures +=
-                    TemplateValidationFailure(
-                        code = PipelineErrorCodes.Template.SYNTAX_ERROR,
-                        message = parse.message,
-                        details = mapOf("line" to parse.line, "column" to parse.column),
-                    )
-            }
-
-            is BodyParse.Parsed -> {
-                val root: TemplateElement? = parse.template.rootTreeNode
-                addDangerousConstructFailures(ForbiddenConstructScanner.scanAst(root), failures)
-                addLibraryBodyFailure(draft, root, failures)
-            }
-        }
-    }
-
-    private fun addDangerousConstructFailures(
-        findings: List<ForbiddenConstructScanner.Finding>,
-        failures: MutableList<TemplateValidationFailure>,
-    ) {
-        findings
-            .distinctBy { it.construct }
-            .forEach { finding ->
-                failures +=
-                    TemplateValidationFailure(
-                        code = PipelineErrorCodes.Template.DANGEROUS_CONSTRUCT,
-                        message = "Body uses the forbidden construct '${finding.construct}'.",
-                        details = mapOf("construct" to finding.construct, "match" to finding.snippet),
-                    )
-            }
-    }
-
-    @Suppress("DEPRECATION") // freemarker.core.TemplateElement — see FreemarkerAst
-    private fun addLibraryBodyFailure(
-        draft: TemplateDraft,
-        root: TemplateElement?,
-        failures: MutableList<TemplateValidationFailure>,
-    ) {
-        if (!draft.isLibrary) return
-        val message =
-            when (LibraryBodyCheck.validate(root)) {
-                LibraryBodyCheck.Result.OK -> {
-                    return
-                }
-
-                LibraryBodyCheck.Result.NO_MACROS -> {
-                    "A library must define at least one <#macro> or <#function>."
-                }
-
-                LibraryBodyCheck.Result.OUTPUT_OUTSIDE_MACROS -> {
-                    "A library must have no output outside its macro/function definitions."
-                }
-            }
-        failures +=
-            TemplateValidationFailure(
-                code = PipelineErrorCodes.Template.IS_LIBRARY_WITHOUT_MACROS,
-                message = message,
-            )
-    }
-
-    /**
-     * The transform body checks (transform-nodes design §2.1/§8.1): the body is parsed through
-     * the scripting engine — never through Freemarker — and a `javascript` body is refused
-     * outright until round two's isolate ships (`transform.js.unavailable`; the type exists so
-     * the enum, the CHECKs and the docs are final). The D-T9 Freemarker-construct refusal is
-     * [addTransformFieldFailures]'s, so both a construct and a syntax error surface in one pass.
-     */
-    private fun addTransformBodyFailures(
-        draft: TemplateDraft,
-        type: TemplateType,
-        failures: MutableList<TemplateValidationFailure>,
-    ) {
-        if (type == TemplateType.JAVASCRIPT) {
-            failures +=
-                TemplateValidationFailure(
-                    code = TransformCodes.JS_UNAVAILABLE,
-                    message =
-                        "A 'javascript' template cannot be saved yet: the GraalJS isolate engine ships in " +
-                            "round two (transform-nodes design §4.4). Only 'jsonata' saves today.",
-                    details = mapOf("type" to type.wire),
-                )
-            return
-        }
-        try {
-            scriptEngines.getValue(ScriptLanguage.JSONATA).compile(draft.body)
-        } catch (err: ScriptSyntaxException) {
-            failures +=
-                TemplateValidationFailure(
-                    code = PipelineErrorCodes.Template.SYNTAX_ERROR,
-                    message = err.message ?: "the body does not parse",
-                    details = mapOf("line" to err.line, "column" to err.column),
-                )
-        }
+        failures += TemplateTypeBehaviour.of(draft.type ?: TemplateType.SQL).validateBody(draft, scriptEngines, trace)
     }
 
     companion object {

@@ -66,7 +66,7 @@ class TemplateDeserializer(
         }
         val dialect = tree.get("dialect")?.takeIf { it.isTextual }?.asText()
         val typed = type?.let { TemplateType.fromWire(it) }
-        if (typed != null && typed != TemplateType.SQL) {
+        if (typed != null && !TemplateTypeBehaviour.of(typed).requiresDialect) {
             // html and the transform types declare NO dialect; presence is the offense (046 §7,
             // transform-nodes §2.1), so the value is irrelevant — including an invalid one,
             // which could not make it "more present".
