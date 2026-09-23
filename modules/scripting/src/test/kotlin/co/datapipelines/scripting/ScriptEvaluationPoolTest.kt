@@ -88,7 +88,6 @@ class ScriptEvaluationPoolTest {
                 p.run(limits(Duration.ofSeconds(20)), "holder@1") {
                     started.countDown()
                     release.await()
-                    1
                 }
             }
         holder.isDaemon = true
