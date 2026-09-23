@@ -27,7 +27,7 @@ actions, assigned per user per workspace.
 | D13 | Workspaces page: ws_admin (their workspaces, members) and super admin; the workspace SWITCHER stays available to every member (rule 10) and re-issues the token. | page is any member | **yes** |
 | D14 | Workspace switching needs no capability; always allowed for a member; new token. | same (`POST /workspace/switch`) | no |
 | D15 | Deactivated users and deactivated workspaces are served NOTHING — sessions, user keys, endpoint keys, server keys pinned there — refused at the boundary with one code. | partial (user snapshot re-read; workspace deactivation exists) | yes: one sweep guard |
-| D16 | MCP key: exactly ONE user key per user per workspace, minted at first login into that workspace, carrying the user's role (re-read per request, as today). Shown in the top bar (right): first characters + copy button. Rotation = the user deletes it, logs in again, a new one is minted. No on-demand user keys anywhere (UI, REST, MCP). | user keys minted on demand with chosen scopes | **yes** |
+| D16 | MCP key: exactly ONE user key per user per workspace, minted at first login into that workspace, carrying the user's role (re-read per request, as today). Shown in the top bar (right): first characters + copy button. **Amended 2026-09-23 (owner ruling): the key is copyable ONCE — the moment Copy is pressed the copyable secret is destroyed and the chip stops offering it; the key is hash-only from then on. After a copy, only rotation yields a new copyable key.** Rotation = the user deletes it, logs in again, a new one is minted. No on-demand user keys anywhere (UI, REST, MCP). | user keys minted on demand with chosen scopes | **yes** |
 | D17 | "API keys" = today's ENDPOINT keys, renamed in the UI and docs. Own page. Created by ws_admin and super admin. Associated with endpoints on the API page (today's bindings). Promotion ignores keys. | endpoint keys on /api-console, any member with MANAGE_OWN_API_KEYS | **yes** |
 | D18 | Server keys (the promotion-peer credential, versioning §10.6) are unchanged: super admin, out of D16/D17's scope. | same | no |
 | D19 | Learned facts/semantics: authors and admins record/retire; they do NOT ride a promotion (nothing promotes them today) — a separate decision later. | semantics_record = AUTHOR | no |
@@ -90,7 +90,17 @@ Migration: `executions.triggered_by` → `executed_by` (rename, same FK) and `ex
 ### 3.3 The login-minted MCP key (D16)
 - `api_keys`: kind `user` rows gain `minted_at_login BOOLEAN` and `secret_ciphertext` (encrypted at
   rest with the existing credential-encryption key, the way datasource credentials are), so the top bar
-  can copy it again. Uniqueness: one `(user_id, workspace_id)` row with `kind = 'user'`.
+  can copy it. Uniqueness: one `(user_id, workspace_id)` row with `kind = 'user'`.
+  **Amended 2026-09-23 (owner ruling — supersedes "can copy it again"): the login-minted MCP key is
+  copyable ONCE.** It is minted into the workspace the user lands in at first sign-in (the user chose
+  no workspace; `workspaceForLogin` decides) and offered for copy in the top bar. The moment Copy is
+  pressed the copyable secret is destroyed and the chip stops offering it — the key is hash-only from
+  then on. Switching into a workspace with no key mints one there, copyable until ITS first copy.
+  After a copy, only rotate (delete + sign in again) yields a new copyable key. Nothing the server
+  holds can reveal a key that has been read. The reason: while `api_keys.secret_sealed` exists the key
+  is recoverable by the server (AES-256-GCM under `datapipelines.db.encryption-key`), so it is not
+  one-way at rest. Existing sealed copies are cleared fleet-wide by migration (V32) so every key that
+  has ever been read is hash-only immediately; the owner rotates once for a copyable key.
 - Minting: on login (any method) and on workspace switch, if no row exists for `(user, workspace)`,
   mint one, pinned to that workspace, scopes = the role's full scope (re-derived per request as today —
   `auth.key_issuer_role_lost` semantics unchanged). Existing row → nothing happens.
