@@ -1630,7 +1630,7 @@ Lists the caller's keys (id, name, `kind`, scopes, created_at, expires_at, last_
 ```
 GET /auth/api-keys/mine
 ```
-The caller's ONE live `user` key in the active workspace — the login-minted MCP key (D16): `id`, `name`, `prefix`, `copyable` (whether the sealed secret can be served — false for keys minted before V31), `created_at`. `data` is `null` when none exists (post-rotation, pre-login — a state, not an error).
+The caller's ONE live `user` key in the active workspace — the login-minted MCP key (D16): `id`, `name`, `prefix`, `copyable` (whether the sealed secret can still be served — false once the key has been copied, #213: the first read of the copy endpoint destroys the copyable secret in the same statement, and V32 cleared every pre-amendment copy), `created_at`. `data` is `null` when none exists (post-rotation, pre-login — a state, not an error).
 
 ```
 POST /auth/api-keys
@@ -2073,6 +2073,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-23 | v2.28 | 213 (#213) show-once MCP key | §16.1: `/mine`'s `copyable` is false once the key has been copied — the first read of the copy endpoint destroys the copyable secret in the same statement (auth.md §7.4). No wire shape changed. |
 | 2026-09-22 | v2.27 | #212 doc_url | §4.2: `doc_url` is `https://datapipelines.co/docs/pipeline-contract#<section anchor>` — the catalog page at the code's §13 section. The previous shape (`https://docs.datapipelines.co/errors/<code>`) named a host that does not exist. |
 | 2026-09-22 | v2.26 | #208 self-membership | Additive. §17.8 / §17.10 / §17.11: a caller addressing their OWN membership — role, login-minted key, removal — is refused with the new `409 workspace.self_membership` (pipeline-contract §13.12); another workspace admin or a super admin does it. |
 | 2026-09-21 | v2.25 | 200 (#200) membership-bound keys | Additive. NEW §17.11 `DELETE /workspaces/{name}/members/{user_id}/key` — a workspace admin or super admin revokes a member's login-minted key without removing them (idempotent `204`; the member's session keeps working, the next login mints fresh; [Auth §7.4](auth.md#74-issuance)). §17.8 states the removal path's new effect: the member's key is revoked in the same act (`auth.api_key.revoked_by_admin`, reason `member_removed` \| `admin_revoked`). |
