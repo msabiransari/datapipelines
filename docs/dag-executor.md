@@ -581,6 +581,50 @@ Abandoning is safe only because the node body is a detached `async` whose value 
 
 **PIPELINE nodes.** A PIPELINE node that declares no `settings.timeout_seconds` is exempt: its work is a child execution, already bounded by `execution-timeout-seconds` one level down, and the default node deadline sits BELOW the default execution timeout — bounding it here would stop legal children early and report `pipeline.node.timeout` for a child that never exceeded any budget anyone set. One that declares a deadline gets it.
 
+#### The script engine seam (7a)
+
+TRANSFORM nodes (round one: JSONata) will evaluate through a dedicated seam in the new layer-0
+module `modules/scripting` — `ScriptEngine` (compile once, evaluate many, JSON in, JSON out),
+`ScriptEvaluationPool`, and the type gate. The module ships as a pure library first (7a); the
+executor itself gains its edge, its configuration block and its catalog rows when the TRANSFORM
+node lands (7c). What is already true and binding:
+
+- **Every production evaluation runs on the evaluation pool**, never on a `dag-executor-N`
+  thread: at most `size` evaluations run at once and at most `queue` submissions are admitted
+  (4/64 are the design's defaults; 7c lands the configuration block), and a refused submission
+  is a typed pool-exhausted refusal (the catalog row arrives with that lane). Each admitted
+  evaluation gets its OWN daemon thread
+  (`script-eval-N`) — a thread whose evaluation outlives its budget is abandoned (the JSONata
+  engine never reads `Thread.interrupted()`), logged at ERROR, counted
+  (`transform.evaluations.abandoned` is the record's meter name) and NEVER reused; the next
+  evaluation gets a fresh thread immediately. This is the same discipline §5.3's statement
+  abandonment applies to drivers that ignore `Statement.cancel()` — here it is the DESIGN, not
+  the fallback, because the engine cannot be interrupted at all.
+- **The engine's bounds are between expression steps** (the library's `Timebox` checks wall
+  clock and depth in its evaluate entry/exit callbacks), so a single builtin call that overruns
+  is caught only by the pool's abandonment. The honest-bounds table below is GENERATED from the
+  breach suite's record (`modules/scripting`'s `JsonataBreachTest` →
+  `build/reports/jsonata-breach.md`), measured 2026-09-23 on jsonata 0.9.10 in a 512m JVM —
+  regenerate the report and paste it; the doc never hand-writes the numbers.
+
+| Breach case (record §4.5 corpus) | Measured outcome | The bound that held |
+|---|---|---|
+| range bomb (`[1..1e7]` — tripled to exhaust a 512m JVM; one alone costs ~240 MB and survives) | UNBOUNDED — `OutOfMemoryError` | none in-process; the caller's input/output caps are the bound |
+| pad bomb (`$pad("x", 1e8)` — a quadratic builtin loop) | UNBOUNDED — caller timed out on budget; the abandoned thread outlived the grace | the pool: the caller failed on time, the thread was counted and replaced |
+| join bomb (`$join` over the range) | REFUSED — the library's own argument cap refuses before any work | the library |
+| regex bomb (`$match(…!, /^(a+)+$/)` on `java.util.regex`) | BOUNDED — resistant: fails fast, no catastrophic backtracking measured; no bound fired | n/a (measured resistant) |
+| deep recursion (self-recursive lambda, depth 100 000) | BOUNDED — `ScriptTimeoutException` on budget; the thread ended inside the grace. **Measured correction:** the library's depth counter skips lambda calls (they mark `isParallelCall`), so TIME, not depth, catches lambda recursion | the engine's between-steps timebox |
+| `$eval` nesting (an eval'd builtin overrun) | UNBOUNDED — same shape as the pad bomb; the eval'd work inherits the evaluation's timebox but reaches no step boundary inside a builtin | the pool |
+| `$now()` | REFUSED — the engine shadows the clock builtins: pinned via `EvaluationLimits.now` (the execution's `current_timestamp`) or refused — a transform is a pure function of its inputs | the engine |
+
+- **The depth bound is real but narrower than the record believed**: it fires on nested
+  EXPRESSIONS (500 nested arrays against a depth of 100 refuses in milliseconds — the
+  conformance suite pins it), not on recursive lambdas.
+- **A heap bound is not enforceable in-process; input and output caps bound a well-formed
+  evaluation; a malicious body can still exhaust the heap.** `EngineCapabilities` states this
+  (`boundsHeap = false`, `interruptible = false`) so the callers document what a limit means
+  instead of guessing.
+
 ### 5.4 Why fail-fast (not partial)
 
 In v1, a single node failure cancels the whole execution. Reasons:
@@ -1452,6 +1496,8 @@ document a customer can read before they need it.
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
+|---|---|---|---|
+| 2026-09-23 | v1.15 | 7a transform engine seam (#7) | §5.3 gains "The script engine seam": the `modules/scripting` library seam (7a) and the evaluation-pool contract the TRANSFORM node (7c) will wire in — every production evaluation on its own bounded, abandoning, thread-replacing pool; the honest-bounds table GENERATED from the breach suite's measured record (2026-09-23, jsonata 0.9.10, 512m JVM), including the measured corrections: lambda recursion is caught by TIME (the library's depth counter skips `isParallelCall` frames), `$join` is refused by the library's own argument cap, and the record's regex bomb is measured resistant on `java.util.regex`. The in-process honesty sentence is the record's own: a heap bound is not enforceable in-process; input and output caps bound a well-formed evaluation; a malicious body can still exhaust the heap. |
 |---|---|---|---|
 | 2026-09-17 | v1.14 | #143/#130 live-stream delivery | §15 grace row: on a CANCELLED execution the unwind's body wait is bounded by the cancel machinery's re-issue horizon (the window `Statement.cancel()` is still being re-issued, 086 A1) in addition to `cancel-grace-seconds` — a body the cancel cannot stop (e.g. a staging drain) no longer holds the `execution_aborted` frame behind the full abandonment grace. Timeout and ancestor paths keep the full grace; the abandon WARN and the statement abandonment itself are unchanged. Delivery guarantee stated in [REST API §10.4](rest-api.md#104-cancel-execution). |
 | 2026-09-17 | v1.13 | 156 query timeout settings (#2) | §5.3's "JDBC query timeout (per node)" row and "Three budgets" table: the statement bound is now node `settings.query_timeout_seconds` > pipeline `settings.query_timeout_seconds` > the datasource's `query_timeout_seconds` > the operator's per-dialect default (`node-query-timeout-seconds-by-dialect.<dialect>`, Configuration §3.2) > the flat application default, resolved by `ExecutorConfig.queryTimeoutSecondsFor`. `pipeline.node.query_timeout`'s detail gains `source` naming the resolved tier. New save-time exception to "documented, not enforced across keys": a node's own `query_timeout_seconds` may not exceed that SAME node's own effective `timeout_seconds` (`pipeline.validation.node_query_timeout_invalid`) — both fully known at save, under one author's control. |

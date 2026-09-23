@@ -45,6 +45,7 @@ datapipelines/
 ├── modules/
 │   ├── typesystem/                      # [Type System spec]
 │   ├── calculators/                     # [Calculators catalog] — pure kinds, layer 0 (§5.14)
+│   ├── scripting/                       # Transform script engine seam, layer 0 (§5.15)
 │   ├── pipeline-contract/               # [Pipeline Contract spec]
 │   ├── templates/                       # [Templates spec]
 │   ├── datasources/                     # [Datasources spec]
@@ -66,6 +67,7 @@ datapipelines/
 | Module | Spec | Responsibility | Owns persistence for |
 |---|---|---|---|
 | `typesystem` | [type-system.md](type-system.md) | The 11 canonical types, per-dialect mappers, H2 mapping, schema envelope. Foundation. | — (no persistence) |
+| `scripting` | (this spec, §5.15) | The transform engine seam: `ScriptEngine` (JSONata in round one), the evaluation pool, the type gate, canonical JSON. Pure library — evaluates untrusted script bodies with no I/O surface. | — (no persistence) |
 | `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. | `PipelineRepository` → `pipelines`, `pipeline_versions` |
 | `templates` | [templates.md](templates.md) | Freemarker integration, library macros, template registry, versioning. | `TemplateRepository` → `templates`, `template_versions` |
 | `datasources` | [datasources.md](datasources.md) | Connection registry, HikariCP pools, dialect adapters, credential encryption. | `DatasourceRepository` → `datasources` |
@@ -145,6 +147,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 |---|---|
 | `typesystem` | *(none)* |
 | `calculators` | `typesystem` |
+| `scripting` | `typesystem` |
 | `pipeline-contract` | `typesystem`, `calculators` |
 | `templates` | `typesystem`, `pipeline-contract` |
 | `datasources` | `typesystem` |
@@ -592,6 +595,29 @@ tests shrink to "the controller/tool calls it and maps the result".
 **Why it is its own module.** The kinds are the one part of the system that must be provably free of I/O: the executor evaluates one at an arbitrary DAG position, the validator type-checks its inputs at save time, and a future editor preview would evaluate one with no execution at all. Purity as a build rule (this row) plus a source rule (`CalculatorPurityTest`) is what makes those three uses safe. It deliberately does **not** depend on `pipeline-contract`: JSON literals, `$` references, `context_key` collisions and error codes are contract concerns, and a catalog that knew about them would be a catalog nobody could reuse.
 
 **Tests:** unit tests per kind (boundary values; the fiscal kinds against both a calendar and a non-calendar fiscal start; `add_business_days` across a weekend and a holiday; `tz_shift` across a DST boundary; `date_parse` with a bad pattern), a registry-invariant test, `CalculatorPurityTest`, and `CalculatorRegistrySpecDriftTest` against `docs/calculators.md`.
+
+### 5.15 `scripting`
+
+**Dependencies (internal):** `typesystem` — and nothing else, ever (§4.2 row; the root
+build's `allowedInternalDependencies` map carries the same closed set).
+
+**Dependencies (external):**
+- `com.dashjoin:jsonata` (pinned, 0.9.10 at introduction) — the round-one transform engine; Apache-2.0. Bus-factor note for the dependency review: a small upstream project (99 stars, 17 open issues, last push 2026-07-08 at dispatch) — recorded on purpose; not a blocker while the seam keeps it replaceable.
+- `com.fasterxml.jackson.core:jackson-databind` (BOM-managed) — the one `ObjectMapper` behind `CanonicalJson`, private to the module.
+- `org.slf4j:slf4j-api` (BOM-managed) — the evaluation pool's abandonment log; the registry lives in `app`.
+
+**Public API:**
+- `ScriptEngine` — compile once, evaluate many; JSON-shaped values in and out; `JsonataEngine` is the round-one implementation
+- `ScriptLanguage`, `EvaluationLimits`, `EngineCapabilities` — the seam's vocabulary; capabilities state which limits an engine can actually enforce, measured by the breach suite, never intended
+- `CompiledScript` — opaque engine-produced handle
+- `ScriptEvaluationPool` — the bounded pool every production evaluate call runs on; `ScriptClock` is its injected time source
+- `TypeGate` (+ `GateRefusal`/`GateResult`) — the §5.3/R1 output contract of the transform design; DECIMAL rounds half-even, BIGDECIMAL is exact
+- `CanonicalJson` — the §5.5 canonical form: keys sorted, shortest doubles, plain decimals
+- `ScriptingException` and its five typed refusals (`ScriptSyntaxException`, `ScriptEvaluationException`, `ScriptTimeoutException`, `ScriptResourceLimitException`, `ScriptPoolExhaustedException`) — the codes they carry are the transform design's §7 mapping
+
+**Why it is its own module.** The engine evaluates UNTRUSTED script bodies as pure functions of their JSON input (transform design D-T4). That is safe because the module cannot reach anything else: one internal edge, an I/O-refusing source guard (`ScriptingPurityTest`), and resource bounds that are measured, not believed (`JsonataBreachTest` writes `build/reports/jsonata-breach.md`, and dag-executor.md's honest-bounds table is pasted from it). It deliberately does **not** depend on `pipeline-contract`: modes, contracts, error codes and the Context are callers' concerns (7b/7c), and an engine that knew them would be an engine nobody could sandbox.
+
+**Tests:** the conformance suite parameterised over every engine (`ScriptEngineConformanceTest`), the breach suite with its three-way outcome record (`JsonataBreachTest`), the 32-thread determinism proof, the pool contract, the §5.3 type-gate table (42 cases), `CanonicalJsonTest`, and `ScriptingPurityTest`.
 
 ## 6. Version Catalog
 
@@ -1123,6 +1149,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-23 | 7a (#7) | #7 lane 7a — the script engine | New layer-0 module `scripting` (§5.15): the `ScriptEngine` seam with the JSONata engine (`com.dashjoin:jsonata` 0.9.10 — the catalog's one new version + library), the evaluation pool, the type gate, and canonical JSON; the transform design's §4.1/§4.5/§5.3/§5.5 as a library with no product surface. §3, §3.1 and §4.2 gain the row (`scripting` → `typesystem`, the calculators shape); the root build's allowed-dependency map and `COVERAGE_FLOORS` (measured 91.4 − 2) carry the module. Its `gradle.lockfile` and the jsonata verification entries ship in the same commit. |
 | 2026-08-05 | v1.0 | initial draft | Initial module structure spec: 10 modules + integration tests, dependency graph, version catalog, build conventions, Spring Boot conventions |
 | 2026-08-05 | v1.1 | design system integration | Added `@acme/design-tokens` as the styling foundation for the `web` module. Documented vendoring approach (CSS files, not npm). Referenced Pipeline Editor spec for integration details. |
 | 2026-08-07 | v1.2 | consistency campaign | **Persistence ownership** (§3.1): repositories live in their owning domain module (`PipelineRepository`, `TemplateRepository`, `DatasourceRepository`, `UserRepository`/`ApiKeyRepository`, `ExecutionRepository`/`ExecutionEventRepository`), each taking `spring-boot-starter-jdbc`; Flyway dep + migrations confined to `app`; Redis (`spring-boot-starter-data-redis`, Lettuce) confined to `dag` and `web`; catalog gains flyway-core + flyway-database-postgresql. **§4.1** graph regenerated to match the §5.x lists; **§4.2** ambiguous layering rules replaced by one machine-checkable allowed-dependency table (+ Gradle verification task). **§5.1** `H2TypeMapper` → `H2IngressMapper` / `H2EgressMapper` (staging §5.3). **§5.2** `TerminalDetector` → `CallerNodeResolver` [D1], `PipelineRepository` added, Jackson named as the ser/deser stack. **§5.3** params-schema types dropped [D3]. **§5.4.1** new: `-Poracle`/`-Pmysql` conditional `runtimeOnly` sketch + `lib/` drop-in via `PropertiesLauncher`/`loader.path`. **§5.6** dag API gains `NodeResult`, `CancellationRegistry`, `CancellationHandle`, `ResultStore`, `ExecutionSlots`, `ExecutionAbortedException`, `AbortReason`, `ExecutorDispatcher`. **§5.11** `db2` Testcontainer removed (not a supported dialect); Redis container added. Both "Verification needed" markers converted to implementation gates G1/G2 with exact commands (§13.1). Duplicate `### 8.2` renumbered (→ 8.3/8.4). See [SPEC-REVIEW-2026-08](SPEC-REVIEW-2026-08.md) |

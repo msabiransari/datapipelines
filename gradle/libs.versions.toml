@@ -163,6 +163,13 @@ playwright = "1.62.0"
 # and suggested 1.21.1, which the gate's vuln scan then refused: GHSA-pmhh-3w7g-xqp8,
 # fixed 1.23.1). Single jar, no transitive dependencies, TEST scope only.
 jsoup = "1.23.2"
+# jsonata — the round-one transform engine (transform-nodes design §4.2, #7 lane 7a).
+# Maven Central <release>0.9.10</release>, verified against repo1.maven.org
+# maven-metadata.xml on 2026-09-23 (matches the design record's floor). Apache-2.0.
+# Pure Java, zero transitive dependencies. Bus-factor note for the next dependency
+# review: small upstream project (99 stars, 17 open issues, last push 2026-07-08 at
+# dispatch) — recorded on purpose in modules/scripting/README.md too.
+jsonata = "0.9.10"
 
 [libraries]
 # --- Spring Boot starters (version from the BOM) -----------------------------
@@ -250,6 +257,10 @@ jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
 # JDK's own SunJCE (`AES/GCM/NoPadding`); no spec names a primitive needing an
 # external provider. Re-adding it requires the spec-deviation flow with the
 # primitive named — do not restore this entry to "fix" a missing import.
+
+# --- Transform script engine (#7 lane 7a; NOT BOM-managed) --------------------
+# Rationale and bus-factor note are at the `jsonata` version pin.
+jsonata = { module = "com.dashjoin:jsonata", version.ref = "jsonata" }
 
 # --- Metrics / logging (BOM-managed) -----------------------------------------
 micrometer-core = { module = "io.micrometer:micrometer-core" }
