@@ -121,6 +121,12 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // a pure function of its inputs, and the executor's freedom to evaluate one anywhere depends
     // on that. Adding a second entry here is the change a reviewer must refuse.
     ":modules:calculators" to setOf(":modules:typesystem"),
+    // 7a transform engine — layer 0 beside typesystem. The seam evaluates untrusted script
+    // bodies as pure functions of their JSON input (transform-nodes design §4.1); its only
+    // internal edge is typesystem, for the canonical LogicalType/ColumnSchema the type gate
+    // (§5.3) and the egress encoding rule over. A second entry here would give a script
+    // engine a route to I/O that the purity test and the breach suite do not fence.
+    ":modules:scripting" to setOf(":modules:typesystem"),
     ":modules:pipeline-contract" to setOf(":modules:typesystem", ":modules:calculators"),
     ":modules:templates" to setOf(":modules:typesystem", ":modules:pipeline-contract"),
     ":modules:datasources" to setOf(":modules:typesystem"),
