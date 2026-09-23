@@ -120,15 +120,34 @@ class ApiKeyRepository(
             ).firstOrNull()
 
     /**
-     * The sealed plaintext of [keyId] (V31, D16) — read ONLY by the copy surface, never
-     * loaded onto the [ApiKey] model: a secret that rides every row read is a secret that
-     * one careless log serializes. Null for rows minted before R3 and for non-user kinds.
+     * Opens AND clears the sealed plaintext of [keyId] in one statement (show-once, #213 —
+     * D16 amended 2026-09-23). The `FOR UPDATE` pre-image CTE is the read and the destruction
+     * at once: no read-then-clear window in which two tabs both copy, and a concurrent second
+     * open blocks on the lock and then sees `secret_sealed IS NOT NULL` fail — it gets null.
+     * (Postgres 16 has no `RETURNING OLD.col`, so `UPDATE … RETURNING` alone cannot hand back
+     * the value it just nulled.) Owner-scoped on [userId]; null when the row is not the
+     * caller's, when the copy was already read, or for rows minted before R3 and non-user
+     * kinds. Read ONLY by the copy surface, never loaded onto the [ApiKey] model: a secret
+     * that rides every row read is a secret that one careless log serializes.
      */
-    fun sealedSecretOf(keyId: String): ByteArray? =
+    fun openAndClearSealedSecret(
+        keyId: String,
+        userId: UUID,
+    ): ByteArray? =
         jdbc
             .query(
-                "SELECT secret_sealed FROM api_keys WHERE id = :id",
-                MapSqlParameterSource("id", keyId),
+                """
+                WITH old AS (
+                    SELECT id, secret_sealed FROM api_keys
+                    WHERE id = :id AND user_id = :uid AND secret_sealed IS NOT NULL
+                    FOR UPDATE
+                ),
+                upd AS (
+                    UPDATE api_keys SET secret_sealed = NULL WHERE id IN (SELECT id FROM old)
+                )
+                SELECT secret_sealed FROM old
+                """.trimIndent(),
+                MapSqlParameterSource("id", keyId).addValue("uid", userId),
             ) { rs, _ -> rs.getBytes("secret_sealed") }
             .firstOrNull()
 

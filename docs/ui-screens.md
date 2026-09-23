@@ -262,16 +262,20 @@ nav packs to the top; the free space below it is deliberate.
 the search field **palette** (161), the light/dark toggle, the **MCP-key chip** (179), and the
 avatar menu.
 
-- **The MCP-key chip** (179, D16 — ruling 7): the caller's ONE login-minted `user` key in the
-  ACTIVE workspace, right side beside the user menu — the `dpk_…` prefix (12 characters), a
-  **Copy** button, and **delete-to-rotate**. Copy FETCHES the secret from
-  `GET /partials/mcp-key/secret` (shell.js → clipboard): the secret is never in the page.
-  A key minted before V31 carries no sealed secret, so its chip shows the prefix WITHOUT Copy
-  and says "delete and sign in again to get a copyable key". After a delete the chip re-renders
-  to "no key — one is minted at your next sign-in", and the chip is absent entirely when no
-  live key exists. The chip links to `/api-console`'s MCP card for the connection JSON. Every
-  role may do all three on their OWN key (`VIEW_OWN_MCP_KEY`), so the chip's guard is the key's
-  existence (`mcpKey != null`), not a role.
+- **The MCP-key chip** (179, D16 — ruling 7; show-once since #213): the caller's ONE
+  login-minted `user` key in the ACTIVE workspace, right side beside the user menu — the
+  `dpk_…` prefix (12 characters), a **Copy** button, and **delete-to-rotate**. Three states:
+  **copyable** — the key's one sealed copy is unread; Copy FETCHES the secret from
+  `GET /partials/mcp-key/secret` (shell.js → clipboard): the secret is never in the page, and
+  the first fetch destroys the server-held copy in the same act that serves it. **copied** —
+  the chip re-renders WITHOUT a reload (`GET /partials/mcp-key/chip`, swapped in by the copy
+  handler) with no Copy button, and the prefix's title says "Copied already — delete it and
+  sign in again to get a new key you can copy"; a reload changes nothing, the clear is
+  server-side. **none** — after a delete (or before the next sign-in mints) the chip reads
+  "No MCP key here — one is minted when you next sign in or switch workspace". The chip links
+  to `/api-console`'s MCP card for the connection JSON. Every role may do all three verbs on
+  their OWN key (`VIEW_OWN_MCP_KEY`), so the chip's guard is the key's existence
+  (`mcpKey != null`), not a role.
 
 - **The breadcrumb** is server-rendered from `AppNav.crumbFor(currentPath)` and re-derived
   client-side after a boosted swap from the active rail link's own `data-nav-group` /
@@ -1059,7 +1063,8 @@ For anything that must outlive the TTL, the answer is not a longer TTL: write it
 ### 4.10 API Keys — the pointer (091; repointed 179)
 
 **This screen is a pointer.** 179 split the keys in two (D16/D17): YOUR MCP key is minted at
-sign-in and lives in the top bar (§4.3e) — copy from the chip, delete there to rotate — and the
+sign-in and lives in the top bar (§4.3e) — copy it ONCE from the chip (the first copy is the
+last, #213), delete there to rotate — and the
 workspace's API keys (the `endpoint` kind) are the workspace admin's `/api-keys` page (§4.19).
 This screen says exactly that, reads no keys at all, and links to `/api-keys` only for the roles
 that hold `MANAGE_API_KEYS`.
@@ -1619,6 +1624,7 @@ reachability gap this round left open and the one-line fix it needs.
 |---|---|---|---|
 | 2026-09-22 | v1.67 | #208 own row + super admin row | §4.13: no verbs on the caller's own member row (`409 workspace.self_membership` behind them); a super admin member reads "super admin" with no role dropdown. |
 | 2026-09-21 | v1.66 | 200 (#200) membership-bound keys | §4.13 members row: the member's key state ("has a key" / "no key" — never an id or prefix) and a **Revoke key** verb, drawn only when a live key exists, inside the same `canAdminWorkspace` guard; posts `POST /workspaces/{name}/members/{userId}/key/revoke` through the ONE `WorkspaceService.revokeMemberKey` the REST twin calls, and toasts `member_key_revoked` (the member stays; the next sign-in mints fresh). §4.3e's members row lists the verb. |
+| 2026-09-23 | v1.66 | 213 (#213) show-once MCP key | **§3.4: the MCP-key chip is copyable ONCE** — the first Copy's fetch destroys the server-held copy in the same statement that serves it, the chip re-renders without a reload (`GET /partials/mcp-key/chip`, swapped in by the copy handler) with no Copy button and a "Copied already — delete it and sign in again to get a new key you can copy" title (the pre-V31 wording is gone; V32 cleared every such key), and a reload changes nothing. The chip's three states (copyable / copied / none) are spelled out; §4.10's pointer says "copy it once". `McpKeyShowOnceBrowserTest` pins click → clipboard value → no-Copy → rotate; `RoleVisibilityRenderTest` pins the states. |
 | 2026-09-21 | v1.65 | 191 (#187) — OIDC identity | Login page gains `?error=identity_mismatch` (the email is already linked to a different sign-in identity; nothing changed, ask an administrator). §4.12 gains the **Reset identity** verb — its own literal route and `USER_IDENTITY_RESET` row, rendering the shared row-swap + toast. |
 | 2026-09-21 | v1.64 | 188 (#188) security headers + CSP | Doc-only for the screens (no visible behaviour changes). §3.4: the rail's first-paint script is `/js/rail.js`, not an inline block — the enforced CSP (`script-src 'self'; style-src 'self'`, no `'unsafe-inline'`) forbids every inline script, `on*=` handler and `style=` attribute in a template; the five page scripts and twenty-three handlers moved into `/js` (`api-keys.js`, `datasources.js`, `template-create-modal.js`, `password-card.js`, `rail.js`; the rest into `shell.js` and `template-editor/lifecycle.js` as `data-action` controls), the executions rows navigate by `data-href`, and the type-coloured editor elements carry `data-type` instead of a style attribute. The pipeline editor's route alone allows `'unsafe-eval'` for Alpine (#195). Guards: `InlineScriptAuditTest`, the browser suite's zero-violation rule, `SecurityHeadersTest`. |
 | 2026-09-21 | v1.63 | 180 (#180) roles R4 — deactivation | Doc-only. §4.11: `?error=inactive` is also where a session deactivated mid-life lands (cookie cleared by the filter, redirect by the entry point). §4.12: the deactivation window sentence names the knob and the new code `auth.principal_deactivated`; nothing is revoked, Activate restores. |

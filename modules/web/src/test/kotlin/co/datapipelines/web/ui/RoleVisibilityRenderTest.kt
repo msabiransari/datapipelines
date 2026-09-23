@@ -355,14 +355,15 @@ class RoleVisibilityRenderTest {
     // ------------------------------------------------------------------ 179: keys
 
     /**
-     * D16 — the top bar's chip (partials/mcp-key-chip): prefix and BOTH verbs when a
-     * copyable key exists; NO copy control for a key minted before V31 (there is no sealed
-     * secret to serve, and a button that 404s is a lie); the rotation hint in its place.
-     * Every role holds VIEW_OWN_MCP_KEY, so the role question does not arise here — what
-     * this pins is the copyable state machine.
+     * D16 — the top bar's chip (partials/mcp-key-chip): prefix and BOTH verbs when an
+     * UNCOPIED key exists; NO copy control once the key's one copy was read (#213: the
+     * first Copy destroys the sealed secret server-side, so "copied" and "minted before
+     * V31" are the same state to the chip — `copyable = false`), the rotation hint in its
+     * place. Every role holds VIEW_OWN_MCP_KEY, so the role question does not arise here —
+     * what this pins is the copyable state machine.
      */
     @Test
-    fun `the top bar chip shows copy only when the key has a sealed secret`() {
+    fun `the top bar chip shows copy only while the key's one copy is unread`() {
         val copyable =
             engine().process(
                 "partials/mcp-key-chip",
@@ -372,16 +373,17 @@ class RoleVisibilityRenderTest {
         copyable shouldContain "data-mcp-copy=\"/partials/mcp-key/secret\""
         copyable shouldContain "hx-delete=\"/partials/mcp-key\""
 
-        val legacy =
+        val copied =
             engine().process(
                 "partials/mcp-key-chip",
                 bare().apply { setVariable("mcpKey", McpKeyChip(prefix = "dpk_ABCDEFGH…", copyable = false)) },
             )
-        legacy shouldContain "dpk_ABCDEFGH…"
-        legacy shouldNotContain "data-mcp-copy"
-        // Rotation is the pre-V31 key's way to a copyable one — the delete stays.
-        legacy shouldContain "hx-delete=\"/partials/mcp-key\""
-        legacy shouldContain "sign in again"
+        copied shouldContain "dpk_ABCDEFGH…"
+        copied shouldNotContain "data-mcp-copy"
+        // Rotation is a read key's only way back to a copyable one — the delete stays, and
+        // the title says why there is no Copy (#213 wording, replacing the pre-V31 one).
+        copied shouldContain "hx-delete=\"/partials/mcp-key\""
+        copied shouldContain "Copied already — delete it and sign in again to get a new key you can copy"
 
         val none =
             engine().process("partials/mcp-key-chip", bare().apply { setVariable("mcpKey", null) })

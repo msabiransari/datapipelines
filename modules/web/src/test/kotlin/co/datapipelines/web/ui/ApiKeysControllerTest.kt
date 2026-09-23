@@ -214,6 +214,39 @@ class ApiKeysPartialControllerTest {
         html shouldNotContain "data-mcp-copy"
     }
 
+    /** #213: the post-copy re-render reads the server state — a read key comes back with no Copy. */
+    @Test
+    fun `the chip partial re-renders from the server's current state - Copy only while unread`() {
+        authenticate()
+        every { apiKeyRepository.findLiveUserKey(userId, workspaceId) } returns liveKey
+
+        val unreadModel = ExtendedModelMap()
+        val view = controller.chip(unreadModel)
+        view shouldBe "partials/mcp-key-chip"
+        (unreadModel["mcpKey"] as McpKeyChip).copyable shouldBe true
+
+        // The same key after its one copy was read: the sealed copy is gone, so the chip the
+        // copy handler swaps in carries no Copy button and says why.
+        every { apiKeyRepository.findLiveUserKey(userId, workspaceId) } returns liveKey.copy(hasSealedSecret = false)
+        val readModel = ExtendedModelMap()
+        controller.chip(readModel)
+        val chip = readModel["mcpKey"] as McpKeyChip
+        chip.copyable shouldBe false
+        chip.prefix shouldBe "dpk_abc123…"
+
+        val html =
+            engine().process(
+                view,
+                WebContext(
+                    JakartaServletWebApplication
+                        .buildApplication(MockServletContext())
+                        .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
+                ).apply { readModel.forEach { (k, v) -> setVariable(k, v) } },
+            )
+        html shouldNotContain "data-mcp-copy"
+        html shouldContain "Copied already — delete it and sign in again"
+    }
+
     private fun engine(): SpringTemplateEngine =
         SpringTemplateEngine().apply {
             setTemplateResolver(

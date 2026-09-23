@@ -19,8 +19,7 @@ import java.time.Instant
 
 /**
  * [UserRepository], [ApiKeyRepository] and [AuditLogger] against a real Postgres
- * running the **shipped** migrations V1 + V4 + V5 (metadata-db §4.1/§4.2/§4.3 — V4 adds the
- * `api_keys.workspace_id` pin, V5 the local password auth columns). The migrations are executed off disk rather than via Flyway —
+ * running the **shipped** migrations, every one in version order off disk rather than via Flyway —
  * domain modules carry no Flyway dependency (module-structure §3.1 rule 2), the same
  * discipline as the sibling `PipelineRepositoryIntegrationTest`.
  */
@@ -247,10 +246,9 @@ class AuthRepositoriesIntegrationTest {
             )
 
         key.mintedAtLogin.shouldBeTrue()
-        // The flag rides the model; the blob never does — it is read only by the copy path.
+        // The flag rides the model; the blob never does — and its only read is the one-shot
+        // open (asserted in full below), so this test touches the flag alone.
         key.hasSealedSecret.shouldBeTrue()
-        keys.sealedSecretOf(key.id)!!.toList() shouldBe sealed.toList()
-        keys.sealedSecretOf("dpk_DOESNOTEXIST").shouldBeNull()
 
         // …and a pre-V31 row (no sealed copy) reads false, with nothing to open. Another
         // owner: the index allows ONE live user key per (user, workspace).
@@ -258,6 +256,41 @@ class AuthRepositoriesIntegrationTest {
         val legacy = keys.insert("dpk_LEGACY000001", legacyOwner.id, "old", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
         legacy.hasSealedSecret.shouldBeFalse()
         legacy.mintedAtLogin.shouldBeFalse()
+    }
+
+    /** #213: show-once — the open and the clear are one statement, owner-scoped. */
+    @Test
+    fun `the sealed copy opens exactly once - a foreign owner gets null and the copy survives`() {
+        val owner = users.insert("once@company.com", "Once", null, "google", "sub3", isAdmin = false)
+        val stranger = users.insert("stranger@company.com", "Stranger", null, "google", "sub4", isAdmin = false)
+        val sealed = byteArrayOf(1, 2, 3, 4)
+        val key =
+            keys.insert(
+                "dpk_SHOWONCE0001",
+                owner.id,
+                "mcp/default",
+                "hash",
+                setOf(Scope.READ),
+                null,
+                DEFAULT_WORKSPACE_ID,
+                ApiKeyKind.USER,
+                sealed,
+                mintedAtLogin = true,
+            )
+
+        // A foreign user id opens nothing — and the refused attempt must not consume the copy.
+        keys.openAndClearSealedSecret(key.id, stranger.id).shouldBeNull()
+        keys.findById(key.id)!!.hasSealedSecret.shouldBeTrue()
+
+        // The owner's first read gets exactly the sealed bytes AND destroys them atomically.
+        keys.openAndClearSealedSecret(key.id, owner.id)!!.toList() shouldBe sealed.toList()
+
+        // From then on the key is hash-only: a second read answers null, the flag agrees, and
+        // the key itself (its hash) is untouched — it still validates.
+        keys.openAndClearSealedSecret(key.id, owner.id).shouldBeNull()
+        val reread = keys.findById(key.id)!!
+        reread.hasSealedSecret.shouldBeFalse()
+        reread.keyHash shouldBe "hash"
     }
 
     @Test

@@ -182,6 +182,25 @@ class ApiKeyMintingTest {
             .then()
             .statusCode(200)
             .body("data.key_id", Matchers.equalTo(keyId))
+
+        // #213 show-once: that one GET destroyed the copyable copy in the same act that
+        // served it — a second GET is 404 (the chip's Copy is gone with it) …
+        given()
+            .port(port)
+            .cookie("dp_session", session)
+            .`when`()
+            .get("/partials/mcp-key/secret")
+            .then()
+            .statusCode(404)
+
+        // … and the key itself is untouched: the Argon2id hash still serves a real read.
+        given()
+            .port(port)
+            .header("DP-API-Key", secret)
+            .`when`()
+            .get("/api/v1/pipelines")
+            .then()
+            .statusCode(200)
     }
 
     @Test

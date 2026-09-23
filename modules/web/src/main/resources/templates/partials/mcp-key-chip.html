@@ -1,16 +1,18 @@
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="chip(mcpKey)" class="app-mcpkey" id="app-mcpkey">
   <!-- 179 (D16) — the top bar's MCP key, right side beside the user menu: the caller's ONE
-       login-minted `user` key in the ACTIVE workspace. Prefix always; Copy only when the key
-       carries a sealed secret (V31 — a pre-R3 key has none, so it offers rotation instead);
-       Delete rotates (the next login or switch mints a fresh key). Every role may do all
-       three on their OWN key — §7.6's VIEW_OWN_MCP_KEY row — so `mcpKey != null` (a live key
-       exists) IS the guard, and the partial's own th:if carries it for the sweep.
-       The secret is never in the page: Copy fetches it (shell.js) from
-       /partials/mcp-key/secret, which opens the sealed store for the caller's own key only. -->
+       login-minted `user` key in the ACTIVE workspace. Prefix always; Copy only while the key
+       still carries its sealed secret — since #213 that means UNCOPIED: the first Copy's fetch
+       destroys the copy server-side in the same act that serves it, and this chip is swapped
+       for the re-rendered one (shell.js → GET /partials/mcp-key/chip) so the button is gone
+       without a reload. Delete rotates (the next login or switch mints a fresh key). Every
+       role may do all three on their OWN key — §7.6's VIEW_OWN_MCP_KEY row — so `mcpKey !=
+       null` (a live key exists) IS the guard, and the partial's own th:if carries it for the
+       sweep. The secret is never in the page: Copy fetches it from /partials/mcp-key/secret,
+       which opens the sealed store for the caller's own key only — once. -->
   <th:block th:if="${mcpKey != null}">
     <span class="app-mcpkey-label" title="Your MCP key for this workspace — minted at sign-in">MCP key</span>
     <span class="app-mcpkey-prefix ds-mono" th:text="${mcpKey.prefix}"
-          th:title="${mcpKey.copyable} ? 'Your MCP key for this workspace' : 'Minted before keys became copyable — delete it and sign in again to get one you can copy'">dpk_RGAXQ7T2…</span>
+          th:title="${mcpKey.copyable} ? 'Your MCP key for this workspace — copyable once' : 'Copied already — delete it and sign in again to get a new key you can copy'">dpk_RGAXQ7T2…</span>
     <button type="button" th:if="${mcpKey.copyable}" data-verb="mcp-key-copy" class="ds-button ds-button-ghost ds-button-sm"
             data-mcp-copy="/partials/mcp-key/secret" title="Copy the full key">
       <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#copy"></use></svg> Copy

@@ -367,8 +367,9 @@ class ApiKeyService(
      *   set is the role's, re-read per request as today (§7.4's issuer check is unchanged);
      * - no expiry, name `mcp/<workspace>`;
      * - `minted_at_login = TRUE`, and the plaintext SEALED into `secret_sealed` so the top
-     *   bar can offer Copy later — the plaintext is never returned to anyone at mint time,
-     *   because there is no screen in a login redirect.
+     *   bar can offer Copy — ONCE (#213: the first open destroys the sealed copy in the same
+     *   statement and the key is hash-only from then on). The plaintext is never returned to
+     *   anyone at mint time, because there is no screen in a login redirect.
      *
      * A user who owes a forced password change (§5A.4) gets NO key: the gate holds every
      * governed route until the change, and a credential minted into that state would start
@@ -450,20 +451,22 @@ class ApiKeyService(
     }
 
     /**
-     * The caller's own MCP key's plaintext, opened from `secret_sealed` — the top bar's Copy
-     * (D16: the secret is served by THIS call, never rendered into a page). Null when the key
-     * is not the caller's own live `user` key in [workspaceId], or when it predates R3 and
-     * carries no sealed copy — the bar then shows "delete and sign in again" instead.
+     * The caller's own MCP key's plaintext — the top bar's Copy, served ONCE (#213 — D16
+     * amended 2026-09-23: the key is copyable once; the open destroys the copyable secret in
+     * the same statement, so the key is hash-only from the first read on). Null when the key
+     * is not the caller's own live `user` key in [workspaceId], when its copy was already
+     * read, or when it predates R3 and never carried one — the bar then shows "delete and
+     * sign in again" instead. Nothing the server holds can reveal a key that has been read.
      *
      * Not cached and deliberately not routed through [AuthCache]: a copy click is rare, and
-     * the sealed blob is the one value that must not outlive a rotation in a cache.
+     * a cached copyable secret would be exactly the recoverable-at-rest copy show-once removes.
      */
     fun openOwnMcpKey(
         userId: UUID,
         workspaceId: UUID,
     ): String? {
         val record = apiKeyRepository.findLiveUserKey(userId, workspaceId) ?: return null
-        val sealed = apiKeyRepository.sealedSecretOf(record.id) ?: return null
+        val sealed = apiKeyRepository.openAndClearSealedSecret(record.id, userId) ?: return null
         val sealer = secretSealer ?: return null
         return sealer.open(sealed, record.id)
     }
