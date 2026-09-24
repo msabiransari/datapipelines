@@ -112,7 +112,9 @@ class TemplateReleaseServiceTest {
                     mapOf(
                         "orders" to
                             co.datapipelines.templates.TransformInput.Table(
-                                listOf(co.datapipelines.templates.ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER)),
+                                listOf(
+                                    co.datapipelines.templates.ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER),
+                                ),
                             ),
                     ),
                 output =
@@ -126,7 +128,9 @@ class TemplateReleaseServiceTest {
                 input = co.datapipelines.templates.TransformTestInput(rows = emptyList(), inputs = emptyMap()),
                 expect =
                     co.datapipelines.templates.TransformTestExpect(
-                        output = co.datapipelines.templates.TransformBlocks.mapper.readTree("""{"rows": []}"""),
+                        output =
+                            co.datapipelines.templates.TransformBlocks.mapper
+                                .readTree("""{"rows": []}"""),
                     ),
             )
         val transformStored =

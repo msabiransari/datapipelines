@@ -11,7 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.json.JsonMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 
-/**
+/*
  * The transform-nodes design's §2.2 model: the three blocks a transform template version
  * carries (`contract`, `invariants`, `tests`), stored as `contract_json` / `invariants_json` /
  * `tests_json` jsonb columns inside the version's body hash (D-T7).
@@ -237,8 +237,7 @@ object TransformBlocks {
     fun writeContract(contract: TransformContract?): String? = contract?.let { mapper.writeValueAsString(it) }
 
     /** Serializes the invariants block; an empty list serializes as `[]` (never null). */
-    fun writeInvariants(invariants: List<TransformInvariant>?): String? =
-        invariants?.let { mapper.writeValueAsString(it) }
+    fun writeInvariants(invariants: List<TransformInvariant>?): String? = invariants?.let { mapper.writeValueAsString(it) }
 
     /** Serializes the tests block. */
     fun writeTests(tests: List<TransformTestCase>?): String? = tests?.let { mapper.writeValueAsString(it) }
@@ -248,7 +247,9 @@ object TransformBlocks {
 
     /** Reads one stored `invariants_json` back. */
     fun readInvariants(json: String?): List<TransformInvariant>? =
-        json?.let { mapper.readValue(it, Array<TransformInvariant>::class.java).toList() }
+        json?.let {
+            mapper.readValue(it, Array<TransformInvariant>::class.java).toList()
+        }
 
     /** Reads one stored `tests_json` back. */
     fun readTests(json: String?): List<TransformTestCase>? =

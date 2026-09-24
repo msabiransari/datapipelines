@@ -128,7 +128,7 @@ class ConfigValidator(
             checkExecutorQueryTimeoutByDialect(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
             checkOrgSettings(snapshot, violations)
-            checkTransformBounds(snapshot, violations)
+            TransformRules.checkTransformBounds(snapshot, violations)
             // §3.27 (137) — the mail rules live in their own file (MailRules), like the posture ones.
             MailRules.checkMailShape(snapshot, violations)
             MailRules.checkMailHardened(snapshot, violations)
@@ -759,57 +759,6 @@ class ConfigValidator(
         /** True when `MM-DD` names a day the calendar has — `02-30` and `13-01` do not. */
         private fun isCalendarDay(value: String): Boolean = runCatching { java.time.MonthDay.parse("--$value") }.isSuccess
 
-        /**
-         * §7 / §3.28 (7b, #7) — the transform evaluation budgets: one case must fit inside its
-         * suite (`evaluate-timeout-seconds` ≤ `suite-timeout-seconds`), and the abandonment
-         * grace must be at least one second (a zero grace would abandon every slow case at the
-         * instant its own wall clock ends, with no room for the engine's between-steps check
-         * to report first — record §4.5). Missing values are not a violation: application.yml
-         * always supplies them.
-         */
-        private fun checkTransformBounds(
-            snapshot: ConfigSnapshot,
-            violations: MutableList<String>,
-        ) {
-            val evaluate = snapshot.transformEvaluateTimeoutSeconds ?: return
-            val suite = snapshot.transformSuiteTimeoutSeconds ?: return
-            val grace = snapshot.transformAbandonGraceSeconds ?: return
-            val poolSize = snapshot.transformPoolSize ?: return
-            val poolQueue = snapshot.transformPoolQueue ?: return
-            val maxInputRows = snapshot.transformMaxInputRows ?: return
-            val maxValueBytes = snapshot.transformMaxValueBytes ?: return
-            val maxStringBytes = snapshot.transformMaxStringBytes ?: return
-            val maxDepth = snapshot.transformMaxDepth ?: return
-            if (evaluate > suite) {
-                violations +=
-                    "datapipelines.transform.evaluate-timeout-seconds ($evaluate) must not exceed " +
-                    "datapipelines.transform.suite-timeout-seconds ($suite) — one case must fit inside its suite (§7)."
-            }
-            if (grace < 1) {
-                violations += "datapipelines.transform.abandon-grace-seconds ($grace) must be >= 1 (§7)."
-            }
-            if (poolSize < 1) {
-                violations += "datapipelines.transform.pool-size ($poolSize) must be >= 1 (§7)."
-            }
-            if (poolQueue < poolSize) {
-                violations +=
-                    "datapipelines.transform.pool-queue ($poolQueue) must be >= datapipelines.transform.pool-size " +
-                    "($poolSize) — the admitted total cannot be smaller than the running set (§7)."
-            }
-            if (maxInputRows < 1) {
-                violations += "datapipelines.transform.max-input-rows ($maxInputRows) must be >= 1 (§7)."
-            }
-            if (maxValueBytes < 1) {
-                violations += "datapipelines.transform.max-value-bytes ($maxValueBytes) must be >= 1 (§7)."
-            }
-            if (maxStringBytes < 1) {
-                violations += "datapipelines.transform.max-string-bytes ($maxStringBytes) must be >= 1 (§7)."
-            }
-            if (maxDepth < 1) {
-                violations += "datapipelines.transform.max-depth ($maxDepth) must be >= 1 (§7)."
-            }
-        }
-
         /** True for a zone id this JVM's tz database knows; a fixed offset (`+02:00`) is not one. */
         private fun isIanaZone(value: String): Boolean = value in java.time.ZoneId.getAvailableZoneIds()
 
@@ -908,14 +857,30 @@ class ConfigValidator(
                 orgWeekStart = environment.getProperty("datapipelines.org.week-start"),
                 orgTimezone = environment.getProperty("datapipelines.org.timezone"),
                 // §3.28 (7b, #7) — the transform budgets.
-                transformEvaluateTimeoutSeconds = environment.getProperty("datapipelines.transform.evaluate-timeout-seconds", Long::class.java),
-                transformSuiteTimeoutSeconds = environment.getProperty("datapipelines.transform.suite-timeout-seconds", Long::class.java),
-                transformAbandonGraceSeconds = environment.getProperty("datapipelines.transform.abandon-grace-seconds", Long::class.java),
+                transformEvaluateTimeoutSeconds =
+                    environment.getProperty(
+                        "datapipelines.transform.evaluate-timeout-seconds",
+                        Long::class.java,
+                    ),
+                transformSuiteTimeoutSeconds =
+                    environment.getProperty(
+                        "datapipelines.transform.suite-timeout-seconds",
+                        Long::class.java,
+                    ),
+                transformAbandonGraceSeconds =
+                    environment.getProperty(
+                        "datapipelines.transform.abandon-grace-seconds",
+                        Long::class.java,
+                    ),
                 transformPoolSize = environment.getProperty("datapipelines.transform.pool-size", Long::class.java),
                 transformPoolQueue = environment.getProperty("datapipelines.transform.pool-queue", Long::class.java),
                 transformMaxInputRows = environment.getProperty("datapipelines.transform.max-input-rows", Long::class.java),
                 transformMaxValueBytes = environment.getProperty("datapipelines.transform.max-value-bytes", Long::class.java),
-                transformMaxStringBytes = environment.getProperty("datapipelines.transform.max-string-bytes", Long::class.java),
+                transformMaxStringBytes =
+                    environment.getProperty(
+                        "datapipelines.transform.max-string-bytes",
+                        Long::class.java,
+                    ),
                 transformMaxDepth = environment.getProperty("datapipelines.transform.max-depth", Long::class.java),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),

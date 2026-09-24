@@ -144,19 +144,46 @@ class TransformContractValidationTest {
     fun `precision_scale_invalid enforces type-system section 4`() {
         // scale without precision
         ruleOf(
-            draftOf(contract = rowContract(inputs = mapOf("orders" to TransformInput.Table(listOf(ContractColumn("a", LogicalType.DECIMAL, scale = 2)))))),
+            draftOf(
+                contract =
+                    rowContract(
+                        inputs =
+                            mapOf("orders" to TransformInput.Table(listOf(ContractColumn("a", LogicalType.DECIMAL, scale = 2)))),
+                    ),
+            ),
         ) shouldBe "precision_scale_invalid"
         // BIGDECIMAL precision without scale
         ruleOf(
-            draftOf(contract = rowContract(inputs = mapOf("orders" to TransformInput.Table(listOf(ContractColumn("a", LogicalType.BIGDECIMAL, precision = 20)))))),
+            draftOf(
+                contract =
+                    rowContract(
+                        inputs =
+                            mapOf("orders" to TransformInput.Table(listOf(ContractColumn("a", LogicalType.BIGDECIMAL, precision = 20)))),
+                    ),
+            ),
         ) shouldBe "precision_scale_invalid"
         // DECIMAL past 15
         ruleOf(
-            draftOf(contract = rowContract(inputs = mapOf("orders" to TransformInput.Table(listOf(ContractColumn("a", LogicalType.DECIMAL, precision = 16, scale = 2)))))),
+            draftOf(
+                contract =
+                    rowContract(
+                        inputs =
+                            mapOf(
+                                "orders" to
+                                    TransformInput.Table(listOf(ContractColumn("a", LogicalType.DECIMAL, precision = 16, scale = 2))),
+                            ),
+                    ),
+            ),
         ) shouldBe "precision_scale_invalid"
         // precision on a non-decimal
         ruleOf(
-            draftOf(contract = rowContract(inputs = mapOf("orders" to TransformInput.Table(listOf(ContractColumn("a", LogicalType.STRING, precision = 4)))))),
+            draftOf(
+                contract =
+                    rowContract(
+                        inputs =
+                            mapOf("orders" to TransformInput.Table(listOf(ContractColumn("a", LogicalType.STRING, precision = 4)))),
+                    ),
+            ),
         ) shouldBe "precision_scale_invalid"
     }
 

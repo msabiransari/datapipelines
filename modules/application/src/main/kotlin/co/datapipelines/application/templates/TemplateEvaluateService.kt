@@ -23,6 +23,7 @@ import java.util.UUID
  * catalog exactly like any other failure, and the audit row never carries the input
  * object or the output (record §9.5).
  */
+@Suppress("ThrowsCount") // each refusal is a distinct catalogued outcome the surfaces map
 class TemplateEvaluateService(
     private val templates: TemplateRepository,
     private val runner: TransformTestRunner,
@@ -91,15 +92,17 @@ class TemplateEvaluateService(
                     now = now,
                 )
         ) {
-            is TransformTestRunner.RunOutcome.Refused ->
+            is TransformTestRunner.RunOutcome.Refused -> {
                 throw DatapipelinesException(
                     code = outcome.code,
                     message = outcome.message,
                     details = mapOf("template_id" to name, "version" to resolved.version),
                 )
+            }
 
-            is TransformTestRunner.RunOutcome.Evaluated ->
+            is TransformTestRunner.RunOutcome.Evaluated -> {
                 Evaluation(outcome.output, outcome.rejects, outcome.invariants)
+            }
         }
     }
 

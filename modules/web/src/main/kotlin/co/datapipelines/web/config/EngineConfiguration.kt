@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
@@ -25,12 +26,11 @@ import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
-import co.datapipelines.application.templates.TemplateEvaluateService
+import co.datapipelines.scripting.ScriptEvaluationPool
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TransformTestRunner
 import co.datapipelines.templates.WorkspaceTemplateEngines
-import co.datapipelines.scripting.ScriptEvaluationPool
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -338,9 +338,11 @@ class EngineConfiguration {
         pool: ScriptEvaluationPool,
         meters: MeterRegistry,
     ): Gauge =
-        Gauge.builder("transform.evaluations.abandoned") { pool.abandoned.sum().toDouble() }
-            .description("Script evaluations abandoned past their wall clock plus grace (the pool's bulkhead holds the thread's slot until it ends)")
-            .register(meters)
+        Gauge
+            .builder("transform.evaluations.abandoned") { pool.abandoned.sum().toDouble() }
+            .description(
+                "Script evaluations abandoned past their wall clock plus grace (the pool's bulkhead holds the thread's slot until it ends)",
+            ).register(meters)
 
     /**
      * The ONE evaluation path the MCP `templates_evaluate` tool and REST

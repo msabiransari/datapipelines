@@ -85,6 +85,7 @@ private fun parseImports(args: McpArguments): List<TemplateImport> =
  * arguments stay absent (null) — the validator's `blocks_missing` / `blocks_not_allowed`
  * rules own that verdict.
  */
+@Suppress("UNCHECKED_CAST") // Jackson's convertValue with a typed JavaType is typed by construction
 private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<TransformInvariant>?, List<TransformTestCase>?> {
     fun bind(
         name: String,
@@ -106,14 +107,12 @@ private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<Tra
     val contract =
         bind("contract", TransformBlocks.mapper.typeFactory.constructType(TransformContract::class.java))
             as TransformContract?
-    @Suppress("UNCHECKED_CAST")
     val invariants =
         bind(
             "invariants",
             TransformBlocks.mapper.typeFactory.constructCollectionType(List::class.java, TransformInvariant::class.java),
         )
             as List<TransformInvariant>?
-    @Suppress("UNCHECKED_CAST")
     val tests =
         bind(
             "tests",

@@ -17,10 +17,10 @@ import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TemplateTypeBehaviour
-import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
+import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiErrors
@@ -532,7 +532,11 @@ class TemplatesController(
         val workspaceId = currentPrincipal().requireWorkspace().id
         val tree = objectOf(body)
         val name =
-            tree.get("name")?.takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() }
+            tree
+                .get("name")
+                ?.takeIf { it.isTextual }
+                ?.asText()
+                ?.takeIf { it.isNotBlank() }
                 ?: throw ApiException(
                     PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
                     "The request requires a 'name' field (§9.6: the name never travels in the path).",
@@ -641,7 +645,10 @@ class TemplatesController(
         // html and the transform types declare none. An unknown wire value keeps the pre-7b
         // reading (fold) — the deserializer's own type_invalid refusal catches it downstream.
         val declaresDialect =
-            tree.get("type")?.takeIf { it.isTextual }?.asText()
+            tree
+                .get("type")
+                ?.takeIf { it.isTextual }
+                ?.asText()
                 ?.let { TemplateType.fromWire(it) }
                 ?.let { TemplateTypeBehaviour.of(it).requiresDialect } ?: true
         when {

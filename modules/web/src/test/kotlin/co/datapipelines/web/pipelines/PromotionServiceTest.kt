@@ -7,11 +7,11 @@ import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.templates.ContractColumn
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateImport
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateVersion
-import co.datapipelines.templates.ContractColumn
 import co.datapipelines.templates.TransformContract
 import co.datapipelines.templates.TransformInput
 import co.datapipelines.templates.TransformMode

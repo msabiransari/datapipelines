@@ -120,7 +120,13 @@ class TemplateTransferRoundTripIntegrationTest {
         // And the import itself lands the blocks in the scratch workspace (the version-less
         // path, the one the seeders and promotion share).
         val stored =
-            repository.create(TARGET_WORKSPACE, imported.copy(id = "test/xform_roundtrip.jsonata"), ACTOR_ID, CreateLifecycle.RELEASED, WriteSurface.SESSION)
+            repository.create(
+                TARGET_WORKSPACE,
+                imported.copy(id = "test/xform_roundtrip.jsonata"),
+                ACTOR_ID,
+                CreateLifecycle.RELEASED,
+                WriteSurface.SESSION,
+            )
         stored.contract shouldBe contract
         stored.bodyHash shouldBe exported.bodyHash
         stored.bodyHash shouldNotBe null

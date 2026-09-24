@@ -191,20 +191,21 @@ class TemplateTypeRulesTest {
         rows.forEach { row ->
             withClue(row.name) {
                 val failures =
-                    validator().validate(
-                        TemplateFixtures.draft(
-                            type = row.type,
-                            engine = row.engine,
-                            dialect = row.dialect,
-                            imports = row.imports,
-                            isLibrary = row.isLibrary,
-                            body = row.body,
-                            contract = row.contract,
-                            invariants = row.invariants,
-                            tests = row.tests,
-                        ),
-                        workspaceId,
-                    ).failures
+                    validator()
+                        .validate(
+                            TemplateFixtures.draft(
+                                type = row.type,
+                                engine = row.engine,
+                                dialect = row.dialect,
+                                imports = row.imports,
+                                isLibrary = row.isLibrary,
+                                body = row.body,
+                                contract = row.contract,
+                                invariants = row.invariants,
+                                tests = row.tests,
+                            ),
+                            workspaceId,
+                        ).failures
                 val codes = failures.map { it.code }
                 codes.filter { it in row.codes } shouldBe row.codes
                 if (row.codes.isEmpty()) {
@@ -221,10 +222,11 @@ class TemplateTypeRulesTest {
     @Test
     fun `the syntax_error of a jsonata body carries the engine's line and column`() {
         val failures =
-            validator().validate(
-                TemplateFixtures.draft(type = TemplateType.JSONATA, engine = Template.NONE_ENGINE, dialect = null, body = "((((("),
-                workspaceId,
-            ).failures
+            validator()
+                .validate(
+                    TemplateFixtures.draft(type = TemplateType.JSONATA, engine = Template.NONE_ENGINE, dialect = null, body = "((((("),
+                    workspaceId,
+                ).failures
         val refusal = failures.single { it.code == PipelineErrorCodes.Template.SYNTAX_ERROR }
         refusal.details["line"] shouldBe 1
         (refusal.details["column"] as Int > 0) shouldBe true

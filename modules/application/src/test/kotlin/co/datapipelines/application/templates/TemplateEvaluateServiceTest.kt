@@ -71,13 +71,14 @@ class TemplateEvaluateServiceTest {
             createdAt = Instant.EPOCH,
             createdBy = UUID.randomUUID(),
             contract = contract,
-            invariants = listOf(
-                co.datapipelines.templates.TransformInvariant(
-                    "one_to_one",
-                    "\$count(rows) = \$count(inputs.orders)",
-                    "no row is lost",
+            invariants =
+                listOf(
+                    co.datapipelines.templates.TransformInvariant(
+                        "one_to_one",
+                        "\$count(rows) = \$count(inputs.orders)",
+                        "no row is lost",
+                    ),
                 ),
-            ),
             tests = emptyList(),
         )
 

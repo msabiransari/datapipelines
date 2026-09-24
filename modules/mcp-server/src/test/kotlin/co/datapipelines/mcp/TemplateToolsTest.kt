@@ -354,7 +354,7 @@ class TemplateToolsTest {
             // The omitted engine defaults by the type (record §2.1).
             { draft.captured.engine shouldBe Template.NONE_ENGINE },
             { draft.captured.contract?.mode shouldBe co.datapipelines.templates.TransformMode.ROW },
-            { draft.captured.tests?.single()?.name shouldBe "empty" },
+            { draft.captured.tests?.map { it.name } shouldBe listOf("empty") },
         )
     }
 

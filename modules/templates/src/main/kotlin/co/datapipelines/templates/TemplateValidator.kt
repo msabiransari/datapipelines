@@ -410,7 +410,9 @@ class TemplateValidator(
                     mapOf("mode" to contract.mode.wire, "table_inputs" to tableInputs.keys.sorted()),
                 )
         }
-        contract.inputs.forEach { (name, input) -> validateDeclaredType("inputs.$name", input.typeOf(), input.precisionOf(), input.scaleOf(), failures) }
+        contract.inputs.forEach { (name, input) ->
+            validateDeclaredType("inputs.$name", input.typeOf(), input.precisionOf(), input.scaleOf(), failures)
+        }
         validateDeclaredType("output", contract.output.typeOf(), contract.output.precisionOf(), contract.output.scaleOf(), failures)
         val outputColumns = (contract.output as? TransformOutput.Table)?.columns.orEmpty()
         outputColumns.forEach { column ->
@@ -569,13 +571,17 @@ class TemplateValidator(
                 val tablesEmpty =
                     when (contract.mode) {
                         // R2: in row mode the table rides `rows`; `inputs` lists no table.
-                        TransformMode.ROW -> true
+                        TransformMode.ROW -> {
+                            true
+                        }
+
                         // Every declared table input is listed AND empty.
-                        TransformMode.TABLE, TransformMode.VALUE ->
+                        TransformMode.TABLE, TransformMode.VALUE -> {
                             contract.inputs
                                 .filterValues { it is TransformInput.Table }
                                 .keys
                                 .all { name -> (case.input.inputs?.get(name) as? List<*>)?.isEmpty() == true }
+                        }
                     }
                 rowsEmpty && tablesEmpty
             }
@@ -588,7 +594,11 @@ class TemplateValidator(
                 )
         }
         if (contract.mode == TransformMode.ROW) {
-            val tableName = contract.inputs.filterValues { it is TransformInput.Table }.keys.singleOrNull()
+            val tableName =
+                contract.inputs
+                    .filterValues { it is TransformInput.Table }
+                    .keys
+                    .singleOrNull()
             tests.forEach { case ->
                 if (tableName != null && case.input.inputs?.containsKey(tableName) == true) {
                     failures +=
@@ -608,7 +618,8 @@ class TemplateValidator(
                 failures +=
                     contractFailure(
                         "expect_shape",
-                        "Test case '${case.name}' declares ${if (hasOutput) "both output and refusal" else "neither output nor refusal"} — " +
+                        "Test case '${case.name}' declares " +
+                            "${if (hasOutput) "both output and refusal" else "neither output nor refusal"} — " +
                             "expect is exactly one of the two (D-T12).",
                         mapOf("case" to case.name),
                     )

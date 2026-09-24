@@ -619,7 +619,8 @@ class TemplatesControllerTest {
                 rejects = emptyList(),
                 invariants =
                     listOf(
-                        co.datapipelines.templates.TransformTestRunner.InvariantVerdict("one_to_one", true, "no row lost"),
+                        co.datapipelines.templates.TransformTestRunner
+                            .InvariantVerdict("one_to_one", true, "no row lost"),
                     ),
             )
 

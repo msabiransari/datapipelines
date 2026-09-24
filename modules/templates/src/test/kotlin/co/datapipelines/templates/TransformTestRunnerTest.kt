@@ -248,7 +248,12 @@ class TransformTestRunnerTest {
         val pinnedCase =
             TransformTestCase(
                 name = "clock pinned",
-                input = TransformTestInput(rows = emptyList(), inputs = mapOf("tz" to "UTC", "min_total" to 0.00), now = "2026-09-23T12:00:00Z"),
+                input =
+                    TransformTestInput(
+                        rows = emptyList(),
+                        inputs = mapOf("tz" to "UTC", "min_total" to 0.00),
+                        now = "2026-09-23T12:00:00Z",
+                    ),
                 expect =
                     TransformTestExpect(
                         output =
