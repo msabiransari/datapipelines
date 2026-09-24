@@ -8,11 +8,20 @@
 # coverage scans, page-count pins), and fixtures in other modules. This script runs
 # exactly those in a few minutes so the full gate runs once.
 #
-# Three stages, each its own bare gradle invocation writing to a log FILE (no pipes —
+# Five stages, each its own bare gradle invocation writing to a log FILE (no pipes —
 # DEVELOPMENT.md §9.4): (1) lint over the whole tree; (2) the UNFILTERED test task of
-# every module the diff touched; (3) the cross-cutting guard classes, filtered, with
-# the zero-test guard skipped for those modules (a filtered run always trips it —
-# §9.4). Exit 0 only if all three passed. This is NOT the gate: scripts/gate.sh is.
+# every `modules/*` module the diff touched; (2b) for the two `tests/*` modules, ONLY the
+# test classes the diff changed or added (their build file changed → the whole module),
+# with the zero-test guard skipped — the E2E and browser suites are the expensive part of
+# a full build, and the orchestrator's gate on the merge SHA runs them whole; (3) the
+# cross-cutting guard classes, filtered, with the zero-test guard skipped for those
+# modules (a filtered run always trips it — §9.4); (4) compileTestKotlin of EVERY module —
+# a signature change breaks a test in a module the lane never ran (MISTAKES.md, the
+# cross-module variant). Exit 0 only if all five passed.
+#
+# LANE PROTOCOL (owner, 2026-09-24): a lane runs THIS and does not run scripts/gate.sh.
+# The full build runs twice — the orchestrator's gate on the merge SHA, and CI cold —
+# not three times. This is still NOT the gate: scripts/gate.sh is.
 #
 # Usage: ./scripts/pregate.sh [base-ref]     (default: origin/main; the diff is base...HEAD
 #        plus the working tree). Logs: .pregate-logs/.
@@ -28,11 +37,13 @@ run() { # run <logfile> <args...> → echoes exit code; never pipes gradle
 
 # --- touched modules -----------------------------------------------------------
 mb="$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")"
-touched="$( { git diff --name-only "$mb" HEAD; git diff --name-only; git ls-files --others --exclude-standard; } \
-  | grep -oE '^(modules|tests)/[a-z-]+/' | sort -u | sed -E 's|^(modules\|tests)/([a-z-]+)/|:\1:\2|')"
+changed_files="$( { git diff --name-only "$mb" HEAD; git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)"
+touched="$(echo "$changed_files" | grep -oE '^modules/[a-z-]+/' | sort -u | sed -E 's|^modules/([a-z-]+)/|:modules:\1|')"
+touched_tests="$(echo "$changed_files" | grep -oE '^tests/[a-z-]+/' | sort -u | sed -E 's|^tests/([a-z-]+)/|\1|')"
 echo "=============================================================="
 echo " Pre-gate   |   $(date '+%Y-%m-%d %H:%M:%S %z')   |   base $BASE ($mb)"
 echo " touched modules: ${touched:-(none)}"
+echo " touched tests/ modules: ${touched_tests:-(none)}"
 echo " logs: $LOGDIR"
 echo "=============================================================="
 
@@ -51,6 +62,38 @@ else
 fi
 echo "  2 touched modules' tests (unfiltered)              EXIT=$mod"
 [ "$mod" -ne 0 ] && grep -E 'FAILED$|> Task .* FAILED' "$LOGDIR/2-touched-modules.log" | head -20 | sed 's/^/      /'
+
+# --- 2b. tests/* modules: the changed test classes only -------------------------
+# A changed `tests/<m>/build.gradle.kts` means the knobs changed → that module unfiltered.
+# Otherwise every changed/added `*.kt` under `tests/<m>/src/test/kotlin/` is a class to
+# run (file name = class name, package from the path), with that module's zero-test guard
+# skipped (a filtered run always trips it). The merge gate runs these modules whole.
+t2b=0
+if [ -n "$touched_tests" ]; then
+  targs=()
+  for m in $touched_tests; do
+    if echo "$changed_files" | grep -qE "^tests/$m/build\.gradle\.kts$"; then
+      targs+=(":tests:$m:test")
+      echo "  2b tests/$m: build file changed → whole module"
+    else
+      classes=$(echo "$changed_files" | grep -E "^tests/$m/src/test/kotlin/.*\.kt$" \
+        | sed -E "s|^tests/$m/src/test/kotlin/||; s|\.kt$||; s|/|.|g")
+      if [ -n "$classes" ]; then
+        targs+=(":tests:$m:test")
+        for c in $classes; do targs+=("--tests" "$c"); done
+        targs+=("-x" ":tests:$m:verifyTestsExecuted")
+        echo "  2b tests/$m: $(echo "$classes" | wc -l | tr -d ' ') changed test class(es)"
+      else
+        echo "  2b tests/$m: touched, but no test class and no build file changed → nothing to run here"
+      fi
+    fi
+  done
+  if [ ${#targs[@]} -gt 0 ]; then
+    t2b=$(run "$LOGDIR/2b-tests-modules.log" "${targs[@]}" --continue)
+  fi
+fi
+echo "  2b tests/* changed classes                         EXIT=$t2b"
+[ "$t2b" -ne 0 ] && grep -E 'FAILED$|> Task .* FAILED' "$LOGDIR/2b-tests-modules.log" | head -20 | sed 's/^/      /'
 
 # --- 3. cross-cutting guards -----------------------------------------------------
 # One line per module: the guard classes that read the WHOLE tree or the docs, so a
@@ -72,11 +115,18 @@ grd=$(run "$LOGDIR/3-guards.log" "${args[@]}" --continue)
 echo "  3 cross-cutting guards (filtered, zero-test guard skipped) EXIT=$grd"
 [ "$grd" -ne 0 ] && grep -E 'FAILED$|> Task .* FAILED' "$LOGDIR/3-guards.log" | head -20 | sed 's/^/      /'
 
+# --- 4. every module's test sources compile ------------------------------------
+# The cross-module trap (MISTAKES.md): a changed signature, a test in ANOTHER module
+# still calling the old one, nothing compiled it until the full gate. About a minute.
+cmp=$(run "$LOGDIR/4-compile-all-tests.log" compileTestKotlin --continue)
+echo "  4 compileTestKotlin, every module                  EXIT=$cmp"
+[ "$cmp" -ne 0 ] && grep -E '^e: |error:|FAILED' "$LOGDIR/4-compile-all-tests.log" | head -20 | sed 's/^/      /'
+
 echo "--------------------------------------------------------------"
-if [ "$lint" -eq 0 ] && [ "$mod" -eq 0 ] && [ "$grd" -eq 0 ]; then
-  echo "  PRE-GATE PASS — now run ./scripts/gate.sh 1 (the verdict is the gate's, not this)"
+if [ "$lint" -eq 0 ] && [ "$mod" -eq 0 ] && [ "$t2b" -eq 0 ] && [ "$grd" -eq 0 ] && [ "$cmp" -eq 0 ]; then
+  echo "  PRE-GATE PASS — a lane stops here (protocol 2026-09-24); the orchestrator's gate on the merge SHA is the verdict"
   exit 0
 else
-  echo "  PRE-GATE FAIL — fix the lines above before spending a full gate"
+  echo "  PRE-GATE FAIL — fix the lines above"
   exit 1
 fi
