@@ -32,33 +32,42 @@ import org.springframework.web.util.HtmlUtils
  *     nothing would fail loudly instead of passing by checking air.
  */
 class SiteProseHygieneTest {
-
-    private data class Scanned(val page: String, val tag: String, val text: String)
+    private data class Scanned(
+        val page: String,
+        val tag: String,
+        val text: String,
+    )
 
     private val scanned: List<Scanned> by lazy {
-        SitePages.ALL.flatMap { page ->
-            val html = SitePageRenderer.render(page)
-            val withoutComments = COMMENT.replace(html, " ")
-            val withoutCode = CODE.replace(withoutComments, " ")
-            SCANNED_TAGS.flatMap { tag ->
-                Regex("<$tag\\b[^>]*>(.*?)</$tag>", RegexOption.DOT_MATCHES_ALL)
-                    .findAll(withoutCode)
-                    .map { m ->
-                        val text = HtmlUtils
-                            .htmlUnescape(TAG.replace(m.groupValues[1], " "))
-                            .replace(WHITESPACE, " ")
-                            .trim()
-                        when {
-                            text.isEmpty() -> null
-                            // A directory row (one arrow link, no sentence): /explore renders
-                            // the DOCS' OWN titles there, and the docs are outside this
-                            // lane's fence. Their wording is the docs' to fix.
-                            tag == "li" && text.endsWith(ARROW) && ARROW_LINK.containsMatchIn(m.groupValues[1]) -> null
-                            else -> Scanned(page.path, tag, text)
-                        }
-                    }
-            }.filterNotNull()
-        }
+        SitePages.ALL
+            .flatMap { page ->
+                val html = SitePageRenderer.render(page)
+                val withoutComments = COMMENT.replace(html, " ")
+                val withoutCode = CODE.replace(withoutComments, " ")
+                SCANNED_TAGS
+                    .flatMap { tag ->
+                        val element = Regex("<$tag\\b[^>]*>(.*?)</$tag>", RegexOption.DOT_MATCHES_ALL)
+                        element
+                            .findAll(withoutCode)
+                            .map { m ->
+                                val text =
+                                    HtmlUtils
+                                        .htmlUnescape(TAG.replace(m.groupValues[1], " "))
+                                        .replace(WHITESPACE, " ")
+                                        .trim()
+                                when {
+                                    text.isEmpty() -> null
+
+                                    // A directory row (one arrow link, no sentence): /explore renders
+                                    // the DOCS' OWN titles there, and the docs are outside this
+                                    // lane's fence. Their wording is the docs' to fix.
+                                    tag == "li" && text.endsWith(ARROW) && ARROW_LINK.containsMatchIn(m.groupValues[1]) -> null
+
+                                    else -> Scanned(page.path, tag, text)
+                                }
+                            }
+                    }.filterNotNull()
+            }
     }
 
     @Test
