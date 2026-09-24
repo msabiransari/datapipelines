@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The JSONata breach suite (transform-nodes design §4.5, R7): every bomb the record
@@ -123,9 +124,16 @@ class JsonataBreachTest {
     /**
      * Runs one bomb on a fresh 1/1 pool (wall clock 2s, grace 5s, depth 100) and
      * classifies the outcome from OBSERVED events: the typed refusal, the caller's
-     * timeout plus the abandoned thread's liveness at the grace, or the heap blowout.
+     * timeout plus the abandoned thread's fate at the grace, or the heap blowout.
      * A result that COMPLETES stays referenced until the heap delta is read, so a
      * bomb that "succeeds" cannot hide its allocation from the measurement.
+     *
+     * The heap blowout is recorded ON THE EVALUATION THREAD (#218): whether the
+     * `OutOfMemoryError` lands before the wall clock (a fast machine — the caller
+     * catches it through the pool) or after it (a 2-vCPU runner — the caller has
+     * already detached and the abandoned thread dies of it inside the grace), the
+     * outcome is the same heap event and reads UNBOUNDED. Liveness at the grace alone
+     * cannot tell "ended because the heap blew" from "ended because it finished".
      */
     private fun measure(case: Case): Row {
         val pool = ScriptEvaluationPool(1, 1, GRACE, ScriptEvaluationPool.SYSTEM)
@@ -136,9 +144,18 @@ class JsonataBreachTest {
         var evidence: String
         var outcome: Outcome
         var result: Any? = null
+        val threadHeapBlowout = AtomicReference<OutOfMemoryError?>(null)
 
         try {
-            result = pool.run(limits, case.name) { engine.evaluate(script, null, limits) }
+            result =
+                pool.run(limits, case.name) {
+                    try {
+                        engine.evaluate(script, null, limits)
+                    } catch (err: OutOfMemoryError) {
+                        threadHeapBlowout.set(err)
+                        throw err
+                    }
+                }
             outcome = Outcome.BOUNDED
             evidence = case.completedNote
         } catch (
@@ -149,7 +166,13 @@ class JsonataBreachTest {
             // record's definition of unbounded abandonment. The exception's type is the
             // signal; the row's numbers come from the limits and the liveness check.
             Thread.sleep(GRACE.toMillis())
-            if (pool.abandonedThreadsAlive() > 0) {
+            val blowout = threadHeapBlowout.get()
+            if (blowout != null) {
+                outcome = Outcome.UNBOUNDED
+                evidence =
+                    "ScriptTimeoutException at ${limits.wallClock.toMillis()} ms; the abandoned thread then " +
+                    "died of OutOfMemoryError: ${blowout.message?.take(40)}"
+            } else if (pool.abandonedThreadsAlive() > 0) {
                 outcome = Outcome.UNBOUNDED
                 evidence =
                     "ScriptTimeoutException at ${limits.wallClock.toMillis()} ms; thread still alive at the grace"
