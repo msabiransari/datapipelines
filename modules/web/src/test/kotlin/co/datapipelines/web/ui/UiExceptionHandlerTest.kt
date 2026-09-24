@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.web.api.ApiExceptionHandler
 import co.datapipelines.web.api.CorrelationId
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -14,12 +15,21 @@ import io.mockk.mockk
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.security.access.AccessDeniedException
+import org.springframework.stereotype.Controller
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.web.bind.MissingServletRequestParameterException
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.ResponseBody
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.web.servlet.ModelAndView
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Pins BOTH halves of the htmx branch (034 B4): the toast contract is what makes an
@@ -177,6 +187,72 @@ class UiExceptionHandlerTest {
         }
     }
 
+    /**
+     * #222's two shapes inside the `web.ui` package, through a real MVC pipeline with BOTH
+     * advices in production order: [plain] is the mapping-time refusal (a `produces` mismatch;
+     * no handler matched, so the global `ApiExceptionHandler` answers it), and [json] is the
+     * return-value refusal (the handler ran, then no converter writes its answer in an accepted
+     * type, which is this advice's). [calls] counts the handler runs.
+     */
+    @Controller
+    class UiProbeController {
+        val calls = AtomicInteger()
+
+        @GetMapping("/probe/ui-plain", produces = [MediaType.TEXT_PLAIN_VALUE])
+        @ResponseBody
+        fun plain(): String {
+            calls.incrementAndGet()
+            return UI_SECRET
+        }
+
+        @GetMapping("/probe/ui-json")
+        @ResponseBody
+        fun json(): Map<String, String> {
+            calls.incrementAndGet()
+            return mapOf("key" to UI_SECRET)
+        }
+    }
+
+    @Test
+    fun `an Accept a web ui route cannot satisfy is 406 not_acceptable on both paths, echoing nothing - never the 500`() {
+        val probe = UiProbeController()
+        val mvc =
+            MockMvcBuilders
+                .standaloneSetup(probe)
+                .setControllerAdvice(UiExceptionHandler(), ApiExceptionHandler())
+                .build()
+
+        // The mapping-time refusal: the handler never runs.
+        val mapped =
+            mvc
+                .perform(get("/probe/ui-plain").header("Accept", "application/json, $ACCEPT_CANARY"))
+                .andExpect(status().isNotAcceptable)
+                .andExpect(jsonPath("$.error.code").value(PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE))
+                .andExpect(jsonPath("$.error.details.produces[0]").value(MediaType.TEXT_PLAIN_VALUE))
+                .andReturn()
+        probe.calls.get() shouldBe 0
+
+        // The return-value refusal: the handler ran; its answer still never reaches the body.
+        val written =
+            mvc
+                .perform(get("/probe/ui-json").header("Accept", "text/csv, $ACCEPT_CANARY"))
+                .andExpect(status().isNotAcceptable)
+                .andExpect(jsonPath("$.error.code").value(PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE))
+                .andExpect(jsonPath("$.error.details.produces").isArray)
+                .andReturn()
+        probe.calls.get() shouldBe 1
+
+        listOf(mapped, written).forEach { result ->
+            result.response.contentType shouldBe MediaType.APPLICATION_JSON_VALUE
+            result.response.contentAsString shouldNotContain ACCEPT_CANARY
+            result.response.contentAsString shouldNotContain UI_SECRET
+        }
+
+        // Unchanged: an acceptable request still reaches the handler.
+        mvc.perform(get("/probe/ui-plain").header("Accept", "*/*")).andExpect(status().isOk)
+        probe.calls.get() shouldBe 2
+    }
+
     /** A BindException from an `@Valid` form takes the same road. */
     @Test
     fun `a bind failure takes the same 400`() {
@@ -187,5 +263,13 @@ class UiExceptionHandlerTest {
             .onUnbindableRequest(org.springframework.validation.BindException(binding), mockRequest())
             .shouldBeInstanceOf<ModelAndView>()
             .status shouldBe HttpStatus.BAD_REQUEST
+    }
+
+    private companion object {
+        /** A value no real client sends; a 406 body carrying it would be echoing the Accept header. */
+        const val ACCEPT_CANARY = "application/x-accept-canary-222"
+
+        /** What [UiProbeController] would return; it must never appear in a refusal. */
+        const val UI_SECRET = "dpk_UIPROBESECRET.never-in-a-refusal"
     }
 }

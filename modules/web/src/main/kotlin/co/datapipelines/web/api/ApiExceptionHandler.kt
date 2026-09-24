@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.web.HttpMediaTypeNotAcceptableException
 import org.springframework.web.HttpMediaTypeNotSupportedException
 import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MissingServletRequestParameterException
@@ -179,6 +180,27 @@ class ApiExceptionHandler {
     }
 
     /**
+     * #222 — an `Accept` the route cannot satisfy is the caller's mismatch, not our 500.
+     *
+     * Spring refuses a request whose `Accept` admits none of a mapping's `produces` types while it
+     * MAPS the request (`RequestMappingInfoHandlerMapping.handleNoMatch`), before any interceptor
+     * or handler runs. Measured on the lane instance, 2026-09-24: `GET /partials/mcp-key/secret`
+     * (`produces = text/plain`) with `Accept: application/json` answered `500
+     * pipeline.execution.aborted` from the `Throwable` backstop below, the trace naming
+     * `HttpMediaTypeNotAcceptableException` thrown from `handleNoMatch`. No handler matched, so
+     * `UiExceptionHandler` (scoped to the `web.ui` package) never sees it and this global advice
+     * does. §13 already carries the code: `endpoint.not_acceptable`, 406.
+     */
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException::class)
+    fun onNotAcceptable(
+        error: HttpMediaTypeNotAcceptableException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        log.debug("406 {} {}: no acceptable representation", request.method, request.requestURI)
+        return notAcceptableResponse(error)
+    }
+
+    /**
      * No handler for the path — 404, not the 500 backstop. §13 catalogues no "no such endpoint"
      * code (reported); the catalogued not-found code plus `details.reason` keeps it unambiguous.
      */
@@ -325,3 +347,25 @@ class ApiExceptionHandler {
         const val GENERIC_STATUS_MESSAGE = "That action isn't available right now."
     }
 }
+
+/**
+ * The #222 406, one body for both advices: [ApiExceptionHandler] (the mapping-time refusal, where
+ * no handler matched) and `UiExceptionHandler` (a `web.ui` handler's return value that no
+ * converter can write in an acceptable type).
+ *
+ * `details.produces` names what the route CAN produce: the mapping's own declaration, or the
+ * converters' types. The request's `Accept` value is attacker-controlled and is never echoed, in
+ * the details or in the message. The status comes from [ApiErrorCatalog] like every other code,
+ * and the body is pinned to `application/json` like every other error (gate C, B6).
+ */
+internal fun notAcceptableResponse(error: HttpMediaTypeNotAcceptableException): ResponseEntity<ApiErrorResponse> =
+    ResponseEntity
+        .status(ApiErrorCatalog.statusFor(PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE))
+        .contentType(MediaType.APPLICATION_JSON)
+        .body(
+            ApiErrorResponse.of(
+                code = PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE,
+                message = "This route cannot produce a representation the request's Accept header admits.",
+                details = mapOf("produces" to error.supportedMediaTypes.map { it.toString() }),
+            ),
+        )
