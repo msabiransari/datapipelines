@@ -1,6 +1,7 @@
 # Permissions and keys: design record
 
-**Status:** draft for owner ratification; not normative until ratified. **Date:** 2026-09-23.
+**Status:** RATIFIED 2026-09-23. The owner ruled PK1–PK9 (§1) and agreed O1–O3 (§9) the same day.
+**Date:** 2026-09-23.
 **Delivery:** [GitHub issue #215](https://github.com/msabiransari/datapipelines/issues/215).
 **Amends:** the [roles and permissions design](2026-09-20-roles-permissions-design.md) (ratified
 2026-09-20). Its roles, the promoter lens (§3.1), executions ownership (§3.2), deactivation (§3.5)
@@ -194,10 +195,9 @@ OR (kind = 'endpoint' AND role IN ('api_caller', 'viewer'))
 OR (kind = 'server'   AND role = 'promotion_receiver')
 ```
 
-The scheduler round widens this CHECK for `scheduler`.
+If scheduler keys are stored in `api_keys` (still open, §8), the scheduler round widens this CHECK.
 
-**Creation limit.** Recommended, but not ruled on. A key's role must not hold a permission its
-creator lacks. With the roles offered in §3.1 this holds by construction; a test pins it, so that a
+**Creation limit (O3, ruled).** A key's role must not hold a permission its creator lacks. With the roles offered in §3.1 this holds by construction; a test pins it, so that a
 later role cannot slip past it.
 
 ### 3.3 Identities (PK5)
@@ -244,7 +244,7 @@ This removes:
 Codes that still mean something (for example `auth.key_issuer_role_lost`, for an MCP key whose
 member lost the role) are kept.
 
-## 5. Behaviour changes to ratify
+## 5. Behaviour changes (ratified)
 
 **C1. Viewer and promoter keys gain schema introspection, and viewer keys gain the connection
 test.**
@@ -255,7 +255,7 @@ test.**
 - With scopes gone, the key follows the role.
 - `datasource.preview_rows`, `datasource.sql_probe` and `pipeline.execute_node` stay at author and
   above, so no key gains access to table data.
-- Recommendation: accept.
+- Ruled: accepted (O1).
 
 **C2. MCP keys follow role changes at once.** On main the scope is fixed when the key is minted, so
 a viewer promoted to author needed a new key to author. With this change the promotion takes
@@ -327,7 +327,12 @@ Every slice gets the security pass (auth, keys and the serve path are all touche
 ## 8. What the scheduler (#9) inherits
 
 - Key type `scheduler`, role `viewer`, created with `scheduler_key.create` (author and above), with
-  its own identity per key. This settles scheduler revision §9 B4, B5 and B6.
+  its own identity per key. This settles scheduler revision §9 B5 (who creates scheduler keys) and
+  B6 (the role).
+- **B4 is not settled here.** B4 asks where scheduler keys are stored. §3.2's CHECK assumes an
+  `api_keys` row, which would keep one key model and one Keys page. The scheduler review recommends
+  a separate table instead: a scheduler key has no bearer secret, and `api_keys.key_hash` is NOT
+  NULL. The scheduler round decides, weighing the two.
 - New permissions arrive with the scheduler (not reserved here): `schedule.read`, `schedule.create`,
   `schedule.update` (including pause and resume), `schedule.delete`, `schedule.run_now`,
   `scheduler_key.create`, `scheduler_key.revoke`.
@@ -335,12 +340,14 @@ Every slice gets the security pass (auth, keys and the serve path are all touche
   unless the owner rules otherwise. The scheduler draft's "own" column (§4.2) conflicts with D2 and
   is for the scheduler round to settle.
 - **Still open for the scheduler:** B7, the credential an application uses to manage schedules over
-  REST. The API key roles here do not include schedule management.
+  REST. The API key roles here do not include schedule management. Role-carrying keys make one
+  option cheap: a pre-created key role holding the `schedule.*` permissions, offered to API keys,
+  would give an application a least-privilege credential without a new key kind.
 
-## 9. Open for the owner
+## 9. Ruled by the owner (2026-09-23)
 
-- **O1.** Accept C1 (viewer and promoter keys gain schema introspection; viewer keys gain the
-  connection test)?
-- **O2.** Is the §2 granularity right? For example, `pipeline.version.manage` covers discarding
-  a draft, discarding and restoring a released version, and deleting a version, as one permission.
-- **O3.** The creation limit in §3.2 (recommended, not yet ruled).
+- **O1. Accepted.** C1 stands: viewer and promoter keys gain schema introspection, and viewer keys
+  gain the connection test. Reading table data stays at author and above.
+- **O2. Accepted.** The §2 granularity stands. For example, `pipeline.version.manage` covers
+  discarding a draft, discarding and restoring a released version, and deleting a version.
+- **O3. Accepted.** The creation limit in §3.2 is a rule, pinned by a test.
