@@ -104,7 +104,7 @@ object SiteFaqsBatch2 {
             FaqEntry(
                 "How do I migrate an existing flow?",
                 "In five steps, each a shipped feature: inventory the flow's sources, register them as datasources " +
-                    "(read-only where nothing should write), describe the transformation to your agent, run the " +
+                    "marked read-only where nothing should write, describe the transformation to your agent, run the " +
                     "pipeline and compare row counts with the flow's output, then release. Registering datasources " +
                     "is docs/datasources.md §3.",
                 "docs/datasources.md §3",

@@ -26,12 +26,12 @@ data class ToolGroup(
 object McpToolGroups {
     private val ORDER: List<Pair<String, String>> =
         listOf(
-            "pipelines" to "Pipelines — author, run, inspect",
-            "templates" to "Templates — the SQL an agent writes",
-            "datasources" to "Datasources — what the agent may see",
-            "lake_tables" to "dp-lake — tables over your bucket",
+            "pipelines" to "Pipelines: author, run, inspect",
+            "templates" to "Templates: the SQL an agent writes",
+            "datasources" to "Datasources: what the agent may see",
+            "lake_tables" to "dp-lake: tables over your bucket",
             "sql_probe" to "The SQL probe",
-            "executions" to "Executions — results and cancellation",
+            "executions" to "Executions: results and cancellation",
             "endpoints" to "Published endpoints",
             "calculators" to "Calculators",
         )

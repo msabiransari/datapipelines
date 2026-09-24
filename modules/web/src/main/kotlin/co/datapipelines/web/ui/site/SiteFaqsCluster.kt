@@ -283,7 +283,7 @@ object SiteFaqsCluster {
             FaqEntry(
                 "Can I try it without my own data?",
                 "Yes. The NYC demo seeds the Postgres trips, the SQLite zone lookup and the pipeline that joins " +
-                    "them (nyc/mobility/revenue_by_borough), and its SQL is printed verbatim on the page. The " +
+                    "them, nyc/mobility/revenue_by_borough, and its SQL is printed verbatim on the page. The " +
                     "demo quickstart is docs/deployment.md Appendix B.",
                 "docs/deployment.md Appendix B",
             ),

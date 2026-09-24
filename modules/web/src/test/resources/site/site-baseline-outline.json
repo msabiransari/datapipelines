@@ -2039,19 +2039,19 @@
     },
     {
      "level": "H3",
-     "text": "Pipelines — author, run, inspect"
+     "text": "Pipelines: author, run, inspect"
     },
     {
      "level": "H3",
-     "text": "Templates — the SQL an agent writes"
+     "text": "Templates: the SQL an agent writes"
     },
     {
      "level": "H3",
-     "text": "Datasources — what the agent may see"
+     "text": "Datasources: what the agent may see"
     },
     {
      "level": "H3",
-     "text": "dp-lake — tables over your bucket"
+     "text": "dp-lake: tables over your bucket"
     },
     {
      "level": "H3",
@@ -2059,7 +2059,7 @@
     },
     {
      "level": "H3",
-     "text": "Executions — results and cancellation"
+     "text": "Executions: results and cancellation"
     },
     {
      "level": "H3",

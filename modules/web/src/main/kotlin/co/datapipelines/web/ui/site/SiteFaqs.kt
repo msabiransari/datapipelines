@@ -25,8 +25,8 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "What is a pipeline here: a DAG, a notebook, a dbt project?",
-                "A JSON document: named nodes, each a SQL template run against one datasource (or the per-run scratch " +
-                    "engine), with explicit dependencies between them. The executor orders the graph, runs independent nodes " +
+                "A JSON document: named nodes, each a SQL template run against one datasource, or against the per-run scratch " +
+                    "engine, with explicit dependencies between them. The executor orders the graph, runs independent nodes " +
                     "in parallel, stages each result, and hands the last node's rows to the caller. The contract is " +
                     "docs/pipeline-contract.md §3 and the execution model docs/dag-executor.md §5.",
                 "docs/pipeline-contract.md §3",
@@ -40,8 +40,8 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Do I need a data warehouse?",
-                "No. Every node runs at its source and streams its result into a per-run scratch engine (H2, created for " +
-                    "the run and dropped after it), where the joining and shaping happen. The demo joins Postgres trips, MySQL " +
+                "No. Every node runs at its source and streams its result into a per-run scratch engine, H2, created for " +
+                    "the run and dropped after it, where the joining and shaping happen. The demo joins Postgres trips, MySQL " +
                     "weather, SQLite zones and Parquet rideshare data in one run. How staging works is docs/staging.md §3.",
                 "docs/staging.md §3",
             ),
@@ -85,7 +85,7 @@ object SiteFaqs {
                 "Is every agent action logged?",
                 "Yes. Every MCP tool call is written to the audit log with the key that made it and the tool, never the " +
                     "SQL text, row data or parameter values, which are your data; every lifecycle verb records who did it " +
-                    "and through which surface (session, API key or MCP). The audit log is docs/auth.md §10 and the MCP " +
+                    "and through which channel it came, being session, API key or MCP. The audit log is docs/auth.md §10 and the MCP " +
                     "events docs/mcp-server.md §10.",
                 "docs/auth.md §10",
             ),
@@ -323,8 +323,8 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Can I add my own data next to it?",
-                "Yes. The demo families are ordinary datasources — register yours in the app (or in the bootstrap file the " +
-                    "demo profiles use) and any pipeline can join them to the demo tables, exactly as the shipped examples " +
+                "Yes. The demo families are ordinary datasources. Register yours in the app, or in the bootstrap file the " +
+                    "demo profiles use, and any pipeline can join them to the demo tables, exactly as the shipped examples " +
                     "join Postgres trips to SQLite zones and MySQL weather. Nothing about the demo is privileged; it is " +
                     "seeded data with example pipelines. (Registration: docs/datasources.md §3.)",
                 "docs/datasources.md §3",
@@ -364,8 +364,8 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Will there be a hosted version?",
-                "There is no paid tier today, and nothing hosted is planned; if a hosted version ever " +
-                    "exists it will be announced on the roadmap page first — never launched quietly. What is " +
+                "There is no paid tier today, and nothing hosted is planned. If a hosted version ever " +
+                    "exists it will be announced on the roadmap page first, never launched quietly. What is " +
                     "deliberately not planned lives on the roadmap's later band. (Source: docs/ROADMAP.md §3.)",
                 "docs/ROADMAP.md §3",
             ),
@@ -410,7 +410,7 @@ object SiteFaqs {
             FaqEntry(
                 "Do I have to write anything?",
                 "No. The agent records what it learns while it works; you verify when you want to. Recording needs an " +
-                    "author-scoped key and a release is still a person's act — the same bar as authoring a pipeline " +
+                    "author-scoped key and a release is still a person's act, the same bar as authoring a pipeline. " +
                     "(docs/auth.md §7.6).",
                 "docs/auth.md §7.6",
             ),
@@ -439,9 +439,9 @@ object SiteFaqs {
         listOf(
             FaqEntry(
                 "Something broke: where do I report it?",
-                "Open a bug report on GitHub: $REPORT_PROBLEM_URL. The form asks for the version (your " +
-                    "deployment's /health build hash or the image tag), the surface it happened on, and the " +
-                    "correlation id from the failed execution, the error toast or the REST envelope — so the " +
+                "Open a bug report on GitHub: $REPORT_PROBLEM_URL. The form asks for the version, your " +
+                    "deployment's /health build hash or the image tag, for the surface it happened on, and for the " +
+                    "correlation id from the failed execution, the error toast or the REST envelope, so the " +
                     "report arrives carrying what a fix needs. What helps most during the beta is in " +
                     "CONTRIBUTING.md; the scope the beta covers is docs/ROADMAP.md §2.2.",
                 "docs/ROADMAP.md §2.2",
@@ -449,7 +449,7 @@ object SiteFaqs {
             FaqEntry(
                 "Where do I ask a question or float an idea?",
                 "GitHub Discussions: $DISCUSSIONS_URL. Questions about running it, ideas that are not yet " +
-                    "feature requests, and show-and-tell all belong there — a concrete defect is a bug report " +
+                    "feature requests, and show-and-tell all belong there. A concrete defect is a bug report " +
                     "and a formed proposal is a feature request, both one click away on the same page. What is " +
                     "already being built is the roadmap's known limitations, docs/ROADMAP.md §2.2, so check " +
                     "there first.",

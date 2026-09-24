@@ -22,8 +22,8 @@ object SiteFaqsHub {
             FaqEntry(
                 "Do I need someone technical to set it up?",
                 "Yes. Someone deploys the server on your infrastructure, registers the database connections in " +
-                    "the application (there is deliberately no agent tool that registers one — docs/mcp-server.md " +
-                    "§6.2.22) and connects the AI client. After setup, business questions can be asked in plain " +
+                    "the application, because there is deliberately no agent tool that registers one " +
+                    "(docs/mcp-server.md §6.2.22), and connects the AI client. After setup, business questions can be asked in plain " +
                     "language; a person who understands your data reviews the resulting SQL and numbers.",
                 "docs/deployment.md §4, docs/mcp-server.md §6.2.22",
             ),
@@ -31,7 +31,7 @@ object SiteFaqsHub {
                 "Does my data reach the AI provider?",
                 "The server holds your database credentials and the agent never sees them (docs/datasources.md " +
                     "§7), but the schema, statistics, preview rows and execution results the agent asks for are " +
-                    "returned to it (docs/mcp-server.md §6.2.15) — and so may reach the model provider behind your " +
+                    "returned to it (docs/mcp-server.md §6.2.15), and so may reach the model provider behind your " +
                     "client. Choose the client, the model and the datasources' access to match your requirements.",
                 "docs/datasources.md §7, docs/mcp-server.md §6.2.15",
             ),
@@ -54,7 +54,7 @@ object SiteFaqsHub {
                 "Do I need to move the data into a warehouse first?",
                 "No. A pipeline reads each source where it lives and joins across sources in a temporary staging " +
                     "database that exists only for the run (docs/staging.md §3). If you want a copy, a node can " +
-                    "write its result back to a database you choose (docs/pipeline-contract.md §8) — that is a " +
+                    "write its result back to a database you choose (docs/pipeline-contract.md §8). That is a " +
                     "choice, not a prerequisite.",
                 "docs/staging.md §3, docs/pipeline-contract.md §8",
             ),

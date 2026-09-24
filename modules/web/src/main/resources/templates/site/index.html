@@ -92,7 +92,7 @@
           </div>
           <div class="panel" id="chart" role="tabpanel" aria-labelledby="tab-chart">
             <p class="panel-label">Business result</p>
-            <p class="chart-title">Each borough’s top company and its share of trips (scale 0–100%)</p>
+            <p class="chart-title">Each borough’s top company and its share of trips, on a scale of 0 to 100 percent</p>
             <div class="bar-row" th:each="r : ${facts.demo.rows}">
               <span th:text="${r.borough}">Manhattan</span>
               <svg class="bar-track" viewBox="0 0 100 1" preserveAspectRatio="none" role="img" th:attr="aria-label=|${r.topCompany} carried ${r.share} of ${r.borough} trips|">
@@ -125,7 +125,7 @@
               <!-- claim: docs/versioning.md §3 (a person releases), docs/pipeline-contract.md §12.12 (release checks) -->
               <li>A person reviews the pipeline before release. Release checks you configure run on the server.</li>
             </ol>
-            <p class="chart-note">A recorded run from the demo workspace (<span th:text="${facts.demo.pipelinePath}">demo/…</span>, <span th:text="${facts.demo.version}">v1</span>). This page does not execute a pipeline.</p>
+            <p class="chart-note">A recorded run from the demo workspace, pipeline <span th:text="${facts.demo.pipelinePath}">demo/…</span> version <span th:text="${facts.demo.version}">v1</span>. This page does not execute a pipeline.</p>
           </div>
           <div class="demo-foot">
             <span aria-hidden="true">&nearr;</span>
@@ -256,7 +256,7 @@
   <section class="section border" id="cap-workspaces" aria-labelledby="cap-workspaces-title">
     <div class="container">
       <div class="section-title">
-        <p class="eyebrow">One server, every team</p>
+        <p class="eyebrow">One server for the whole company</p>
         <h2 id="cap-workspaces-title">Each team has its own workspace.</h2>
         <!-- claim: docs/auth.md §4.2 (membership and roles per workspace), docs/auth.md §7.4 (a key is pinned to one workspace) -->
         <p>Workspaces keep each team's pipelines, connections and keys apart, with a role per member. One person can belong to several and switch between them; an API key is pinned to a single workspace, so no key reaches past its own team.</p>
