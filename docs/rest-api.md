@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.27 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
+**Status:** v2.29 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-21
@@ -335,9 +335,9 @@ transaction back. Each cascaded release is audited as `template.version.released
 query like `override_checks_reason`, for the same reason: the endpoint has no body. The same
 role holds both release verbs (auth §7.6), so the flag grants no new capability.
 UI-driven in practice — agents never release (versioning D4); no MCP tool exists. Over REST
-the verb needs `RELEASE_VERSION` (`author` scope on a key whose issuer is a promoter, or a
-promoter's session), so a promoter's own CI key may release; a key issued by anyone else
-cannot. **Audited** as `pipeline.version.released` with the version and `via` (`session` /
+the verb needs `pipeline.release` (`author` scope on a key whose issuer is an author or workspace
+admin, or such a session — release is the author's since 2026-09-20, D8), so an author's own CI
+key may release; a key issued by a viewer or a promoter cannot. **Audited** as `pipeline.version.released` with the version and `via` (`session` /
 `api_key`) — the record of who made the D4 decision and through what (T187).
 
 Response: `200 OK` with the released version's full shape (`status: "RELEASED"`).
@@ -909,7 +909,7 @@ Every completed execution with a caller node has its full result **materialized 
 GET /executions/{execution_id}/result?offset=0&limit=10000&format=json
 ```
 
-Auth: `read` scope + the `RETRIEVE_RESULT` row (D11, 177): the caller's OWN execution — `executed_by = self`, not an endpoint-key run — or any execution for a workspace admin; a promoter is refused by role, and another member's execution is `404 result.execution_not_found`, never 403. The URL is not a capability — an unauthenticated request 401s ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
+Auth: `read` scope + the `execution.result.read` row (D11, 177): the caller's OWN execution — `executed_by = self`, not an endpoint-key run — or any execution with `execution.read_all` (a workspace admin's); a promoter is refused by role, and another member's execution is `404 result.execution_not_found`, never 403. The URL is not a capability — an unauthenticated request 401s ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
 
 ### 7.3 Response (JSON format, default)
 
@@ -1187,7 +1187,7 @@ The evaluate route — the MCP `templates_evaluate` tool's REST twin, the same s
 }
 ```
 
-A refusal is the code with its detail — the contract's input check, the type gate, or the engine's own (the record's §7 mapping; §13.18 lands with 7c). Scope: `MUTATE_PIPELINES_TEMPLATES` (the render's row — auth.md §7.6).
+A refusal is the code with its detail — the contract's input check, the type gate, or the engine's own (the record's §7 mapping; §13.18 lands with 7c). Permission: `template.evaluate` (the render row's twin — auth.md §7.6).
 
 ### 8.8 Import template library
 
@@ -1472,7 +1472,7 @@ result is unexpired):
 | `parent_node_id` | string \| null | That node's id; null for a root |
 | `root_execution_id` | uuid | The family's top ancestor; equals `execution_id` for a root |
 
-Ownership (roles design D11, ratified 2026-09-20 — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) `READ_EXECUTIONS`): a **workspace admin** (or super admin) reads every execution in the workspace, optionally pipeline-narrowed; a **viewer** or **author** reads only their OWN runs — `executed_by = self` and not started through an endpoint key; a **promoter** is refused the list, the read, the result and the replay by role (`403 auth.role_required`) before any row is consulted. The filter is SQL, so the page is cut after it and `has_more` is honest. Another member's execution is `404 result.execution_not_found` on the single reads, never 403 ([Auth §11A.1](auth.md#11a1-the-404-rule)).
+Ownership (roles design D11, ratified 2026-09-20 — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) `execution.read`): a **workspace admin** (or super admin — `execution.read_all`) reads every execution in the workspace, optionally pipeline-narrowed; a **viewer** or **author** reads only their OWN runs — `executed_by = self` and not started through an endpoint key; a **promoter** is refused the list, the read, the result and the replay by role (`403 auth.role_required`) before any row is consulted. The filter is SQL, so the page is cut after it and `has_more` is honest. Another member's execution is `404 result.execution_not_found` on the single reads, never 403 ([Auth §11A.1](auth.md#11a1-the-404-rule)).
 
 ### 10.2 Get execution metadata
 
@@ -1652,7 +1652,7 @@ Flows and rules are specified in [Auth](auth.md) (§7.4 issuance, §7.6 scope ma
 ```
 GET /auth/api-keys
 ```
-Lists the caller's keys (id, name, `kind`, scopes, created_at, expires_at, last_used_at, is_revoked). Never returns secrets. (`VIEW_OWN_MCP_KEY` — every role.)
+Lists the caller's keys (id, name, `kind`, scopes, created_at, expires_at, last_used_at, is_revoked). Never returns secrets. (`mcp_key.own` — every role.)
 
 ```
 GET /auth/api-keys/mine
@@ -1665,7 +1665,7 @@ Content-Type: application/json
 
 {"name": "nightly-sync", "kind": "endpoint", "bindings": ["/nyc"], "expires_at": "2027-08-07T00:00:00Z"}
 ```
-**Workspace admins and super admins only** (`MANAGE_API_KEYS`, since 179 — D17). `expires_at` optional. Response `201`:
+**Workspace admins and super admins only** (`api_key.create`, since 179 — D17; a `server` key additionally `server_key.create`, super admins only). `expires_at` optional. Response `201`:
 
 ```json
 {
@@ -1691,7 +1691,7 @@ Content-Type: application/json
 | `kind` | `scopes` | `bindings` | Who may mint |
 |---|---|---|---|
 | `user` | — | — | **Nobody, on any request surface (179, D16)**: minted by the login/switch hook, one per user per workspace. `400 auth.key_kind_not_mintable` for every role — and an ABSENT `kind` means `user`, so a pre-179 client gets the refusal, not a silently different credential |
-| `endpoint` | **Refused if present** — an endpoint key's authority is its bindings | The endpoint-tree nodes it authorises, validated BEFORE the key is minted — and since 2026-09-21 (#191) each must be the root or lie at or above a path the CALLER'S workspace publishes (`400 endpoint.path_invalid`, naming only the caller's own tree) | Workspace admins and super admins (`MANAGE_API_KEYS`) |
+| `endpoint` | **Refused if present** — an endpoint key's authority is its bindings | The endpoint-tree nodes it authorises, validated BEFORE the key is minted — and since 2026-09-21 (#191) each must be the root or lie at or above a path the CALLER'S workspace publishes (`400 endpoint.path_invalid`, naming only the caller's own tree) | Workspace admins and super admins (`api_key.create`) |
 | `server` | **Refused if present** — a server key's authority is a route family | Refused | Super admin only |
 
 An unknown `kind` is `403 endpoint.key_kind_refused`, naming the supported values. A `server` key is the credential a SENDING deployment presents as `DP-Promotion-Key` (§18); it authenticates nothing on this API — presented as `DP-API-Key` it is refused on every route with `403 endpoint.key_kind_refused` and `details.reason = "server_key_off_surface"`.
@@ -1699,7 +1699,7 @@ An unknown `kind` is `403 endpoint.key_kind_refused`, naming the supported value
 ```
 DELETE /auth/api-keys/{key_id}
 ```
-Revokes the caller's OWN key (owner-scoped; `VIEW_OWN_MCP_KEY`, every role — this is also the MCP key's delete-to-rotate). Effective ≤ cache TTL, ~60s. `204 No Content`.
+Revokes the caller's OWN key (owner-scoped; `mcp_key.own`, every role — this is also the MCP key's delete-to-rotate). Effective ≤ cache TTL, ~60s. `204 No Content`.
 
 ### 16.2 Current principal
 
@@ -1741,7 +1741,7 @@ Workspaces are the unit of team isolation ([workspaces design](superpowers/specs
 ```
 GET /workspaces
 ```
-The caller's memberships (design §9 "list-own"): `{name, role, active, joined_at}` rows, `role` one of `viewer` \| `author` \| `promoter` \| `workspace_admin` ([enums §8C](enums.md#8c-workspacerole--the-one-role-a-membership-holds); D1, 2026-09-20 — the three booleans V23's flags had put on the wire are gone). **Every member's read** — it is the list the chrome's switcher draws from, so it sits on the switcher's row (`WORKSPACE_SWITCH`), not on the page's (`WORKSPACES_READ`, which D13 narrowed to admins: §17.2 and §17.6). A super admin gets every workspace on the instance, deactivated ones marked `active: false`.
+The caller's memberships (design §9 "list-own"): `{name, role, active, joined_at}` rows, `role` one of `viewer` \| `author` \| `promoter` \| `workspace_admin` ([enums §8C](enums.md#8c-workspacerole--the-one-role-a-membership-holds); D1, 2026-09-20 — the three booleans V23's flags had put on the wire are gone). **Every member's read** — it is the list the chrome's switcher draws from, so it sits on the switcher's row (`workspace.switch`), not on the page's (`workspace.read`, which D13 narrowed to admins: §17.2 and §17.6). A super admin gets every workspace on the instance, deactivated ones marked `active: false`.
 
 ### 17.2 Get workspace
 
@@ -1779,7 +1779,7 @@ Soft delete. `409 workspace.in_use` while the workspace still owns non-deleted p
 POST /workspaces/{name}/deactivate
 POST /workspaces/{name}/reactivate
 ```
-Super admin (`MANAGE_INSTANCE_WORKSPACES`). Deactivate, never delete (D-R10): nothing is purged; the workspace stops being selectable, its published endpoints become unknown paths to every caller, keys pinned to it answer `404 auth.key_workspace_inactive` and a server key pinned to it is refused by the promotion peer — all within the ~60 s liveness window ([Auth §11A.3](auth.md#11a3-deactivation)). Returns the §17.2 record (`active: false`, `deactivated_at` set). Reactivate restores every credential; reactivating an already-active workspace is `404 workspace.not_found` (the 404 rule: the surface owes no "it was not deactivated"). Both are audited (`workspace.deactivated` / `workspace.reactivated`).
+Super admin (`workspace.lifecycle`). Deactivate, never delete (D-R10): nothing is purged; the workspace stops being selectable, its published endpoints become unknown paths to every caller, keys pinned to it answer `404 auth.key_workspace_inactive` and a server key pinned to it is refused by the promotion peer — all within the ~60 s liveness window ([Auth §11A.3](auth.md#11a3-deactivation)). Returns the §17.2 record (`active: false`, `deactivated_at` set). Reactivate restores every credential; reactivating an already-active workspace is `404 workspace.not_found` (the 404 rule: the surface owes no "it was not deactivated"). Both are audited (`workspace.deactivated` / `workspace.reactivated`).
 
 ### 17.6 List members
 
@@ -1797,7 +1797,7 @@ TWO arrays, never mixed ([Auth §4.6](auth.md#46-invitations)) — a client that
 POST /workspaces/{name}/members
 {"email": "bob@example.com", "role": "author"}
 ```
-Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`; D-R11 retired the `open-join` self-service path). `role` is optional, one of `viewer` \| `author` \| `promoter` \| `workspace_admin`; absent = `viewer` — a body that says nothing asks for the least a membership can be. A value outside the four is the surface's bad-parameter 400 (`pipeline.execution.invalid_parameter_type`, `details.field = "role"`, `details.allowed` the four) — never stored. The email is normalized lowercase before every lookup and store (the [Auth §4.2](auth.md#42-user-provisioning) rule). Adding an existing member is idempotent: the existing membership is returned unchanged — changing a role is §17.10.
+Workspace admin or super admin (`workspace.members.manage`; D-R11 retired the `open-join` self-service path). `role` is optional, one of `viewer` \| `author` \| `promoter` \| `workspace_admin`; absent = `viewer` — a body that says nothing asks for the least a membership can be. A value outside the four is the surface's bad-parameter 400 (`pipeline.execution.invalid_parameter_type`, `details.field = "role"`, `details.allowed` the four) — never stored. The email is normalized lowercase before every lookup and store (the [Auth §4.2](auth.md#42-user-provisioning) rule). Adding an existing member is idempotent: the existing membership is returned unchanged — changing a role is §17.10.
 
 TWO outcomes, distinguishable by status AND body, so a client never mistakes a ghost for a member:
 
@@ -1818,7 +1818,7 @@ Workspace admin or super admin. Removing YOURSELF is refused with `409 workspace
 ```
 DELETE /workspaces/{name}/invitations/{email}
 ```
-Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`). Removes a pending invitation ([Auth §4.6](auth.md#46-invitations)) — `204` on success. An email with no invitation in this workspace is `404 workspace.invitation.not_found`: the workspace itself resolved, so the not-found thing is the invitation, and one answer for "revoked already", "never created" and "another workspace's" keeps an admin from probing which emails hold pending invitations. The email is normalized lowercase, so revoking `Bob@Company.com` finds the row the invite of `bob@company.com` created. A super admin may revoke inside a DEACTIVATED workspace (its pending invitations wait; cleanup before reactivation is the point).
+Workspace admin or super admin (`workspace.members.manage`). Removes a pending invitation ([Auth §4.6](auth.md#46-invitations)) — `204` on success. An email with no invitation in this workspace is `404 workspace.invitation.not_found`: the workspace itself resolved, so the not-found thing is the invitation, and one answer for "revoked already", "never created" and "another workspace's" keeps an admin from probing which emails hold pending invitations. The email is normalized lowercase, so revoking `Bob@Company.com` finds the row the invite of `bob@company.com` created. A super admin may revoke inside a DEACTIVATED workspace (its pending invitations wait; cleanup before reactivation is the point).
 
 ### 17.10 Set a member's role
 
@@ -1833,7 +1833,7 @@ Workspace admin or super admin. REPLACES the membership's ONE role (D1, 2026-09-
 ```
 DELETE /workspaces/{name}/members/{user_id}/key
 ```
-Workspace admin or super admin (`MANAGE_WORKSPACE_MEMBERS`, the §17.8 row). Revokes the member's login-minted `user` key pinned to this workspace WITHOUT removing them (#200; roles record §3.7, ruling 3; [Auth §7.4](auth.md#74-issuance)). `204` — also when the member holds no live key: the verb is IDEMPOTENT, "already revoked" is the success it reports, so an admin retrying after a timeout cannot turn cleanup into a failure. A `user_id` that names no member is the workspace's own 404 (`workspace.not_found`, the §17.8 rule).
+Workspace admin or super admin (`workspace.members.manage`, the §17.8 row). Revokes the member's login-minted `user` key pinned to this workspace WITHOUT removing them (#200; roles record §3.7, ruling 3; [Auth §7.4](auth.md#74-issuance)). `204` — also when the member holds no live key: the verb is IDEMPOTENT, "already revoked" is the success it reports, so an admin retrying after a timeout cannot turn cleanup into a failure. A `user_id` that names no member is the workspace's own 404 (`workspace.not_found`, the §17.8 rule).
 
 The member's SESSION is untouched — revoking a key is not deactivation — and their next login or workspace entry mints a fresh key. There is no automatic rotation on password or identity events (§3.7 ruling 2: the product cannot tell a forgotten password from a compromise, so recovery is an admin act — this verb, or §17.8's removal). The audit event is `auth.api_key.revoked_by_admin` with `reason: admin_revoked`; the removal path's revoke carries `reason: member_removed`. No key id, prefix or plaintext appears in any response.
 
@@ -2054,7 +2054,7 @@ listed iff its pipeline is visible to that principal, so a hidden pipeline never
 the endpoint that publishes it.
 
 Bindings are `POST` / `DELETE /api/v1/endpoints/bindings`, and since 179 (D17) they are a
-**workspace admin's verb** (`MANAGE_API_KEYS` — associating a credential with an endpoint tree is
+**workspace admin's verb** (`api_key.bind` — associating a credential with an endpoint tree is
 no longer the publisher's). A prefix is refused with `endpoint.path_invalid` unless it is the
 root or lies at or above a path the CALLER'S workspace publishes (2026-09-21, #191 — the refusal
 names only the caller's own tree), and at serve time a binding decides only for an endpoint of
@@ -2100,6 +2100,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v2.29 | 215a (#215) the permission catalog | No route, field or status changes. The inline authorization names are the §7.6 catalog's `<functionality>.<permission>` permissions instead of the retired operations (`RELEASE_VERSION` → `pipeline.release`, `READ_EXECUTIONS` → `execution.read`, `MANAGE_API_KEYS` → `api_key.create` / `api_key.bind`, …); §5's release sentence corrected — release is the author's since 2026-09-20 (D8), so a promoter's key cannot release (the text still described the pre-D8 rule). A `role_required` refusal's `details.held` is the role the caller was judged as (auth §9). Status caught up with the change log (it read v2.27). |
 | 2026-09-23 | v2.28 | 213 (#213) show-once MCP key | §16.1: `/mine`'s `copyable` is false once the key has been copied — the first read of the copy endpoint destroys the copyable secret in the same statement (auth.md §7.4). No wire shape changed. |
 | 2026-09-22 | v2.27 | #212 doc_url | §4.2: `doc_url` is `https://datapipelines.co/docs/pipeline-contract#<section anchor>` — the catalog page at the code's §13 section. The previous shape (`https://docs.datapipelines.co/errors/<code>`) named a host that does not exist. |
 | 2026-09-22 | v2.26 | #208 self-membership | Additive. §17.8 / §17.10 / §17.11: a caller addressing their OWN membership — role, login-minted key, removal — is refused with the new `409 workspace.self_membership` (pipeline-contract §13.12); another workspace admin or a super admin does it. |
