@@ -61,6 +61,8 @@ class MailNotifierIntegrationTest {
         sender = RecordingMailSender()
         audit = RecordingSink()
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        // The CASCADE takes `workspaces` with it (by constraint, not data); both go back (#146).
+        DefaultWorkspaceFixture.ensure(jdbc)
         user = users.insert("ada@company.com", "Ada Lovelace", null, "local", "ada@company.com", isAdmin = false)
     }
 

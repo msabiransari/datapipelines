@@ -51,6 +51,13 @@ import java.util.concurrent.atomic.AtomicReference
  * Trials are configured with `-Dsse157.trials` (default [DEFAULT_TRIALS]); the count is
  * printed as `sse157-harness SUMMARY` and the test fails when any live stream missed its
  * terminal frame.
+ *
+ * A trial is three-valued (#176): CONCLUSIVE (the cancel was accepted — the stream must
+ * deliver and close), INCONCLUSIVE (the cancel answered 409 — the subject ended before
+ * the DELETE landed, so the trial measured nothing; it retries with a fresh execution),
+ * or an error (anything else). Only conclusive trials count, every planned trial must
+ * reach a verdict (the non-vacuity floor), and inconclusive retries are bounded so a box
+ * where the subject always wins fails loudly instead of spinning or passing vacuously.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -73,23 +80,42 @@ class ExecutionStreamCancelLoadE2eTest {
                 ?: System.getenv("SSE157_TRIALS")?.toInt()
                 ?: DEFAULT_TRIALS
         val misses = mutableListOf<TrialOutcome>()
+        var conclusive = 0
+        var inconclusive = 0
+        var attempt = 0
 
-        repeat(trials) { index ->
-            val outcome = runTrial(index)
+        while (conclusive < trials) {
+            check(inconclusive <= trials) {
+                "more trials inconclusive ($inconclusive) than planned ($trials) — the subject ends before the " +
+                    "cancel lands, so the harness is measuring nothing on this box; that is a broken fixture, not a pass"
+            }
+            val outcome = runTrial(attempt++)
+            if (outcome == null) {
+                // runTrial printed the detail (the 409, the attempts, the subject's status).
+                inconclusive++
+                continue
+            }
+            conclusive++
             println(
-                "sse157-harness trial=${index + 1}/$trials delivered=${outcome.delivered} closed=${outcome.closed} " +
+                "sse157-harness trial=$conclusive/$trials delivered=${outcome.delivered} closed=${outcome.closed} " +
                     "abortMs=${outcome.abortLatencyMs ?: "-"} closeMs=${outcome.closeLatencyMs ?: "-"} " +
                     "serverStatus=${outcome.serverStatus} replayHasAbort=${outcome.replayHasAbort}",
             )
             if (!outcome.delivered || !outcome.closed) misses += outcome
         }
 
-        println("sse157-harness SUMMARY trials=$trials misses=${misses.size}")
+        // The non-vacuity floor (#176): EVERY planned trial reached a conclusive verdict —
+        // a green with fewer proves nothing about the stream.
+        println("sse157-harness SUMMARY trials=$trials conclusive=$conclusive inconclusive=$inconclusive misses=${misses.size}")
         misses shouldBe emptyList()
     }
 
-    /** One cancel-under-load trial; the subject's live stream is read incrementally. */
-    private fun runTrial(index: Int): TrialOutcome {
+    /**
+     * One cancel-under-load trial; the subject's live stream is read incrementally.
+     * NULL is the inconclusive verdict (#176): the cancel answered 409 because the subject
+     * reached a terminal state first — nothing about delivery was measured.
+     */
+    private fun runTrial(index: Int): TrialOutcome? {
         val load = LoadWorkers()
         load.start()
         val reader = SubjectReader()
@@ -102,24 +128,20 @@ class ExecutionStreamCancelLoadE2eTest {
             }
             val executionId = checkNotNull(reader.executionId.get()) { "execution_started never carried an id" }
 
-            var cancelStatus = -1
-            repeat(CANCEL_RETRIES) { attempt ->
-                reader.cancelAtMillis = System.currentTimeMillis()
-                cancelStatus =
-                    given()
-                        .port(port)
-                        .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-                        .`when`()
-                        .delete("/api/v1/executions/$executionId")
-                        .then()
-                        .extract()
-                        .statusCode()
-                if (cancelStatus != 429) return@repeat
-                // The 429'd request never reached the app; the retry is request hygiene,
-                // not a second cancel (one cancel per trial either way).
-                Thread.sleep(RATE_WINDOW_MILLIS)
+            val (cancelStatus, cancelAttempts) = cancelSubject(executionId, reader)
+            if (cancelStatus == 409) {
+                // Already terminal on the FIRST accepted cancel: the subject ended before
+                // the DELETE landed. The trial measured nothing about delivery —
+                // inconclusive, retried by the caller with a fresh execution; NOT a miss
+                // and NOT an error (#176). Print the subject's terminal state so a storm
+                // of these is diagnosable from the log alone.
+                println(
+                    "sse157-harness trial attempt=$index INCONCLUSIVE (cancel answered 409 " +
+                        "after $cancelAttempts attempt(s); subject ended first: status=${executionStatus(executionId)})",
+                )
+                return null
             }
-            if (cancelStatus != 204) error("trial $index: cancel answered $cancelStatus (execution already terminal?)")
+            if (cancelStatus != 204) error("trial $index: cancel answered $cancelStatus")
 
             // The client model is the editor's own contract (sse.js SseHandler.cancel): after
             // the DELETE, the page keeps listening for execution_aborted for exactly its 5 s
@@ -136,16 +158,7 @@ class ExecutionStreamCancelLoadE2eTest {
                     false
                 }
 
-            val serverStatus =
-                given()
-                    .port(port)
-                    .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-                    .`when`()
-                    .get("/api/v1/executions/$executionId")
-                    .then()
-                    .extract()
-                    .jsonPath()
-                    .getString("data.status")
+            val serverStatus = executionStatus(executionId)
             val replayHasAbort = replayCarriesAbort(executionId)
 
             return TrialOutcome(
@@ -161,6 +174,50 @@ class ExecutionStreamCancelLoadE2eTest {
             load.stop()
         }
     }
+
+    /**
+     * The cancel round-trip: status to attempts. Retries ONLY a 429 — a rate-limited
+     * request never reached the app, so the retry is request hygiene, not a second
+     * cancel. The pre-#176 loop used `return@repeat` here, which is a CONTINUE: every
+     * trial issued up to three DELETEs, and under load the redundant retry landed after
+     * the abort completed and answered 409 — that, not a fast subject, was the
+     * loaded-gate red.
+     */
+    private fun cancelSubject(
+        executionId: String,
+        reader: SubjectReader,
+    ): Pair<Int, Int> {
+        var cancelStatus = -1
+        var cancelAttempts = 0
+        while (cancelAttempts < CANCEL_RETRIES) {
+            cancelAttempts++
+            reader.cancelAtMillis = System.currentTimeMillis()
+            cancelStatus =
+                given()
+                    .port(port)
+                    .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                    .`when`()
+                    .delete("/api/v1/executions/$executionId")
+                    .then()
+                    .extract()
+                    .statusCode()
+            if (cancelStatus != 429) break
+            Thread.sleep(RATE_WINDOW_MILLIS)
+        }
+        return cancelStatus to cancelAttempts
+    }
+
+    /** The subject's server-side status — the trial's control read. */
+    private fun executionStatus(executionId: String): String =
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .`when`()
+            .get("/api/v1/executions/$executionId")
+            .then()
+            .extract()
+            .jsonPath()
+            .getString("data.status")
 
     /** The §10.3 replay — the witness's own control: did the SERVER emit the abort at all? */
     private fun replayCarriesAbort(executionId: String): Boolean {

@@ -43,6 +43,8 @@ class SystemActorProvisioningIntegrationTest {
     @BeforeEach
     fun setUp() {
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        // The CASCADE takes `workspaces` with it (by constraint, not data); both go back (#146).
+        DefaultWorkspaceFixture.ensure(jdbc)
         jdbc.jdbcTemplate.execute("TRUNCATE audit_log")
         users = UserRepository(jdbc)
     }

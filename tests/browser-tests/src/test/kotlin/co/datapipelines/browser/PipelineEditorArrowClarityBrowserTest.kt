@@ -17,9 +17,13 @@ import java.nio.file.Paths
  *  1. IDLE — every `depends_on` entry is one `dependency` edge; no edge carries a label; the
  *     producer has exactly ONE output port naming `tempdb.stg`; the DDL node has none; the
  *     legend explains the two link kinds.
- *  2. THE PRODUCER WRITES — its port reads `writing · N written` with the flow element while
- *     the samples say so; NEITHER dependency out of it is active, and its two consumers read
- *     Pending: a write is a fact about the producer, not about its arrows.
+ *  2. THE PRODUCER WRITES — the port recorder (installed before Execute, wrapping the
+ *     graph's own `setNodeOperation`) holds every port view the page was TOLD to show,
+ *     in event order: it contains a `writing` entry, and no dependency was active in
+ *     that snapshot. Sampling the DOM for a transient state was the #206 flake: the
+ *     html-label re-render is deferred (setTimeout(0) coalescing), so under load the DOM
+ *     may never paint `writing` at all — and the tracker's first writing sample carries
+ *     no count, so the count is asserted on the sequence, not on the writing entry.
  *  3. THE PRODUCER IS DONE — its port reads `committed · N rows`; its outgoing dependencies
  *     are `satisfied` (a fact about the source) — and still no label on any edge.
  *  4. CONSUMERS RUN — the edges INTO a running consumer are `active` (static), the producer's
@@ -54,6 +58,7 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
             ?.forEach { it.delete() }
 
         idlePicture()
+        installPortRecorder()
         page.locator("[data-verb='pipeline-execute']").click()
         producerWriting()
         producerDone()
@@ -80,23 +85,56 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
         shootClose("idle-producer", "stg")
     }
 
-    /** 2. The producer writes: port writing with a count and the flow; no arrow active. */
+    /**
+     * 2. The producer writes: the RECORDED port sequence holds a writing entry, and the
+     * snapshot taken at that event shows the write is a fact about the producer — no
+     * dependency active, both consumers and the DDL still Pending, no edge labelled.
+     * Nothing is sampled: the DOM's deferred re-render can skip a transient state under
+     * load (that was the #206 flake), so the port is read where the page writes it — the
+     * `setNodeOperation` call itself. The entry is GUARANTEED: NodeOperationTracker emits
+     * a first-entry sample per phase and flushes it before the terminal one.
+     */
     private fun producerWriting() {
-        waitUntil("the producer's port reads writing") { portState("stg") == "writing" && WRITTEN.containsMatchIn(portLine("stg")) }
-        page.locator(".pe-card[data-node-id='stg'] .pe-port .pe-port-flow").count() shouldBe 1
-        val duringWrite = edgeModel()
-        duringWrite.filter { it["kind"] == "dependency" }.all { it["active"] == false } shouldBe true
-        cardState("by_a") shouldBe "Pending"
-        cardState("by_b") shouldBe "Pending"
-        cardState("mk_index") shouldBe "Pending"
-        duringWrite.all { (it["label"] as String).isEmpty() } shouldBe true
+        waitUntil("the port recorder saw the producer writing", ::trailDump) {
+            portTrail().any { it.node == "stg" && it.state == "writing" }
+        }
+        val writing = portTrail().filter { it.node == "stg" && it.state == "writing" }
+        writing.all { it.activeDeps.isEmpty() } shouldBe true
+        writing.all { w -> listOf("by_a", "by_b", "mk_index").all { w.cardStates[it] == "idle" } } shouldBe true
+        writing.all { !it.labelled } shouldBe true
+        // The flow element is buildPortHtml's writing-only marker — a PURE function of the
+        // port state, so it is asserted as a mapping, not timed against the live DOM.
+        val card =
+            page.evaluate(
+                """() => window.PEGraphUtil.buildCardHtml({ id: 'stg', type: 'DQL', state: 'running',
+                  output: { text: 'tempdb.stg' },
+                  port: { state: 'writing', text: 'writing · 1,234 written', kindLabel: 'stage', a11y: 'a11y' } })""",
+            ) as String
+        card shouldContain "pe-port-writing"
+        card shouldContain "pe-port-flow"
         shoot("producer-writing")
         shootClose("producer-writing-close", "stg")
     }
 
     /** 3. The producer is done: committed count on the port, satisfied orderings, no labels. */
     private fun producerDone() {
-        waitUntil("the producer's port reads committed") { portState("stg") == "done" }
+        waitUntil("the producer's port reads committed", ::trailDump) { portState("stg") == "done" }
+        // The recorded sequence, not a sample: writing came BEFORE done, and the write was
+        // MEASURED — the cumulative count showed on the port while the producer was live.
+        // The count is NOT required on a writing entry: the tracker's first-entry sample
+        // for the writing phase is taken at phase entry, before the first batch completes,
+        // so it reads "writing" bare and the count lands on a later sample's own state
+        // (finalizing carries "· 900,000 written"). Requiring both in one sample was the
+        // other half of the #206 race.
+        val trail = portTrail().filter { it.node == "stg" }
+        val lastWrite = trail.indexOfLast { it.state == "writing" }
+        val firstDone = trail.indexOfFirst { it.state == "done" }
+        check(lastWrite >= 0 && firstDone > lastWrite) {
+            "the recorded port sequence has no writing before done: ${trail.map { it.state }}"
+        }
+        check(trail.subList(0, firstDone).any { WRITTEN.containsMatchIn(it.text) }) {
+            "the recorded port sequence never measured the write (no 'N written' before done): ${trail.map { it.text }}"
+        }
         portLine("stg") shouldMatch Regex("committed · 900,000 rows.*")
         page.locator(".pe-card[data-node-id='stg'] .pe-port .pe-port-flow").count() shouldBe 0
         val afterProducer = edgeModel()
@@ -147,6 +185,65 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
     }
 
     // --------------------------------------------------------------- reads
+
+    /**
+     * #206: the port recorder — one entry per port view the page is TOLD to show, in event
+     * order, wrapped around the graph's own `setNodeOperation` (the synchronous write every
+     * SSE event makes; the DOM re-render it triggers is deferred and may coalesce a
+     * transient state away under load). Each entry also snapshots what the write-phase
+     * assertions read: the active dependency edges, every node's card state, and whether
+     * any edge carries a label.
+     */
+    private data class TrailEntry(
+        val node: String,
+        val state: String,
+        val text: String,
+        val activeDeps: List<String>,
+        val cardStates: Map<String, String>,
+        val labelled: Boolean,
+    )
+
+    private fun installPortRecorder() {
+        page.evaluate(
+            """() => {
+              const editor = window.__peInstance;
+              if (!editor || !editor.graph || typeof editor.graph.setNodeOperation !== 'function') return false;
+              const cy = document.getElementById('cy-canvas')._cyreg.cy;
+              window.__portTrail = [];
+              const orig = editor.graph.setNodeOperation.bind(editor.graph);
+              editor.graph.setNodeOperation = function (nodeId, view) {
+                const r = orig(nodeId, view);
+                if (view && view.port) {
+                  window.__portTrail.push({
+                    node: nodeId,
+                    state: view.port.state || '',
+                    text: view.port.text || '',
+                    activeDeps: cy.edges('.dependency.active').map(e => e.id()),
+                    cardStates: Object.fromEntries(cy.nodes().map(n => [n.id(), n.data('state') || ''])),
+                    labelled: cy.edges().some(e => String(e.style('label') || '') !== ''),
+                  });
+                }
+                return r;
+              };
+              return true;
+            }""",
+        ) shouldBe true
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun portTrail(): List<TrailEntry> {
+        val raw = page.evaluate("() => window.__portTrail || []") as List<Map<String, Any?>>
+        return raw.map { e ->
+            TrailEntry(
+                node = e["node"] as String,
+                state = e["state"] as String,
+                text = e["text"] as String,
+                activeDeps = (e["activeDeps"] as List<*>).map { it as String },
+                cardStates = (e["cardStates"] as Map<*, *>).map { (k, v) -> k as String to v as String }.toMap(),
+                labelled = e["labelled"] as Boolean,
+            )
+        }
+    }
 
     private data class Poll(
         val activeInto: List<String>,
@@ -211,10 +308,9 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
     private fun portLine(nodeId: String): String =
         page.locator(".pe-card[data-node-id='$nodeId'] .pe-port .pe-port-line").let { if (it.count() == 0) "" else it.innerText().trim() }
 
-    private fun cardState(nodeId: String): String = page.locator(".pe-card[data-node-id='$nodeId'] .pe-card-st").innerText().trim()
-
     private fun waitUntil(
         what: String,
+        diagnostics: () -> String = { "" },
         done: () -> Boolean,
     ) {
         val deadline = System.currentTimeMillis() + EXECUTION_TIMEOUT_MS.toLong()
@@ -228,8 +324,18 @@ class PipelineEditorArrowClarityBrowserTest : BrowserSuite() {
             if (ok) return
             Thread.sleep(POLL_MS)
         }
-        error("never saw: $what")
+        error("never saw: $what ${diagnostics()}")
     }
+
+    /** The recorded trail, compressed to transitions, for failure messages. */
+    private fun trailDump(): String =
+        "trail: " +
+            portTrail()
+                .fold(mutableListOf<String>()) { acc, e ->
+                    val t = "${e.node}:${e.state}:${e.text}"
+                    if (acc.lastOrNull() != t) acc += t
+                    acc
+                }.joinToString(" → ")
 
     private fun shoot(state: String) {
         page.screenshot(Page.ScreenshotOptions().setPath(shotDir().resolve("151-$state.png")).setFullPage(true))

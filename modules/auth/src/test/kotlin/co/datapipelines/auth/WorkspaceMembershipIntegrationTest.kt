@@ -57,10 +57,10 @@ class WorkspaceMembershipIntegrationTest {
         // it (V23 deliberately does not; `DemoWorkspaceSeeder` owns it at boot) but because
         // this suite asserts the world a BOOTED deployment has, and it never boots one.
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        DefaultWorkspaceFixture.ensure(jdbc)
         jdbc.jdbcTemplate.execute(
             "INSERT INTO workspaces (id, name, display_name)" +
-                " VALUES ('defa0000-0000-0000-0000-000000000001', 'default', 'Default')," +
-                " ('de000000-0000-0000-0000-000000000001', 'demo', 'Demo')",
+                " VALUES ('de000000-0000-0000-0000-000000000001', 'demo', 'Demo')",
         )
         alice = users.insert("alice@company.com", "Alice", null, "google", "sub-1", isAdmin = false)
         admin = users.insert("root@company.com", "Root", null, "google", "sub-2", isAdmin = true)

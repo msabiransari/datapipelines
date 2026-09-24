@@ -56,6 +56,8 @@ class WorkspaceInvitationMaterialiseIntegrationTest {
         workspaces = WorkspaceRepository(jdbc)
         invitations = WorkspaceInvitationRepository(jdbc)
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        // The CASCADE takes `workspaces` with it (by constraint, not data); both go back (#146).
+        DefaultWorkspaceFixture.ensure(jdbc)
         alice("inviter@company.com")
         alice("invited@company.com")
         inviter = users.findByEmail("inviter@company.com").shouldNotBeNull()

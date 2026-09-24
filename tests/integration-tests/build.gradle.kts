@@ -90,6 +90,15 @@ tasks.named<Test>("test") {
     // ordinary dp.test.forks — DEVELOPMENT.md §9.5 has the RAM arithmetic.
     maxParallelForks =
         project.providers.gradleProperty("dp.test.forks.e2e").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+    // #139: ONE class order for CI and the box. These suites share containers and Spring
+    // contexts per fork, so the class order decides which suites cohabit a JVM (the
+    // memory-limit note above is one measured consequence) — it must not depend on the
+    // filesystem's scan order. Pinned to alphabetical UNLESS the property is passed: a passed
+    // -Pjunit.jupiter.testclass.order.default is forwarded by the conventions plugin, and this
+    // default then stays out of its way (the round-060 shuffle override keeps winning).
+    if (project.providers.gradleProperty("junit.jupiter.testclass.order.default").orNull == null) {
+        systemProperty("junit.jupiter.testclass.order.default", "org.junit.jupiter.api.ClassOrderer\$ClassName")
+    }
     // The #143/#130 load harness (ExecutionStreamCancelLoadE2eTest) counts its cancel-under-load
     // trials through this knob. Gradle properties, not -D: a -D stops at the build JVM and would
     // silently never reach the test (the shared conventions' own warning). A Gradle property is a
