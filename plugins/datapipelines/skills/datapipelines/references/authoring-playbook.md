@@ -227,6 +227,17 @@ semantics; the question's words decide the window.
   evidence. Do not split a scan into repeated `UNION ALL` walks as a substitute for evidence
   (§3a). `references/dp-lake.md` explains the read path; this read-only datasource cannot
   repartition or sort stored files, and tempdb `CREATE INDEX` does not index S3 data.
+  **Measured first-hand on DuckDB 1.5.5 — the working rules until a new measurement replaces
+  them:** a predicate on the registered partition column prunes — `WHERE <partition_col> IN
+  (DATE '…', …)`, `BETWEEN` two dates, and a deterministic expression of the column such as
+  `CAST(<partition_col> AS …)` still prune. **Bound parameters prune exactly like literals**:
+  write `:d` for a date filter and the engine folds the bound value into the scan (33 bound
+  dates read 33 of 731 files, the same as literals). A predicate on a sibling column INSIDE
+  the files (a timestamp beside the partition date) read EVERY file and relied on row-group
+  statistics — it looked fast on a quiet box and died at the timeout on a busy one. Never
+  build a `UNION ALL` of date-range branches to work around that; it is N full walks in one
+  statement. One query, the partition column, a list of dates. (Real miss: an 11-branch UNION
+  over the sibling timestamp, cancelled at 60 s.)
 - **Climb the ladder: probe → render → execute_node → full DAG.** `sql_probe` the exact
   SELECT against the source first — rows, `wall_ms`, and the EXPLAIN plan (captured before
   the run, so it survives the timeout it explains); then `templates_render`; then
