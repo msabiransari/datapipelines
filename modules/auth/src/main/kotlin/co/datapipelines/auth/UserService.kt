@@ -269,8 +269,22 @@ class UserService(
     fun provisionIdentity(
         keyId: String,
         keyName: String,
-    ): User =
-        createUser(
+    ): User {
+        // Find-else-create, like [provisionSystemActor]: a key id minted again — the configured
+        // demo key after its row was removed, or a rotation back to an earlier value — meets
+        // the identity its first mint left behind (#224 follow-up). The row is the key's, so it
+        // is reused and made live again; a second insert would only trip `users_email_key`.
+        val existing = userRepository.findByEmail(identityEmail(keyId))
+        if (existing != null) {
+            check(existing.kind == UserKind.SERVICE) {
+                "The identity address of key $keyId is held by a ${existing.kind.wire} row"
+            }
+            if (!existing.isActive && userRepository.setActive(existing.id, active = true)) {
+                authCache.invalidateUser(existing.id)
+            }
+            return existing
+        }
+        return createUser(
             normalizedEmail = identityEmail(keyId),
             displayName = keyName,
             pictureUrl = null,
@@ -278,6 +292,7 @@ class UserService(
             providerSubject = keyId,
             kind = UserKind.SERVICE,
         )
+    }
 
     /**
      * Deactivates a key's identity — the revocation of its key (record §3.3: "Revoking the key

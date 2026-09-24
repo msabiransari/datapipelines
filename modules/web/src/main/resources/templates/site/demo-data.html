@@ -358,17 +358,23 @@
           read the executions it started, and nothing else. Pass it in the <code>DP-API-Key</code> header and
           read the JSON.
         </p>
+        <div class="code-block">
         <pre><code th:text="${facts.demoApiKey}">dpk_DEMOPUBLIC42.THISKEYISPUBLICBYDESIGNDEMOONLYREADONLY222222222</code></pre>
-        <div th:each="e : ${facts.demoApiEndpoints}">
-          <h3 th:text="|${e.family}: ${e.pipeline}|">NYC mobility: nyc/mobility/revenue_by_borough</h3>
-          <pre><code th:text="${facts.demoApiCurl(e, facts.demoApiKey)}">curl -H &quot;DP-API-Key: dpk_&quot; https://datapipelines.co/api/demo/nyc/mobility/revenue-by-borough</code></pre>
-          <p th:if="${e.note != null}" th:text="${e.note}">reads from S3 and may take a few seconds</p>
         </div>
+        <th:block th:each="e : ${facts.demoApiEndpoints}">
+          <h3 th:text="|${e.family}: ${e.pipeline}|">NYC mobility: nyc/mobility/revenue_by_borough</h3>
+          <p th:if="${e.note != null}" th:text="${e.note}">reads from S3 and may take a few seconds</p>
+          <div class="code-block">
+          <pre><code th:text="${facts.demoApiCurl(e, facts.demoApiKey)}">curl -H &quot;DP-API-Key: dpk_&quot; https://datapipelines.co/api/demo/nyc/mobility/revenue-by-borough</code></pre>
+          </div>
+        </th:block>
         <p>
           The response is one JSON document: the execution id, the result schema, the first page of rows, the
           total, and a cursor URL for the rest.
         </p>
+        <div class="code-block">
         <pre th:inline="none"><code>{"execution_id": "…", "schema": ["column", "…"], "rows": [["value", "…"]], "row_count": 1, "total_rows": 1, "has_more": false, "result_url": "…", "expires_at": "…"}</code></pre>
+        </div>
         <p>
           A request budget applies to the key, so one script cannot run the demo nonstop. When a key spends its
           budget the API answers <code>429</code> with a retry hint, and the key works again when the window rolls

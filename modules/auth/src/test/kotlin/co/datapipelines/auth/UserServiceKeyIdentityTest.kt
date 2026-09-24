@@ -47,6 +47,7 @@ class UserServiceKeyIdentityTest {
     @Test
     fun `provisionIdentity inserts a service row under the reserved key provider, never an admin`() {
         val created = row(UUID.randomUUID(), UserKind.SERVICE)
+        every { userRepository.findByEmail(identityEmail) } returns null
         every { userRepository.insert(any(), any(), any(), any(), any(), any(), any()) } returns created
 
         // The bootstrap email is set to the identity's own address: the kind still decides.
@@ -65,6 +66,39 @@ class UserServiceKeyIdentityTest {
         }
         // The only audit the create path writes is the bootstrap grant — and it did not happen.
         verify { auditLogger wasNot Called }
+    }
+
+    @Test
+    fun `provisionIdentity for a key id minted before reuses its identity row, never a second insert`() {
+        val existing = row(UUID.randomUUID(), UserKind.SERVICE)
+        every { userRepository.findByEmail(identityEmail) } returns existing
+
+        service().provisionIdentity(keyId, "ci") shouldBe existing
+
+        verify(exactly = 0) { userRepository.insert(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { userRepository.setActive(any(), any()) }
+        verify { authCache wasNot Called }
+    }
+
+    @Test
+    fun `provisionIdentity for a key id minted before makes a deactivated identity live again and evicts it`() {
+        val dormant = row(UUID.randomUUID(), UserKind.SERVICE, active = false)
+        every { userRepository.findByEmail(identityEmail) } returns dormant
+        every { userRepository.setActive(dormant.id, active = true) } returns true
+
+        service().provisionIdentity(keyId, "ci") shouldBe dormant
+
+        verify(exactly = 1) { userRepository.setActive(dormant.id, active = true) }
+        verify(exactly = 1) { authCache.invalidateUser(dormant.id) }
+        verify(exactly = 0) { userRepository.insert(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `provisionIdentity refuses to adopt a person's row sitting at a key's identity address`() {
+        every { userRepository.findByEmail(identityEmail) } returns row(UUID.randomUUID(), UserKind.HUMAN)
+
+        shouldThrow<IllegalStateException> { service().provisionIdentity(keyId, "ci") }
+        verify(exactly = 0) { userRepository.insert(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

@@ -380,6 +380,24 @@ class SampleDataBootstrapE2eTest {
     private fun resetDemoWorkspace() {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
             connection.createStatement().use { statement ->
+                // #224: the demo seeder publishes every seeded pipeline and binds the demo key
+                // to the published paths — rows that reference the pipelines and the key.
+                // Bindings first, then the endpoints, then the key; only then may a pipeline go.
+                statement.execute(
+                    """
+                    DELETE FROM endpoint_key_bindings WHERE api_key_id IN
+                        (SELECT id FROM api_keys WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo'));
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
+                    DELETE FROM published_endpoints WHERE pipeline_id IN
+                        (SELECT id FROM pipelines WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo'));
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    "DELETE FROM api_keys WHERE workspace_id IN (SELECT id FROM workspaces WHERE name = 'demo')",
+                )
                 statement.execute(
                     """
                     DELETE FROM pipeline_versions WHERE pipeline_id IN

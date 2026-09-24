@@ -164,7 +164,10 @@ class PipelineEditorLeaseWaitBrowserTest : BrowserSuite() {
     ): List<LongRange> {
         val own = filter { it.node == node }.sortedBy { it.at }
         return own.mapIndexedNotNull { i, s ->
-            if (s.state != state) null else s.at until (own.getOrNull(i + 1)?.at ?: Long.MAX_VALUE)
+            // Half-open [at, next.at): a next sample on the SAME millisecond must yield an
+            // instant, never a range whose end precedes its start (seen under gate load:
+            // waits a=[…157..…156], and the wait vanished from the overlap check).
+            if (s.state != state) null else s.at..maxOf(s.at, (own.getOrNull(i + 1)?.at ?: Long.MAX_VALUE) - 1)
         }
     }
 
