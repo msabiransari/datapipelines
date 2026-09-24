@@ -39,7 +39,7 @@ class ReadFloorTest {
     private val publicPatterns = PublicPaths.PATTERNS.map { parser.parse(it) }
 
     @Test
-    fun `every non-public GET declares the lowest operation its family admits`() {
+    fun `every non-public GET declares the lowest permission its family admits`() {
         val wrong = mutableListOf<String>()
         readers().forEach { handler ->
             val family = familyOf(handler.path)

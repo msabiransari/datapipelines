@@ -505,9 +505,11 @@ class RoleWalkE2eTest {
         /**
          * Floors, not targets. The 2026-09-20 walk: 175 routes — viewer allowed 73 / refused 102,
          * author 127 / 48, promoter 58 / 117, workspace admin 150 / 25, super admin 175 / 0; 42
-         * tools — viewer 28 / 13, author 42 / 0, promoter 20 / 21, admins 42 / 0. The #215 catalog
-         * leaves the REST numbers where the base had them and moves five MCP cells to refused
-         * (viewer 25 / 16, promoter 18 / 23 on 42 tools — the five named in [MOVED_MCP_CELLS]).
+         * tools — viewer 28 / 13, author 42 / 0, promoter 20 / 21, admins 42 / 0. Measured on the
+         * #215 lane (2026-09-24), before the catalog (091df07b) and after it: 185 routes — viewer
+         * 75 / 110, author 128 / 57, promoter 60 / 125, workspace admin 159 / 26, super admin
+         * 185 / 0, IDENTICAL before and after; 42 tools — viewer 28 / 14 → 25 / 17, promoter
+         * 20 / 22 → 18 / 24 (the five cells named in [MOVED_MCP_CELLS]), author and admins 42 / 0.
          * A walk well under these numbers is a broken scan, not a leaner app.
          */
         private const val MINIMUM_ROUTES = 60
@@ -518,8 +520,8 @@ class RoleWalkE2eTest {
         private const val AUTHOR_REFUSED_FLOOR = 15
         private const val PROMOTER_REFUSED_FLOOR = 60
         private const val WS_ADMIN_REFUSED_FLOOR = 8
-        private const val MCP_VIEWER_REFUSED_FLOOR = 12
-        private const val MCP_PROMOTER_REFUSED_FLOOR = 20
+        private const val MCP_VIEWER_REFUSED_FLOOR = 15
+        private const val MCP_PROMOTER_REFUSED_FLOOR = 22
 
         private val VARIABLE_PATTERN = Regex("\\{([^}]+)\\}")
         private val CODE = Regex("\"code\"\\s*:\\s*\"([a-z_.]+)\"")
