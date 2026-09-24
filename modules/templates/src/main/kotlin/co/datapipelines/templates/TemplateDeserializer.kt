@@ -64,46 +64,19 @@ class TemplateDeserializer(
                 ),
             )
         }
-        val dialect = tree.get("dialect")?.takeIf { it.isTextual }?.asText()
         val typed = type?.let { TemplateType.fromWire(it) }
-        // Presence of a NON-NULL dialect is the offense: an explicit `"dialect": null` carries
-        // no value and reads as absent (an export serialized by a mapper that writes nulls must
-        // re-import cleanly).
-        val dialectPresent = tree.get("dialect")?.let { !it.isNull } == true
-        if (typed != null && !TemplateTypeBehaviour.of(typed).requiresDialect) {
-            // html and the transform types declare NO dialect; presence is the offense (046 §7,
-            // transform-nodes §2.1), so the value is irrelevant — including an invalid one,
-            // which could not make it "more present".
-            if (dialectPresent) {
-                return TemplateDeserializationOutcome.Rejected(
-                    TemplateValidationResult(
-                        listOf(
-                            TemplateValidationFailure(
-                                code = PipelineErrorCodes.Template.DIALECT_NOT_ALLOWED,
-                                message =
-                                    "A template of type '${typed.wire}' declares no dialect, but the payload carries " +
-                                        "'${dialect.truncateForError()}'.",
-                                details = mapOf("type" to typed.wire, "dialect" to dialect.truncateForError()),
-                            ),
-                        ),
-                    ),
-                )
-            }
-        } else if (dialect == null || Dialect.entries.none { it.wire == dialect }) {
-            return TemplateDeserializationOutcome.Rejected(
-                TemplateValidationResult(
-                    listOf(
-                        TemplateValidationFailure(
-                            code = PipelineErrorCodes.Template.DIALECT_INVALID,
-                            message =
-                                "Dialect '${dialect.truncateForError()}' is not one of ${Dialect.entries.map { it.wire }}." +
-                                    " A dialect is required unless the template's type is 'html'.",
-                            details = mapOf("dialect" to dialect.truncateForError()),
-                        ),
-                    ),
-                ),
-            )
+        dialectPreScan(typed, tree)?.let { return it }
+        return when (val bound = bindDraft(tree, typed)) {
+            is TemplateDeserializationOutcome.Rejected -> bound
+            is TemplateDeserializationOutcome.Parsed -> bound
         }
+    }
+
+    /** Binds the tree — Parsed (with the §2.1 engine default resolved) or the strict-block Rejected. */
+    private fun bindDraft(
+        tree: JsonNode,
+        typed: TemplateType?,
+    ): TemplateDeserializationOutcome {
         val parsed =
             try {
                 mapper.treeToValue(tree, TemplateDraft::class.java)
@@ -145,6 +118,54 @@ class TemplateDeserializer(
                 parsed
             }
         return TemplateDeserializationOutcome.Parsed(normalized)
+    }
+
+    /** The type/dialect wire-value verdicts, or null when the pair is sound (046 §7, 7b §2.1). */
+    private fun dialectPreScan(
+        typed: TemplateType?,
+        tree: JsonNode,
+    ): TemplateDeserializationOutcome.Rejected? {
+        val dialect = tree.get("dialect")?.takeIf { it.isTextual }?.asText()
+        // Presence of a NON-NULL dialect is the offense: an explicit `"dialect": null` carries
+        // no value and reads as absent (an export serialized by a mapper that writes nulls must
+        // re-import cleanly).
+        val dialectPresent = tree.get("dialect")?.let { !it.isNull } == true
+        if (typed != null && !TemplateTypeBehaviour.of(typed).requiresDialect) {
+            // html and the transform types declare NO dialect; presence is the offense, so the
+            // value is irrelevant — including an invalid one, which could not make it "more present".
+            if (dialectPresent) {
+                return TemplateDeserializationOutcome.Rejected(
+                    TemplateValidationResult(
+                        listOf(
+                            TemplateValidationFailure(
+                                code = PipelineErrorCodes.Template.DIALECT_NOT_ALLOWED,
+                                message =
+                                    "A template of type '${typed.wire}' declares no dialect, but the payload carries " +
+                                        "'${dialect.truncateForError()}'.",
+                                details = mapOf("type" to typed.wire, "dialect" to dialect.truncateForError()),
+                            ),
+                        ),
+                    ),
+                )
+            }
+            return null
+        }
+        if (dialect == null || Dialect.entries.none { it.wire == dialect }) {
+            return TemplateDeserializationOutcome.Rejected(
+                TemplateValidationResult(
+                    listOf(
+                        TemplateValidationFailure(
+                            code = PipelineErrorCodes.Template.DIALECT_INVALID,
+                            message =
+                                "Dialect '${dialect.truncateForError()}' is not one of ${Dialect.entries.map { it.wire }}." +
+                                    " A dialect is required unless the template's type is 'html'.",
+                            details = mapOf("dialect" to dialect.truncateForError()),
+                        ),
+                    ),
+                ),
+            )
+        }
+        return null
     }
 
     /** As [read], but throws [TemplateValidationException] instead of returning a rejection. */

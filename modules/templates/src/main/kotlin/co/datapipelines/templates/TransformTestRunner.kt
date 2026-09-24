@@ -68,6 +68,13 @@ class TransformTestRunner(
         val rejects: List<Map<String, Any?>>,
     )
 
+    /** One case's evaluated input (the test-case object and its two halves). */
+    private data class CaseContext(
+        val input: TransformTestInput,
+        val rows: List<Map<String, Any?>>,
+        val inputs: Map<String, Any?>,
+    )
+
     /** A case's clock pin, parsed (record §2.2, v0.3.1): ISO-8601, or null (the clock builtins refuse). */
     fun caseNow(input: TransformTestInput): Instant? =
         input.now?.let { raw ->
@@ -125,6 +132,7 @@ class TransformTestRunner(
      * compiled by the caller — they do not vary per case. [now] is the production clock pin
      * (the execution's `current_timestamp`); a case's own `now` wins when present.
      */
+    @Suppress("ReturnCount") // each §4.3/§5.1 guard is its own early refusal; the order is the contract
     fun runCase(
         label: String,
         engine: ScriptEngine,
@@ -137,7 +145,40 @@ class TransformTestRunner(
         val rows = input.rows.orEmpty()
         val inputs = input.inputs.orEmpty()
 
-        // Caps BEFORE any evaluation (§4.3): the row batch, or any table input, above the row cap.
+        inputCaps(contract, rows, inputs)?.let { return it }
+
+        // §5.1: rows and each table input against the contract's columns, value inputs against types.
+        inputViolation(contract, rows, inputs)?.let { return it }
+
+        val limits =
+            EvaluationLimits(
+                wallClock = evaluateTimeout,
+                maxDepth = maxDepth,
+                now = caseNow(input) ?: now,
+            )
+        val evaluated = evaluateOnPool(label, engine, script, contract, CaseContext(input, rows, inputs), limits)
+        if (evaluated is RunOutcome.Refused) return evaluated
+
+        // Shape + gate the output (§5.3).
+        val gated =
+            when (val shaped = shapeAndGate(contract, (evaluated as RunOutcome.Evaluated).output)) {
+                is RunOutcome.Refused -> return shaped
+                is Gated -> shaped
+                else -> error("shapeAndGate returned ${shaped.javaClass}")
+            }
+
+        val verdicts =
+            runInvariants(label, contract, compiledInvariants, gated, rows, inputs, limits)
+        if (verdicts is RunOutcome.Refused) return verdicts
+        return RunOutcome.Evaluated(gated.output, gated.rejects, (verdicts as RunOutcome.Evaluated).invariants)
+    }
+
+    /** Caps BEFORE any evaluation (§4.3): the row batch, or any table input, above the row cap. */
+    private fun inputCaps(
+        contract: TransformContract,
+        rows: List<Map<String, Any?>>,
+        inputs: Map<String, Any?>,
+    ): RunOutcome.Refused? {
         val tableCounts =
             contract.inputs
                 .filterValues { it is TransformInput.Table }
@@ -154,40 +195,41 @@ class TransformTestRunner(
                 "input exceeds max-input-rows ($maxInputRows): rows=${rows.size}, tables=$tableCounts",
             )
         }
+        return null
+    }
 
-        // §5.1: rows and each table input against the contract's columns, value inputs against types.
-        inputViolation(contract, rows, inputs)?.let { return it }
-
-        // The input object (§3.2; test input mirrors production exactly — R2).
+    /** The one engine evaluation on the pool — the input object is §3.2's, mirroring production (R2). */
+    private fun evaluateOnPool(
+        label: String,
+        engine: ScriptEngine,
+        script: CompiledScript,
+        contract: TransformContract,
+        case: CaseContext,
+        limits: EvaluationLimits,
+    ): RunOutcome {
         val inputObject =
             buildMap<String, Any?> {
-                if (contract.mode == TransformMode.ROW) put("rows", rows)
-                put("inputs", productionInputs(contract, rows, inputs))
-                put("meta", input.meta ?: mapOf("node_id" to "test", "context_key" to null))
+                if (contract.mode == TransformMode.ROW) put("rows", case.rows)
+                put("inputs", productionInputs(contract, case.rows, case.inputs))
+                put("meta", case.input.meta ?: mapOf("node_id" to "test", "context_key" to null))
             }
+        return try {
+            RunOutcome.Evaluated(pool.run(limits, label) { engine.evaluate(script, inputObject, limits) }, emptyList(), emptyList())
+        } catch (err: ScriptingException) {
+            RunOutcome.Refused(err.code, err.message ?: err.code)
+        }
+    }
 
-        val limits =
-            EvaluationLimits(
-                wallClock = evaluateTimeout,
-                maxDepth = maxDepth,
-                now = caseNow(input) ?: now,
-            )
-        val evaluated =
-            try {
-                pool.run(limits, label) { engine.evaluate(script, inputObject, limits) }
-            } catch (err: ScriptingException) {
-                return RunOutcome.Refused(err.code, err.message ?: err.code)
-            }
-
-        // Shape + gate the output (§5.3).
-        val gated =
-            when (val shaped = shapeAndGate(contract, evaluated)) {
-                is RunOutcome.Refused -> return shaped
-                is Gated -> shaped
-                else -> error("shapeAndGate returned ${shaped.javaClass}")
-            }
-
-        // Invariants over { rows, rejects, inputs } (§5.4; R2 — the table rides under its name).
+    /** Every invariant over `{ rows, rejects, inputs }` (§5.4; R2 — the table rides under its name). */
+    private fun runInvariants(
+        label: String,
+        contract: TransformContract,
+        compiledInvariants: List<Pair<TransformInvariant, CompiledScript>>,
+        gated: Gated,
+        rows: List<Map<String, Any?>>,
+        inputs: Map<String, Any?>,
+        limits: EvaluationLimits,
+    ): RunOutcome {
         val invariantObject =
             mapOf(
                 "rows" to gatedRows(gated.output, contract),
@@ -218,7 +260,7 @@ class TransformTestRunner(
                 }
             }
         }
-        return RunOutcome.Evaluated(gated.output, gated.rejects, verdicts)
+        return RunOutcome.Evaluated(null, emptyList(), verdicts)
     }
 
     /** The rows half of a gated table output (the invariants' `rows`). */
@@ -249,7 +291,9 @@ class TransformTestRunner(
         }
 
     /** The §5.1 check as a refusal, or null when every input fits. */
-    @Suppress("UNCHECKED_CAST") // gateRow's Pass value is a LinkedHashMap<String, Any?> by the gate's contract
+    @Suppress("UNCHECKED_CAST", "ReturnCount")
+    // gateRow's Pass value is a LinkedHashMap by the gate's contract; every input's first
+    // violation is its own early refusal.
     private fun inputViolation(
         contract: TransformContract,
         rows: List<Map<String, Any?>>,
@@ -321,130 +365,153 @@ class TransformTestRunner(
     ): Any {
         when (val output = contract.output) {
             is TransformOutput.Obj -> {
-                val verdict = TypeGate.over(emptyList(), maxStringBytes).gateObject(evaluated, maxValueBytes)
-                return when (verdict) {
-                    is GateResult.Refuse -> refused(verdict.refusal)
-                    is GateResult.Pass -> Gated(verdict.value, emptyList())
-                }
+                return gateObjectOutput(evaluated)
             }
 
             is TransformOutput.Value -> {
-                val column = ColumnSchema("value", output.type, output.precision, output.scale, nullable = false)
-                val gated =
-                    when (val verdict = TypeGate.over(listOf(column), maxStringBytes).gateValue(evaluated, column)) {
-                        is GateResult.Refuse -> return refused(verdict.refusal)
-                        is GateResult.Pass -> verdict.value
-                    }
-                val bytes =
-                    CanonicalJson
-                        .write(gated)
-                        .toByteArray(Charsets.UTF_8)
-                        .size
-                        .toLong()
-                if (bytes > maxValueBytes) {
-                    return RunOutcome.Refused(TransformCodes.VALUE_TOO_LARGE, "value output is $bytes bytes (cap $maxValueBytes)")
-                }
-                return Gated(gated, emptyList())
+                return gateValueOutput(output, evaluated)
             }
 
             is TransformOutput.Table -> {
-                val (rawRows, rawRejects) =
-                    if (contract.rejects) {
-                        val asMap =
-                            evaluated as? Map<*, *>
-                                ?: return RunOutcome.Refused(
-                                    TransformCodes.ROW_SHAPE_MISMATCH,
-                                    "rejects contract expects { rows, rejects } but the function returned ${shapeOf(evaluated)}",
-                                )
-                        val rows =
-                            asMap["rows"] as? List<*>
-                                ?: return RunOutcome.Refused(
-                                    TransformCodes.ROW_SHAPE_MISMATCH,
-                                    "{ rows, rejects }: 'rows' is not an array",
-                                )
-                        val rejects =
-                            asMap["rejects"] as? List<*>
-                                ?: return RunOutcome.Refused(
-                                    TransformCodes.ROW_SHAPE_MISMATCH,
-                                    "{ rows, rejects }: 'rejects' is not an array",
-                                )
-                        rows to rejects
-                    } else {
-                        val rows =
-                            evaluated as? List<*>
-                                ?: return RunOutcome.Refused(
-                                    TransformCodes.ROW_SHAPE_MISMATCH,
-                                    "the function returned ${shapeOf(evaluated)} where an array of rows was expected",
-                                )
-                        rows to emptyList<Any?>()
-                    }
-
-                val gate = TypeGate.over(output.columns.toColumnSchemas(), maxStringBytes)
-                val rowsOut = mutableListOf<Map<String, Any?>>()
-                rawRows.forEachIndexed { index, entry ->
-                    val map =
-                        entry as? Map<String, Any?>
-                            ?: return RunOutcome.Refused(TransformCodes.ROW_SHAPE_MISMATCH, "row ${index + 1}: not an object")
-                    when (val verdict = gate.gateRow(map, index + 1)) {
-                        is GateResult.Refuse -> return refused(verdict.refusal)
-                        is GateResult.Pass -> rowsOut += verdict.value as Map<String, Any?>
-                    }
-                }
-
-                val rejectColumns =
-                    when (contract.mode) {
-                        TransformMode.ROW -> {
-                            contract.inputs
-                                .values
-                                .filterIsInstance<TransformInput.Table>()
-                                .singleOrNull()
-                                ?.columns
-                        }
-
-                        else -> {
-                            output.columns
-                        }
-                    }.orEmpty()
-                val rejectsOut = mutableListOf<Map<String, Any?>>()
-                if (contract.rejects) {
-                    val rejectGate = TypeGate.over(rejectColumns.toColumnSchemas(), maxStringBytes)
-                    rawRejects.forEachIndexed { index, entry ->
-                        val map =
-                            entry as? Map<String, Any?>
-                                ?: return RunOutcome.Refused(TransformCodes.ROW_SHAPE_MISMATCH, "reject ${index + 1}: not an object")
-                        val reason = map["reason"] as? String
-                        if (reason.isNullOrBlank()) {
-                            return RunOutcome.Refused(
-                                TransformCodes.VALUE_TYPE_MISMATCH,
-                                "reject ${index + 1}: 'reason' must be a non-empty string",
-                            )
-                        }
-                        val row =
-                            map["row"] as? Map<String, Any?>
-                                ?: return RunOutcome.Refused(
-                                    TransformCodes.ROW_SHAPE_MISMATCH,
-                                    "reject ${index + 1}: 'row' is not an object",
-                                )
-                        when (val verdict = rejectGate.gateRow(row, index + 1)) {
-                            is GateResult.Refuse -> {
-                                return refused(verdict.refusal)
-                            }
-
-                            is GateResult.Pass -> {
-                                rejectsOut += mapOf("row" to verdict.value, "reason" to reason)
-                            }
-                        }
-                    }
-                }
-                val outputValue: Any =
-                    if (contract.rejects) {
-                        mapOf("rows" to rowsOut, "rejects" to rejectsOut)
-                    } else {
-                        rowsOut
-                    }
-                return Gated(outputValue, rejectsOut)
+                return gateTableOutput(contract, output, evaluated)
             }
         }
+    }
+
+    /** A table output: the rows (and rejects, when declared) shaped, then gated row by row (§5.3). */
+    @Suppress("UNCHECKED_CAST", "ReturnCount")
+    // gateRow's Pass value is a LinkedHashMap<String, Any?> by the gate's contract; the shape and
+    // reject guards are each their own early refusal (§5.3's mix-shape rule).
+    private fun gateTableOutput(
+        contract: TransformContract,
+        output: TransformOutput.Table,
+        evaluated: Any?,
+    ): Any {
+        val (rawRows, rawRejects) =
+            shapeRows(contract, evaluated)
+                ?: return RunOutcome.Refused(
+                    TransformCodes.ROW_SHAPE_MISMATCH,
+                    "the function's return does not match the declared output shape",
+                )
+
+        val gate = TypeGate.over(output.columns.toColumnSchemas(), maxStringBytes)
+        val rowsOut = mutableListOf<Map<String, Any?>>()
+        rawRows.forEachIndexed { index, entry ->
+            val map =
+                entry as? Map<String, Any?>
+                    ?: return RunOutcome.Refused(TransformCodes.ROW_SHAPE_MISMATCH, "row ${index + 1}: not an object")
+            when (val verdict = gate.gateRow(map, index + 1)) {
+                is GateResult.Refuse -> return refused(verdict.refusal)
+                is GateResult.Pass -> rowsOut += verdict.value as Map<String, Any?>
+            }
+        }
+
+        val rejectsOutcome = gateRejects(contract, output, rawRejects)
+        if (rejectsOutcome is RunOutcome.Refused) return rejectsOutcome
+        val gatedRejects = (rejectsOutcome as RunOutcome.Evaluated).rejects
+        val outputValue: Any =
+            if (contract.rejects) {
+                mapOf("rows" to rowsOut, "rejects" to gatedRejects)
+            } else {
+                rowsOut
+            }
+        return Gated(outputValue, gatedRejects)
+    }
+
+    /** The `{ rows, rejects }` (or bare array) the function returned, as raw lists (§5.3's mix-shape rule). */
+    @Suppress("ReturnCount") // a shape mismatch at any step is null; every other path returns
+    private fun shapeRows(
+        contract: TransformContract,
+        evaluated: Any?,
+    ): Pair<List<*>, List<*>>? {
+        if (!contract.rejects) {
+            val rows = evaluated as? List<*> ?: return null
+            return rows to emptyList<Any?>()
+        }
+        val asMap = evaluated as? Map<*, *> ?: return null
+        val rows = asMap["rows"] as? List<*> ?: return null
+        val rejects = asMap["rejects"] as? List<*> ?: return null
+        return rows to rejects
+    }
+
+    /** The rejects half of a rejects contract, gated row by row with a non-empty reason (§5.3). */
+    @Suppress("UNCHECKED_CAST", "ReturnCount")
+    // gateRow's Pass value is a LinkedHashMap by the gate's contract; each reject's first
+    // violation is its own early refusal.
+    private fun gateRejects(
+        contract: TransformContract,
+        output: TransformOutput.Table,
+        rawRejects: List<*>,
+    ): RunOutcome {
+        if (!contract.rejects) return RunOutcome.Evaluated(null, emptyList(), emptyList())
+        val rejectColumns =
+            when (contract.mode) {
+                TransformMode.ROW -> {
+                    contract.inputs
+                        .values
+                        .filterIsInstance<TransformInput.Table>()
+                        .singleOrNull()
+                        ?.columns
+                }
+
+                else -> {
+                    output.columns
+                }
+            }.orEmpty()
+        val rejectGate = TypeGate.over(rejectColumns.toColumnSchemas(), maxStringBytes)
+        val rejectsOut = mutableListOf<Map<String, Any?>>()
+        rawRejects.forEachIndexed { index, entry ->
+            val map =
+                entry as? Map<String, Any?>
+                    ?: return RunOutcome.Refused(TransformCodes.ROW_SHAPE_MISMATCH, "reject ${index + 1}: not an object")
+            val reason = map["reason"] as? String
+            if (reason.isNullOrBlank()) {
+                return RunOutcome.Refused(
+                    TransformCodes.VALUE_TYPE_MISMATCH,
+                    "reject ${index + 1}: 'reason' must be a non-empty string",
+                )
+            }
+            val row =
+                map["row"] as? Map<String, Any?>
+                    ?: return RunOutcome.Refused(
+                        TransformCodes.ROW_SHAPE_MISMATCH,
+                        "reject ${index + 1}: 'row' is not an object",
+                    )
+            val verdict = rejectGate.gateRow(row, index + 1)
+            if (verdict is GateResult.Refuse) return refused(verdict.refusal)
+            rejectsOut += mapOf("row" to (verdict as GateResult.Pass).value, "reason" to reason)
+        }
+        return RunOutcome.Evaluated(null, rejectsOut, emptyList())
+    }
+
+    /** An object output: the value must be a JSON object whose canonical form fits the byte cap (R4). */
+    private fun gateObjectOutput(evaluated: Any?): Any =
+        when (val verdict = TypeGate.over(emptyList(), maxStringBytes).gateObject(evaluated, maxValueBytes)) {
+            is GateResult.Refuse -> refused(verdict.refusal)
+            is GateResult.Pass -> Gated(verdict.value, emptyList())
+        }
+
+    /** A value output: the declared type through the gate, then the byte cap (§4.3). */
+    private fun gateValueOutput(
+        output: TransformOutput.Value,
+        evaluated: Any?,
+    ): Any {
+        val column = ColumnSchema("value", output.type, output.precision, output.scale, nullable = false)
+        val gated =
+            when (val verdict = TypeGate.over(listOf(column), maxStringBytes).gateValue(evaluated, column)) {
+                is GateResult.Refuse -> return refused(verdict.refusal)
+                is GateResult.Pass -> verdict.value
+            }
+        val bytes =
+            CanonicalJson
+                .write(gated)
+                .toByteArray(Charsets.UTF_8)
+                .size
+                .toLong()
+        if (bytes > maxValueBytes) {
+            return RunOutcome.Refused(TransformCodes.VALUE_TOO_LARGE, "value output is $bytes bytes (cap $maxValueBytes)")
+        }
+        return Gated(gated, emptyList())
     }
 
     /**
@@ -485,47 +552,58 @@ class TransformTestRunner(
             }
         }
         return when (outcome) {
-            is RunOutcome.Refused -> {
-                if (outcome.code == PipelineErrorCodes.Template.INVARIANT_INVALID) {
-                    listOf(
-                        TemplateValidationFailure(
-                            code = PipelineErrorCodes.Template.INVARIANT_INVALID,
-                            message = "Test case '${case.name}': ${outcome.message}",
-                            details = mapOf("case" to case.name, "message" to outcome.message.bounded()),
-                        ),
-                    )
-                } else {
-                    listOf(
-                        testFailed(
-                            case.name,
-                            "expected an output but the run refused with '${outcome.code}' (${outcome.message.bounded()})",
-                        ),
-                    )
-                }
-            }
-
-            is RunOutcome.Evaluated -> {
-                val expected = TransformBlocks.mapper.convertValue(case.expect.output, Any::class.java)
-                val diff = firstDifference("$", expected, outcome.output)
-                val invariantFailure =
-                    outcome.invariants.firstOrNull { !it.passed }?.let { invariant ->
-                        testFailed(case.name, "invariant '${invariant.name}' is false: ${invariant.message}", invariant.name)
-                    }
-                listOfNotNull(
-                    diff?.let { (path, expected, actual) ->
-                        testFailed(
-                            case.name,
-                            "output differs at $path — expected ${CanonicalJson.write(expected).bounded()}, " +
-                                "actual ${CanonicalJson.write(actual).bounded()}",
-                        )
-                    },
-                    invariantFailure,
-                )
-            }
+            is RunOutcome.Refused -> unexpectedRefusal(case, outcome)
+            is RunOutcome.Evaluated -> outputVerdict(case, outcome)
         }
     }
 
+    /** An output-expected case whose run REFUSED — `invariant_invalid` keeps its own code. */
+    private fun unexpectedRefusal(
+        case: TransformTestCase,
+        outcome: RunOutcome.Refused,
+    ): List<TemplateValidationFailure> {
+        if (outcome.code == PipelineErrorCodes.Template.INVARIANT_INVALID) {
+            return listOf(
+                TemplateValidationFailure(
+                    code = PipelineErrorCodes.Template.INVARIANT_INVALID,
+                    message = "Test case '${case.name}': ${outcome.message}",
+                    details = mapOf("case" to case.name, "message" to outcome.message.bounded()),
+                ),
+            )
+        }
+        return listOf(
+            testFailed(
+                case.name,
+                "expected an output but the run refused with '${outcome.code}' (${outcome.message.bounded()})",
+            ),
+        )
+    }
+
+    /** The output-expected verdict: canonical equality (first difference's path), then invariants. */
+    private fun outputVerdict(
+        case: TransformTestCase,
+        outcome: RunOutcome.Evaluated,
+    ): List<TemplateValidationFailure> {
+        val expected = TransformBlocks.mapper.convertValue(case.expect.output, Any::class.java)
+        val diff = firstDifference("$", expected, outcome.output)
+        val invariantFailure =
+            outcome.invariants.firstOrNull { !it.passed }?.let { invariant ->
+                testFailed(case.name, "invariant '${invariant.name}' is false: ${invariant.message}", invariant.name)
+            }
+        return listOfNotNull(
+            diff?.let { (path, expected, actual) ->
+                testFailed(
+                    case.name,
+                    "output differs at $path — expected ${CanonicalJson.write(expected).bounded()}, " +
+                        "actual ${CanonicalJson.write(actual).bounded()}",
+                )
+            },
+            invariantFailure,
+        )
+    }
+
     /** The first structural difference between two JSON-shaped values, numbers compared by value (§5.5). */
+    @Suppress("ReturnCount") // recursion returns the first difference found; every other path falls through to null
     private fun firstDifference(
         path: String,
         expected: Any?,
@@ -581,14 +659,6 @@ class TransformTestRunner(
             is GateRefusal.ValueTooLarge -> {
                 "${refusal.column}: ${refusal.bytes} bytes above the cap"
             }
-        }
-
-    private fun shapeOf(value: Any?): String =
-        when (value) {
-            null -> "null"
-            is List<*> -> "an array of ${value.size}"
-            is Map<*, *> -> "an object ${value.keys}"
-            else -> value.javaClass.simpleName
         }
 
     private fun jsonata(): ScriptEngine = engines.getValue(ScriptLanguage.JSONATA)

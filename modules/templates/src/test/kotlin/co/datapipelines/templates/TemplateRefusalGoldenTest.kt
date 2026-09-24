@@ -54,8 +54,9 @@ class TemplateRefusalGoldenTest {
     }
 
     /** The corpus: one entry per refusal path, in declaration order. */
-    private fun corpus(): List<Pair<String, List<String>>> {
-        val cases = mutableListOf<Pair<String, List<String>>>()
+    private fun corpus(): List<Pair<String, List<String>>> = deserializerCases() + validatorCases() + importAndLibraryCases()
+
+    private fun deserializerCases(): List<Pair<String, List<String>>> {
         val deserializer = TemplateDeserializer()
 
         fun rejectionsOf(payload: String): List<String> =
@@ -64,15 +65,19 @@ class TemplateRefusalGoldenTest {
                 is TemplateDeserializationOutcome.Rejected -> outcome.result.failures.map { lineOf(it) }
             }
 
-        cases +=
+        return listOf(
             "deserializer/type_invalid" to
-            rejectionsOf("""{"type":"csv","dialect":"POSTGRES","display_name":"X","description":"Y","body":"SELECT 1"}""")
-        cases +=
+                rejectionsOf("""{"type":"csv","dialect":"POSTGRES","display_name":"X","description":"Y","body":"SELECT 1"}"""),
             "deserializer/dialect_not_allowed_html" to
-            rejectionsOf("""{"type":"html","dialect":"POSTGRES","display_name":"X","description":"Y","body":"<p>Hi</p>"}""")
-        cases +=
+                rejectionsOf("""{"type":"html","dialect":"POSTGRES","display_name":"X","description":"Y","body":"<p>Hi</p>"}"""),
             "deserializer/dialect_invalid_unknown" to
-            rejectionsOf("""{"type":"sql","dialect":"DB2","display_name":"X","description":"Y","body":"SELECT 1"}""")
+                rejectionsOf("""{"type":"sql","dialect":"DB2","display_name":"X","description":"Y","body":"SELECT 1"}"""),
+        )
+    }
+
+    @Suppress("LongMethod") // the corpus IS the test — one entry per refusal path, split only for the rule
+    private fun validatorCases(): List<Pair<String, List<String>>> {
+        val cases = mutableListOf<Pair<String, List<String>>>()
 
         cases +=
             "validator/id_invalid" to
@@ -130,6 +135,13 @@ class TemplateRefusalGoldenTest {
                     .validate(TemplateFixtures.draft(body = "SELECT 1 FROM x"), workspaceId)
                     .failures
             }
+        return cases
+    }
+
+    @Suppress("LongMethod") // the corpus IS the test — one entry per refusal path
+    private fun importAndLibraryCases(): List<Pair<String, List<String>>> {
+        val cases = mutableListOf<Pair<String, List<String>>>()
+
         cases +=
             "validator/import_not_found" to
             linesOf {

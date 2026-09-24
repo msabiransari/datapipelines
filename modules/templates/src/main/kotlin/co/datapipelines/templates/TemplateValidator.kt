@@ -410,19 +410,32 @@ class TemplateValidator(
                     mapOf("mode" to contract.mode.wire, "table_inputs" to tableInputs.keys.sorted()),
                 )
         }
+        validateDeclaredTypes(contract, failures)
+        validateModeAndRejects(contract, failures)
+    }
+
+    /** Every declared type in the contract — inputs, table columns, the output — through the §4 rule. */
+    private fun validateDeclaredTypes(
+        contract: TransformContract,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
         contract.inputs.forEach { (name, input) ->
             validateDeclaredType("inputs.$name", input.typeOf(), input.precisionOf(), input.scaleOf(), failures)
-        }
-        validateDeclaredType("output", contract.output.typeOf(), contract.output.precisionOf(), contract.output.scaleOf(), failures)
-        val outputColumns = (contract.output as? TransformOutput.Table)?.columns.orEmpty()
-        outputColumns.forEach { column ->
-            validateDeclaredType("output.${column.name}", column.type, column.precision, column.scale, failures)
-        }
-        contract.inputs.forEach { (name, input) ->
             (input as? TransformInput.Table)?.columns?.forEach { column ->
                 validateDeclaredType("inputs.$name.${column.name}", column.type, column.precision, column.scale, failures)
             }
         }
+        validateDeclaredType("output", contract.output.typeOf(), contract.output.precisionOf(), contract.output.scaleOf(), failures)
+        (contract.output as? TransformOutput.Table)?.columns?.forEach { column ->
+            validateDeclaredType("output.${column.name}", column.type, column.precision, column.scale, failures)
+        }
+    }
+
+    /** mode/output.kind agreement, and rejects only with a table output (record §2.2). */
+    private fun validateModeAndRejects(
+        contract: TransformContract,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
         val modeOutputOk =
             when (contract.mode) {
                 TransformMode.ROW, TransformMode.TABLE -> contract.output is TransformOutput.Table
@@ -490,47 +503,35 @@ class TemplateValidator(
             return
         }
         if (decimal) {
-            if (scale != null && precision == null) {
-                failures +=
-                    contractFailure(
-                        "precision_scale_invalid",
-                        "'$path' declares a scale without a precision (type-system.md §4).",
-                        mapOf("path" to path, "type" to type.wire),
-                    )
-            }
-            if (type == LogicalType.BIGDECIMAL && precision != null && scale == null) {
-                failures +=
-                    contractFailure(
-                        "precision_scale_invalid",
-                        "'$path' declares BIGDECIMAL($precision) without a scale — BIGDECIMAL's scale is " +
-                            "declared or the type means unbounded-and-unknown with both omitted (type-system.md §4).",
-                        mapOf("path" to path, "type" to type.wire),
-                    )
-            }
-            if (type == LogicalType.DECIMAL && precision != null && precision > 15) {
-                failures +=
-                    contractFailure(
-                        "precision_scale_invalid",
-                        "'$path' declares DECIMAL($precision) — past 15 digits the type is BIGDECIMAL " +
-                            "(type-system.md §4).",
-                        mapOf("path" to path, "type" to type.wire),
-                    )
-            }
-            if (precision != null && precision < 1) {
-                failures +=
-                    contractFailure(
-                        "precision_scale_invalid",
-                        "'$path' declares precision $precision — the minimum is 1 (type-system.md §7.1).",
-                        mapOf("path" to path, "type" to type.wire),
-                    )
-            }
-            if (precision != null && scale != null && scale > precision) {
-                failures +=
-                    contractFailure(
-                        "precision_scale_invalid",
-                        "'$path' declares scale $scale above precision $precision.",
-                        mapOf("path" to path, "type" to type.wire),
-                    )
+            validateDecimalShape(path, type, precision, scale, failures)
+        }
+    }
+
+    /** The §4 precision/scale rules for DECIMAL/BIGDECIMAL, each failure naming the key and path. */
+    private fun validateDecimalShape(
+        path: String,
+        type: LogicalType,
+        precision: Int?,
+        scale: Int?,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        val rules =
+            listOf(
+                (scale != null && precision == null) to
+                    "'$path' declares a scale without a precision (type-system.md §4).",
+                (type == LogicalType.BIGDECIMAL && precision != null && scale == null) to
+                    "'$path' declares BIGDECIMAL($precision) without a scale — BIGDECIMAL's scale is " +
+                    "declared or the type means unbounded-and-unknown with both omitted (type-system.md §4).",
+                (type == LogicalType.DECIMAL && precision != null && precision > MAX_DECIMAL_PRECISION) to
+                    "'$path' declares DECIMAL($precision) — past $MAX_DECIMAL_PRECISION digits the type is BIGDECIMAL (type-system.md §4).",
+                (precision != null && precision < 1) to
+                    "'$path' declares precision $precision — the minimum is 1 (type-system.md §7.1).",
+                (precision != null && scale != null && scale > precision) to
+                    "'$path' declares scale $scale above precision $precision.",
+            )
+        rules.forEach { (violated, message) ->
+            if (violated) {
+                failures += contractFailure("precision_scale_invalid", message, mapOf("path" to path, "type" to type.wire))
             }
         }
     }
@@ -636,6 +637,9 @@ class TemplateValidator(
 
         /** A transform contract's input name — pipeline-contract §6.1's identifier rule. */
         private val INPUT_NAME = Regex("[a-z_][a-z0-9_]*")
+
+        /** type-system.md §4: DECIMAL is exact up to 15 digits; beyond that the type is BIGDECIMAL. */
+        private const val MAX_DECIMAL_PRECISION = 15
 
         /**
          * `datapipelines.templates.max-body-chars` (configuration.md §3.9) — mirrored here for

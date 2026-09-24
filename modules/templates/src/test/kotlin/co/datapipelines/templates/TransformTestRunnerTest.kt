@@ -119,7 +119,8 @@ class TransformTestRunnerTest {
                     TransformTestExpect(
                         output =
                             TransformBlocks.mapper.readTree(
-                                """{"rows": [], "rejects": [{"row": {"order_id": 1, "amount_cents": 1250, "customer_id": null}, "reason": "customer_id missing"}]}""",
+                                """{"rows": [], "rejects": [{"row": {"order_id": 1, "amount_cents": 1250, "customer_id": null},""" +
+                                    """ "reason": "customer_id missing"}]}""",
                             ),
                     ),
             ),

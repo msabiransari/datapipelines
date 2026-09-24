@@ -1,6 +1,5 @@
 package co.datapipelines.web.config
 
-import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
@@ -26,12 +25,8 @@ import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
-import co.datapipelines.scripting.ScriptEvaluationPool
 import co.datapipelines.staging.StagingFactory
-import co.datapipelines.templates.TemplateRepository
-import co.datapipelines.templates.TransformTestRunner
 import co.datapipelines.templates.WorkspaceTemplateEngines
-import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.CoroutineDispatcher
@@ -291,67 +286,4 @@ class EngineConfiguration {
          */
         val INERT_BEAN_WORKSPACE: UUID = UUID.fromString("00000000-0000-0000-0000-000000000000")
     }
-
-    /**
-     * The bounded script-evaluation pool (transform-nodes design §4.3, R7; the 7a bulkhead):
-     * every production evaluation — the save/release test suite, `templates_evaluate`, the
-     * editor preview, and 7c's node runner — is admitted here and runs on its own thread,
-     * never on a request thread or the executor's. [transformProperties] sizes it.
-     */
-    @Bean
-    fun scriptEvaluationPool(properties: TransformProperties): ScriptEvaluationPool =
-        ScriptEvaluationPool(
-            size = properties.poolSize,
-            queue = properties.poolQueue,
-            abandonGrace = Duration.ofSeconds(properties.abandonGraceSeconds),
-            clock = ScriptEvaluationPool.SYSTEM,
-        )
-
-    /**
-     * The §8.1 test runner / §9.1 evaluator — one service behind the save-time suite, the
-     * release re-run, `templates_evaluate` and the REST route (record §9.1). Templates'
-     * validator bean picks it up (ObjectProvider) so the suite rides every save path.
-     */
-    @Bean
-    fun transformTestRunner(
-        pool: ScriptEvaluationPool,
-        properties: TransformProperties,
-    ): TransformTestRunner =
-        TransformTestRunner(
-            engines = mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
-            pool = pool,
-            evaluateTimeout = Duration.ofSeconds(properties.evaluateTimeoutSeconds),
-            suiteTimeout = Duration.ofSeconds(properties.suiteTimeoutSeconds),
-            maxInputRows = properties.maxInputRows,
-            maxStringBytes = properties.maxStringBytes,
-            maxValueBytes = properties.maxValueBytes,
-            maxDepth = properties.maxDepth,
-        )
-
-    /**
-     * `transform.evaluations.abandoned` (record §9.5): the pool's abandoned-evaluation count
-     * as a gauge, so a runaway that outlived its budget and grace is visible rather than only
-     * logged.
-     */
-    @Bean
-    fun transformEvaluationsAbandonedGauge(
-        pool: ScriptEvaluationPool,
-        meters: MeterRegistry,
-    ): Gauge =
-        Gauge
-            .builder("transform.evaluations.abandoned") { pool.abandoned.sum().toDouble() }
-            .description(
-                "Script evaluations abandoned past their wall clock plus grace (the pool's bulkhead holds the thread's slot until it ends)",
-            ).register(meters)
-
-    /**
-     * The ONE evaluation path the MCP `templates_evaluate` tool and REST
-     * `POST /api/v1/templates/evaluate` share (transform-nodes §9.1/§9.2) — the same service,
-     * the same pool, the same timeout; declared here like every cross-module collaborator.
-     */
-    @Bean
-    fun templateEvaluateService(
-        templates: TemplateRepository,
-        runner: TransformTestRunner,
-    ): TemplateEvaluateService = TemplateEvaluateService(templates, runner)
 }

@@ -58,6 +58,7 @@ class TemplateReleaseServiceTest {
         )
 
     @Test
+    @Suppress("LongMethod") // the fixture is the point: an exhausted pool, a real validator, a stored transform draft
     fun `release re-runs the suite on a transform draft — a pool refusing at release fails the release`() {
         // 7b §8.1: release re-runs the version's test suite. A suite that passed at save fails
         // at release only if the engine changed — here the evaluation pool is exhausted, so the

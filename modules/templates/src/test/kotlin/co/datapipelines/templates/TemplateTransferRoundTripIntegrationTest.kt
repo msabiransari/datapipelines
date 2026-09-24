@@ -54,27 +54,28 @@ class TemplateTransferRoundTripIntegrationTest {
         jdbc.update("DELETE FROM users WHERE id = :id", mapOf("id" to ACTOR_ID))
     }
 
-    @Test
-    fun `the blocks survive export-import and the hash guard passes`() {
-        val source = repository
-        val contract =
-            TransformContract(
-                mode = TransformMode.ROW,
-                inputs =
-                    mapOf(
-                        "orders" to TransformInput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
-                        "tz" to TransformInput.Value(LogicalType.STRING),
-                    ),
-                output = TransformOutput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
-            )
-        val cases =
-            listOf(
-                TransformTestCase(
-                    name = "empty",
-                    input = TransformTestInput(rows = emptyList(), inputs = mapOf("tz" to "UTC")),
-                    expect = TransformTestExpect(output = TransformBlocks.mapper.readTree("""{"rows": []}""")),
+    private val contract =
+        TransformContract(
+            mode = TransformMode.ROW,
+            inputs =
+                mapOf(
+                    "orders" to TransformInput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
+                    "tz" to TransformInput.Value(LogicalType.STRING),
                 ),
-            )
+            output = TransformOutput.Table(listOf(ContractColumn("order_id", LogicalType.INTEGER))),
+        )
+
+    private val cases =
+        listOf(
+            TransformTestCase(
+                name = "empty",
+                input = TransformTestInput(rows = emptyList(), inputs = mapOf("tz" to "UTC")),
+                expect = TransformTestExpect(output = TransformBlocks.mapper.readTree("""{"rows": []}""")),
+            ),
+        )
+
+    /** The exported released template and its import-bound draft, built once per test. */
+    private fun exportAndRebind(): Pair<Template, TemplateDraft> {
         val draft =
             TemplateFixtures.draft(
                 id = "test/xform_roundtrip.jsonata",
@@ -86,13 +87,16 @@ class TemplateTransferRoundTripIntegrationTest {
                 invariants = emptyList(),
                 tests = cases,
             )
-        val exported = source.create(SOURCE_WORKSPACE, draft, ACTOR_ID, CreateLifecycle.RELEASED, WriteSurface.SESSION)
+        val exported = repository.create(SOURCE_WORKSPACE, draft, ACTOR_ID, CreateLifecycle.RELEASED, WriteSurface.SESSION)
         exported.bodyHash.isNotBlank() shouldBe true
-
-        // The wire crossing: the DTO out through Jackson, back in through the deserializer.
         val wire = TemplateJson.objectMapper().writeValueAsString(exported)
-        val outcome = TemplateDeserializer().read(wire)
-        val imported = (outcome as TemplateDeserializationOutcome.Parsed).draft
+        val imported = (TemplateDeserializer().read(wire) as TemplateDeserializationOutcome.Parsed).draft
+        return exported to imported
+    }
+
+    @Test
+    fun `the blocks survive the wire crossing`() {
+        val (exported, imported) = exportAndRebind()
 
         assertSoftly {
             imported.type shouldBe TemplateType.JSONATA
@@ -101,7 +105,11 @@ class TemplateTransferRoundTripIntegrationTest {
             imported.invariants shouldBe emptyList()
             imported.tests?.single()?.name shouldBe "empty"
         }
+    }
 
+    @Test
+    fun `the import hash guard recomputes over the blocks`() {
+        val (exported, imported) = exportAndRebind()
         // The receiver's guard (versioning §9.2): the recompute over the imported fields —
         // blocks included — reproduces the declared hash.
         val recomputed =

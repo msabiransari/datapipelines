@@ -101,6 +101,7 @@ private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<Tra
                 code = PipelineErrorCodes.Template.CONTRACT_INVALID,
                 message = "The '$name' block does not bind: ${err.message}. A typo is a refusal, never a silent drop.",
                 details = mapOf("rule" to "unknown_field"),
+                cause = err,
             )
         }
     }

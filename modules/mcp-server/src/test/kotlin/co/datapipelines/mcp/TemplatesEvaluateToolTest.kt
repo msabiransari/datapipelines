@@ -50,8 +50,6 @@ private class EvaluateRecordingAuditSink : co.datapipelines.auth.AuditEventSink 
  */
 class TemplatesEvaluateToolTest {
     private val templates = mockk<TemplateRepository>()
-    private val workspaceId = UUID.randomUUID()
-
     private val contract =
         TransformContract(
             mode = TransformMode.ROW,

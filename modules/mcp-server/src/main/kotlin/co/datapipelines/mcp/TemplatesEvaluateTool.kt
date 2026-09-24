@@ -71,7 +71,10 @@ class TemplatesEvaluateTool(
         val input =
             try {
                 TransformBlocks.mapper.convertValue(args.requiredObject("input"), TransformTestInput::class.java)
-            } catch (err: JsonMappingException) {
+            } catch (
+                @Suppress("SwallowedException") err: JsonMappingException,
+            ) {
+                // The protocol error names the binding failure; the original is a mapping detail.
                 throw McpArguments.invalidParams(
                     "The 'input' object does not bind ({ rows, inputs, meta?, now? }): ${err.originalMessage}",
                 )

@@ -524,57 +524,15 @@ class TemplatesController(
      * form, the MCP tool's body and response, the same service, the same pool, the same
      * timeout). The version resolves as `/render`'s: omitted, the working version.
      */
+    @Suppress("ThrowsCount") // each request-shape refusal is its own catalogued outcome
     @PostMapping("/evaluate")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
     fun evaluate(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
         val workspaceId = currentPrincipal().requireWorkspace().id
-        val tree = objectOf(body)
-        val name =
-            tree
-                .get("name")
-                ?.takeIf { it.isTextual }
-                ?.asText()
-                ?.takeIf { it.isNotBlank() }
-                ?: throw ApiException(
-                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                    "The request requires a 'name' field (§9.6: the name never travels in the path).",
-                    mapOf(ApiErrors.REASON to "name_missing"),
-                )
-        val version = tree.get("version")?.takeIf { it.isInt }?.asInt()
-        val inputNode =
-            tree.get("input")?.takeIf { it.isObject }
-                ?: throw ApiException(
-                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                    "The request requires an 'input' object ({ rows, inputs, meta?, now? }).",
-                    mapOf(ApiErrors.REASON to "input_missing"),
-                )
-        val input =
-            try {
-                TransformBlocks.mapper.treeToValue(inputNode, co.datapipelines.templates.TransformTestInput::class.java)
-            } catch (err: com.fasterxml.jackson.databind.JsonMappingException) {
-                throw ApiException(
-                    PipelineErrorCodes.Template.CONTRACT_INVALID,
-                    "The 'input' object does not bind: ${err.originalMessage}.",
-                    mapOf("rule" to "unknown_field", "path" to err.pathReference),
-                )
-            }
-        val now =
-            tree.get("now")?.takeIf { it.isTextual }?.asText()?.let { raw ->
-                try {
-                    java.time.Instant.parse(raw)
-                } catch (
-                    @Suppress("SwallowedException") err: java.time.format.DateTimeParseException,
-                ) {
-                    throw ApiException(
-                        PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                        "'now' must be an ISO-8601 instant, was '$raw'.",
-                        mapOf("now" to raw),
-                    )
-                }
-            }
-        val result = evaluate.evaluate(workspaceId, name, version, input, now)
+        val request = evaluateRequestOf(body)
+        val result = evaluate.evaluate(workspaceId, request.name, request.version, request.input, request.now)
         return ApiResponse.of(
             mapOf(
                 "output" to result.output,
@@ -609,6 +567,67 @@ class TemplatesController(
         val version: Int,
         val context: Map<String, Any?>,
     )
+
+    /** A parsed `POST /evaluate` body: `name`, optional `version`, the `input` object, optional `now`. */
+    private data class EvaluateRequest(
+        val name: String,
+        val version: Int?,
+        val input: co.datapipelines.templates.TransformTestInput,
+        val now: java.time.Instant?,
+    )
+
+    @Suppress("ThrowsCount") // each request-shape refusal is its own catalogued outcome
+    private fun evaluateRequestOf(body: String): EvaluateRequest {
+        val tree = objectOf(body)
+        val name =
+            tree
+                .get("name")
+                ?.takeIf { it.isTextual }
+                ?.asText()
+                ?.takeIf { it.isNotBlank() }
+                ?: throw ApiException(
+                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                    "The request requires a 'name' field (§9.6: the name never travels in the path).",
+                    mapOf(ApiErrors.REASON to "name_missing"),
+                )
+        val version = tree.get("version")?.takeIf { it.isInt }?.asInt()
+        val inputNode =
+            tree.get("input")?.takeIf { it.isObject }
+                ?: throw ApiException(
+                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                    "The request requires an 'input' object ({ rows, inputs, meta?, now? }).",
+                    mapOf(ApiErrors.REASON to "input_missing"),
+                )
+        val input =
+            try {
+                TransformBlocks.mapper.treeToValue(inputNode, co.datapipelines.templates.TransformTestInput::class.java)
+            } catch (
+                @Suppress("SwallowedException") err: com.fasterxml.jackson.databind.JsonMappingException,
+            ) {
+                // The catalogued refusal names the failure; the original is a mapping detail.
+                throw ApiException(
+                    PipelineErrorCodes.Template.CONTRACT_INVALID,
+                    "The 'input' object does not bind: ${err.originalMessage}.",
+                    mapOf("rule" to "unknown_field", "path" to err.pathReference),
+                )
+            }
+        val now =
+            tree.get("now")?.takeIf { it.isTextual }?.asText()?.let { raw ->
+                try {
+                    java.time.Instant.parse(raw)
+                } catch (
+                    @Suppress("SwallowedException") err: java.time.format.DateTimeParseException,
+                ) {
+                    // The request error names the field and the value; the parse detail is redundant.
+                    throw ApiException(
+                        PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                        "'now' must be an ISO-8601 instant, was '$raw'.",
+                        mapOf("now" to raw),
+                    )
+                }
+            }
+        return EvaluateRequest(name, version, input, now)
+    }
 
     /** [TemplateDeserializer.readOrThrow] for a tree already parsed (and possibly completed by [inheritFromWorking]). */
     private fun bindOrThrow(tree: JsonNode): co.datapipelines.templates.TemplateDraft =
