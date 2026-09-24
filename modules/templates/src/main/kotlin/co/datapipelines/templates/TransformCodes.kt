@@ -21,6 +21,15 @@ internal object TransformCodes {
     /** §13.18 (record §4.3) — an input above `max-input-rows` (rows or any table input). */
     const val INPUT_TOO_LARGE = "pipeline.transform.input_too_large"
 
+    /** §13.18 (record §5.3) — a row's key set is not exactly the declared column set. */
+    const val ROW_SHAPE_MISMATCH = "pipeline.transform.row_shape_mismatch"
+
+    /** §13.18 (record §5.3) — a value does not fit its column's wire form. */
+    const val VALUE_TYPE_MISMATCH = "pipeline.transform.value_type_mismatch"
+
+    /** §13.18 (record §5.3, R1) — a numeric value does not fit its declared precision/scale. */
+    const val PRECISION_LOST = "pipeline.transform.precision_lost"
+
     /** §13.18 (record §4.3) — a returned value or string above the byte caps. */
     const val VALUE_TOO_LARGE = "pipeline.transform.value_too_large"
 }

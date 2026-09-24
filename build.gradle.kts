@@ -171,6 +171,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ":modules:web" to setOf(
         ":modules:typesystem",
         ":modules:calculators",
+        ":modules:scripting",
         ":modules:pipeline-contract",
         ":modules:templates",
         ":modules:datasources",

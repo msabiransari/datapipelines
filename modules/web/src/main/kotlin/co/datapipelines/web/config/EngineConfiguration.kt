@@ -26,7 +26,10 @@ import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
 import co.datapipelines.staging.StagingFactory
+import co.datapipelines.templates.TransformTestRunner
 import co.datapipelines.templates.WorkspaceTemplateEngines
+import co.datapipelines.scripting.ScriptEvaluationPool
+import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.CoroutineDispatcher
@@ -286,4 +289,54 @@ class EngineConfiguration {
          */
         val INERT_BEAN_WORKSPACE: UUID = UUID.fromString("00000000-0000-0000-0000-000000000000")
     }
+
+    /**
+     * The bounded script-evaluation pool (transform-nodes design §4.3, R7; the 7a bulkhead):
+     * every production evaluation — the save/release test suite, `templates_evaluate`, the
+     * editor preview, and 7c's node runner — is admitted here and runs on its own thread,
+     * never on a request thread or the executor's. [transformProperties] sizes it.
+     */
+    @Bean
+    fun scriptEvaluationPool(properties: TransformProperties): ScriptEvaluationPool =
+        ScriptEvaluationPool(
+            size = properties.poolSize,
+            queue = properties.poolQueue,
+            abandonGrace = Duration.ofSeconds(properties.abandonGraceSeconds),
+            clock = ScriptEvaluationPool.SYSTEM,
+        )
+
+    /**
+     * The §8.1 test runner / §9.1 evaluator — one service behind the save-time suite, the
+     * release re-run, `templates_evaluate` and the REST route (record §9.1). Templates'
+     * validator bean picks it up (ObjectProvider) so the suite rides every save path.
+     */
+    @Bean
+    fun transformTestRunner(
+        pool: ScriptEvaluationPool,
+        properties: TransformProperties,
+    ): TransformTestRunner =
+        TransformTestRunner(
+            engines = mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+            pool = pool,
+            evaluateTimeout = Duration.ofSeconds(properties.evaluateTimeoutSeconds),
+            suiteTimeout = Duration.ofSeconds(properties.suiteTimeoutSeconds),
+            maxInputRows = properties.maxInputRows,
+            maxStringBytes = properties.maxStringBytes,
+            maxValueBytes = properties.maxValueBytes,
+            maxDepth = properties.maxDepth,
+        )
+
+    /**
+     * `transform.evaluations.abandoned` (record §9.5): the pool's abandoned-evaluation count
+     * as a gauge, so a runaway that outlived its budget and grace is visible rather than only
+     * logged.
+     */
+    @Bean
+    fun transformEvaluationsAbandonedGauge(
+        pool: ScriptEvaluationPool,
+        meters: MeterRegistry,
+    ): Gauge =
+        Gauge.builder("transform.evaluations.abandoned") { pool.abandoned.sum().toDouble() }
+            .description("Script evaluations abandoned past their wall clock plus grace (the pool's bulkhead holds the thread's slot until it ends)")
+            .register(meters)
 }

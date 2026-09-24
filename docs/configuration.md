@@ -453,6 +453,22 @@ Outbound mail (137, [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-
 
 **What the admin screen shows** follows from the derivation: with mail on, the create-user and reset-password actions no longer display the one-time password — it went to the user, and the screen says so with the send's outcome; with mail off they show it as before ([UI §4.12](ui-screens.md#412-admin-user-management-admin-scope-only)).
 
+### 3.28 Transform evaluation (7b, #7)
+
+The budgets every script evaluation runs under — the save/release test suite of a transform template, `templates_evaluate` / `POST /api/v1/templates/evaluate`, and the TRANSFORM node (7c). The pool is the record's §4.3 bulkhead: at most `pool-size` evaluations run at once, `pool-queue` bounds the evaluations ADMITTED in total (running plus waiting — an abandoned evaluation keeps its slot until its thread ends), and a submission that cannot be admitted or that waits its whole wall clock for a slot is the record §4.3's pool-refusal (§13.18, 7c).
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.transform.evaluate-timeout-seconds` | `10` | Wall clock for one `templates_evaluate` call or one test case. Must not exceed `suite-timeout-seconds` (§7) |
+| `datapipelines.transform.suite-timeout-seconds` | `60` | Wall clock for the whole save/release test suite |
+| `datapipelines.transform.pool-size` | `4` | Concurrent running script evaluations |
+| `datapipelines.transform.pool-queue` | `64` | Evaluations admitted in total, running plus waiting — never "the wait queue" (the bulkhead holds an abandoned evaluation's slot until its thread ends) |
+| `datapipelines.transform.abandon-grace-seconds` | `30` | Grace past the wall clock before an evaluation is abandoned, counted (`transform.evaluations.abandoned`) and logged at ERROR. Must be ≥ 1 (§7) |
+| `datapipelines.transform.max-input-rows` | `100000` | Row cap on any table input — the `rows` batch or any table input — refused BEFORE evaluation with the record §4.3's input-cap code (§13.18, 7c) |
+| `datapipelines.transform.max-value-bytes` | `1048576` | Cap on a value/object output (the record §4.3's value-cap code, §13.18, 7c) — a Context value is not a table |
+| `datapipelines.transform.max-string-bytes` | `1048576` | Cap on a single string in any returned row (the same §4.3 code, with the row number) |
+| `datapipelines.transform.max-depth` | `100` | Expression depth bound — time catches recursion, depth catches nesting (the engine's measured bounds, dag-executor §5.3) |
+
 ---
 
 ## 4. Precedence
@@ -690,6 +706,16 @@ datapipelines:
     reply-to: ${DATAPIPELINES_MAIL_REPLY_TO:}
     ops-to: ${DATAPIPELINES_MAIL_OPS_TO:}
     message-stream: ${DATAPIPELINES_MAIL_MESSAGE_STREAM:}
+  transform:
+    evaluate-timeout-seconds: ${DATAPIPELINES_TRANSFORM_EVALUATE_TIMEOUT_SECONDS:10}
+    suite-timeout-seconds: ${DATAPIPELINES_TRANSFORM_SUITE_TIMEOUT_SECONDS:60}
+    pool-size: ${DATAPIPELINES_TRANSFORM_POOL_SIZE:4}
+    pool-queue: ${DATAPIPELINES_TRANSFORM_POOL_QUEUE:64}
+    abandon-grace-seconds: ${DATAPIPELINES_TRANSFORM_ABANDON_GRACE_SECONDS:30}
+    max-input-rows: ${DATAPIPELINES_TRANSFORM_MAX_INPUT_ROWS:100000}
+    max-value-bytes: ${DATAPIPELINES_TRANSFORM_MAX_VALUE_BYTES:1048576}
+    max-string-bytes: ${DATAPIPELINES_TRANSFORM_MAX_STRING_BYTES:1048576}
+    max-depth: ${DATAPIPELINES_TRANSFORM_MAX_DEPTH:100}
 ```
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
@@ -771,6 +797,7 @@ On startup, the app validates:
 - **Posture / profile alignment (§3.23):** `spring.profiles.active` is derived from the posture, so setting `SPRING_PROFILES_ACTIVE` to a DIFFERENT posture refuses startup naming both — otherwise one posture's defaults would load while every posture rule below judged the other. The `dev` profile was renamed `development` in 075; a deployment still asking for `dev` is refused rather than silently getting no posture file at all.
 - **The `hardened` posture (§3.23),** each refusal naming the variable and the posture: `datapipelines.demo` must be empty; no local bootstrap credential may be set (`bootstrap-password` or `bootstrap-password-hash` — local accounts themselves stay allowed); `spring.datasource.url` and `datapipelines.redis.host` must not be loopback (039's dev-profile guard, inverted and reused — "dev convenience must never touch production infrastructure" is the same fact as "a hardened deployment does not run against a laptop's database"); and at least one OIDC provider must be fully configured unless `datapipelines.auth.allow-local-only=true`, which is logged as `event=config.auth_local_only`.
 - **Organisation (§3.21):** `datapipelines.org.fiscal-start-date` is `MM-DD` and a day the calendar has — `02-30` and `13-01` are refused, and a month name (`SEP-15`) is refused with a message naming the `MM-DD` form; `datapipelines.org.week-start` is `monday` or `sunday`; `datapipelines.org.timezone` is an IANA zone id (a fixed offset such as `+02:00` is not one); `datapipelines.org.currency.name` and `.symbol` are non-blank. All four report together — every value is in every Context, so a wrong one is a wrong number in every report the deployment produces.
+- **Transform (§3.28, 7b):** `datapipelines.transform.evaluate-timeout-seconds` ≤ `suite-timeout-seconds`; `abandon-grace-seconds` ≥ 1; `pool-size` ≥ 1 and `pool-queue` ≥ `pool-size`; `max-input-rows`, `max-value-bytes`, `max-string-bytes` and `max-depth` each ≥ 1 — every refusal naming the keys.
 - **Redis auth:** when `datapipelines.redis.password` is empty (after trimming) and `datapipelines.redis.host` is not loopback — under `development`, log a structured WARN `event=config.redis_no_password` (production Redis holds materialized caller results — [Deployment §9](deployment.md#9-security-hardening-checklist-deployment)); under the **`hardened` posture** it is a REFUSAL naming the key and the host, the same treatment Postgres's password gets as a §2 required key (#189). The refusal replaces the warning; a hardened boot never logs both.
 - `datapipelines.deployment.promotion.server-key` set ⇒ **WARN** (091): the value is deprecated in favour of a `server`-kind API key and is removed next release. Presence only — the warning never carries the secret.
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
@@ -787,6 +814,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-23 | v1.28 | 7b (#7) | New **§3.28 Transform evaluation**: the nine `datapipelines.transform.*` budgets (evaluate/suite timeouts, pool size/queue, abandon grace, the input/output caps, max depth) behind the transform test suite, `templates_evaluate` and the evaluate route; §7 gains the transform bounds check (check 27: evaluate ≤ suite, grace ≥ 1, pool-queue ≥ pool-size, the caps ≥ 1). §5 template block appended after `mail` (the whole `datapipelines:` tree, as every append). |
 | 2026-09-21 | v1.27 | 186 in-process datasource containment (#186) | §3.26 gains `datapipelines.datasources.file-roots` (default **empty** = no file-backed in-process datasource is registrable by anyone; each root must be an existing directory at boot). §3.17's `member-datasources-enabled` default flips to **`false`**, matching the shipped posture (`deploy/env/defaults.env` has shipped `false` since the workspaces round) — a documented default must match the shipped posture, and the drift guards now pin all three to the same value. §3.17's row also states the flag-independent rule: in-process engines (H2 `mem:`/`file:`, DuckDB, SQLite) are super-admin-only regardless. |
 | 2026-09-21 | v1.26 | 188 (#189) | §3.23's posture table and the §7 rule list gain the Redis-password row: passwordless Redis off loopback stays a WARN under `development` and is a REFUSAL under `hardened` (`PostureRules.checkHardenedRedisPassword`, check 26); the §3 Redis row says so. |
 | 2026-09-21 | v1.25 | 180 (#180, #182) | Doc-only, no key change. §3.18's `examples-file` row, its cross-key paragraph and the three §7 bullets (`provisioning-mode` value, open-join/mode agreement, examples-file/mode) described rules `ConfigValidator` dropped in v1.9 — the document contradicted its own §3.17 and v1.9 row. Each now states that the rule was dropped and why (the seeder runs at `demo`'s creation in every deployment). |

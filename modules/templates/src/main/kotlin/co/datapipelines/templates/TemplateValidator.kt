@@ -47,6 +47,13 @@ class TemplateValidator(
     private val maxBodyChars: Int = DEFAULT_MAX_BODY_CHARS,
     private val scriptEngines: Map<ScriptLanguage, ScriptEngine> =
         mapOf(ScriptLanguage.JSONATA to JsonataEngine()),
+    /**
+     * The test suite of §8.1 — present in production wiring (EngineConfiguration's runner bean
+     * via [TemplatesConfiguration]), absent in unit constructions that test the static rules.
+     * The suite runs last, on the pool, only when every static check passed — a malformed
+     * contract has no meaningful evaluation.
+     */
+    private val suiteRunner: TransformTestRunner? = null,
 ) {
     /**
      * Runs §7 against [draft] and returns every failure. Imports resolve within
@@ -90,6 +97,27 @@ class TemplateValidator(
         addHtmlEntityFailure(draft, failures)
         addBodyFailures(draft, failures, trace)
         libraryResolver.validate(workspaceId, draft.imports, failures, trace)
+
+        // §8.1's last step: the test suite, on the pool — only when every static check passed
+        // (a malformed contract has no meaningful evaluation) and production wiring supplied
+        // the runner. The draft-id-less label names the body hash when the caller has one.
+        val type = draft.type ?: TemplateType.SQL
+        if (failures.isEmpty() && suiteRunner != null && type.isTransform) {
+            val contract = draft.contract
+            val invariants = draft.invariants
+            val tests = draft.tests
+            if (contract != null && invariants != null && tests != null) {
+                failures +=
+                    suiteRunner.runSuite(
+                        label = draft.id ?: "<unsaved>",
+                        body = draft.body,
+                        type = type,
+                        contract = contract,
+                        invariants = invariants,
+                        tests = tests,
+                    )
+            }
+        }
 
         return TemplateValidationResult(failures)
     }

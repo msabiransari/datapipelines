@@ -384,3 +384,37 @@ data class OrgProperties(
             timezone = timezone,
         )
 }
+
+/**
+ * `datapipelines.transform.*` — the transform evaluation budgets (transform-nodes design §4.3,
+ * lane 7b): the pool every script evaluation (the test suite at save/release,
+ * `templates_evaluate`, and 7c's node runner) is admitted to, the per-case and per-suite
+ * timeouts, and the input/output caps. The pool admits at most [poolSize] running + waiting
+ * evaluations in total ([poolQueue] bounds ADMITTED, running plus waiting — 7a's bulkhead: an
+ * abandoned evaluation keeps its slot until its thread ends); a submission past that, or
+ * waiting its whole wall clock for a slot, is `pipeline.transform.pool_exhausted`.
+ *
+ * `ConfigValidator` owns §7 for these keys (`checkTransformBounds`: evaluate ≤ suite,
+ * abandon-grace ≥ 1), consistent with the other bound relations.
+ */
+@ConfigurationProperties(prefix = "datapipelines.transform")
+data class TransformProperties(
+    /** One `templates_evaluate` call or one test case, wall clock. */
+    val evaluateTimeoutSeconds: Long = 10,
+    /** The whole test suite at save/release, wall clock. */
+    val suiteTimeoutSeconds: Long = 60,
+    /** Concurrent running script evaluations (the pool's size). */
+    val poolSize: Int = 4,
+    /** Evaluations ADMITTED in total, running plus waiting (7a's semantics — record §4.3). */
+    val poolQueue: Int = 64,
+    /** Grace past the wall clock before an evaluation is abandoned, counted and logged. */
+    val abandonGraceSeconds: Long = 30,
+    /** Rows cap on any table input (rows in row mode, any table input in table/value mode). */
+    val maxInputRows: Long = 100_000,
+    /** Cap on a value/object output (a Context value is not a table). */
+    val maxValueBytes: Long = 1_048_576,
+    /** Cap on a single string in any returned row. */
+    val maxStringBytes: Long = 1_048_576,
+    /** Expression depth bound (the JSONata library's own default; recursion is time's job — §4.5). */
+    val maxDepth: Int = 100,
+)

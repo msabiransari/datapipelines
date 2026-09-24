@@ -137,7 +137,7 @@ layer 6
 
 layer 7
 ┌──────────────┐
-│     web      │  ← typesystem, calculators, pipeline-contract, templates,
+│     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
 │              │    datasources, staging, dag, auth, application, mcp-server
 │              │    (declared explicitly, not transitively)
 └──────────────┘
@@ -172,7 +172,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging` |
 | `application` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application` |
-| `web` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app` |

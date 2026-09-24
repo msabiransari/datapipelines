@@ -58,6 +58,109 @@ class TemplateReleaseServiceTest {
         )
 
     @Test
+    fun `release re-runs the suite on a transform draft — a pool refusing at release fails the release`() {
+        // 7b §8.1: release re-runs the version's test suite. A suite that passed at save fails
+        // at release only if the engine changed — here the evaluation pool is exhausted, so the
+        // release is refused with template.test_failed instead of flipping the draft.
+        val pool =
+            co.datapipelines.scripting.ScriptEvaluationPool(
+                size = 1,
+                queue = 1,
+                abandonGrace = java.time.Duration.ofMillis(200),
+                clock = co.datapipelines.scripting.ScriptEvaluationPool.SYSTEM,
+            )
+        val blocker = java.util.concurrent.CountDownLatch(1)
+        Thread {
+            pool.run(
+                co.datapipelines.scripting.EvaluationLimits(
+                    wallClock = java.time.Duration.ofSeconds(30),
+                    maxDepth = 100,
+                ),
+                "blocker",
+            ) { blocker.await() }
+        }.start()
+        // Let the blocker take the one slot before the release asks for it.
+        Thread.sleep(100)
+
+        val runner =
+            co.datapipelines.templates.TransformTestRunner(
+                engines = mapOf(co.datapipelines.scripting.ScriptLanguage.JSONATA to co.datapipelines.scripting.JsonataEngine()),
+                pool = pool,
+                evaluateTimeout = java.time.Duration.ofSeconds(5),
+                suiteTimeout = java.time.Duration.ofSeconds(30),
+            )
+        val emptyRegistry =
+            object : co.datapipelines.templates.TemplateRegistry {
+                override fun lookup(
+                    id: String,
+                    version: Int,
+                ): co.datapipelines.templates.TemplateVersion? = null
+
+                override fun existsId(id: String): Boolean = false
+            }
+        val realValidator =
+            co.datapipelines.templates.TemplateValidator(
+                co.datapipelines.templates.LibraryResolver { _ -> emptyRegistry },
+                suiteRunner = runner,
+            )
+        val releaseService = TemplateReleaseService(templates, realValidator, AuthoringGuard(true), pipelines)
+
+        val contract =
+            co.datapipelines.templates.TransformContract(
+                mode = co.datapipelines.templates.TransformMode.ROW,
+                inputs =
+                    mapOf(
+                        "orders" to
+                            co.datapipelines.templates.TransformInput.Table(
+                                listOf(co.datapipelines.templates.ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER)),
+                            ),
+                    ),
+                output =
+                    co.datapipelines.templates.TransformOutput.Table(
+                        listOf(co.datapipelines.templates.ContractColumn("order_id", co.datapipelines.typesystem.LogicalType.INTEGER)),
+                    ),
+            )
+        val case =
+            co.datapipelines.templates.TransformTestCase(
+                name = "empty",
+                input = co.datapipelines.templates.TransformTestInput(rows = emptyList(), inputs = emptyMap()),
+                expect =
+                    co.datapipelines.templates.TransformTestExpect(
+                        output = co.datapipelines.templates.TransformBlocks.mapper.readTree("""{"rows": []}"""),
+                    ),
+            )
+        val transformStored =
+            Template(
+                id = "test/t.sql",
+                version = 1,
+                engine = Template.NONE_ENGINE,
+                type = co.datapipelines.pipeline.TemplateType.JSONATA,
+                dialect = null,
+                displayName = "T",
+                description = "d",
+                body = "rows",
+                createdAt = Instant.EPOCH,
+                createdBy = actor,
+                contract = contract,
+                invariants = emptyList(),
+                tests = listOf(case),
+            )
+        every { templates.findDraftDetail(workspaceId, "test/t.sql") } returns draft(1)
+        every { templates.findVersion(workspaceId, "test/t.sql", 1) } returns transformStored
+
+        try {
+            val thrown =
+                shouldThrow<co.datapipelines.templates.TemplateValidationException> {
+                    releaseService.release(workspaceId, "test/t.sql", "draft-hash-1", actor)
+                }
+            thrown.result.failures.map { it.code } shouldBe listOf(PipelineErrorCodes.Template.TEST_FAILED)
+            verify(exactly = 0) { templates.releaseDraft(any(), any(), any(), any()) }
+        } finally {
+            blocker.countDown()
+        }
+    }
+
+    @Test
     fun `releasePinned releases the pinned version at the draft's own hash, through the ordinary release`() {
         every { templates.findDraftDetail(workspaceId, "test/t.sql") } returns draft(2)
         every { templates.findVersion(workspaceId, "test/t.sql", 2) } returns stored(2)
