@@ -124,4 +124,15 @@ class McpToolLearningsIntegrationTest {
 
         learnings.lastRenderAt(key, "test/t.sql").shouldBeNull()
     }
+
+    @Test
+    fun `an evaluate row counts as the render (7b) — newer than the draft's update satisfies Check B`() {
+        insertCall(key, "templates_evaluate", "test/xform.jsonata", template = "test/xform.jsonata", at = Instant.parse("2026-09-23T10:00:00Z"))
+
+        learnings.lastRenderAt(key, "test/xform.jsonata") shouldBe Instant.parse("2026-09-23T10:00:00Z")
+
+        // And the render still wins when it is the newer of the two tools.
+        insertCall(key, "templates_render", "test/xform.jsonata", template = "test/xform.jsonata", at = Instant.parse("2026-09-23T12:00:00Z"))
+        learnings.lastRenderAt(key, "test/xform.jsonata") shouldBe Instant.parse("2026-09-23T12:00:00Z")
+    }
 }

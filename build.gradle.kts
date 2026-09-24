@@ -152,6 +152,7 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // something compiles against them.
     ":modules:application" to setOf(
         ":modules:typesystem",
+        ":modules:scripting",
         ":modules:pipeline-contract",
         ":modules:templates",
         ":modules:datasources",

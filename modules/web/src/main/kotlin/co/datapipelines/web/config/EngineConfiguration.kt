@@ -25,7 +25,9 @@ import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
+import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.staging.StagingFactory
+import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TransformTestRunner
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.scripting.ScriptEvaluationPool
@@ -339,4 +341,15 @@ class EngineConfiguration {
         Gauge.builder("transform.evaluations.abandoned") { pool.abandoned.sum().toDouble() }
             .description("Script evaluations abandoned past their wall clock plus grace (the pool's bulkhead holds the thread's slot until it ends)")
             .register(meters)
+
+    /**
+     * The ONE evaluation path the MCP `templates_evaluate` tool and REST
+     * `POST /api/v1/templates/evaluate` share (transform-nodes §9.1/§9.2) — the same service,
+     * the same pool, the same timeout; declared here like every cross-module collaborator.
+     */
+    @Bean
+    fun templateEvaluateService(
+        templates: TemplateRepository,
+        runner: TransformTestRunner,
+    ): TemplateEvaluateService = TemplateEvaluateService(templates, runner)
 }

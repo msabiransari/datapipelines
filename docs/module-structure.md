@@ -125,8 +125,8 @@ layer 4
 
 layer 5
 ┌──────────────┐
-│ application  │  ← typesystem, pipeline-contract, templates, datasources,
-│ (use cases)  │    dag, auth
+│ application  │  ← typesystem, scripting, pipeline-contract, templates,
+│ (use cases)  │    datasources, dag, auth
 └──────────────┘
 
 layer 6
@@ -170,7 +170,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `staging` | `typesystem` |
 | `auth` | `typesystem` |
 | `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging` |
-| `application` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
+| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application` |
 | `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server` |
 | `app` | `web` |

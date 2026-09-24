@@ -57,6 +57,9 @@ object McpToolCatalog {
             // agent's edit verb: parse-only validation, then TemplateDraftService.write.
             Entry("templates_update", mutating = true),
             Entry("templates_render", mutating = false),
+            // 7b — the transform evaluator (sql_probe's twin): reads one version and evaluates
+            // over a caller-supplied input; nothing is staged and nothing is stored.
+            Entry("templates_evaluate", mutating = false),
             // 107 — the bounded D61/D62 self-service verb: hard-deletes a never-released,
             // unpinned, author-owned draft template. A write, so the `mcp.tool.write` audit's
             // business.

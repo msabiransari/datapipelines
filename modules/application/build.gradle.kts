@@ -16,6 +16,11 @@ dependencies {
     // §4.2's row for this module already allowed `datasources`; it is declared now because
     // something here finally compiles against it (declared = what is used).
     implementation(project(":modules:datasources"))
+    // 7b: TemplateEvaluateService — the ONE evaluation path `templates_evaluate` and
+    // POST /api/v1/templates/evaluate share (transform-nodes §9.1/§9.2). Templates for the
+    // repository and the test runner; scripting for the engine seam the runner drives.
+    implementation(project(":modules:templates"))
+    implementation(project(":modules:scripting"))
 
     // ExecutionLauncher binds parameters and reserves idempotency keys before the surface
     // starts anything; the reservation store and ExecuteRequest are dag types, the principal

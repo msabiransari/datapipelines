@@ -223,6 +223,7 @@ class WebsiteFactsGuardTest {
                 checkRunner = mockk<co.datapipelines.application.checks.PipelineCheckRunner>(),
                 lens = co.datapipelines.web.EVERYTHING_LENS,
                 templateService = mockk<co.datapipelines.templates.TemplateService>(),
+                templateEvaluateService = mockk<co.datapipelines.application.templates.TemplateEvaluateService>(),
             ).size
     }
 

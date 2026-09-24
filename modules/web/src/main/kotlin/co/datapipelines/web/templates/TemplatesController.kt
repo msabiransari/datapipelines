@@ -17,6 +17,7 @@ import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TemplateTypeBehaviour
+import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
@@ -94,6 +95,8 @@ class TemplatesController(
     private val releases: TemplateReleaseService,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     private val audit: co.datapipelines.auth.AuditEventSink,
+    /** 7b — the evaluate route's service (transform-nodes §9.2), the MCP tool's twin. */
+    private val evaluate: co.datapipelines.application.templates.TemplateEvaluateService,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
     /** §8.1 — create; the server assigns version 1 RELEASED (and the id when the body omits one). */
@@ -481,7 +484,8 @@ class TemplatesController(
     /**
      * §8.7 — render against a sample context. The response `data` IS the rendered SQL string:
      * "Response: rendered SQL string" pins the payload, and the envelope (§4.1) wraps it.
-     * `name`, `version` and `context` are body fields (§9.6).
+     * `name`, `version` and `context` are body fields (§9.6). A transform type has nothing to
+     * render — `template.render_not_applicable` points at `/evaluate` (7b, record §9.1).
      */
     @PostMapping("/render")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
@@ -490,19 +494,92 @@ class TemplatesController(
     ): ApiResponse<String> {
         val workspaceId = currentPrincipal().requireWorkspace().id
         val request = renderRequestOf(body)
-        if (templates.lookupVersion(workspaceId, request.name, request.version) == null) {
-            throw if (templates.existsId(
-                    workspaceId,
-                    request.name,
-                )
-            ) {
-                ApiErrors.templateNotFound(request.name, request.version)
-            } else {
-                ApiErrors.templateNotFound(request.name)
-            }
+        val version =
+            templates.lookupVersion(workspaceId, request.name, request.version)
+                ?: throw if (templates.existsId(
+                        workspaceId,
+                        request.name,
+                    )
+                ) {
+                    ApiErrors.templateNotFound(request.name, request.version)
+                } else {
+                    ApiErrors.templateNotFound(request.name)
+                }
+        if (version.type.isTransform) {
+            throw ApiException(
+                PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
+                "Template '${request.name}' has type '${version.type.wire}' — a transform is evaluated, not rendered; " +
+                    "use POST /api/v1/templates/evaluate.",
+                mapOf("type" to version.type.wire, "use" to "templates_evaluate"),
+            )
         }
         return ApiResponse.of(
             templateEngines.engineFor(workspaceId).render(TemplateRef(request.name, request.version), request.context),
+        )
+    }
+
+    /**
+     * §8.7A (7b, transform-nodes design §9.2) — evaluate a transform template over a
+     * caller-supplied input object: `{ name, version?, input, now? }` (the §9.6 addressing
+     * form, the MCP tool's body and response, the same service, the same pool, the same
+     * timeout). The version resolves as `/render`'s: omitted, the working version.
+     */
+    @PostMapping("/evaluate")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun evaluate(
+        @RequestBody body: String,
+    ): ApiResponse<Map<String, Any?>> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val tree = objectOf(body)
+        val name =
+            tree.get("name")?.takeIf { it.isTextual }?.asText()?.takeIf { it.isNotBlank() }
+                ?: throw ApiException(
+                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                    "The request requires a 'name' field (§9.6: the name never travels in the path).",
+                    mapOf(ApiErrors.REASON to "name_missing"),
+                )
+        val version = tree.get("version")?.takeIf { it.isInt }?.asInt()
+        val inputNode =
+            tree.get("input")?.takeIf { it.isObject }
+                ?: throw ApiException(
+                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                    "The request requires an 'input' object ({ rows, inputs, meta?, now? }).",
+                    mapOf(ApiErrors.REASON to "input_missing"),
+                )
+        val input =
+            try {
+                TransformBlocks.mapper.treeToValue(inputNode, co.datapipelines.templates.TransformTestInput::class.java)
+            } catch (err: com.fasterxml.jackson.databind.JsonMappingException) {
+                throw ApiException(
+                    PipelineErrorCodes.Template.CONTRACT_INVALID,
+                    "The 'input' object does not bind: ${err.originalMessage}.",
+                    mapOf("rule" to "unknown_field", "path" to err.pathReference),
+                )
+            }
+        val now =
+            tree.get("now")?.takeIf { it.isTextual }?.asText()?.let { raw ->
+                try {
+                    java.time.Instant.parse(raw)
+                } catch (
+                    @Suppress("SwallowedException") err: java.time.format.DateTimeParseException,
+                ) {
+                    throw ApiException(
+                        PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                        "'now' must be an ISO-8601 instant, was '$raw'.",
+                        mapOf("now" to raw),
+                    )
+                }
+            }
+        val result = evaluate.evaluate(workspaceId, name, version, input, now)
+        return ApiResponse.of(
+            mapOf(
+                "output" to result.output,
+                "rejects" to result.rejects,
+                "invariants" to
+                    result.invariants.map { verdict ->
+                        mapOf("name" to verdict.name, "passed" to verdict.passed, "message" to verdict.message)
+                    },
+            ),
         )
     }
 

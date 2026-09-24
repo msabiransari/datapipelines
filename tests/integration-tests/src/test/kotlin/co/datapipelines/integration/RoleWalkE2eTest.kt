@@ -467,13 +467,13 @@ class RoleWalkE2eTest {
 
         /**
          * Floors, not targets. The 2026-09-20 walk: 175 routes — viewer allowed 73 / refused 102,
-         * author 127 / 48, promoter 58 / 117, workspace admin 150 / 25, super admin 175 / 0; 41
-         * tools — viewer 28 / 13, author 41 / 0, promoter 20 / 21, admins 41 / 0. A walk well under
+         * author 127 / 48, promoter 58 / 117, workspace admin 150 / 25, super admin 175 / 0; 42
+         * tools — viewer 28 / 13, author 42 / 0, promoter 20 / 21, admins 42 / 0. A walk well under
          * these numbers is a broken scan, not a leaner app.
          */
         private const val MINIMUM_ROUTES = 60
         private const val MINIMUM_HANDLERS = 100
-        private const val MINIMUM_TOOLS = 41
+        private const val MINIMUM_TOOLS = 42
         private const val ALLOWED_FLOOR = 20
         private const val VIEWER_REFUSED_FLOOR = 40
         private const val AUTHOR_REFUSED_FLOOR = 15

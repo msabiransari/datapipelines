@@ -268,7 +268,9 @@ class McpToolDispatcher(
             ?.filter { it.isNotEmpty() }
             ?.takeIf { it.isNotEmpty() }
             ?.let { put("namespace", it) }
-        if (toolName == "templates_render") {
+        if (toolName == "templates_render" || toolName == "templates_evaluate") {
+            // Both rows carry `template`: 139's render check (7b A.7) reads either tool's row
+            // as "the key rendered/evaluated this template after its last draft write".
             (args["id"] as? String)?.takeIf { it.isNotBlank() }?.let { put("template", it) }
         }
     }

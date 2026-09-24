@@ -492,6 +492,18 @@ class TemplatesRenderTool(
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredString("id")
         val version = resolveVersion(args, workspaceId, id)
+        // 7b (record §9.1): a transform type has nothing to render — the refusal points at
+        // the evaluate tool, the way the REST /render twin does.
+        val stored = templates.lookupVersion(workspaceId, id, version)
+        if (stored != null && stored.type.isTransform) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
+                message =
+                    "Template '$id' has type '${stored.type.wire}' — a transform is evaluated, not rendered; " +
+                        "use templates_evaluate.",
+                details = mapOf("type" to stored.type.wire, "use" to "templates_evaluate"),
+            )
+        }
         return engines.engineFor(workspaceId).render(TemplateRef(id, version), args.requiredObject("context"))
     }
 

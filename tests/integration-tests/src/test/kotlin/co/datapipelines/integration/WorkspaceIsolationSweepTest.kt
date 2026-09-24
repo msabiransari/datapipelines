@@ -551,6 +551,8 @@ class WorkspaceIsolationSweepTest {
                 "templates_get" to """{"name":"globex_tpl"}""",
                 "templates_used_by" to """{"name":"globex_tpl"}""",
                 "templates_render" to """{"name":"globex_tpl","version":1,"parameters":{}}""",
+                // 7b — the transform evaluator addresses a template by id, like the render it twins.
+                "templates_evaluate" to """{"id":"globex_tpl","input":{"rows":[],"inputs":{}}}""",
                 "templates_purge_draft" to """{"name":"globex_tpl"}""",
                 "executions_get" to """{"execution_id":"${WorkspaceIsolationIntegrationTest.EXEC_GLOBEX}"}""",
                 "executions_get_result" to """{"execution_id":"${WorkspaceIsolationIntegrationTest.EXEC_GLOBEX}"}""",

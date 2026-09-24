@@ -10,7 +10,7 @@ server does not ship. Do not edit it by hand; a drift test fails if you do. Scop
 auth §7.6 minimum: scopes are hierarchical (`admin ⊃ author ⊃ execute ⊃ read`), so a key
 with a higher scope satisfies a lower requirement.
 
-There are **41 tools**, in `tools/list` order.
+There are **42 tools**, in `tools/list` order.
 
 ## pipelines
 
@@ -189,6 +189,19 @@ Render a template against the provided context values and return the SQL it prod
 | `id` | string | required |  |
 | `version` | integer | optional | Defaults to latest. |
 | `context` | object | required | Render context: the parameter map a calling pipeline would provide, defaults already applied. Values follow the wire conventions of the Type System (BIGINTEGER/BIGDECIMAL as strings, TIMESTAMP with Z or offset). |
+
+### `templates_evaluate`
+
+Scope `author` · read-only
+
+Evaluate a transform template ('jsonata'/'javascript') over a caller-supplied input object and return { output, rejects, invariants } — no staging, no Context. Use this to run a transform's body against one input the way its test suite does (sql_probe's twin; templates_render is for sql/html and refuses a transform type with template.render_not_applicable). The version resolves as templates_render does: omitted, the working version (the draft when one exists, else the latest released). A refusal is the code with its detail — a type-gate refusal, an input-contract violation, or an engine refusal (timeout, resource limit, pool exhausted).
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `id` | string | required |  |
+| `version` | integer | optional | Specific version. Defaults to the working version: the draft when one exists, else the latest released. |
+| `input` | object | required | The input object of the template's contract: { rows: [...], inputs: {...} } — in row mode `rows` is the batch and `inputs` holds the value inputs only (the table input is NOT listed); in table/value mode `inputs` holds every input, tables as arrays. Optional `now` (ISO-8601) pins the clock: without it the $now()/$millis() builtins refuse. |
+| `now` | string | optional | Optional ISO-8601 instant the $now()/$millis() builtins return for this evaluation. Absent, a body that reads the clock refuses (a transform is a pure function of its inputs — the clock is an input). |
 
 ### `templates_purge_draft`
 
