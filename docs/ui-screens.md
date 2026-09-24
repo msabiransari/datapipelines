@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.69
+**Status:** v1.70
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-09-19 (173)
+**Last updated:** 2026-09-24 (215c)
 
 ---
 
@@ -1438,15 +1438,23 @@ Two cards.
 | htmx | `hx-post="/partials/api-keys"` (create, into `#keyCreated`); `hx-delete="/partials/api-keys/{id}"` (delete, into `#keys-table-body`); `hx-post="/partials/api-keys/{id}/bindings"` (save an association SET) — each with a §5.1 Shape A out-of-band piece |
 
 The table lists the workspace's API keys, whoever created them: name + `dpk_…` prefix (12
-characters, D16's length), kind, **role** (#215 — `api caller` on an API key, `promotion
-receiver` on a server key; fixed by the kind until slice (c) offers a choice), **acts as** (the
-key's own identity — what its runs and received versions are attributed to, [Auth §4.7](auth.md#47-key-identities)),
+characters, D16's length), kind, **role** (#215 — fixed by the kind: `api caller` on an API key,
+`promotion receiver` on a server key; each kind carries exactly one role, so there is nothing to
+choose, record §3.1 and A1), **acts as** (the key's own identity, rendered "<key name> (API key)" —
+what its runs and received versions are attributed to, [Auth §4.7](auth.md#47-key-identities)),
 **created by** (the person, `api_keys.created_by`), associated endpoints (`/nyc/**` form; the root reads
 as the whole-tree wildcard), created, expires, last used — relative in the cell, absolute (UTC)
 on hover, like every table here. Deleted and expired keys keep their row and lose their verbs.
 
-- **Create** — one modal: **Kind → Name → Expiry → Associations**. Kind offers `endpoint`
-  ("API key") and, to a super admin, `server`; there is NO `user` choice (D16 — the login
+- **Create** — one modal (**New API key**): **Kind → Name → Expiry → Associations**. Kind is one
+  radio card per kind the caller may create, each sentence naming the kind's fixed role
+  (`ApiKeyForm.kindChoices`): **API key** (`endpoint`, the api caller role — "the paths you bind
+  it to are its whole reach"; `api_key.create`, workspace admins and super admins) and, to a
+  super admin only, **Server key** (`server`, the promotion receiver role, no bindings;
+  `server_key.create`). There is NO role field, because no kind offers a second role, and NO
+  admin role on any key (record §3.1, A1); the service refuses another role with
+  `endpoint.key_kind_refused` and the per-kind permission with `auth.role_required`
+  (`WorkspaceService.requireIssuancePermission`). There is NO `user` choice (D16 — the login
   hook mints those, and the service refuses `auth.key_kind_not_mintable` for every role).
   Expiry is the same server-resolved select §4.18 used to host (a custom date expires at the
   end of that day, UTC; a bad one is `400 auth.api_key.expiry_invalid`). Associations are the
@@ -1629,6 +1637,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v1.70 | 215c (#215) after the key model | **§4.19 describes the Keys page and dialog as slice (b) built them**: the role column is fixed by the kind (`api caller` / `promotion receiver`), with nothing left for a slice to offer, since each kind carries exactly one role (record §3.1, A1); the Acts-as cell renders "<key name> (API key)"; the New API key dialog is one card per kind, each naming its fixed role and its create permission (`api_key.create` for workspace admins and super admins, `server_key.create` for super admins only), with no role field and no admin role. The record's §6(c) is marked delivered. No screen, route or verb changed. |
 | 2026-09-24 | v1.69 | 215b (#215) key identities | **§4.19: the Keys table gains Role and Acts as** — the key's role (`api caller` / `promotion receiver`, fixed by the kind until slice (c)) and the key's own identity, which its runs and received versions are attributed to; Created by is `api_keys.created_by`. **§4.11: the API card's Scopes row is a Role row** (the session's role in the active workspace). §4.12: the users list shows people only (`kind = 'human'`). §3.4's role badge no longer narrows for a key (no key renders a screen, B2); §4.18's refusal note and §3.3's column table follow. |
 | 2026-09-24 | v1.68 | 215a (#215) the permission catalog | **§4.3e's last column is the §7.6 catalog permission** a verb answers to (`pipeline.release`, `datasource.test`, `workspace.members.manage`, …) instead of the retired operation, and every other section names permissions the same way; the booleans and every template are unchanged. §4.19: **a `server` key's Delete renders for a super admin only** (owner ruling 2026-09-24, `server_key.revoke`) — a workspace admin sees the row without the verb. §4.5's "Rendered for" paragraph corrected: Test renders by `canExecute` (`datasource.test` follows execute since 2026-09-20 — the template already did; the prose still said `canAdminWorkspace`). |
 | 2026-09-22 | v1.67 | #208 own row + super admin row | §4.13: no verbs on the caller's own member row (`409 workspace.self_membership` behind them); a super admin member reads "super admin" with no role dropdown. |
