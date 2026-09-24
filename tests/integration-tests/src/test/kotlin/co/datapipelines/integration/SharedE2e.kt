@@ -125,11 +125,17 @@ internal object SharedE2e {
     val redisPort: Int get() = redis.getMappedPort(REDIS_PORT)
 
     /**
-     * The current stable RELEASE tag (verified 2026-09-08), pinned exactly. quay.io, not Docker
-     * Hub: MinIO withdrew this tag from `minio/minio` on Docker Hub (404 "pull access denied" on
-     * every CI run from 2026-09-11); a laptop with the image cached never noticed.
+     * Chainguard's MinIO, pinned by DIGEST (DEVELOPMENT.md §9.2a). The digest held MinIO
+     * `RELEASE.2026-09-22T19-25-18Z` when pinned on 2026-09-24; Chainguard's free tier publishes
+     * `latest` only and states that old digests are never deleted. Why not MinIO's own image: on
+     * 2026-09-24 MinIO removed EVERY tag from `quay.io/minio/minio` (after withdrawing the Docker
+     * Hub tag on 2026-09-11) and its binary downloads — every local gate stayed green because the
+     * laptop had the image cached, and CI failed on every push. `scripts/verify-image-pins.sh`
+     * checks this pin against the registry before CI runs the suites. The image runs as a non-root
+     * user; `server /data` and the readiness wait below work unchanged (proven 2026-09-24 on
+     * LakeMinioE2eTest + TaxiVsRideshareFourEngineE2eTest, 7/7).
      */
-    private const val MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
+    private const val MINIO_IMAGE = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
     private const val MINIO_PORT = 9000
 
     /** The root credential the lake datasources and the seeding client both present. */

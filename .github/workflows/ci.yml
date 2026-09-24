@@ -100,6 +100,8 @@ jobs:
           dp.test.forks.e2e=1
           dp.test.heap=1g
           EOF
+      - name: every pinned test image still exists at its registry (cold — never the cache)
+        run: ./scripts/verify-image-pins.sh
       - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
         # --continue: one red module must not stop the others — every module's tests and
         # coverage verification run, so a failure is read from the full picture (the local
@@ -157,6 +159,8 @@ jobs:
           dp.test.forks.e2e=1
           dp.test.heap=1g
           EOF
+      - name: every pinned test image still exists at its registry (cold — never the cache)
+        run: ./scripts/verify-image-pins.sh
       - name: integration tests + fat-jar smoke (Testcontainers; Docker required)
         run: ./gradlew integrationTest
       # The suite's test-result XML, kept for a week, pass or fail (154, #137). Every E2E suite
