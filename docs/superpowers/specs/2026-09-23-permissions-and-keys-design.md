@@ -1,7 +1,7 @@
 # Permissions and keys: design record
 
 **Status:** RATIFIED 2026-09-23; **amended 2026-09-24** (§10, the owner's rulings A1–A8 on the
-pre-implementation review). The owner ruled PK1–PK9 (§1) and agreed O1–O3 (§9) on 2026-09-23.
+pre-implementation review, and A9–A12 during slice (b)). The owner ruled PK1–PK9 (§1) and agreed O1–O3 (§9) on 2026-09-23.
 **Date:** 2026-09-23.
 **Delivery:** [GitHub issue #215](https://github.com/msabiransari/datapipelines/issues/215).
 **Amends:** the [roles and permissions design](2026-09-20-roles-permissions-design.md) (ratified
@@ -173,7 +173,7 @@ permissions stay separate even while every role holds both (for example `pipelin
 
 | Key type (wire kind) | Created by | Roles offered | Acts as | Lifetime |
 |---|---|---|---|---|
-| MCP key (`user`) | automatic at login (D16) | none; the member's role per PK4 | the member | ends with the membership (#200) |
+| MCP key (`user`) | automatic at login (D16) | none; the member's role per PK4 | the member, over MCP only (A10) | ends with the membership (#200) |
 | API key (`endpoint`) | `api_key.create` | `api_caller` (A1: `viewer` withdrawn) | its own identity (PK5) | until revoked or expired |
 | Server key (`server`) | `server_key.create` | `promotion_receiver` | its own identity | until revoked or expired |
 | Scheduler key (#9) | `scheduler_key.create` (author and above) | decided in the scheduler round (A1: not `viewer`) | its own identity | until revoked; lands with the scheduler |
@@ -182,8 +182,8 @@ permissions stay separate even while every role holds both (for example `pipelin
 
 | Key role | Permissions | Notes |
 |---|---|---|
-| `api_caller` | `endpoint.serve` for the paths bound to the key; `execution.result.read` for the executions the key started | Exactly today's endpoint key, which is why every existing API key migrates to it (PK9). The only role an API key may hold (A1). |
-| `promotion_receiver` | `promotion.inventory.read`, `promotion.push` | Replaces today's System-account-with-author authority on the receiving side |
+| `api_caller` | `endpoint.serve` for the paths bound to the key; `execution.read` (A12) and `execution.result.read` for the executions the key started | Exactly today's endpoint key, which is why every existing API key migrates to it (PK9). The only role an API key may hold (A1). |
+| `promotion_receiver` | `promotion.inventory.read`, `promotion.push` | Replaces today's System-account-with-author authority on the receiving side. Instance-wide (A11): it takes a batch for any workspace. |
 
 Spelling (A5): key roles are `snake_case` everywhere — storage, wire, the CHECK and the dialog's
 values — like the member roles (`workspace_admin`); the UI shows a human label.
@@ -216,6 +216,9 @@ later role cannot slip past it.
   - `provider_subject` is the key id
   - it has no password and `is_admin` is false
 - Identities hold **no membership**; their authority is the key's role in the key's pinned workspace.
+  **Amended (A11):** for a server key the pinned workspace is where the key is ADMINISTERED (the
+  Keys page), not a confinement — a promotion receiver takes a batch for any workspace, the one its
+  `batch.workspace` names. An API key's reach is its bound paths in its own workspace, as before.
 - Revoking the key deactivates the identity (the deactivation mechanism of roles design §3.5).
   History keeps it and shows "<key name> (API key)".
 - **Lifecycle is derived, never cascaded (A2).** Deactivating or deleting a workspace does NOT
@@ -238,7 +241,9 @@ later role cannot slip past it.
 
 ### 3.4 The MCP key (PK4)
 
-Its role is re-read on every request:
+It connects an MCP client and nothing else (A10): over REST the key is refused on every route,
+`endpoint.key_kind_refused` with `details.reason = user_key_off_surface`. Its role is re-read on
+every request (within the auth cache TTL, A9):
 - a member's role, with workspace admin mapped to author
 - a super admin who is a member: that membership's role capped at author
 - a super admin with no membership: viewer
@@ -274,7 +279,7 @@ test.**
 
 **C2. MCP keys follow role changes at once.** On main the scope is fixed when the key is minted, so
 a viewer promoted to author needed a new key to author. With this change the promotion takes
-effect on the next request.
+effect ~~on the next request~~ **within the auth cache TTL, 60 s by default** (A9).
 
 **C3. Admin MCP keys are capped at author.** A workspace admin's or super admin's MCP key sees only
 its own executions over MCP. Nothing else changes over MCP (§3.4).
@@ -395,4 +400,13 @@ they change (marked A1–A8).
 | A6 | "Renaming the key renames the identity" dropped — keys have no rename. | §3.3 |
 | A7 | Counts are re-derived on the lane's base (42 tools since 7b). | §6(a) |
 | A8 | The permissions work lands BEFORE the remaining transform lanes (7c → 7d → 7e), which were re-worded to this catalog (transform record v0.4). | — |
+
+Rulings of 2026-09-24 during slice (b) (the lane brief's §B, and one question the lane asked):
+
+| # | Ruling | Where |
+|---|---|---|
+| A9 | Authority freshness is the auth cache's TTL (`datapipelines.auth.api-keys.cache-ttl-seconds`, 60 s by default). A role change, a member removal, a key revoke or a user deactivation takes effect within the TTL. No eviction and no shared stamp. C2's "on the next request" becomes "within the auth cache TTL, 60 s by default". | C2, §3.4 |
+| A10 | The MCP key is MCP-only (owner: "I want the agent prevented from making calls to REST endpoints"). The REST key filter refuses a `user` key on every route outside `/mcp`, before any permission check: `endpoint.key_kind_refused`, `details.reason = user_key_off_surface`. It mirrors the refusal of endpoint and server keys on `/mcp`. PK4's cap applies over MCP. The browser's own calls are session-authenticated and unaffected. Consequence: an unbound published path has no caller, because serving is key-only, and it is unservable until it is bound. | §3.1, §3.4 |
+| A11 | Promotion intake is instance-wide. §3.3 said: "Identities hold **no membership**; their authority is the key's role in the key's pinned workspace." For a server key, `workspace_id` is where the key is administered, not a confinement. No workspace comparison is added, and a batch for another workspace is accepted. The config-value server key (no key row) keeps acting as the System actor, the one non-identity credential. A stored server key acts as its identity (C4). | §3.2, §3.3 |
+| A12 | `api_caller` also holds `execution.read` for the executions the key started, so a program can poll the run it launched as well as read its result. The endpoint key could already do this on main. | §3.2 |
 
