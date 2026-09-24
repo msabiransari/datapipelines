@@ -120,9 +120,9 @@ class DatasourceSchemaToolsTest {
 
     /**
      * 126 §B — a LAKE table's partition status rides on the LISTING, not only on the stats read:
-     * the registered table's column by name, an explicit null for the unpartitioned one (one file
-     * every read scans whole). The lookup is per (namespace, table) — an unpartitioned table must
-     * never inherit a partitioned sibling's column.
+     * the registered column by name, or explicit null when no key is registered. This does not
+     * establish file count or scan cost. The lookup is per (namespace, table) — a table with no
+     * registered key must never inherit a sibling's column.
      */
     @Test
     fun `126 - get_tables on a LAKE datasource states each table's partition status`() {

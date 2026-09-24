@@ -121,8 +121,8 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    a table a template you PIN reads; `_get_columns` and `_get_table_stats` on each, before the
    first `templates_create` — each with its reported `namespace` array →
    `datasources_get_table_stats` → `sql_probe` a few rows and the distinct values of every column you
-   will filter, group or join by. A lake table with `partition_column: null` in the listing has
-   nothing to prune on — filter pushdown inside a file is not pruning. Descriptions and `remarks`
+   will filter, group or join by. A lake listing's `partition_column: null` means no registered
+   partition column, not one file or no data skipping (`references/dp-lake.md`). Descriptions and `remarks`
    are one input, written by a person; **the columns and the rows are the ground truth** — never
    write SQL against a column, a unit, a time zone or a sample rate you have not seen. Write what
    you learned into the pipeline's description. `references/authoring-playbook.md` §1 is the full procedure.
@@ -288,7 +288,7 @@ context and correlation id to work with.
 
 **Read `references/authoring-playbook.md` before building or updating anything with more than two nodes** — the
 judgment between the golden path's steps: the question's grain, the lookups and display names, aggregating at the
-source, indexing a staged table, filtering a lake table on its partition column, `depends_on` as data flow, the
+source while preserving keys and aggregate semantics (§4), indexing staged tables, lake pruning, `depends_on`, the
 three timeout budgets and when a scan may be partitioned, the measurement contract (population, units, weights,
 precision, ties, support), the three verification strategies, the numbered verification recipe, stopping at the
 draft. Its Do/Don't table is one screen; each row is a mistake an agent made here.
@@ -364,8 +364,8 @@ draft. Its Do/Don't table is one screen; each row is a mistake an agent made her
     answer "rainy" two ways.
 13½. **A number you did not measure is not a number.** Row counts, sample rates and windows come from
     `datasources_get_table_stats`, a probe, or a metadata table — never estimated. **A claim about the DATA is a
-    probe you ran or a registry line you read:** partition layout from the stats read (no `partition` index = one
-    unpartitioned file, whatever the plan's pushdown shows); a column's values over the WHOLE table from a
+    probe you ran or a registry line you read:** stats describe registered partitions, not all physical layout
+    or actual bytes skipped; confirm pruning from execution evidence. A column's values over the WHOLE table from a
     whole-table probe, never a lookup or a description; "census, not sample" from a reconciled count or an
     `asserted` record. **And a cause is a claim too:** the REASON for a number you noticed is named only after the
     probe that shows it, and never names a mechanism — "the generator", "the feed" — you have not seen. That

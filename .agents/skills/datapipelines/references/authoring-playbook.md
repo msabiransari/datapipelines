@@ -24,10 +24,10 @@ The mandatory read order, for **every** datasource a pipeline will touch:
    `semantics_record`. Neither lists tables: a lake's registered tables come from
    `datasources_get_tables`, whose entries state partition status for a lake table (step 2).
 2. `datasources_get_schemas` → `datasources_get_tables(namespace)` — every table, with its
-   `remarks`; on a LAKE datasource each entry also carries `partition_column` (a name means
-   the table is hive-partitioned on it and a filter on that column prunes files; `null`
-   means one unpartitioned file every read scans whole — filter pushdown inside a file is
-   not pruning). Read the names as an analyst would (§2), then confirm.
+   `remarks`; on a LAKE datasource each entry also carries `partition_column`, the registered
+   partition key. Use a compatible predicate on it when it matches the question's window.
+   `null` means no registered key, not one file or a mandatory full scan; file/row-group
+   skipping and column projection may still apply. Read the names as an analyst would (§2), then confirm.
 3. `datasources_get_columns(table, namespace)` for every table the SQL will read — canonical
    types, nullability, `remarks`. **Never write SQL against a column you have not seen
    listed.** A column name you recall from another deployment is a guess.
@@ -37,8 +37,8 @@ The mandatory read order, for **every** datasource a pipeline will touch:
    For a lake table the stats still state partition status out loud (the listing's
    `partition_column` already told you): a registered partition column reports as
    `partition_column` (and an index entry of kind `partition`);
-   `partition_column: null` means the table is one unpartitioned file that every read
-   scans whole — filter pushdown inside a file is not pruning, whatever the plan shows.
+   `partition_column: null` describes the registry, not file count or physical layout.
+   A pushed filter alone does not establish how many files, row groups or bytes were skipped.
 5. `sql_probe` — a few rows of every table you will filter or join on, and the distinct
    values of every column you will filter on, group by, or join by. This is where you learn
    what a code means, whether a "date" is text, whether an empty value is `NULL` or `''`,
@@ -97,9 +97,9 @@ semantics; the question's words decide the window.
   to "will this be slow"); `*_sample` is usually a sample; `stg_*`/`tmp_*` are staging. A
   name is a hypothesis: `datasources_get_columns` confirms it — a lookup has the id column,
   a name column and little else; a pre-aggregate has a count or a sum and the grain columns.
-- **Check the grain of every pre-aggregate** before summing it: a per-zone-per-day table
-  summed over a month is fine; joined to a daily table it must be joined on the day, not
-  the month.
+- **Check the grain and measure of every pre-aggregate** before combining it: daily event
+  counts can sum over a month; daily balances generally cannot. A join must preserve the
+  intended cardinality at that grain. Carry the keys and aggregate state needed downstream (§4).
 - **A place the question names that has a sensor AT it is answered by that sensor.** When
   the question names a site — an airport, a plant, a store, a port — and the data has a
   station, a meter or a device located at that site, the site's measure is that one station's
@@ -180,10 +180,10 @@ semantics; the question's words decide the window.
   443 literal rows, no node reading the source they came from, and no parameters at all —
   the numbers were right, and nothing would have said so when they stopped being right.)
 - **Aggregate at the source.** The source engine is built for its own data; tempdb (H2) is
-  not a warehouse. Ship *the grain the answer needs*, not the raw rows: a node that returns
+  not a warehouse. Ship the grain downstream steps need, preserving keys and aggregate state (§4): a node that returns
   `SUM(x) GROUP BY key` ships a thousand rows; the same node without the `GROUP BY` shipped
   tens of thousands into H2 to join a few hundred lookup rows. Push filters down too — on a
-  lake table, the `WHERE` on the partition column is what makes the read prune.
+  lake table, a compatible partition predicate can skip files; other data skipping depends on layout and metadata.
 - **Before you divide, look at MIN/MAX of every column you divide by.** A per-mile, per-rider
   or per-second ratio inherits every lie in its denominator: one absurd distance or one
   zero row collapses the average for everyone. One catalog-stats or probe read of the bounds
@@ -217,19 +217,16 @@ semantics; the question's words decide the window.
   your handback — see §3a.
 - **One template, bound per node.** If two nodes run the same SQL over different values,
   that is one template with parameters, not two copies. Copies drift.
-- **On a lake table, read the stats first — a table with no `partition` index has no
-  partition column to filter on** (§1 step 4 states the rule, and why pushdown inside a
-  file is not pruning). When the column IS registered, a predicate over it prunes:
-  `WHERE <partition_col> IN (DATE '…', …)`, `BETWEEN` two dates, and — measured on
-  DuckDB 1.5.5 — a deterministic expression of the column such as `CAST(<partition_col> AS …)`
-  still prune. **Bound parameters prune too**: write `:d` for a date filter and the engine
-  folds the bound value into the scan (measured: 33 bound dates read 33 of 731 files, same as
-  literals). What never prunes is a predicate on a sibling column INSIDE the files (a
-  timestamp beside the partition date) — that reads EVERY file and relies on row-group
-  statistics; it looks fast on a quiet box and dies at the timeout on a busy one. Never build
-  a `UNION ALL` of date-range branches to work around it; that is N full walks in one
-  statement. One query, the partition column, a list of dates. (Real miss: an 11-branch
-  UNION over the sibling timestamp, cancelled at 60 s.)
+- **On a lake table, distinguish registered partitions from measured pruning.** Read the
+  stats first (§1), then use bound predicates on the partition key where they express the
+  intended selection. Bound parameters can prune; literals are not required. A filter on a
+  sibling timestamp does not by itself prove that date partitions are skipped, but Parquet
+  statistics may still skip row groups. The actual layout, metadata and engine determine
+  what is skipped; a pushed `READ_PARQUET` filter alone does not prove fewer bytes read.
+  Record available file/partition counts and cold/warm timings, and label missing byte-level
+  evidence. Do not split a scan into repeated `UNION ALL` walks as a substitute for evidence
+  (§3a). `references/dp-lake.md` explains the read path; this read-only datasource cannot
+  repartition or sort stored files, and tempdb `CREATE INDEX` does not index S3 data.
 - **Climb the ladder: probe → render → execute_node → full DAG.** `sql_probe` the exact
   SELECT against the source first — rows, `wall_ms`, and the EXPLAIN plan (captured before
   the run, so it survives the timeout it explains); then `templates_render`; then
@@ -293,8 +290,8 @@ semantics; the question's words decide the window.
   rules above). If the workload still does not fit and the data has a natural partition — a
   period, a key range — several nodes may each read one partition, under four conditions: the
   partitions cover the window exactly and do not overlap; the answer recombines additively at
-  its grain (a count or a sum per partition adds up; a distinct count, a median or a ratio does
-  not — recombine the inputs, never the outputs); concurrency is bounded and understood (the
+  its grain (additive counts/sums combine; averages need sums/counts, distinct counts need
+  disjoint entity sets or deduplication, and medians need more than partial medians — §4); concurrency is bounded and understood (the
   partitions run at once against the same source, each its own statement under the same
   statement timeout — N partitions are N concurrent loads, and each still has to fit); and the
   evidence is measured — per-node timings, and a reconciliation against the unsplit population
@@ -388,6 +385,41 @@ the right quantity was computed.
 
 Then verify the QUESTION (§5): derive the check from the question and the source facts —
 population, weights, denominators and all — never from the SQL you just wrote.
+
+### Preserve meaning across aggregation steps
+
+Before reducing a source or combining summaries, identify what the later joins, filters and
+groupings need. A small intermediate is useful only if it can still answer the question.
+
+- **Keep the required keys and grain.** Retain downstream join/group/filter keys, including
+  dates needed for effective-dated lookups. Aggregating away a required key loses information;
+  joining a coarser summary later cannot recover its allocation without an explicit rule.
+- **Carry the components of an average.** For a later average of `x`, ship `SUM(x)` and
+  `COUNT(x)` over the same eligible rows; `COUNT(*)` matches only when every eligible `x` is
+  non-null. Combine as `SUM(x_sum) / NULLIF(SUM(x_count), 0)` with the destination engine's
+  appropriate numeric casts (§6), preserving precision until display. Averaging subgroup
+  averages gives each subgroup equal weight, which is a different measure unless the counts
+  are equal or that weighting is intended. For weighted averages and ratios, retain the
+  corresponding weighted numerator and denominator. State the empty-input policy.
+- **Distinct counts need distinct entities.** Add partial distinct counts only when the
+  counted entity sets are provably disjoint. Disjoint date partitions do not prove this: an
+  entity can occur on several dates. Otherwise deduplicate retained keys at the final grain,
+  or use a supported mergeable approximation only when its error is acceptable and stated.
+- **Check join multiplicity and coverage.** A lookup used to enrich a summary must match
+  at most one row per summary row under the complete join predicate (including effective
+  dates). Multiple matches multiply measures; an inner join can also lose unmatched rows.
+  Verify match counts, unmatched keys and relevant totals before/after the join. An intended
+  one-to-many allocation needs explicit weights or a different grain; `DISTINCT` or an
+  arbitrary lookup row is not a repair.
+- **Snapshots are not flows.** An `as_of_date` balance can often sum across distinct entities
+  at one instant, but summing it across dates counts the same holdings repeatedly. Choose
+  as-of/closing balance or a defined time average, with a policy for missing dates and
+  irregular observations. Do not infer additivity from a numeric column's type or name.
+
+Use these invariants in the Verification recipe (§5) where the pipeline relies on them,
+including unequal group sizes, overlapping entities, duplicate lookup keys or multiple
+snapshot dates as applicable. Source checks and successful execution alone do not reconcile
+the final output; compare it independently at the requested grain.
 
 ## 5. Finish like a professional
 

@@ -98,9 +98,10 @@ class DatasourcesGetTablesTool(
                     "datasources_get_columns. A table carries `facts` when agents have recorded table-level " +
                     "learned facts on it (grain, sampling, window, a caveat) — read them before probing; a fact " +
                     "marked stale or needs_review is a warning, not a truth. For a LAKE datasource each table " +
-                    "carries `partition_column` — a name means the table is hive-partitioned on it and a filter " +
-                    "on that column prunes files; `null` means one unpartitioned file, every read scans it, " +
-                    "and no filter prunes. Read-only, for pipeline authoring.",
+                    "carries `partition_column`: the registered partition key, or `null` when none is registered. " +
+                    "A compatible filter on a partition key can skip files; missing registration does not establish " +
+                    "file count or rule out Parquet row-group skipping and column projection. " +
+                    "Read-only, for pipeline authoring.",
             schema =
                 """
                 {
@@ -141,7 +142,7 @@ class DatasourcesGetTablesTool(
             val wire = page.toWireMap(byTable)
             // 126 §B — a LAKE table states its partition status on the LISTING, not only on the
             // stats read the agent may skip: the registered column's name, or an explicit null
-            // (one unpartitioned file). Non-lake dialects carry no such key. Read from the same
+            // (no registered key, not a file-count claim). Non-lake dialects carry no such key. Read from the same
             // registry row the stats payload resolves, so the two cannot disagree. The wire's
             // tables are page.tables in order (TablesPage.toWireMap maps in place).
             if (gated.dialect == Dialect.LAKE) {
@@ -238,17 +239,17 @@ class DatasourcesGetTableStatsTool(
                     "reports as the pseudo-index it is), and per-column distinct / null-fraction / min-max bounds — " +
                     "the min/max are the catalog's estimates, not a scan — probe for the exact bound. " +
                     "For a LAKE table the payload also carries partition_column: the registered partition column's " +
-                    "name, or null when the table has none — null means ONE unpartitioned file every read scans " +
-                    "whole; filter pushdown inside a file is not pruning, whatever a plan's READ_PARQUET filter " +
-                    "line shows. " +
+                    "name, or null when none is registered. This metadata does not establish file count or " +
+                    "physical layout; Parquet row-group skipping and column projection may still reduce reads. " +
+                    "A pushed READ_PARQUET filter alone does not prove skipped files or bytes. " +
                     "Every number comes from the engine's own catalog (pg_class, information_schema, parquet " +
                     "footers) — never a scan of the table, so this is safe at any table size. When a dialect holds " +
                     "no catalog stats the stat fields are null and stats_source is \"none\" — probe an explicit " +
                     "count with sql_probe if you need one. An unknown table is refused as " +
                     "datasource.table_not_found, naming the nearest listed table when one is close; a LAKE " +
                     "datasource answers datasource.lake_table_not_found for a table its registry does not carry. " +
-                    "Read this before writing a predicate — an unindexed filter on a large table is the timeout " +
-                    "you will hit.",
+                    "Read this before writing a predicate, then probe the query's access path and timing; " +
+                    "an absent index alone does not establish scan cost.",
             schema =
                 """
                 {
