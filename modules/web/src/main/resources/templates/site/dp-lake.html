@@ -23,7 +23,7 @@
       <h1 id="lake-title" class="ds-display">Your data is already in S3. Ask it a question.</h1>
       <p class="section-lede">
         dp-lake reads Parquet and Apache Iceberg tables on S3 or S3-compatible object storage
-        <strong>in place</strong> — no warehouse to buy, no loader to run, nothing copied.
+        <strong>in place</strong>, with no warehouse to buy, no loader to run and nothing copied.
         DuckDB is the engine, the catalog is ours, and the answer comes back through the same
         pipeline, the same UI, the same agent and the same API as every other query here.
       </p>
@@ -42,27 +42,27 @@
         <li>
           <h3>Parquet and Iceberg, on S3 or S3-compatible</h3>
           <!-- claim: docs/datasources.md §8C.1 -->
-          <p>Tables in <code>parquet</code> or <code>iceberg</code> format, addressed by <code>s3://</code> (or <code>file://</code> for an on-prem volume). S3-compatible stores — MinIO included — work through the datasource's endpoint and URL-style settings. This is SQL on S3 in the plain sense, and Iceberg SQL without a Spark cluster: the table's own metadata says which files to read.</p>
+          <p>Tables in <code>parquet</code> or <code>iceberg</code> format, addressed by <code>s3://</code> or, for an on-prem volume, <code>file://</code>. S3-compatible stores, MinIO included, work through the datasource's endpoint and URL-style settings. This is SQL on S3 in the plain sense, and Iceberg SQL without a Spark cluster: the table's own metadata says which files to read.</p>
         </li>
         <li>
-          <h3>Read in place — no warehouse, no loader</h3>
+          <h3>Read in place: no warehouse, no loader</h3>
           <!-- claim: docs/datasources.md §8C.2 -->
           <p>Every registered table becomes a view at connect over the objects in your bucket. Nothing is downloaded at registration, nothing is restored into an engine, and there is no load step to keep fresh. The data stays where it is.</p>
         </li>
         <li>
           <h3>Read-only, by design</h3>
           <!-- claim: docs/datasources.md §8C.8 -->
-          <p>dp-lake is a read connector. There is no write path to the object store — a lake datasource answers questions and never mutates the bucket.</p>
+          <p>dp-lake is a read connector. There is no write path to the object store: a lake datasource answers questions and never mutates the bucket.</p>
         </li>
         <li>
           <h3>DuckDB as the engine</h3>
           <!-- claim: docs/datasources.md §8C.4 -->
-          <p>An in-memory DuckDB instance per pooled connection, with operator-set memory, threads and spill limits, and the engine extensions bundled into the published image — a hardened deployment needs no egress to an extension repository.</p>
+          <p>An in-memory DuckDB instance per pooled connection, with operator-set memory, threads and spill limits, and the engine extensions bundled into the published image, so a hardened deployment needs no egress to an extension repository.</p>
         </li>
         <li>
-          <h3>dp-catalog — our own registry</h3>
+          <h3>dp-catalog, our own registry</h3>
           <!-- claim: docs/datasources.md §8C.1 -->
-          <p>The engine cannot list a bucket, so which tables exist is declared: a small Postgres registry, written over REST or by an agent through the <code>lake_tables_*</code> MCP tools, and shown read-only on the datasource's page. External catalogs (Glue, S3 Tables, REST) are not read — yet.</p>
+          <p>The engine cannot list a bucket, so which tables exist is declared: a small Postgres registry, written over REST or by an agent through the <code>lake_tables_*</code> MCP tools, and shown read-only on the datasource's page. External catalogs such as Glue, S3 Tables and REST are not read yet.</p>
         </li>
         <li>
           <h3>Partition pruning</h3>
@@ -72,12 +72,12 @@
         <li>
           <h3>Joined to the databases you already run</h3>
           <!-- claim: docs/staging.md §1 -->
-          <p>A lake table is one node in a pipeline. Its rows stage into the execution's in-memory database and join your Postgres, MySQL or SQLite with ordinary SQL — the lake and the operational databases answer one question together.</p>
+          <p>A lake table is one node in a pipeline. Its rows stage into the execution's in-memory database and join your Postgres, MySQL or SQLite with ordinary SQL. The lake and the operational databases answer one question together.</p>
         </li>
         <li>
           <h3>From the UI, from an agent, or as an API</h3>
           <!-- claim: docs/mcp-server.md §6.2.29, docs/rest-api.md §19 -->
-          <p>Query it from the browser, let an agent register tables and author the pipeline over MCP, then publish the released pipeline as a governed GET endpoint — the lake becomes an API your applications call.</p>
+          <p>Query it from the browser, let an agent register tables and author the pipeline over MCP, then publish the released pipeline as a governed GET endpoint. The lake becomes an API your applications call.</p>
         </li>
       </ol>
     </div>
@@ -90,7 +90,7 @@
       <!-- claim: docs/deployment.md Appendix B (dp-lake — the family with no loader); the count is the published manifest.json's own `row_count`, recorded in deployment.md Appendix C's dp-lake v1 publication row -->
       <p class="section-lede">
         The published demo bucket holds <strong>24 months of NYC TLC high-volume for-hire
-        trips</strong> — Uber, Lyft, Via and Juno, <strong>471,851,707 rides</strong> — as
+        trips</strong>, the Uber, Lyft, Via and Juno records, <strong>471,851,707 rides</strong>, as
         day-partitioned Parquet, plus a pre-aggregated zone-and-day table, a 1-in-16 sample, an
         Iceberg copy of that sample and the licence lookup: 855 objects, 7.57&nbsp;GB in all.
         Nothing is downloaded at demo start: the lake family has no loader, and a query fetches
@@ -101,16 +101,16 @@
       <p>
         The seeded showcase pipeline <code>nyc/mobility/taxi_vs_rideshare</code> asks one question
         across engines: rideshare zone-days from the lake, yellow-taxi trips from Postgres,
-        the borough lookup from SQLite and the day's rainfall from MySQL — the per-mode rain
-        lift, rainy days against dry ones, for yellow taxi and for rideshare in each borough (the
-        taxi side is a hash sample, so within-mode ratios are what stay honest). It ships with
-        <code>./app.sh --start --demo nyc,trade,lake</code>, which needs egress to S3 (or a mirror
-        you configure) whenever a lake query runs. The demo's registry is seeded from the published
+        the borough lookup from SQLite and the day's rainfall from MySQL. The per-mode rain
+        lift, rainy days against dry ones for yellow taxi and for rideshare in each borough. The taxi
+        side is a hash sample, so within-mode ratios are what stay honest. It ships with
+        <code>./app.sh --start --demo nyc,trade,lake</code>, which needs egress to S3, or to a mirror
+        you configure, whenever a lake query runs. The demo's registry is seeded from the published
         manifest and holds four tables; the Iceberg copy is published but not registered.
       </p>
       <div class="shots">
         <figure class="shot">
-          <figcaption>dp-catalog on the demo's own lake datasource. Four registered tables, each with its format and — where it has one — its partition column. Read-only on this screen: registration is REST or <code>lake_tables_*</code>.</figcaption>
+          <figcaption>dp-catalog on the demo's own lake datasource. Four registered tables, each with its format and, where it has one, its partition column. Read-only on this screen: registration is REST or <code>lake_tables_*</code>.</figcaption>
           <div th:replace="~{site/_demo-datasources :: datasources(${facts.demo})}"></div>
         </figure>
       </div>
@@ -128,15 +128,15 @@
         </li>
         <li>
           <!-- claim: docs/datasources.md §8C.7 -->
-          <strong>Iceberg tables register by their metadata file.</strong> DuckDB 1.5.5.1 cannot resolve a pyiceberg table by its root, so the registry names the table's current metadata file — and a table that still receives commits is re-registered to follow it.
+          <strong>Iceberg tables register by their metadata file.</strong> DuckDB 1.5.5.1 cannot resolve a pyiceberg table by its root, so the registry names the table's current metadata file, and a table that still receives commits is re-registered to follow it.
         </li>
         <li>
           <!-- claim: docs/datasources.md §8C.8 -->
-          <strong>No scheduler, no dashboards.</strong> A pipeline runs when you run it, or when something calls its published endpoint. Recurring cadence and a dashboard surface are not shipped — nothing on this page should read as a promise of either.
+          <strong>No scheduler, no dashboards.</strong> A pipeline runs when you run it, or when something calls its published endpoint. Recurring cadence and a dashboard are not shipped. Nothing on this page should read as a promise of either.
         </li>
         <li>
           <!-- claim: docs/datasources.md §8C.3 -->
-          <strong>Aggregate in the lake, not in the cursor.</strong> The full trip table is 471.9 million rows behind a result cap. Push the aggregation into the lake node — that is what the engine and the pruning are for — and let the pipeline carry the answer, not the raw rows.
+          <strong>Aggregate in the lake, not in the cursor.</strong> The full trip table is 471.9 million rows behind a result cap. Push the aggregation into the lake node. That is what the engine and the pruning are for. Let the pipeline carry the answer, not the raw rows.
         </li>
       </ul>
       <p><a th:href="@{/federated-query}">Federated query &rarr;</a> &middot;

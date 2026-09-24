@@ -18,36 +18,36 @@ object SiteFaqs {
         listOf(
             FaqEntry(
                 "What is datapipelines.co, in one sentence?",
-                "A self-hosted server that lets an AI coding agent — Claude Code, Cursor, Copilot, any MCP client — author SQL " +
+                "A self-hosted server that lets an AI coding agent, whether Claude Code, Cursor, Copilot or any MCP client, author SQL " +
                     "data pipelines across your databases, while people keep the release button; every released pipeline can be " +
                     "published as a versioned HTTP API. The tool surface is specified in docs/mcp-server.md §6.",
                 "docs/mcp-server.md §6",
             ),
             FaqEntry(
-                "What is a pipeline here — a DAG, a notebook, a dbt project?",
-                "A JSON document: named nodes, each a SQL template run against one datasource (or the per-run scratch " +
-                    "engine), with explicit dependencies between them. The executor orders the graph, runs independent nodes " +
+                "What is a pipeline here: a DAG, a notebook, a dbt project?",
+                "A JSON document: named nodes, each a SQL template run against one datasource, or against the per-run scratch " +
+                    "engine, with explicit dependencies between them. The executor orders the graph, runs independent nodes " +
                     "in parallel, stages each result, and hands the last node's rows to the caller. The contract is " +
                     "docs/pipeline-contract.md §3 and the execution model docs/dag-executor.md §5.",
                 "docs/pipeline-contract.md §3",
             ),
             FaqEntry(
                 "Which databases does it talk to?",
-                "${facts.engines} — dp-lake is Parquet and Iceberg on S3 read in place by an embedded " +
+                "${facts.engines}. dp-lake is Parquet and Iceberg on S3 read in place by an embedded " +
                     "DuckDB. One pipeline can mix all of them; each node runs where its data lives. " +
                     "The dialect matrix with driver and licence notes is docs/datasources.md §4.",
                 "docs/datasources.md §4",
             ),
             FaqEntry(
                 "Do I need a data warehouse?",
-                "No. Every node runs at its source and streams its result into a per-run scratch engine (H2, created for " +
-                    "the run and dropped after it), where the joining and shaping happen. The demo joins Postgres trips, MySQL " +
+                "No. Every node runs at its source and streams its result into a per-run scratch engine, H2, created for " +
+                    "the run and dropped after it, where the joining and shaping happen. The demo joins Postgres trips, MySQL " +
                     "weather, SQLite zones and Parquet rideshare data in one run. How staging works is docs/staging.md §3.",
                 "docs/staging.md §3",
             ),
             FaqEntry(
                 "Is it open source, and what may I do with it?",
-                "Yes — AGPL-3.0. Run it on your own infrastructure for your own company or your clients, read and change " +
+                "Yes: AGPL-3.0. Run it on your own infrastructure for your own company or your clients, read and change " +
                     "every line, keep your pipelines in your own database with no per-seat licence. The one obligation is " +
                     "the AGPL's: if you offer a modified server to others over a network, you publish the changes. The " +
                     "licence and the packaging are described in docs/deployment.md §10.",
@@ -60,7 +60,7 @@ object SiteFaqs {
             FaqEntry(
                 "Does my agent get my database password?",
                 "No. The agent holds an API key to datapipelines; the server holds the datasource credentials, encrypted at " +
-                    "rest, and never returns them — not through a tool, not through the UI. A datasource can be marked " +
+                    "rest, and never returns them, not through a tool and not through the UI. A datasource can be marked " +
                     "read-only so write-shaped nodes are refused at save time. Credential storage is docs/datasources.md §7 and " +
                     "the read-only flag docs/datasources.md §3.",
                 "docs/datasources.md §7",
@@ -83,16 +83,16 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Is every agent action logged?",
-                "Yes. Every MCP tool call is written to the audit log with the key that made it and the tool — never the " +
+                "Yes. Every MCP tool call is written to the audit log with the key that made it and the tool, never the " +
                     "SQL text, row data or parameter values, which are your data; every lifecycle verb records who did it " +
-                    "and through which surface (session, API key or MCP). The audit log is docs/auth.md §10 and the MCP " +
+                    "and through which channel it came, being session, API key or MCP. The audit log is docs/auth.md §10 and the MCP " +
                     "events docs/mcp-server.md §10.",
                 "docs/auth.md §10",
             ),
             FaqEntry(
                 "Can an agent release a pipeline to production?",
-                "No, by design. Agents create and iterate drafts; a person releases. A released version is immutable — a " +
-                    "later edit becomes a new draft — and a published endpoint serves the version you point it at. The " +
+                "No, by design. Agents create and iterate drafts; a person releases. A released version is immutable, so a " +
+                    "later edit becomes a new draft, and a published endpoint serves the version you point it at. The " +
                     "lifecycle is docs/versioning.md §3.",
                 "docs/versioning.md §3",
             ),
@@ -102,16 +102,16 @@ object SiteFaqs {
         listOf(
             FaqEntry(
                 "What does “published endpoint” mean?",
-                "A released pipeline gets a URL of its own — /api/<your-namespace>/<version>/<path>; a GET runs it " +
+                "A released pipeline gets a URL of its own, /api/<your-namespace>/<version>/<path>; a GET runs it " +
                     "with the query string bound to its declared " +
                     "parameters and returns the rows as JSON. Keys are bound to a path prefix, so a partner can be given one " +
                     "endpoint and nothing else. The serving contract is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",
             ),
             FaqEntry(
-                "From data to an API in a day — is that real?",
+                "From data to an API in a day: is that real?",
                 "For the API half, today: an agent authors the pipeline against your databases, runs it, fixes what fails, " +
-                    "you review and release, and the endpoint exists — no deployment, no service to write, no gateway to " +
+                    "you review and release, and the endpoint exists. No deployment, no service to write, no gateway to " +
                     "configure. Dashboards your agent creates and you embed in your own product are a planned roadmap item; the " +
                     "roadmap page says so. Publishing is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",
@@ -126,7 +126,7 @@ object SiteFaqs {
             FaqEntry(
                 "What happens when a query is too slow?",
                 "Every statement carries a query timeout and the run an overall deadline; a node that outlives its budget " +
-                    "fails with pipeline.node.query_timeout and the elapsed time — and the SQL probe returns the plan — so the " +
+                    "fails with pipeline.node.query_timeout and the elapsed time, and the SQL probe returns the plan, so the " +
                     "agent fixes the shape instead of guessing. The limits and cancellation are docs/dag-executor.md §5.",
                 "docs/dag-executor.md §5",
             ),
@@ -147,21 +147,21 @@ object SiteFaqs {
                 "What is dp-lake?",
                 "A way to query Parquet and Apache Iceberg tables on S3 or S3-compatible object storage in place: no " +
                     "warehouse, no load step, read-only. DuckDB is the engine, and the catalog is the server's own " +
-                    "registry, dp-catalog, because the engine cannot list a bucket - tables are registered by REST or " +
+                    "registry, dp-catalog, because the engine cannot list a bucket. Tables are registered by REST or " +
                     "over MCP. See docs/datasources.md section 8C.",
                 "docs/datasources.md §8C",
             ),
             FaqEntry(
                 "Does dp-lake copy my data out of S3?",
                 "No. Every registered table becomes a view at connect over the objects in your bucket, and the engine " +
-                    "reads only what a query's predicates name - a filter on the partition column reads only the " +
+                    "reads only what a query's predicates name; a filter on the partition column reads only the " +
                     "matching partitions. Nothing is downloaded at registration or at demo start; reads are in place, " +
                     "at query time. See docs/datasources.md section 8C.2.",
                 "docs/datasources.md §8C.2",
             ),
             FaqEntry(
                 "How do I register an Iceberg table in dp-lake?",
-                "By its current metadata file - s3://bucket/table/metadata/00042-<uuid>.metadata.json - not by the " +
+                "By its current metadata file, s3://bucket/table/metadata/00042-<uuid>.metadata.json, not by the " +
                     "table root: DuckDB 1.5.5.1 cannot resolve a pyiceberg table's root, so the registry row names the " +
                     "file, and you re-register when the table commits. See docs/datasources.md section 8C.7.",
                 "docs/datasources.md §8C.7",
@@ -181,7 +181,7 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Is this a Tableau alternative?",
-                "Not today, and the page does not claim it. Tableau draws; datapipelines gets the data there — across " +
+                "Not today, and the page does not claim it. Tableau draws; datapipelines gets the data there, across " +
                     "Postgres, MySQL, SQL Server, Oracle, SQLite and S3, without a warehouse, authored by an agent and " +
                     "released by a person. Embedded dashboards created by your agent are planned; the " +
                     "roadmap page carries the status. What is versioned today is docs/versioning.md §3.",
@@ -189,7 +189,7 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Why not just build the dashboard in Tableau?",
-                "Because the dashboard usually is not the expensive part — getting a trustworthy, joined, refreshed " +
+                "Because the dashboard usually is not the expensive part. Getting a trustworthy, joined, refreshed " +
                     "dataset into it is, and embedding the result in your own product is a second project. datapipelines " +
                     "makes the dataset a versioned pipeline an agent can author and an API you can call from your app " +
                     "today; the dashboards you embed are planned. Publishing is docs/rest-api.md §19.",
@@ -244,7 +244,7 @@ object SiteFaqs {
                 "Today: pipelines authored with an AI agent, reviewed and released by a person, a published API " +
                     "for each released one, and datasets your Tableau workbook or your own application reads. " +
                     "Planned, without a date on this page: native dashboards, scheduled refresh, reports and " +
-                    "alerts — the roadmap page carries the current order (docs/ROADMAP.md §2).",
+                    "alerts. The roadmap page carries the current order (docs/ROADMAP.md §2).",
                 "docs/ROADMAP.md §2",
             ),
             FaqEntry(
@@ -259,7 +259,7 @@ object SiteFaqs {
                 "Can each customer see only their own rows?",
                 "Through your application: it supplies the customer's id as a declared parameter and holds the " +
                     "key. An endpoint key restricts which published paths it may call, not which rows a caller may " +
-                    "see — row-level authorisation stays your backend's job (docs/rest-api.md §19.3, docs/auth.md " +
+                    "see. Row-level authorisation stays your backend's job (docs/rest-api.md §19.3, docs/auth.md " +
                     "§7.7). Per-viewer filtering for native dashboards is planned with the dashboards.",
                 "docs/rest-api.md §19.3, docs/auth.md §7.7",
             ),
@@ -278,8 +278,8 @@ object SiteFaqs {
             ),
             FaqEntry(
                 "Which databases?",
-                "The ${facts.engineCountWord} engines are ${facts.engines} — dp-lake reads Parquet and " +
-                    "Iceberg on S3 in place — and one dataset can read several of them in the same run " +
+                "The ${facts.engineCountWord} engines are ${facts.engines}, and dp-lake reads Parquet and " +
+                    "Iceberg on S3 in place. One dataset can read several of them in the same run " +
                     "(docs/datasources.md §4).",
                 "docs/datasources.md §4",
             ),
@@ -296,7 +296,7 @@ object SiteFaqs {
         listOf(
             FaqEntry(
                 "Is the demo data real?",
-                "Yes — all three families are real public data, not fixtures: NYC Taxi & Limousine Commission trip records " +
+                "Yes. All three families are real public data, not fixtures: NYC Taxi & Limousine Commission trip records " +
                     "and NOAA weather for New York, US Census trade and Federal Reserve exchange rates, and the TLC " +
                     "high-volume for-hire feed on S3. Every family is rebuilt deterministically from pinned sources, so the " +
                     "same version loads the same numbers anywhere. What ships is documented table by table on the demo-data " +
@@ -316,15 +316,15 @@ object SiteFaqs {
                 "How big is the demo on disk?",
                 "The nyc family's files are about 118 MB and the trade family's about 223 MB, restored into the demo " +
                     "containers at start; the lake family is about 7.6 GB of Parquet and Iceberg objects that are never " +
-                    "downloaded — the engine reads only the partitions a query names. The exact per-file and per-table " +
+                    "downloaded, and the engine reads only the partitions a query names. The exact per-file and per-table " +
                     "figures render from the published manifests on the demo-data page, so they are always the published " +
                     "numbers. (The artifacts the loader fetches: docs/deployment.md Appendix B.)",
                 "docs/deployment.md §Appendix B",
             ),
             FaqEntry(
                 "Can I add my own data next to it?",
-                "Yes. The demo families are ordinary datasources — register yours in the app (or in the bootstrap file the " +
-                    "demo profiles use) and any pipeline can join them to the demo tables, exactly as the shipped examples " +
+                "Yes. The demo families are ordinary datasources. Register yours in the app, or in the bootstrap file the " +
+                    "demo profiles use, and any pipeline can join them to the demo tables, exactly as the shipped examples " +
                     "join Postgres trips to SQLite zones and MySQL weather. Nothing about the demo is privileged; it is " +
                     "seeded data with example pipelines. (Registration: docs/datasources.md §3.)",
                 "docs/datasources.md §3",
@@ -332,7 +332,7 @@ object SiteFaqs {
             FaqEntry(
                 "Does the demo need internet access?",
                 "At start, yes: the nyc and trade artifacts download from the published bucket and the lake datasource " +
-                    "points at S3. After that they differ — nyc and trade are local files restored into the demo engines, so " +
+                    "points at S3. After that they differ. nyc and trade are local files restored into the demo engines, so " +
                     "running them needs no network, while the lake family is read in place over HTTPS at query time and " +
                     "always needs it. (The consuming side: docs/deployment.md Appendix B.)",
                 "docs/deployment.md §Appendix B",
@@ -350,36 +350,36 @@ object SiteFaqs {
         listOf(
             FaqEntry(
                 "Is it really free?",
-                "Yes — free to run, for yourself or your customers, with every feature on every deployment. There is " +
+                "Yes: free to run, for yourself or your customers, with every feature on every deployment. There is " +
                     "no seat count, no feature gate and no account with us, because the licence is AGPL-3.0 and you " +
                     "host it. (Licence and packaging: docs/deployment.md §10.)",
                 "docs/deployment.md §10",
             ),
             FaqEntry(
                 "What does AGPL require of me?",
-                "Running it inside your company — even at scale, even commercially — asks nothing of you. If you " +
+                "Running it inside your company, even at scale and even commercially, asks nothing of you. If you " +
                     "modify the server and offer it to others over a network, you publish your modifications under " +
                     "the same licence; that is the whole obligation. (The licence: docs/deployment.md §10.)",
                 "docs/deployment.md §10",
             ),
             FaqEntry(
                 "Will there be a hosted version?",
-                "There is no paid tier today, and nothing hosted is planned; if a hosted version ever " +
-                    "exists it will be announced on the roadmap page first — never launched quietly. What is " +
+                "There is no paid tier today, and nothing hosted is planned. If a hosted version ever " +
+                    "exists it will be announced on the roadmap page first, never launched quietly. What is " +
                     "deliberately not planned lives on the roadmap's later band. (Source: docs/ROADMAP.md §3.)",
                 "docs/ROADMAP.md §3",
             ),
             FaqEntry(
                 "Can I pay for support?",
-                "Not today — there is nothing to buy. Help is GitHub Discussions and Issues, the docs under /docs, " +
+                "Not today, because there is nothing to buy. Help is GitHub Discussions and Issues, the docs under /docs, " +
                     "and the owner answers the contact address on the pricing page personally. You also own the ops: " +
                     "the upgrade runbook is docs/deployment.md §8.",
                 "docs/deployment.md §8",
             ),
             FaqEntry(
                 "What about the demo data's licences?",
-                "The sample families are real public data, each under its own terms — NYC Open Data's " +
-                    "no-restrictions statement, US Government public-domain works, the Census API terms — and the " +
+                "The sample families are real public data, each under its own terms: NYC Open Data's " +
+                    "no-restrictions statement, US Government public-domain works and the Census API terms. The " +
                     "demo-data page quotes the operative sentence per family. (The demo and its gates: " +
                     "docs/deployment.md Appendix B.)",
                 "docs/deployment.md §Appendix B",
@@ -395,35 +395,35 @@ object SiteFaqs {
         listOf(
             FaqEntry(
                 "Is this a data catalog?",
-                "No. A catalog lists what exists — tables, columns, owners. This records what it means: a unit, a " +
-                    "time zone, a grain, what a code means, how tables join, what revenue excludes — each with the " +
+                "No. A catalog lists what exists, the tables, columns and owners. This records what it means: a unit, a " +
+                    "time zone, a grain, what a code means, how tables join and what revenue excludes, each with the " +
                     "query that proved it. The introspection surface it rides is docs/datasources.md §7.",
                 "docs/datasources.md §7",
             ),
             FaqEntry(
                 "Can a wrong fact poison the agent?",
                 "That is what the trust ladder and the conflict rule are for: a fact is never higher-trust than its " +
-                    "evidence, two live facts of the same kind are shown as a conflict — never a silent winner — and " +
+                    "evidence, two live facts of the same kind are shown as a conflict rather than a silent winner, and " +
                     "any fact can be retired with a reason. Facts are specified in docs/mcp-server.md §6.2.",
                 "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "Do I have to write anything?",
                 "No. The agent records what it learns while it works; you verify when you want to. Recording needs an " +
-                    "author-scoped key and a release is still a person's act — the same bar as authoring a pipeline " +
+                    "author-scoped key and a release is still a person's act, the same bar as authoring a pipeline. " +
                     "(docs/auth.md §7.6).",
                 "docs/auth.md §7.6",
             ),
             FaqEntry(
                 "What happens when my schema changes?",
                 "Drift is detected at read time: a renamed or dropped column flips its facts to stale, shown beside " +
-                    "the current columns — nothing is silently re-mapped to a new column; someone re-verifies and " +
+                    "the current columns. Nothing is silently re-mapped to a new column; someone re-verifies and " +
                     "records the successor. The drift rule is docs/metadata-db.md §4.18.",
                 "docs/metadata-db.md §4.18",
             ),
             FaqEntry(
                 "Does it work on my own warehouse?",
-                "Yes — the skill and the tools are demo-free, and the facts come from whatever your agent probes: " +
+                "Yes. The skill and the tools are demo-free, and the facts come from whatever your agent probes: " +
                     "${facts.engines} (docs/datasources.md §4).",
                 "docs/datasources.md §4",
             ),
@@ -438,10 +438,10 @@ object SiteFaqs {
     val SUPPORT: List<FaqEntry> =
         listOf(
             FaqEntry(
-                "Something broke — where do I report it?",
-                "Open a bug report on GitHub: $REPORT_PROBLEM_URL. The form asks for the version (your " +
-                    "deployment's /health build hash or the image tag), the surface it happened on, and the " +
-                    "correlation id from the failed execution, the error toast or the REST envelope — so the " +
+                "Something broke: where do I report it?",
+                "Open a bug report on GitHub: $REPORT_PROBLEM_URL. The form asks for the version, your " +
+                    "deployment's /health build hash or the image tag, for the surface it happened on, and for the " +
+                    "correlation id from the failed execution, the error toast or the REST envelope, so the " +
                     "report arrives carrying what a fix needs. What helps most during the beta is in " +
                     "CONTRIBUTING.md; the scope the beta covers is docs/ROADMAP.md §2.2.",
                 "docs/ROADMAP.md §2.2",
@@ -449,7 +449,7 @@ object SiteFaqs {
             FaqEntry(
                 "Where do I ask a question or float an idea?",
                 "GitHub Discussions: $DISCUSSIONS_URL. Questions about running it, ideas that are not yet " +
-                    "feature requests, and show-and-tell all belong there — a concrete defect is a bug report " +
+                    "feature requests, and show-and-tell all belong there. A concrete defect is a bug report " +
                     "and a formed proposal is a feature request, both one click away on the same page. What is " +
                     "already being built is the roadmap's known limitations, docs/ROADMAP.md §2.2, so check " +
                     "there first.",

@@ -280,11 +280,11 @@
     },
     {
      "level": "H3",
-     "text": "Cursor — ~/.cursor/mcp.json"
+     "text": "Cursor: ~/.cursor/mcp.json"
     },
     {
      "level": "H3",
-     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+     "text": "GitHub Copilot in VS Code: .vscode/mcp.json"
     },
     {
      "level": "H2",
@@ -370,11 +370,11 @@
     },
     {
      "level": "H3",
-     "text": "Cursor — ~/.cursor/mcp.json"
+     "text": "Cursor: ~/.cursor/mcp.json"
     },
     {
      "level": "H3",
-     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+     "text": "GitHub Copilot in VS Code: .vscode/mcp.json"
     },
     {
      "level": "H2",
@@ -457,11 +457,11 @@
     },
     {
      "level": "H3",
-     "text": "Cursor — ~/.cursor/mcp.json"
+     "text": "Cursor: ~/.cursor/mcp.json"
     },
     {
      "level": "H3",
-     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+     "text": "GitHub Copilot in VS Code: .vscode/mcp.json"
     },
     {
      "level": "H2",
@@ -547,11 +547,11 @@
     },
     {
      "level": "H3",
-     "text": "Cursor — ~/.cursor/mcp.json"
+     "text": "Cursor: ~/.cursor/mcp.json"
     },
     {
      "level": "H3",
-     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+     "text": "GitHub Copilot in VS Code: .vscode/mcp.json"
     },
     {
      "level": "H2",
@@ -634,11 +634,11 @@
     },
     {
      "level": "H3",
-     "text": "Cursor — ~/.cursor/mcp.json"
+     "text": "Cursor: ~/.cursor/mcp.json"
     },
     {
      "level": "H3",
-     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+     "text": "GitHub Copilot in VS Code: .vscode/mcp.json"
     },
     {
      "level": "H2",
@@ -724,11 +724,11 @@
     },
     {
      "level": "H3",
-     "text": "Cursor — ~/.cursor/mcp.json"
+     "text": "Cursor: ~/.cursor/mcp.json"
     },
     {
      "level": "H3",
-     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+     "text": "GitHub Copilot in VS Code: .vscode/mcp.json"
     },
     {
      "level": "H2",
@@ -810,11 +810,11 @@
     },
     {
      "level": "H3",
-     "text": "Cursor — ~/.cursor/mcp.json"
+     "text": "Cursor: ~/.cursor/mcp.json"
     },
     {
      "level": "H3",
-     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+     "text": "GitHub Copilot in VS Code: .vscode/mcp.json"
     },
     {
      "level": "H2",
@@ -897,11 +897,11 @@
     },
     {
      "level": "H3",
-     "text": "Cursor — ~/.cursor/mcp.json"
+     "text": "Cursor: ~/.cursor/mcp.json"
     },
     {
      "level": "H3",
-     "text": "GitHub Copilot in VS Code — .vscode/mcp.json"
+     "text": "GitHub Copilot in VS Code: .vscode/mcp.json"
     },
     {
      "level": "H2",
@@ -1015,7 +1015,7 @@
     },
     {
      "level": "SUMMARY",
-     "text": "The tools did not come back — what now?"
+     "text": "The tools did not come back: what now?"
     },
     {
      "level": "H2",
@@ -1390,15 +1390,15 @@
     },
     {
      "level": "H3",
-     "text": "Node 1 — the trips, from Postgres"
+     "text": "Node 1: the trips, from Postgres"
     },
     {
      "level": "H3",
-     "text": "Node 2 — the zones, from SQLite"
+     "text": "Node 2: the zones, from SQLite"
     },
     {
      "level": "H3",
-     "text": "Node 3 — the join, in staging"
+     "text": "Node 3: the join, in staging"
     },
     {
      "level": "H2",
@@ -1450,7 +1450,7 @@
     },
     {
      "level": "H3",
-     "text": "Read in place — no warehouse, no loader"
+     "text": "Read in place: no warehouse, no loader"
     },
     {
      "level": "H3",
@@ -1462,7 +1462,7 @@
     },
     {
      "level": "H3",
-     "text": "dp-catalog — our own registry"
+     "text": "dp-catalog, our own registry"
     },
     {
      "level": "H3",
@@ -1570,7 +1570,7 @@
     },
     {
      "level": "SUMMARY",
-     "text": "What is a pipeline here — a DAG, a notebook, a dbt project?"
+     "text": "What is a pipeline here: a DAG, a notebook, a dbt project?"
     },
     {
      "level": "SUMMARY",
@@ -1618,7 +1618,7 @@
     },
     {
      "level": "SUMMARY",
-     "text": "From data to an API in a day — is that real?"
+     "text": "From data to an API in a day: is that real?"
     },
     {
      "level": "SUMMARY",
@@ -1730,7 +1730,7 @@
     },
     {
      "level": "SUMMARY",
-     "text": "Something broke — where do I report it?"
+     "text": "Something broke: where do I report it?"
     },
     {
      "level": "SUMMARY",
@@ -1952,7 +1952,7 @@
    "headings": [
     {
      "level": "H1",
-     "text": "Turn a SQL query into a data API — versioned, parameterised, scoped by key"
+     "text": "Turn a SQL query into a data API: versioned, parameterised, scoped by key"
     },
     {
      "level": "H2",
@@ -1976,7 +1976,7 @@
     },
     {
      "level": "H2",
-     "text": "The result, paged, with a cursor — never a cached one"
+     "text": "The result, paged, with a cursor, never a cached one"
     },
     {
      "level": "H2",
@@ -2004,7 +2004,7 @@
     },
     {
      "level": "H2",
-     "text": "The API section: endpoints, keys, the MCP server — one screen"
+     "text": "The API section: endpoints, keys, the MCP server, one screen"
     },
     {
      "level": "H2",
@@ -2016,7 +2016,7 @@
     },
     {
      "level": "SUMMARY",
-     "text": "From data to an API in a day — is that real?"
+     "text": "From data to an API in a day: is that real?"
     }
    ]
   },
@@ -2039,19 +2039,19 @@
     },
     {
      "level": "H3",
-     "text": "Pipelines — author, run, inspect"
+     "text": "Pipelines: author, run, inspect"
     },
     {
      "level": "H3",
-     "text": "Templates — the SQL an agent writes"
+     "text": "Templates: the SQL an agent writes"
     },
     {
      "level": "H3",
-     "text": "Datasources — what the agent may see"
+     "text": "Datasources: what the agent may see"
     },
     {
      "level": "H3",
-     "text": "dp-lake — tables over your bucket"
+     "text": "dp-lake: tables over your bucket"
     },
     {
      "level": "H3",
@@ -2059,7 +2059,7 @@
     },
     {
      "level": "H3",
-     "text": "Executions — results and cancellation"
+     "text": "Executions: results and cancellation"
     },
     {
      "level": "H3",
@@ -2185,7 +2185,7 @@
    "headings": [
     {
      "level": "H1",
-     "text": "Publish a governed dataset for Tableau from Postgres, MySQL and S3 — without a warehouse"
+     "text": "Publish a governed dataset for Tableau from Postgres, MySQL and S3, without a warehouse"
     },
     {
      "level": "H2",
@@ -2205,7 +2205,7 @@
     },
     {
      "level": "H3",
-     "text": "Publish the endpoint — or write the table"
+     "text": "Publish the endpoint, or write the table"
     },
     {
      "level": "H3",
@@ -2248,7 +2248,7 @@
     },
     {
      "level": "H2",
-     "text": "What the nightly copy adds — and what answering in place removes"
+     "text": "What the nightly copy adds, and what answering in place removes"
     },
     {
      "level": "H3",
@@ -2337,7 +2337,7 @@
     },
     {
      "level": "H2",
-     "text": "What shows up with the second source — and the agent, and the partner"
+     "text": "What shows up with the second source, and the agent, and the partner"
     },
     {
      "level": "H3",
@@ -2426,7 +2426,7 @@
     },
     {
      "level": "H2",
-     "text": "Same job, different artifact — and the artifact decides the second week"
+     "text": "Same job, different artifact, and the artifact decides the second week"
     },
     {
      "level": "H2",
@@ -2529,7 +2529,7 @@
    "headings": [
     {
      "level": "H1",
-     "text": "Embedded dashboards, scheduled extracts to S3, data-driven alerts — the roadmap"
+     "text": "Embedded dashboards, scheduled extracts to S3, data-driven alerts: the roadmap"
     },
     {
      "level": "H2",
@@ -2735,7 +2735,7 @@
     },
     {
      "level": "H2",
-     "text": "From data to an API in a day — the shipped half"
+     "text": "From data to an API in a day: the shipped half"
     },
     {
      "level": "H2",
@@ -2860,7 +2860,7 @@
     },
     {
      "level": "H2",
-     "text": "Release when you trust it — and it is an API"
+     "text": "Release when you trust it, and it is an API"
     },
     {
      "level": "H2",
@@ -2876,7 +2876,7 @@
     },
     {
      "level": "SUMMARY",
-     "text": "A query is slow — how do I find out why?"
+     "text": "A query is slow: how do I find out why?"
     },
     {
      "level": "SUMMARY",
@@ -3103,7 +3103,7 @@
     },
     {
      "level": "SUMMARY",
-     "text": "From data to an API in a day — is that real?"
+     "text": "From data to an API in a day: is that real?"
     },
     {
      "level": "SUMMARY",

@@ -37,7 +37,7 @@
       </p>
       <!-- claim: docs/mcp-server.md §6.2.19 -->
       <p>
-        Introspection is a read, and it is scoped like everything else — the server builds the statement and quotes
+        Introspection is a read, and it is scoped like everything else: the server builds the statement and quotes
         every identifier itself; the agent supplies names, never SQL fragments.
       </p>
     </div>
@@ -55,7 +55,7 @@
       </p>
       <!-- claim: docs/templates.md §7.2, docs/templates.md §8.4 -->
       <p>
-        Values reach the SQL as bound parameters, never as interpolated strings — the template engine refuses the
+        Values reach the SQL as bound parameters, never as interpolated strings. The template engine refuses the
         interpolated form outright. That rule is not there for tidiness; it is what keeps an agent-authored query
         from becoming an injection surface.
       </p>
@@ -74,7 +74,7 @@
       </p>
       <!-- claim: docs/versioning.md §10.1 -->
       <p>
-        Moving a release into a higher environment is a human, UI-triggered action — there is no MCP tool for
+        Moving a release into a higher environment is a human, UI-triggered action, and there is no MCP tool for
         promotion and no schedule. An agent can author and run; a person promotes.
       </p>
     </div>
@@ -93,12 +93,12 @@
         <article class="card">
           <!-- claim: docs/auth.md §10.1, docs/mcp-server.md §14 -->
           <h3>Every call is in the audit log</h3>
-          <p><code>mcp.tool.called</code> for each call, <code>mcp.tool.write</code> for each mutating one — beside the login, key-issuance and decryption events.</p>
+          <p><code>mcp.tool.called</code> for each call, <code>mcp.tool.write</code> for each mutating one, beside the login, key-issuance and decryption events.</p>
         </article>
         <article class="card">
           <!-- claim: docs/rest-api.md §6 -->
           <h3>Execution is observable while it runs</h3>
-          <p>Per-milestone events stream over SSE with heartbeats, so the agent — and the human watching — know which node is running rather than waiting on a spinner.</p>
+          <p>Per-milestone events stream over SSE with heartbeats, so the agent, and the human watching, know which node is running rather than waiting on a spinner.</p>
         </article>
         <article class="card">
           <!-- claim: docs/pipeline-contract.md §13 -->
@@ -142,11 +142,11 @@
         Most data pipeline tools were built for a person at a keyboard and gained an AI feature later. This one is
         agent-native: the authoring surface is the MCP tool set, the person's job is review and release, and the
         artifact is designed to be read by both. Call it an AI-native data platform if the phrase helps, with two
-        honest limits — it runs SQL and nothing else, and it runs on demand, so an orchestrator still owns the
-        schedule. Beside an orchestrator (<a th:href="@{/compare/airflow}">Airflow</a>,
-        <a th:href="@{/compare/dagster-vs-airflow}">Dagster or Prefect</a>) it is the governed SQL step they call;
-        beside a modelling tool (<a th:href="@{/compare/dbt}">dbt</a>) it is the no-warehouse case; beside an ELT
-        tool (<a th:href="@{/compare/fivetran-airbyte}">Fivetran or Airbyte</a>) it is the query at the source
+        honest limits: it runs SQL and nothing else, and it runs on demand, so an orchestrator still owns the
+        schedule. Beside an orchestrator, <a th:href="@{/compare/airflow}">Airflow</a> or
+        <a th:href="@{/compare/dagster-vs-airflow}">Dagster or Prefect</a>, it is the governed SQL step they call;
+        beside a modelling tool such as <a th:href="@{/compare/dbt}">dbt</a> it is the no-warehouse case; beside an ELT
+        tool such as <a th:href="@{/compare/fivetran-airbyte}">Fivetran or Airbyte</a> it is the query at the source
         instead of the copy.
       </p>
     </div>
@@ -168,7 +168,7 @@
       <h2 id="cta-title" class="ds-headline">Watch an agent build one on the demo</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
-        Bring up the demo sources, describe a question in your own words, and read what the agent drafts — then
+        Bring up the demo sources, describe a question in your own words, and read what the agent drafts. Then
         release it, or don't. The artifact either way is a pipeline you can read.
       </p>
       <div class="btn-row">

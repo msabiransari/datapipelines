@@ -18,10 +18,10 @@
       <h1 id="cmp-title" class="ds-display">datapipelines.co vs dbt</h1>
       <p class="section-lede">
         The short version: if your data is already in a warehouse and the job is to model it, use dbt. Its whole
-        design — models as SELECT statements, lineage from references, tests and generated docs — assumes one
+        design of models as SELECT statements, lineage from references, and tests and generated docs assumes one
         warehouse that everything has already been loaded into. We assume the opposite: the data is still in the
         operational databases it was written to, and the question crosses them. So this is an alternative to dbt
-        only for that case — not a replacement for it where a warehouse already exists.
+        only for that case, not a replacement for it where a warehouse already exists.
       </p>
     </div>
   </section>
@@ -52,12 +52,12 @@
         <article class="card">
           <!-- claim: docs/datasources.md §4.1 -->
           <h3>The sources are operational databases</h3>
-          <p>Eight dialects, each with its own adapter and type mapping — the databases your applications actually write to, not a warehouse they were exported into.</p>
+          <p>Eight dialects, each with its own adapter and type mapping: the databases your applications actually write to, not a warehouse they were exported into.</p>
         </article>
         <article class="card">
           <!-- claim: docs/mcp-server.md §6.1 -->
           <h3>An agent is the author</h3>
-          <p>Introspect, create a template, create a pipeline, execute, read rows — the whole loop over MCP tools. dbt's authoring surface is a repository and a CLI, which is a different shape of collaboration.</p>
+          <p>Introspect, create a template, create a pipeline, execute, read rows: the whole loop over MCP tools. dbt's authoring surface is a repository and a CLI, which is a different shape of collaboration.</p>
         </article>
         <article class="card">
           <!-- claim: docs/datasources.md §5.7, docs/auth.md §10.1 -->
@@ -99,7 +99,7 @@
       <h2 id="cta-title" class="ds-headline">See the no-warehouse join on real data</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
-        The demo joins Postgres, MySQL, SQLite and Parquet on S3 in one pipeline — the workload dbt would need a
+        The demo joins Postgres, MySQL, SQLite and Parquet on S3 in one pipeline, the workload dbt would need a
         warehouse in front of, run without one.
       </p>
       <div class="btn-row">

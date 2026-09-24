@@ -42,11 +42,11 @@
   <section class="section page-hero" aria-labelledby="gd-title">
     <div class="container">
       <p class="kicker">How-to · about two hours the first time</p>
-      <h1 id="gd-title" class="ds-display">Publish a governed dataset for Tableau from Postgres, MySQL and S3 — without a warehouse</h1>
+      <h1 id="gd-title" class="ds-display">Publish a governed dataset for Tableau from Postgres, MySQL and S3, without a warehouse</h1>
       <p class="section-lede">
         The goal is a dataset Tableau reads that a person released, an agent maintains, and no one hand-copies between
-        systems. Six steps, each one a feature that ships today. The example is the demo's own data — taxi trips in
-        Postgres, weather in MySQL, zones in SQLite, rideshare trips as Parquet on S3 — so you can run every step on a
+        systems. Six steps, each one a feature that ships today. The example is the demo's own data, taxi trips in
+        Postgres, weather in MySQL, zones in SQLite and rideshare trips as Parquet on S3, so you can run every step on a
         laptop before you point it at your databases.
       </p>
     </div>
@@ -62,7 +62,7 @@
           <!-- claim: docs/datasources.md §3 -->
           <p>
             Each database and the bucket becomes a <em>datasource</em>: a name, a dialect, a connection, credentials
-            the server encrypts and never returns. Mark the ones the dataset only reads as <code>readonly</code> — a
+            the server encrypts and never returns. Mark the ones the dataset only reads as <code>readonly</code>; a
             pipeline that tries to write to them is refused at save time, before anything runs. The agent will see
             the names and the schemas; it will never see a password.
           </p>
@@ -88,13 +88,13 @@
           <!-- claim: docs/versioning.md §3 -->
           <p>
             Open the draft in the editor: the graph, each node's SQL, the result of the last run. Run it yourself. When
-            the numbers are the numbers, release it. A released version is immutable — the next change becomes a new
-            draft — and an agent cannot release, by design. The dataset Tableau will read is now a version with a
+            the numbers are the numbers, release it. A released version is immutable, so the next change becomes a new
+            draft, and an agent cannot release by design. The dataset Tableau will read is now a version with a
             number and a name on it.
           </p>
         </li>
         <li>
-          <h3>Publish the endpoint — or write the table</h3>
+          <h3>Publish the endpoint, or write the table</h3>
           <!-- claim: docs/rest-api.md §19 -->
           <p>
             <b>Endpoint:</b> publish the released pipeline under a path such as <code>/api/nyc/v1/rain-share</code>. A
@@ -113,7 +113,7 @@
           <!-- claim: docs/auth.md §7.7 -->
           <p>
             Issue an API key and bind it to the endpoint's path prefix. That key can call <code>/api/nyc/v1/…</code>
-            and nothing else — not the product's own API, not another team's endpoints. Give it to the workbook, the
+            and nothing else, not the product's own API and not another team's endpoints. Give it to the workbook, the
             partner, or the service that needs the dataset.
           </p>
           <div class="code-block">
@@ -128,7 +128,7 @@
           <p>
             For the endpoint, a web data connector that reads JSON over HTTP with a header is all Tableau needs; for
             the table, a live connection you already have. Either way the dataset behind the chart is a released
-            pipeline version — traceable, restorable, and maintained by an agent that reads the same specs you do.
+            pipeline version, traceable, restorable, and maintained by an agent that reads the same specs you do.
           </p>
         </li>
       </ol>
@@ -150,14 +150,14 @@
         <!-- claim: docs/auth.md §7.7 -->
         <p>
           Access is structural too. Keys are scoped to endpoint paths, so the surface each consumer sees is exactly
-          the surface you published — the way you would design it if you were building the API by hand, without
+          the API you published, the way you would design it if you were building the API by hand, without
           building the API by hand.
         </p>
         <!-- claim: docs/staging.md §3 -->
         <p>
           And there is still no warehouse. The join happens in a scratch database that exists for the run; nothing is
           copied anywhere permanent unless you chose a write-back. When Tableau's extracts arrive on the roadmap, they
-          land on your own bucket — the same principle, one step further.
+          land on your own bucket. The same principle, one step further.
         </p>
       </div>
     </div>
@@ -169,13 +169,13 @@
       <h2 id="gd-shots" class="ds-headline">The screens you will actually see</h2>
       <div class="shots">
         <figure class="shot">
-          <figcaption>A datasource with the read-only flag set — the agent sees the schema, never the credential.</figcaption>
+          <figcaption>A datasource with the read-only flag set. The agent sees the schema, never the credential.</figcaption>
           <div th:replace="~{site/_demo-datasources :: datasources(${facts.demo})}"></div>
         </figure>
       </div>
       <div class="prose">
         <!-- claim: docs/versioning.md §3 -->
-        <p>The release itself stays a person's step: the draft carries its pins until a human releases it — the
+        <p>The release itself stays a person's step: the draft carries its pins until a human releases it. The
           home page's pipeline shows the same state, a DRAFT bar waiting on that one decision, and then the
           endpoint answers as that version forever.</p>
       </div>

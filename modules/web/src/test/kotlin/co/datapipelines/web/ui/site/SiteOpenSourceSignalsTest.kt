@@ -59,7 +59,7 @@ class SiteOpenSourceSignalsTest {
         // The three placements the round names, beyond the footer every page carries.
         rendered.getValue(SitePages.PRICING) shouldContain "will help you connect"
         rendered.getValue(SitePages.SECURITY) shouldContain "Report a vulnerability"
-        rendered.getValue(SitePages.HOME) shouldContain "Contact — <span>$CONTACT_EMAIL</span>"
+        rendered.getValue(SitePages.HOME) shouldContain "Contact: <span>$CONTACT_EMAIL</span>"
     }
 
     @Test

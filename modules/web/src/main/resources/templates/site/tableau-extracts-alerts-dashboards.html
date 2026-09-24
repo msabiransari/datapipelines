@@ -7,7 +7,7 @@
     <ol>
       <li><a th:href="@{/}">Home</a></li>
       <li><a th:href="@{/tableau}">Tableau</a></li>
-      <li aria-current="page">Extracts, alerts, dashboards — the roadmap</li>
+      <li aria-current="page">Extracts, alerts, dashboards: the roadmap</li>
     </ol>
   </nav>
 
@@ -27,7 +27,7 @@
   {
     "@context": "https://schema.org",
     "@type": "Article",
-    "headline": "Embedded dashboards, scheduled extracts to your own bucket, email alerts — the roadmap beside Tableau",
+    "headline": "Embedded dashboards, scheduled extracts to your own bucket, email alerts: the roadmap beside Tableau",
     "datePublished": "2026-09-10",
     "dateModified": "2026-09-16",
     "author": { "@type": "Organization", "name": "datapipelines.co" },
@@ -39,13 +39,13 @@
   <section class="section page-hero" aria-labelledby="tr-title">
     <div class="container">
       <p class="kicker"><span class="status">Roadmap</span> none of this page is shipped; release dates are not announced</p>
-      <h1 id="tr-title" class="ds-display">Embedded dashboards, scheduled extracts to S3, data-driven alerts — the roadmap</h1>
+      <h1 id="tr-title" class="ds-display">Embedded dashboards, scheduled extracts to S3, data-driven alerts: the roadmap</h1>
       <p class="section-lede">
         This page describes the plans for these three features.
         <strong>None of this page is shipped; release dates are not announced.</strong> What ships today
         is the half these features stand on: a released pipeline, published as a versioned endpoint, that a
         dashboard would consume and an extract would materialise. Everything below says roadmap, planned, or
-        later — in as many words.
+        later, in as many words.
       </p>
       <p class="dateline" data-roadmap-updated="2026-09-16">Last updated 2026-09-16</p>
       <div class="btn-row">
@@ -63,14 +63,14 @@
         <!-- claim: docs/ROADMAP.md §2 -->
         <p>
           The roadmap's own words: <em>"dashboards, created by your agent, you embed in your own product, fed by
-          released pipelines and APIs, filtered per viewer."</em> Each clause is a decision. Created by your agent —
-          the same authoring surface that drafts a pipeline today. Embedded in your own product — not a hosted
-          portal you send people to; the chart lives behind your login. Fed by released pipelines and APIs — the
+          released pipelines and APIs, filtered per viewer."</em> Each clause is a decision. Created by your agent,
+          the same authoring tools that draft a pipeline today. Embedded in your own product, not a hosted
+          portal you send people to; the chart lives behind your login. Fed by released pipelines and APIs, the
           numbers are the ones a person released, not a query someone retyped.
         </p>
         <!-- claim: docs/templates.md §4.5 -->
         <p>
-          <strong>Filtered per viewer</strong> means: a value bound from the viewer's request — session or key —
+          <strong>Filtered per viewer</strong> means: a value bound from the viewer's request, from the session or the key,
           becomes a declared parameter of the released pipeline, and the released SQL filters on it. The same
           dashboard, every viewer, their own rows. That mechanism is not roadmap: declared parameters bind as
           prepared-statement values in the released pipelines served today, which is what the dashboard feature
@@ -79,9 +79,9 @@
         <p>
           The shape of the feature follows from the wording, and it is worth reading the clauses as commitments:
           "fed by released pipelines" means the dashboard cannot show a number that did not come from a version a
-          person released — the audit trail of a chart is the audit trail of a pipeline. "Embedded in your own
+          person released, so the audit trail of a chart is the audit trail of a pipeline. "Embedded in your own
           product" means there is no second portal to log into, no copy of your users to manage, and no hosted
-          tier — the chart renders where your users already are. And "created by your agent" means the authoring
+          tier, so the chart renders where your users already are. And "created by your agent" means the authoring
           loop is the one that already works: schemas in, draft out, run checked, person releases.
         </p>
       </div>
@@ -95,18 +95,18 @@
       <div class="prose">
         <!-- claim: docs/ROADMAP.md §3 -->
         <p>
-          The roadmap item: a scheduled pipeline materialises its result as Parquet on your own S3 bucket — the
+          The roadmap item: a scheduled pipeline materialises its result as Parquet files on your own S3 bucket, in the layout the lake already reads. The
           lake you already own becomes the extract store, with no second copy of the data anywhere else. Tableau
           reads Parquet natively, so the extract lands where the drawing tool already looks. Two pieces, in order:
-          the <strong>scheduler</strong> is the planned roadmap item — schedules in folders, fired exactly once
-          across instances, every run a first-class execution — and the extract itself is <strong>later</strong>,
+          the <strong>scheduler</strong> is the planned roadmap item, with schedules in folders, fired exactly once
+          across instances, every run a first-class execution. And the extract itself is <strong>later</strong>,
           decided but not dated. Until it ships, write-back can land a result in a datasource table a BI tool
           connects to, and the lake reads Parquet and Iceberg on S3 in place.
         </p>
         <p>
           Why your own bucket, and not a managed extract store? The same reason the rest of the product runs on
           your infrastructure: the extract is <em>your</em> data, in <em>your</em> bucket, under your retention
-          rules and your access rules — the server holds the schedule, the bucket holds the bytes, and either can
+          rules and your access rules: the server holds the schedule, the bucket holds the bytes, and either can
           be audited without the other. When the item ships, the extract's shape is the write-back node's contract
           pointed at object storage: a released pipeline's result, landed where a drawing tool already reads.
         </p>
@@ -122,17 +122,17 @@
         <!-- claim: docs/ROADMAP.md §3 -->
         <p>
           The roadmap item in full: a scheduled pipeline, a condition, an email. When a released pipeline's result
-          crosses a threshold you set — a number too low, a load too high — the schedule fires, the condition
+          crosses a threshold you set, a number too low or a load too high, the schedule fires, the condition
           decides, an email arrives. <strong>Email only.</strong> Nothing else is promised until it exists; there
           is no Slack connector on any roadmap, and the "what this is not" section below says so in as many words.
         </p>
         <p>
           Notice what the alert inherits from what ships: the number it watches is a released pipeline's output, so
-          an alert that fires is traceable to a version, a run and a result — not to a query somebody's laptop was
+          an alert that fires is traceable to a version, a run and a result, not to a query somebody's laptop was
           kind enough to finish. That inheritance is the design's whole argument, and it is why the item sits
           behind the scheduler on the roadmap rather than beside it: alerts without schedules are cron with
-          opinions. Until both ship, the closest honest substitutes are the ones already on this page — a scheduled
-          run a person checks, or an endpoint a monitor polls — and they keep the audit trail an alert would want.
+          opinions. Until both ship, the closest honest substitutes are the ones already on this page: a scheduled
+          run a person checks, or an endpoint a monitor polls. Both keep the audit trail an alert would want, with nothing new to trust.
         </p>
       </div>
     </div>
@@ -146,7 +146,7 @@
         <article class="card">
           <!-- claim: docs/ROADMAP.md §2 -->
           <h3>Not a Tableau Server replacement</h3>
-          <p>Drawing, workbooks and Tableau's own governance stay Tableau's. The roadmap items here are the three things Tableau users keep asking the pipeline to do — embed, extract, alert — not a suite to migrate to, and the <a th:href="@{/tableau}">Tableau page</a> keeps today's column honest.</p>
+          <p>Drawing, workbooks and Tableau's own governance stay Tableau's. The roadmap items here are the three things Tableau users keep asking the pipeline to do: embed, extract, alert. Not a suite to migrate to, and the <a th:href="@{/tableau}">Tableau page</a> keeps today's column honest.</p>
         </article>
         <article class="card">
           <!-- claim: docs/ROADMAP.md §3 -->
@@ -175,7 +175,7 @@
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
           <h3>The endpoint a dashboard will consume</h3>
-          <p>Release a pipeline, publish it under a path, and a <code>GET</code> serves the released version with bound parameters as typed JSON — <code>Cache-Control: no-store</code>, keys scoped to the path. The dashboard feature consumes exactly this contract.</p>
+          <p>Release a pipeline, publish it under a path, and a <code>GET</code> serves the released version with bound parameters as typed JSON. <code>Cache-Control: no-store</code>, keys scoped to the path. The dashboard feature consumes exactly this contract.</p>
         </article>
         <article class="card">
           <!-- claim: docs/templates.md §4.5 -->
@@ -185,12 +185,12 @@
         <article class="card">
           <!-- claim: docs/pipeline-contract.md §8 -->
           <h3>Write-back, the extract's small sibling</h3>
-          <p>A node can land its result in a datasource table today — the pattern a scheduled extract generalises to Parquet on your own bucket. One is shipped, one is planned; this page keeps the two apart.</p>
+          <p>A node can land its result in a datasource table today, the pattern a scheduled extract generalises to Parquet on your own bucket. One is shipped, one is planned; this page keeps the two apart.</p>
         </article>
         <article class="card">
           <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md -->
           <h3>Transform nodes, designed</h3>
-          <p>JSONata and JavaScript transform nodes — the shaping SQL is bad at, the pivot Prep did with a click — are the planned roadmap item beside the scheduler, with a design record on disk. Named as roadmap here; this page does not describe designs as shipped.</p>
+          <p>JSONata and JavaScript transform nodes, for the shaping SQL is bad at and the pivot Prep did with a click, are the planned roadmap item beside the scheduler, with a design record on disk. Named as roadmap here; this page does not describe designs as shipped.</p>
         </article>
       </div>
     </div>
@@ -213,7 +213,7 @@
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">
         Every item on this page consumes the same contract that ships today. Publish the endpoint now, and the
-        dashboard, the extract and the alert each become an addition — not a migration.
+        dashboard, the extract and the alert each become an addition, not a migration.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/published-api}">Publish the endpoint today</a>

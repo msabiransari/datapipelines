@@ -18,7 +18,7 @@
       <p class="kicker">Client setup</p>
       <h1 id="add-title" class="ds-display">Add an MCP server to Claude Code, Cursor or Copilot</h1>
       <p class="section-lede">
-        This page sets up <strong>one particular MCP server</strong> — datapipelines.co's, the one that puts your
+        This page sets up <strong>one particular MCP server</strong>, datapipelines.co's, the one that puts your
         SQL databases behind scoped, audited, read-only-by-default credentials. It is not a general directory of
         MCP servers. If you came looking for how the <code>mcp add</code> mechanics work, they are the same either
         way, and the four steps below are the whole job.
@@ -37,7 +37,7 @@
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/deployment.md §3.5 -->
-      <p>For your own databases, register a datasource per engine — Postgres, SQL Server, SQLite, DuckDB, H2 and dp-lake ship in the published image; the MySQL and Oracle drivers you supply, because of their licenses. <a th:href="@{/mcp-server-for-sql-databases}">Engine-by-engine details</a>.</p>
+      <p>For your own databases, register a datasource per engine. Postgres, SQL Server, SQLite, DuckDB, H2 and dp-lake ship in the published image; you supply the MySQL and Oracle drivers, because of their licenses. <a th:href="@{/mcp-server-for-sql-databases}">Engine-by-engine details</a>.</p>
     </div>
   </section>
 
@@ -62,7 +62,7 @@
         <tbody>
           <tr><th scope="row">Viewer</th><td>browse pipelines, templates, datasources and past executions, and run pipelines</td></tr>
           <tr><th scope="row">Author</th><td>also create and update pipelines and templates, and introspect schemas</td></tr>
-          <tr><th scope="row">Promoter</th><td>read released-and-newer pipelines and templates — the promotion reviewer's reach, nothing executable</td></tr>
+          <tr><th scope="row">Promoter</th><td>read released-and-newer pipelines and templates. That is the promotion reviewer's reach, nothing executable</td></tr>
           <tr><th scope="row">Workspace admin</th><td>everything the author may do, plus the workspace's administration</td></tr>
         </tbody>
       </table>
@@ -80,7 +80,7 @@
       <!-- claim: docs/mcp-server.md §3.2, docs/mcp-server.md §4.1 -->
       <p class="section-lede">
         Every client needs the same two facts: the endpoint <code>POST {host}/mcp</code>, over Streamable HTTP, and
-        an API key in <code>DP-API-Key</code> — or in <code>Authorization: Bearer dpk_…</code>, for clients that can
+        an API key in <code>DP-API-Key</code>, or in <code>Authorization: Bearer dpk_…</code> for clients that can
         only set the standard header. Both route through the identical validation path. Browser session cookies are
         rejected on <code>/mcp</code>, deliberately.
       </p>
@@ -91,7 +91,7 @@
 
       <p class="demo-note">
         The URL and the header are ours, and specified above. The file names and the JSON shape around them belong
-        to each client and change when its vendor changes them — check the client's own documentation if a block
+        to each client and change when its vendor changes them. Check the client's own documentation if a block
         here is refused, and tell us so we can fix the page.
       </p>
     </div>
@@ -110,10 +110,10 @@
       <!-- claim: docs/mcp-server.md §4.2 -->
       <h3>If it does not connect</h3>
       <ul class="fact-list fact-list-plain">
-        <li><strong><code>401 auth.api_key.missing</code></strong> — the header did not arrive. Check the header name, and that the client sends headers at all on HTTP transports.</li>
-        <li><strong><code>401 auth.api_key.invalid</code> or <code>auth.api_key.expired</code></strong> — wrong, revoked, expired, or the owning user is deactivated.</li>
-        <li><strong><code>403 auth.scope.insufficient</code> or <code>auth.role_required</code></strong> — the key is real and your role in that workspace is too small for what the agent tried. The key follows the role: ask a workspace admin to raise it rather than looking for a wider key — none exists.</li>
-        <li><strong>Silent rejection of a browser session</strong> — expected. <code>/mcp</code> takes API keys only; a cookie will never work there.</li>
+        <li><strong><code>401 auth.api_key.missing</code></strong>: the header did not arrive. Check the header name, and that the client sends headers at all on HTTP transports.</li>
+        <li><strong><code>401 auth.api_key.invalid</code> or <code>auth.api_key.expired</code></strong>: wrong, revoked, expired, or the owning user is deactivated.</li>
+        <li><strong><code>403 auth.scope.insufficient</code> or <code>auth.role_required</code></strong>: the key is real and your role in that workspace is too small for what the agent tried. The key follows the role: ask a workspace admin to raise it rather than looking for a wider key. None exists.</li>
+        <li><strong>Silent rejection of a browser session</strong>: expected. <code>/mcp</code> takes API keys only; a cookie will never work there.</li>
       </ul>
       <p><a th:href="@{/docs/mcp-server}">The MCP server specification &rarr;</a> &middot;
          <a th:href="@{/docs/auth}">Authentication and scopes &rarr;</a></p>

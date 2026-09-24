@@ -26,7 +26,7 @@
       <p class="eyebrow">Run it, then build on it</p>
       <h1 id="hiw-hero-title" class="ds-display">How it works: the MCP server tutorial, end to end on your laptop</h1>
       <!-- claim: docs/deployment.md Appendix B (the demo quickstart), docs/mcp-server.md §3 (the endpoint), docs/rest-api.md §19 (the published endpoint) -->
-      <p class="lede">Eight steps, each executed on a fresh checkout before it was written here: start the server with sample data, copy your MCP key from the top bar, connect Claude Code, Cursor or Copilot over MCP, let the agent author and run a pipeline, release it, publish it as an API, scope a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
+      <p class="lede">Eight steps, each executed on a fresh checkout before it was written here. Start the server with sample data. Copy your MCP key from the top bar. Connect Claude Code, Cursor or Copilot over MCP. Let the agent author and run a pipeline, release it, publish it as an API, scope a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
       <div class="actions">
         <a class="btn btn-primary" href="#quickstart">Start at step 1 <span aria-hidden="true">&rarr;</span></a>
         <a class="btn btn-secondary" href="#engineering">Skip to the engineering depth</a>
@@ -40,12 +40,12 @@
       <p class="kicker">Step 1</p>
       <h2 id="quickstart-title" class="ds-headline">Run it locally, with sample data</h2>
       <!-- claim: app.sh (the header's usage block: Docker builds the jar in a throwaway JDK container), docs/deployment.md Appendix B (the demo families) -->
-      <p class="section-lede">You need Docker with the compose plugin and a checkout of the repository — nothing else. The build runs inside a throwaway JDK container, so there is no local Java to install. One command:</p>
+      <p class="section-lede">You need Docker with the compose plugin and a checkout of the repository. Nothing else. The build runs inside a throwaway JDK container, so there is no local Java to install. One command:</p>
       <div class="quick-code">
         <button class="copy-btn" type="button" hidden>Copy</button>
         <pre class="code" id="demo-command">./app.sh --start --demo nyc,trade,lake</pre>
       </div>
-      <p><strong>What you see.</strong> The first build is the slow one (the dependency cache is cold); later starts reuse it. When the stack is healthy the script prints the address and the login it seeded:</p>
+      <p><strong>What you see.</strong> The first build is the slow one because the dependency cache is cold. Later starts reuse it. When the stack is healthy the script prints the address and the login it seeded:</p>
       <div class="code-block">
         <pre><code>==&gt; UP — http://localhost:8080
 ==&gt; LOGIN: admin@local.test / &lt;a generated one-time password&gt;
@@ -56,13 +56,13 @@
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/auth.md §5A.2 (the seed fires once), §5A.4 (the forced change), docs/auth.md §4.2 step 4 (login lands in the shipped demo workspace) -->
-      <p><strong>What just happened.</strong> The script started Postgres, Redis, the app and the demo loaders, ran the migrations and seeded the first admin behind a one-time password. The <code>--demo</code> flag restored three published sample families — NYC taxi trips on Postgres, NOAA weather on MySQL and the zone reference on SQLite; US trade at HS-6 grain on DuckDB; and a rideshare lake read in place as Parquet and Iceberg on S3 — and registered them as read-only datasources with example pipelines beside them.</p>
-      <p>Now open <code>http://localhost:8080</code> and sign in with the printed login. The app forces a password change (twelve characters or more) before anything else, then lands on the dashboard — already inside the <code>demo</code> workspace, which is where the example pipelines live.</p>
+      <p><strong>What just happened.</strong> The script started Postgres, Redis, the app and the demo loaders, ran the migrations and seeded the first admin behind a one-time password. The <code>--demo</code> flag restored three published sample families and registered them as read-only datasources with example pipelines beside them: NYC taxi trips on Postgres, NOAA weather on MySQL, the zone reference on SQLite, US trade at HS-6 grain on DuckDB, and a rideshare lake read in place as Parquet and Iceberg on S3.</p>
+      <p>Now open <code>http://localhost:8080</code> and sign in with the printed login. The app forces a password change of twelve characters or more before anything else, then lands on the dashboard. You are already inside the <code>demo</code> workspace, which is where the example pipelines live.</p>
       <div>
         <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Sign in</span><span class="tag">Screenshot</span></div>
         <img src="/site/img/tutorial-login.png" width="2880" height="1800" loading="lazy" alt="The sign-in screen of a local datapipelines deployment: email and password fields, no identity provider configured.">
-        <figcaption>The sign-in screen of a fresh local deployment — local password accounts, no OIDC client to configure.</figcaption>
+        <figcaption>The sign-in screen of a fresh local deployment. It uses local password accounts, and there is no OIDC client to configure.</figcaption>
         </figure>
       </div>
     </div>
@@ -82,7 +82,7 @@
         <figcaption>The MCP-key chip in the top bar: prefix, Copy, and delete-to-rotate.</figcaption>
         </figure>
       </div>
-      <p><strong>What you see.</strong> Exactly one key per workspace per person — the demo login's role there is admin, so its reach is <code>read</code>, <code>execute</code> and <code>author</code>: the whole ladder an authoring agent needs. A viewer's key would carry read and execute; the role decides, never a form.</p>
+      <p><strong>What you see.</strong> You get exactly one key per workspace per person. The demo login's role is admin, so its reach is <code>read</code>, <code>execute</code> and <code>author</code>. That is the whole ladder an authoring agent needs. A viewer's key would carry read and execute. The role decides, never a form.</p>
       <!-- claim: docs/auth.md §7.4 (minted at login; pinned to the workspace; rotation is delete + sign in), docs/rest-api.md §16.1 (the /mine read) -->
       <p><strong>What just happened.</strong> The key was created when you signed in and pinned to the workspace you entered, <code>demo</code> here. It is sealed at rest so the top bar can open it for a copy. There is no endpoint that creates one, on purpose: <code>GET /api/v1/auth/api-keys/mine</code> reads it, and rotating it means deleting it with the chip's button and signing in again. Administration stays with signed-in people; no key can hold it.</p>
     </div>
@@ -94,11 +94,11 @@
       <p class="kicker">Step 3</p>
       <h2 id="step-connect-title" class="ds-headline">Point the agent at <code>/mcp</code></h2>
       <!-- claim: docs/mcp-server.md §3.2 (Streamable HTTP, one endpoint), §4.1 (the DP-API-Key header; sessions refused) -->
-      <p class="section-lede"><strong>What you do.</strong> Every client needs the same two facts: the endpoint <code>POST http://localhost:8080/mcp</code> and the key from step 2 in the <code>DP-API-Key</code> header. The blocks below are the ones <a th:href="@{/add-mcp-server-to-claude-code}">the setup page</a> shows — one shared fragment, so the two pages cannot drift.</p>
+      <p class="section-lede"><strong>What you do.</strong> Every client needs the same two facts: the endpoint <code>POST http://localhost:8080/mcp</code> and the key from step 2 in the <code>DP-API-Key</code> header. The blocks below are the ones <a th:href="@{/add-mcp-server-to-claude-code}">the setup page</a> shows. They are one shared fragment, so the two pages cannot drift.</p>
 
       <div th:replace="~{site/fragments/mcp-client-configs :: clientConfigs('http://localhost:8080')}"></div>
 
-      <p><strong>What you see</strong> (Claude Code, on the run this page was written from):</p>
+      <p><strong>What you see</strong>, from Claude Code on the run this page was written from:</p>
       <div class="code-block">
         <pre><code>$ claude mcp list
 …
@@ -106,7 +106,7 @@ datapipelines: http://localhost:8080/mcp (HTTP) - ✔ Connected</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/mcp-server.md §6.1 (the catalog size renders from the code), §4.1 (API keys only) -->
-      <p><strong>What just happened.</strong> The client ran the MCP <code>initialize</code> handshake against <code>/mcp</code> with the key, and the server answered with its capabilities and its working instructions — the authoring flow, the naming rules, and what it may not do. The endpoint accepts API keys only; a browser session is refused, deliberately. Exactly <span th:text="${facts.toolCount}">30</span> tools cover the full lifecycle, starting with <code>pipelines_list</code> and <code>datasources_list</code>.</p>
+      <p><strong>What just happened.</strong> The client ran the MCP <code>initialize</code> handshake against <code>/mcp</code> with the key, and the server answered with its capabilities and its working instructions: the authoring flow, the naming rules, and what it may not do. The endpoint accepts API keys only; a browser session is refused, deliberately. Exactly <span th:text="${facts.toolCount}">30</span> tools cover the full lifecycle, starting with <code>pipelines_list</code> and <code>datasources_list</code>.</p>
     </div>
   </section>
 
@@ -125,19 +125,19 @@ anything. Stop after reporting.</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/mcp-server.md §6 (the tool sequence the server instructs), .agents/skills/datapipelines/SKILL.md (the golden path) -->
-      <p><strong>What you see.</strong> The agent works the server's own authoring flow, in this order — the calls below are from the run's transcript:</p>
+      <p><strong>What you see.</strong> The agent works the server's own authoring flow, in this order. The calls below are from the run's transcript:</p>
       <ol class="fact-list">
-        <li><code>pipelines_list</code> and <code>datasources_list</code> — the existing folders and the demo datasources.</li>
-        <li><code>datasources_get_schemas</code> → <code>get_tables</code> → <code>get_columns</code> — the real columns, read, never recalled.</li>
-        <li><code>sql_probe</code> — candidate SQL against each source, before anything exists.</li>
-        <li><code>templates_create</code> and <code>templates_render</code> — the SQL previewed before a pipeline references it.</li>
-        <li><code>pipelines_create</code> — <code>test/borough_fare_by_weather</code>, a versioned JSON DAG of SQL nodes.</li>
-        <li><code>pipelines_execute</code> → <code>executions_get_result</code> — <strong>SUCCESS</strong>, 12 rows in under four seconds.</li>
-        <li><code>pipelines_run_checks</code> — the release checks pass.</li>
+        <li><code>pipelines_list</code> and <code>datasources_list</code>: the existing folders and the demo datasources.</li>
+        <li><code>datasources_get_schemas</code> → <code>get_tables</code> → <code>get_columns</code>: the real columns, read, never recalled.</li>
+        <li><code>sql_probe</code>: candidate SQL against each source, before anything exists.</li>
+        <li><code>templates_create</code> and <code>templates_render</code>: the SQL previewed before a pipeline references it.</li>
+        <li><code>pipelines_create</code>: <code>test/borough_fare_by_weather</code>, a versioned JSON DAG of SQL nodes.</li>
+        <li><code>pipelines_execute</code> → <code>executions_get_result</code>: <strong>SUCCESS</strong>, 12 rows in under four seconds.</li>
+        <li><code>pipelines_run_checks</code>: the release checks pass.</li>
       </ol>
-      <p>The first rows of the answer (2024, defaults; <em>est ×16</em> scales the 1-in-16 sample to the population):</p>
+      <p>The first rows of the answer, on 2024 defaults. The <em>est ×16</em> column scales the 1-in-16 sample to the population:</p>
       <table class="facts-table">
-        <caption>Fare revenue per borough, rainy vs dry days — the pipeline's first rows.</caption>
+        <caption>Fare revenue per borough, rainy vs dry days. The pipeline's first rows.</caption>
         <thead>
           <tr><th scope="col">Borough</th><th scope="col">Weather</th><th scope="col">Days</th><th scope="col">Trips</th><th scope="col">Fare, sampled</th><th scope="col">Fare, est ×16</th></tr>
         </thead>
@@ -156,7 +156,7 @@ anything. Stop after reporting.</code></pre>
         </figure>
       </div>
       <!-- claim: docs/staging.md §3 (the per-run in-memory staging database), docs/datasources.md §4.1 (the engines), docs/mcp-server.md (no tool releases — the draft waits for a person) -->
-      <p><strong>What just happened.</strong> Each node read its own engine — trips from Postgres, rainfall from MySQL, the borough lookup from SQLite — and the federated join happened in a per-run in-memory staging database that exists only for the execution. Nothing was copied into a warehouse first. And the agent stopped at <strong>draft</strong>: no MCP tool can release anything, which is a design rule, not a limitation of the demo.</p>
+      <p><strong>What just happened.</strong> Each node read its own engine: trips from Postgres, rainfall from MySQL, the borough lookup from SQLite. The federated join happened in a per-run in-memory staging database that exists only for the execution. Nothing was copied into a warehouse first. And the agent stopped at <strong>draft</strong>, because no MCP tool can release anything. That is a design rule, not a demo limitation.</p>
     </div>
   </section>
 
@@ -166,7 +166,7 @@ anything. Stop after reporting.</code></pre>
       <p class="kicker">Step 5</p>
       <h2 id="step-release-title" class="ds-headline">A person releases it</h2>
       <!-- claim: docs/versioning.md §5.3 (the release preconditions), docs/auth.md §7.6 (release needs the promote role; no MCP tool releases) -->
-      <p class="section-lede"><strong>What you do.</strong> Open the pipeline in the editor and choose <strong>Release v1…</strong>. This is the step the agent cannot do for you: release needs the <code>promote</code> role — the bootstrap admin from step 1 holds it — and there is deliberately no MCP tool for it.</p>
+      <p class="section-lede"><strong>What you do.</strong> Open the pipeline in the editor and choose <strong>Release v1…</strong>. This is the step the agent cannot do for you. Release needs the <code>promote</code> role, which the bootstrap admin from step 1 holds, and there is deliberately no MCP tool for it.</p>
       <div>
         <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Release step</span><span class="tag">Screenshot</span></div>
@@ -174,9 +174,9 @@ anything. Stop after reporting.</code></pre>
         <figcaption>The release dialog: the pins answered before the button, the check verdicts, the version about to lock.</figcaption>
         </figure>
       </div>
-      <p><strong>What you see.</strong> The dialog runs the pipeline's release checks as it opens and answers every template pin before it offers the button — the two draft templates the agent created ride along through the checked consent. One click, and the response flips the pipeline to <code>RELEASED</code>.</p>
+      <p><strong>What you see.</strong> The dialog runs the pipeline's release checks as it opens and answers every template pin before it offers the button. The two draft templates the agent created ride along through the checked consent. One click, and the response flips the pipeline to <code>RELEASED</code>.</p>
       <!-- claim: docs/versioning.md §3 (a release is immutable; the next change is a new draft), docs/rest-api.md §5.10 (the REST twin) -->
-      <p><strong>What just happened.</strong> Version 1 became immutable. Everything that serves the pipeline — executions, and the endpoint you are about to publish — now runs the released logic; a further change is a new draft that changes nothing live. The same release exists as <code>POST /api/v1/pipelines/{id}/release</code>.</p>
+      <p><strong>What just happened.</strong> Version 1 became immutable. Everything that serves the pipeline now runs the released logic: the executions, and the endpoint you are about to publish. A further change is a new draft that changes nothing live. The same release exists as <code>POST /api/v1/pipelines/{id}/release</code>.</p>
     </div>
   </section>
 
@@ -185,7 +185,7 @@ anything. Stop after reporting.</code></pre>
     <div class="container">
       <p class="kicker">Step 6</p>
       <h2 id="step-publish-title" class="ds-headline">Publish it as an API</h2>
-      <p class="section-lede"><strong>What you do.</strong> One POST — from a shell, or the <code>endpoints_create</code> MCP tool if the agent is doing it:</p>
+      <p class="section-lede"><strong>What you do.</strong> One POST, from a shell, or the <code>endpoints_create</code> MCP tool if the agent is doing it:</p>
       <div class="code-block">
         <pre><code>curl -X POST http://localhost:8080/api/v1/endpoints \
   -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;" -H "Content-Type: application/json" \
@@ -204,7 +204,7 @@ anything. Stop after reporting.</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/rest-api.md §19.2 (released and side-effect-free), §19.1 (the path grammar; v* and api are reserved categories) -->
-      <p><strong>What just happened.</strong> Publication is refused unless the pipeline has a released version and is side-effect-free — every node reads, and writes at most to the per-run tempdb or to the caller — which is what makes a <code>GET</code> safe to retry, preload or crawl. The path is <em>category, version, path</em>; a category like <code>v1</code> or the literal <code>api</code> can never be published, so a published path cannot shadow a product route by construction. The API section in the UI lists the endpoint; managing it stays on REST and MCP.</p>
+      <p><strong>What just happened.</strong> Publication is refused unless the pipeline has a released version and is side-effect-free. Every node reads, and writes at most to the per-run tempdb or to the caller. That is what makes a <code>GET</code> safe to retry, preload or crawl. The path is <em>category, version, path</em>, and a category like <code>v1</code> or the literal <code>api</code> can never be published, so a published path can never shadow a product route. The API section in the UI lists the endpoint; managing it stays on REST and MCP.</p>
     </div>
   </section>
 
@@ -213,7 +213,7 @@ anything. Stop after reporting.</code></pre>
     <div class="container">
       <p class="kicker">Step 7</p>
       <h2 id="step-endpoint-key-title" class="ds-headline">Scope an API key to the endpoint</h2>
-      <p class="section-lede"><strong>What you do.</strong> An <strong>admin creates an API key</strong> on the <strong>API keys</strong> page (<code>/api-keys</code>) and <strong>associates</strong> it with the endpoint's path — in the demo you are the admin, so this is you. Kind <em>API key</em> (the <code>endpoint</code> kind on the wire), a name, the path under <em>Associated endpoints</em> — or over REST:</p>
+      <p class="section-lede"><strong>What you do.</strong> An <strong>admin creates an API key</strong> on the <strong>API keys</strong> page at <code>/api-keys</code> and <strong>associates</strong> it with the endpoint's path. In the demo you are the admin, so this is you. Pick the kind <em>API key</em>, which is the <code>endpoint</code> kind on the wire, add a name, and set the path under <em>Associated endpoints</em>. Or do it over REST:</p>
       <div class="code-block">
         <pre><code>curl -X POST http://localhost:8080/api/v1/auth/api-keys \
   -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;" -H "Content-Type: application/json" \
@@ -229,7 +229,7 @@ anything. Stop after reporting.</code></pre>
         </figure>
       </div>
       <!-- claim: docs/auth.md §7.7 (an endpoint key's authority is its bindings; nearest ancestor wins), docs/rest-api.md §19.3 (a session is a 401 here) -->
-      <p><strong>What just happened.</strong> An endpoint key carries no scopes at all — its authority is exactly its bindings, and the nearest bound ancestor decides: a binding to <code>/nyc</code> would cover every endpoint under it. The negative control, from the same run: the agent's key from step 2 — which authored the pipeline — is refused here:</p>
+      <p><strong>What just happened.</strong> An endpoint key carries no scopes at all. Its authority is exactly its bindings, and the nearest bound ancestor decides: a binding to <code>/nyc</code> would cover every endpoint under it. The negative control, from the same run: the agent's key from step 2, the one that authored the pipeline, is refused here:</p>
       <div class="code-block">
         <pre><code>$ curl http://localhost:8080/api/nyc/v1/borough-fare-by-weather \
     -H "DP-API-Key: dpk_&lt;the agent key&gt;"
@@ -244,13 +244,13 @@ anything. Stop after reporting.</code></pre>
     <div class="container">
       <p class="kicker">Step 8</p>
       <h2 id="step-call-title" class="ds-headline">Call it, and page the result</h2>
-      <p class="section-lede"><strong>What you do.</strong> A GET with the endpoint key — no session, no SDK:</p>
+      <p class="section-lede"><strong>What you do.</strong> A GET with the endpoint key. No session, no SDK:</p>
       <div class="code-block">
         <pre><code>curl http://localhost:8080/api/nyc/v1/borough-fare-by-weather \
   -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
-      <p><strong>What you see.</strong> <code>200</code> and the first page with its cursor (trimmed — the run returned 12 rows):</p>
+      <p><strong>What you see.</strong> <code>200</code>, and the first page with its cursor. The output below is trimmed; the run returned 12 rows:</p>
       <div class="code-block">
         <pre><code>{
   "execution_id": "2e9236bd-707d-4f23-b71a-8757ad9ae64b",
@@ -263,7 +263,7 @@ anything. Stop after reporting.</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
       <!-- claim: docs/rest-api.md §19.4 (the data_ready payload, 202 on timeout), §19.3 (strict parameter validation), §7.2 (the cursor's offset/limit) -->
-      <p><strong>What just happened.</strong> The endpoint executed the latest released version in-process, audited against the key, and materialized the full result before answering: <code>DP-Result-Page-Rows: 5</code> returns five rows with <code>has_more: true</code>, and the cursor pages the rest — <code>GET …/result?offset=5&amp;limit=5</code> — inside the TTL. The pipeline's declared parameters arrive as the query string (<code>?year=2023</code>), and validation is strict on purpose: a typo like <code>?yr=2023</code> is a <code>400</code> listing every accepted parameter, because a silently defaulted year would return plausible, wrong rows. A run that outlives the endpoint's timeout answers <code>202</code> with the cursor instead of an error — the answer is coming.</p>
+      <p><strong>What just happened.</strong> The endpoint executed the latest released version in-process, audited against the key, and materialized the full result before answering. <code>DP-Result-Page-Rows: 5</code> returns five rows with <code>has_more: true</code>, and the cursor pages the rest inside the TTL with <code>GET …/result?offset=5&amp;limit=5</code>. The pipeline's declared parameters arrive as the query string, like <code>?year=2023</code>. Validation is strict on purpose: a typo like <code>?yr=2023</code> is a <code>400</code> listing every accepted parameter, because a silently defaulted year would return plausible, wrong rows. A run that outlives the endpoint's timeout answers <code>202</code> with the cursor instead of an error. The answer is coming.</p>
     </div>
   </section>
 
@@ -278,7 +278,7 @@ anything. Stop after reporting.</code></pre>
       <div class="section-title">
         <p class="eyebrow">Inside the application</p>
         <h2 id="application-title">See the work behind the result.</h2>
-        <p>Real screens, photographed from a running demo deployment — the pipeline as it is built, the result as it is checked, and the release a person approves.</p>
+        <p>Real screens, photographed from a running demo deployment: the pipeline as it is built, the result as it is checked, and the release a person approves.</p>
       </div>
       <div class="media-gallery">
         <figure class="media-frame" id="shot-pipeline">
@@ -301,7 +301,7 @@ anything. Stop after reporting.</code></pre>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Pipeline editor</span><span class="tag">Screenshot</span></div>
           <img src="/site/img/graph-cards.png" width="1440" height="900" loading="lazy" alt="The same editor with the workspace rail open: the graph of node cards and the results dock beneath.">
-          <figcaption>The same run with the workspace rail open — cards, dependencies and the fit-to-view controls.</figcaption>
+          <figcaption>The same run with the workspace rail open: cards, dependencies and the fit-to-view controls.</figcaption>
         </figure>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Datasources</span><span class="tag">Screenshot</span></div>
@@ -316,7 +316,7 @@ anything. Stop after reporting.</code></pre>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Templates</span><span class="tag">Screenshot</span></div>
           <img src="/site/img/template-explorer.png" width="1440" height="900" loading="lazy" alt="The template explorer: the folder tree on the left, the selected template's version list on the right.">
-          <figcaption>The template explorer — folders on the left, the selected template's versions on the right.</figcaption>
+          <figcaption>The template explorer: folders on the left, the selected template's versions on the right.</figcaption>
         </figure>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Templates</span><span class="tag">Screenshot</span></div>
@@ -326,12 +326,12 @@ anything. Stop after reporting.</code></pre>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API keys</span><span class="tag">Screenshot</span></div>
           <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The top bar's right side: the MCP-key chip with its prefix, a Copy button and a delete-to-rotate button.">
-          <figcaption>Your MCP key — copy it from the top bar.</figcaption>
+          <figcaption>Your MCP key. Copy it from the top bar.</figcaption>
         </figure>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Executions</span><span class="tag">Screenshot</span></div>
           <img src="/site/img/executions.png" width="1440" height="900" loading="lazy" alt="The execution history table listing past runs with their status and duration, newest first.">
-          <figcaption>The execution history — every run, its status and duration, newest first.</figcaption>
+          <figcaption>The execution history: every run, its status and duration, newest first.</figcaption>
         </figure>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Dark shell</span><span class="tag">Screenshot</span></div>
@@ -341,12 +341,12 @@ anything. Stop after reporting.</code></pre>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Workspaces</span><span class="tag">Screenshot</span></div>
           <img src="/site/img/workspaces.png" width="1440" height="900" loading="lazy" alt="The workspaces page listing workspaces and each workspace's members with their roles.">
-          <figcaption>Workspaces and members — the boundaries around who sees what.</figcaption>
+          <figcaption>Workspaces and members: the boundaries around who sees what.</figcaption>
         </figure>
         <figure class="media-frame">
           <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Failure detail</span><span class="tag">Screenshot</span></div>
           <img src="/site/img/failure-detail.png" width="1440" height="900" loading="lazy" alt="A deliberately failing pipeline in the editor: the failed node on the canvas and the full error chain in the Errors tab.">
-          <figcaption>A deliberately failing pipeline — the error chain on the record, not hidden.</figcaption>
+          <figcaption>A deliberately failing pipeline. The error chain is on the record, not hidden.</figcaption>
         </figure>
       </div>
     </div>
@@ -364,7 +364,7 @@ anything. Stop after reporting.</code></pre>
       <p class="section-lede">
         The steps above ran the product. From here down is the mechanism behind them: what a
         dataset is here, where it runs, what the agent may and may not do, and what a release
-        costs you. Every card below cites the spec section it comes from — view source and
+        costs you. Every card below cites the spec section it comes from. View source and
         spot-check us.
       </p>
       <ul class="jump-list" aria-label="On this page">
@@ -390,8 +390,8 @@ anything. Stop after reporting.</code></pre>
         <!-- claim: docs/versioning.md §3 (a release is immutable), docs/rest-api.md §19 (published as a GET endpoint) -->
         <p>
           A dataset here is a pipeline: a versioned JSON DAG of SQL nodes the agent authors over MCP against your
-          real schemas. Each node runs on its own engine — Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB,
-          Parquet and Iceberg on S3 through dp-lake — and cross-engine joins happen in an in-memory staging database
+          real schemas. Each node runs on its own engine: Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB, or
+          Parquet and Iceberg on S3 through dp-lake. Cross-engine joins happen in an in-memory staging database
           that exists only for the run. Nothing is copied to a warehouse; nothing lands. A release is immutable, and
           a released pipeline can be published as a GET endpoint.
         </p>
@@ -416,7 +416,7 @@ anything. Stop after reporting.</code></pre>
         <li th:each="e : ${engines}"><a th:href="@{'/mcp-server/' + ${e.slug}}" th:text="|${e.displayName} MCP server|">Engine MCP server</a></li>
       </ul>
       <!-- claim: docs/datasources.md §4.1 (the LAKE row), §8C -->
-      <p class="engine-strip-more">Every dialect has its page — H2 (also the staging engine) and dp-lake (<code>LAKE</code>: Parquet and Iceberg on S3 read in place) included. <a th:href="@{/dp-lake}">The dp-lake product page &rarr;</a></p>
+      <p class="engine-strip-more">Every dialect has its page. That includes H2, also the staging engine, and dp-lake, the <code>LAKE</code> dialect that reads Parquet and Iceberg on S3 in place. <a th:href="@{/dp-lake}">The dp-lake product page &rarr;</a></p>
       <p class="engine-strip-more"><a th:href="@{/mcp-server-for-sql-databases}">Start with the SQL MCP server overview &rarr;</a></p>
     </div>
   </section>
@@ -428,7 +428,7 @@ anything. Stop after reporting.</code></pre>
     <div class="container">
       <p class="kicker">Shipped, not promised</p>
       <h2 id="cap-title" class="ds-headline">What's in the box</h2>
-      <p class="section-lede">Each card cites the spec section it comes from — view source and spot-check us. Caveats included where they exist — honesty is the brand.</p>
+      <p class="section-lede">Each card cites the spec section it comes from. View source and spot-check us. Caveats included where they exist. Honesty is the brand.</p>
 
       <div class="feature-group">
         <h3 class="group-title">Author</h3>
@@ -441,7 +441,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/pipeline-contract.md §3.1, §14, §15 -->
           <h3>Versioned JSON contracts</h3>
-          <p>Pipelines are declarative JSON — <code>schema_version</code>, nodes, <code>depends_on</code>, parameters, settings. Every update mints a new immutable integer version, and the contract is additive-only.</p>
+          <p>Pipelines are declarative JSON: <code>schema_version</code>, nodes, <code>depends_on</code>, parameters, settings. Every update creates a new immutable integer version, and the contract is additive-only.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -450,9 +450,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/templates.md §4.2–§6 -->
           <h3>Freemarker SQL templates</h3>
-          <p>A save-time scan walks the parsed template AST against a forbidden-construct list — <code>?eval</code>, <code>?new</code>, <code>?api</code>, in-body imports — so SSTI vectors are rejected before a template is ever saved.</p>
+          <p>A save-time scan walks the parsed template AST against a forbidden-construct list: <code>?eval</code>, <code>?new</code>, <code>?api</code>, and in-body imports. SSTI vectors are rejected before a template is ever saved.</p>
           <!-- claim: docs/templates.md §4.5, §8.4 -->
-          <p>Declared parameters bind as <code>:name</code> on a prepared statement — never interpolated. Interpolating one into the SQL text instead is refused at save with <code>template.validation.parameter_interpolated</code>.<!-- deliberately phrased without a literal dollar-brace: that sequence is how an unresolved Thymeleaf expression looks, and SiteRenderTest sweeps the RENDER for it (an entity is decoded back by the parser) --></p>
+          <p>Declared parameters bind as <code>:name</code> on a prepared statement and are never interpolated. Interpolating one into the SQL text instead is refused at save with <code>template.validation.parameter_interpolated</code>.<!-- deliberately phrased without a literal dollar-brace: that sequence is how an unresolved Thymeleaf expression looks, and SiteRenderTest sweeps the RENDER for it (an entity is decoded back by the parser) --></p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -463,9 +463,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/templates.md §5.1, §5.3 -->
           <h3>Template versions, pinned by hash</h3>
-          <p>Every template version is immutable — body, imports, dialect and engine are frozen once stored, versions are never reused or renumbered, and each carries a content hash. Pipelines pin <code>{name, version}</code>, so a new template version is invisible to them until an author moves the pin.</p>
+          <p>Every template version is immutable. Body, imports, dialect and engine are frozen once stored, versions are never reused or renumbered, and each carries a content hash. Pipelines pin <code>{name, version}</code>, so a new template version is invisible to them until an author moves the pin.</p>
           <!-- claim: docs/template-hierarchy-design.md §5.1, §5.3, §6 -->
-          <p>Templates are typed: <code>sql</code> (dialect required) or <code>html</code> (dialect absent, auto-escaping on). The type is fixed at creation and a database constraint enforces the pair.</p>
+          <p>Templates are typed: <code>sql</code>, which requires a dialect, or <code>html</code>, which has none and turns auto-escaping on. The type is fixed at creation and a database constraint enforces the pair.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -475,9 +475,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/template-hierarchy-design.md §4.1, §4.3, §4.5 -->
           <h3>Names are paths, and a folder is mandatory</h3>
-          <p>A template's or pipeline's name <em>is</em> its path — <code>nyc/mobility/revenue_by_borough</code>, <strong>2 to 10 segments</strong>, and the first one is a folder: the root holds folders only. A flat name is refused with <code>details.reason = "folder_required"</code>.</p>
+          <p>A template's or pipeline's name <em>is</em> its path: <code>nyc/mobility/revenue_by_borough</code>, <strong>2 to 10 segments</strong>. The first one is a folder, and the root holds folders only. A flat name is refused with <code>details.reason = "folder_required"</code>.</p>
           <!-- claim: docs/mcp-server.md §6.2.4, §6.2.8 (the confirm_new_root argument) -->
-          <p>An agent that invents a NEW top-level root is refused until it says so on purpose: <code>confirm_new_root</code>, with the roots that already exist in the error's details. Asking a person before minting a namespace is a guarantee here, not advice.</p>
+          <p>An agent that invents a NEW top-level root is refused until it says so on purpose: <code>confirm_new_root</code>, with the roots that already exist in the error's details. Asking a person before creating a namespace is a guarantee here, not advice.</p>
           <a class="card-link" th:href="@{/docs/mcp-server}">Read the spec &rarr;</a>
         </article>
 
@@ -490,9 +490,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/versioning.md §3.1, §3.3, §5.3, §5.4 -->
           <h3>Draft → release → discard</h3>
-          <p>One draft per entity, at most. Releasing locks the version: <em>we never modify a released pipeline</em> — the next change copies it into a new draft. Discard drops the draft and returns the number to the pool.</p>
+          <p>One draft per entity, at most. Releasing locks the version: <em>we never modify a released pipeline</em>. The next change copies it into a new draft. Discard drops the draft and returns the number to the pool.</p>
           <!-- claim: docs/ui-screens.md §4.7 -->
-          <p>The editor's version select is read-only for anything but the working version, and <strong>Edit</strong> reuses the existing draft or copies the selected version into a new one — the rule is visible on screen, not just enforced behind it.</p>
+          <p>The editor's version select is read-only for anything but the working version, and <strong>Edit</strong> reuses the existing draft or copies the selected version into a new one. The rule is visible on screen, not just enforced behind it.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -502,7 +502,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/templates.md §5.4 -->
           <h3>Used-by: impact before you change</h3>
-          <p>The reverse arrow, answered as two different questions. <em>Who uses this version now?</em> scans every pipeline's working version and names the pipeline, the node id and the version carrying the pin — a fact you can go and change, not a count.</p>
+          <p>The reverse arrow, answered as two different questions. <em>Who uses this version now?</em> scans every pipeline's working version and names the pipeline, the node id and the version carrying the pin. That is a fact you can go and change, not a count.</p>
           <!-- claim: docs/templates.md §5.1, §5.4 -->
           <p><em>Is it safe to delete?</em> scans every version ever, because historical versions stay executable. Delete is refused with <code>409 template.in_use</code> while any pipeline version pins it.</p>
         </article>
@@ -521,9 +521,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/datasources.md §4.1 -->
           <h3 th:text="|${#strings.capitalize(facts.engineCountWord)} engines, one contract|">Eight engines, one contract</h3>
-          <p th:text="|${facts.engines} — dp-lake is object storage read in place. One pipeline contract over all of them.|">PostgreSQL, MySQL, SQL Server, Oracle, DuckDB, SQLite, H2 — and LAKE, object storage read in place. One pipeline contract over all of them.</p>
+          <p th:text="|${facts.engines}. dp-lake is object storage read in place. One pipeline contract over all of them.|">PostgreSQL, MySQL, SQL Server, Oracle, DuckDB, SQLite, H2, and LAKE, object storage read in place. One pipeline contract over all of them.</p>
           <!-- claim: docs/datasources.md §10, docs/deployment.md §3.5 -->
-          <p>Oracle and MySQL drivers are opt-in for license reasons (<code>-Poracle</code>/<code>-Pmysql</code>, or drop the jar in <code>lib/</code>); a missing driver fails at save with <code>datasource.driver_not_loaded</code>. Everything else is in the published image, the DuckDB extensions included — a hardened deployment needs no egress to an extension repository.</p>
+          <p>Oracle and MySQL drivers are opt-in for license reasons: pass <code>-Poracle</code> or <code>-Pmysql</code>, or drop the jar in <code>lib/</code>. A missing driver fails at save with <code>datasource.driver_not_loaded</code>. Everything else is in the published image, the DuckDB extensions included. A hardened deployment needs no egress to an extension repository.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -534,7 +534,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/datasources.md §8C, §8C.1, §8C.2 -->
           <h3>dp-lake: Parquet and Iceberg, read in place</h3>
-          <p>A <code>LAKE</code> datasource queries Parquet and Apache Iceberg on S3 or any S3-compatible store with no warehouse and no load step. DuckDB is the engine; the catalog is the server's own registry, <strong>dp-catalog</strong> — tables are registered over REST or by an agent through the <code>lake_tables_*</code> tools.</p>
+          <p>A <code>LAKE</code> datasource queries Parquet and Apache Iceberg on S3 or any S3-compatible store with no warehouse and no load step. DuckDB is the engine; the catalog is the server's own registry, <strong>dp-catalog</strong>. Tables are registered over REST or by an agent through the <code>lake_tables_*</code> tools.</p>
           <!-- claim: docs/datasources.md §8C.2, §8C.8 -->
           <p>Hive-partitioned Parquet is scanned with partition pruning, so a date predicate reads the days it names and not the table. It is a <strong>read</strong> connector: there is no write path to the bucket. <a th:href="@{/dp-lake}">The whole dp-lake story &rarr;</a></p>
           <a class="card-link" th:href="@{/docs/datasources}">Read the spec &rarr;</a>
@@ -546,7 +546,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/staging.md §1, §3.1 -->
           <h3>Cross-engine staging joins</h3>
-          <p>Each execution gets its own isolated in-memory H2 tempdb — created at start, destroyed at end. Nodes stage ResultSets there, so downstream nodes join across engines.</p>
+          <p>Each execution gets its own isolated in-memory H2 tempdb, created at start and destroyed at end. Nodes stage ResultSets there, so downstream nodes join across engines.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -556,7 +556,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/pipeline-contract.md §4.9, docs/dag-executor.md §6.6 -->
           <h3>Pipeline composition</h3>
-          <p>A <code>PIPELINE</code> node executes a version-pinned child pipeline as a linked child execution — in-process, with lineage and family cancellation. The child keeps its own execution record, tempdb, stats and stream.</p>
+          <p>A <code>PIPELINE</code> node executes a version-pinned child pipeline as a linked child execution, in-process, with lineage and family cancellation. The child keeps its own execution record, tempdb, stats and stream.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -569,9 +569,9 @@ anything. Stop after reporting.</code></pre>
           <h3>The pipeline editor</h3>
           <p>The DAG renders on a full-bleed canvas as node <em>cards</em>, with the facts inside the box: name, a type badge, <code>datasource · dialect</code>, <code>template @ version</code>, and after a run, elapsed time and rows.</p>
           <!-- claim: docs/pipeline-editor.md §10, §10.2, §8 -->
-          <p>One dock, four tabs — <strong>Details</strong>, <strong>Results</strong>, <strong>Errors</strong>, <strong>Events</strong>: a failure opens Errors, every event in arrival order.</p>
+          <p>One dock, four tabs: <strong>Details</strong>, <strong>Results</strong>, <strong>Errors</strong> and <strong>Events</strong>. A failure opens Errors, every event in arrival order.</p>
           <!-- claim: docs/pipeline-editor.md §11.1, §11.3 -->
-          <p>It executes, streams, cancels and pages results. What it deliberately does not do is author: no edit mode in v1 — authoring is agent-first.</p>
+          <p>It executes, streams, cancels and pages results. What it deliberately does not do is author: there is no edit mode in v1. Authoring is agent-first.</p>
           <a class="card-link" th:href="@{/docs/pipeline-editor}">Read the spec &rarr;</a>
         </article>
 
@@ -582,9 +582,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/dag-executor.md §8.4 -->
           <h3>Failures you can actually read</h3>
-          <p>A failed node carries the catalogued code, the message, the node's own facts (<code>datasource</code>, dialect, <code>template @ version</code>), the rendered SQL in <code>:name</code> form — never a bound value — and the <strong>original exception chain with frames</strong>, root cause last.</p>
+          <p>A failed node carries the catalogued code, the message, and the node's own facts: <code>datasource</code>, dialect, <code>template @ version</code>. It carries the rendered SQL in <code>:name</code> form, never a bound value, and the <strong>original exception chain with frames</strong>, root cause last.</p>
           <!-- claim: docs/rest-api.md §6.4, docs/mcp-server.md §6.2.14, docs/pipeline-editor.md §9 -->
-          <p>The same record, built once, reaches the <code>node_failed</code> SSE event, the stored <code>error_json</code>, the editor's error surface and the agent's <code>executions_get</code>. No surface strips what another shows.</p>
+          <p>The same record, built once, reaches the <code>node_failed</code> SSE event, the stored <code>error_json</code>, the editor's Errors tab and the agent's <code>executions_get</code>. No screen strips what another shows.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -593,9 +593,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/rest-api.md §6 -->
           <h3>Live execution streams, and a cancel that means it</h3>
-          <p><code>POST /api/v1/pipelines/{id}/execute</code> returns <code>text/event-stream</code> with per-milestone events and heartbeats. No stream resumption — a dropped connection cancels the execution rather than orphaning it.</p>
+          <p><code>POST /api/v1/pipelines/{id}/execute</code> returns <code>text/event-stream</code> with per-milestone events and heartbeats. There is no stream resumption. A dropped connection cancels the execution rather than orphaning it.</p>
           <!-- claim: docs/dag-executor.md §8.3.1, §8.3.2 -->
-          <p>Cancel reaches the executing instance through Redis from any instance, and a per-node latch refuses to enter the driver once it has fired. <strong>A cancelled execution cannot come back SUCCESS</strong> — the window where it could was closed and is covered by a test that injects the descheduling rather than racing it.</p>
+          <p>Cancel reaches the executing instance through Redis from any instance, and a per-node latch refuses to enter the driver once it has fired. <strong>A cancelled execution cannot come back SUCCESS</strong>. The window where it could was closed, and a test covers it by injecting the descheduling rather than racing it.</p>
         </article>
 
         </div>
@@ -616,7 +616,7 @@ anything. Stop after reporting.</code></pre>
           <h3>Promotion between environments</h3>
           <p>Push dev → staging → prod from the UI. The screen lists only <strong>released</strong> versions newer than the target's; drafts never leave the authoring environment, and templates and child pipelines travel first, as a dependency closure.</p>
           <!-- claim: docs/auth.md §7.7 (the server kind), docs/versioning.md §10.6, docs/deployment.md §6.3A -->
-          <p>The credential is a <strong><code>server</code>-kind API key</strong>, not a principal — no user account, so rotation and offboarding are independent of any person. Rotation is: mint a second, set it on the sender, revoke the first — no restart on either side.</p>
+          <p>The credential is a <strong><code>server</code>-kind API key</strong>, not a principal. It has no user account, so rotation and offboarding are independent of any person. To rotate: create a second key, set it on the sender, revoke the first. Neither side restarts.</p>
           <a class="card-link" th:href="@{/docs/versioning}">Read the spec &rarr;</a>
         </article>
 
@@ -628,7 +628,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/deployment.md §6.2 -->
           <h3>Multi-instance ready</h3>
-          <p>Instances are symmetric and stateless for API, MCP, UI and auth — no sticky sessions. Only a <em>running</em> execution is pinned to one JVM; cancel works from any instance through Redis, and results and history are readable from all of them.</p>
+          <p>Instances are symmetric and stateless for API, MCP, UI and auth. There are no sticky sessions. Only a <em>running</em> execution is pinned to one JVM; cancel works from any instance through Redis, and results and history are readable from all of them.</p>
           <!-- claim: docs/datasources.md §5.7 -->
           <p>Datasource pool invalidation rides a Redis channel: repoint or rotate a credential on one instance and every other evicts its pool and rebuilds from the row.</p>
           <!-- claim: docs/deployment.md §6.2 -->
@@ -644,9 +644,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/ui-screens.md §4.18 -->
           <h3>One API section</h3>
-          <p>Everything a program uses to talk to a workspace, on one screen: the endpoints you have published as <code>GET /api/…</code>, the keys that may call them, and the MCP connection block — the tool count rendered live from the catalog, never a literal.</p>
+          <p>Everything a program uses to talk to a workspace, on one screen: the endpoints you have published as <code>GET /api/…</code>, the keys that may call them, and the MCP connection block. The tool count is rendered live from the catalog, never a literal.</p>
           <!-- claim: docs/ui-screens.md §4.18 (the endpoints card) -->
-          <p>It is honest about what it cannot show: no "calls in the last 24 h" column — every serve is audited, but nothing tallies them per endpoint — so the card states the absence instead of filling it from a sample.</p>
+          <p>It is honest about what it cannot show. There is no "calls in the last 24 h" column: every serve is audited, but nothing tallies them per endpoint. The card states the absence instead of filling it from a sample.</p>
           <a class="card-link" th:href="@{/docs/ui-screens}">Read the spec &rarr;</a>
         </article>
 
@@ -660,7 +660,7 @@ anything. Stop after reporting.</code></pre>
           <h3>Connection pools you can see and set</h3>
           <p>Eight HikariCP settings are on the datasource form, each prefilled with its <strong>effective</strong> default and labelled with where that default came from. A field left alone is not persisted, so a later change to a product default still reaches the datasource.</p>
           <!-- claim: docs/datasources.md §5 (the ranges are refusals) -->
-          <p>Out-of-range values are <em>refused</em>, not accepted — every floor restates a rewrite Hikari would otherwise perform silently, and the test that justifies them builds a real pool and watches it happen.</p>
+          <p>Out-of-range values are <em>refused</em>, not accepted. Every floor restates a rewrite Hikari would otherwise perform silently, and the test that justifies them builds a real pool and watches it happen.</p>
           <a class="card-link" th:href="@{/docs/datasources}">Read the spec &rarr;</a>
         </article>
 
@@ -671,9 +671,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/datasources.md §5.2 (Retire, then close) -->
           <h3>A saved datasource never kills a running query</h3>
-          <p>Editing or deleting a datasource <strong>retires</strong> its pool instead of closing it: new leases build a fresh pool from the new row at once, idle connections close now, and a connection still in use closes when its borrower returns it — never mid-statement.</p>
+          <p>Editing or deleting a datasource <strong>retires</strong> its pool instead of closing it: new leases build a fresh pool from the new row at once, idle connections close now, and a connection still in use closes when its borrower returns it, never mid-statement.</p>
           <!-- claim: docs/datasources.md §6.2 -->
-          <p>Delete asks the question first: the dialog runs the <em>any-version</em> usage scan before it offers anything, and lists <code>pipeline &rsaquo; node (v3 released)</code> for every reference. The <code>409</code> and the dialog cannot disagree — same scan.</p>
+          <p>Delete asks the question first: the dialog runs the <em>any-version</em> usage scan before it offers anything, and lists <code>pipeline &rsaquo; node (v3 released)</code> for every reference. The <code>409</code> and the dialog cannot disagree. It is the same scan.</p>
           <a class="card-link" th:href="@{/docs/datasources}">Read the spec &rarr;</a>
         </article>
 
@@ -684,7 +684,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §10, docs/datasources.md §7.4 -->
           <h3>Append-only audit log</h3>
-          <p>Logins, key lifecycle, scope denials, user admin, workspace events, promotion accept/reject, every MCP tool call and each credential-decryption point — recorded with actor, cause and source IP.</p>
+          <p>Logins, key lifecycle, scope denials, user admin, workspace events, promotion accept/reject, every MCP tool call and each credential-decryption point, recorded with actor, cause and source IP.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -694,7 +694,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/pipeline-contract.md §13, docs/rest-api.md §4.2, docs/mcp-server.md §9 -->
           <h3>Catalogued error contract</h3>
-          <p>Failures arrive as stable <code>{domain}.{entity}.{failure}</code> codes in a uniform error envelope — a catalog enforced against the code by drift tests, and the same codes over MCP. Agents get errors they can branch on, not prose to parse.</p>
+          <p>Failures arrive as stable <code>{domain}.{entity}.{failure}</code> codes in a uniform error envelope. It is a catalog enforced against the code by drift tests, and the same codes flow over MCP. Agents get errors they can branch on, not prose to parse.</p>
         </article>
 
         </div>
@@ -704,17 +704,17 @@ anything. Stop after reporting.</code></pre>
         <!--/* 145: the DAG the agent built joins the console and the endpoint panel here — the
              three rendered records of the one demo run (133 §B), off the home page now. */-->
         <figure class="shot shot--wide">
-          <figcaption>The pipeline the agent built, as the product draws it: three sources read in place, two staging steps in the per-run scratch database, one answer node — every count and timing from the recorded run.</figcaption>
+          <figcaption>The pipeline the agent built, as the product draws it: three sources read in place, two staging steps in the per-run scratch database, one answer node. Every count and timing comes from the recorded run.</figcaption>
           <div class="dag-embed">
             <div th:replace="~{site/_demo-dag :: dag(${facts.demo})}"></div>
           </div>
         </figure>
         <figure class="shot">
-          <figcaption>The run, recorded: the agent's steps with their row counts and timings, then the rows themselves — which is how an agent checks its own work instead of asserting it.</figcaption>
+          <figcaption>The run, recorded: the agent's steps with their row counts and timings, then the rows themselves. That is how an agent checks its own work instead of asserting it.</figcaption>
           <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
         </figure>
         <figure class="shot">
-          <figcaption>One API section: the keys, the endpoints those keys may call, and the MCP connection — with the tool count read from the catalog at request time, exactly as this page reads it.</figcaption>
+          <figcaption>One API section: the keys, the endpoints those keys may call, and the MCP connection. The tool count is read from the catalog at request time, exactly as this page reads it.</figcaption>
           <div th:replace="~{site/_demo-api :: api(${facts.demo})}"></div>
         </figure>
       </div>
@@ -733,7 +733,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §5.6, docs/auth.md §11A, docs/metadata-db.md §4.12 -->
           <h3>Workspaces &amp; team isolation</h3>
-          <p>Every request resolves exactly one workspace; all authored content is workspace-scoped; API keys are pinned to one workspace; membership roles are additive flags — viewer, author, promoter, workspace admin and super admin.</p>
+          <p>Every request resolves exactly one workspace; all authored content is workspace-scoped; API keys are pinned to one workspace. Membership comes in five roles: viewer, author, promoter, workspace admin and super admin.</p>
           <!-- claim: docs/ui-screens.md §4.13, docs/rest-api.md §17 -->
           <p>The management UI ships: create, switch, manage members, a navbar switcher and add-by-email.</p>
         </article>
@@ -746,9 +746,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §7.7 -->
           <h3>A key has a kind, and the kind decides its reach</h3>
-          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Three kinds.</span> A <code>user</code> key is an agent's key and a program's key — its authority is its scopes. An <code>endpoint</code> key authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
+          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Three kinds.</span> A <code>user</code> key is an agent's key and a program's key. Its authority is its scopes. An <code>endpoint</code> key authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
           <!-- claim: docs/auth.md §7.7 (the confinement is central) -->
-          <p>The confinement is decided centrally, before any handler's annotation is read — a new route cannot become quietly reachable to a scopeless key.</p>
+          <p>The confinement is decided centrally, before any handler's annotation is read. A new route cannot become quietly reachable to a scopeless key.</p>
           <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>
         </article>
 
@@ -761,9 +761,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/mcp-server.md §6.2.22 -->
           <h3>The agent never sees a credential</h3>
-          <p>There is deliberately <strong>no tool that registers a datasource</strong>, and none that mints a key: a credential through a tool call transits the agent's context and transcript. A person adds the datasource in the UI; the agent uses it <em>by name</em>.</p>
+          <p>There is deliberately <strong>no tool that registers a datasource</strong>, and none that creates a key: a credential through a tool call would land in the agent's context and transcript. A person adds the datasource in the UI; the agent uses it <em>by name</em>.</p>
           <!-- claim: docs/mcp-server.md §6.2.22, docs/datasources.md §3.4 -->
-          <p>What the agent keeps is everything that needs no secret: list, get, test, schemas, tables, columns, preview rows — enough to author without a password.</p>
+          <p>What the agent keeps is everything that needs no secret: list, get, test, schemas, tables, columns and preview rows. Enough to author without a password.</p>
           <a class="card-link" th:href="@{/docs/mcp-server}">Read the spec &rarr;</a>
         </article>
 
@@ -774,7 +774,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §5.1, §7.1–7.6 -->
           <h3>OIDC SSO + scoped agent keys</h3>
-          <p>Humans sign in through OIDC SSO. Agents get their own API keys with hierarchical scopes — separate principals, separate blast radii.</p>
+          <p>Humans sign in through OIDC SSO. Agents get their own API keys with hierarchical scopes. Separate principals, separate blast radii.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -784,9 +784,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §5A, §5A.1, §5A.2 -->
           <h3>Local password accounts</h3>
-          <p>No identity provider? Turn on local accounts and the whole product runs with zero external setup. Hashes are <strong>Argon2id</strong> through the same hasher API keys use; there is no self-registration — an admin creates the account, or config seeds the first admin only.</p>
+          <p>No identity provider? Turn on local accounts and the whole product runs with zero external setup. Hashes are <strong>Argon2id</strong> through the same hasher API keys use. There is no self-registration: an admin creates the account, or config seeds the first admin only.</p>
           <!-- claim: docs/auth.md §5A.4, §5A.5, §5A.3 -->
-          <p>Every seeded or admin-reset credential is one-time and the app refuses every other screen until it is changed. Five consecutive failures lock the account — and the unknown-email path spends the same hashing memory, so timing cannot enumerate.</p>
+          <p>Every seeded or admin-reset credential is one-time and the app refuses every other screen until it is changed. Five consecutive failures lock the account. The unknown-email path spends the same hashing memory, so timing cannot enumerate it.</p>
           <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>
         </article>
 
@@ -797,7 +797,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/datasources.md §5.7 -->
           <h3>Read-only datasource governance</h3>
-          <p><code>is_readonly</code> forbids write-shaped uses — enforced at save time, at an executor backstop, and as Hikari <code>readOnly</code>. Admin-gated on globals. The flag is a contract, not containment: pair it with a SELECT-only DB user.</p>
+          <p><code>is_readonly</code> forbids write-shaped uses. It is enforced at save time, at an executor backstop, and as Hikari <code>readOnly</code>. Admins turn it on for global datasources. The flag is a contract, not containment. Pair it with a SELECT-only DB user.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -810,14 +810,14 @@ anything. Stop after reporting.</code></pre>
           <h3>Encrypted datasource credentials</h3>
           <p>Passwords are AES-256-GCM encrypted with the row's name bound as additional authenticated data, so a ciphertext moved between rows fails to decrypt. The app refuses to start without a valid key.</p>
           <!-- claim: docs/key-providers.md §4–§5, docs/datasources.md §7.1.1 -->
-          <p>Every credential carries a key version and <code>datapipelines.db.key-provider</code> selects where the key comes from — one contract test every provider passes.</p>
+          <p>Every credential carries a key version, and <code>datapipelines.db.key-provider</code> selects where the key comes from. One contract test covers every provider.</p>
         </article>
 
         </div>
       </div>
 
 
-      <p class="features-pointer">Charts and dashboards are next — <a th:href="@{/roadmap}">see the roadmap</a>.</p>
+      <p class="features-pointer">Charts and dashboards are next. <a th:href="@{/roadmap}">See the roadmap</a>.</p>
     </div>
   </section>
 
@@ -837,15 +837,15 @@ anything. Stop after reporting.</code></pre>
         </li>
         <li>
           <!-- claim: docs/environments.md §2 (the posture table), §5 (demo is a flag), docs/deployment.md Appendix B -->
-          <strong>Two variables, two files.</strong> An org sets what it calls the environment (<code>DATAPIPELINES_ENV</code>) and how careful the product should be (<code>DATAPIPELINES_POSTURE</code>: <code>development</code> or <code>hardened</code>). Configuration lives in exactly two files — a tracked <code>deploy/env/defaults.env</code> carrying every non-secret default, and a git-ignored <code>deploy/secrets.env</code> that <code>./app.sh --scaffold</code> writes for you with every secret generated. The <code>hardened</code> posture refuses the demo at boot.
+          <strong>Two variables, two files.</strong> An org sets what it calls the environment with <code>DATAPIPELINES_ENV</code>, and how careful the product should be with <code>DATAPIPELINES_POSTURE</code>: <code>development</code> or <code>hardened</code>. Configuration lives in exactly two files. A tracked <code>deploy/env/defaults.env</code> carries every non-secret default. A git-ignored <code>deploy/secrets.env</code> holds the secrets, and <code>./app.sh --scaffold</code> writes it for you with every secret generated. The <code>hardened</code> setting refuses the demo at boot.
         </li>
         <li>
           <!-- claim: docs/rest-api.md §12.3, docs/pipeline-contract.md §13.11 -->
-          <strong>The rate limiter fails closed.</strong> If Redis — where the counters live — is unreachable, requests are refused with <code>429 rate_limit.unavailable</code> rather than waved through. A limiter that opens under its own outage is not a limit.
+          <strong>The rate limiter fails closed.</strong> If Redis, where the counters live, is unreachable, requests are refused with <code>429 rate_limit.unavailable</code> rather than waved through. A limiter that opens under its own outage is not a limit.
         </li>
         <li>
           <!-- claim: docs/datasources.md §7.1 -->
-          <strong>Encrypted credentials.</strong> Datasource passwords are AES-256-GCM encrypted with the row name bound as AAD — and the app refuses to start without a valid key.
+          <strong>Encrypted credentials.</strong> Datasource passwords are AES-256-GCM encrypted with the row name bound as AAD. The app refuses to start without a valid key.
         </li>
         <li>
           <!-- claim: docs/deployment.md Appendix B, §9 -->
@@ -856,7 +856,7 @@ anything. Stop after reporting.</code></pre>
           <strong>No surprise egress.</strong> The DuckDB extensions dp-lake needs are baked into the published image and loaded from disk, so a hardened deployment never reaches out to an extension repository at runtime. What a lake query costs in bytes is bounded by the query's own predicates, and the docs say so before you turn it on.
         </li>
         <li>
-          <strong>TLS is your job.</strong> Terminate TLS at your own proxy — we don't pretend a built-in would fit every network.
+          <strong>TLS is your job.</strong> Terminate TLS at your own proxy. We don't pretend a built-in would fit every network.
         </li>
       </ul>
     </div>
@@ -883,19 +883,19 @@ anything. Stop after reporting.</code></pre>
           <span class="card-number">CONTEXT</span>
           <!-- claim: docs/mcp-server.md §6 (semantics_record) — the transcript shows the agent recording the rainy-day rule as a workspace definition -->
           <h3>Teach it your definitions once</h3>
-          <p>Mid-session the agent recorded the rainy-day rule as a workspace definition. The next session — and the next agent — starts with it, instead of re-deriving it. <a th:href="@{/semantic-layer}">The semantic layer &rarr;</a></p>
+          <p>Mid-session the agent recorded the rainy-day rule as a workspace definition. The next session, and the next agent, starts with it instead of re-deriving it. <a th:href="@{/semantic-layer}">The semantic layer &rarr;</a></p>
         </article>
         <article class="card">
           <span class="card-number">CHECKS</span>
           <!-- claim: docs/pipeline-contract.md §12.12 (release checks), docs/versioning.md §5.3 (they run at release) -->
           <h3>Make the review mechanical</h3>
-          <p>The checks the release dialog ran are declared on the pipeline — counts, totals, invariants — and run again at every release. <a th:href="@{/docs}">The specs &rarr;</a></p>
+          <p>The checks the release dialog ran are declared on the pipeline: counts, totals, invariants. They run again at every release. <a th:href="@{/docs}">The specs &rarr;</a></p>
         </article>
         <article class="card">
           <span class="card-number">NEXT UP</span>
           <!-- claim: docs/ROADMAP.md §2 (charts and dashboards are planned) -->
           <h3>Where the product is going</h3>
-          <p>Charts and dashboards on top of released pipelines are the next big surface. <a th:href="@{/roadmap}">See the roadmap &rarr;</a></p>
+          <p>Charts and dashboards on top of released pipelines come next. <a th:href="@{/roadmap}">See the roadmap &rarr;</a></p>
         </article>
       </div>
       <ul class="engine-links">

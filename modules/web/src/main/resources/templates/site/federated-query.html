@@ -17,7 +17,7 @@
       <p class="kicker">Data virtualization, minus the platform</p>
       <h1 id="fq-title" class="ds-display">Federated query across databases, without a warehouse</h1>
       <p class="section-lede">
-        Join tables from different databases — Postgres to MySQL to SQLite — in one pipeline. Each source is queried
+        Join tables from different databases, Postgres to MySQL to SQLite, in one pipeline. Each source is queried
         where it lives, the join happens in a staging database created for that one execution, and the staging
         database is destroyed when the execution ends. Nothing is landed, nothing is synced, and there is no
         warehouse to keep.
@@ -36,7 +36,7 @@
       <!-- claim: docs/staging.md §1 -->
       <p class="section-lede">
         Staging is an in-memory H2 database that holds the intermediate result sets of one execution. It is created
-        when the execution starts and destroyed when it ends. No state survives between executions — that is the
+        when the execution starts and destroyed when it ends. No state survives between executions, and that is the
         design, not a limitation being worked around.
       </p>
       <!-- claim: docs/staging.md §3.1 -->
@@ -79,16 +79,16 @@
       <p class="section-lede">
         Seeded by the NYC demo. The trip rollup lives in a Postgres datasource; the 265-row taxi-zone lookup that
         turns a pickup zone into a borough lives in a SQLite one. Neither engine can see the other's table, so both
-        are staged first — and then it is just a join.
+        are staged first, and then it is just a join.
       </p>
 
-      <h3>Node 1 &mdash; the trips, from Postgres</h3>
+      <h3>Node 1: the trips, from Postgres</h3>
       <p>A <code>DQL</code> node against the <code>sample-trips</code> datasource, staged as <code>stg_trips_monthly</code>.</p>
 
-      <h3>Node 2 &mdash; the zones, from SQLite</h3>
+      <h3>Node 2: the zones, from SQLite</h3>
       <p>A <code>DQL</code> node against the <code>sample-reference</code> datasource, staged as <code>stg_zones</code>.</p>
 
-      <h3>Node 3 &mdash; the join, in staging</h3>
+      <h3>Node 3: the join, in staging</h3>
       <p>Source <code>tempdb</code>. This is the pipeline's SQL, verbatim:</p>
       <div class="code-block">
         <pre><code>SELECT
@@ -107,12 +107,12 @@ ORDER BY SUM(t.total_revenue) DESC</code></pre>
       <!-- claim: docs/staging.md §3.1 -->
       <p>
         Unquoted references to staged tables resolve because the staging database runs in PostgreSQL compatibility
-        mode with lower-folded identifiers — the author style the specs themselves use. That parameter is a
+        mode with lower-folded identifiers, the author style the specs themselves use. That parameter is a
         correctness invariant of the identifier scheme, not an operator preference.
       </p>
       <p>
         The demo family goes further: <code>nyc/mobility/rainy_vs_dry_ridership</code> joins the same Postgres
-        trips to daily precipitation from a MySQL datasource and a calendar from SQLite — one query,
+        trips to daily precipitation from a MySQL datasource and a calendar from SQLite, one query,
         nothing landed.
       </p>
     </div>
@@ -125,13 +125,13 @@ ORDER BY SUM(t.total_revenue) DESC</code></pre>
       <ul class="fact-list fact-list-plain">
         <li>
           <!-- claim: docs/staging.md §1 -->
-          <strong>Staging is in memory, per execution.</strong> That is the right shape for joining a rollup to a lookup, and the wrong one for joining two billion-row fact tables. Push the aggregation down into each source node — that is what the source engines are for.
+          <strong>Staging is in memory, per execution.</strong> That is the right shape for joining a rollup to a lookup, and the wrong one for joining two billion-row fact tables. Push the aggregation down into each source node. That is what the source engines are for.
         </li>
         <li>
           <!-- claim: docs/ROADMAP.md §2 -->
           <strong>DuckDB as a staging engine is planned, not shipped.</strong> H2 is the staging engine today; the abstraction exists so a larger analytical engine can take its place.
         </li>
-        <li><strong>This is not data virtualization as a platform, and not a federated query engine.</strong> A federated query engine plans one SQL statement across engines; there is no such planner here, no unified catalog and no query optimiser spanning sources. A cross-database query here is a pipeline: one node per source, each running native SQL where the data lives, and one join node over their results in staging — which is the part most teams actually needed.</li>
+        <li><strong>This is not data virtualization as a platform, and not a federated query engine.</strong> A federated query engine plans one SQL statement across engines; there is no such planner here, no unified catalog and no query optimiser spanning sources. A cross-database query here is a pipeline: one node per source, each running native SQL where the data lives, and one join node over their results in staging, which is the part most teams actually needed.</li>
         <li><strong>It is not an ETL tool.</strong> Nothing is copied anywhere on a schedule. If you want a result written back to a database, that is a node you add on purpose.</li>
       </ul>
       <p><a th:href="@{/mcp-server-for-sql-databases}">The SQL MCP server overview &rarr;</a> &middot;

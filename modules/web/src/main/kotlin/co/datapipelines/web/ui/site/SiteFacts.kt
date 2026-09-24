@@ -177,10 +177,10 @@ val DEMO_SHOWCASE =
         question = "Which rideshare company carried the most trips in each borough last quarter?",
         steps =
             listOf(
-                "read the datasource facts, columns and stats — hvfhv_zone_day is a census at zone × day × company",
-                "resolved \"last quarter\" from the data's last day — Q4 2024",
+                "read the datasource facts, columns and stats. hvfhv_zone_day is a census at zone × day × company",
+                "resolved \"last quarter\" from the data's last day, which gave Q4 2024",
                 "rendered 3 templates, ran the draft: 4 nodes · 763 ms",
-                "draft demo/top_company_by_borough v1 — left for a human to release",
+                "draft demo/top_company_by_borough v1, left for a human to release",
             ),
         rows =
             listOf(

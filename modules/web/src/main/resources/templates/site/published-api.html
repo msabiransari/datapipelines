@@ -20,7 +20,7 @@
   <section class="section page-hero" aria-labelledby="pa-title">
     <div class="container">
       <p class="kicker">Published endpoints</p>
-      <h1 id="pa-title" class="ds-display">Turn a SQL query into a data API — versioned, parameterised, scoped by key</h1>
+      <h1 id="pa-title" class="ds-display">Turn a SQL query into a data API: versioned, parameterised, scoped by key</h1>
       <p class="section-lede">
         Building an API over a dataset is usually a second project: a service, a deployment, auth, pagination,
         on-call. Here the SQL API is one step after a release: a released pipeline is published under a path, a
@@ -44,7 +44,7 @@
         <li>
           <h3>Release the pipeline</h3>
           <!-- claim: docs/versioning.md §3 -->
-          <p>Only a released, side-effect-free pipeline can be published — a version a person locked, with no node that writes anywhere. The endpoint serves whatever version its pipeline's pointer names, so switching the served version is a lifecycle verb, not a redeploy.</p>
+          <p>Only a released, side-effect-free pipeline can be published: a version a person locked, with no node that writes anywhere. The endpoint serves whatever version its pipeline's pointer names, so switching the served version is a lifecycle verb, not a redeploy.</p>
         </li>
         <li>
           <h3>Publish it under a path</h3>
@@ -54,12 +54,12 @@
         <li>
           <h3>Bind a key to the path</h3>
           <!-- claim: docs/auth.md §7.7 -->
-          <p>An API key is bound to a path prefix. A caller holding it can reach that subtree of <code>/api</code> and nothing else — not the product's own API, not another workspace's endpoints. Give a partner one key per contract and the contract is enforced by the router.</p>
+          <p>An API key is bound to a path prefix. A caller holding it can reach that subtree of <code>/api</code> and nothing else, not the product's own API and not another workspace's endpoints. Give a partner one key per contract and the contract is enforced by the router.</p>
         </li>
         <li>
           <h3>Call it</h3>
           <!-- claim: docs/rest-api.md §19 -->
-          <p>A <code>GET</code> with the key in <code>DP-API-Key</code>. Validation reports every defect at once — an unknown parameter, a repeated one, a missing required one, a wrong type — because a client fixes a request once, not four times.</p>
+          <p>A <code>GET</code> with the key in <code>DP-API-Key</code>. Validation reports every defect at once: an unknown parameter, a repeated one, a missing required one, a wrong type. A client fixes a request once, not four times.</p>
         </li>
       </ol>
       <div class="code-block">
@@ -83,14 +83,14 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
   <section class="section band" aria-labelledby="pa-shape">
     <div class="container">
       <p class="kicker">What the response is</p>
-      <h2 id="pa-shape" class="ds-headline">The result, paged, with a cursor — never a cached one</h2>
+      <h2 id="pa-shape" class="ds-headline">The result, paged, with a cursor, never a cached one</h2>
       <div class="prose">
         <!-- claim: docs/rest-api.md §19 -->
         <p>
           The body is the same <code>data_ready</code> payload the product's own execution stream produces: a schema
           with typed columns, the first page of rows, the total, and a cursor URL for the rest. Each call is a fresh
           execution of the released version, run in-process as the endpoint's workspace, audited with the key, the
-          endpoint and the execution id. The response carries <code>Cache-Control: no-store</code> on purpose — a
+          endpoint and the execution id. The response carries <code>Cache-Control: no-store</code> on purpose, because a
           result belongs to one execution, and a shared cache that held one would hand a second caller another
           caller's rows.
         </p>
@@ -102,7 +102,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
         </p>
         <!-- claim: docs/pipeline-contract.md §9 -->
         <p>
-          What is returned is the pipeline's <em>caller node</em> — declared, not guessed from the graph's shape — so
+          What is returned is the pipeline's <em>caller node</em>, declared rather than guessed from the graph's shape, so
           a pipeline that also writes to a table, or stages six intermediate results, still returns exactly one
           declared result.
         </p>
@@ -118,7 +118,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
           <h3>GET only</h3>
-          <p>Every other method is <code>405</code> with <code>Allow: GET</code>. A published pipeline cannot have a write-shaped node, and the check is re-run at serve time — a pipeline that gained a write after publishing answers <code>503</code>, not a write.</p>
+          <p>Every other method is <code>405</code> with <code>Allow: GET</code>. A published pipeline cannot have a write-shaped node, and the check is re-run at serve time. A pipeline that gained a write after publishing answers <code>503</code>, not a write.</p>
         </article>
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
@@ -133,7 +133,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
           <h3>Rate- and concurrency-limited</h3>
-          <p><code>429</code> with <code>Retry-After</code> when a caller exceeds its budget or the instance's execution slots — the same limits the product's own runs live under.</p>
+          <p><code>429</code> with <code>Retry-After</code> when a caller exceeds its budget or the instance's execution slots. These are the same limits the product's own runs live under.</p>
         </article>
       </div>
     </div>
@@ -148,13 +148,13 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
           Teams that already have the data and already have the chart still spend a quarter getting the number into
           their own product, because “expose this dataset as an API” means a service, a schema, an auth story, a
           deployment pipeline and someone to wake up when it fails. What a published endpoint hands you is a
-          REST API from database tables you already have — the query you released, answered over GET. That quarter
+          REST API from database tables you already have: the query you released, answered over GET. That quarter
           is what it removes. The agent authors the pipeline against your databases and iterates it until the numbers are right;
           you review and release; the endpoint exists. No service was written. Nothing was deployed. The on-call is
           the server you were already running.
         </p>
         <p>
-          It is also why the roadmap's dashboards are built the way they are — created by the same agent, fed by the
+          It is also why the roadmap's dashboards are built the way they are, created by the same agent and fed by the
           same released pipelines and endpoints, embedded in your product rather than hosted in ours. The endpoint is
           the contract; the dashboard is a consumer of it, like any other.
         </p>
@@ -165,7 +165,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
   <section class="section" aria-labelledby="pa-shot">
     <div class="container">
       <p class="kicker">Where you manage them</p>
-      <h2 id="pa-shot" class="ds-headline">The API section: endpoints, keys, the MCP server — one screen</h2>
+      <h2 id="pa-shot" class="ds-headline">The API section: endpoints, keys, the MCP server, one screen</h2>
       <figure class="shot">
         <figcaption>Published endpoints with the version each one serves, the keys bound to each path, and the MCP connection details.</figcaption>
         <div th:replace="~{site/_demo-api :: api(${facts.demo})}"></div>

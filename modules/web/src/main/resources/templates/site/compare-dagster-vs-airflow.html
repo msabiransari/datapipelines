@@ -26,7 +26,7 @@
       <p class="section-lede">
         Both are open-source, Python-first orchestrators under the Apache-2.0 licence, and both will run a
         nightly job that moves data from A to B. The difference is what each asks you to describe: Airflow asks for
-        the <em>work</em> — a graph of tasks and when to run it — and Dagster asks for the <em>data</em> — the tables
+        the <em>work</em>, a graph of tasks and when to run it, and Dagster asks for the <em>data</em>, the tables
         and files your code produces, and what each depends on. That one difference decides most of the rest. Prefect
         asks for neither: it takes the Python functions you already have and makes them observable.
       </p>
@@ -40,18 +40,18 @@
       <div class="features-grid">
         <article class="card">
           <!-- claim: https://airflow.apache.org/docs/apache-airflow/stable/index.html (Airflow 3.3.2, read 2026-09-19) — the self-description, "workflows as code", backfills; https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/overview.html — the components -->
-          <h3>Apache Airflow — a scheduler for task graphs</h3>
+          <h3>Apache Airflow: a scheduler for task graphs</h3>
           <p>Airflow calls itself "an open-source platform for developing, scheduling, and monitoring workflows", batch-oriented data pipelines and ML training included. A DAG carries the schedule, the tasks, their dependencies and callbacks; workflows are "defined entirely in Python"; backfills and re-running failed tasks are built in. Running it means a scheduler, a DAG processor, an API server, a metadata database and, usually, workers.</p>
         </article>
         <article class="card">
           <!-- claim: https://docs.dagster.io/ (read 2026-09-19) — the self-description; https://docs.dagster.io/guides/build/assets (read 2026-09-19) — what an asset is, materialization, dependencies; https://docs.dagster.io/getting-started/concepts — schedules, sensors, automation conditions -->
-          <h3>Dagster — an orchestrator built around data assets</h3>
-          <p>Dagster calls itself "a data orchestrator built for data engineers, with integrated lineage, observability, a declarative programming model, and best-in-class testability". Its unit is the asset — "an object in persistent storage, such as a table, file, or persisted machine learning model" — and materializing one means running its function and saving the result. Asset definitions know their own dependencies, so lineage comes free; schedules, sensors and automation conditions decide when they run.</p>
+          <h3>Dagster: an orchestrator built around data assets</h3>
+          <p>Dagster calls itself "a data orchestrator built for data engineers, with integrated lineage, observability, a declarative programming model, and best-in-class testability". Its unit is the asset, "an object in persistent storage, such as a table, file, or persisted machine learning model", and materializing one means running its function and saving the result. Asset definitions know their own dependencies, so lineage comes free; schedules, sensors and automation conditions decide when they run.</p>
         </article>
         <article class="card">
           <!-- claim: https://docs.prefect.io/v3/get-started/index (read 2026-09-19) — the self-description, native control flow, Cloud or self-hosted; https://docs.prefect.io/v3/concepts/flows — flows as decorated functions -->
-          <h3>Prefect — Python functions, made into flows</h3>
-          <p>Prefect calls itself "an open-source orchestration engine that turns your Python functions into production-grade data pipelines with minimal friction". Flows "are defined as decorated Python functions" and can use native control flow — conditionals, loops, tasks created at runtime — rather than a graph declared up front. The server is self-hosted or Prefect Cloud.</p>
+          <h3>Prefect: Python functions, made into flows</h3>
+          <p>Prefect calls itself "an open-source orchestration engine that turns your Python functions into production-grade data pipelines with minimal friction". Flows "are defined as decorated Python functions" and can use native control flow, conditionals, loops and tasks created at runtime, rather than a graph declared up front. The server is self-hosted or Prefect Cloud.</p>
         </article>
       </div>
     </div>
@@ -70,17 +70,17 @@
       <h3>Choose Airflow when…</h3>
       <ul class="fact-list fact-list-plain">
         <li><strong>The platform already runs on it.</strong> Airflow is the standard; the hiring pool, the operators, the managed offerings and the tribal knowledge are all there. Migrating an orchestrator that works is rarely the best use of a quarter.</li>
-        <li><strong>The work is heterogeneous.</strong> File transfers, container jobs, ML training, API calls, SQL — anything a Python operator can wrap. Airflow orchestrates work; it does not need the work to produce a table.</li>
+        <li><strong>The work is heterogeneous.</strong> File transfers, container jobs, ML training, API calls, SQL, anything a Python operator can wrap. Airflow orchestrates work; it does not need the work to produce a table.</li>
         <li><strong>Scheduling semantics are the hard part.</strong> Cron and interval schedules, backfills over history, rerunning failed tasks, and assets whose updates schedule the DAGs that consume them. This is the machinery Airflow exists to provide.</li>
         <li><strong>Your team writes Python and wants to.</strong> Airflow's own docs say it: if you prefer clicking over coding, it is not the best fit. Everything is code.</li>
       </ul>
       <!-- claim: https://docs.dagster.io/guides/build/assets (read 2026-09-19) — asset definitions know their dependencies; https://docs.dagster.io/ — lineage, testability; https://docs.dagster.io/getting-started/concepts — Dagster+ Hybrid, Serverless and OSS -->
       <h3>Choose Dagster when…</h3>
       <ul class="fact-list fact-list-plain">
-        <li><strong>You are starting fresh, and the output is data.</strong> If the thing you run produces tables, files and models, describing those assets directly — with their dependencies — is a closer fit than describing the tasks that happen to produce them.</li>
+        <li><strong>You are starting fresh, and the output is data.</strong> If the thing you run produces tables, files and models, describing those assets directly, with their dependencies, is a closer fit than describing the tasks that happen to produce them.</li>
         <li><strong>Lineage and freshness are questions people actually ask.</strong> Because asset definitions know what they depend on, "what is stale and why" is a first-class view rather than something you reconstruct from task logs.</li>
         <li><strong>Local development and tests matter to you.</strong> Dagster leads with testability and a declarative model; an asset is a function you can call in a unit test.</li>
-        <li><strong>You want a managed offering beside the open-source core.</strong> Dagster's own quickstarts split three ways — Dagster+ Hybrid, Dagster+ Serverless and OSS — for the same asset model.</li>
+        <li><strong>You want a managed offering beside the open-source core.</strong> Dagster's own quickstarts split three ways, into Dagster+ Hybrid, Dagster+ Serverless and OSS, for the same asset model.</li>
       </ul>
     </div>
   </section>
@@ -93,13 +93,13 @@
       <p class="section-lede">
         Prefect is the answer for a team whose pipelines are already Python functions and who want them scheduled,
         retried and observed without rewriting them as a graph. Where Airflow wants the DAG declared up front, a
-        Prefect flow is ordinary Python — an <code>if</code>, a loop, tasks created from the data at hand — with the
+        Prefect flow is ordinary Python, an <code>if</code>, a loop, tasks created from the data at hand, with the
         orchestration added by a decorator. That makes it the lightest of the three to adopt and the least
         opinionated about what your data looks like afterwards.
       </p>
       <ul class="fact-list fact-list-plain">
         <li><strong>Pick Prefect over Airflow</strong> when the workflows are dynamic, the team is small, and "wrap what we have" beats "re-model what we have".</li>
-        <li><strong>Pick Airflow over Prefect</strong> when you need the ecosystem — the operators, the managed services, the people who already know it — or a control plane the whole company will standardise on.</li>
+        <li><strong>Pick Airflow over Prefect</strong> when you need the ecosystem, the operators, the managed services and the people who already know it, or a control plane the whole company will standardise on.</li>
         <li><strong>Pick Dagster over both</strong> when lineage between data assets is the thing you will look at every day.</li>
       </ul>
     </div>
@@ -112,9 +112,9 @@
       <p class="section-lede">
         The honest candidates are the two above. Airflow if you want the standard and its ecosystem; Prefect if
         you want the least ceremony around Python you already have. There are other orchestrators, and each has a
-        case, but a team leaving Dagster is almost always choosing between "more platform" (Airflow) and "less
-        model" (Prefect). What no orchestrator is an alternative for is the SQL itself — the joins and the reviewed
-        datasets the tasks produce — which is the one place this site's own product enters, below.
+        case, but a team leaving Dagster is almost always choosing between "more platform", meaning Airflow, and "less
+        model", per Prefect. What no orchestrator is an alternative for is the SQL itself, the joins and the reviewed
+        datasets the tasks produce. That is the one place this site's own product enters, below.
       </p>
     </div>
   </section>
@@ -127,7 +127,7 @@
         Whichever you choose, it will orchestrate <em>work</em>. When the work is SQL across several operational
         databases, authored by an agent and run under governed, read-only-by-default credentials, that part can
         live here: a versioned pipeline the orchestrator triggers through one endpoint and follows to completion.
-        datapipelines has no scheduler and wants none — it composes with Dagster, Airflow or Prefect rather than
+        datapipelines has no scheduler and wants none. It composes with Dagster, Airflow or Prefect rather than
         competing with any of them. <a th:href="@{/compare/airflow}">The Airflow comparison</a> spells out the
         boundary; <a th:href="@{/compare/dbt}">the dbt comparison</a> covers the modelling side of the same question.
       </p>
@@ -152,7 +152,7 @@
       <h2 id="cta-title" class="ds-headline">Keep your orchestrator. See what it would trigger.</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
-        The demo stack runs the cross-database pipeline any of the three would call — read the SQL, the run and
+        The demo stack runs the cross-database pipeline any of the three would call. Read the SQL, the run and
         the result before you wire anything together.
       </p>
       <div class="btn-row">

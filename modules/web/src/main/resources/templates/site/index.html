@@ -68,7 +68,7 @@
           <!-- claim: docs/deployment.md §10 (free, AGPL-3.0, self-hosted) -->
           <p class="support">Open source · Free software · Runs on your infrastructure<br>Need help getting started? <a th:href="'mailto:' + ${contactEmail}">Talk to the founder</a></p>
           <!--/* 127 §B.1: the release stage, rendered from the ONE constant (SitePages.RELEASE_STAGE). */-->
-          <p class="hero-note"><b th:text="${releaseStage}">Public beta — self-hosted, AGPL, actively developed.</b> <a th:href="@{/faq#support-and-feedback}" th:text="${releaseStageCta}">Report what breaks.</a></p>
+          <p class="hero-note"><b th:text="${releaseStage}">Public beta. Self-hosted, AGPL, actively developed.</b> <a th:href="@{/faq#support-and-feedback}" th:text="${releaseStageCta}">Report what breaks.</a></p>
         </div>
 
         <!--/* The worked example: a recorded run of the demo pipeline (SiteFacts.demo, ledger
@@ -92,7 +92,7 @@
           </div>
           <div class="panel" id="chart" role="tabpanel" aria-labelledby="tab-chart">
             <p class="panel-label">Business result</p>
-            <p class="chart-title">Each borough’s top company and its share of trips (scale 0–100%)</p>
+            <p class="chart-title">Each borough’s top company and its share of trips, on a scale of 0 to 100 percent</p>
             <div class="bar-row" th:each="r : ${facts.demo.rows}">
               <span th:text="${r.borough}">Manhattan</span>
               <svg class="bar-track" viewBox="0 0 100 1" preserveAspectRatio="none" role="img" th:attr="aria-label=|${r.topCompany} carried ${r.share} of ${r.borough} trips|">
@@ -125,7 +125,7 @@
               <!-- claim: docs/versioning.md §3 (a person releases), docs/pipeline-contract.md §12.12 (release checks) -->
               <li>A person reviews the pipeline before release. Release checks you configure run on the server.</li>
             </ol>
-            <p class="chart-note">A recorded run from the demo workspace (<span th:text="${facts.demo.pipelinePath}">demo/…</span>, <span th:text="${facts.demo.version}">v1</span>). This page does not execute a pipeline.</p>
+            <p class="chart-note">A recorded run from the demo workspace, pipeline <span th:text="${facts.demo.pipelinePath}">demo/…</span> version <span th:text="${facts.demo.version}">v1</span>. This page does not execute a pipeline.</p>
           </div>
           <div class="demo-foot">
             <span aria-hidden="true">&nearr;</span>
@@ -163,12 +163,12 @@
         <p class="eyebrow">Your databases, as they are</p>
         <h2 id="cap-connect-title">Connect the databases you already have.</h2>
         <!-- claim: docs/datasources.md §4 (the engine catalog), docs/ui-screens.md §4.5 (the registry screen) -->
-        <p>Register the databases and object storage you already run — Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2, and Parquet or Iceberg files on S3. Credentials are stored encrypted and never rendered back. Nothing is copied, and nothing moves until a pipeline reads it.</p>
+        <p>Register the databases and object storage you already run: Postgres, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2, and Parquet or Iceberg files on S3. Credentials are stored encrypted and never rendered back. Nothing is copied, and nothing moves until a pipeline reads it.</p>
       </div>
       <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Datasources</span><span class="tag">Screenshot</span></div>
         <img src="/site/img/home-connect.png" width="2880" height="1800" alt="The datasource registry of the live demo deployment in the dark theme: seven connections across SQLite, MySQL, Postgres, DuckDB and S3 lake engines, with each connection's last test state.">
-        <figcaption>The live deployment's datasource registry — the engines it reads, and the state of each connection's last test.</figcaption>
+        <figcaption>The live deployment's datasource registry: the engines it reads, and the state of each connection's last test.</figcaption>
       </figure>
     </div>
   </section>
@@ -179,12 +179,12 @@
         <p class="eyebrow">AI authors. You read every step.</p>
         <h2 id="cap-agent-title">Ask a question; the agent builds the pipeline.</h2>
         <!-- claim: docs/mcp-server.md §6 (the agent authors over the MCP tool surface) -->
-        <p>Describe the answer in business words. Your AI agent reads the real schemas through the built-in MCP server, writes the SQL and wires the steps into a versioned pipeline you can read end to end. The capture is a pipeline built exactly this way on the live deployment — eighteen nodes answering which boroughs slow down most on snow days.</p>
+        <p>Describe the answer in business words. Your AI agent reads the real schemas through the built-in MCP server, writes the SQL and wires the steps into a versioned pipeline you can read end to end. The capture is a pipeline built exactly this way on the live deployment, eighteen nodes answering which boroughs slow down most on snow days.</p>
       </div>
       <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Pipeline editor</span><span class="tag">Screenshot</span></div>
         <img src="/site/img/home-agent-builds.png" width="2880" height="1800" loading="lazy" alt="The pipeline editor on the live deployment in the dark theme: an eighteen-node agent-built pipeline with every node's name, source and dependencies visible on the canvas.">
-        <figcaption>Eighteen nodes, fitted to view — each card names its step, its source and what it feeds.</figcaption>
+        <figcaption>Eighteen nodes, fitted to view. Each card names its step, its source and what it feeds.</figcaption>
       </figure>
     </div>
   </section>
@@ -195,10 +195,10 @@
         <p class="eyebrow">No warehouse to build</p>
         <h2 id="cap-no-warehouse-title">No warehouse. Joined where the data lives.</h2>
         <!-- claim: docs/staging.md §3 (the per-run in-memory staging database, discarded with the run) -->
-        <p>There is no warehouse to load, model or keep in sync. Each run stages just the rows the question needs into its own in-memory database, joins them there — taxi trips from Postgres beside rideshare history read in place from S3 — and discards it when the run ends. The capture shows one join step reading tables that arrived from two different databases.</p>
+        <p>There is no warehouse to load, model or keep in sync. Each run stages just the rows the question needs into its own in-memory database and joins them there. Taxi trips from Postgres can sit beside rideshare history read in place from S3. The database is discarded when the run ends. The capture shows one join step reading tables that arrived from two different databases.</p>
       </div>
       <figure class="media-frame">
-        <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Pipeline editor — node details</span><span class="tag">Screenshot</span></div>
+        <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Pipeline editor: node details</span><span class="tag">Screenshot</span></div>
         <img src="/site/img/home-no-warehouse.png" width="2880" height="1800" loading="lazy" alt="A join node's details in the pipeline editor on the live deployment: the rendered SQL reads staged tables that arrived from Postgres and from S3 Parquet into the run's in-memory staging database.">
         <figcaption>One join step's rendered SQL: staged tables that arrived from two different databases, joined for this run only.</figcaption>
       </figure>
@@ -211,7 +211,7 @@
         <p class="eyebrow">Every run on the record</p>
         <h2 id="cap-run-title">Run it and read the result.</h2>
         <!-- claim: docs/rest-api.md §7 (the result is materialized with the run and paged through a cursor until it expires) -->
-        <p>Run the pipeline with its inputs and watch each step finish. The result is materialized with the run — the rows, and each node's row counts and durations — and stays pageable until it expires, so what you inspect is what ran.</p>
+        <p>Run the pipeline with its inputs and watch each step finish. The result is materialized with the run: the rows, plus each node's row counts and durations. It stays pageable until it expires, so what you inspect is what ran.</p>
       </div>
       <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Execution detail</span><span class="tag">Screenshot</span></div>
@@ -227,12 +227,12 @@
         <p class="eyebrow">A person signs off</p>
         <h2 id="cap-release-title">Review, then release.</h2>
         <!-- claim: docs/versioning.md §3 (a person releases; a released version is immutable), docs/versioning.md §5 (the next change is a new draft) -->
-        <p>The agent works on drafts. A person reads what changed, runs the release checks you configured, and releases a version — immutable from that moment, so what you approved is what runs, and the next edit is a new draft.</p>
+        <p>The agent works on drafts. A person reads what changed, runs the release checks you configured, and releases a version, immutable from that moment, so what you approved is what runs and the next edit is a new draft.</p>
       </div>
       <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Release dialog</span><span class="tag">Screenshot</span></div>
         <img src="/site/img/home-review-release.png" width="2880" height="1800" loading="lazy" alt="The release dialog on a draft pipeline in the dark theme: the configured checks with their passing verdicts and the version the release would lock.">
-        <figcaption>The release dialog on a seeded demo draft — the checks, their verdicts, and the version a person would lock.</figcaption>
+        <figcaption>The release dialog on a seeded demo draft: the checks, their verdicts, and the version a person would lock.</figcaption>
       </figure>
     </div>
   </section>
@@ -243,7 +243,7 @@
         <p class="eyebrow">One reviewed answer, many consumers</p>
         <h2 id="cap-api-title">Serve it as an API.</h2>
         <!-- claim: docs/rest-api.md §19 (a released version published as an authenticated GET endpoint with declared parameters), docs/rest-api.md §19.1 (the URL grammar) -->
-        <p>Publish a released version as an authenticated GET endpoint with declared parameters, at a URL your team chooses — <code>/api/analytics/v1/snow-days</code>, say. Your application, your BI tool and your agent all read the same reviewed answer.</p>
+        <p>Publish a released version as an authenticated GET endpoint with declared parameters, at a URL your team chooses, <code>/api/analytics/v1/snow-days</code> for example. Your application, your BI tool and your agent all read the same reviewed answer.</p>
       </div>
       <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API</span><span class="tag">Screenshot</span></div>
@@ -256,7 +256,7 @@
   <section class="section border" id="cap-workspaces" aria-labelledby="cap-workspaces-title">
     <div class="container">
       <div class="section-title">
-        <p class="eyebrow">One server, every team</p>
+        <p class="eyebrow">One server for the whole company</p>
         <h2 id="cap-workspaces-title">Each team has its own workspace.</h2>
         <!-- claim: docs/auth.md §4.2 (membership and roles per workspace), docs/auth.md §7.4 (a key is pinned to one workspace) -->
         <p>Workspaces keep each team's pipelines, connections and keys apart, with a role per member. One person can belong to several and switch between them; an API key is pinned to a single workspace, so no key reaches past its own team.</p>

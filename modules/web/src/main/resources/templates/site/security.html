@@ -29,10 +29,10 @@
       <p class="kicker">For the person who has to say yes</p>
       <h1 id="sec-title" class="ds-display">Letting an AI agent near your databases, without handing it a password</h1>
       <p class="section-lede">
-        The usual way to connect an agent to a database is a connection string on a laptop — one credential, every
+        The usual way to connect an agent to a database is a connection string on a laptop: one credential that can do everything, from every
         privilege that credential has, no record of what the agent did with it. datapipelines is built so that shape
         cannot occur: the agent holds a key to <em>this server</em>, the server holds the credentials, every action is
-        scoped, audited, and — for anything that reaches production — released by a person.
+        scoped, audited, and, for anything that reaches production, released by a person.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/auth}">Read the auth spec</a>
@@ -49,32 +49,32 @@
         <article class="card">
           <!-- claim: docs/datasources.md §7 -->
           <h3>The agent never holds a credential</h3>
-          <p>Datasource passwords and tokens are encrypted at rest and never returned — not through a tool, not through the UI, not in a pipeline's JSON. Pipelines reference datasources by name; the server connects.</p>
+          <p>Datasource passwords and tokens are encrypted at rest and never returned, not through a tool, not through the UI, and not in a pipeline's JSON. Pipelines reference datasources by name; the server connects.</p>
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §7.5 -->
           <h3>One key, a scope, a workspace</h3>
-          <p>An agent's key carries a scope — <code>read</code>, <code>execute</code>, <code>author</code> — and is pinned to one workspace. Every tool and every REST route declares the scope it needs; the matrix is a spec, and a test keeps the code equal to it.</p>
+          <p>An agent's key carries one of three scopes, <code>read</code>, <code>execute</code> or <code>author</code>, and is pinned to one workspace. Every tool and every REST route declares the scope it needs; the matrix is a spec, and a test keeps the code equal to it.</p>
         </article>
         <article class="card">
           <!-- claim: docs/datasources.md §3 -->
           <h3>Read-only where you say so</h3>
-          <p>Mark a datasource <code>readonly</code> and every write-shaped node against it is refused when the pipeline is saved, and again when it runs — two checks, so a flag flipped between them cannot ship a write.</p>
+          <p>Mark a datasource <code>readonly</code> and every write-shaped node against it is refused when the pipeline is saved, and again when it runs. Two checks, so a flag flipped between them cannot ship a write.</p>
         </article>
         <article class="card">
           <!-- claim: docs/versioning.md §3 -->
           <h3>Agents leave drafts; people release</h3>
-          <p>No tool releases a version. A draft is runnable — that is how an agent tests its work — but what an endpoint serves and what promotion carries is a version a person locked. A release is immutable; a discarded one is restorable.</p>
+          <p>No tool releases a version. A draft is runnable, which is how an agent tests its work, but what an endpoint serves and what promotion carries is a version a person locked. A release is immutable; a discarded one is restorable.</p>
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §10 -->
           <h3>Everything is audited</h3>
-          <p>Every MCP call, every lifecycle verb, every endpoint serve: who, through which surface (session, API key, MCP), on what, with the outcome. Never the SQL text, the row data or the parameter values — those are yours.</p>
+          <p>Every MCP call, every lifecycle verb and every endpoint serve records who, through which channel, being session, API key or MCP, on what, and with what outcome. Never the SQL text, the row data or the parameter values. Those are yours.</p>
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §8.3 -->
           <h3>Secured by default, public by allowlist</h3>
-          <p>Every route requires a credential unless it is on an enumerated public list with a written reason — the marketing site, the docs, the health probe. A route that is not on the list is not public. A test freezes the list.</p>
+          <p>Every route requires a credential unless it is on an enumerated public list with a written reason: the marketing site, the docs and the health probe. A route that is not on the list is not public. A test freezes the list.</p>
         </article>
       </div>
     </div>
@@ -90,19 +90,19 @@
           A key holds a scope, and a scope is a row in a matrix that names every operation it permits: listing and
           reading pipelines and schemas under <code>read</code>; running them under <code>execute</code>; creating
           and editing drafts, probing a <code>SELECT</code>, registering lake tables under <code>author</code>. The
-          matrix is the authority — the MCP server and the REST API are two adapters over it — and the scope every
+          matrix is the authority, and the MCP server and the REST API are two adapters over it, and the scope every
           tool requires is printed beside it in the tool list.
         </p>
         <!-- claim: docs/auth.md §7.7 -->
         <p>
           A second kind of key exists for published endpoints: bound to a path prefix of the published tree under <code>/api</code>, it can
-          call that subtree and nothing else. That is the key you give a partner, a workbook or a service — one per
+          call that subtree and nothing else. That is the key you give a partner, a workbook or a service, one per
           contract, revocable by the person who owns it, useless anywhere but the paths it was bound to.
         </p>
         <!-- claim: docs/auth.md §7.5 -->
         <p>
           Keys are owned by people, pinned to a workspace, and can be revoked; validation checks the key, its expiry
-          and its owner's status on every request. Revoking one person's key never touches another's — the reason
+          and its owner's status on every request. Revoking one person's key never touches another's. That is the reason
           keys, not shared passwords, are the only way in for programs.
         </p>
       </div>
@@ -125,13 +125,13 @@
         <!-- claim: docs/datasources.md §3 -->
         <p>
           An agent that tries to write where it should not is refused before the write, by the read-only flag on the
-          datasource and by the scope on its key. An agent that tries to release or promote finds no tool for it —
+          datasource and by the scope on its key. An agent that tries to release or promote finds no tool for it,
           it can publish an endpoint, but only over a version a person already released. An agent that tries to
           read a credential finds none in any response.
         </p>
         <!-- claim: docs/auth.md §10 -->
         <p>
-          And whatever it did, the audit log says so — by key, by tool, by outcome — so the question after an incident
+          And whatever it did, the audit log says so, by key, by tool and by outcome, so the question after an incident
           is a query, not an investigation.
         </p>
       </div>
@@ -146,12 +146,12 @@
         <article class="card">
           <!-- claim: docs/key-providers.md §2 -->
           <h3>Encryption keys you control</h3>
-          <p>Datasource credentials are encrypted with a master key the server reads from its environment — never from the database it protects; the key-provider contract is written for a KMS, with AWS KMS as the worked recipe, so the master key can live where your other secrets do.</p>
+          <p>Datasource credentials are encrypted with a master key the server reads from its environment, never from the database it protects; the key-provider contract is written for a KMS, with AWS KMS as the worked recipe, so the master key can live where your other secrets do.</p>
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §5 -->
           <h3>Your identity provider</h3>
-          <p>People sign in through OIDC — Google, Microsoft, Okta, Keycloak, any compliant provider — or through local accounts when you choose; there is no datapipelines account to create anywhere.</p>
+          <p>People sign in through OIDC, Google, Microsoft, Okta, Keycloak or any compliant provider, or through local accounts when you choose; there is no datapipelines account to create anywhere.</p>
         </article>
         <article class="card">
           <!-- claim: docs/deployment.md §10 -->
@@ -170,7 +170,7 @@
            what a report reaches: docs/auth.md §10 (the audit log every event already lands in) -->
       <p class="section-lede">
         Email <a th:href="'mailto:' + ${contactEmail}"><span th:text="${contactEmail}">datapipelines.co@gmail.com</span></a>
-        directly — the address reaches the owner, and the code you read is the code that runs.
+        directly. The address reaches the owner, and the code you read is the code that runs.
       </p>
     </div>
   </section>

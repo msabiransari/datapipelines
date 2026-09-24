@@ -28,10 +28,10 @@
       <h1 id="ag-title" class="ds-display">A client reporting API per client: one pipeline each, one key each, a release you can invoice</h1>
       <p class="section-lede">
         An agency's reporting is a map of other people's databases: a Postgres here, a client's SQL Server there, a
-        lake for the third. The work is the same shape every time — join their sources, produce their numbers, put
+        lake for the third. The work is the same shape every time: join their sources, produce their numbers, put
         those numbers in front of them, prove where the number came from. datapipelines is not a client reporting
         tool with dashboards of its own; it is the governed data layer under one. Each client gets its own
-        workspace, its own key, an agent that drafts the pipeline, and a release your team signs — which becomes the
+        workspace, its own key, an agent that drafts the pipeline, and a release your team signs, which becomes the
         API the client's portal calls.
       </p>
       <div class="btn-row">
@@ -48,8 +48,8 @@
       <div class="prose">
         <!-- claim: docs/auth.md §7.5 -->
         <p>
-          Every client gets a workspace, and a key is pinned to one workspace at issuance: the analyst (or the
-          agent) working client A sees nothing of client B — the other workspace's pipelines, datasources and
+          Every client gets a workspace, and a key is pinned to one workspace at issuance: the analyst, or the
+          agent, working client A sees nothing of client B. The other workspace's pipelines, datasources and
           executions are absent, not merely hidden. Cross-client leakage by a mistyped id resolves as not-found,
           which is the property you want when the clients are each other's competitors.
         </p>
@@ -57,12 +57,12 @@
         <p>
           The client-facing half is a second kind of key: bound to a path prefix of the published tree under <code>/api</code>, it can
           call that client's endpoints and nothing else. Handing client A their key never touches client B's, and
-          revoking one is a checkbox — no shared password to rotate across the roster.
+          revoking one is a checkbox. There is no shared password to rotate across the roster.
         </p>
         <p>
           Isolation is also the answer to the question agencies ask first, which is not technical: <em>what
           happens when one client's data must never influence another's numbers?</em> Here the answer is
-          structural — the workspaces do not share datasources unless you deliberately bind a global one, the
+          structural. The workspaces do not share datasources unless you deliberately bind a global one, the
           agent's key cannot see across them, and the endpoint keys cannot reach another prefix. There is no
           "careful not to touch the other tab" step in the runbook, because the isolation is not a convention the
           team follows; it is the shape of the system they are working in.
@@ -80,7 +80,7 @@
         <p>
           The repetitive half of agency work is walking a new client's schema: what tables exist, what the columns
           hold, how their "orders" differs from the last client's. The agent does that walk with the same tools on
-          every engagement — schemas, catalogue statistics, a bounded probe — and drafts the pipeline: one node per
+          every engagement, from schemas and catalogue statistics to a bounded probe, and drafts the pipeline: one node per
           source, the join in the per-run scratch database, the client's definition of "active customer" as the
           filter your reviewer reads before anything ships. The draft is the deliverable your team reviews; the
           variance between clients becomes reading, not re-typing. Engagement number four costs a fraction of
@@ -88,7 +88,7 @@
         </p>
       </div>
       <figure class="shot">
-        <figcaption>The agent's session on a new client's sources: schemas read, the draft iterated, the run checked — the same ritual for every engagement.</figcaption>
+        <figcaption>The agent's session on a new client's sources: schemas read, the draft iterated, the run checked. It is the same ritual for every engagement.</figcaption>
         <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
       </figure>
     </div>
@@ -102,7 +102,7 @@
         <li>
           <h3>Open the workspace</h3>
           <!-- claim: docs/auth.md §7.5 -->
-          <p>One workspace per client, created in minutes. Everything that follows — datasources, pipelines, releases, keys — lives inside it, invisible to every other workspace.</p>
+          <p>One workspace per client, created in minutes. Everything that follows, from datasources and pipelines to releases and keys, lives inside it, invisible to every other workspace.</p>
         </li>
         <li>
           <h3>Register the client's sources, read-only</h3>
@@ -135,15 +135,15 @@
       <div class="prose">
         <!-- claim: docs/versioning.md §3 -->
         <p>
-          The report a client disputes is the report you can defend: the pipeline that produced it was released — by
-          a person on your team, as an immutable version — and the endpoint serves the version you point it at. "The
+          The report a client disputes is the report you can defend: the pipeline that produced it was released, by
+          a person on your team, as an immutable version, and the endpoint serves the version you point it at. "The
           numbers changed" becomes "version 4 was the deliverable; here is its diff", which is a different
           conversation. Agents cannot release; the sign-off is structurally yours.
         </p>
         <p>
           It also changes the retainer conversation. "Maintenance" stops being a euphemism for re-running things by
           hand: a schema change upstream is a new draft your agent produces, a diff your reviewer reads, and a
-          release your client's invoice can reference. The engagement's artifacts are versioned all the way down —
+          release your client's invoice can reference. The engagement's artifacts are versioned all the way down,
           which is what "professional services" was always supposed to mean.
         </p>
       </div>
@@ -159,7 +159,7 @@
           <h3><span class="status status-shipped">Ships today</span> The endpoint in their portal</h3>
           <!-- claim: docs/rest-api.md §19 -->
           <ul>
-            <li>The client's white-label page calls <code>GET /api/…</code> with their key; the query string binds the report's parameters — month, region, account.</li>
+            <li>The client's white-label page calls <code>GET /api/…</code> with their key; the query string binds the report's parameters, such as month, region and account.</li>
             <li><code>Cache-Control: no-store</code>: every call is a fresh run of the released version, so the portal never shows a stale cached copy.</li>
             <li>The key reaches that path and nothing else; the contract is enforced by the router, not by a promise.</li>
           </ul>
@@ -169,7 +169,7 @@
           <!-- claim: docs/ROADMAP.md §2 -->
           <ul>
             <li>Embedded dashboards are the planned roadmap item: created by your agent, embedded in the client's product, fed by released pipelines, filtered per viewer.</li>
-            <li>Until it ships, the endpoint is the embed — a portal table or chart that reads the client's JSON is an afternoon of their front-end.</li>
+            <li>Until it ships, the endpoint is the embed: a portal table or chart that reads the client's JSON is an afternoon of their front-end.</li>
             <li>Either way, the isolation holds: the dashboard, like the key, belongs to one client's workspace and stops at its boundary.</li>
             <li>The <a th:href="@{/tableau/extracts-alerts-dashboards}">Tableau roadmap page</a> carries the same plans, labelled as unshipped.</li>
           </ul>
@@ -183,17 +183,17 @@
       <p class="kicker">What it looks like</p>
       <h2 id="ag-shot" class="ds-headline">The client's endpoint, the key, the version</h2>
       <figure class="shot">
-        <figcaption>The API section: one published endpoint per client, the version each serves, and the key bound to each path — the roster, read at a glance. The panel here is the demo workspace's own endpoint, rendered from the same recorded run the home page shows, so what a client receives is never a mock-up.</figcaption>
+        <figcaption>The API section: one published endpoint per client, the version each serves, and the key bound to each path. It is the roster, read at a glance. The panel here is the demo workspace's own endpoint, rendered from the same recorded run the home page shows, so what a client receives is never a mock-up.</figcaption>
         <div th:replace="~{site/_demo-api :: api(${facts.demo})}"></div>
       </figure>
       <div class="prose">
         <!-- claim: docs/auth.md §10 -->
         <p>
           One more property matters at review season: the audit log. Every call a client's key made, every release
-          a teammate signed, every agent action on every workspace — recorded with the actor and the surface, and
+          a teammate signed, every agent action on every workspace, recorded with the actor and the tool, and
           never the data itself. When a client asks "who looked at our numbers and when", the answer is a query
           over your own deployment's log, not a search through inboxes. The same log answers the earlier question
-          too — which version of the report was live on which date — because releases and calls land in one record
+          too, which version of the report was live on which date, because releases and calls land in one record
           your agency owns outright.
         </p>
       </div>
@@ -218,7 +218,7 @@
       <p class="section-lede">
         One workspace, one datasource, one pipeline, one release, one endpoint: the smallest engagement-shaped slice
         of the demo proves the flow before you point it at a real client's database. The same ritual scales from the
-        pilot client to the roster without changing shape — only the workspace names change.
+        pilot client to the roster without changing shape. Only the workspace names change.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/deployment}">Demo quickstart</a>
