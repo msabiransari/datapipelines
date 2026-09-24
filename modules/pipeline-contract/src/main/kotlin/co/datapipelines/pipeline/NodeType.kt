@@ -9,9 +9,11 @@ import com.fasterxml.jackson.annotation.JsonValue
  *
  * The value drives executor behaviour (§8.4): `DQL` stages / returns / writes back a
  * ResultSet, `DML` records an affected-row count, `DDL` records success, `PIPELINE` executes
- * the pinned child pipeline and consumes its result (§8.5), and `CALCULATOR` evaluates a pure
- * catalog function and writes one typed value into the shared Context (§4.10). It also decides whether an `output`
- * block is legal at all — `DQL` always may carry one, `PIPELINE` may when the pinned child has
+ * the pinned child pipeline and consumes its result (§8.5), `CALCULATOR` evaluates a pure
+ * catalog function and writes one typed value into the shared Context (§4.10), and `TRANSFORM`
+ * evaluates a pinned transform template over staged data (§4.12). It also decides whether an `output`
+ * block is legal at all — `DQL` always may carry one, `TRANSFORM` may in `row`/`table` mode,
+ * `PIPELINE` may when the pinned child has
  * a caller node (§12.9), `DML`/`DDL` never (§12.4).
  *
  * Wire values are UPPER and coincide with the constant names, but the `@JsonValue` /
@@ -43,6 +45,18 @@ enum class NodeType(
      * that nobody reads it as one; and it carries no `source`, because it touches no database.
      */
     CALCULATOR("CALCULATOR"),
+
+    /**
+     * Evaluates a pinned `jsonata`/`javascript` template as a pure function over staged data
+     * and the Context (§4.12, transform-nodes design §3): `row`/`table` modes write a tempdb
+     * table or the caller result, `value` mode writes one Context key under `context_key`.
+     *
+     * Like [CALCULATOR] it carries no `source` — it is tempdb-only by construction, so the
+     * read-only rule holds trivially and every run is reproducible from staged inputs. Unlike
+     * it, the work is a template pin, not a catalog kind: the contract (inputs, output, rejects)
+     * is the pinned version's, and §12.13 checks the node's `inputs`/`output` against it.
+     */
+    TRANSFORM("TRANSFORM"),
     ;
 
     companion object {

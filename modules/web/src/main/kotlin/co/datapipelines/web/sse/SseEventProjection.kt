@@ -140,6 +140,11 @@ class SseEventProjection(
             // 078 A5: a calculator whose key the caller supplied was SKIPPED, not evaluated —
             // the payload says so, same conditional discipline (absent on every other node).
             event.stats.providedBy?.let { put("provided_by", it) }
+            // 7c (#7), same discipline: a TRANSFORM node reports what it read, what it
+            // rejected, and how many invariants ran — absent on every other node type.
+            event.stats.rowsIn?.let { put("rows_in", it) }
+            event.stats.rowsRejected?.let { put("rows_rejected", it) }
+            event.stats.invariantsChecked?.let { put("invariants_checked", it) }
         }
 
     private fun nodeFailedPayload(event: NodeFailed) =

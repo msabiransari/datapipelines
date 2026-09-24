@@ -57,7 +57,8 @@ class PipelinesExecuteNodeTool(
                 "Runs ONE pipeline node's rendered SQL against its own datasource and returns up to 50 " +
                     "decoded rows — a debug query for testing a node in isolation, NOT a pipeline execution. " +
                     "DML and DDL nodes execute FOR REAL against the datasource, leaving no execution history " +
-                    "or trace. No ancestors run and no tempdb exists: a node whose source is tempdb is refused. " +
+                    "or trace. No ancestors run and no tempdb exists: a node whose source is tempdb is refused, " +
+                    "and so is a TRANSFORM node (use templates_evaluate). " +
                     "Parameters bind through the pipeline's declarations; unsupplied required parameters fall " +
                     "back to sample values and the response names them in sampled_parameters. Absent version " +
                     "runs the DRAFT if one exists, else the current released version; the response states which " +
@@ -227,6 +228,12 @@ class PipelinesExecuteNodeTool(
                 NodeType.CALCULATOR -> {
                     standaloneRefused(resolution.version, node.id, "calculator_node")
                 }
+
+                // 7c (#7): a TRANSFORM node is a script over staged data, not SQL against a
+                // datasource — the same refusal, and `templates_evaluate` is its debug verb.
+                NodeType.TRANSFORM -> {
+                    standaloneRefused(resolution.version, node.id, "transform_node")
+                }
             }
         }
     }
@@ -269,10 +276,22 @@ class PipelinesExecuteNodeTool(
                             "Context key, and runs no SQL of its own."
                     }
 
+                    "transform_node" -> {
+                        "Node '$nodeId' is a TRANSFORM node — it evaluates a script over staged data " +
+                            "and runs no SQL of its own."
+                    }
+
                     else -> {
                         "Node '$nodeId' is a PIPELINE node — it runs a child pipeline, not SQL."
                     }
                 },
-            details = mapOf("node_id" to nodeId, "reason" to reason, "version" to version.version),
+            details =
+                mapOf(
+                    "node_id" to nodeId,
+                    "reason" to reason,
+                    "version" to version.version,
+                    // 7c: a TRANSFORM's debug verb is the evaluate surface, not this tool.
+                    "use" to if (reason == "transform_node") "templates_evaluate" else null,
+                ),
         )
 }

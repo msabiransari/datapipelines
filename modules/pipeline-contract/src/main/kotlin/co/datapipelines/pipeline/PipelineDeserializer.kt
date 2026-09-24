@@ -171,6 +171,18 @@ private class WireValueScan(
             return
         }
         if (target == OutputTarget.DATASOURCE) scanWriteMode(index, output)
+        // §12.13 (7c, R5): `rejects` is a TRANSFORM companion of a TEMPDB output. On a `caller`
+        // target the typed model has no field to hold it, so the refusal lives here — silently
+        // dropping a declared rejects table is exactly what R5 forbids.
+        if (target == OutputTarget.CALLER && !output.path("rejects").let { it.isMissingNode || it.isNull }) {
+            add(
+                PipelineErrorCodes.Validation.TRANSFORM_REJECTS_ON_CALLER,
+                "nodes[$index].output.rejects",
+                "Output target 'caller' takes no 'rejects' table — the caller result has nowhere " +
+                    "to put rejected rows, and rejects are never silently dropped (R5).",
+                mapOf("node" to node.path("id").asTextOrNull()?.truncateForError()),
+            )
+        }
     }
 
     /**

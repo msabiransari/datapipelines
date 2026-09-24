@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.28 (revised — see Change Log)
+**Status:** v1.29 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-17
@@ -293,18 +293,19 @@ Note: no `output` block. DML's side effect IS the output.
 |---|---|---|---|
 | `id` | string | yes | Node identifier. `[a-z0-9_]+`. Unique within the pipeline. Stable across versions and environments. |
 | `description` | string | yes | Human-readable. Shown in UI editor. |
-| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`, `PIPELINE`, `CALCULATOR`. Drives executor behavior. |
-| `source` | string | yes, except PIPELINE and CALCULATOR | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). |
-| `template` | object | yes, except PIPELINE and CALCULATOR | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). |
+| `type` | string (enum) | yes | One of `DQL`, `DML`, `DDL`, `PIPELINE`, `CALCULATOR`, `TRANSFORM`. Drives executor behavior. |
+| `source` | string | yes, except PIPELINE, CALCULATOR and TRANSFORM | Datasource name, OR `"tempdb"` for in-memory staging. Must be a registered datasource name in the env, or `"tempdb"`. Forbidden on `PIPELINE` nodes (§12.9), `CALCULATOR` nodes (§12.10) and `TRANSFORM` nodes (§12.13 — a TRANSFORM is tempdb-only). |
+| `template` | object | yes, except PIPELINE and CALCULATOR | Template reference: `{id, version}`. Immutable. See [Templates spec](templates.md). Forbidden on `PIPELINE` nodes (§12.9) and `CALCULATOR` nodes (§12.10). On `TRANSFORM` nodes it pins a `jsonata`/`javascript` template (§12.13). |
 | `pipeline` | object | PIPELINE nodes only | Child pipeline reference: `{name, version}` — the pinned pipeline version the node executes. Required on `PIPELINE` nodes; absent on SQL node types. See §4.9. |
 | `parameters` | object | no | Child input bindings on a `PIPELINE` node: each key names a child declared parameter or a child calculator `context_key`; each value is a typed literal in the target's §6.3 wire encoding, or `"${ref}"` resolving against the parent's Context tiers (a parent parameter, a parent calculator `context_key`, an org/platform key) at the identical type. See §4.9. |
 | `kind` | string | CALCULATOR nodes only | The catalog calculator this node evaluates ([Calculators §2](calculators.md)). Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
-| `inputs` | object | CALCULATOR nodes only | The kind's inputs, by input name. A `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type. Required on `CALCULATOR` nodes; forbidden on every other type. See §4.10. |
-| `context_key` | string | CALCULATOR nodes on a single-output kind | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. XOR with `context_keys`; forbidden on every other type. See §4.10. |
+| `inputs` | object | CALCULATOR and TRANSFORM nodes only | On a `CALCULATOR` node: the kind's inputs, by input name — a `"$name"` string is a **reference** to a Context key; every other JSON value is a literal typed against the kind's declared input type (§4.10). On a `TRANSFORM` node: the pinned contract's inputs, by input name — a `"$name"` string names a Context key, anything else names a tempdb table an ancestor stages (§4.12). Required on both; forbidden on every other type. |
+| `context_key` | string | CALCULATOR nodes on a single-output kind; value-mode TRANSFORM nodes | The Context key this node writes, per §6.1's `[a-z_][a-z0-9_]*`. Deliberately not called `output`: it names a value downstream nodes bind as `:context_key`, never a table. XOR with `context_keys` on a `CALCULATOR` node (§4.10); required on a value-mode `TRANSFORM` node (§4.12); forbidden on every other type. |
 | `context_keys` | object | CALCULATOR nodes on a multi-output kind | The Context key each of the kind's named outputs is written to, as `{output name: context key}` — every declared output mapped, each key per §6.1. XOR with `context_key`; forbidden on every other type. See §4.10. |
-| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). See §4.7. |
+| `output` | object | conditional | Optional for `DQL` nodes — omitted means `{"target": "caller"}`. Forbidden for `DML` / `DDL` / `CALCULATOR` nodes. On `PIPELINE` nodes, permitted only when the pinned child has a caller node (§12.9). On `TRANSFORM` nodes: required in `row`/`table` mode (`tempdb` or `caller`), forbidden in `value` mode (§4.12). See §4.7. |
 | `depends_on` | array of string | yes | Parent node IDs. Empty array for source nodes. Must reference existing node IDs. No cycles. **Data flow only** — never an edge added to avoid contention between nodes; the executor owns scheduling (§4.11). |
 | `settings` | object | no | Per-node execution settings. v1 holds one key, `timeout_seconds` — this node's wall-clock deadline. See §4.11. |
+| `strict` | boolean | no | TRANSFORM nodes only: fail the node when the rejects table is non-empty (`pipeline.transform.rejects_strict`). Default `false` (partition — the rejects are written and the run continues). Legal only when the pinned contract declares rejects (§12.13). See §4.12. |
 
 ### 4.7 `output` block reference
 
@@ -312,8 +313,8 @@ The `output` block declares where the node's ResultSet goes. Optional for DQL no
 
 | `target` value | Additional fields | Description |
 |---|---|---|
-| `"tempdb"` | `table: string` | Stage the ResultSet into the in-memory tempdb under the given table name. Downstream nodes can query it via `source: "tempdb"` SQL referencing the table. A node whose data downstream nodes consume must declare this explicitly. |
-| `"caller"` | (none) | Return the ResultSet as the pipeline's result. **Default when `output` is omitted.** At most one node per pipeline may resolve to this target; zero is legal (write-back pipelines return stats only). |
+| `"tempdb"` | `table: string`; TRANSFORM only: `rejects: string` | Stage the ResultSet into the in-memory tempdb under the given table name. Downstream nodes can query it via `source: "tempdb"` SQL referencing the table. A node whose data downstream nodes consume must declare this explicitly. On a `TRANSFORM` node `rejects` names the tempdb table the function's rejected rows go to, required exactly when the pinned contract declares `rejects` (§12.13); the rejects table joins the tempdb namespace's uniqueness rule (§12.1). |
+| `"caller"` | (none — `rejects` is refused, §12.13 R5) | Return the ResultSet as the pipeline's result. **Default when `output` is omitted.** At most one node per pipeline may resolve to this target; zero is legal (write-back pipelines return stats only). A `row`/`table`-mode TRANSFORM may be the caller node only when its contract declares no rejects (§12.13). |
 | `"datasource"` | `datasource: string`, `table: string`, `mode: "replace" \| "append"` | Stream the ResultSet to an external datasource's table. `replace` = TRUNCATE+INSERT in one transaction; `append` = INSERT only. The target table must already exist in the datasource (or be created by a preceding DDL node in the pipeline). |
 
 ### 4.8 `source` field rules
@@ -433,6 +434,51 @@ A node that exceeds its deadline fails with `pipeline.node.timeout` (§13.4, HTT
 A PIPELINE node that declares no `timeout_seconds` is not bounded by the node deadline: its work is a child execution, already bounded by `execution-timeout-seconds` one level down. One that declares it, is.
 
 ---
+
+### 4.12 JSON structure (TRANSFORM node)
+
+```json
+{
+  "id": "shape_orders",
+  "description": "Order lines at reporting grain; cents to currency; refunds preserved.",
+  "type": "TRANSFORM",
+  "template": { "id": "acme/shape/order_lines.jsonata", "version": 3 },
+  "inputs": { "orders": "stg_orders", "tz": "$org_timezone", "min_total": "$min_total" },
+  "output": { "target": "tempdb", "table": "order_lines", "rejects": "order_lines_rejected" },
+  "strict": false,
+  "depends_on": ["stage_orders"]
+}
+```
+
+A TRANSFORM node evaluates the pinned transform template as a **pure function** over staged data
+and the Context (the transform-nodes design record §3). The language is the pinned template's
+`type` (`jsonata` today, `javascript` in round two); the **mode** (`row`, `table`, `value`) and
+the input/output shapes are the pinned version's **contract** — never repeated on the node, which
+conforms to it at save time (§12.13). The function has no handle to tempdb, the network, the
+filesystem or the clock: iteration is the executor's job (`row` mode reads the single table input
+in `result-batch-size` batches), `$now()`/`$millis()` return the execution's `current_timestamp`,
+and the output is a function of the template version and its inputs — every run is reproducible.
+
+| Field | Rule |
+|---|---|
+| `template` | Pinned like every pin; its type must be `jsonata` or `javascript` (`pipeline.validation.transform_template_type`). |
+| `source` | **Forbidden** (`transform_source_forbidden`). A TRANSFORM is tempdb-only: it reads what upstream nodes staged plus the Context, and writes tempdb, the Context or the caller. It never touches a datasource — the read-only rule holds trivially, and every run is reproducible from staged inputs. |
+| `inputs` | The CALCULATOR convention. `"$name"` is a Context key of any tier; anything else is a tempdb table a node this one depends on stages. The key set must equal the contract's input names (`transform_input_contract`); a table no upstream stages or a `$key` nobody writes is `transform_input_unknown`; a value input whose Context type does not fit is `transform_input_contract`. An object-valued key (R4) binds only here. |
+| `output` | **Table output** (`row`/`table` mode): `{ "target": "tempdb", "table", "rejects"? }` or `{ "target": "caller" }` (the caller-node rules of §9 apply unchanged). `rejects` on a `caller` output, or a rejects-declaring contract pinned by a caller node, is `transform_rejects_on_caller` (R5 — rejects are never silently dropped). **Value/object output** (`value` mode): no `output` block — the node writes `context_key` only (R3: no JSON result bodies), obeying every calculator rule: §6.1 name shape, one writer per key, never shadowing a declared parameter (`calculator_output_collision` / `calculator_output_name_invalid` reused), topology-ordered. Any other output/mode pairing is `transform_output_shape`. `rejects` present without the contract declaring it — or absent when it does — is `transform_rejects_undeclared` / `transform_rejects_missing`. |
+| `strict` | Boolean, default `false`. Legal only when the contract declares rejects (`transform_strict_without_rejects`); then a non-empty rejects table fails the node with `pipeline.transform.rejects_strict` (count + first ten reasons). Default is partition: the rejects are written and the run continues. |
+| `depends_on` | Sequencing is topology, as for calculators: a `$key` written by another node is bindable only from a node that depends on its writer (`calculator_input_unordered` reused). |
+
+**Every key a `value`-mode TRANSFORM writes is an implicit optional execute input**, exactly like
+a calculator's (§4.10): supplied by the caller, the node is skipped and its stats carry
+`provided_by: "caller"`; the supplied value is checked against the contract's declared output at
+the node (an `object` output accepts any JSON object under the `max-value-bytes` cap).
+
+**Object keys have one reader (R4).** A key whose writer declares `output.kind: object` may be
+bound only by a TRANSFORM `inputs` entry; a SQL node's `:key`, a calculator input or a `PIPELINE`
+node's `parameters` reference to it is refused at pipeline save with
+`pipeline.validation.transform_object_key_bound`, naming the key, its writer and the offending
+node. A caller may supply it at execute time as any JSON object under the cap; it persists as
+jsonb in the execution's Context snapshot.
 
 ## 5. Settings
 
@@ -563,12 +609,15 @@ them spell a key the same way. Lowest precedence first:
 | 1 | **org config** | `org_currency_name`, `org_currency_symbol`, `org_fiscal_start_date`, `org_week_start`, `org_timezone` — the yml path minus the `datapipelines.org.` prefix, dots and dashes as `_`. All typed `STRING`; `org_fiscal_start_date` is an `MM-DD` string the calculator kinds parse | the deployment's `application.yml` (Configuration §3.21) |
 | 2 | **platform** | `current_date` (`DATE`, evaluated in `org_timezone`), `current_timestamp` (`TIMESTAMP`), `execution_id` (`STRING`) | the executor, at execution start |
 | 3 | **declared `parameters`** | whatever §6.2 declares, after defaulting | the pipeline body — declaring a key an org or platform value also provides IS the override, and it is visible in the body |
-| 4 | **execute-time inputs** | declared parameters (§6.3), and every key a `CALCULATOR` node writes as an implicit **optional** input (§4.10 — supplied → the node is skipped; unsupplied → the node runs; a multi-output node's keys are all-or-nothing) | the caller's `parameters` object |
-| 5 | **calculator outputs** | every key a `CALCULATOR` node writes (§4.10 — one, or a multi-output kind's whole mapped set) | the node, at its DAG position |
+| 4 | **execute-time inputs** | declared parameters (§6.3), and every key a `CALCULATOR` or value-mode `TRANSFORM` node writes as an implicit **optional** input (§4.10, §4.12 — supplied → the node is skipped; unsupplied → the node runs; a multi-output calculator's keys are all-or-nothing) | the caller's `parameters` object |
+| 5 | **calculator outputs** | every key a `CALCULATOR` node writes (§4.10 — one, or a multi-output kind's whole mapped set), and every key a value-mode `TRANSFORM` node writes (§4.12 — including an `object`-shaped value, persisted as jsonb under the `datapipelines.transform.max-value-bytes` cap) | the node, at its DAG position |
 
 A calculator output may shadow an org or platform key; it may **never** shadow a declared
 parameter, and one is refused at save time with `pipeline.validation.calculator_output_collision`
-(§12.10). A calculator that RUNS writes over everything below tier 5 — including a caller-supplied
+(§12.10) — the same rule binds a value-mode TRANSFORM's key (§12.13). An **object-valued** key
+(a TRANSFORM whose contract declares `output.kind: object`) has ONE reader: another TRANSFORM's
+`inputs` — a SQL bind, a calculator input or a composition parameter naming it is refused at
+save with `pipeline.validation.transform_object_key_bound` (R4, §4.12). A calculator that RUNS writes over everything below tier 5 — including a caller-supplied
 value for a *different* key — but a key the caller supplied skips its node (§4.10), so the two
 never contest the same key in one run. Org and platform keys are deployment constants, so the
 save-time dry render knows them: a template binding `:org_currency_symbol` validates without the
@@ -681,7 +730,7 @@ There is **no `terminal_node_id` field** and no topology-based auto-detection. T
 
 ### 9.1 Resolution
 
-1. For each DQL node, resolve its effective target: the declared `output.target`, or `caller` if `output` is omitted.
+1. For each DQL or TRANSFORM node, resolve its effective target: the declared `output.target`, or `caller` if `output` is omitted (DQL only — a TRANSFORM's output is always explicit, §4.12).
 2. At most one node may resolve to `caller` — this is the **caller node**, and its ResultSet is the pipeline's result.
 3. Zero caller nodes is legal: the pipeline is a pure write-back/ETL pipeline. Execution returns stats only and emits no `data_ready` event.
 
@@ -945,6 +994,30 @@ The `checks[]` rules (§3.3, 140). One code covers every defect, because to the 
 | Code | Check |
 |---|---|
 | `pipeline.validation.check_invalid` | A body carries at most **20** checks. Each check's `id` matches `[a-z0-9_]{1,63}`, is not `tempdb` or the reserved `__…__` namespace, and is unique within the body (the run rows key on it). `name` is 1–200 characters. `datasource` is not `tempdb` and resolves in this environment's registry (the §12.5 rule as for nodes). `sql` is non-blank, carries no `${}` interpolation (a check has no rendering), and every `:name` bind names a DECLARED pipeline parameter — the calculator Context is not available to a check; a cast (`amount::numeric`) is not a bind. `expected.kind` is the closed list `value` \| `range` \| `rows`, with the kind's members present and coherent: `value` needs `value` and `tolerance` ≥ 0; `range` needs `min` ≤ `max`; `rows` needs `rows` ≥ 0 |
+
+### 12.13 Transform validation rules
+
+The `TRANSFORM`-node rules (§4.12, transform-nodes design §3.1, R3–R5). Each is decidable from
+the body plus the pinned version's contract, so an author gets all of them at save time — the
+dry-render analogue for transforms, where "the pipeline and the template agree" is proven, not
+hoped. Run-time refusals are §13.18's family.
+
+| Code | Check |
+|---|---|
+| `pipeline.validation.transform_template_type` | A TRANSFORM node's pinned template is `jsonata` or `javascript`. |
+| `pipeline.validation.transform_source_forbidden` | A TRANSFORM node carries no `source` — it is tempdb-only. |
+| `pipeline.validation.transform_input_unknown` | An `inputs` entry names a tempdb table no ancestor stages, or a `$key` no tier and no node writes. |
+| `pipeline.validation.transform_input_contract` | The `inputs` key set differs from the contract's input names (`details.missing` / `details.extra`), a table input is bound to a `$key` or vice versa, or a value input's Context type does not fit the contract's declared type. |
+| `pipeline.validation.transform_output_shape` | The `output` block does not fit the contract's mode: a `target` on `value` mode (R3 — a value-mode TRANSFORM writes its `context_key` only), a missing `context_key` on `value` mode, or a `row`/`table` mode without `{ "target": "tempdb", "table", "rejects"? }` or `{ "target": "caller" }`. |
+| `pipeline.validation.transform_rejects_undeclared` | `output.rejects` is present but the pinned contract declares no rejects (or the node is not a TRANSFORM at all). |
+| `pipeline.validation.transform_rejects_missing` | The pinned contract declares rejects and the node's `output` names no rejects table. |
+| `pipeline.validation.transform_rejects_on_caller` | `rejects` on a `caller` output, or a rejects-declaring contract pinned by a caller node (R5). |
+| `pipeline.validation.transform_strict_without_rejects` | `strict` on a node whose pinned contract declares no rejects (or on a non-TRANSFORM node). |
+| `pipeline.validation.transform_object_key_bound` | A SQL `:bind`, a calculator `inputs` `$reference` or a PIPELINE `parameters` `${ref}` names a Context key whose writer's contract output is `kind: object` (R4 — an object key's one reader is another TRANSFORM's `inputs`). |
+
+`calculator_input_unordered`, `calculator_output_collision` and `calculator_output_name_invalid`
+(§12.10) apply unchanged to a value-mode TRANSFORM's `context_key` and to `$key` bindings whose
+writer is another node.
 
 ---
 
@@ -1262,6 +1335,31 @@ The release-check run's refusals (140, §3.3). Checks are opt-in: a version with
 |---|---|---|
 | `pipeline.check.failed` | 409 | release refused — a check on the version failed or errored; details.checks lists expected/observed/message per failing check; override requires override_checks_reason (≥ 10 chars) |
 
+### 13.18 Transform
+
+The TRANSFORM node's execution-time refusals (7c, #7; the transform-nodes design record's §7).
+The HTTP column is the class the node failure record carries, as for every execution-time
+family in §13.4; through `templates_evaluate` and the save-time test suite these surface
+inside `template.test_failed` (400) or as the tool's own status. The save-time twins of these
+checks are §12.13's `pipeline.validation.transform_*` rows.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `pipeline.transform.input_contract_violation` | 500 | an input violates the contract's declared inputs (record §5.1): the staged schema does not cover a contract column, a `nullable: false` column carried null, a value input's type does not fit. |
+| `pipeline.transform.input_too_large` | 500 | a table input exceeds `datapipelines.transform.max-input-rows` — refused BEFORE loading (record §4.3). |
+| `pipeline.transform.evaluation_failed` | 500 | the script threw; the detail carries the engine message bounded to 2 000 chars (record §7). |
+| `pipeline.transform.timeout` | 504 | the engine's own wall-clock bound fired (`pipeline.node.timeout` is the outer backstop — the engine reports first, record §4.3). |
+| `pipeline.transform.resource_limit` | 500 | a declared resource limit fired — depth (JSONata); heap/statements (JavaScript); `details.kind` names which. |
+| `pipeline.transform.pool_exhausted` | 503 | the evaluation pool's admission bound is full (record §4.3 — a node failure in a run, 503 on the tool/route). |
+| `pipeline.transform.row_shape_mismatch` | 500 | a returned row's key set is not exactly the declared column set, with batch and row number (record §5.3). |
+| `pipeline.transform.value_type_mismatch` | 500 | a returned value does not fit its column's wire form, with batch and row number (record §5.3). |
+| `pipeline.transform.precision_lost` | 500 | a numeric value does not fit its declared precision/scale (record §5.3, R1 — DECIMAL rounds half-even; BIGDECIMAL is exact). |
+| `pipeline.transform.value_too_large` | 500 | a value/object output or a single string above the byte caps (record §4.3: `max-value-bytes`, `max-string-bytes`). |
+| `pipeline.transform.invariant_failed` | 500 | an invariant evaluated to other than `true`; names the invariant and its message (record §5.4). |
+| `pipeline.transform.invariants_too_large` | 500 | the invariants' read-back exceeded `max-input-rows` (record §5.4 — an assertion over an unbounded table is a SQL node or a release check, not an invariant). |
+| `pipeline.transform.rejects_strict` | 500 | `strict: true` and the rejects table is non-empty; carries the count and the first ten reasons (record §5.4). |
+| `transform.js.unavailable` | 400 | a `javascript` template is refused at save until round two's engine ships (record §4.4; 503 at boot). |
+
 ---
 
 ## 14. Pipeline Lifecycle Operations
@@ -1502,6 +1600,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v1.29 | 7c (#7) the TRANSFORM node | `NodeType` gains `TRANSFORM` (§4.6 lists six). §4.12: the node — a pinned `jsonata`/`javascript` template evaluated as a pure function over staged data, `inputs`/`output`/`strict` conforming to the pinned contract (R3–R5), the implicit-optional-input rule for a value-mode `context_key`, and R4's one-reader rule for object keys. §4.7: the `rejects` companion of a tempdb output; §7.2: object keys persist as jsonb and read as TRANSFORM-only; §9.1: a `row`/`table`-mode TRANSFORM may be the caller node. §12.13 gains the ten `pipeline.validation.transform_*` rows (the §13 row count and §12 code count move in the same commit as the constants) and §13.18 the `pipeline.transform.*` execution-time family plus `transform.js.unavailable` — 7b's privately declared constants unified here and deleted. |
 | 2026-09-24 | v1.28 | 215a (#215) the permission catalog | §13's `auth.role_required` row: `details.required` is a catalog permission (`pipeline.update`) and `details.held` the role the caller was judged as. No code added, removed or renamed — the catalogued set and every drift count are unchanged. Status caught up with the change log (it read v1.24). |
 | 2026-09-23 | v1.27 | 7b (#7) transform template types | §13.9 gains the transform rows: `template.validation.freemarker_forbidden` (D-T9 — `imports`/`is_library`/a Freemarker construct on a transform type), `template.contract_invalid` (the §2.2 model rules, `details.rule` naming which), `template.invariant_invalid`, `template.test_failed` (the save/release suite), `template.blocks_not_allowed` (the blocks on `sql`/`html`) and `template.render_not_applicable` (`templates_render` on a transform type). The existing `type_invalid` / `dialect_not_allowed` / `engine_unsupported` rows' RULES changed: the type vocabulary is now four values, `dialect` is forbidden outside `sql`, and `engine` is type-conditional (`none` iff a transform type). Landed in the same commit as the constants, the catalog rows and the drift counts (§13 row count 183 → 189). The §13.18 Transform section is 7c's; the codes the runner emits until then are declared privately (the 7b handback names them). |
 | 2026-09-19 | v1.26 | 172 (#172) | §13.14 gains `endpoint.path_reserved` (400): a published path's category segment matching `v[0-9]+` or equal to `api` is refused, `details.segment` naming it — the companion of the old fixed-letter root's retirement (REST API §19: endpoints now serve at `/api/<category>/<version>/<path…>`). Checked at publish and re-checked when the serve registry is built. Landed in the same commit as its `PipelineErrorCodes.Endpoint.PATH_RESERVED` constant. |

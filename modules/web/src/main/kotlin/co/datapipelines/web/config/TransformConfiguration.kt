@@ -83,4 +83,41 @@ class TransformConfiguration {
         templates: TemplateRepository,
         runner: TransformTestRunner,
     ): TemplateEvaluateService = TemplateEvaluateService(templates, runner)
+
+    /**
+     * The TRANSFORM node's runtime collaborators (7c, #7; record §4.3/§5), handed to every
+     * `pipelineExecutor(...)` construction: the pinned-version resolver (the workspace-scoped
+     * repository read), the same bounded pool the template surfaces use, the engines, and the
+     * `datapipelines.transform.*` bounds. One bean so the four executor call sites cannot
+     * disagree about what a TRANSFORM run is allowed to cost.
+     */
+    @Bean
+    fun transformSupport(
+        templates: TemplateRepository,
+        pool: ScriptEvaluationPool,
+        properties: TransformProperties,
+        stagingProperties: co.datapipelines.staging.H2StagingProperties,
+    ): co.datapipelines.executor.TransformSupport =
+        co.datapipelines.executor.TransformSupport(
+            resolver =
+                co.datapipelines.executor.TransformVersionResolver { workspaceId, ref ->
+                    templates.findVersion(workspaceId, ref.id, ref.version)?.let { version ->
+                        co.datapipelines.executor.ResolvedTransform(
+                            type = version.type,
+                            status = version.status,
+                            body = version.body,
+                            contract = version.contract
+                                ?: throw IllegalStateException("transform version ${ref.key} has no contract (chk_transform_blocks)"),
+                            invariants = version.invariants.orEmpty(),
+                        )
+                    }
+                },
+            pool = pool,
+            engines = mapOf(ScriptLanguage.JSONATA to JsonataEngine()),
+            maxInputRows = properties.maxInputRows,
+            maxValueBytes = properties.maxValueBytes,
+            maxStringBytes = properties.maxStringBytes,
+            maxDepth = properties.maxDepth,
+            readBatchSize = stagingProperties.resultBatchSize,
+        )
 }

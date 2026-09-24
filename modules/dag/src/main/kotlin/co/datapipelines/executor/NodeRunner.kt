@@ -213,6 +213,16 @@ class NodeRunner(
      * as `PipelineValidator.calculatorKinds` established on the save-time side.
      */
     private val calculatorKinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
+    /**
+     * The TRANSFORM-node collaborators (§4.12): the pinned-version resolver, the script
+     * evaluation pool, the engines and the transform bounds. Null means this runtime has no
+     * transform evaluation wired — a TRANSFORM node then fails with
+     * `pipeline.transform.evaluation_failed`, exactly as a PIPELINE node fails
+     * `child_execution_failed` on an unwired composition port. Production wires it from
+     * `TransformConfiguration`'s pool; dag's own fixtures leave it null unless the node under
+     * test is a TRANSFORM.
+     */
+    private val transforms: TransformSupport? = null,
 ) {
     /**
      * A CALCULATOR node dispatches to [CalculatorNodeRuns] — its own object for the reason
@@ -225,6 +235,31 @@ class NodeRunner(
         ctx: NodeExecutionContext,
         startedAt: Instant,
     ): NodeResult = CalculatorNodeRuns.run(node, ctx, startedAt, calculatorKinds)
+
+    /**
+     * The TRANSFORM leg of [run] (§4.12), beside [runCalculator] for the same reason: this
+     * class is at detekt's size ceiling and the transform run — resolve, input check, batched
+     * pooled evaluation, gate, write, invariants, strict — is self-contained in
+     * [TransformNodeRuns].
+     */
+    private suspend fun runTransform(
+        node: ExecutableNode,
+        ctx: NodeExecutionContext,
+        startedAt: Instant,
+    ): NodeResult =
+        TransformNodeRuns.run(
+            node,
+            ctx,
+            startedAt,
+            transforms
+                ?: throw DatapipelinesException(
+                    code = PipelineErrorCodes.Transform.EVALUATION_FAILED,
+                    message = "TRANSFORM nodes are not wired in this runtime.",
+                    details = mapOf("node" to node.id),
+                ),
+            config,
+            resultStore,
+        )
 
     /** Executes [node] and returns its result. Throws [NodeFailedSignal] on any failure. */
     suspend fun run(
@@ -250,6 +285,12 @@ class NodeRunner(
         // into the shared Context (§4.10) — everything below this line is about SQL.
         if (node.type == NodeType.CALCULATOR) {
             return runCalculator(node, ctx, startedAt)
+        }
+        // A TRANSFORM node is dispatched here too (§4.12): its template is a script, not SQL,
+        // so it never enters render — [TransformNodeRuns] resolves the pinned version's
+        // contract, evaluates on the script pool and writes tempdb, the Context or the caller.
+        if (node.type == NodeType.TRANSFORM) {
+            return runTransform(node, ctx, startedAt)
         }
         val sql = phase(ctx, NodePhase.RENDER, node.id) { render(node, ctx) }
         return dispatchRendered(node, ctx, startedAt, sql)
@@ -354,7 +395,7 @@ class NodeRunner(
                 tempdbWrite(node, bound, ctx, startedAt, resolved)
             }
 
-            NodeType.PIPELINE, NodeType.CALCULATOR -> {
+            NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.TRANSFORM -> {
                 error("unreachable: ${node.type.wire} dispatched before source resolution")
             }
         }
@@ -705,7 +746,7 @@ class NodeRunner(
                     datasourceDdl(node, conn, bound, ctx, startedAt, resolved)
                 }
 
-                NodeType.PIPELINE, NodeType.CALCULATOR -> {
+                NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.TRANSFORM -> {
                     error("unreachable: ${node.type.wire} dispatched before source resolution")
                 }
             }

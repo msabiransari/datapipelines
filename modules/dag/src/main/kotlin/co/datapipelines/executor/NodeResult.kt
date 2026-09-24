@@ -74,6 +74,15 @@ data class NodeResult(
      * kind's evaluation. Null on a calculator that ran and on every other node type.
      */
     val providedBy: String? = null,
+    /**
+     * TRANSFORM nodes only (§4.12, transform-nodes design §5.5): rows read from the table
+     * input(s). Null on every other node type — no node reported an input count before.
+     */
+    val rowsIn: Long? = null,
+    /** TRANSFORM nodes only (§4.12): rows the function rejected, written to the rejects table. */
+    val rowsRejected: Long? = null,
+    /** TRANSFORM nodes only (§4.12): how many invariants were evaluated after the last batch (§5.4). */
+    val invariantsChecked: Int? = null,
 ) {
     companion object {
         /** A successful node's result; the duration is computed from [startedAt] to now. */
@@ -89,6 +98,9 @@ data class NodeResult(
             contextValue: String? = null,
             contextValues: Map<String, String?>? = null,
             providedBy: String? = null,
+            rowsIn: Long? = null,
+            rowsRejected: Long? = null,
+            invariantsChecked: Int? = null,
         ): NodeResult =
             NodeResult(
                 nodeId = nodeId,
@@ -104,6 +116,9 @@ data class NodeResult(
                 contextValue = contextValue,
                 contextValues = contextValues,
                 providedBy = providedBy,
+                rowsIn = rowsIn,
+                rowsRejected = rowsRejected,
+                invariantsChecked = invariantsChecked,
             )
 
         /** The sentinel for a quantity that was not measured — §7.1's `-1`. */
@@ -180,6 +195,19 @@ data class NodeStats(
      */
     @field:JsonProperty("provided_by") @get:JsonProperty("provided_by") @param:JsonProperty("provided_by")
     val providedBy: String? = null,
+    /**
+     * TRANSFORM nodes only (§4.12, transform-nodes design §5.5): rows read from the table
+     * input(s). Absent from the JSON for every other node type (NON_NULL inclusion), the same
+     * additive discipline as the fields above.
+     */
+    @field:JsonProperty("rows_in") @get:JsonProperty("rows_in") @param:JsonProperty("rows_in")
+    val rowsIn: Long? = null,
+    /** TRANSFORM nodes only (§4.12): rows the function rejected. Same additive discipline. */
+    @field:JsonProperty("rows_rejected") @get:JsonProperty("rows_rejected") @param:JsonProperty("rows_rejected")
+    val rowsRejected: Long? = null,
+    /** TRANSFORM nodes only (§4.12): how many invariants ran after the last batch. Same additive discipline. */
+    @field:JsonProperty("invariants_checked") @get:JsonProperty("invariants_checked") @param:JsonProperty("invariants_checked")
+    val invariantsChecked: Int? = null,
 ) {
     companion object {
         /** Projects a succeeded node (§7.2 row 1). */
@@ -197,6 +225,9 @@ data class NodeStats(
                 contextValue = result.contextValue,
                 contextValues = result.contextValues,
                 providedBy = result.providedBy,
+                rowsIn = result.rowsIn,
+                rowsRejected = result.rowsRejected,
+                invariantsChecked = result.invariantsChecked,
             )
 
         /** Synthesizes a failed node (§7.2 row 2). */

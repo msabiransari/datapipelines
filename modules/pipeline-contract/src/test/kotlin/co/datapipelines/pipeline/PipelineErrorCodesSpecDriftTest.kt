@@ -140,6 +140,8 @@ class PipelineErrorCodesSpecDriftTest {
                 "mcp.",
                 // 140 — release checks (§13.17).
                 "pipeline.check.",
+                // 7c (#7) — the TRANSFORM node's execution-time family (§13.18).
+                "pipeline.transform.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")

@@ -173,7 +173,7 @@ class NodeSqlResolver(
         // here exactly as it does at execute time, and the sample context the rejected path
         // renders with covers the calculator keys by output type — one derivation, so the
         // debug panel and the executor cannot disagree about which keys are legal inputs.
-        val binder = ParameterBinder(pipeline.parameters, pipeline.calculatorOutputs())
+        val binder = ParameterBinder(pipeline.parameters, pipeline.calculatorOutputs(), transformKeys = pipeline.transformOutputKeys())
         return when (val binding = binder.bind(parameterInputs ?: emptyMap())) {
             is ParameterBindingResult.Bound -> {
                 render(workspaceId, templateLens, detail, node, binding.context.asMap(), sampled = emptyList())

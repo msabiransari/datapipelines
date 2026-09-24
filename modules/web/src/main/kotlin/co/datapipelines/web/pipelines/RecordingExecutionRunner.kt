@@ -105,6 +105,11 @@ class RecordingExecutionRunner(
      * provisioning eighteen real collaborators. Null in production (the default).
      */
     private val executorFactory: ((co.datapipelines.web.sse.WebEventEmitter) -> PipelineExecutor)? = null,
+    /**
+     * The TRANSFORM-node collaborators (7c, #7) — handed to the per-run executor, as in
+     * [ExecutionStreamLauncher]; null only in module-slice wiring.
+     */
+    private val transformSupport: co.datapipelines.executor.TransformSupport? = null,
 ) {
     private val log = LoggerFactory.getLogger(RecordingExecutionRunner::class.java)
 
@@ -174,5 +179,6 @@ class RecordingExecutionRunner(
             metrics = executorMetrics,
             progress = executionProgress,
             subPipelineRunner = subPipelineRunner,
+            transforms = transformSupport,
         )
 }

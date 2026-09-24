@@ -41,6 +41,9 @@ private object NodeOutputSerializer : JsonSerializer<NodeOutput>() {
         when (value) {
             is NodeOutput.Tempdb -> {
                 gen.writeStringField(TABLE, value.table)
+                // TRANSFORM-only companion (§4.7); absent everywhere else, so every existing
+                // pipeline's serialized form is byte-identical.
+                value.rejects?.let { gen.writeStringField(REJECTS, it) }
             }
 
             NodeOutput.Caller -> {
@@ -65,7 +68,12 @@ private object NodeOutputDeserializer : JsonDeserializer<NodeOutput>() {
         val node: JsonNode = parser.readValueAsTree()
         return when (OutputTarget.fromWireOrNull(node.path(TARGET).asTextOrNull())) {
             OutputTarget.TEMPDB -> {
-                NodeOutput.Tempdb(table = node.path(TABLE).asTextOrNull().orEmpty())
+                NodeOutput.Tempdb(
+                    table = node.path(TABLE).asTextOrNull().orEmpty(),
+                    // Absent binds to null, exactly like the other lenient reads above — §12.13
+                    // owns the "rejects on a non-TRANSFORM node" verdict, not binding.
+                    rejects = node.path(REJECTS).asTextOrNull(),
+                )
             }
 
             OutputTarget.DATASOURCE -> {
@@ -91,6 +99,7 @@ private const val TARGET = "target"
 private const val TABLE = "table"
 private const val DATASOURCE = "datasource"
 private const val MODE = "mode"
+private const val REJECTS = "rejects"
 
 /** The node's text, or null when it is absent, JSON `null`, or not a string. */
 internal fun JsonNode.asTextOrNull(): String? = if (isTextual) asText() else null

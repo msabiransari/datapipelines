@@ -315,6 +315,8 @@ internal class StubTemplates(
     private val conditioned: Map<String, Set<String>> = emptyMap(),
     /** Per-template id, the `:name` binds the stub reports the body carrying (072, §12.10). */
     private val bound: Map<String, List<String>> = emptyMap(),
+    /** Per-template id, the transform contract the stub reports (7c, §12.13). */
+    private val contracts: Map<String, TransformContractView> = emptyMap(),
 ) : TemplateDryRenderer {
     /** Contexts the validator passed in, keyed by template id — the §7.4 sample-context evidence. */
     val renderedContexts = mutableMapOf<String, Map<String, Any?>>()
@@ -349,4 +351,9 @@ internal class StubTemplates(
         workspaceId: UUID,
         ref: TemplateRef,
     ): List<String> = bound[ref.id] ?: emptyList()
+
+    override fun transformContract(
+        workspaceId: UUID,
+        ref: TemplateRef,
+    ): TransformContractView? = contracts[ref.id]
 }

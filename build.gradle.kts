@@ -145,6 +145,9 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:templates",
         ":modules:datasources",
         ":modules:staging",
+        // 7c (#7) — the TRANSFORM node's executor: evaluations run through 7a's pool and the
+        // type gate, both scripting. The dag-executor.md layering table moves with this row.
+        ":modules:scripting",
     ),
     // The cross-aggregate use-case layer (056/R6): below `web` and `mcp-server`, above the
     // domain modules. `templates` and `datasources` are allowed here for slices B/C's moves
