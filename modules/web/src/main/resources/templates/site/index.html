@@ -195,7 +195,7 @@
         <p class="eyebrow">No warehouse to build</p>
         <h2 id="cap-no-warehouse-title">No warehouse. Joined where the data lives.</h2>
         <!-- claim: docs/staging.md §3 (the per-run in-memory staging database, discarded with the run) -->
-        <p>There is no warehouse to load, model or keep in sync. Each run stages just the rows the question needs into its own in-memory database, joins them there, taxi trips from Postgres beside rideshare history read in place from S3, and discards it when the run ends. The capture shows one join step reading tables that arrived from two different databases.</p>
+        <p>There is no warehouse to load, model or keep in sync. Each run stages just the rows the question needs into its own in-memory database and joins them there. Taxi trips from Postgres can sit beside rideshare history read in place from S3. The database is discarded when the run ends. The capture shows one join step reading tables that arrived from two different databases.</p>
       </div>
       <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Pipeline editor: node details</span><span class="tag">Screenshot</span></div>

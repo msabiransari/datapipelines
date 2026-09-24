@@ -47,7 +47,7 @@
         <article class="card">
           <!-- claim: docs/staging.md §1 -->
           <h3>The data is in several operational databases</h3>
-          <p>Reading Postgres, MySQL and SQLite in one query, each in place, joined in a per-execution in-memory staging database with nothing landed, is the case this was built for. In Airflow that is an extract job, a load job and a warehouse to keep.</p>
+          <p>Reading Postgres, MySQL and SQLite in one query is the case this was built for. Each source is read in place. The join runs in a per-execution in-memory staging database, and nothing lands. In Airflow that is an extract job, a load job and a warehouse to keep.</p>
         </article>
         <article class="card">
           <!-- claim: docs/mcp-server.md §6.1 -->
