@@ -331,23 +331,31 @@ class ApiKeyService(
 
     /**
      * Revokes a `server` key of [workspaceId] — the `/api-keys` page's delete extended to the
-     * whole table it renders (#191 functional note, D17/D18): the page administers the
-     * workspace's keys, whoever created them, and a row it lists with a delete button that
-     * silently did nothing was worse than not listing it. The same rails as the endpoint twin:
-     * the kind and workspace predicates in SQL keep this off a user's MCP key and off every
-     * other workspace's server key.
+     * whole table it renders (#191 functional note, D17/D18). The same rails as the endpoint
+     * twin: the kind and workspace predicates in SQL keep this off a user's MCP key and off
+     * every other workspace's server key.
+     *
+     * **A super admin's verb** (#215, owner ruling 2026-09-24 — the permissions record's
+     * `server_key.revoke` row): a server key is the promotion receiver's whole credential and
+     * only a super admin mints one (D18), so only a super admin ends one. #191 had let the
+     * page's workspace admin revoke it; the ruling narrowed that. The check is HERE, not at the
+     * surface, for the reason [issue]'s mint floor is: every caller inherits it. The page
+     * draws the row's Delete only for a principal who passes it.
      */
     fun revokeWorkspaceServerKey(
         keyId: String,
         workspaceId: UUID,
-        actorId: UUID,
+        actor: AuthenticatedPrincipal,
     ): Boolean {
+        if (!actor.isSuperAdmin) {
+            throw RoleRequiredException(Permission.SUPER_ADMIN, actor.workspace?.held() ?: emptySet(), actor.workspace?.name)
+        }
         val revoked = apiKeyRepository.revokeInWorkspace(keyId, workspaceId, ApiKeyKind.SERVER)
         if (revoked) {
             authCache.invalidateKey(keyId)
             auditLogger.log(
                 event = "auth.api_key.revoked",
-                userId = actorId,
+                userId = actor.userId,
                 keyId = keyId,
                 details = mapOf("workspace_id" to workspaceId.toString(), "kind" to ApiKeyKind.SERVER.wire),
             )

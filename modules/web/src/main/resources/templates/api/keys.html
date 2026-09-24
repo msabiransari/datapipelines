@@ -100,7 +100,7 @@
                 <button type="submit" class="ds-button ds-button-secondary ds-button-sm">Save associations</button>
               </form>
             </details>
-            <button th:if="${k.isLive and (canAdminWorkspace == true or isSuperAdmin == true)}" data-verb="key-revoke"
+            <button th:if="${k.isLive and (canAdminWorkspace == true or isSuperAdmin == true) and (k.kind != 'server' or isSuperAdmin == true)}" data-verb="key-revoke"
                     class="ds-button ds-button-ghost ds-button-sm u-danger"
                     th:attr="hx-delete=@{/partials/api-keys/{id}(id=${k.id})}"
                     hx-target="#keys-table-body"

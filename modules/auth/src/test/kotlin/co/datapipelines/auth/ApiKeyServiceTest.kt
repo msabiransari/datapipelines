@@ -628,6 +628,29 @@ class ApiKeyServiceTest {
         io.mockk.verify(exactly = 1) { auditLogger.log(event = "auth.api_key.revoked", userId = any(), keyId = any(), details = any()) }
     }
 
+    /**
+     * #215 (owner ruling 2026-09-24, the record's `server_key.revoke` row): revoking a server key
+     * is a super admin's verb — the mint's floor (D18) on the way out. #191 had let the
+     * `/api-keys` page's workspace admin do it; the ruling narrowed that. Refused BEFORE the SQL:
+     * a workspace admin's attempt flips no row and audits nothing.
+     */
+    @Test
+    fun `revoking a server key is a super admin's - a workspace admin is refused and nothing is revoked`() {
+        val workspaceAdmin = issuer.copy(workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.WORKSPACE_ADMIN))
+
+        val refusal =
+            shouldThrow<RoleRequiredException> {
+                mintingService.revokeWorkspaceServerKey("dpk_SRV000000001", workspaceId, workspaceAdmin)
+            }
+        refusal.code shouldBe AuthErrorCodes.ROLE_REQUIRED
+        io.mockk.verify(exactly = 0) { repo.revokeInWorkspace(any(), any(), any()) }
+        io.mockk.verify(exactly = 0) { auditLogger.log(event = "auth.api_key.revoked", userId = any(), keyId = any(), details = any()) }
+
+        every { repo.revokeInWorkspace("dpk_SRV000000001", workspaceId, ApiKeyKind.SERVER) } returns true
+        mintingService.revokeWorkspaceServerKey("dpk_SRV000000001", workspaceId, workspaceAdmin.copy(superAdmin = true)) shouldBe true
+        io.mockk.verify { auditLogger.log(event = "auth.api_key.revoked", userId = ownerId, keyId = "dpk_SRV000000001", details = any()) }
+    }
+
     /** Collects WARN-level messages emitted by [type]'s logger while [block] runs. */
     private fun captureWarnings(
         type: Class<*>,

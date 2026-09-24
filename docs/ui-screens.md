@@ -719,7 +719,7 @@ Each boolean narrows for an API-key principal by the key's SCOPE as well as its 
 | Datasources (§4.5) | Register, Edit, Delete | `canAdminWorkspace` | `MUTATE_WORKSPACE_DATASOURCES` |
 | Datasources | **Test** | `canExecute` — the connection test **follows execute** (ratified 2026-09-20) | `TEST_DATASOURCE` |
 | Datasource grants (§4.5a) | Grants, Grant, Revoke | `isSuperAdmin` | `MANAGE_DATASOURCE_GRANTS` |
-| API keys (§4.19) | New API key / Delete / Edit associations | `canAdminWorkspace` or `isSuperAdmin` | `MANAGE_API_KEYS` (179, D17) |
+| API keys (§4.19) | New API key / Delete / Edit associations — a `server` key's Delete: `isSuperAdmin` only (#215) | `canAdminWorkspace` or `isSuperAdmin` | `MANAGE_API_KEYS` (179, D17) |
 | Top bar (§4.3e) | MCP key copy / delete-to-rotate | every role, own key (`mcpKey != null`) | `VIEW_OWN_MCP_KEY` (179, D16) |
 | Promotion (§4.17) | the page itself | `canReadPromotion` — author, promoter, admins (owner rule 13) | `PROMOTION_READ` |
 | Promotion (§4.17) | Promote — and, since 143, the whole submission form (Send column, selection boxes) | `canPromote` in the SOURCE workspace; an author gets the plan as a plain table | `PROMOTE_VERSION` |
@@ -1454,7 +1454,10 @@ on hover, like every table here. Deleted and expired keys keep their row and los
 - **Delete** — revokes the key (a workspace-scoped, kind-pinned SQL revoke: it cannot touch
   a user's MCP key or another workspace's). Since 2026-09-21 (#191) it works for BOTH kinds
   the table lists — `endpoint` and `server` — through each kind's own workspace-scoped verb;
-  before then a server-key row's delete silently did nothing.
+  before then a server-key row's delete silently did nothing. **A `server` key's Delete is a
+  super admin's** (#215, owner ruling 2026-09-24 — the permissions record's `server_key.revoke`):
+  a workspace admin sees the row but not the verb, and the service refuses a hand-crafted
+  delete with `auth.role_required`.
 - **Edit associations** — a per-row disclosure with the picker pre-checked to the key's
   current bindings; Save posts the whole SET and the service writes the delta (add/remove),
   so a checkbox never maps to "add" or "remove" by itself.
