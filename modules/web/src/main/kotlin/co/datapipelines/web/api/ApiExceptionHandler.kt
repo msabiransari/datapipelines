@@ -367,5 +367,8 @@ internal fun notAcceptableResponse(error: HttpMediaTypeNotAcceptableException): 
                 code = PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE,
                 message = "This route cannot produce a representation the request's Accept header admits.",
                 details = mapOf("produces" to error.supportedMediaTypes.map { it.toString() }),
+                // The catalog's user message for this code speaks of a PUBLISHED endpoint, which serves its
+                // own 406; every caller of this builder is some other route, so the sentence is route-neutral.
+                userMessage = "This address can't answer in the format the request asked for.",
             ),
         )

@@ -281,6 +281,7 @@ class ApiExceptionHandlerTest {
                     .andExpect(status().isNotAcceptable)
                     .andExpect(jsonPath("$.error.code").value(PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE))
                     .andExpect(jsonPath("$.error.details.produces[0]").value(MediaType.TEXT_PLAIN_VALUE))
+                    .andExpect(jsonPath("$.error.user_message").value("This address can't answer in the format the request asked for."))
                     .andExpect(jsonPath("$.correlation_id").exists())
                     .andReturn()
             val body = result.response.contentAsString
