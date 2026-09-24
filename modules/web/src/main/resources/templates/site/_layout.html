@@ -221,7 +221,7 @@
           <li><a th:href="@{/tableau}">With Tableau</a></li>
           <li><a th:href="@{/tableau/governed-dataset}">A governed dataset for Tableau</a></li>
           <li><a th:href="@{/tableau/prep-vs-pipelines-as-code}">Tableau Prep, or pipelines as code</a></li>
-          <li><a th:href="@{/tableau/extracts-alerts-dashboards}">Extracts, alerts, dashboards — the roadmap</a></li>
+          <li><a th:href="@{/tableau/extracts-alerts-dashboards}">Extracts, alerts, dashboards: the roadmap</a></li>
           <li><a th:href="@{/compare/airflow}">vs Apache Airflow</a></li>
           <li><a th:href="@{/compare/dbt}">vs dbt</a></li>
           <li><a th:href="@{/compare/fivetran-airbyte}">vs Fivetran or Airbyte</a></li>
@@ -235,12 +235,12 @@
           <li><a th:href="@{/explore}">Every page</a></li>
           <li><a th:href="@{/faq}">FAQ</a></li>
           <li><a th:href="@{/faq#support-and-feedback}">Support</a></li>
-          <li><a th:href="@{/pricing}">Pricing — free and open source</a></li>
+          <li><a th:href="@{/pricing}">Pricing: free and open source</a></li>
           <li><a th:href="${repoUrl}">Source on GitHub</a></li>
           <li><a th:href="${discussionsUrl}">Discussions</a></li>
           <li><a th:href="${reportProblemUrl}">Report a problem</a></li>
           <li><a th:href="${advisoryUrl}">Report a vulnerability privately</a></li>
-          <li><a th:href="'mailto:' + ${contactEmail}">Contact — <span th:text="${contactEmail}">datapipelines.co@gmail.com</span></a></li>
+          <li><a th:href="'mailto:' + ${contactEmail}">Contact: <span th:text="${contactEmail}">datapipelines.co@gmail.com</span></a></li>
           <li><a th:href="@{/login}" th:text="${publicOrigin} ? 'Try the live demo' : 'Sign in'">Sign in</a></li>
         </ul>
       </div>
@@ -249,7 +249,7 @@
       <!--/* 127 §B.1: the beta line rides the footer of every page, from the same
            SitePages.RELEASE_STAGE constant the hero renders — the wording changes in one
            place. The support link targets the FAQ's "Support and feedback" anchor. */-->
-      <p class="footer-note">Self-hosted. Agent-native. Licensed AGPL-3.0.<br><span th:text="${releaseStage}">Public beta — self-hosted, AGPL, actively developed.</span> <a th:href="@{/faq#support-and-feedback}" th:text="${releaseStageCta}">Report what breaks.</a><br>&copy; 2026 datapipelines.co</p>
+      <p class="footer-note">Self-hosted. Agent-native. Licensed AGPL-3.0.<br><span th:text="${releaseStage}">Public beta. Self-hosted, AGPL, actively developed.</span> <a th:href="@{/faq#support-and-feedback}" th:text="${releaseStageCta}">Report what breaks.</a><br>&copy; 2026 datapipelines.co</p>
     </div>
   </div>
 </footer>

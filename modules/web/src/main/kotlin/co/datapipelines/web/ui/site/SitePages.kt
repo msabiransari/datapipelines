@@ -59,7 +59,7 @@ const val ADVISORY_URL: String = "$REPO_URL/security/advisories/new"
  * homepage hero and the site footer. A string the templates read — never typed into a
  * page, so the day the beta ends the wording changes HERE and nowhere else.
  */
-const val RELEASE_STAGE: String = "Public beta — self-hosted, AGPL, actively developed."
+const val RELEASE_STAGE: String = "Public beta. Self-hosted, AGPL, actively developed."
 
 /** The call to action that follows [RELEASE_STAGE], linking to the support section on `/faq`. */
 const val RELEASE_STAGE_CTA: String = "Report what breaks."
@@ -219,7 +219,7 @@ object SitePages {
     val PILLAR =
         SitePage(
             path = "/mcp-server-for-sql-databases",
-            title = "SQL MCP server — one database MCP server, ${facts.engineCountWord} engines",
+            title = "SQL MCP server: one database MCP server, ${facts.engineCountWord} engines",
             description =
                 "A database MCP server your agent uses instead of your production credentials: " +
                     "${facts.engineCountWord} SQL engines, read-only by default, scoped keys, every call audited.",
@@ -233,7 +233,7 @@ object SitePages {
             title = "Add an MCP server to Claude Code, Cursor or Copilot",
             description =
                 "How to add the datapipelines.co MCP server to Claude Code, Cursor and GitHub Copilot: " +
-                    "mint a scoped API key, paste one config block, check the tool list.",
+                    "create a scoped API key, paste one config block, check the tool list.",
             view = "site/add-mcp-server",
         )
 
@@ -241,7 +241,7 @@ object SitePages {
     val AI_DATA_PIPELINE =
         SitePage(
             path = "/ai-data-pipeline",
-            title = "AI data pipeline — authored by an agent, run under review",
+            title = "AI data pipeline: authored by an agent, run under review",
             description =
                 "What an AI data pipeline is here: an agent reads your real schemas, writes the SQL, " +
                     "and saves it as a versioned pipeline that runs governed and audited.",
@@ -252,7 +252,7 @@ object SitePages {
     val TEXT_TO_SQL_AGENT =
         SitePage(
             path = "/text-to-sql-agent",
-            title = "Text-to-SQL agent — from a question to a pipeline you rerun",
+            title = "Text-to-SQL agent: from a question to a pipeline you rerun",
             description =
                 "Text-to-SQL answers once. Give the agent real schemas, a versioned pipeline and " +
                     "readable failures, and the answer becomes something your team can rerun.",
@@ -263,7 +263,7 @@ object SitePages {
     val COMPARE_AIRFLOW =
         SitePage(
             path = "/compare/airflow",
-            title = "Apache Airflow alternative for SQL pipelines — when to use each",
+            title = "Apache Airflow alternative for SQL pipelines: when to use each",
             description =
                 "An honest comparison: Airflow orchestrates scheduled workflows across a whole platform. " +
                     "We run agent-authored SQL across several operational databases.",
@@ -274,7 +274,7 @@ object SitePages {
     val COMPARE_DBT =
         SitePage(
             path = "/compare/dbt",
-            title = "dbt alternative without a warehouse — when to use each",
+            title = "dbt alternative without a warehouse: when to use each",
             description =
                 "An honest comparison: dbt transforms inside one warehouse and owns the modelling layer. " +
                     "We join across operational databases without landing anything.",
@@ -291,7 +291,7 @@ object SitePages {
     val COMPARE_DAGSTER_AIRFLOW =
         SitePage(
             path = "/compare/dagster-vs-airflow",
-            title = "Dagster vs Airflow — when to choose each, and where Prefect sits",
+            title = "Dagster vs Airflow: when to choose each, and where Prefect sits",
             // ≤ 155 (SiteSeoMetaTest): the three one-line definitions and the promise.
             description =
                 "Airflow schedules task graphs, Dagster models the data assets those tasks produce, " +
@@ -303,7 +303,7 @@ object SitePages {
     val FEDERATED_QUERY =
         SitePage(
             path = "/federated-query",
-            title = "Federated query and data virtualization — cross-database joins",
+            title = "Federated query and data virtualization: cross-database joins",
             description =
                 "Join Postgres to MySQL to SQLite in one pipeline. Each source is read in place, " +
                     "the join runs in an in-memory staging database, and nothing is landed.",
@@ -319,7 +319,7 @@ object SitePages {
     val DP_LAKE =
         SitePage(
             path = "/dp-lake",
-            title = "dp-lake — query Parquet and Iceberg on S3 with SQL",
+            title = "dp-lake: query Parquet and Iceberg on S3 with SQL",
             description =
                 "Your data is already in S3. Ask it a question: Parquet and Iceberg tables read in " +
                     "place, no warehouse, joined to your databases and served as an API.",
@@ -330,16 +330,16 @@ object SitePages {
     val FAQ =
         SitePage(
             path = "/faq",
-            title = "FAQ — datapipelines.co, the MCP pipeline server, in questions",
+            title = "FAQ: datapipelines.co, the MCP pipeline server, in questions",
             description =
                 "What it is, what an agent can and cannot do, how the API works, where it runs, and what is on the " +
-                    "roadmap — every answer cites the spec it rests on.",
+                    "roadmap. Every answer cites the spec it rests on.",
             view = "site/faq",
         )
     val ROADMAP =
         SitePage(
             path = "/roadmap",
-            title = "Roadmap — shipped, planned, and later | datapipelines.co",
+            title = "Roadmap: shipped, planned, and later | datapipelines.co",
             description =
                 "Shipped: MCP server, ${facts.engineCountWord} engines, published APIs. Planned: scheduler, embedded dashboards, " +
                     "JSONata and JavaScript nodes. Later: lake extracts, alerts.",
@@ -348,7 +348,7 @@ object SitePages {
     val SECURITY =
         SitePage(
             path = "/security",
-            title = "AI agent database access, made safe — scoped keys, read-only, audited",
+            title = "AI agent database access, made safe: scoped keys, read-only, audited",
             description =
                 "How an AI agent reaches your databases without a password: scoped keys, read-only datasources, " +
                     "encrypted credentials, human release, a full audit log.",
@@ -358,7 +358,7 @@ object SitePages {
         SitePage(
             path = "/published-api",
             // "data api" is the measured head term (SEO addendum 4) — it leads the title and the H1.
-            title = "A data API from a SQL query — published endpoints | datapipelines.co",
+            title = "A data API from a SQL query: published endpoints | datapipelines.co",
             description =
                 "A released pipeline becomes a versioned GET endpoint with bound parameters and " +
                     "path-scoped keys. Data to API in a day, nothing to deploy.",
@@ -367,7 +367,7 @@ object SitePages {
     val MCP_TOOLS =
         SitePage(
             path = "/mcp-tools",
-            title = "The MCP tools — what an agent can do against your databases",
+            title = "The MCP tools: what an agent can do against your databases",
             description =
                 "Every tool the MCP server exposes, generated from its own catalogue: schema reads, catalogue " +
                     "statistics, the SQL probe, drafts, execution, results.",
@@ -376,7 +376,7 @@ object SitePages {
     val TABLEAU =
         SitePage(
             path = "/tableau",
-            title = "Using datapipelines with Tableau — what ships today, what is planned",
+            title = "Using datapipelines with Tableau: what ships today, what is planned",
             description =
                 "Feed Tableau a governed dataset from Postgres, MySQL, SQL Server and S3 without a warehouse, " +
                     "as an API or a table it reads. What ships now, what is next.",
@@ -398,7 +398,7 @@ object SitePages {
     val COMPARE_FIVETRAN =
         SitePage(
             path = "/compare/fivetran-airbyte",
-            title = "Fivetran or Airbyte vs datapipelines — sync or query at the source",
+            title = "Fivetran or Airbyte vs datapipelines: sync or query at the source",
             description =
                 "ELT tools copy your data into a warehouse on a schedule. datapipelines queries at the source, " +
                     "joins in a per-run scratch database; the result is an API.",
@@ -420,7 +420,7 @@ object SitePages {
     val TABLEAU_PREP =
         SitePage(
             path = "/tableau/prep-vs-pipelines-as-code",
-            title = "Tableau Prep or pipelines as code — a flow is a file, this is code",
+            title = "Tableau Prep or pipelines as code: a flow is a file, this is code",
             description =
                 "A Tableau Prep flow is a file one tool opens. A pipeline here is a JSON document of SQL nodes " +
                     "you can diff, version, hand to an agent and release.",
@@ -434,7 +434,7 @@ object SitePages {
     val TABLEAU_ROADMAP =
         SitePage(
             path = "/tableau/extracts-alerts-dashboards",
-            title = "Embedded dashboards, extracts to S3, alerts — the roadmap",
+            title = "Embedded dashboards, extracts to S3, alerts: the roadmap",
             description =
                 "Embedded dashboards, scheduled extracts to your own bucket, email alerts: what the roadmap " +
                     "dates, what ships today, and what is not planned.",
@@ -445,7 +445,7 @@ object SitePages {
     val FOR_AGENCIES =
         SitePage(
             path = "/for/agencies",
-            title = "A client reporting API per client — datapipelines for agencies",
+            title = "A client reporting API per client: datapipelines for agencies",
             description =
                 "One workspace and one key per client, an agent drafting every pipeline, a release you can name " +
                     "in the invoice, an API for the portal today.",
@@ -456,7 +456,7 @@ object SitePages {
     val FOR_SAAS_TEAMS =
         SitePage(
             path = "/for/saas-teams",
-            title = "Embedded analytics without a warehouse — the API ships today",
+            title = "Embedded analytics without a warehouse: the API ships today",
             description =
                 "Show customers their own numbers in your app: an agent authors the pipeline, a person " +
                     "releases it, a versioned endpoint serves each viewer.",
@@ -471,7 +471,7 @@ object SitePages {
     val FOR_ANALYSTS =
         SitePage(
             path = "/for/analysts",
-            title = "AI data analyst with governance — one analyst, five databases",
+            title = "AI data analyst with governance: one analyst, five databases",
             description =
                 "Ask in your words, get a pipeline you can read: the agent drafts the SQL, the join crosses " +
                     "engines in a scratch database, a release makes it an API.",
@@ -510,7 +510,7 @@ object SitePages {
             path = "/demo-data",
             // 116 §B's title is 72 chars against the 70 pin, so "and" tightens away; the
             // search phrases (NYC taxi, rideshare, trade, weather) all stay.
-            title = "Demo data — NYC taxi, rideshare, US trade, weather | datapipelines.co",
+            title = "Demo data: NYC taxi, rideshare, US trade, weather | datapipelines.co",
             // 116 §B's description is 159 chars against the 155 pin; the same sentence with
             // the two words its tail does not need.
             description =
@@ -527,7 +527,7 @@ object SitePages {
     val PRICING =
         SitePage(
             path = "/pricing",
-            title = "Pricing — free and open source | datapipelines.co",
+            title = "Pricing: free and open source | datapipelines.co",
             // 119 §C.4's register row, ≤ 155 (SiteSeoMetaTest's pin).
             description =
                 "There is no price: AGPL-3.0, self-hosted on your infrastructure, every feature, no seat count. " +
@@ -545,7 +545,7 @@ object SitePages {
             path = "/semantic-layer",
             // The brief's description is 174 chars against the 155 pin (SiteSeoMetaTest) —
             // trimmed from the end as the brief sanctions; every key phrase stays.
-            title = "Semantic layer, learned by the agent — open source | datapipelines.co",
+            title = "Semantic layer, learned by the agent: open source | datapipelines.co",
             description =
                 "An open-source semantic layer your agent builds from your data, recording what it learned with " +
                     "the query that proved it. Drift is detected, never guessed.",
@@ -560,7 +560,7 @@ object SitePages {
     val USE_CASES =
         SitePage(
             path = "/use-cases",
-            title = "Use cases — operations, product and analytics teams | datapipelines.co",
+            title = "Use cases: operations, product and analytics teams | datapipelines.co",
             description =
                 "Where datapipelines fits: a combined operations view, a data API inside your product, " +
                     "and a reviewed dataset behind your Tableau workbook.",
@@ -575,7 +575,7 @@ object SitePages {
     val EXPLORE =
         SitePage(
             path = "/explore",
-            title = "Explore — product, engines, comparisons and docs | datapipelines.co",
+            title = "Explore: product, engines, comparisons and docs | datapipelines.co",
             description =
                 "Every page on the site, generated from its registry: product pages, the SQL MCP server " +
                     "and each engine, comparisons and Tableau, and the packaged docs.",
@@ -705,9 +705,9 @@ object SitePages {
     fun enginePage(facts: EngineFacts): SitePage =
         SitePage(
             path = ENGINE_PREFIX + facts.slug,
-            title = "${facts.displayName} MCP server — governed, read-only, self-hosted",
+            title = "${facts.displayName} MCP server: governed, read-only, self-hosted",
             description =
-                "Connect Claude Code, Cursor or any MCP client to ${facts.displayName} — read-only by " +
+                "Connect Claude Code, Cursor or any MCP client to ${facts.displayName}. Read-only by " +
                     "default, one scoped key per agent, every call audited. Self-hosted, open source.",
             view = "site/engine",
         )

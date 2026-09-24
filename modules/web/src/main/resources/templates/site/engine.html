@@ -45,7 +45,7 @@
           <tr><th scope="row">Driver license</th><td th:text="${engine.license}">license</td></tr>
           <tr>
             <th scope="row">In the published image?</th>
-            <td th:text="${engine.bundled} ? 'Yes — bundled' : 'No'">Yes</td>
+            <td th:text="${engine.bundled} ? 'Yes, bundled' : 'No'">Yes</td>
           </tr>
           <tr th:if="${!engine.bundled}">
             <th scope="row">How to supply it</th>
@@ -57,7 +57,7 @@
       <!-- claim: docs/deployment.md §3.5 -->
       <p th:if="${!engine.bundled}">
         The driver is not redistributed in the image for license reasons. Supplying it is the operator's
-        act of accepting that license — and registering a datasource for a dialect whose driver is absent
+        act of accepting that license. Registering a datasource for a dialect whose driver is absent
         fails at save time with <code>datasource.driver_not_loaded</code>, a packaging error that says so.
       </p>
     </div>
@@ -71,7 +71,7 @@
       <p class="section-lede">
         The endpoint is <code>POST {host}/mcp</code> over Streamable HTTP, and the credential is an API key in
         <code>DP-API-Key</code> or <code>Authorization: Bearer dpk_…</code>. Session cookies are rejected there,
-        so the config is the same whichever engine you registered — the engine is a datasource, not a server.
+        so the config is the same whichever engine you registered. The engine is a datasource, not a server.
       </p>
 
       <h3>Claude Code</h3>
@@ -81,7 +81,7 @@
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
 
-      <h3>Cursor — <code>~/.cursor/mcp.json</code></h3>
+      <h3>Cursor: <code>~/.cursor/mcp.json</code></h3>
       <div class="code-block">
         <pre><code>{
   "mcpServers": {
@@ -94,7 +94,7 @@
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
 
-      <h3>GitHub Copilot in VS Code — <code>.vscode/mcp.json</code></h3>
+      <h3>GitHub Copilot in VS Code: <code>.vscode/mcp.json</code></h3>
       <div class="code-block">
         <pre><code>{
   "servers": {
@@ -126,12 +126,12 @@
         <article class="card">
           <!-- claim: docs/datasources.md §5.7 -->
           <h3>The read-only flag refuses writes</h3>
-          <p>Flag the datasource read-only and the three write-shaped uses — a DML node's source, a DDL node's source, and writing a node's output back to it — are refused at save time and again at execution time, against the live row.</p>
+          <p>Flag the datasource read-only and the three write-shaped uses are refused at save time and again at execution time, against the live row. The three are a DML node's source, a DDL node's source, and writing a node's output back to it.</p>
         </article>
         <article class="card">
           <!-- claim: docs/datasources.md §5.7 -->
           <h3>Use a SELECT-only login as well</h3>
-          <p>The flag is contract; the database credential is containment. For anything that must not change, create a SELECT-only user — the documented pattern, and what the demo's own datasources run under.</p>
+          <p>The flag is contract; the database credential is containment. For anything that must not change, create a SELECT-only user. That is the documented pattern, and what the demo's own datasources run under.</p>
         </article>
         <article class="card">
           <!-- claim: docs/datasources.md §7.1 -->
@@ -153,7 +153,7 @@
       <h2 id="demo-title" class="ds-headline">A seeded pipeline that reads this engine</h2>
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
-        <code th:text="${engine.demo}">pipeline</code> ships with the NYC demo — one command, real data, and a
+        <code th:text="${engine.demo}">pipeline</code> ships with the NYC demo: one command, real data, and a
         <span th:text="${engine.displayName}">engine</span> datasource among its sources.
         <a th:href="@{${engine.demoHref}}">See what it does</a>.
       </p>
