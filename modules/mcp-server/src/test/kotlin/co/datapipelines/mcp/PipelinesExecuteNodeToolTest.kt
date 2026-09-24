@@ -178,6 +178,26 @@ class PipelinesExecuteNodeToolTest {
     }
 
     @Test
+    fun `a TRANSFORM node is the standalone refusal pointing at templates_evaluate`() {
+        // 7c (#7): a TRANSFORM is a script over staged data, not SQL — the tool's one refusal
+        // code, the reason named, and `use` naming the verb that DOES evaluate it.
+        resolverReturns(rendered(nodeType = NodeType.TRANSFORM, source = ""))
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                tool.call(McpArguments(mapOf("pipeline_id" to pipelineId.toString(), "node_id" to "fetch")), ctx)
+            }
+
+        assertAll(
+            { thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED },
+            { thrown.details["reason"] shouldBe "transform_node" },
+            { thrown.details["use"] shouldBe "templates_evaluate" },
+        )
+        verify(exactly = 0) { runner.select(any(), any(), any(), any()) }
+        verify(exactly = 0) { datasources.getVisible(any(), any()) }
+    }
+
+    @Test
     fun `a rejected override and a missing template and a render failure map to their catalogued codes`() {
         resolverReturns(
             NodeSqlResolution.ParameterRejected(

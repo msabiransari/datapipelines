@@ -188,10 +188,12 @@ internal object TransformNodeRuns {
                 resultStore = resultStore,
             )
         try {
-            return when (resolved.contract.mode) {
-                TransformMode.ROW -> run.rowMode()
-                TransformMode.TABLE -> run.singleShot(tableMode = true)
-                TransformMode.VALUE -> run.singleShot(tableMode = false)
+            return phase(ctx, NodePhase.EXECUTE, node.id) {
+                when (resolved.contract.mode) {
+                    TransformMode.ROW -> run.rowMode()
+                    TransformMode.TABLE -> run.singleShot(tableMode = true)
+                    TransformMode.VALUE -> run.singleShot(tableMode = false)
+                }
             }
         } catch (e: CancellationException) {
             run.dropWritten()
@@ -403,6 +405,7 @@ internal class TransformRun(
         var rowsIn = 0L
         var rowsOut = 0L
         var rowsRejected = 0L
+        var delivered: NodeResult? = null
         when (val output = node.output) {
             is NodeOutput.Tempdb -> {
                 val outTable = requireTable(output.table)
@@ -446,7 +449,7 @@ internal class TransformRun(
 
             NodeOutput.Caller -> {
                 beginOperation()
-                rowsOut =
+                delivered =
                     TransformNodeRuns.phase(ctx, NodePhase.MATERIALIZE, node.id) {
                         ctx.staging.withQuery("SELECT $selectList FROM $quotedInput") { rs ->
                             deliverCaller(
@@ -455,9 +458,10 @@ internal class TransformRun(
                                     rs, inputColumns, stagedSchema, valueInputs, outputColumns, Split.ACCEPTED,
                                     collectRejects = collect,
                                 ) { rowsIn += it },
-                            ).rowsOut
+                            )
                         }
                     }
+                rowsOut = delivered.rowsOut
             }
 
             else -> error("unreachable: §12.13 refuses ${node.output} on a row-mode TRANSFORM")
@@ -468,6 +472,8 @@ internal class TransformRun(
             nodeId = node.id,
             rowsOut = rowsOut,
             startedAt = startedAt,
+            callerResultRef = delivered?.callerResultRef,
+            bytesOutEstimate = delivered?.bytesOutEstimate ?: NodeResult.NOT_MEASURED,
             rowsIn = rowsIn,
             rowsRejected = rowsRejected,
             invariantsChecked = invariantsChecked,
@@ -492,6 +498,7 @@ internal class TransformRun(
 
         var rowsOut = 0L
         var rowsRejected = 0L
+        var delivered: NodeResult? = null
         var gatedValue: Any? = null
         var gatedRows: List<Map<String, Any?>> = emptyList()
         when (val output = contract.output) {
@@ -536,13 +543,14 @@ internal class TransformRun(
 
                     NodeOutput.Caller -> {
                         beginOperation()
-                        rowsOut =
+                        delivered =
                             TransformNodeRuns.phase(ctx, NodePhase.MATERIALIZE, node.id) {
                                 deliverCaller(
                                     outputColumns.toColumnSchemas(),
                                     gated.rows.asSequence().map { TransformValues.storageRow(it, outputColumns) },
-                                ).rowsOut
+                                )
                             }
+                        rowsOut = delivered.rowsOut
                     }
 
                     else -> error("unreachable: §12.13 refuses ${node.output} on a table-mode TRANSFORM")
@@ -589,6 +597,8 @@ internal class TransformRun(
             nodeId = node.id,
             rowsOut = rowsOut,
             startedAt = startedAt,
+            callerResultRef = delivered?.callerResultRef,
+            bytesOutEstimate = delivered?.bytesOutEstimate ?: NodeResult.NOT_MEASURED,
             contextKey = if (tableMode) null else node.contextKey,
             contextValue = if (tableMode) null else TransformValues.renderContextValue(gatedValue),
             rowsIn = loadedTables.values.sumOf { it.size.toLong() },

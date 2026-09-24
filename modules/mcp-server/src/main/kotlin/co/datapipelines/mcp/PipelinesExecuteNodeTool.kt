@@ -187,6 +187,11 @@ class PipelinesExecuteNodeTool(
             // different feature. Use pipelines_execute for the node that builds this table.
             standaloneRefused(resolution.version, node.id, "tempdb_source")
         }
+        if (node.type == NodeType.TRANSFORM) {
+            // 7c (#7): a TRANSFORM carries no source at all — refusing here, before the
+            // datasource resolution, keeps its blank source from being resolved as one.
+            standaloneRefused(resolution.version, node.id, "transform_node")
+        }
 
         val datasourceName = node.source
         val gated = datasources.requireVisible(datasourceName, ctx)
