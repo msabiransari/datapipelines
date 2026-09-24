@@ -29,11 +29,11 @@
       <p class="kicker">Same job, different artifact</p>
       <h1 id="tp-title" class="ds-display">Tableau Prep alternative: a flow is a file, a pipeline is code you can release</h1>
       <p class="section-lede">
-        Tableau Prep and a datapipelines pipeline do the same first job — pull several sources together, shape
+        Tableau Prep and a datapipelines pipeline do the same first job, pulling several sources together and shaping
         them, hand the result to the next step. The difference is the artifact that job produces. Prep produces a
         flow: a document one tool opens, edits and runs. A pipeline here is a JSON document of SQL nodes: diffable
         in a pull request, versioned, runnable by an AI agent, releasable only by a person, and publishable as an
-        API — pipeline as code, in the plain sense of the phrase. This page compares them honestly, including the
+        API, pipeline as code in the plain sense of the phrase. This page compares them honestly, including the
         part Prep does better.
       </p>
       <div class="btn-row">
@@ -46,7 +46,7 @@
   <section class="section" aria-labelledby="tp-artifact">
     <div class="container">
       <p class="kicker">The artifact</p>
-      <h2 id="tp-artifact" class="ds-headline">Same job, different artifact — and the artifact decides the second week</h2>
+      <h2 id="tp-artifact" class="ds-headline">Same job, different artifact, and the artifact decides the second week</h2>
       <div class="prose">
         <!-- claim: docs/pipeline-contract.md §3 -->
         <p>
@@ -69,7 +69,7 @@
           There is a quieter difference underneath, and it decides who can help you. The flow's knowledge lives in
           the person who built it and in the file only that tool opens; hand the work to a colleague, a contractor
           or an agent, and the first week is archaeology. The pipeline's knowledge lives in the document: the nodes
-          are named for what they do, the SQL is in the file, the dependencies are declared — so the second person
+          are named for what they do, the SQL is in the file and the dependencies are declared, so the second person
           (or the second agent) starts from reading, not from reverse-engineering. Teams do not adopt pipelines
           because the first build is faster; often it is not. They adopt them because the second week, the second
           person and the second year are all cheaper.
@@ -101,12 +101,12 @@
         <article class="card">
           <!-- claim: docs/dag-executor.md §5 -->
           <h3>Show why a node is slow</h3>
-          <p>Every statement carries a query timeout, and the SQL probe captures the plan before the query runs — so a slow node names itself, with a plan, instead of being a spinner in someone else's UI.</p>
+          <p>Every statement carries a query timeout, and the SQL probe captures the plan before the query runs, so a slow node names itself, with a plan, instead of being a spinner in someone else's UI.</p>
         </article>
         <article class="card">
           <!-- claim: docs/pipeline-contract.md §8 -->
           <h3>Write its result back</h3>
-          <p>A node can land its result in a datasource — the Postgres table a BI tool live-connects to. The flow's output stays where the flow puts it.</p>
+          <p>A node can land its result in a datasource, the Postgres table a BI tool live-connects to. The flow's output stays where the flow puts it.</p>
         </article>
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
@@ -123,17 +123,17 @@
       <h2 id="tp-better" class="ds-headline">What Prep does better</h2>
       <div class="prose">
         <p>
-          Visual profiling — the distributions, the nulls, the value counts a flow shows while you drag — is a real
+          Visual profiling, the distributions, the nulls and the value counts a flow shows while you drag, is a real
           strength, and this server does not ship an equivalent: the agent reads catalogue statistics and the probe's
           rows instead, which is evidence, not a histogram. The click-to-pivot is faster than writing the SQL by
-          hand if you do not have an agent to write it. And Tableau-native output — the flow that lands directly
-          where a Tableau author expects — is friction this does not attempt to match; the honest path here is the
+          hand if you do not have an agent to write it. And Tableau-native output, the flow that lands directly
+          where a Tableau author expects, is friction this does not attempt to match; the honest path here is the
           write-back node or the endpoint.
         </p>
         <p>
           If the preparation is a one-off reshape by a person who lives in Prep, none of the six above pays for the
           move. The pipeline earns its keep when the preparation is repeated, reviewed, handed between people and
-          machines, or served — which is the moment a file one tool opens stops being enough.
+          machines, or served, which is the moment a file one tool opens stops being enough.
         </p>
       </div>
     </div>
@@ -145,7 +145,7 @@
       <h2 id="tp-migrate" class="ds-headline">Migrating a flow, step by step</h2>
       <div class="prose">
         <p>
-          Pick the flow you would least like to rebuild from scratch next quarter — the weekly one, with the joins
+          Pick the flow you would least like to rebuild from scratch next quarter: the weekly one, with the joins
           someone has memorised. That flow pays for the migration twice: once in the move, and once every week it
           no longer depends on the person who built it. The five steps below are each a shipped feature; the whole
           sequence is an afternoon for a flow of ordinary size.
@@ -154,12 +154,12 @@
       <ol class="steps">
         <li>
           <h3>Inventory the flow's sources</h3>
-          <p>List every input the flow touches — databases, files, the join keys between them. This list is the migration's scope; most flows are smaller than they look once the inputs are named.</p>
+          <p>List every input the flow touches: databases, files, the join keys between them. This list is the migration's scope; most flows are smaller than they look once the inputs are named.</p>
         </li>
         <li>
           <h3>Register them as datasources</h3>
           <!-- claim: docs/datasources.md §3 -->
-          <p>Each source becomes a datasource: name, dialect, connection, credentials the server encrypts and never returns. Mark read-only every source the pipeline must never write to — the refusal is enforced at save time and again at run time.</p>
+          <p>Each source becomes a datasource with a name, a dialect, a connection and credentials the server encrypts and never returns. Mark read-only every source the pipeline must never write to; the refusal is enforced at save time and again at run time.</p>
         </li>
         <li>
           <h3>Describe the transformation to the agent</h3>
@@ -169,12 +169,12 @@
         <li>
           <h3>Run it and compare against the flow's output</h3>
           <!-- claim: docs/staging.md §3 -->
-          <p>Run the flow once more and the pipeline once, and compare row counts and spot totals. The pipeline's result is paged rows you can read in the results dock — the comparison is a morning, not a project.</p>
+          <p>Run the flow once more and the pipeline once, and compare row counts and spot totals. The pipeline's result is paged rows you can read in the results dock, the comparison is a morning, not a project.</p>
         </li>
         <li>
           <h3>Release it</h3>
           <!-- claim: docs/versioning.md §3 -->
-          <p>When the numbers match, a person releases. The flow on the shared drive can retire; the pipeline is versioned, diffable, and — the step Prep never had — <a th:href="@{/published-api}">publishable as an endpoint</a>.</p>
+          <p>When the numbers match, a person releases. The flow on the shared drive can retire; the pipeline is versioned and diffable, and it has the step Prep never had: <a th:href="@{/published-api}">publishable as an endpoint</a>.</p>
         </li>
       </ol>
     </div>
@@ -192,13 +192,13 @@
           </div>
         </figure>
         <figure class="shot">
-          <figcaption>The agent's session: schemas read, the draft iterated, the run verified — the authoring a flow file cannot accept.</figcaption>
+          <figcaption>The agent's session: schemas read, the draft iterated, the run verified. It is the authoring a flow file cannot accept.</figcaption>
           <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
         </figure>
       </div>
       <div class="prose">
         <!-- claim: docs/deployment.md §Appendix B, site facts: the recorded run of record -->
-        <p>Both panels are the demo workspace's run of record — <code>demo/top_company_by_borough</code>, a
+        <p>Both panels are the demo workspace's run of record, <code>demo/top_company_by_borough</code>, a
           recorded acceptance result over the published sample data (the reference zones and the lake's
           ride ledger on S3), reproduced from the bucket. The same sentence, the same steps and the same
           numbers the home page shows.</p>
@@ -221,7 +221,7 @@
       <h2 id="tp-next" class="ds-headline">Bring one flow over and compare</h2>
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">
-        The demo stack gives you the four sources to practise on. Migrate the smallest flow you run weekly — the
+        The demo stack gives you the four sources to practise on. Migrate the smallest flow you run weekly, the
         comparison against its output is the whole argument, whichever way it lands.
       </p>
       <div class="btn-row">

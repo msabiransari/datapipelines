@@ -2185,7 +2185,7 @@
    "headings": [
     {
      "level": "H1",
-     "text": "Publish a governed dataset for Tableau from Postgres, MySQL and S3 — without a warehouse"
+     "text": "Publish a governed dataset for Tableau from Postgres, MySQL and S3, without a warehouse"
     },
     {
      "level": "H2",
@@ -2205,7 +2205,7 @@
     },
     {
      "level": "H3",
-     "text": "Publish the endpoint — or write the table"
+     "text": "Publish the endpoint, or write the table"
     },
     {
      "level": "H3",
@@ -2426,7 +2426,7 @@
     },
     {
      "level": "H2",
-     "text": "Same job, different artifact — and the artifact decides the second week"
+     "text": "Same job, different artifact, and the artifact decides the second week"
     },
     {
      "level": "H2",
@@ -2529,7 +2529,7 @@
    "headings": [
     {
      "level": "H1",
-     "text": "Embedded dashboards, scheduled extracts to S3, data-driven alerts — the roadmap"
+     "text": "Embedded dashboards, scheduled extracts to S3, data-driven alerts: the roadmap"
     },
     {
      "level": "H2",
