@@ -43,6 +43,14 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 | `pipeline.node.timeout` | The NODE outlived its wall-clock budget — render through staging, whatever the driver did. `details` carries `timeout_seconds`, `elapsed_ms` and `phase` | Read the `phase`: `execute` → make the query cheaper (prune on the partition column, push the filter down); `stage` → ship fewer rows (aggregate at the source); `connect` → the pool or the network, not your SQL. Only when the scan is legitimately long, set that node's `settings.timeout_seconds` and say why. Never slice the scan |
 | `pipeline.node.sql_parameter_missing` | The rendered SQL references a `:name` no pipeline parameter declares | Name a declared parameter — or interpolate structure instead |
 | `template.validation.html_entity` | The body carries `&lt;`/`&gt;`/`&amp;` where a SQL operator belongs — it was HTML-escaped between you and the server | Re-send the body with the operator itself (`<=`, `>`, `&`); check how your client encodes tool arguments |
+| `template.validation.freemarker_forbidden` | A transform type carried `imports`/`is_library`, or its body has a Freemarker construct (`${`, `<#`, `<@`) | Remove it — `details.rule` says which; a transform body is evaluated, never rendered |
+| `template.validation.engine_unsupported` | `engine` does not match the template's type | `freemarker` iff `sql`/`html`, `none` iff `jsonata`/`javascript` |
+| `template.contract_invalid` | A transform's contract block broke a rule | `details.rule` names which (`unknown_field`, `row_mode_inputs`, `empty_case_missing`, `row_case_lists_table`, …) — see `references/transforms.md` |
+| `template.invariant_invalid` | An invariant does not compile, or returned non-boolean | Fix the JSONata expression named in `details.invariant` |
+| `template.test_failed` | A test case failed at save or release | `details` names the case and the bounded diff, or the invariant that is false — fix the body or the expectation |
+| `template.blocks_not_allowed` | `contract`/`invariants`/`tests` on an `sql`/`html` template | The blocks belong to the transform types only |
+| `template.render_not_applicable` | `templates_render` (or REST `/render`) on a transform type | Use `templates_evaluate` — `details.use` says so |
+| `transform.js.unavailable` | A `javascript` template was saved | Round two's engine is not shipped yet; author `jsonata` |
 | `template.validation.parameter_interpolated` | A declared parameter appears inside `${}` | Write `:name` for it — bound values are never parsed as SQL |
 | `result.expired` | TTL elapsed on the cursor | Re-execute and page sooner |
 | `datasource.lake.table_unavailable` | A lake table's view failed to build at connect and was skipped; `details` carries `table` and the recorded `last_error` | Do not retry — the query is fine, the registration is broken. Report `last_error` to the user and let them fix or re-register the table |

@@ -66,18 +66,80 @@ Note that the body contains **no `<#import>` directive**. The engine synthesizes
 | `schema_version` | integer | yes | Currently `1` — the only value v1 accepts; any other is **rejected at save time** with `template.validation.schema_version_unsupported` (§7). Independent of the entity `version` below — see [Pipeline Contract §15.4](pipeline-contract.md#154-which-version-counter-governs-what). |
 | `id` | string | yes | Stable identifier — a path of **2–10** `/`-separated segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total ([Template Hierarchy §4.1](template-hierarchy-design.md)); the full path IS the name, and **a folder is required** (`test/scratch`, not `scratch`). Auto-generated if omitted on create — under `test/`, since a name nobody chose is scratch and §4.1 admits no root-level asset. |
 | `version` | integer | yes | Monotonically increasing per template id. Server-assigned. |
-| `engine` | string (enum) | optional (default `"freemarker"`) | Template engine. v1 supports only `"freemarker"`; a save carrying any other value (`"pebble"`, `"handlebars"`, `"none"`) is **rejected at save time** with `template.validation.engine_unsupported` (§7) — it is never stored and silently rendered as Freemarker. Reserved values are catalogued in [Enums §6](enums.md#6-templateengine--template-language). |
-| `type` | string (enum) | optional (default `"sql"`) | The template's kind: `sql` or `html` ([Enums §6A](enums.md#6a-templatetype--template-kind), [Template Hierarchy §5](template-hierarchy-design.md)). Accepted on **create only** — defaulting to `sql` when absent — and identical on every version of the template; a write payload carrying a different type is refused with `template.validation.type_immutable` (§7). `sql` renders SQL through the escaping-free configuration and is the only kind a pipeline node may reference; `html` renders through a second, auto-escaping configuration ([Template Hierarchy §6](template-hierarchy-design.md)) and takes **no** `dialect`. An unknown value is refused with `template.validation.type_invalid`. |
-| `dialect` | string (enum) | yes — **iff `type` is `sql`** | One of `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`. Required unless the template's type is `html` (absence on a non-html payload is `template.validation.dialect_invalid`); a `dialect` present on an `html` template is refused with `template.validation.dialect_not_allowed` (§7). |
+| `engine` | string (enum) | optional (default `"freemarker"`) | Template engine, **matched to the type** (since 7b): `"freemarker"` iff `sql`/`html`, `"none"` iff `jsonata`/`javascript` — any other pairing is **rejected at save time** with `template.validation.engine_unsupported` (§7). Values are catalogued in [Enums §6](enums.md#6-templateengine--template-language). |
+| `type` | string (enum) | optional (default `"sql"`) | The template's kind: `sql`, `html`, or one of the two transform types `jsonata` / `javascript` ([Enums §6A](enums.md#6a-templatetype--template-kind); the transform types since 7b, transform-nodes design §2.1). Accepted on **create only** — defaulting to `sql` when absent — and identical on every version of the template; a write payload carrying a different type is refused with `template.validation.type_immutable` (§7). `sql` renders SQL through the escaping-free configuration and is the only kind a pipeline node may reference; `html` renders through a second, auto-escaping configuration ([Template Hierarchy §6](template-hierarchy-design.md)) and takes **no** `dialect`; a transform type renders nothing — the body is an expression evaluated as a pure function of its input (§3.3), with `engine: none`, no `dialect`, no `imports` and `is_library: false`, and its version carries the contract/invariants/tests blocks. `javascript` is refused at save until round two (`transform.js.unavailable`). An unknown value is refused with `template.validation.type_invalid`. |
+| `dialect` | string (enum) | yes — **iff `type` is `sql`** | One of `POSTGRES`, `ORACLE`, `MSSQL`, `MYSQL`, `H2`, `DUCKDB`, `SQLITE`. Required on `sql` (absence is `template.validation.dialect_invalid`); a `dialect` present on any other type (`html` or a transform type) is refused with `template.validation.dialect_not_allowed` (§7). |
 | `display_name` | string | yes | Human-readable name. |
 | `description` | string | yes | Free-text, for human and agent discoverability. Not machine-validated: it is the only place a template can hint at the parameters it expects, since it declares none (§2.5). |
-| `imports` | array of `{id, version, alias}` | yes (may be empty) | Library templates whose macros this template calls, and the namespace alias each is bound to. See §6. Only meaningful when `engine` is `"freemarker"`. |
+| `imports` | array of `{id, version, alias}` | yes (may be empty) | Library templates whose macros this template calls, and the namespace alias each is bound to. See §6. Only meaningful when `engine` is `"freemarker"` — non-empty on a transform type is refused with `template.validation.freemarker_forbidden` (§7). |
 | `body` | string | yes | Template source. Syntax depends on `engine` (Freemarker by default). Multi-line. Must **not** contain `<#import>` or `<#include>` directives (§6.3). |
 | `created_at` | ISO 8601 timestamp | yes | Server-assigned. |
 | `created_by` | string (UUID) | yes | User ID of creator. |
-| `is_library` | boolean | yes | `true` if this template exists to be imported by others. A library body contains **only `<#macro>` / `<#function>` definitions — no output outside macro definitions** (§6.2); `body` is still required. `false` if the template is executable directly by a pipeline node. |
+| `is_library` | boolean | yes | `true` if this template exists to be imported by others. A library body contains **only `<#macro>` / `<#function>` definitions — no output outside macro definitions** (§6.2); `body` is still required. `false` if the template is executable directly by a pipeline node. `true` on a transform type is refused with `template.validation.freemarker_forbidden` (§7). |
 
 **Render context.** There is no `params_schema` field. The variables a body may reference are exactly the keys of the calling pipeline's `parameters` map, defaults applied — see [Pipeline Contract §7.4](pipeline-contract.md#74-template-variable-resolution).
+
+### 3.3 Transform templates: contract, invariants, tests (7b)
+
+A template of type `jsonata` or `javascript` is a **transform**: the body is one expression evaluated as a pure function of its input object by the scripting engine seam (`engine: none` — there is no Freemarker anywhere: no render, no `imports`, no `is_library`, and a `${`, `<#` or `<@` in the body is refused with `template.validation.freemarker_forbidden`, D-T9). The design record is [transform-nodes-design](superpowers/specs/2026-09-09-transform-nodes-design.md); this section is the product spec of its §2.2.
+
+A transform version carries three blocks, stored on `template_versions` as `contract_json` / `invariants_json` / `tests_json` (non-null exactly on the transform types — `chk_transform_blocks`) and **inside the version's `body_hash`** through the hash expression's CASE arm, so an `sql`/`html` hash is byte-identical before and after. The blocks bind strictly: an unknown field inside any block is a refusal (`template.contract_invalid`, `details.rule: "unknown_field"`), never a silent drop.
+
+**`contract`**
+
+| Field | Rule |
+|---|---|
+| `mode` | `row` \| `table` \| `value`. A `row` body reads `rows`; a `table`/`value` body reads `inputs.<name>`. `row` requires exactly one `table` input (`template.contract_invalid`, detail `row_mode_inputs`). |
+| `inputs` | Name → `{ kind: "table", columns[] }` or `{ kind: "value", type, precision?, scale? }`. Names obey `[a-z_][a-z0-9_]*` (`name_invalid`). At least one input (`inputs_empty`). `columns[]` entries are `{ name, type, precision?, scale?, nullable? }`; `type` is a `LogicalType` wire name; `nullable` defaults to false. `BINARY` and `NULL` are refused as declared types (`type_unsupported`). precision/scale follow type-system.md §4 (`precision_scale_invalid`). |
+| `output` | `{ kind: "table", columns[] }` for `row`/`table`; `{ kind: "value", type, … }` or `{ kind: "object" }` for `value`. A mode/output.kind mismatch is `mode_output_mismatch`. |
+| `rejects` | Boolean, default false; legal only with a table output (`rejects_without_table`). When true the function returns `{ rows: [...], rejects: [ { row, reason } ] }` and `reason` is a non-empty string. |
+
+**`invariants`** — a list, possibly empty, of `{ name, expr, message }`. `expr` is a JSONata expression over `{ rows, rejects, inputs }` that must evaluate to boolean `true`, on every test case and every real execution. Each `expr` is compiled at save (`template.invariant_invalid` on a syntax error; a non-boolean result on any case is `invariant_invalid` with the case named).
+
+**`tests`** — a non-empty list of `{ name, input, expect }`. `input` is the production input object with `meta` optional (the runner supplies `{ node_id: "test", context_key: null }`) and mirrors production exactly (R2): in `row` mode, `rows` is the batch and `inputs` holds the value inputs only — the table input is NOT listed (`row_case_lists_table`); the runner builds `inputs.<table>` = the case's `rows` for the invariants. A case may carry `"now": "<ISO-8601 TIMESTAMP>"`: the runner passes it as the evaluation's pinned clock; absent, the `$now()`/`$millis()` builtins refuse (a transform is a pure function of its inputs — the clock is an input). `expect` is exactly one of `{ output }` — the function's return value, compared after canonicalisation — or `{ refusal: "<code>" }` — the run must refuse with that code (`expect_shape`). **One case whose every table input and `rows` are empty is mandatory** (`empty_case_missing`): a transform with no test for zero rows does not save.
+
+The blocks ride every surface that carries a template: `templates_create`/`templates_update` and the REST create/update accept them (refused on `sql`/`html` with `template.blocks_not_allowed`), `templates_get` and the GETs return them, and the export/import and promotion payloads carry them (the import hash guard recomputes over them).
+
+Example (the design record's own — a row-mode transform over staged orders):
+
+```json
+{
+  "contract": {
+    "mode": "row",
+    "inputs": {
+      "orders":    { "kind": "table", "columns": [
+                       { "name": "order_id",     "type": "INTEGER" },
+                       { "name": "amount_cents", "type": "INTEGER" },
+                       { "name": "customer_id",  "type": "STRING", "nullable": true } ] },
+      "tz":        { "kind": "value", "type": "STRING" },
+      "min_total": { "kind": "value", "type": "DECIMAL", "precision": 12, "scale": 2 }
+    },
+    "output": { "kind": "table", "columns": [
+                  { "name": "order_id",    "type": "INTEGER" },
+                  { "name": "amount",      "type": "DECIMAL", "precision": 12, "scale": 2 },
+                  { "name": "customer_id", "type": "STRING" } ] },
+    "rejects": true
+  },
+  "invariants": [
+    { "name": "customer_present",
+      "expr": "$count(rows[customer_id = null]) = 0",
+      "message": "every accepted row carries a customer id" },
+    { "name": "one_to_one",
+      "expr": "$count(rows) + $count(rejects) = $count(inputs.orders)",
+      "message": "every input row is accepted or rejected, never lost" }
+  ],
+  "tests": [
+    { "name": "empty input",
+      "input":  { "rows": [], "inputs": { "tz": "UTC", "min_total": 0.00 } },
+      "expect": { "output": { "rows": [], "rejects": [] } } },
+    { "name": "wrong shape is refused",
+      "input":  { "rows": [ { "order_id": "x" } ], "inputs": { "tz": "UTC", "min_total": 0.00 } },
+      "expect": { "refusal": "pipeline.transform.input_contract_violation" } }
+  ]
+}
+```
+
+**Save and release run the suite (§8.1 of the record).** Every case runs through the real engine on the bounded evaluation pool under `datapipelines.transform.evaluate-timeout-seconds`; its output passes the type gate against the contract (a `DECIMAL` output is rounded half-even to its declared scale, R1); the invariants run on it; the result is compared to `expect` after canonicalisation — exact equality or a refusal code, no tolerances. The suite is bounded by `suite-timeout-seconds`. The first failure refuses the save with `template.test_failed` naming the case and the assertion (a diff bounded to 2 000 chars). **Release re-runs the suite** on the version being released — a suite that passed at save fails at release only if the engine changed, which is the case worth catching.
 
 ---
 
@@ -344,14 +406,20 @@ All checks below run at template create/update time, before anything is written 
 
 | Code | Check |
 |---|---|
-| `template.validation.dialect_invalid` | `dialect` is in the allowed enum — and is present whenever the type is not `html` |
-| `template.validation.type_invalid` | `type` is one of `sql`, `html` (046, [Template Hierarchy §5.4](template-hierarchy-design.md)) |
-| `template.validation.dialect_not_allowed` | No `dialect` on a `type='html'` template — an html template declares none (046, [Template Hierarchy §7](template-hierarchy-design.md)) |
+| `template.validation.dialect_invalid` | `dialect` is in the allowed enum — and is present whenever the type is `sql` |
+| `template.validation.type_invalid` | `type` is one of `sql`, `html`, `jsonata`, `javascript` (046, [Template Hierarchy §5.4](template-hierarchy-design.md); the transform types since 7b) |
+| `template.validation.dialect_not_allowed` | No `dialect` on a type that declares none — `html` or a transform type (046, [Template Hierarchy §7](template-hierarchy-design.md)) |
 | `template.validation.type_immutable` | A write payload carries a `type` other than the template's established one — the type is chosen at create and identical on every version (046, [Template Hierarchy §5.3](template-hierarchy-design.md)) |
-| `template.validation.engine_unsupported` | `engine` is a value v1 supports (only `"freemarker"`) |
+| `template.validation.engine_unsupported` | `engine` matches the type: `"freemarker"` iff `sql`/`html`, `"none"` iff a transform type (7b, record §2.1) |
+| `template.validation.freemarker_forbidden` | A transform type carries `imports` or `is_library: true`, or its body contains a Freemarker construct (`${`, `<#`, `<@`) — D-T9; `details.rule` names which (`imports` / `is_library` / `body`) |
 | `template.validation.schema_version_unsupported` | `schema_version` is a value v1 supports (only `1`) |
+| `template.contract_invalid` | A transform block failed a §3.3 rule; `details.rule` names which (`blocks_missing`, `unknown_field`, `inputs_empty`, `name_invalid`, `row_mode_inputs`, `type_unsupported`, `precision_scale_invalid`, `mode_output_mismatch`, `rejects_without_table`, `empty_case_missing`, `row_case_lists_table`, `expect_shape`) |
+| `template.invariant_invalid` | An invariant does not compile, or produced a non-boolean on a test case — `details` names the invariant (and the case) |
+| `template.test_failed` | A test case failed at save or at release — `details` names the case and the assertion (a diff bounded to 2 000 chars), or the invariant that is false |
+| `template.blocks_not_allowed` | `contract` / `invariants` / `tests` on an `sql`/`html` template — the blocks belong to the transform types only |
+| `template.render_not_applicable` | `templates_render` / `POST /api/v1/templates/render` on a transform type — there is nothing to render; `details.use` points at `templates_evaluate` |
 | `template.validation.id_invalid` | `id` is a path of 2–10 segments, each `[a-z0-9][a-z0-9_.-]{0,63}`, ≤ 200 chars total — a folder is required ([Template Hierarchy §4.1](template-hierarchy-design.md)). `details.reason` is `folder_required` when a folder is the only thing missing, `grammar` otherwise |
-| `template.validation.syntax_error` | Freemarker parses the body without syntax errors |
+| `template.validation.syntax_error` | Freemarker parses the body without syntax errors — or, for a transform type, the scripting engine parses it (with the engine's line/column) |
 | `template.validation.dangerous_construct` | Body uses a forbidden Freemarker construct — including a literal `<#import>`/`<#include>` (see §4.2) |
 | `template.validation.duplicate_alias` | No two `imports` entries share an `alias` |
 | `template.validation.import_not_found` | Every `imports` entry resolves to an existing template at that exact version |
@@ -363,6 +431,7 @@ All checks below run at template create/update time, before anything is written 
 ### 7.1 Save-time validation is parse-only
 
 - **At template save** — everything in the table above: Freemarker syntax validity, the forbidden-construct scan, and full import-graph resolution (existence, `is_library`, alias uniqueness, depth, cycles). **No render is performed.** A template declares no parameters (§2.5), so at save time there is no context to render against and no basis for a synthetic one. There is deliberately no "sample context" anywhere in this contract.
+- **At transform save** (7b) — the §3.3 order, after the static rules: body parse through the scripting engine, contract validation, invariant compile, then **the test suite** — every case on the bounded evaluation pool, gated, invariant-checked and compared to `expect` after canonicalisation. A draft is re-validated on every update, and **release re-runs the suite** on the version being released; both refuse with `template.test_failed` on the first failing case. A transform's cases are its "sample context" — declared, versioned and hash-covered, never synthetic.
 - **At pipeline save** — the render-level check. Pipeline validation dry-renders every template its nodes reference against the pipeline's declared `parameters` (defaults where present, type-appropriate sample values otherwise). See §7.2.
 - **At execution** — nothing new is checked. Both gates above have already run; a render failure at execution time is a bug or an environment drift, and surfaces as `pipeline.node.template_render_failed` (§8.2).
 
@@ -389,6 +458,10 @@ A consequence worth stating plainly: a template that is perfectly valid on its o
 ---
 
 ## 8. Render Lifecycle
+
+### 8.0 Evaluate beside render (7b)
+
+Render is the `sql`/`html` verb; **evaluate is the transform verb**. `templates_render` and `POST /api/v1/templates/render` refuse a transform type with `template.render_not_applicable` (`details.use: "templates_evaluate"`). `templates_evaluate` and `POST /api/v1/templates/evaluate` take `{ name|id, version?, input }` (the §9.6 addressing form; `version` omitted = the working version, exactly as render), apply the contract's input check (the record's §5.1), evaluate on the bounded evaluation pool under `datapipelines.transform.evaluate-timeout-seconds`, gate the output against the contract, run every invariant, and answer `{ output, rejects, invariants: [ { name, passed, message } ] }` — no staging, no Context. A refusal is the code with its detail (the §5.1 input check, the type gate, or the engine's own). The evaluate of a draft transform version counts as its render for the render-before-you-run check (139) — without it a draft pipeline pinning a draft transform would be refused at execute forever.
 
 ### 8.1 Single-template render
 
@@ -509,6 +582,7 @@ The Template entity is **versioned, additive-only**.
 ### 11.2 Not frozen
 
 - New optional fields (`tags`, `metadata`, etc.) may be added non-breakingly.
+- The transform blocks (§3.3) may grow: new optional fields on the contract/input/test shapes, and 7e's `implements` citation, land non-breakingly; a block's fields are refused when UNKNOWN (`unknown_field`), so growth is a deliberate doc-plus-code move, not a silent one (7b).
 - **Conditional-requirement relaxations are named explicitly** (amended 2026-09-02, 046): making a previously required field conditional on another — as 046 did to `dialect`, required iff `type='sql'` — is *not* covered by "new optional fields" above, because §11.1 froze the field's presence as part of the shape. Such a relaxation is compatible in practice when no existing payload becomes invalid and every stored row already satisfies the new rule (every pre-046 template backfills to `type='sql'` with its dialect intact), but the claim must be written down in the change log of the round that takes it, not assumed under §11.2's first bullet.
 - The render cache and timeout configuration are deployment-specific ([Configuration §3.9](configuration.md#39-templates)).
 - Future template languages beyond Freemarker are out of scope but possible (would be a new `engine` value).
@@ -662,6 +736,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-23 | v1.13 | 7b (#7) transform templates | **The two transform types land**: `jsonata` and `javascript` as `TemplateType` values (§3.2; `javascript` refused at save until round two). `engine` becomes type-conditional (`none` iff a transform type); `dialect` is forbidden outside `sql`; `imports`/`is_library`/Freemarker-in-body are `template.validation.freemarker_forbidden` (D-T9). New **§3.3**: the contract/invariants/tests blocks — strict binding (`unknown_field`), every model rule with its detail name, the mandatory empty case (R2's `row_case_lists_table`, the pinned clock), and the save/release test-suite rule on the bounded evaluation pool. §7's table gains `freemarker_forbidden`, `contract_invalid`, `invariant_invalid`, `test_failed`, `blocks_not_allowed`, `render_not_applicable`; §8 gains **§8.0 Evaluate beside render** (`templates_evaluate` / `POST /api/v1/templates/evaluate`, the render refusal, and the evaluate-counts-as-render rule for Check B); §11.2 notes the blocks' growth rule. The `TemplateTypeBehaviour` object owns the per-type rules (record §2.4), with the sql/html refusals proven byte-identical by the golden. |
 | 2026-09-14 | v1.12 | 132 draft cache | §5.1's immutability rule is now exact: a RELEASED/DISCARDED version is immutable, the sole DRAFT is overwritten in place (117) and purged. §8.3 rewritten: both render-cache tiers key on content — the registry caches non-DRAFT rows only and re-reads a draft on every lookup; the parsed-template cache keys on `{id}@{version}#{body_hash}`; the loader's `lastModified` is the row's write stamp; invalidation is by construction on every instance, no bus. Fixes the 2026-09-14 acceptance defect where a rendered-then-updated draft kept rendering and executing its first body. |
 | 2026-09-11 | v1.11 | 117 templates_update | §5.3 gains the MCP twin: `templates_update` ([MCP §6.2.36](mcp-server.md#6236-templates_update)) — the same parse-only validation and the same `TemplateDraftService.write` the REST PUT makes, the `If-Match` hash carried as the required `expected_hash` argument, and the type-immutability refusal named on every surface. §9's CRUD table names the twin. `templates_purge_draft` is explicitly not the edit verb. |
 | 2026-09-08 | v1.10 | 099 draft-first (D55) | §5.2's lifecycle: **create lands version 1 as a DRAFT** (`POST /templates`, `templates_create`, the editor), `templates.current_version` is null until a human releases, and the release step is now shown in the sequence. A DRAFT pipeline may pin a DRAFT template version while iterating — unchanged; the pipeline's RELEASE is still what requires released pins (versioning §6). The import path (promotion, the seeders) lands RELEASED. |
