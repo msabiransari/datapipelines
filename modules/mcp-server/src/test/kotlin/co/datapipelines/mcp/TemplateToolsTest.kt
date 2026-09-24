@@ -304,6 +304,90 @@ class TemplateToolsTest {
     }
 
     @Test
+    fun `create passes the transform blocks into the draft (7b)`() {
+        val draft = slot<TemplateDraft>()
+        every { validator.validateOrThrow(capture(draft), any()) } answers { firstArg() }
+        every {
+            templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.MCP)
+        } returns McpFixtures.template()
+
+        TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
+            McpArguments(
+                mapOf(
+                    "type" to "jsonata",
+                    "display_name" to "Rules",
+                    "description" to "Row rules over staged orders.",
+                    "body" to "rows",
+                    "contract" to
+                        mapOf(
+                            "mode" to "row",
+                            "inputs" to
+                                mapOf(
+                                    "orders" to
+                                        mapOf(
+                                            "kind" to "table",
+                                            "columns" to listOf(mapOf("name" to "order_id", "type" to "INTEGER")),
+                                        ),
+                                ),
+                            "output" to
+                                mapOf(
+                                    "kind" to "table",
+                                    "columns" to listOf(mapOf("name" to "order_id", "type" to "INTEGER")),
+                                ),
+                        ),
+                    "invariants" to emptyList<Any>(),
+                    "tests" to
+                        listOf(
+                            mapOf(
+                                "name" to "empty",
+                                "input" to mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>()),
+                                "expect" to mapOf("output" to mapOf("rows" to emptyList<Any>())),
+                            ),
+                        ),
+                ),
+            ),
+            authorCtx,
+        )
+
+        assertAll(
+            { draft.captured.type shouldBe co.datapipelines.pipeline.TemplateType.JSONATA },
+            // The omitted engine defaults by the type (record §2.1).
+            { draft.captured.engine shouldBe Template.NONE_ENGINE },
+            { draft.captured.contract?.mode shouldBe co.datapipelines.templates.TransformMode.ROW },
+            { draft.captured.tests?.single()?.name shouldBe "empty" },
+        )
+    }
+
+    @Test
+    fun `a typo inside a block is contract_invalid unknown_field, never a silent drop (7b)`() {
+        val thrown =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
+                    McpArguments(
+                        mapOf(
+                            "type" to "jsonata",
+                            "display_name" to "Rules",
+                            "description" to "d",
+                            "body" to "rows",
+                            "contract" to
+                                mapOf(
+                                    "mode" to "row",
+                                    "inputs" to
+                                        mapOf(
+                                            "orders" to
+                                                mapOf("kind" to "table", "collumns" to emptyList<Any>()),
+                                        ),
+                                ),
+                        ),
+                    ),
+                    authorCtx,
+                )
+            }
+        thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Template.CONTRACT_INVALID
+        thrown.details["rule"] shouldBe "unknown_field"
+    }
+
+    @Test
     fun `create rejects a malformed imports entry as a protocol error`() {
         shouldThrow<McpError> {
             TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(

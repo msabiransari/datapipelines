@@ -93,11 +93,13 @@ private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<Tra
         val raw = args.rawMap()[name] ?: return null
         return try {
             TransformBlocks.mapper.convertValue(raw, type)
-        } catch (err: com.fasterxml.jackson.databind.JsonMappingException) {
+        } catch (err: IllegalArgumentException) {
+            // convertValue wraps the mapping failure as IllegalArgumentException; the
+            // mapping error rides as its cause.
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.CONTRACT_INVALID,
-                message = "The '$name' block does not bind: ${err.originalMessage}. A typo is a refusal, never a silent drop.",
-                details = mapOf("rule" to "unknown_field", "path" to err.pathReference),
+                message = "The '$name' block does not bind: ${err.message}. A typo is a refusal, never a silent drop.",
+                details = mapOf("rule" to "unknown_field"),
             )
         }
     }
