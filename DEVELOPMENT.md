@@ -592,6 +592,41 @@ docker rm <container>
 
 CI never sets the opt-in, so CI behaviour is unchanged.
 
+### 9.2a Test container images: pinned by digest, checked against the registry, never trusted from the cache
+
+Every image the tests start (`postgres`, `redis`, `mysql`, MSSQL, Keycloak, GreenMail, the S3
+server for the lake suites) is pinned to an exact tag or digest in the test source that declares
+it. Two incidents set the rules (MISTAKES.md, "Green on the Laptop"): on 2026-09-11 MinIO withdrew
+a tag from Docker Hub, and on 2026-09-24 MinIO removed EVERY tag from `quay.io/minio/minio` and its
+binary downloads (HTTP 410). Both times every local gate stayed green for days because the laptop
+had the image cached, while CI failed on every push.
+
+- **The S3 server is `cgr.dev/chainguard/minio`, pinned by digest.** Chainguard rebuilds MinIO
+  from source and publishes it under `latest` only (its free tier carries no version tags since
+  2023-08-16), so the pin is the digest (`cgr.dev/chainguard/minio@sha256:…`) recorded in `SharedE2e.kt` and
+  `LakeConnectivityIntegrationTest.kt` beside the MinIO release it contained when pinned. The image
+  runs as a non-root user; the suites' `server /data` command and `/minio/health/ready` wait work
+  unchanged (proven 2026-09-24 on `RELEASE.2026-09-22T19-25-18Z`). MinIO is AGPL-3.0; the image is
+  used unmodified, in tests only. Digest pins are durable by Chainguard's stated policy ("We don't
+  delete images, so old digests will continue to work"; "images pulled by digest … will be
+  available without logging in, but will not receive any updates" — chainguard.dev, read
+  2026-09-24), which is why a digest and not a mirror is enough here; the guard below is the
+  backstop should that policy ever change.
+- **`./scripts/verify-image-pins.sh` is the guard.** It greps every pin out of the test trees and
+  asks each registry for the manifest with `docker manifest inspect`, which never reads the local
+  image store. CI runs it before the gate's build and before the integration tests, so a withdrawn
+  image fails in seconds with the pin named, instead of two minutes per suite into a pull timeout.
+  Run it by hand before a dependency review. It exits 2 when its grep finds nothing (a broken grep
+  must never read as "all fine").
+- **When the guard goes red on the S3 pin:** pull `cgr.dev/chainguard/minio:latest`, read
+  `docker image inspect … --format '{{index .RepoDigests 0}}'` and `minio --version`, move both
+  pins to the new digest, run `LakeConnectivityIntegrationTest`, `LakeMinioE2eTest` and
+  `TaxiVsRideshareFourEngineE2eTest` against it, and land that as its own gated commit. A
+  community fallback exists (`alpine/minio:RELEASE.2025-10-15T17-29-55Z`, built from source, last
+  updated 2025-10-25 — unmaintained since) if Chainguard ever stops publishing; the last quay.io
+  build is also kept as a tarball outside the repo on the orchestrator's box
+  (`~/image-cache/minio-RELEASE.2025-09-07T16-13-09Z.tar.gz`, sha256 in the file beside it).
+
 ### 9.3 Verifying order independence (shuffled method order)
 
 Suites sharing a container must not depend on test-method order. To verify a module under shuffled ordering (two different seeds, both must be green):

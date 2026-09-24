@@ -272,11 +272,14 @@ class LakeConnectivityIntegrationTest {
          * the same image tests/integration-tests' MinIO suite uses; each module pins its own
          * because test sources do not cross module bounds.
          *
-         * quay.io, not Docker Hub: MinIO withdrew this tag from `minio/minio` on Docker Hub (404
-         * "pull access denied" on every CI run from 2026-09-11); a laptop with the image cached
-         * never noticed.
+         * Chainguard's MinIO by DIGEST (DEVELOPMENT.md §9.2a): MinIO removed every tag from
+         * `quay.io/minio/minio` on 2026-09-24 (Docker Hub on 2026-09-11) and its binary downloads;
+         * the digest held `RELEASE.2026-09-22T19-25-18Z` when pinned on 2026-09-24, and Chainguard
+         * never deletes old digests. `scripts/verify-image-pins.sh` checks the pin against the
+         * registry in CI. Move BOTH pins together (this one and SharedE2e's) — they must run the
+         * same server.
          */
-        private const val MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
+        private const val MINIO_IMAGE = "cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
 
         @Container
         @JvmStatic
