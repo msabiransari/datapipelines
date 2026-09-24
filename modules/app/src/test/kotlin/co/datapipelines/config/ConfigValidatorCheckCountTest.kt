@@ -63,6 +63,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/PostureRules.kt",
                 // 137 — the two §3.27 mail rules, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/MailRules.kt",
+                // 7b — the §3.28 transform bounds, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/TransformRules.kt",
             )
     }
 }
