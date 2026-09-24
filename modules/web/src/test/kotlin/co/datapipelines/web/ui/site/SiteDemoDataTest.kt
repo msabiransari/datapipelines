@@ -92,7 +92,7 @@ class SiteDemoDataTest {
         // Assertions are scoped to the family's own section: the other two families'
         // sections legitimately still carry their (real) licence statements.
         val nycSection = html.substringAfter("""aria-labelledby="dd-nyc"""").substringBefore("</section>")
-        withClue("the unverified status renders") { nycSection shouldContain "not yet verified — no licence claim" }
+        withClue("the unverified status renders") { nycSection shouldContain "not yet verified. No licence claim." }
         withClue("the family's licence strings render nowhere in its section") {
             nycSection shouldNotContain "freely usable"
             nycSection shouldNotContain "US Government work"
