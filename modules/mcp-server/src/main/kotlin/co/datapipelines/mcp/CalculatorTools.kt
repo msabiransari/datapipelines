@@ -11,8 +11,9 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.modelcontextprotocol.spec.McpSchema
 
 /**
- * `calculators_list` (mcp-server.md §6.2.23). Scope: `read` — the catalog is a property of the
- * BUILD, not of any workspace's data: the same kinds, in the same order, for every caller.
+ * `calculators_list` (mcp-server.md §6.2.23). Permission: `calculator.read` — the catalog is a
+ * property of the BUILD, not of any workspace's data: the same kinds, in the same order, for every
+ * caller.
  *
  * The one tool an agent must call before it can author a `CALCULATOR` node, because a `kind` and
  * its input names are the two things it cannot guess. Returning the typed schemas — not just the
@@ -57,7 +58,7 @@ class CalculatorsListTool : McpTool {
 }
 
 /**
- * `calculators_get` (mcp-server.md §6.2.24). Scope: `read`.
+ * `calculators_get` (mcp-server.md §6.2.24). Permission: `calculator.read`.
  *
  * The same entry `calculators_list` returns, for one kind. It exists so an agent that already
  * knows the kind does not have to pull the whole catalog to re-read one signature — the same

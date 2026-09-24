@@ -205,7 +205,7 @@ private fun defaultEngineFor(type: TemplateType?): String =
     if (type?.isTransform == true) Template.NONE_ENGINE else Template.FREEMARKER_ENGINE
 
 /**
- * `templates_create` (mcp-server.md §6.2.8). Scope: `author`.
+ * `templates_create` (mcp-server.md §6.2.8). Permission: `template.create`.
  *
  * Save-time validation is **parse-only** (templates.md §7.1): syntax, forbidden constructs,
  * import resolution, and the type/dialect consistency rules. A template is never rendered
@@ -332,7 +332,7 @@ class TemplatesCreateTool(
 }
 
 /**
- * `templates_update` (mcp-server.md §6.2.36). Scope: `author`. Mutating.
+ * `templates_update` (mcp-server.md §6.2.36). Permission: `template.update`. Mutating.
  *
  * The MCP twin of REST `PUT /templates` (§8.4): the body is validated exactly as
  * [TemplatesCreateTool] validates it (parse-only, §7.1), then [TemplateDraftService.write] —
@@ -525,7 +525,7 @@ class TemplatesUpdateTool(
 }
 
 /**
- * `templates_render` (mcp-server.md §6.2.9). Scope: `author`.
+ * `templates_render` (mcp-server.md §6.2.9). Permission: `template.render`.
  *
  * A preview: nothing is executed and nothing is stored. Referencing a key absent from the context
  * fails the render with the same failure a pipeline save would report (templates.md §7.2).

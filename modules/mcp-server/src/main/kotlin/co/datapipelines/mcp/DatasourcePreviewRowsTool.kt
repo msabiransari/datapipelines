@@ -14,8 +14,9 @@ import io.modelcontextprotocol.spec.McpSchema
 private const val LIMIT_DEFAULT = 50
 
 /**
- * `datasources_preview_rows` (mcp-server.md §6.2.19, datasources.md §7A — 037 D). Scope:
- * `author`, like every tool that returns live data from a datasource connection.
+ * `datasources_preview_rows` (mcp-server.md §6.2.19, datasources.md §7A — 037 D).
+ * Permission: `datasource.preview_rows`, an author's, like every tool that returns live data from
+ * a datasource connection.
  *
  * The agent's blindness this closes: *"there is no way agent can see the sample data from the
  * sample table."* `datasources_get_columns` shows the shape; this shows the DATA — up to 50

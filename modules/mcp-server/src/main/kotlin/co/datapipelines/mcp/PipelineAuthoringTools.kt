@@ -141,7 +141,7 @@ internal object PipelineToolPayloads {
             "observed."
 }
 
-/** `pipelines_create` (mcp-server.md §6.2.4). Scope: `author`. */
+/** `pipelines_create` (mcp-server.md §6.2.4). Permission: `pipeline.create`. */
 class PipelinesCreateTool(
     private val pipelines: PipelineService,
     /**
@@ -237,7 +237,7 @@ class PipelinesCreateTool(
 }
 
 /**
- * `pipelines_update` (mcp-server.md §6.2.5). Scope: `author`.
+ * `pipelines_update` (mcp-server.md §6.2.5). Permission: `pipeline.update`.
  *
  * "Same input as `pipelines_create` plus required `id` and `expected_hash`. Returns the new version. Same save-time
  * validation applies."

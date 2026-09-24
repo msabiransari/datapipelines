@@ -26,8 +26,8 @@ internal val PROBE_TYPE_ENUM_JSON: String =
     LogicalType.entries.filter { it != LogicalType.NULL }.joinToString(prefix = "[", postfix = "]") { "\"${it.wire}\"" }
 
 /**
- * `sql_probe` (datasources.md §7D — 107). Scope: `author`, like every tool that returns live
- * row data from a datasource connection (037 F).
+ * `sql_probe` (datasources.md §7D — 107). Permission: `datasource.sql_probe`, an author's, like
+ * every tool that returns live row data from a datasource connection (037 F).
  *
  * The bounded, read-only free-SQL probe: ONE classified SELECT/WITH, row-capped and timeboxed,
  * answering rows + canonical schema + the EXPLAIN plan captured BEFORE the query ran (so the

@@ -5,7 +5,9 @@ import co.datapipelines.auth.AuthException
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrorCatalog
+import co.datapipelines.web.api.ApiErrorResponse
 import co.datapipelines.web.api.CorrelationId
+import co.datapipelines.web.api.notAcceptableResponse
 import jakarta.servlet.http.HttpServletRequest
 import org.slf4j.LoggerFactory
 import org.springframework.core.Ordered
@@ -13,6 +15,7 @@ import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.validation.BindException
+import org.springframework.web.HttpMediaTypeNotAcceptableException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ControllerAdvice
@@ -151,6 +154,24 @@ class UiExceptionHandler(
             INTERNAL_STAND_IN_CODE,
             request,
         )
+    }
+
+    /**
+     * #222 — an `Accept` a `web.ui` handler's return value cannot satisfy: no converter writes it
+     * in any type the request admits. The caller's mismatch, so 406 with the unified JSON body
+     * (`notAcceptableResponse`, shared with `ApiExceptionHandler`), never the 500 backstop below.
+     * The mapping-time variant (a `produces` mismatch, where no handler matched) never reaches this
+     * advice; `ApiExceptionHandler` answers it with the same body. No toast and no page: the
+     * request said which representations it accepts, and the §4.2 envelope is the one error body
+     * every surface shares.
+     */
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException::class)
+    fun onNotAcceptable(
+        error: HttpMediaTypeNotAcceptableException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        log.debug("406 {} {}: no acceptable representation", request.method, request.requestURI)
+        return notAcceptableResponse(error)
     }
 
     @ExceptionHandler(Throwable::class)

@@ -5,9 +5,9 @@ import co.datapipelines.templates.TemplateUsageService
 import io.modelcontextprotocol.spec.McpSchema
 
 /**
- * `templates_used_by` (mcp-server.md §6.2.8). Scope: `read` (040 D7 — it returns no customer
- * row data, only which pipelines reference which template version, which any workspace reader
- * may already see by reading the pipelines themselves).
+ * `templates_used_by` (mcp-server.md §6.2.21). Permission: `template.read` (040 D7 — it returns
+ * no customer row data, only which pipelines reference which template version, which any
+ * workspace reader may already see by reading the pipelines themselves).
  *
  * The reverse arrow of a node's `{id, version}` pin: which pipelines pin THIS template version
  * in their **working version** right now (040 D1 question 1 — the draft when one exists, else

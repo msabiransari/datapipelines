@@ -324,6 +324,14 @@ the first code commit. Migration: the next free number at that point (7b takes V
 
 **(c) The key dialog.** Only the roles §3.1 allows for each type; never an admin role; the create
 permission per type. Docs: ui-screens.
+**Delivered (2026-09-24).** Slice (b) built the dialog: `ApiKeyForm.kindChoices` offers one card
+per kind with its fixed role (an API key acts as its identity with `api_caller`; a server key, for
+a super admin only, with `promotion_receiver`). There is no role field because A1 leaves each kind
+one role. Per-kind issuance is refused in the service (`WorkspaceService.requireIssuancePermission`,
+`WorkspaceServiceTest`), and the Keys table has Role and Acts-as columns. Slice (c), lane 215c,
+documented that screen (ui-screens §4.19, v1.70) and removed what the key model left behind: the
+site's tutorial and every sentence that still described key scopes, the tool KDoc's `Scope:` lines
+(now `Permission:`, guarded by `McpToolKdocPermissionTest`), and #222 (406 where a 500 stood).
 
 ## 7. Gates (each falsified when written)
 

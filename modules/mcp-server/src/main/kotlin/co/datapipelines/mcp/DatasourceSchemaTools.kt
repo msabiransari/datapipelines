@@ -16,10 +16,10 @@ import co.datapipelines.typesystem.Dialect
  * ONE introspection flow: get_schemas → get_tables(schema) → get_columns for only the tables
  * the SQL needs.
  *
- * Scope: `author` on all three (auth.md §7.6) — each opens a live connection against the
- * datasource, matching the `datasources_test` precedent. Every tool first passes the §5.3
- * visibility gate ([DatasourceRegistry.requireVisible]): a datasource bound to another
- * workspace resolves as not-found BEFORE any pool opens, uniformly with `datasources_get`
+ * The three share one catalog permission, named on each class (auth.md §7.6). Each opens a live
+ * connection against the datasource, matching the `datasources_test` precedent. Every tool first
+ * passes the §5.3 visibility gate ([DatasourceRegistry.requireVisible]): a datasource bound to
+ * another workspace resolves as not-found BEFORE any pool opens, uniformly with `datasources_get`
  * and the REST twins. Payloads are the shared §7A wire maps
  * (`toWireMap`, in `modules/datasources` beside the data classes — the same projections the REST
  * endpoints use, so the two surfaces cannot drift); credentials are not part of schema metadata
@@ -43,7 +43,8 @@ import co.datapipelines.typesystem.Dialect
  */
 
 /**
- * `datasources_get_schemas` (mcp-server.md §6.2.16) — the flow's entry point. Scope: `author`.
+ * `datasources_get_schemas` (mcp-server.md §6.2.16) — the flow's entry point.
+ * Permission: `datasource.introspect`.
  */
 class DatasourcesGetSchemasTool(
     private val introspector: SchemaIntrospector,
@@ -83,7 +84,7 @@ class DatasourcesGetSchemasTool(
     }
 }
 
-/** `datasources_get_tables` (mcp-server.md §6.2.17). Scope: `author`. */
+/** `datasources_get_tables` (mcp-server.md §6.2.17). Permission: `datasource.introspect`. */
 class DatasourcesGetTablesTool(
     private val introspector: SchemaIntrospector,
     private val datasources: DatasourceRegistry,
@@ -160,7 +161,7 @@ class DatasourcesGetTablesTool(
     }
 }
 
-/** `datasources_get_columns` (mcp-server.md §6.2.18). Scope: `author`. */
+/** `datasources_get_columns` (mcp-server.md §6.2.18). Permission: `datasource.introspect`. */
 class DatasourcesGetColumnsTool(
     private val introspector: SchemaIntrospector,
     private val datasources: DatasourceRegistry,
@@ -218,7 +219,7 @@ class DatasourcesGetColumnsTool(
 }
 
 /**
- * `datasources_get_table_stats` (datasources.md §7C — 107). Scope: `read`.
+ * `datasources_get_table_stats` (datasources.md §7C — 107). Permission: `datasource.read`.
  *
  * The fourth introspection tool, one step past the get_columns flow: the engine's CATALOG
  * statistics — row estimate, indexes, per-column histogram bounds — never a scan of the table.

@@ -22,7 +22,7 @@ private const val NODE_RUN_ROW_CAP = 50
 private const val NANOS_PER_MILLI = 1_000_000L
 
 /**
- * `pipelines_execute_node` (mcp-server.md §6.2.20 — 037 E). Scope: `author`.
+ * `pipelines_execute_node` (mcp-server.md §6.2.20 — 037 E). Permission: `pipeline.execute_node`.
  *
  * The owner's definition (§A, 2026-09-01): *1. convert Freemarker into SQL, 2. pass parameters
  * needed in the SQL, 3. execute the SQL on the datasource the node is pointing to.* **A debug

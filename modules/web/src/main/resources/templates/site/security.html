@@ -15,8 +15,8 @@
        specs it summarises. The FAQ block is SiteFaqs.AGENTS_AND_SECURITY. */-->
   <!-- claim: docs/datasources.md §7 — credentials encrypted, never returned -->
   <!-- claim: docs/datasources.md §3 — the read-only flag -->
-  <!-- claim: docs/auth.md §7.5 — scopes -->
-  <!-- claim: docs/auth.md §7.6 — the scope matrix -->
+  <!-- claim: docs/auth.md §7.5 — key roles -->
+  <!-- claim: docs/auth.md §7.6 — the permission catalog -->
   <!-- claim: docs/auth.md §7.7 — key kinds and endpoint bindings -->
   <!-- claim: docs/auth.md §8.3 — the public allowlist -->
   <!-- claim: docs/auth.md §10 — the audit log -->
@@ -32,7 +32,7 @@
         The usual way to connect an agent to a database is a connection string on a laptop: one credential that can do everything, from every
         privilege that credential has, no record of what the agent did with it. datapipelines is built so that shape
         cannot occur: the agent holds a key to <em>this server</em>, the server holds the credentials, every action is
-        scoped, audited, and, for anything that reaches production, released by a person.
+        checked against a role, audited, and, for anything that reaches production, released by a person.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/auth}">Read the auth spec</a>
@@ -53,8 +53,8 @@
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §7.5 -->
-          <h3>One key, a scope, a workspace</h3>
-          <p>An agent's key carries one of three scopes, <code>read</code>, <code>execute</code> or <code>author</code>, and is pinned to one workspace. Every tool and every REST route declares the scope it needs; the matrix is a spec, and a test keeps the code equal to it.</p>
+          <h3>One key, your role, one workspace</h3>
+          <p>An agent's key acts as you, with your role in one workspace, capped at author. It reaches the MCP server and nothing else. Every tool and every REST route declares the one permission it needs. The catalog is a spec, and a test keeps the code equal to it.</p>
         </article>
         <article class="card">
           <!-- claim: docs/datasources.md §3 -->
@@ -87,23 +87,23 @@
       <div class="prose">
         <!-- claim: docs/auth.md §7.6 -->
         <p>
-          A key holds a scope, and a scope is a row in a matrix that names every operation it permits: listing and
-          reading pipelines and schemas under <code>read</code>; running them under <code>execute</code>; creating
-          and editing drafts, probing a <code>SELECT</code>, registering lake tables under <code>author</code>. The
-          matrix is the authority, and the MCP server and the REST API are two adapters over it, and the scope every
-          tool requires is printed beside it in the tool list.
+          A role is a column of a catalog that names every permission it holds: reading pipelines and schemas and
+          running pipelines for a viewer; creating and editing drafts, probing a <code>SELECT</code> and registering
+          lake tables for an author. The catalog is the authority, and the MCP server and the REST API are two
+          adapters over it. The permission every tool requires is printed beside it in the tool list.
         </p>
         <!-- claim: docs/auth.md §7.7 -->
         <p>
           A second kind of key exists for published endpoints: bound to a path prefix of the published tree under <code>/api</code>, it can
-          call that subtree and nothing else. That is the key you give a partner, a workbook or a service, one per
-          contract, revocable by the person who owns it, useless anywhere but the paths it was bound to.
+          call that subtree and nothing else. It acts as its own identity with one fixed role, <em>api caller</em>.
+          That is the key you give a partner, a workbook or a service, one per contract, revocable by a workspace
+          admin, useless anywhere but the paths it was bound to.
         </p>
-        <!-- claim: docs/auth.md §7.5 -->
+        <!-- claim: docs/auth.md §7.3 -->
         <p>
-          Keys are owned by people, pinned to a workspace, and can be revoked; validation checks the key, its expiry
-          and its owner's status on every request. Revoking one person's key never touches another's. That is the reason
-          keys, not shared passwords, are the only way in for programs.
+          Every key is created by a person, pinned to a workspace and revocable. Validation checks the key, its expiry
+          and whether the identity it acts as is still active, on every request. Revoking one key never touches
+          another. That is the reason keys, not shared passwords, are the only way in for programs.
         </p>
       </div>
     </div>
@@ -125,7 +125,7 @@
         <!-- claim: docs/datasources.md §3 -->
         <p>
           An agent that tries to write where it should not is refused before the write, by the read-only flag on the
-          datasource and by the scope on its key. An agent that tries to release or promote finds no tool for it,
+          datasource and by the role its key carries. An agent that tries to release or promote finds no tool for it,
           it can publish an endpoint, but only over a version a person already released. An agent that tries to
           read a credential finds none in any response.
         </p>

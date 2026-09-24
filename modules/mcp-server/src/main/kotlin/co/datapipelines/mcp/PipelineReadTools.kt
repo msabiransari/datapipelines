@@ -23,7 +23,7 @@ internal const val PREFIX_ARG_DESC: String =
         "folders exist; use q to search across full paths."
 
 /**
- * `pipelines_list` (mcp-server.md §6.2.1). Scope: `read`.
+ * `pipelines_list` (mcp-server.md §6.2.1). Permission: `pipeline.read`.
  *
  * The owner/datasource/`q` filter is [PipelineService.list] (056, ARCH-AUDIT S2/D2) — this tool
  * and `GET /pipelines` had separate implementations of the same three rules. What stays here is
@@ -184,7 +184,7 @@ class PipelinesListTool(
 }
 
 /**
- * `pipelines_get` (mcp-server.md §6.2.2). Scope: `read`.
+ * `pipelines_get` (mcp-server.md §6.2.2). Permission: `pipeline.read`.
  *
  * Returns the **pipeline JSON body** exactly as stored (pipeline-contract §3) — not a wrapper
  * carrying server-assigned fields — merged with the fields the hash protocol needs

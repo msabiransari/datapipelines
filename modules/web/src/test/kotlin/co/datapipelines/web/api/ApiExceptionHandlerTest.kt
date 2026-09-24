@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RestController
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The one place a thrown failure becomes an HTTP response (rest-api §4.2), exercised through a
@@ -79,6 +80,22 @@ class ApiExceptionHandlerTest {
                 message = "Syntax error in the rendered SQL.",
                 details = mapOf("node_id" to "n1"),
             )
+    }
+
+    /**
+     * #222's shape: a route that produces `text/plain` only, as `GET /partials/mcp-key/secret`
+     * does. [calls] proves the refusal happens before the handler runs, so nothing it would
+     * return (here a stand-in secret) can reach the response.
+     */
+    @RestController
+    class PlainProbeController {
+        val calls = AtomicInteger()
+
+        @GetMapping("/probe/plain", produces = [MediaType.TEXT_PLAIN_VALUE])
+        fun plain(): String {
+            calls.incrementAndGet()
+            return PLAIN_SECRET
+        }
     }
 
     /** `endpoints_create`'s shape, reduced to the field 093 §5 omitted. */
@@ -239,5 +256,57 @@ class ApiExceptionHandlerTest {
         } finally {
             logger.detachAppender(appender)
         }
+    }
+
+    /**
+     * #222 — an `Accept` the route cannot produce is the caller's mismatch: 406
+     * `endpoint.not_acceptable`, never the 500 backstop. Spring refuses it while MAPPING the
+     * request, so the handler never runs. The response names what the route produces and echoes
+     * nothing of the attacker-controlled `Accept`.
+     */
+    @Test
+    fun `an Accept the route cannot produce is 406 endpoint not_acceptable - never the 500 backstop, and nothing echoed`() {
+        val probe = PlainProbeController()
+        val plainMvc = MockMvcBuilders.standaloneSetup(probe).setControllerAdvice(ApiExceptionHandler()).build()
+        val logger = org.slf4j.LoggerFactory.getLogger(ApiExceptionHandler::class.java) as ch.qos.logback.classic.Logger
+        val appender =
+            ch.qos.logback.core.read
+                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+        appender.start()
+        logger.addAppender(appender)
+        try {
+            val result =
+                plainMvc
+                    .perform(get("/probe/plain").header("Accept", "application/json, $ACCEPT_CANARY"))
+                    .andExpect(status().isNotAcceptable)
+                    .andExpect(jsonPath("$.error.code").value(PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE))
+                    .andExpect(jsonPath("$.error.details.produces[0]").value(MediaType.TEXT_PLAIN_VALUE))
+                    .andExpect(jsonPath("$.error.user_message").value("This address can't answer in the format the request asked for."))
+                    .andExpect(jsonPath("$.correlation_id").exists())
+                    .andReturn()
+            val body = result.response.contentAsString
+            assertAll(
+                { result.response.contentType shouldBe MediaType.APPLICATION_JSON_VALUE },
+                { body.contains(ACCEPT_CANARY) shouldBe false },
+                { body.contains(PLAIN_SECRET) shouldBe false },
+                { probe.calls.get() shouldBe 0 },
+                { appender.list.map { it.level.toString() } shouldNotContain "ERROR" },
+            )
+        } finally {
+            logger.detachAppender(appender)
+        }
+
+        // Unchanged: an Accept the route CAN satisfy still reaches the handler.
+        plainMvc.perform(get("/probe/plain").header("Accept", "*/*")).andExpect(status().isOk)
+        plainMvc.perform(get("/probe/plain").accept(MediaType.TEXT_PLAIN)).andExpect(status().isOk)
+        probe.calls.get() shouldBe 2
+    }
+
+    private companion object {
+        /** A value no real client sends; if the 406 body ever carries it, the Accept header was echoed. */
+        const val ACCEPT_CANARY = "application/x-accept-canary-222"
+
+        /** What [PlainProbeController] would return; it must never appear in a refusal. */
+        const val PLAIN_SECRET = "dpk_PROBESECRET.never-in-a-refusal"
     }
 }

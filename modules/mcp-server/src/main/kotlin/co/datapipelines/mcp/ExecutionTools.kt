@@ -61,7 +61,7 @@ internal fun ExecutionRecord.toMcpMetadata(): Map<String, Any?> =
     }
 
 /**
- * `executions_list` (mcp-server.md §6.2.13). Scope: `read`; role: the EXECUTE row (D11).
+ * `executions_list` (mcp-server.md §6.2.13). Permission: `execution.read` (D11).
  *
  * Own runs unless the key's issuer administers the workspace, in which case every run of the
  * workspace (`findAll`): the same rule the REST listing and the executions screen apply, read
@@ -120,7 +120,10 @@ class ExecutionsListTool(
     }
 }
 
-/** `executions_get` (mcp-server.md §6.2.14). Scope: `read`; role: the EXECUTE row + own-or-admin (D11). */
+/**
+ * `executions_get` (mcp-server.md §6.2.14). Permission: `execution.read`, own runs unless
+ * `execution.read_all` (D11).
+ */
 class ExecutionsGetTool(
     private val executions: ExecutionRepository,
 ) : McpTool {
@@ -159,7 +162,7 @@ class ExecutionsGetTool(
 }
 
 /**
- * `executions_cancel` (107). Scope: `execute`. Mutating.
+ * `executions_cancel` (107). Permission: `execution.cancel`. Mutating.
  *
  * The MCP twin of `DELETE /api/v1/executions/{id}` (rest-api §10.4) with one rule REST does not
  * have: **the same-credential rule**. A key cancels only an execution its OWN MCP calls started

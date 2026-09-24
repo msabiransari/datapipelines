@@ -17,7 +17,7 @@ private const val PARAMETERS_DESC =
         "Values must match the declared types (BIGINTEGER and BIGDECIMAL as strings, others as JSON native types)."
 
 /**
- * `pipelines_run_checks` (mcp-server.md §6.2.42). Scope: `execute`.
+ * `pipelines_run_checks` (mcp-server.md §6.2.42). Permission: `pipeline.run_checks`.
  *
  * ## The one observed value there is
  *

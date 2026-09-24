@@ -34,7 +34,7 @@ private const val PARAMETERS_DESC =
         "and BIGDECIMAL as strings, others as JSON native types)."
 
 /**
- * `pipelines_execute` (mcp-server.md §6.2.3). Scope: `execute`.
+ * `pipelines_execute` (mcp-server.md §6.2.3). Permission: `pipeline.execute`.
  *
  * ## A single blocking call
  *

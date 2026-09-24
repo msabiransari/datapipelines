@@ -72,7 +72,7 @@ internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
     }
 
 /**
- * `datasources_list` (mcp-server.md §6.2.10). Scope: `read`.
+ * `datasources_list` (mcp-server.md §6.2.10). Permission: `datasource.read`.
  *
  * Since 126 §A each entry also carries `facts` — the SAME datasource-wide learned facts
  * `datasources_get` serves — and since 136 §A `definitions`: every WORKSPACE-scope rule
@@ -139,7 +139,7 @@ class DatasourcesListTool(
     }
 }
 
-/** `datasources_get` (mcp-server.md §6.2.11). Scope: `read`. */
+/** `datasources_get` (mcp-server.md §6.2.11). Permission: `datasource.read`. */
 class DatasourcesGetTool(
     private val datasources: DatasourceRegistry,
     private val facts: FactEnrichment = FactEnrichment.NONE,
@@ -191,9 +191,9 @@ private fun blocks(blocks: FactEnrichment.DatasourceBlocks): Map<String, Any?> =
     mapOf("facts" to blocks.facts, "definitions" to blocks.definitions)
 
 /**
- * `datasources_test` (mcp-server.md §6.2.12). Scope: `author` — testing a connection opens a real
- * pool against a production database, so it sits above plain `read` even though it mutates
- * nothing.
+ * `datasources_test` (mcp-server.md §6.2.12). Permission: `datasource.test` — testing a connection
+ * opens a real pool against a production database, so it is its own permission, not
+ * `datasource.read`, even though it mutates nothing.
  *
  * The payload is exactly §6.2.12's `{connected, server_version?, error?}`. The failure text is the
  * registry's own scrubbed message (datasources §6.1), which is where credential and URL redaction
