@@ -74,6 +74,7 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
     PipelineProperties::class,
     ExecutionsProperties::class,
     DatasourcesProperties::class,
+    TransformProperties::class,
 )
 // One bean per collaborator is what a no-stereotype codebase looks like (015 /
 // module-structure §8.4): every wiring decision is visible in one file, and the count grows

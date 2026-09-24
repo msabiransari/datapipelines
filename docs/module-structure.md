@@ -94,47 +94,63 @@ datapipelines/
 
 ### 4.1 Layered dependency graph
 
-This diagram is a **rendering of the normative table in §4.2** — it carries no information the table does not. When the two disagree, §4.2 wins and the diagram is the bug.
+This diagram is a **rendering of the normative table in §4.2** — it carries no information the table does not. When the two disagree, §4.2 wins and the diagram is the bug. `verifyModuleDependencies` checks that every module the table names appears below; edge fidelity (the `←` lists) is a human read against the table, because ASCII arrows cannot be parsed honestly.
 
 ```
-                              ┌──────────────┐
-                              │  typesystem  │              layer 0 — no internal deps
-                              └──────┬───────┘
-             ┌──────────────┬────────┴────────┬──────────────┐
-             │              │                 │              │
-      ┌──────▼──────┐ ┌─────▼──────┐   ┌──────▼──────┐ ┌─────▼─────┐
-      │  pipeline-  │ │ datasources│   │   staging   │ │   auth    │  layer 1
-      │  contract   │ │            │   │             │ │           │
-      └──┬───────┬──┘ └─────┬──────┘   └──────┬──────┘ └─────┬─────┘
-         │       │          │                 │              │
-   ┌─────▼─────┐ │          │                 │              │
-   │ templates │ │          │                 │              │        layer 2
-   └─────┬─────┘ │          │                 │              │
-         │       │          │                 │              │
-         └───────┴────┬─────┴─────────────────┘              │
-                      │                                      │
-               ┌──────▼──────┐                               │
-               │     dag     │  ← + typesystem               │        layer 3
-               │  (executor) │                               │
-               └──────┬──────┘                               │
-                      │                                      │
-               ┌──────▼──────┐                               │
-               │ application │ ◄─────────────────────────────┤        layer 4
-               │ (use cases) │  ← + typesystem, pipeline-contract,
-               └──────┬──────┘    templates, datasources
-                      │                                      │
-               ┌──────▼──────┐                               │
-               │  mcp-server │ ◄─────────────────────────────┘        layer 5
-               │             │  ← + typesystem, pipeline-contract,
-               └──────┬──────┘    templates, datasources, application
-                      │
-               ┌──────▼──────┐
-               │     web     │  ← + every module in layers 0–4          layer 6
-               └──────┬──────┘    (declared explicitly, not transitively)
-                      │
-               ┌──────▼──────┐
-               │     app     │  ← web only                              layer 7
-               └─────────────┘
+layer 0 — no internal deps
+┌──────────────┐
+│  typesystem  │
+└──────────────┘
+
+layer 1 — typesystem only
+┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
+│ calculators  │ │  scripting  │ │ datasources  │ │  staging  │ │  auth  │  ← typesystem
+└──────────────┘ └─────────────┘ └──────────────┘ └───────────┘ └────────┘
+
+layer 2
+┌───────────────────┐
+│ pipeline-contract │  ← typesystem, calculators
+└───────────────────┘
+
+layer 3
+┌──────────────┐
+│  templates   │  ← typesystem, pipeline-contract, scripting
+└──────────────┘
+
+layer 4
+┌──────────────┐
+│     dag      │  ← typesystem, calculators, pipeline-contract, templates,
+│  (executor)  │    datasources, staging
+└──────────────┘
+
+layer 5
+┌──────────────┐
+│ application  │  ← typesystem, scripting, pipeline-contract, templates,
+│ (use cases)  │    datasources, dag, auth
+└──────────────┘
+
+layer 6
+┌──────────────┐
+│  mcp-server  │  ← typesystem, calculators, pipeline-contract, templates,
+│              │    datasources, dag, auth, application
+└──────────────┘
+
+layer 7
+┌──────────────┐
+│     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
+│              │    datasources, staging, dag, auth, application, mcp-server
+│              │    (declared explicitly, not transitively)
+└──────────────┘
+
+layer 8
+┌──────────────┐
+│     app      │  ← web only
+└──────────────┘
+
+layer 9 — the test suites
+┌─────────────────────────┐ ┌─────────────────────┐
+│ tests/integration-tests │ │ tests/browser-tests │  ← app
+└─────────────────────────┘ └─────────────────────┘
 ```
 
 ### 4.2 The dependency rule (machine-checkable)
@@ -149,14 +165,14 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `calculators` | `typesystem` |
 | `scripting` | `typesystem` |
 | `pipeline-contract` | `typesystem`, `calculators` |
-| `templates` | `typesystem`, `pipeline-contract` |
+| `templates` | `typesystem`, `pipeline-contract`, `scripting` |
 | `datasources` | `typesystem` |
 | `staging` | `typesystem` |
 | `auth` | `typesystem` |
 | `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging` |
-| `application` | `typesystem`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
+| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application` |
-| `web` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app` |
@@ -226,7 +242,7 @@ Some concerns touch every module:
 
 ### 5.3 `templates`
 
-**Dependencies (internal):** `typesystem`, `pipeline-contract` (for `Parameter` shape).
+**Dependencies (internal):** `typesystem`, `pipeline-contract` (for `Parameter` shape), `scripting` (transform bodies parse and evaluate through its seam, never through Freemarker — transform-nodes design §2.1, D-T9).
 
 **Dependencies (external):**
 - `org.freemarker:freemarker` (pinned).
@@ -1149,6 +1165,8 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-23 | 7b (#7) | lane 7b — the template model | §4.2: `templates` and `application` gain `scripting` (transform bodies parse and evaluate through its seam — never through Freemarker), and `web` gains it for the EngineConfiguration pool bean (the fence's "templates and application, nothing else" was written before the bean's home was known; the diagram and the map moved with the table, and the #214 check proves they cannot drift). §5.3's dependency line and the §4.1 `←` lists updated in the same commits. |
+| 2026-09-23 | #214 | lane 7b (#7) | **§4.1 redrawn from §4.2** — the old diagram predated `calculators` and `scripting` entirely, omitted the two test modules, and its `mcp-server` annotation dropped the `calculators`, `dag` and `auth` edges; the redraw renders every module and every edge as a per-layer `←` list. **The drift is now mechanical:** `verifyModuleDependencies` also parses the §4.2 table and fails when it and the root build's `allowedInternalDependencies` disagree in either direction, and when a table module is absent from the §4.1 diagram; a sibling `verifyVerificationMetadataDocs` check keeps hand-written comments out of `gradle/verification-metadata.xml` (their home is DEVELOPMENT.md §6.3's hand-verified table, which the same check cross-references). Both are wired into `check`. |
 | 2026-09-23 | 7a (#7) | #7 lane 7a — the script engine | New layer-0 module `scripting` (§5.15): the `ScriptEngine` seam with the JSONata engine (`com.dashjoin:jsonata` 0.9.10 — the catalog's one new version + library), the evaluation pool, the type gate, and canonical JSON; the transform design's §4.1/§4.5/§5.3/§5.5 as a library with no product surface. §3, §3.1 and §4.2 gain the row (`scripting` → `typesystem`, the calculators shape); the root build's allowed-dependency map and `COVERAGE_FLOORS` (measured 91.4 − 2) carry the module. Its `gradle.lockfile` and the jsonata verification entries ship in the same commit. |
 | 2026-08-05 | v1.0 | initial draft | Initial module structure spec: 10 modules + integration tests, dependency graph, version catalog, build conventions, Spring Boot conventions |
 | 2026-08-05 | v1.1 | design system integration | Added `@acme/design-tokens` as the styling foundation for the `web` module. Documented vendoring approach (CSS files, not npm). Referenced Pipeline Editor spec for integration details. |

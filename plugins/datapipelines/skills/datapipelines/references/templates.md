@@ -16,6 +16,14 @@ The body must **never** contain `<#import>` / `<#include>` — imports come from
 the body calls macros by alias (`<@dates.date_range …/>`). Library templates
 (`is_library: true`) contain only `<#macro>`/`<#function>` definitions.
 
+**Types.** `sql` is the default and the only kind a pipeline node references today;
+`html` renders escaped output and takes no `dialect`; `jsonata`/`javascript` are the
+**transform** types — the body is evaluated as a pure function of its input, never
+rendered (`engine: "none"`, no `dialect`, no `imports`, no `is_library`), and the version
+carries a contract, invariants and a test suite. For a transform, read
+`references/transforms.md` — the render tools refuse it with
+`template.render_not_applicable` and its probe is `templates_evaluate`.
+
 ## Calculators — computing a value the SQL then binds
 
 A `CALCULATOR` node evaluates one **pure function the server ships** and writes one typed value,

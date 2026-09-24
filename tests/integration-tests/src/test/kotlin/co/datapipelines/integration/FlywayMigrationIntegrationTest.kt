@@ -122,6 +122,9 @@ class FlywayMigrationIntegrationTest {
                 // 213 — show-once (D16 amended 2026-09-23): every pre-amendment sealed copy
                 // cleared, the fleet hash-only; data-only, no DDL.
                 "32|mcp key sealed copy cleared|true",
+                // 7b (#7) — the transform blocks: three jsonb columns, chk_template_type's
+                // four values, chk_type_dialect required-iff-sql, chk_transform_blocks.
+                "33|transform template blocks|true",
             )
     }
 
@@ -817,6 +820,9 @@ class FlywayMigrationIntegrationTest {
                 "chk_template_versions_discard_stamps",
                 "chk_template_versions_status",
                 "chk_template_versions_via",
+                // 7b (V33) — the transform blocks exist exactly on the transform types
+                // (metadata-db §4.9).
+                "chk_transform_blocks",
                 "chk_triggered_via",
                 "chk_type_dialect",
                 // V24 (113) — the invitation row stores the email in the one canonical form §4.2

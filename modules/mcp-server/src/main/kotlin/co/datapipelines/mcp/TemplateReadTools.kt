@@ -21,6 +21,20 @@ import io.modelcontextprotocol.spec.McpSchema
  */
 internal val DIALECT_ENUM_JSON: String = Dialect.entries.joinToString(prefix = "[", postfix = "]") { "\"${it.wire}\"" }
 
+/**
+ * The `type` enum, restated in every schema that accepts one — DERIVED from
+ * [TemplateType.WIRE_VALUES], never typed (7b: the same drift lesson as [DIALECT_ENUM_JSON];
+ * a literal `["sql", "html"]` would have kept refusing `jsonata` at the client).
+ */
+internal val TEMPLATE_TYPE_ENUM_JSON: String = TemplateType.WIRE_VALUES.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
+
+/**
+ * The `engine` enum — derived from the two engine values the model admits (transform-nodes
+ * design §2.1: `freemarker` for sql/html, `none` for the transform types).
+ */
+internal val TEMPLATE_ENGINE_ENUM_JSON: String =
+    listOf(Template.FREEMARKER_ENGINE, Template.NONE_ENGINE).joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
+
 /** Parses a `dialect` argument against the supported values (enums.md §5). */
 internal fun McpArguments.dialect(name: String): Dialect? =
     enumString(name, Dialect.entries.map { it.wire }.toSet())?.let { Dialect.fromWire(it) }
@@ -28,8 +42,10 @@ internal fun McpArguments.dialect(name: String): Dialect? =
 /** §6.2.6 — the `is_library` filter description, kept off the schema line for length. */
 private const val IS_LIBRARY_FILTER_DESC = "Filter to library templates (macro collections) or executable templates."
 
-/** §6.2.6 — the `type` filter description (046 §10). */
-private const val TYPE_FILTER_DESC = "Filter by template kind: 'sql' (pipeline-referenced SQL) or 'html' (rendered output)."
+/** §6.2.6 — the `type` filter description (046 §10; the transform types since 7b). */
+private const val TYPE_FILTER_DESC =
+    "Filter by template kind: 'sql' (pipeline-referenced SQL), 'html' (rendered output), or a transform type " +
+        "('jsonata', 'javascript' — a pure function over its input, never rendered)."
 
 /**
  * `templates_list` (mcp-server.md §6.2.6). Scope: `read`.
@@ -64,9 +80,12 @@ class TemplatesListTool(
         McpTools.tool(
             name = "templates_list",
             description =
-                "List the templates of the key's pinned workspace. Templates are reusable generators authored in " +
-                    "Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline " +
-                    "nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are " +
+                "List the templates of the key's pinned workspace. Templates are reusable generators " +
+                    "referenced by id+version — sql/html bodies are authored in Freemarker, transform bodies " +
+                    "are script expressions; each has a fixed type — 'sql' renders SQL for pipeline " +
+                    "nodes (and carries a dialect), 'html' renders escaped output and declares none, and the " +
+                    "transform types ('jsonata', 'javascript') evaluate the body as a pure function of its input " +
+                    "and declare neither. Template ids are " +
                     "unique per workspace — another workspace's template resolves as not-found." +
                     " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +
                     "lens); every other template resolves as not-found.",
@@ -76,7 +95,7 @@ class TemplatesListTool(
                   "type": "object",
                   "properties": {
                     "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON},
-                    "type": {"type": "string", "enum": ["sql", "html"], "description": "$TYPE_FILTER_DESC"},
+                    "type": {"type": "string", "enum": $TEMPLATE_TYPE_ENUM_JSON, "description": "$TYPE_FILTER_DESC"},
                     "q": {"type": "string"},
                     "prefix": {"type": "string", "description": "$PREFIX_ARG_DESC"},
                     "is_library": {"type": "boolean", "description": "$IS_LIBRARY_FILTER_DESC"},

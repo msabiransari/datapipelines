@@ -69,6 +69,8 @@ class McpServerWiringTest {
             TemplatesCreateTool(templates, authoringGuard, templateValidator),
             TemplatesUpdateTool(templates, co.datapipelines.templates.TemplateDraftService(templates, authoringGuard), templateValidator),
             TemplatesRenderTool(templates, engines),
+            // 7b — the transform evaluator, appended the way the shipped bean does.
+            TemplatesEvaluateTool(mockk<co.datapipelines.application.templates.TemplateEvaluateService>()),
             TemplatesPurgeDraftTool(templates, usage, authoringGuard),
             DatasourcesListTool(datasources),
             DatasourcesGetTool(datasources),

@@ -233,6 +233,9 @@ class TemplateEngine(
         // TemplateNotFoundException — and the NotFound classification that turns it into
         // template_not_found — is preserved exactly as it was.
         val version = registry.lookup(ref.id, ref.version)
+        // 7b §2.4: the transform types never reach here — templates_render and the REST
+        // /render refuse them with template.render_not_applicable, and a node's reference is
+        // refused at pipeline save. The configuration pick stays the two rendering types'.
         val configuration = if (version?.type == TemplateType.HTML) htmlConfiguration else sqlConfiguration
         // The version just read is pinned through the load, so the configuration's own
         // identity check and (on a miss) the parse consume it rather than reading the row

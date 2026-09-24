@@ -1016,7 +1016,7 @@ Content-Type: application/json
 
 Templates declare no parameter schema — variables are declared by the pipelines that reference the template, and validated there by dry-render ([Pipeline Contract §7.4](pipeline-contract.md#74-template-variable-resolution)).
 
-`type` is chosen here and never changes afterwards: `sql` (the default) requires `dialect` and is what pipeline nodes reference; `html` declares no `dialect`, renders through an auto-escaping engine configuration, and cannot be referenced by a pipeline node (templates.md §3.2, 046).
+`type` is chosen here and never changes afterwards: `sql` (the default) requires `dialect` and is what pipeline nodes reference; `html` declares no `dialect`, renders through an auto-escaping engine configuration, and cannot be referenced by a pipeline node (templates.md §3.2, 046); `jsonata` and `javascript` are the transform types (7b) — `engine: "none"`, no `dialect`, no `imports`, `is_library: false`, and the three blocks `contract` / `invariants` / `tests` are required on create and update (templates.md §3.3; `javascript` is refused until round two).
 
 Response: `201 Created` with full template (including `type`, version `1`, `created_at`).
 
@@ -1122,13 +1122,13 @@ events. Responses mirror §5.12–§5.15 at template shape.
 ### 8.5 List templates
 
 ```
-GET /templates?dialect={dialect}&type={sql|html}&q={search}&offset=0&limit=50
+GET /templates?dialect={dialect}&type={sql|html|jsonata|javascript}&q={search}&offset=0&limit=50
 ```
 
 The second shape on this route: answers only when `name` AND `prefix` are both ABSENT (§8's addressing note). The `type` filter (046) is optional; an unknown value is refused `400 pipeline.execution.invalid_parameter_type` naming the supported values.
 
 ```
-GET /templates?prefix={folder}&dialect={dialect}&type={sql|html}&offset=0&limit=50
+GET /templates?prefix={folder}&dialect={dialect}&type={sql|html|jsonata|javascript}&offset=0&limit=50
 ```
 
 The third shape: answers when `name` is absent and `prefix` is PRESENT — browse ONE level of the template tree (067; same contract as `templates_list {prefix}`, [MCP §6.2.6](mcp-server.md)). Present-but-empty (`?prefix=`) is the ROOT. The `data` payload becomes `{prefix, folders, templates, total, has_more}`: `folders` lists the prefix's direct sub-folders as `{path, segment, template_count}` (subtree counts), `templates` its direct leaves as the same rows as the flat list, `total`/`has_more` page the leaves via `offset`/`limit`. `dialect`/`type` narrow both halves, so a folder whose whole subtree is filtered out is absent rather than empty; `q` is ignored while `prefix` is present (browse and search are different presentations). An unknown or illegal prefix answers an EMPTY level with `200` — never a `400`, never a query error.
@@ -1160,7 +1160,34 @@ POST /templates/render
 }
 ```
 
-Response: rendered SQL string. Useful for UI editor preview and for LLM-assisted authoring.
+Response: rendered SQL string. Useful for UI editor preview and for LLM-assisted authoring. A **transform type** (`jsonata`/`javascript`) has nothing to render — refused `400 template.render_not_applicable` with `details.use: "templates_evaluate"` (7b).
+
+### 8.7A Evaluate a transform template (7b)
+
+```
+POST /templates/evaluate
+
+{
+  "name": "acme/finance/apply_rules.jsonata",
+  "version": 1,
+  "input": {
+    "rows": [ { "order_id": 1, "amount_cents": 1250, "customer_id": null } ],
+    "inputs": { "tz": "UTC", "min_total": 0.00 }
+  }
+}
+```
+
+The evaluate route — the MCP `templates_evaluate` tool's REST twin, the same service, the same bounded evaluation pool, the same timeout (`datapipelines.transform.evaluate-timeout-seconds`). `version` omitted = the working version (the draft when one exists, else the latest released); `input` is the template contract's input object (in row mode `rows` is the batch and `inputs` holds the value inputs only; in table/value mode `inputs` holds every input, tables as arrays); an optional `now` (ISO-8601) pins the clock for `$now()`/`$millis()` (absent, those builtins refuse). Response:
+
+```json
+{
+  "output": { "rows": [], "rejects": [ { "row": { "order_id": 1, "amount_cents": 1250, "customer_id": null }, "reason": "customer_id missing" } ] },
+  "rejects": [ { "row": { "order_id": 1, "amount_cents": 1250, "customer_id": null }, "reason": "customer_id missing" } ],
+  "invariants": [ { "name": "one_to_one", "passed": true, "message": "every input row is accepted or rejected, never lost" } ]
+}
+```
+
+A refusal is the code with its detail — the contract's input check, the type gate, or the engine's own (the record's §7 mapping; §13.18 lands with 7c). Scope: `MUTATE_PIPELINES_TEMPLATES` (the render's row — auth.md §7.6).
 
 ### 8.8 Import template library
 

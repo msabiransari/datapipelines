@@ -13,6 +13,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateTypeRule
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
+import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -155,6 +156,9 @@ class TemplateImportService(
                 isLibrary = draft.isLibrary,
                 importsJson = TemplateJson.writeImports(draft.imports),
                 body = draft.body,
+                contractJson = TransformBlocks.writeContract(draft.contract),
+                invariantsJson = TransformBlocks.writeInvariants(draft.invariants),
+                testsJson = TransformBlocks.writeTests(draft.tests),
             )
         val declared = preserved.bodyHash
         if (declared == null || declared != recomputed) {

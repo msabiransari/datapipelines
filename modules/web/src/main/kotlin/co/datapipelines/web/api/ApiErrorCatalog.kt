@@ -203,6 +203,14 @@ object ApiErrorCatalog {
             // the version refused. Wired explicitly for that reason (025 A2).
             PipelineErrorCodes.Versioning.CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.VERSION_CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
+            // §13.9 (7b, the transform types) — 400s, wired explicitly so each code owns a row
+            // rather than being absorbed by a default (the 025 A2 convention).
+            PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.CONTRACT_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.INVARIANT_INVALID to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.TEST_FAILED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.BLOCKS_NOT_ALLOWED to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE to HttpStatus.BAD_REQUEST,
             // §13.7 (055) — 401 like the auth.promotion family default, same A2 reason.
             PipelineErrorCodes.Auth.PROMOTION_KEY_INVALID to HttpStatus.UNAUTHORIZED,
             // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,

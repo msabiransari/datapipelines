@@ -64,27 +64,93 @@ class TemplateDeserializer(
                 ),
             )
         }
+        val typed = type?.let { TemplateType.fromWire(it) }
+        dialectPreScan(typed, tree)?.let { return it }
+        return when (val bound = bindDraft(tree, typed)) {
+            is TemplateDeserializationOutcome.Rejected -> bound
+            is TemplateDeserializationOutcome.Parsed -> bound
+        }
+    }
+
+    /** Binds the tree — Parsed (with the §2.1 engine default resolved) or the strict-block Rejected. */
+    private fun bindDraft(
+        tree: JsonNode,
+        typed: TemplateType?,
+    ): TemplateDeserializationOutcome {
+        val parsed =
+            try {
+                mapper.treeToValue(tree, TemplateDraft::class.java)
+            } catch (err: com.fasterxml.jackson.databind.JsonMappingException) {
+                // The transform blocks are strict interior (the model's KDoc): a typo is a
+                // refusal, never a silently dropped section. Jackson reports it in two shapes —
+                // an unknown key directly (UnrecognizedPropertyException), or the missing
+                // creator parameter the typo leaves behind (the Kotlin module's null check);
+                // both are the same author error, so both carry `unknown_field` with the path.
+                val field =
+                    (err as? com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException)?.propertyName
+                        ?: err.pathReference
+                return TemplateDeserializationOutcome.Rejected(
+                    TemplateValidationResult(
+                        listOf(
+                            TemplateValidationFailure(
+                                code = PipelineErrorCodes.Template.CONTRACT_INVALID,
+                                message =
+                                    "The transform blocks do not bind: ${err.originalMessage}. " +
+                                        "A typo is a refusal, never a silent drop.",
+                                details =
+                                    mapOf(
+                                        "rule" to "unknown_field",
+                                        "field" to field,
+                                        "path" to err.pathReference,
+                                    ),
+                            ),
+                        ),
+                    ),
+                )
+            }
+        // An omitted engine on a transform type means 'none' (transform-nodes design §2.1) —
+        // the DTO's own default is freemarker, which would refuse a create that simply omitted
+        // the field. Stated values still go through the validator's type-conditional rule.
+        val normalized =
+            if (typed?.isTransform == true && !tree.has("engine")) {
+                parsed.copy(engine = Template.NONE_ENGINE)
+            } else {
+                parsed
+            }
+        return TemplateDeserializationOutcome.Parsed(normalized)
+    }
+
+    /** The type/dialect wire-value verdicts, or null when the pair is sound (046 §7, 7b §2.1). */
+    private fun dialectPreScan(
+        typed: TemplateType?,
+        tree: JsonNode,
+    ): TemplateDeserializationOutcome.Rejected? {
         val dialect = tree.get("dialect")?.takeIf { it.isTextual }?.asText()
-        if (type == TemplateType.HTML.wire) {
-            // An html template declares NO dialect; presence is the offense (046 §7), so the
-            // value is irrelevant — including an invalid one, which could not make it "more
-            // present".
-            if (tree.has("dialect")) {
+        // Presence of a NON-NULL dialect is the offense: an explicit `"dialect": null` carries
+        // no value and reads as absent (an export serialized by a mapper that writes nulls must
+        // re-import cleanly).
+        val dialectPresent = tree.get("dialect")?.let { !it.isNull } == true
+        if (typed != null && !TemplateTypeBehaviour.of(typed).requiresDialect) {
+            // html and the transform types declare NO dialect; presence is the offense, so the
+            // value is irrelevant — including an invalid one, which could not make it "more present".
+            if (dialectPresent) {
                 return TemplateDeserializationOutcome.Rejected(
                     TemplateValidationResult(
                         listOf(
                             TemplateValidationFailure(
                                 code = PipelineErrorCodes.Template.DIALECT_NOT_ALLOWED,
                                 message =
-                                    "A template of type 'html' declares no dialect, but the payload carries " +
+                                    "A template of type '${typed.wire}' declares no dialect, but the payload carries " +
                                         "'${dialect.truncateForError()}'.",
-                                details = mapOf("type" to TemplateType.HTML.wire, "dialect" to dialect.truncateForError()),
+                                details = mapOf("type" to typed.wire, "dialect" to dialect.truncateForError()),
                             ),
                         ),
                     ),
                 )
             }
-        } else if (dialect == null || Dialect.entries.none { it.wire == dialect }) {
+            return null
+        }
+        if (dialect == null || Dialect.entries.none { it.wire == dialect }) {
             return TemplateDeserializationOutcome.Rejected(
                 TemplateValidationResult(
                     listOf(
@@ -99,7 +165,7 @@ class TemplateDeserializer(
                 ),
             )
         }
-        return TemplateDeserializationOutcome.Parsed(mapper.treeToValue(tree, TemplateDraft::class.java))
+        return null
     }
 
     /** As [read], but throws [TemplateValidationException] instead of returning a rejection. */

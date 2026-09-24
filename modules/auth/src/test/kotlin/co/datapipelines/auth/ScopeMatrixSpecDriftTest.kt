@@ -104,7 +104,7 @@ class ScopeMatrixSpecDriftTest {
     }
 
     private companion object {
-        const val TOOL_COUNT = 41
+        const val TOOL_COUNT = 42
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

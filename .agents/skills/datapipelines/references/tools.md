@@ -10,7 +10,7 @@ server does not ship. Do not edit it by hand; a drift test fails if you do. Scop
 auth §7.6 minimum: scopes are hierarchical (`admin ⊃ author ⊃ execute ⊃ read`), so a key
 with a higher scope satisfies a lower requirement.
 
-There are **41 tools**, in `tools/list` order.
+There are **42 tools**, in `tools/list` order.
 
 ## pipelines
 
@@ -107,12 +107,12 @@ Update an existing pipeline by writing its DRAFT — the first update after a re
 
 Scope `read` · read-only
 
-List the templates of the key's pinned workspace. Templates are reusable generators authored in Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
+List the templates of the key's pinned workspace. Templates are reusable generators referenced by id+version — sql/html bodies are authored in Freemarker, transform bodies are script expressions; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none, and the transform types ('jsonata', 'javascript') evaluate the body as a pure function of its input and declare neither. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
 | `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional |  |
-| `type` | string (`sql` \| `html`) | optional | Filter by template kind: 'sql' (pipeline-referenced SQL) or 'html' (rendered output). |
+| `type` | string (`sql` \| `html` \| `jsonata` \| `javascript`) | optional | Filter by template kind: 'sql' (pipeline-referenced SQL), 'html' (rendered output), or a transform type ('jsonata', 'javascript' — a pure function over its input, never rendered). |
 | `q` | string | optional |  |
 | `prefix` | string | optional | Browse ONE level of the folder tree instead of listing flat: returns that prefix's direct sub-folders (with counts) and its direct children. An empty string is the root. Use this to discover which roots and folders exist; use q to search across full paths. |
 | `is_library` | boolean | optional | Filter to library templates (macro collections) or executable templates. |
@@ -149,14 +149,17 @@ Create a new template. Templates use Freemarker syntax. A template declares NO p
 | Argument | Type | | What it is |
 |---|---|---|---|
 | `id` | string | optional | Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (acme/finance/daily_orders.sql). A FOLDER IS REQUIRED — a bare 'daily_orders.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now. |
-| `engine` | string (`freemarker`), default `"freemarker"` | optional | Template engine. v1 supports freemarker only. |
-| `type` | string (`sql` \| `html`), default `"sql"` | optional | Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'). |
-| `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional | SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect. |
+| `engine` | string (`freemarker` \| `none`), default `"freemarker"` | optional | Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types ('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused with template.validation.engine_unsupported. |
+| `type` | string (`sql` \| `html` \| `jsonata` \| `javascript`), default `"sql"` | optional | Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); 'jsonata' and 'javascript' are transform types — the body is one expression evaluated as a pure function of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests blocks are required. 'javascript' is refused at save until round two. |
+| `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional | SQL execution target. Required when type is 'sql' (the default); forbidden otherwise — html and the transform types declare no dialect. |
 | `display_name` | string | required |  |
 | `description` | string | required | Free text. State the variables the body expects and their types — the template declares none. |
 | `imports` | array of object | optional | Library templates whose macros this body calls. Aliases must be unique within the template; each referenced template must exist at that exact version and be is_library=true. |
 | `is_library` | boolean, default `false` | optional | true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required. |
 | `body` | string | required | Template source. Must not contain <#import> or <#include>. |
+| `contract` | object | optional | Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): { mode: 'row'\|'table'\|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'\|'value'\|'object', ... }, rejects?: boolean }. Types are LogicalType wire names; a row-mode contract requires exactly one table input. |
+| `invariants` | array | optional | Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every test case and every real execution. May be empty but is required on a transform type. |
+| `tests` | array | optional | Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. Save runs the suite; release re-runs it. |
 | `confirm_new_root` | boolean | optional | Set true ONLY after a person has agreed to a new top-level folder. A name whose root segment has no pipelines or templates under it yet is refused with details.existing_roots listing the roots that do exist — reuse one of those, or ask the person first and then pass this. 'test/' never needs it. |
 
 ### `templates_update`
@@ -169,14 +172,17 @@ Update an existing template by writing its DRAFT — the first update after a re
 |---|---|---|---|
 | `id` | string | required | Template to update — the FOLDER PATH id it was created under (acme/finance/daily_orders.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found. |
 | `expected_hash` | string | required | The body_hash of the version this edit is based on — templates_get, or a previous templates_create/templates_update result. A mismatch is a 409 template.version.conflict; re-read and rebase, never retry blindly. |
-| `engine` | string (`freemarker`), default `"freemarker"` | optional | Template engine. v1 supports freemarker only. |
-| `type` | string (`sql` \| `html`) | optional | Template kind — fixed at creation, so on an update it is OPTIONAL: omitted, the working version's is inherited; stated, it must equal it (template.validation.type_immutable otherwise). |
+| `engine` | string (`freemarker` \| `none`), default `"freemarker"` | optional | Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types ('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused with template.validation.engine_unsupported. |
+| `type` | string (`sql` \| `html` \| `jsonata` \| `javascript`) | optional | Template kind — fixed at creation, so on an update it is OPTIONAL: omitted, the working version's is inherited; stated, it must equal it (template.validation.type_immutable otherwise). |
 | `dialect` | string (`POSTGRES` \| `ORACLE` \| `MSSQL` \| `MYSQL` \| `H2` \| `DUCKDB` \| `SQLITE` \| `LAKE`) | optional | Optional on update: omit it and the working version's dialect is inherited. When present it must be the dialect the template already has — a different one is refused with template.validation.dialect_invalid (a template pinned by pipeline nodes cannot change engine; create a new template instead). Never present for an html template. |
 | `display_name` | string | required |  |
 | `description` | string | required | Free text. State the variables the body expects and their types — the template declares none. |
 | `imports` | array of object | optional | Library templates whose macros this body calls. Aliases must be unique within the template; each referenced template must exist at that exact version and be is_library=true. |
 | `is_library` | boolean, default `false` | optional | true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required. |
 | `body` | string | required | Template source. Must not contain <#import> or <#include>. |
+| `contract` | object | optional | Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): { mode: 'row'\|'table'\|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'\|'value'\|'object', ... }, rejects?: boolean }. Types are LogicalType wire names; a row-mode contract requires exactly one table input. |
+| `invariants` | array | optional | Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every test case and every real execution. May be empty but is required on a transform type. |
+| `tests` | array | optional | Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. Save runs the suite; release re-runs it. |
 
 ### `templates_render`
 
@@ -189,6 +195,19 @@ Render a template against the provided context values and return the SQL it prod
 | `id` | string | required |  |
 | `version` | integer | optional | Defaults to latest. |
 | `context` | object | required | Render context: the parameter map a calling pipeline would provide, defaults already applied. Values follow the wire conventions of the Type System (BIGINTEGER/BIGDECIMAL as strings, TIMESTAMP with Z or offset). |
+
+### `templates_evaluate`
+
+Scope `author` · read-only
+
+Evaluate a transform template ('jsonata'/'javascript') over a caller-supplied input object and return { output, rejects, invariants } — no staging, no Context. Use this to run a transform's body against one input the way its test suite does (sql_probe's twin; templates_render is for sql/html and refuses a transform type with template.render_not_applicable). The version resolves as templates_render does: omitted, the working version (the draft when one exists, else the latest released). A refusal is the code with its detail — a type-gate refusal, an input-contract violation, or an engine refusal (timeout, resource limit, pool exhausted).
+
+| Argument | Type | | What it is |
+|---|---|---|---|
+| `id` | string | required |  |
+| `version` | integer | optional | Specific version. Defaults to the working version: the draft when one exists, else the latest released. |
+| `input` | object | required | The input object of the template's contract: { rows: [...], inputs: {...} } — in row mode `rows` is the batch and `inputs` holds the value inputs only (the table input is NOT listed); in table/value mode `inputs` holds every input, tables as arrays. Optional `now` (ISO-8601) pins the clock: without it the $now()/$millis() builtins refuse. |
+| `now` | string | optional | Optional ISO-8601 instant the $now()/$millis() builtins return for this evaluation. Absent, a body that reads the clock refuses (a transform is a pure function of its inputs — the clock is an input). |
 
 ### `templates_purge_draft`
 

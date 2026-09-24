@@ -406,13 +406,17 @@ CREATE TABLE template_versions (
     template_id     UUID        NOT NULL REFERENCES templates(id) ON DELETE CASCADE,  -- surrogate (V4)
     version         INTEGER     NOT NULL,
     engine          TEXT        NOT NULL DEFAULT 'freemarker',
-    dialect         TEXT        NOT NULL,            -- 'POSTGRES', 'ORACLE', etc.
+    type            TEXT        NOT NULL DEFAULT 'sql',   -- V8 (046); four values since V33 (7b)
+    dialect         TEXT        NULL,                -- V8: required iff type='sql' (chk_type_dialect)
     is_library      BOOLEAN     NOT NULL DEFAULT FALSE,
     imports_json    JSONB       NOT NULL DEFAULT '[]',   -- array of {id, version, alias}
     body            TEXT        NOT NULL,            -- template source; syntax per `engine`
+    contract_json   JSONB       NULL,                -- V33 (7b): the transform contract (transform types only)
+    invariants_json JSONB       NULL,                -- V33: the invariants (transform types only)
+    tests_json      JSONB       NULL,                -- V33: the test suite (transform types only)
     status          TEXT        NOT NULL DEFAULT 'RELEASED'
                         CONSTRAINT chk_template_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
-    body_hash       TEXT        NOT NULL,            -- SHA-256 (hex) of the canonical {engine,dialect,is_library,imports,body} object
+    body_hash       TEXT        NOT NULL,            -- SHA-256 (hex) of the canonical version-owned object (see notes)
     released_at     TIMESTAMPTZ NULL,                -- DB-generated at release; UNTOUCHED by discard/restore (V19)
     released_by     UUID        REFERENCES users(id),
     discarded_at    TIMESTAMPTZ NULL,                -- V19 (101): set at discard, cleared at restore
@@ -424,7 +428,19 @@ CREATE TABLE template_versions (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by      UUID        NOT NULL REFERENCES users(id),
     PRIMARY KEY (template_id, version),
-    CONSTRAINT chk_dialect CHECK (dialect IN ('POSTGRES', 'ORACLE', 'MSSQL', 'MYSQL', 'H2', 'DUCKDB', 'SQLITE')),
+    CONSTRAINT chk_dialect CHECK (dialect IS NULL OR dialect IN ('POSTGRES', 'ORACLE', 'MSSQL', 'MYSQL', 'H2', 'DUCKDB', 'SQLITE')),
+    CONSTRAINT chk_template_type CHECK (type IN ('sql','html','jsonata','javascript')),  -- V33 replaced V8's two-value form
+    CONSTRAINT chk_type_dialect CHECK (          -- V33 replaced V8's "required unless html" form
+        (type = 'sql' AND dialect IS NOT NULL) OR
+        (type IN ('html','jsonata','javascript') AND dialect IS NULL)
+    ),
+    CONSTRAINT chk_transform_blocks CHECK (      -- V33 (7b): the blocks exist exactly on the transform types
+        (type IN ('jsonata','javascript')
+            AND contract_json IS NOT NULL AND invariants_json IS NOT NULL AND tests_json IS NOT NULL)
+        OR
+        (type IN ('sql','html')
+            AND contract_json IS NULL AND invariants_json IS NULL AND tests_json IS NULL)
+    ),
     CONSTRAINT chk_template_versions_discard_stamps CHECK (
         (status = 'DISCARDED' AND discarded_at IS NOT NULL)
         OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
@@ -442,9 +458,11 @@ CREATE UNIQUE INDEX uq_template_versions_one_draft
 
 **Notes:**
 - `template_id` re-keyed from the TEXT human id to the surrogate `templates.id` in V4 (§4.8) — same FK name (`template_versions_template_id_fkey`), same `ON DELETE CASCADE`, new type. Lookups by human id join `templates` on the surrogate and filter `name` within the workspace; the join back is how a stored version "resolves to its named template".
-- **The version lifecycle mirrors `pipeline_versions` (V6, versioning §6)**: same statuses, same one-draft partial index, same four write paths, same DB-computed `body_hash` discipline. Two template-specific differences. First, the canonical body is the **version-owned field object** — `jsonb_build_object('engine', …, 'dialect', …, 'is_library', …, 'imports', imports_json, 'body', body)` — because `display_name`/`description` live on the index row `templates` only and are not part of the versioned artifact (they keep updating at save time; versioning v1.3 records the asymmetry). Second, discard is always a hard delete — nothing references a `template_versions` row by FK (pipeline pins are numbers in JSON, not constraints), so versioning §3.4's executed-draft DISCARDED branch cannot fire here.
+- **The version lifecycle mirrors `pipeline_versions` (V6, versioning §6)**: same statuses, same one-draft partial index, same four write paths, same DB-computed `body_hash` discipline. Two template-specific differences. First, the canonical body is the **version-owned field object** — `jsonb_build_object('engine', …, 'dialect', …, 'is_library', …, 'imports', imports_json, 'body', body)`, extended since V33 (7b) with the CASE arm `|| CASE WHEN contract_json IS NOT NULL THEN jsonb_build_object('contract', contract_json, 'invariants', invariants_json, 'tests', tests_json) ELSE '{}'::jsonb END` — present exactly on the transform types, so an `sql`/`html` row's hash is byte-identical before and after V33 (the migration test recomputes every pre-V33 row and finds zero changes; `type` is deliberately NOT in the hash — V8 explains why). Second, discard is always a hard delete — nothing references a `template_versions` row by FK (pipeline pins are numbers in JSON, not constraints), so versioning §3.4's executed-draft DISCARDED branch cannot fire here.
 - **No `params_schema` column** (D3) — deleted, not deprecated. Any migration from a pre-v1.1 draft drops it.
-- `engine` carries the [`TemplateEngine`](enums.md#6-templateengine--template-language) value. It is `NOT NULL DEFAULT 'freemarker'` and deliberately has **no CHECK constraint**: v1 accepts only `freemarker` (enforced by save-time validation, D2), and future engines must not require a migration to become storable. The default exists for the v1 write path, which never omits it.
+- `engine` carries the [`TemplateEngine`](enums.md#6-templateengine--template-language) value. It is `NOT NULL DEFAULT 'freemarker'` and deliberately has **no CHECK constraint**: the accepted value is type-conditional — `freemarker` iff `sql`/`html`, `none` iff a transform type (7b; enforced by save-time validation, D2), and future engines must not require a migration to become storable. The default exists for the sql/html write path, which never omits it.
+- `type` (V8, 046) is the template's kind, fixed at create and identical on every version (`template.validation.type_immutable` — the application twin of `chk_type_dialect`); V33 (7b) admits the two transform types in `chk_template_type`. `javascript` rows cannot be written today — the application refuses them at save until round two (`transform.js.unavailable`), and the CHECK admits the value so round two is not a schema change.
+- `contract_json` / `invariants_json` / `tests_json` (V33, 7b, D-T7) are the transform blocks as **bound** JSON (templates.md §3.3). They are version content: the hash's CASE arm above folds them in exactly when present. `implements` (7e) is deliberately NOT among them and NOT in the hash — a citation is a claim about meaning, not a change of behaviour (R9).
 - `is_library` is version-scoped (§4.8). [Templates §6](templates.md#6-library-templates) resolves `template.validation.import_not_library` against the *exact* `{id, version}` an `imports` entry names, so this is the column that validation reads. A library body holds only macro/function definitions — `body` is still `NOT NULL`.
 - `imports_json` is a JSONB **array** of `{id, version, alias}` objects, `[]` when the template imports nothing. The body never contains `<#import>` (D12) — the engine synthesizes the prologue from this array. Nothing here enforces the referenced versions exist: that is save-time validation's job (D2), and a DB-level FK is impossible against a JSONB array.
 - `body` is `TEXT`, not JSONB — it is template source, so no `_json` suffix applies.

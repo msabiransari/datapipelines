@@ -56,9 +56,10 @@ class ConfigValidator(
          * examples-file/mode cross-key rule — and added one that refuses both removed keys by
          * name. 24 since 137 added the two mail rules (`MailRules`). 25 since 156 added
          * `checkExecutorQueryTimeoutByDialect` (#2). 26 since 188 added
-         * `PostureRules.checkHardenedRedisPassword` (#189).
+         * `PostureRules.checkHardenedRedisPassword` (#189). 27 since 7b added
+         * `checkTransformBounds` (#7 — evaluate ≤ suite, abandon-grace ≥ 1).
          */
-        internal const val CHECK_COUNT = 26
+        internal const val CHECK_COUNT = 27
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -127,6 +128,7 @@ class ConfigValidator(
             checkExecutorQueryTimeoutByDialect(snapshot, violations)
             checkRedisAuthWarning(snapshot, warnings)
             checkOrgSettings(snapshot, violations)
+            TransformRules.checkTransformBounds(snapshot, violations)
             // §3.27 (137) — the mail rules live in their own file (MailRules), like the posture ones.
             MailRules.checkMailShape(snapshot, violations)
             MailRules.checkMailHardened(snapshot, violations)
@@ -854,6 +856,32 @@ class ConfigValidator(
                 orgFiscalStartDate = environment.getProperty("datapipelines.org.fiscal-start-date"),
                 orgWeekStart = environment.getProperty("datapipelines.org.week-start"),
                 orgTimezone = environment.getProperty("datapipelines.org.timezone"),
+                // §3.28 (7b, #7) — the transform budgets.
+                transformEvaluateTimeoutSeconds =
+                    environment.getProperty(
+                        "datapipelines.transform.evaluate-timeout-seconds",
+                        Long::class.java,
+                    ),
+                transformSuiteTimeoutSeconds =
+                    environment.getProperty(
+                        "datapipelines.transform.suite-timeout-seconds",
+                        Long::class.java,
+                    ),
+                transformAbandonGraceSeconds =
+                    environment.getProperty(
+                        "datapipelines.transform.abandon-grace-seconds",
+                        Long::class.java,
+                    ),
+                transformPoolSize = environment.getProperty("datapipelines.transform.pool-size", Long::class.java),
+                transformPoolQueue = environment.getProperty("datapipelines.transform.pool-queue", Long::class.java),
+                transformMaxInputRows = environment.getProperty("datapipelines.transform.max-input-rows", Long::class.java),
+                transformMaxValueBytes = environment.getProperty("datapipelines.transform.max-value-bytes", Long::class.java),
+                transformMaxStringBytes =
+                    environment.getProperty(
+                        "datapipelines.transform.max-string-bytes",
+                        Long::class.java,
+                    ),
+                transformMaxDepth = environment.getProperty("datapipelines.transform.max-depth", Long::class.java),
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
                 // §3.23 (075) — the org's label, the product's posture, the demo flag, and the
@@ -1070,6 +1098,16 @@ internal data class ConfigSnapshot(
     val orgFiscalStartDate: String? = null,
     val orgWeekStart: String? = null,
     val orgTimezone: String? = null,
+    // §3.28 (7b, #7) — the transform budgets the bounds check reads.
+    val transformEvaluateTimeoutSeconds: Long? = null,
+    val transformSuiteTimeoutSeconds: Long? = null,
+    val transformAbandonGraceSeconds: Long? = null,
+    val transformPoolSize: Long? = null,
+    val transformPoolQueue: Long? = null,
+    val transformMaxInputRows: Long? = null,
+    val transformMaxValueBytes: Long? = null,
+    val transformMaxStringBytes: Long? = null,
+    val transformMaxDepth: Long? = null,
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,
@@ -1123,6 +1161,15 @@ internal data class ConfigSnapshot(
             "orgCurrencySymbol=$orgCurrencySymbol, " +
             "orgFiscalStartDate=$orgFiscalStartDate, " +
             "orgWeekStart=$orgWeekStart, " +
+            "transformEvaluateTimeoutSeconds=$transformEvaluateTimeoutSeconds, " +
+            "transformSuiteTimeoutSeconds=$transformSuiteTimeoutSeconds, " +
+            "transformAbandonGraceSeconds=$transformAbandonGraceSeconds, " +
+            "transformPoolSize=$transformPoolSize, " +
+            "transformPoolQueue=$transformPoolQueue, " +
+            "transformMaxInputRows=$transformMaxInputRows, " +
+            "transformMaxValueBytes=$transformMaxValueBytes, " +
+            "transformMaxStringBytes=$transformMaxStringBytes, " +
+            "transformMaxDepth=$transformMaxDepth, " +
             "orgTimezone=$orgTimezone, " +
             "activeProfiles=$activeProfiles, " +
             "vendoredThemes=$vendoredThemes, " +

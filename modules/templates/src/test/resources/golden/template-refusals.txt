@@ -1,0 +1,20 @@
+deserializer/dialect_invalid_unknown :: template.validation.dialect_invalid | Dialect 'DB2' is not one of [POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE, LAKE]. A dialect is required unless the template's type is 'html'. | dialect=DB2
+deserializer/dialect_not_allowed_html :: template.validation.dialect_not_allowed | A template of type 'html' declares no dialect, but the payload carries 'POSTGRES'. | dialect=POSTGRES,type=html
+deserializer/type_invalid :: template.validation.type_invalid | Type 'csv' is not one of [sql, html, jsonata, javascript]. | supported=[sql,html,jsonata,javascript],type=csv
+typerule/type_immutable :: template.validation.type_immutable | A template's type is chosen at creation and never changes: 'SQL' is established, the payload requests 'HTML'. | established_type=sql,type=html
+validator/body_over_cap :: template.validation.syntax_error | Body of 15 characters exceeds the limit of 10. | body_chars=15,max_body_chars=10
+validator/dangerous_construct_builtin :: template.validation.dangerous_construct | Body uses the forbidden construct '?eval'. | construct=?eval,match=?eval
+validator/dangerous_construct_ftl_header :: template.validation.dangerous_construct | Body uses the forbidden construct '<#ftl> header'. | construct=<#ftl> header,match=<#ftl
+validator/dangerous_construct_square_bracket :: template.validation.dangerous_construct | Body uses the forbidden construct '[# or [= (square-bracket syntax)'. | construct=[# or [= (square-bracket syntax),match=[#
+validator/dialect_invalid_missing :: template.validation.dialect_invalid | Dialect is required unless the template's type is 'html'. | dialect=null,supported=[POSTGRES,ORACLE,MSSQL,MYSQL,H2,DUCKDB,SQLITE,LAKE]
+validator/dialect_not_allowed :: template.validation.dialect_not_allowed | A template of type 'html' declares no dialect, but the payload carries 'POSTGRES'. | dialect=POSTGRES,type=html
+validator/duplicate_alias :: template.validation.duplicate_alias | Import alias 'x' is used by more than one import. | alias=x
+validator/engine_unsupported :: template.validation.engine_unsupported | Engine 'pebble' is not supported; v1 supports only 'freemarker'. | engine=pebble,supported=[freemarker]
+validator/html_entity :: template.validation.html_entity | Body contains the HTML entity '&lt;' at line 1 — a SQL body was HTML-escaped between the author and the server. Send the operator itself. | entity=&lt;,line=1
+validator/id_invalid :: template.validation.id_invalid | Template id 'Fetch Orders' must be a path of 2-10 '/'-separated segments, each [a-z0-9][a-z0-9_.-], at most 64 chars, 200 total — a folder is required (test/scratch, not scratch). | id=Fetch Orders,reason=grammar
+validator/import_cycle :: template.validation.import_cycle | Imported template 'acme/a.lib.sql@1' is part of an import cycle. | import=acme/a.lib.sql@1
+validator/import_not_found :: template.validation.import_not_found | Imported template 'acme/missing.lib.sql@1' does not exist. | import=acme/missing.lib.sql@1
+validator/import_not_library :: template.validation.import_not_library | Imported template 'acme/plain.sql@1' is not a library. | import=acme/plain.sql@1
+validator/is_library_without_macros :: template.validation.is_library_without_macros | A library must define at least one <#macro> or <#function>. | 
+validator/schema_version_unsupported :: template.validation.schema_version_unsupported | schema_version 2 is not supported; v1 supports only 1. | schema_version=2,supported=[1]
+validator/syntax_error :: template.validation.syntax_error | Freemarker parse error: Unexpected end of file reached. | column=2,line=1

@@ -68,6 +68,11 @@ class McpToolLearnings(
      * from the same metadata database's clock (`audit_log.timestamp` and
      * `pipeline_versions.updated_at` are both `NOW()` at write), so the comparison carries
      * no cross-clock skew.
+     *
+     * A successful `templates_evaluate` of a draft transform version counts as its render
+     * (7b, record §9.1): without it every draft pipeline pinning a draft transform would be
+     * refused at execute forever — the render-before-you-run check reads the same audit
+     * rows, so it is one more name in the allow-set.
      */
     fun lastRenderAt(
         keyId: String?,
@@ -80,11 +85,11 @@ class McpToolLearnings(
               FROM audit_log
              WHERE event = :event
                AND key_id = :keyId
-               AND details_json ->> 'tool' = :tool
+               AND details_json ->> 'tool' IN (:tools)
                AND details_json ->> 'template' = :templateId
                AND details_json ->> 'outcome' = 'success'
             """.trimIndent(),
-            mapOf("event" to McpCallAudit.CALL_EVENT, "keyId" to keyId, "tool" to TOOL_RENDER, "templateId" to templateId),
+            mapOf("event" to McpCallAudit.CALL_EVENT, "keyId" to keyId, "tools" to RENDER_TOOLS, "templateId" to templateId),
             Instant::class.java,
         )
     }
@@ -92,5 +97,9 @@ class McpToolLearnings(
     companion object {
         private const val TOOL_COLUMNS = "datasources_get_columns"
         private const val TOOL_RENDER = "templates_render"
+        private const val TOOL_EVALUATE = "templates_evaluate"
+
+        /** The tools whose success counts as "the key saw this template run" for Check B (7b §A.7). */
+        private val RENDER_TOOLS = listOf(TOOL_RENDER, TOOL_EVALUATE)
     }
 }

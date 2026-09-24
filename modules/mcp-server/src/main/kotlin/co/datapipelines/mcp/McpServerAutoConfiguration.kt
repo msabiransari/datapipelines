@@ -40,7 +40,7 @@ import org.springframework.context.annotation.Bean
 /**
  * The `mcp-server` module's Spring Boot autoconfiguration (module-structure §5.8, §8.2).
  *
- * It contributes the whole MCP surface — the 41 tools, the three prompts, the resource catalog, the
+ * It contributes the whole MCP surface — the 42 tools, the three prompts, the resource catalog, the
  * transport servlet at `/mcp` and [McpAuthFilter] in front of it — from collaborators the other
  * modules already publish. Nothing here re-implements a service: `mcp-server` is a thin adapter
  * over the same service layer the REST controllers use (§5.8), which is why every dependency
@@ -72,7 +72,7 @@ class McpServerAutoConfiguration {
             TemplateRenderFreshness(templates, learnings)
     }
 
-    /** The 41 tools of §6.1, in `tools/list` order. */
+    /** The 42 tools of §6.1, in `tools/list` order. */
     @Suppress("LongParameterList")
     @Bean
     @ConditionalOnMissingBean
@@ -135,6 +135,10 @@ class McpServerAutoConfiguration {
         // narrow exactly as REST and the UI do. Plain parameters, the 068/074 pattern.
         lens: PromoterLens,
         templateService: TemplateService,
+        // 7b — the SAME evaluation service POST /api/v1/templates/evaluate calls (declared by
+        // `web`'s EngineConfiguration), so an evaluation over MCP crosses the same pool, caps
+        // and invariants. A plain parameter, the 068/074 pattern.
+        templateEvaluateService: co.datapipelines.application.templates.TemplateEvaluateService,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -178,6 +182,9 @@ class McpServerAutoConfiguration {
             TemplatesCreateTool(templates, authoring, templateValidator),
             TemplatesUpdateTool(templates, templateDrafts, templateValidator),
             TemplatesRenderTool(templates, templateEngines),
+            // 7b — the transform evaluator (record §9.1): the SAME service the REST evaluate
+            // route calls, a plain parameter by the 068/074 pattern.
+            TemplatesEvaluateTool(templateEvaluateService),
             // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
             TemplatesPurgeDraftTool(templates, usage, authoring),
             DatasourcesListTool(datasources, factEnrichment),

@@ -8,6 +8,8 @@ dependencies {
     implementation(project(":modules:calculators"))
     implementation(project(":modules:pipeline-contract"))
     implementation(project(":modules:templates"))
+    // 7b: the script-evaluation pool and the §8.1 test-runner bean (transform-nodes §4.3/§8.1).
+    implementation(project(":modules:scripting"))
     implementation(project(":modules:datasources"))
     implementation(project(":modules:staging"))
     implementation(project(":modules:dag"))

@@ -1,9 +1,12 @@
-// module-structure.md §5.3 — allowed internal deps: typesystem, pipeline-contract.
+// module-structure.md §5.3 — allowed internal deps: typesystem, pipeline-contract, scripting.
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     implementation(project(":modules:typesystem"))
     implementation(project(":modules:pipeline-contract")) // Parameter shape
+    // 7b: the transform types' bodies parse (save) and evaluate (test runner) through the
+    // scripting seam — never through Freemarker (transform-nodes design §2.1, D-T9).
+    implementation(project(":modules:scripting"))
 
     // Declared explicitly rather than leaned on transitively through typesystem's `api`:
     // module-structure §4.2 requires everything used at compile time to be listed

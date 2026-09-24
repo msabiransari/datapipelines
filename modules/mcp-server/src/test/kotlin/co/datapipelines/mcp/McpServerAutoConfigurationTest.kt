@@ -142,6 +142,10 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun templateService(): co.datapipelines.templates.TemplateService = mockk()
 
+        // 7b — the evaluate tool's collaborator (declared by web's EngineConfiguration in the
+        // assembled application). Mocked like every other collaborator.
+        @Bean fun templateEvaluateService(): co.datapipelines.application.templates.TemplateEvaluateService = mockk()
+
         @Bean fun templateValidator(): TemplateValidator = mockk()
 
         @Bean fun workspaceTemplateEngines(): WorkspaceTemplateEngines = mockk()

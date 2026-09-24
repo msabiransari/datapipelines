@@ -16,9 +16,11 @@ import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
+import co.datapipelines.templates.TemplateTypeBehaviour
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
+import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.ApiErrors
@@ -93,6 +95,8 @@ class TemplatesController(
     private val releases: TemplateReleaseService,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     private val audit: co.datapipelines.auth.AuditEventSink,
+    /** 7b — the evaluate route's service (transform-nodes §9.2), the MCP tool's twin. */
+    private val evaluate: co.datapipelines.application.templates.TemplateEvaluateService,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
     /** §8.1 — create; the server assigns version 1 RELEASED (and the id when the body omits one). */
@@ -480,7 +484,8 @@ class TemplatesController(
     /**
      * §8.7 — render against a sample context. The response `data` IS the rendered SQL string:
      * "Response: rendered SQL string" pins the payload, and the envelope (§4.1) wraps it.
-     * `name`, `version` and `context` are body fields (§9.6).
+     * `name`, `version` and `context` are body fields (§9.6). A transform type has nothing to
+     * render — `template.render_not_applicable` points at `/evaluate` (7b, record §9.1).
      */
     @PostMapping("/render")
     @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
@@ -489,19 +494,54 @@ class TemplatesController(
     ): ApiResponse<String> {
         val workspaceId = currentPrincipal().requireWorkspace().id
         val request = renderRequestOf(body)
-        if (templates.lookupVersion(workspaceId, request.name, request.version) == null) {
-            throw if (templates.existsId(
-                    workspaceId,
-                    request.name,
-                )
-            ) {
-                ApiErrors.templateNotFound(request.name, request.version)
-            } else {
-                ApiErrors.templateNotFound(request.name)
-            }
+        val version =
+            templates.lookupVersion(workspaceId, request.name, request.version)
+                ?: throw if (templates.existsId(
+                        workspaceId,
+                        request.name,
+                    )
+                ) {
+                    ApiErrors.templateNotFound(request.name, request.version)
+                } else {
+                    ApiErrors.templateNotFound(request.name)
+                }
+        if (version.type.isTransform) {
+            throw ApiException(
+                PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
+                "Template '${request.name}' has type '${version.type.wire}' — a transform is evaluated, not rendered; " +
+                    "use POST /api/v1/templates/evaluate.",
+                mapOf("type" to version.type.wire, "use" to "templates_evaluate"),
+            )
         }
         return ApiResponse.of(
             templateEngines.engineFor(workspaceId).render(TemplateRef(request.name, request.version), request.context),
+        )
+    }
+
+    /**
+     * §8.7A (7b, transform-nodes design §9.2) — evaluate a transform template over a
+     * caller-supplied input object: `{ name, version?, input, now? }` (the §9.6 addressing
+     * form, the MCP tool's body and response, the same service, the same pool, the same
+     * timeout). The version resolves as `/render`'s: omitted, the working version.
+     */
+    @Suppress("ThrowsCount") // each request-shape refusal is its own catalogued outcome
+    @PostMapping("/evaluate")
+    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    fun evaluate(
+        @RequestBody body: String,
+    ): ApiResponse<Map<String, Any?>> {
+        val workspaceId = currentPrincipal().requireWorkspace().id
+        val request = evaluateRequestOf(body)
+        val result = evaluate.evaluate(workspaceId, request.name, request.version, request.input, request.now)
+        return ApiResponse.of(
+            mapOf(
+                "output" to result.output,
+                "rejects" to result.rejects,
+                "invariants" to
+                    result.invariants.map { verdict ->
+                        mapOf("name" to verdict.name, "passed" to verdict.passed, "message" to verdict.message)
+                    },
+            ),
         )
     }
 
@@ -527,6 +567,67 @@ class TemplatesController(
         val version: Int,
         val context: Map<String, Any?>,
     )
+
+    /** A parsed `POST /evaluate` body: `name`, optional `version`, the `input` object, optional `now`. */
+    private data class EvaluateRequest(
+        val name: String,
+        val version: Int?,
+        val input: co.datapipelines.templates.TransformTestInput,
+        val now: java.time.Instant?,
+    )
+
+    @Suppress("ThrowsCount") // each request-shape refusal is its own catalogued outcome
+    private fun evaluateRequestOf(body: String): EvaluateRequest {
+        val tree = objectOf(body)
+        val name =
+            tree
+                .get("name")
+                ?.takeIf { it.isTextual }
+                ?.asText()
+                ?.takeIf { it.isNotBlank() }
+                ?: throw ApiException(
+                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                    "The request requires a 'name' field (§9.6: the name never travels in the path).",
+                    mapOf(ApiErrors.REASON to "name_missing"),
+                )
+        val version = tree.get("version")?.takeIf { it.isInt }?.asInt()
+        val inputNode =
+            tree.get("input")?.takeIf { it.isObject }
+                ?: throw ApiException(
+                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                    "The request requires an 'input' object ({ rows, inputs, meta?, now? }).",
+                    mapOf(ApiErrors.REASON to "input_missing"),
+                )
+        val input =
+            try {
+                TransformBlocks.mapper.treeToValue(inputNode, co.datapipelines.templates.TransformTestInput::class.java)
+            } catch (
+                @Suppress("SwallowedException") err: com.fasterxml.jackson.databind.JsonMappingException,
+            ) {
+                // The catalogued refusal names the failure; the original is a mapping detail.
+                throw ApiException(
+                    PipelineErrorCodes.Template.CONTRACT_INVALID,
+                    "The 'input' object does not bind: ${err.originalMessage}.",
+                    mapOf("rule" to "unknown_field", "path" to err.pathReference),
+                )
+            }
+        val now =
+            tree.get("now")?.takeIf { it.isTextual }?.asText()?.let { raw ->
+                try {
+                    java.time.Instant.parse(raw)
+                } catch (
+                    @Suppress("SwallowedException") err: java.time.format.DateTimeParseException,
+                ) {
+                    // The request error names the field and the value; the parse detail is redundant.
+                    throw ApiException(
+                        PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                        "'now' must be an ISO-8601 instant, was '$raw'.",
+                        mapOf("now" to raw),
+                    )
+                }
+            }
+        return EvaluateRequest(name, version, input, now)
+    }
 
     /** [TemplateDeserializer.readOrThrow] for a tree already parsed (and possibly completed by [inheritFromWorking]). */
     private fun bindOrThrow(tree: JsonNode): co.datapipelines.templates.TemplateDraft =
@@ -559,11 +660,18 @@ class TemplatesController(
         // A supplied token that is no dialect at all is the deserializer's own `dialect_invalid`
         // ("not one of …"); only a KNOWN, different one is the fixed-dialect refusal.
         val parsed = supplied?.let { token -> Dialect.entries.firstOrNull { it.wire == token } }
-        // An html body (inherited or stated) declares no dialect — never fold one in: a
-        // stated `html` on a sql template stays the draft service's `type_immutable`.
-        val html = tree.get("type")?.takeIf { it.isTextual }?.asText() == TemplateType.HTML.wire
+        // A known type folds the established dialect only when the type declares one (sql);
+        // html and the transform types declare none. An unknown wire value keeps the pre-7b
+        // reading (fold) — the deserializer's own type_invalid refusal catches it downstream.
+        val declaresDialect =
+            tree
+                .get("type")
+                ?.takeIf { it.isTextual }
+                ?.asText()
+                ?.let { TemplateType.fromWire(it) }
+                ?.let { TemplateTypeBehaviour.of(it).requiresDialect } ?: true
         when {
-            !tree.has("dialect") && established != null && !html -> {
+            !tree.has("dialect") && established != null && declaresDialect -> {
                 tree.put("dialect", established.wire)
             }
 

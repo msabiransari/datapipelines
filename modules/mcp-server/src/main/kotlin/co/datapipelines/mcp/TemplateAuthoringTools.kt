@@ -15,6 +15,10 @@ import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
+import co.datapipelines.templates.TransformBlocks
+import co.datapipelines.templates.TransformContract
+import co.datapipelines.templates.TransformInvariant
+import co.datapipelines.templates.TransformTestCase
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -74,6 +78,69 @@ private fun parseImports(args: McpArguments): List<TemplateImport> =
         )
     }
 
+/**
+ * The transform blocks of §6.2.8/§6.2.36 (7b): `contract`, `invariants`, `tests` — bound
+ * strictly from the tool arguments through the blocks' own mapper, so a typo inside a block
+ * is `template.contract_invalid` with `unknown_field` and never a silent drop. Absent
+ * arguments stay absent (null) — the validator's `blocks_missing` / `blocks_not_allowed`
+ * rules own that verdict.
+ */
+@Suppress("UNCHECKED_CAST") // Jackson's convertValue with a typed JavaType is typed by construction
+private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<TransformInvariant>?, List<TransformTestCase>?> {
+    fun bind(
+        name: String,
+        type: com.fasterxml.jackson.databind.JavaType,
+    ): Any? {
+        val raw = args.rawMap()[name] ?: return null
+        return try {
+            TransformBlocks.mapper.convertValue(raw, type)
+        } catch (err: IllegalArgumentException) {
+            // convertValue wraps the mapping failure as IllegalArgumentException; the
+            // mapping error rides as its cause.
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.CONTRACT_INVALID,
+                message = "The '$name' block does not bind: ${err.message}. A typo is a refusal, never a silent drop.",
+                details = mapOf("rule" to "unknown_field"),
+                cause = err,
+            )
+        }
+    }
+    val contract =
+        bind("contract", TransformBlocks.mapper.typeFactory.constructType(TransformContract::class.java))
+            as TransformContract?
+    val invariants =
+        bind(
+            "invariants",
+            TransformBlocks.mapper.typeFactory.constructCollectionType(List::class.java, TransformInvariant::class.java),
+        )
+            as List<TransformInvariant>?
+    val tests =
+        bind(
+            "tests",
+            TransformBlocks.mapper.typeFactory.constructCollectionType(List::class.java, TransformTestCase::class.java),
+        )
+            as List<TransformTestCase>?
+    return Triple(contract, invariants, tests)
+}
+
+/** §6.2.8/§6.2.36 — the `contract` block description (7b; transform types only). */
+private const val CONTRACT_DESC =
+    "Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): " +
+        "{ mode: 'row'|'table'|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } " +
+        "or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'|'value'|'object', ... }, rejects?: boolean }. " +
+        "Types are LogicalType wire names; a row-mode contract requires exactly one table input."
+
+/** §6.2.8/§6.2.36 — the `invariants` block description. */
+private const val INVARIANTS_DESC =
+    "Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every " +
+        "test case and every real execution. May be empty but is required on a transform type."
+
+/** §6.2.8/§6.2.36 — the `tests` block description. */
+private const val TESTS_DESC =
+    "Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — " +
+        "non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. " +
+        "Save runs the suite; release re-runs it."
+
 /** §6.2.9 — the render `context` description. */
 private const val RENDER_CONTEXT_DESC =
     "Render context: the parameter map a calling pipeline would provide, defaults already applied. Values follow the " +
@@ -82,7 +149,10 @@ private const val RENDER_CONTEXT_DESC =
 /** §6.2.8 — the `type` field's description, kept off the schema line for length. */
 private const val TYPE_FIELD_DESC =
     "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes " +
-        "(requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."
+        "(requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); " +
+        "'jsonata' and 'javascript' are transform types — the body is one expression evaluated as a pure function " +
+        "of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests " +
+        "blocks are required. 'javascript' is refused at save until round two."
 
 /** §6.2.36 — `type` on an UPDATE: inherited from the working version when absent (136 §D / T289b). */
 private const val UPDATE_TYPE_FIELD_DESC =
@@ -91,8 +161,8 @@ private const val UPDATE_TYPE_FIELD_DESC =
 
 /** §6.2.8 — the `dialect` description, stating the type/dialect rule (046 §10). */
 private const val DIALECT_FIELD_DESC =
-    "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html " +
-        "template declares no dialect."
+    "SQL execution target. Required when type is 'sql' (the default); forbidden otherwise — html and the " +
+        "transform types declare no dialect."
 
 /**
  * §6.2.36 — the update tool's `id` description. It is REQUIRED here (§9.6 — the name never
@@ -120,6 +190,19 @@ private const val EXPECTED_HASH_DESC =
     "The body_hash of the version this edit is based on — templates_get, or a previous " +
         "templates_create/templates_update result. A mismatch is a 409 template.version.conflict; " +
         "re-read and rebase, never retry blindly."
+
+/** §6.2.8/§6.2.36 — the two engine values the model admits (record §2.1: freemarker iff sql/html, none iff a transform type). */
+private val ENGINE_VALUES = setOf(Template.FREEMARKER_ENGINE, Template.NONE_ENGINE)
+
+/** §6.2.8 — the `engine` description, stating the type-conditional rule (record §2.1). */
+private const val ENGINE_FIELD_DESC =
+    "Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types " +
+        "('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused " +
+        "with template.validation.engine_unsupported."
+
+/** The engine an omitted `engine` argument means: the type's one legal value (record §2.1). */
+private fun defaultEngineFor(type: TemplateType?): String =
+    if (type?.isTransform == true) Template.NONE_ENGINE else Template.FREEMARKER_ENGINE
 
 /**
  * `templates_create` (mcp-server.md §6.2.8). Scope: `author`.
@@ -171,10 +254,13 @@ class TemplatesCreateTool(
             args
                 .enumString("type", TemplateType.WIRE_VALUES.toSet(), TemplateType.SQL.wire)
                 ?.let { TemplateType.fromWire(it)!! }
+        val blocks = parseBlocks(args)
         val draft =
             TemplateDraft(
                 id = args.string("id"),
-                engine = args.enumString("engine", setOf(Template.FREEMARKER_ENGINE), Template.FREEMARKER_ENGINE)!!,
+                // The omitted-engine default follows the type (record §2.1): a transform create
+                // that names no engine means 'none', not the sql/html default.
+                engine = args.enumString("engine", ENGINE_VALUES, defaultEngineFor(type))!!,
                 type = type,
                 // Null is legal only for html — the validator's type/dialect consistency pair
                 // refuses a missing dialect on sql and a present one on html, with the same
@@ -185,6 +271,9 @@ class TemplatesCreateTool(
                 imports = parseImports(args),
                 body = args.requiredString("body"),
                 isLibrary = args.boolean("is_library") ?: false,
+                contract = blocks.first,
+                invariants = blocks.second,
+                tests = blocks.third,
             )
         // D55: authoring lands version 1 DRAFT — the response's `status` says so, and a human
         // releases it from the UI. Pinning it from a draft pipeline is legal meanwhile
@@ -208,10 +297,10 @@ class TemplatesCreateTool(
               "properties": {
                 "id": {"type": "string", "pattern": "${TemplateNameGrammar.pattern}", "description": "$ID_ARG_DESC"},
                 "engine": {
-                  "type": "string", "enum": ["freemarker"], "default": "freemarker",
-                  "description": "Template engine. v1 supports freemarker only."
+                  "type": "string", "enum": $TEMPLATE_ENGINE_ENUM_JSON, "default": "freemarker",
+                  "description": "$ENGINE_FIELD_DESC"
                 },
-                "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "$TYPE_FIELD_DESC"},
+                "type": {"type": "string", "enum": $TEMPLATE_TYPE_ENUM_JSON, "default": "sql", "description": "$TYPE_FIELD_DESC"},
                 "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON, "description": "$DIALECT_FIELD_DESC"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string", "description": "$DESCRIPTION_FIELD_DESC"},
@@ -231,6 +320,9 @@ class TemplatesCreateTool(
                 },
                 "is_library": {"type": "boolean", "default": false, "description": "$IS_LIBRARY_DESC"},
                 "body": {"type": "string", "description": "$BODY_DESC"},
+                "contract": {"type": "object", "description": "$CONTRACT_DESC"},
+                "invariants": {"type": "array", "description": "$INVARIANTS_DESC"},
+                "tests": {"type": "array", "description": "$TESTS_DESC"},
                 "confirm_new_root": {"type": "boolean", "description": "${NewRootConfirmation.ARG_DESC}"}
               },
               "additionalProperties": false
@@ -311,10 +403,11 @@ class TemplatesUpdateTool(
         // it no longer defaults to `sql`, which sent every html update to `type_immutable`;
         // a stated type still goes to the service's own immutability refusal.
         val working = templates.findWorking(workspaceId, id) ?: throw McpNotFound.template(id)
+        val blocks = parseBlocks(args)
         val draft =
             TemplateDraft(
                 id = id,
-                engine = args.enumString("engine", setOf(Template.FREEMARKER_ENGINE), Template.FREEMARKER_ENGINE)!!,
+                engine = args.enumString("engine", ENGINE_VALUES, defaultEngineFor(suppliedType ?: working.type))!!,
                 type = suppliedType ?: working.type,
                 // Null is legal only for html — the validator's type/dialect consistency pair
                 // refuses a missing dialect on sql and a present one on html, with the same
@@ -325,6 +418,9 @@ class TemplatesUpdateTool(
                 imports = parseImports(args),
                 body = args.requiredString("body"),
                 isLibrary = args.boolean("is_library") ?: false,
+                contract = blocks.first,
+                invariants = blocks.second,
+                tests = blocks.third,
             )
         // Parse-only validation (§7.1) exactly as templates_create and the REST PUT run it,
         // then the SAME draft write PUT /templates makes (§8.4) — one write path, two surfaces.
@@ -395,10 +491,10 @@ class TemplatesUpdateTool(
                 "id": {"type": "string", "pattern": "${TemplateNameGrammar.pattern}", "description": "$UPDATE_ID_ARG_DESC"},
                 "expected_hash": {"type": "string", "description": "$EXPECTED_HASH_DESC"},
                 "engine": {
-                  "type": "string", "enum": ["freemarker"], "default": "freemarker",
-                  "description": "Template engine. v1 supports freemarker only."
+                  "type": "string", "enum": $TEMPLATE_ENGINE_ENUM_JSON, "default": "freemarker",
+                  "description": "$ENGINE_FIELD_DESC"
                 },
-                "type": {"type": "string", "enum": ["sql", "html"], "description": "$UPDATE_TYPE_FIELD_DESC"},
+                "type": {"type": "string", "enum": $TEMPLATE_TYPE_ENUM_JSON, "description": "$UPDATE_TYPE_FIELD_DESC"},
                 "dialect": {"type": "string", "enum": $DIALECT_ENUM_JSON, "description": "$UPDATE_DIALECT_DESC"},
                 "display_name": {"type": "string"},
                 "description": {"type": "string", "description": "$DESCRIPTION_FIELD_DESC"},
@@ -417,7 +513,10 @@ class TemplatesUpdateTool(
                   }
                 },
                 "is_library": {"type": "boolean", "default": false, "description": "$IS_LIBRARY_DESC"},
-                "body": {"type": "string", "description": "$BODY_DESC"}
+                "body": {"type": "string", "description": "$BODY_DESC"},
+                "contract": {"type": "object", "description": "$CONTRACT_DESC"},
+                "invariants": {"type": "array", "description": "$INVARIANTS_DESC"},
+                "tests": {"type": "array", "description": "$TESTS_DESC"}
               },
               "additionalProperties": false
             }
@@ -473,7 +572,18 @@ class TemplatesRenderTool(
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredString("id")
-        val version = resolveVersion(args, workspaceId, id)
+        val (version, type) = resolveVersion(args, workspaceId, id)
+        // 7b (record §9.1): a transform type has nothing to render — the refusal points at
+        // the evaluate tool, the way the REST /render twin does.
+        if (type != null && type.isTransform) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
+                message =
+                    "Template '$id' has type '${type.wire}' — a transform is evaluated, not rendered; " +
+                        "use templates_evaluate.",
+                details = mapOf("type" to type.wire, "use" to "templates_evaluate"),
+            )
+        }
         return engines.engineFor(workspaceId).render(TemplateRef(id, version), args.requiredObject("context"))
     }
 
@@ -481,13 +591,17 @@ class TemplatesRenderTool(
         args: McpArguments,
         workspaceId: java.util.UUID,
         id: String,
-    ): Int {
+    ): Pair<Int, TemplateType?> {
         // The working version (D55/§7.1): a template created and not yet released has only a
         // draft, and defaulting to the released one would refuse to render it.
-        val version = args.version() ?: return templates.findWorking(workspaceId, id)?.version ?: throw McpNotFound.template(id)
-        if (templates.lookupVersion(workspaceId, id, version) == null) {
-            throw if (templates.existsId(workspaceId, id)) McpNotFound.templateVersion(id, version) else McpNotFound.template(id)
+        val explicit = args.version()
+        if (explicit == null) {
+            val working = templates.findWorking(workspaceId, id) ?: throw McpNotFound.template(id)
+            return working.version to working.type
         }
-        return version
+        val stored =
+            templates.lookupVersion(workspaceId, id, explicit)
+                ?: throw if (templates.existsId(workspaceId, id)) McpNotFound.templateVersion(id, explicit) else McpNotFound.template(id)
+        return explicit to stored.type
     }
 }

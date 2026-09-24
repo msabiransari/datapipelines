@@ -52,12 +52,23 @@ class TemplateErrorCodesSpecDriftTest {
             // §5.5) — the template mirror of the authoring-capability refusal.
             // §13.9 gained `template.in_use` on 2026-09-02 (040 D4) — the used-by delete
             // refusal (the `datasource.in_use` shape for templates).
+            // §13.9 gained `template.in_use` on 2026-09-02 (040 D4) — the used-by delete
+            // refusal (the `datasource.in_use` shape for templates).
+            // §13.9 gained the transform codes on 2026-09-23 (7b, #7): bare `template.*`
+            // spellings — `contract_invalid`, `invariant_invalid`, `test_failed`,
+            // `blocks_not_allowed`, `render_not_applicable` — the record (transform-nodes
+            // design §7) names them without the `validation.` infix.
             val nonValidationShape =
                 documented.filterNot {
                     it.startsWith("template.validation.") || it.startsWith("template.version.") ||
                         it.startsWith("template.authoring.") ||
                         it == PipelineErrorCodes.Template.NOT_FOUND ||
-                        it == PipelineErrorCodes.Template.IN_USE
+                        it == PipelineErrorCodes.Template.IN_USE ||
+                        it == PipelineErrorCodes.Template.CONTRACT_INVALID ||
+                        it == PipelineErrorCodes.Template.INVARIANT_INVALID ||
+                        it == PipelineErrorCodes.Template.TEST_FAILED ||
+                        it == PipelineErrorCodes.Template.BLOCKS_NOT_ALLOWED ||
+                        it == PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE
                 }
             nonValidationShape.shouldBeEmpty()
         }

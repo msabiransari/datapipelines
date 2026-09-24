@@ -71,6 +71,8 @@ class TemplatesControllerTest {
             }
         }
 
+    private val evaluateService = mockk<co.datapipelines.application.templates.TemplateEvaluateService>()
+
     private val controller =
         TemplatesController(
             repository,
@@ -83,6 +85,7 @@ class TemplatesControllerTest {
             releases,
             guard,
             audit,
+            evaluateService,
         )
 
     private val userId = UUID.randomUUID()
@@ -151,6 +154,7 @@ class TemplatesControllerTest {
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(false),
                 audit,
+                evaluateService,
             )
         // The authoring refusal for delete comes from the service the controller delegates to.
         every { releases.purgeEntity(any(), "test/fetch_orders.sql") } throws
@@ -530,6 +534,7 @@ class TemplatesControllerTest {
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(true),
                 audit,
+                evaluateService,
             )
 
         val thrown =
@@ -580,6 +585,61 @@ class TemplatesControllerTest {
             .details["reason"] shouldBe "context_missing"
         shouldThrow<ApiException> { controller.render("""not json""") }
             .details["reason"] shouldBe "malformed_json"
+    }
+
+    @Test
+    fun `render on a transform type is render_not_applicable pointing at evaluate`() {
+        authenticate()
+        every { repository.lookupVersion(any(), "test/xform.jsonata", 1) } returns
+            TemplateVersion(
+                id = "test/xform.jsonata",
+                version = 1,
+                type = co.datapipelines.pipeline.TemplateType.JSONATA,
+                dialect = null,
+                isLibrary = false,
+                imports = emptyList(),
+                body = "rows",
+                createdAt = Instant.EPOCH,
+                createdBy = userId,
+            )
+        val thrown =
+            shouldThrow<ApiException> {
+                controller.render("""{"name":"test/xform.jsonata","version":1,"context":{}}""")
+            }
+        thrown.code shouldBe PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE
+        thrown.details["use"] shouldBe "templates_evaluate"
+    }
+
+    @Test
+    fun `evaluate delegates to the service and returns output, rejects and invariants`() {
+        authenticate()
+        every { evaluateService.evaluate(any(), eq("test/xform.jsonata"), isNull(), any(), isNull()) } returns
+            co.datapipelines.application.templates.TemplateEvaluateService.Evaluation(
+                output = mapOf("rows" to emptyList<Any>()),
+                rejects = emptyList(),
+                invariants =
+                    listOf(
+                        co.datapipelines.templates.TransformTestRunner
+                            .InvariantVerdict("one_to_one", true, "no row lost"),
+                    ),
+            )
+
+        val response =
+            controller.evaluate("""{"name":"test/xform.jsonata","input":{"rows":[],"inputs":{}}}""")
+
+        (response.data["output"] as Map<*, *>)["rows"] shouldBe emptyList<Any>()
+        (response.data["invariants"] as List<*>).single().let {
+            (it as Map<*, *>)["name"] shouldBe "one_to_one"
+        }
+    }
+
+    @Test
+    fun `evaluate requires a name and an input object`() {
+        authenticate()
+        shouldThrow<ApiException> { controller.evaluate("""{"input":{}}""") }
+            .details["reason"] shouldBe "name_missing"
+        shouldThrow<ApiException> { controller.evaluate("""{"name":"t.jsonata"}""") }
+            .details["reason"] shouldBe "input_missing"
     }
 
     @Test

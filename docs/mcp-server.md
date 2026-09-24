@@ -165,7 +165,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 41 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 42 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -193,6 +193,7 @@ Tools are named `{domain}_{action}`:
 - `templates_create`
 - `templates_update`
 - `templates_render`
+- `templates_evaluate`
 - `templates_purge_draft`
 - `datasources_list`
 - `datasources_get`
@@ -414,12 +415,12 @@ List templates.
 ```json
 {
   "name": "templates_list",
-  "description": "List the templates of the key's pinned workspace. Templates are reusable generators authored in Freemarker, referenced by id+version; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.",
+  "description": "List the templates of the key's pinned workspace. Templates are reusable generators referenced by id+version — sql/html bodies are authored in Freemarker, transform bodies are script expressions; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none, and the transform types ('jsonata', 'javascript') evaluate the body as a pure function of its input and declare neither. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"]},
-      "type": {"type": "string", "enum": ["sql", "html"], "description": "Filter by template kind: 'sql' (pipeline-referenced SQL) or 'html' (rendered output)."},
+      "type": {"type": "string", "enum": ["sql", "html", "jsonata", "javascript"], "description": "Filter by template kind: 'sql' (pipeline-referenced SQL), 'html' (rendered output), or a transform type ('jsonata', 'javascript' — a pure function over its input, never rendered)."},
       "q": {"type": "string"},
       "prefix": {"type": "string", "description": "Browse ONE level of the folder tree instead of listing flat: returns that prefix's direct sub-folders (with counts) and its direct children. An empty string is the root. Use this to discover which roots and folders exist; use q to search across full paths."},
       "is_library": {"type": "boolean", "description": "Filter to library templates (macro collections) or executable templates."},
@@ -486,9 +487,9 @@ Create a new template.
     "required": ["display_name", "description", "body"],
     "properties": {
       "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template id, and a FOLDER PATH: 2-10 lower-case '/'-separated segments (acme/finance/daily_orders.sql). A FOLDER IS REQUIRED — a bare 'daily_orders.sql' is refused with template.validation.id_invalid and details.reason='folder_required'; put experiments under test/, and shared macros under <owner>/lib/. Keep a template under the same prefix as the pipelines that read it. Optional; auto-generated if omitted. There is no rename, so choose the folder now."},
-      "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
-      "type": {"type": "string", "enum": ["sql", "html"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect')."},
-      "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"], "description": "SQL execution target. Required when type is 'sql' (the default); forbidden when type is 'html' — an html template declares no dialect."},
+      "engine": {"type": "string", "enum": ["freemarker", "none"], "default": "freemarker", "description": "Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types ('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused with template.validation.engine_unsupported."},
+      "type": {"type": "string", "enum": ["sql", "html", "jsonata", "javascript"], "default": "sql", "description": "Template kind, fixed at creation and identical on every version: 'sql' renders SQL for pipeline nodes (requires 'dialect'); 'html' renders HTML through an auto-escaping engine (must have NO 'dialect'); 'jsonata' and 'javascript' are transform types — the body is one expression evaluated as a pure function of its input, engine is 'none', dialect/imports/is_library are refused, and contract/invariants/tests blocks are required. 'javascript' is refused at save until round two."},
+      "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"], "description": "SQL execution target. Required when type is 'sql' (the default); forbidden otherwise — html and the transform types declare no dialect."},
       "display_name": {"type": "string"},
       "description": {"type": "string", "description": "Free text. State the variables the body expects and their types — the template declares none."},
       "imports": {
@@ -507,6 +508,9 @@ Create a new template.
       },
       "is_library": {"type": "boolean", "default": false, "description": "true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required."},
       "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."},
+      "contract": {"type": "object", "description": "Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): { mode: 'row'|'table'|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'|'value'|'object', ... }, rejects?: boolean }. Types are LogicalType wire names; a row-mode contract requires exactly one table input."},
+      "invariants": {"type": "array", "description": "Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every test case and every real execution. May be empty but is required on a transform type."},
+      "tests": {"type": "array", "description": "Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. Save runs the suite; release re-runs it."},
       "confirm_new_root": {"type": "boolean", "description": "Set true ONLY after a person has agreed to a new top-level folder. A name whose root segment has no pipelines or templates under it yet is refused with details.existing_roots listing the roots that do exist — reuse one of those, or ask the person first and then pass this. 'test/' never needs it."}
     },
     "additionalProperties": false
@@ -1407,8 +1411,8 @@ Update an existing template by writing its DRAFT (versioning §3.2/§5.1/§5.2) 
     "properties": {
       "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}(/[a-z0-9][a-z0-9_.-]{0,63}){1,9}$", "description": "Template to update — the FOLDER PATH id it was created under (acme/finance/daily_orders.sql). Required here: §9.6, the name never travels in a path or anywhere else. There is no rename, so the id cannot change — an unknown id is the catalogued template.not_found."},
       "expected_hash": {"type": "string", "description": "The body_hash of the version this edit is based on — templates_get, or a previous templates_create/templates_update result. A mismatch is a 409 template.version.conflict; re-read and rebase, never retry blindly."},
-      "engine": {"type": "string", "enum": ["freemarker"], "default": "freemarker", "description": "Template engine. v1 supports freemarker only."},
-      "type": {"type": "string", "enum": ["sql", "html"], "description": "Template kind — fixed at creation, so on an update it is OPTIONAL: omitted, the working version's is inherited; stated, it must equal it (template.validation.type_immutable otherwise)."},
+      "engine": {"type": "string", "enum": ["freemarker", "none"], "default": "freemarker", "description": "Template engine, matched to the type: 'freemarker' for sql/html, 'none' for the transform types ('jsonata'/'javascript' — the body is evaluated, never rendered). Any other pairing is refused with template.validation.engine_unsupported."},
+      "type": {"type": "string", "enum": ["sql", "html", "jsonata", "javascript"], "description": "Template kind — fixed at creation, so on an update it is OPTIONAL: omitted, the working version's is inherited; stated, it must equal it (template.validation.type_immutable otherwise)."},
       "dialect": {"type": "string", "enum": ["POSTGRES", "ORACLE", "MSSQL", "MYSQL", "H2", "DUCKDB", "SQLITE", "LAKE"], "description": "Optional on update: omit it and the working version's dialect is inherited. When present it must be the dialect the template already has — a different one is refused with template.validation.dialect_invalid (a template pinned by pipeline nodes cannot change engine; create a new template instead). Never present for an html template."},
       "display_name": {"type": "string"},
       "description": {"type": "string", "description": "Free text. State the variables the body expects and their types — the template declares none."},
@@ -1427,7 +1431,10 @@ Update an existing template by writing its DRAFT (versioning §3.2/§5.1/§5.2) 
         }
       },
       "is_library": {"type": "boolean", "default": false, "description": "true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required."},
-      "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."}
+      "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."},
+      "contract": {"type": "object", "description": "Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): { mode: 'row'|'table'|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'|'value'|'object', ... }, rejects?: boolean }. Types are LogicalType wire names; a row-mode contract requires exactly one table input."},
+      "invariants": {"type": "array", "description": "Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every test case and every real execution. May be empty but is required on a transform type."},
+      "tests": {"type": "array", "description": "Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. Save runs the suite; release re-runs it."}
     },
     "additionalProperties": false
   }
@@ -1712,6 +1719,34 @@ Run a pipeline version's release checks (`checks[]`, pipeline-contract §3.3) NO
 
 **Errors:** an unknown pipeline or version is the §6.2.3 not-found refusal; `{version: 0}` is `-32602`, never clamped.
 
+#### 6.2.43 `templates_evaluate`
+
+Evaluate a transform template over a caller-supplied input object (7b, transform-nodes design §9.1) — `sql_probe`'s twin for the transform types. The version resolves exactly as `templates_render`'s (explicit `version`, else the working version — the draft when one exists, else the latest released); the §5.1 input check runs first, the body evaluates on the bounded evaluation pool under `datapipelines.transform.evaluate-timeout-seconds`, the output passes the type gate against the contract, and every invariant runs on it. Nothing is staged and nothing is stored.
+
+```json
+{
+  "name": "templates_evaluate",
+  "description": "Evaluate a transform template ('jsonata'/'javascript') over a caller-supplied input object and return { output, rejects, invariants } — no staging, no Context. Use this to run a transform's body against one input the way its test suite does (sql_probe's twin; templates_render is for sql/html and refuses a transform type with template.render_not_applicable). The version resolves as templates_render does: omitted, the working version (the draft when one exists, else the latest released). A refusal is the code with its detail — a type-gate refusal, an input-contract violation, or an engine refusal (timeout, resource limit, pool exhausted).",
+  "inputSchema": {
+    "type": "object",
+    "required": ["id", "input"],
+    "properties": {
+      "id": {"type": "string"},
+      "version": {"type": "integer", "description": "Specific version. Defaults to the working version: the draft when one exists, else the latest released."},
+      "input": {"type": "object", "description": "The input object of the template's contract: { rows: [...], inputs: {...} } — in row mode `rows` is the batch and `inputs` holds the value inputs only (the table input is NOT listed); in table/value mode `inputs` holds every input, tables as arrays. Optional `now` (ISO-8601) pins the clock: without it the $now()/$millis() builtins refuse.", "additionalProperties": true},
+      "now": {"type": "string", "description": "Optional ISO-8601 instant the $now()/$millis() builtins return for this evaluation. Absent, a body that reads the clock refuses (a transform is a pure function of its inputs — the clock is an input)."}
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Scope:** `author` — the `templates_render` row (R6: evaluating untrusted code on the server is the same authoring act as rendering). The catalog declares the tool **not mutating**.
+
+**Returns:** `{ output, rejects, invariants: [ { name, passed, message } ] }`. `output` is the function's return after the type gate (the rows array, `{ rows, rejects }` when the contract declares rejects, or the one value/object in value mode); `rejects` is the rejected half with its reasons; each invariant verdict is `{ name, passed, message }`.
+
+**Errors:** an unknown id or version is `template.not_found`; an `sql`/`html` id is `template.contract_invalid` with `details.rule: "type_not_transform"`; an input that violates the contract is the record §5.1's input-check code; an evaluation failure is the engine's own typed refusal (evaluation failure, timeout, resource limit, pool exhausted) or the type gate's (shape, value, precision, size) — §13.18 names them (7c). The `mcp.tool.called` audit row carries `tool`, `template`, `version` and `outcome` — never the input object or the output (§9.5).
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -1836,7 +1871,7 @@ We do not support `resources/subscribe` in v1. Resources change rarely enough th
 
 Predefined prompts the agent can invoke via `prompts/get`. Useful for steering agents toward common workflows.
 
-**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 41 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
+**Admission rule:** a prompt ships only if every step it instructs the agent to take is achievable with the 42 tools in §6.1 and the resources in §7. A prompt that depends on a tool we have not built is a scripted failure — it reads as a supported capability and dead-ends the agent partway through. All three prompts meet the bar (§8.1, §8.2, §8.3); §8.2 returned in v1.1 together with the introspection tools it depends on.
 
 ### 8.1 `analyze_pipeline`
 
@@ -2049,7 +2084,7 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 | `mcp.execution.launched` | One per `pipelines_execute` launch (107), emitted BEFORE the blocking run begins: key id + correlation id + pipeline/execution id. It exists so §6.2.35's same-credential rule can authorize cancelling an IN-FLIGHT execution — the end-of-call `mcp.tool.called` row only exists once the blocking call returns, which for this tool is after the execution is terminal |
 | `mcp.resource.read` | Every `resources/read`, success or failure (120). Until this event the read side of the MCP surface left no trace at all — the audit of an agent's session could show 35 tool calls and silence about which documents it opened |
 
-**Fields** (the two tool events identical; the resource event mirrors them): actor — `user_id` (the key's owner) and `key_id`; `tool`; `target` — the identifier-shaped argument only (execution/pipeline/template id or name); for version-aware tools the `version` the call named; for node runs the `node_id`; for the table-addressed schema tools (`datasources_get_columns` / `_get_tables` / `_get_table_stats`) the `table` (and the `namespace` segments when the caller passed one) beside the `target` datasource; for `templates_render` the `template` id beside the `target`; `outcome` (`success` \| `error` + `code` \| `invalid_params` \| `internal_error` \| `scope_refused`); `elapsed_ms`; `correlation_id`. A resource read records `uri` instead of `tool`/`target`, and its `code` names the failure (`resource_not_found`, `forbidden`, `internal_error`) — a name, never the JSON-RPC number. Since 139 the table/template identifiers are what the entry-point checks learn from (`pipeline.validation.table_not_learned` §6.2.4, `pipeline.execution.template_unrendered` §6.2.3); rows written before 139 carry neither key, and those simply do not count.
+**Fields** (the two tool events identical; the resource event mirrors them): actor — `user_id` (the key's owner) and `key_id`; `tool`; `target` — the identifier-shaped argument only (execution/pipeline/template id or name); for version-aware tools the `version` the call named; for node runs the `node_id`; for the table-addressed schema tools (`datasources_get_columns` / `_get_tables` / `_get_table_stats`) the `table` (and the `namespace` segments when the caller passed one) beside the `target` datasource; for `templates_render` / `templates_evaluate` the `template` id beside the `target`; `outcome` (`success` \| `error` + `code` \| `invalid_params` \| `internal_error` \| `scope_refused`); `elapsed_ms`; `correlation_id`. A resource read records `uri` instead of `tool`/`target`, and its `code` names the failure (`resource_not_found`, `forbidden`, `internal_error`) — a name, never the JSON-RPC number. Since 139 the table/template identifiers are what the entry-point checks learn from (`pipeline.validation.table_not_learned` §6.2.4, `pipeline.execution.template_unrendered` §6.2.3); rows written before 139 carry neither key, and those simply do not count.
 
 **Which tools are mutating is a declared property of the catalog entry** (`McpToolCatalog.Entry.mutating`), never a name pattern — `McpToolCatalogBindingTest` fails if a catalogued tool lacks the declaration or a known writer (`pipelines_create`, `pipelines_update`, `pipelines_execute`, `pipelines_execute_node`, `templates_create`, and since 140 `pipelines_run_checks` — it writes the `pipeline_check_runs` rows) is flagged read. The failure direction is asymmetric: a read tool declared mutating is a harmless over-audit; a mutating tool declared read is the hole.
 
@@ -2146,6 +2181,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-23 | v1.46 | 7b (#7) | **`templates_evaluate` lands (41 → 42 tools, §6.2.43)** — the transform evaluator: a caller-supplied input object through the bounded evaluation pool with the contract's input check, the type gate and the invariants; the working-version resolution is `templates_render`'s, and `templates_render` now refuses a transform type with `template.render_not_applicable` pointing at it (§6.2.9). The `type`/`engine` enums in the create/update/list schemas are derived from the enums and admit `jsonata`/`javascript`/`none` (§6.2.6, §6.2.8, §6.2.36). §14's identifier list: the evaluate row carries `template` like the render row. Every count (§3's capability note, §6.1, §8, the two ScopeMatrix rows, tools.md) moved in the same commit. |
 | 2026-09-21 | v1.45 | 180 (#180) | No tool, no schema, no permission change. §4.2 and §9.3: a deactivated OWNER is `401 auth.principal_deactivated` (new §13.7 code; was folded into `auth.api_key.invalid`), a deactivated PIN `404 auth.key_workspace_inactive`; both refused at validation, so `tools/list` is refused too ([Auth §11A.3](auth.md#11a3-deactivation)). |
 | 2026-09-21 | v1.44 | 179 (#179) | No tool, no schema, no permission change on the MCP surface. The KEY an agent presents changed how it is born: §1/§2/§3 (authentication model, principle 3, the key bullet list) now say the user's key is minted at sign-in (D16) and copied from the top bar, one per workspace, its reach the owner's role re-read per request; the "Agent / API key" form label is gone with on-demand minting. §4.2's troubleshooting line points at the role, not a re-mint. |
 | 2026-09-19 | v1.43 | 172 (#172) | §6.2.23 `endpoints_create` description and `path` schema text: published endpoints serve at `/api/<category>/<version>/<path…>` (R-EP5) — the category is the caller's namespace with `v[0-9]+` and `api` reserved (`endpoint.path_reserved`), the version free-form, one leading `/api` prefix normalised away; `endpoints_*` responses' `url` carries the full served URL. No tool added, removed or renamed; no scope change. |

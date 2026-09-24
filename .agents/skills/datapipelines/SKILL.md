@@ -102,16 +102,15 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
 
 ## The golden path (authoring a new pipeline)
 
+**SQL when SQL can; a transform when the shape is nested, the logic is per-row, or SQL cannot say it** — `references/transforms.md`.
+
 0. **Pick the folder.** `pipelines_list {"prefix": ""}` and `templates_list {"prefix": ""}`
    to see which roots this workspace already uses, then drill in with `{"prefix": "<root>"}`.
    Reuse a root. **A new root is refused until you confirm it: ask the person first, then pass
-   `confirm_new_root: true`** — `pipelines_create` and `templates_create` answer
-   `pipeline.validation.new_root_requires_confirmation` / `template.validation.new_root_requires_confirmation`
-   with `details.existing_roots` listing what already exists. `test/` never needs it, and when the
-   person has named the folder, pass `confirm_new_root: true` on the FIRST create of either kind —
-   a template or a pipeline, whichever you create first — the confirmation is theirs, already given.
-   Everything you create in the steps below goes under the prefix you settle on here — and it
-   cannot be moved later.
+   `confirm_new_root: true` on the FIRST create of either kind** — `pipelines_create` and
+   `templates_create` answer `pipeline.validation.new_root_requires_confirmation` /
+   `template.validation.new_root_requires_confirmation` with `details.existing_roots`. `test/`
+   never needs it. Everything you create below goes under this prefix — it cannot be moved later.
 1. **Learn before you assume.** You know nothing about a datasource until you have read it —
    not its time zone, not its units, not whether a table is a sample or a census, not what a coded
    value means. `datasources_list` is your first call and your first read: for every granted datasource
@@ -392,6 +391,7 @@ draft. Its Do/Don't table is one screen; each row is a mistake an agent made her
 - **`references/node-types.md`** — wiring the DAG.
 - **`references/authoring-playbook.md`** — building anything non-trivial.
 - **`references/templates.md`** — writing SQL: templates, library imports, CALCULATOR nodes.
+- **`references/transforms.md`** — a transform template (JSONata), its contract/invariants/tests, `templates_evaluate`.
 - **`references/naming.md`** — choosing where a new pipeline or template lives.
 - **`references/connecting.md`** — a first call, a scope or credential refusal, no MCP transport.
 - **`references/dp-lake.md`** — the data is Parquet or Iceberg on S3, not in a database.

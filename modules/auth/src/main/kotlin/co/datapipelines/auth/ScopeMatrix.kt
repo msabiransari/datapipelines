@@ -318,6 +318,9 @@ object ScopeMatrix {
             "templates_create" to Scope.AUTHOR,
             "templates_update" to Scope.AUTHOR,
             "templates_render" to Scope.AUTHOR,
+            // 7b — the transform evaluator takes the templates_render row (R6): evaluating
+            // untrusted code on the server is the same authoring act as rendering.
+            "templates_evaluate" to Scope.AUTHOR,
             "datasources_test" to Scope.AUTHOR,
             "datasources_get_schemas" to Scope.AUTHOR,
             "datasources_get_tables" to Scope.AUTHOR,
@@ -429,6 +432,8 @@ object ScopeMatrix {
             "templates_create" to Permission.AUTHOR,
             "templates_update" to Permission.AUTHOR,
             "templates_render" to Permission.AUTHOR,
+            // 7b — the transform evaluator, the templates_render row (R6).
+            "templates_evaluate" to Permission.AUTHOR,
             "templates_purge_draft" to Permission.AUTHOR,
             "endpoints_create" to Permission.AUTHOR,
             "endpoints_delete" to Permission.AUTHOR,

@@ -69,7 +69,11 @@ class TemplatesConfiguration {
     fun templateValidator(
         libraryResolver: LibraryResolver,
         properties: TemplatesProperties,
-    ): TemplateValidator = TemplateValidator(libraryResolver, properties.maxBodyChars)
+        // The §8.1 test suite: the runner bean lives in web's EngineConfiguration (the pool and
+        // the transform.* knobs are the app's wiring, not this module's). ObjectProvider keeps
+        // this configuration loadable in a context that does not assemble the engine.
+        runner: org.springframework.beans.factory.ObjectProvider<TransformTestRunner>,
+    ): TemplateValidator = TemplateValidator(libraryResolver, properties.maxBodyChars, suiteRunner = runner.ifAvailable)
 
     @Bean
     fun templateDryRenderer(engines: WorkspaceTemplateEngines): TemplateDryRenderer = TemplateDryRendererImpl(engines)
