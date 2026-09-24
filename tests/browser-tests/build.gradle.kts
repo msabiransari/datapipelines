@@ -81,4 +81,12 @@ tasks.register<JavaExec>("siteShots") {
 tasks.named<Test>("test") {
     maxParallelForks =
         project.providers.gradleProperty("dp.test.forks.e2e").orNull?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+    // #139: ONE class order for CI and the box — each fork boots its own containers, app and
+    // Chromium, so which suites cohabit a JVM must not depend on the filesystem's scan order.
+    // Pinned to alphabetical UNLESS the property is passed: a passed
+    // -Pjunit.jupiter.testclass.order.default is forwarded by the conventions plugin, and this
+    // default then stays out of its way (the round-060 shuffle override keeps winning).
+    if (project.providers.gradleProperty("junit.jupiter.testclass.order.default").orNull == null) {
+        systemProperty("junit.jupiter.testclass.order.default", "org.junit.jupiter.api.ClassOrderer\$ClassName")
+    }
 }

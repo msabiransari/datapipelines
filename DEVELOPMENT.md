@@ -675,6 +675,13 @@ UI assertions lose their race.
 | `dp.test.forks.e2e` | 2 | the same for `tests/integration-tests` and `tests/browser-tests` | each fork boots its **own** containers, Spring contexts and Chromium — the expensive one |
 | `dp.test.heap` | 1g | the ordinary test JVM's `-Xmx` (integration-tests keeps 6g) | RAM, only when the JVM actually needs it |
 
+Both e2e suites pin their test-class order to alphabetical
+(`junit.jupiter.testclass.order.default=org.junit.jupiter.api.ClassOrderer$ClassName`, the default
+their build files set; any `-Pjunit.jupiter.testclass.order.default=…` you pass still wins — the
+§9.3 shuffle included), so the box and CI see the same suite sequence; reproduce CI's exact
+one-fork order with
+`./gradlew :tests:integration-tests:test :tests:browser-tests:test -Pdp.test.forks.e2e=1 -Pjunit.jupiter.testclass.order.default='org.junit.jupiter.api.ClassOrderer$ClassName'`.
+
 **Measured on 2026-09-12** (2 × 24-core Xeon, 96 threads, 64 GB, NVMe, native Docker, Ubuntu
 26.04) — the numbers to size against:
 
