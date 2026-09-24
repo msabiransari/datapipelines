@@ -222,7 +222,7 @@ object SitePages {
             title = "SQL MCP server: one database MCP server, ${facts.engineCountWord} engines",
             description =
                 "A database MCP server your agent uses instead of your production credentials: " +
-                    "${facts.engineCountWord} SQL engines, read-only by default, scoped keys, every call audited.",
+                    "${facts.engineCountWord} SQL engines, read-only by default, keys with roles, every call audited.",
             view = "site/pillar",
         )
 
@@ -233,7 +233,7 @@ object SitePages {
             title = "Add an MCP server to Claude Code, Cursor or Copilot",
             description =
                 "How to add the datapipelines.co MCP server to Claude Code, Cursor and GitHub Copilot: " +
-                    "create a scoped API key, paste one config block, check the tool list.",
+                    "copy your MCP key, paste one config block, check the tool list.",
             view = "site/add-mcp-server",
         )
 
@@ -348,9 +348,9 @@ object SitePages {
     val SECURITY =
         SitePage(
             path = "/security",
-            title = "AI agent database access, made safe: scoped keys, read-only, audited",
+            title = "AI agent database access, made safe: keys by role, read-only, audited",
             description =
-                "How an AI agent reaches your databases without a password: scoped keys, read-only datasources, " +
+                "How an AI agent reaches your databases without a password: keys with roles, read-only datasources, " +
                     "encrypted credentials, human release, a full audit log.",
             view = "site/security",
         )
@@ -708,7 +708,7 @@ object SitePages {
             title = "${facts.displayName} MCP server: governed, read-only, self-hosted",
             description =
                 "Connect Claude Code, Cursor or any MCP client to ${facts.displayName}. Read-only by " +
-                    "default, one scoped key per agent, every call audited. Self-hosted, open source.",
+                    "default, a revocable key per agent, every call audited. Self-hosted, open source.",
             view = "site/engine",
         )
 

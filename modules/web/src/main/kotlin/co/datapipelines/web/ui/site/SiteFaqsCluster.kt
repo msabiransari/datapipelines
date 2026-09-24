@@ -52,7 +52,7 @@ object SiteFaqsCluster {
             ),
         )
 
-    /** The client-setup page's four: the client, the scope, the drivers, the troubleshooting. */
+    /** The client-setup page's four: the client, the key's role, the drivers, the troubleshooting. */
     val ADD_TO_CLIENT: List<FaqEntry> =
         listOf(
             FaqEntry(
@@ -63,10 +63,10 @@ object SiteFaqsCluster {
                 "docs/mcp-server.md §3.2",
             ),
             FaqEntry(
-                "What scope should the agent's key carry?",
-                "None to pick: since 179 the key is created at sign-in and carries YOUR role in that workspace. " +
-                    "a viewer's key browses and runs, an author's also creates and edits drafts, a promoter's reads " +
-                    "released content. The ladder behind that is docs/auth.md §7.5.",
+                "What role does the agent's key carry?",
+                "Yours, capped at author: the key is created at sign-in and acts as you in that workspace. " +
+                    "A viewer's key browses and runs, an author's also creates and edits drafts, a promoter's reads " +
+                    "released content, and a workspace admin's acts as an author. The rule is docs/auth.md §7.5.",
                 "docs/auth.md §7.5",
             ),
             FaqEntry(
@@ -79,8 +79,9 @@ object SiteFaqsCluster {
             FaqEntry(
                 "The tools did not come back: what now?",
                 "Read the refusal: auth.api_key.missing means the header did not arrive; invalid or expired means " +
-                    "wrong, revoked or the owner is deactivated; auth.scope.insufficient means the key is real " +
-                    "but too small. A silently ignored browser session is expected, because /mcp takes API keys only. " +
+                    "wrong, revoked or the owner is deactivated; auth.key_issuer_role_lost means the key is real " +
+                    "but your role does not reach that tool. A silently ignored browser session is expected, " +
+                    "because /mcp takes API keys only. " +
                     "The troubleshooting list is docs/mcp-server.md §4.2.",
                 "docs/mcp-server.md §4.2",
             ),
@@ -214,7 +215,8 @@ object SiteFaqsCluster {
             FaqEntry(
                 "What is the credential story?",
                 "Read-only datasources whose write-shaped uses are refused at save time and again at execution, " +
-                    "one scoped revocable key per agent, and an audit log entry for every tool call. Those are the checks " +
+                    "one revocable key per agent that holds no more than its person's role, and an audit log entry " +
+                    "for every tool call. Those are the checks " +
                     "an agent-facing warehouse pipeline needs. The read-only flag is docs/datasources.md §5.7.",
                 "docs/datasources.md §5.7",
             ),

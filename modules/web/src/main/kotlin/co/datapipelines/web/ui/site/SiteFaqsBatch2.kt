@@ -63,7 +63,7 @@ object SiteFaqsBatch2 {
             FaqEntry(
                 "Does datapipelines take Postgres away?",
                 "No. Postgres becomes a datasource: it keeps serving your application, the agent reads it through " +
-                    "the server with a scoped key, and a pipeline can write its result back into a Postgres table " +
+                    "the server with its own revocable key, and a pipeline can write its result back into a Postgres table " +
                     "if that is where the answer belongs. Write-back is docs/pipeline-contract.md §8.",
                 "docs/pipeline-contract.md §8",
             ),
@@ -151,7 +151,7 @@ object SiteFaqsBatch2 {
                 "Can each client be kept separate from the others?",
                 "Yes, one workspace per client. A key is pinned to one workspace at issuance, so an agent or a " +
                     "colleague working client A sees nothing of client B: the other workspace's pipelines, " +
-                    "datasources and executions are absent, not hidden. Scopes and pinning are docs/auth.md §7.5.",
+                    "datasources and executions are absent, not hidden. Key roles and pinning are docs/auth.md §7.5.",
                 "docs/auth.md §7.5",
             ),
             FaqEntry(

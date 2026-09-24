@@ -26,7 +26,7 @@
       <p class="eyebrow">Run it, then build on it</p>
       <h1 id="hiw-hero-title" class="ds-display">How it works: the MCP server tutorial, end to end on your laptop</h1>
       <!-- claim: docs/deployment.md Appendix B (the demo quickstart), docs/mcp-server.md §3 (the endpoint), docs/rest-api.md §19 (the published endpoint) -->
-      <p class="lede">Eight steps, each executed on a fresh checkout before it was written here. Start the server with sample data. Copy your MCP key from the top bar. Connect Claude Code, Cursor or Copilot over MCP. Let the agent author and run a pipeline, release it, publish it as an API, scope a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
+      <p class="lede">Eight steps, each executed on a fresh checkout before it was written here. Start the server with sample data. Copy your MCP key from the top bar. Connect Claude Code, Cursor or Copilot over MCP. Let the agent author and run a pipeline, release it, publish it as an API, bind a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
       <div class="actions">
         <a class="btn btn-primary" href="#quickstart">Start at step 1 <span aria-hidden="true">&rarr;</span></a>
         <a class="btn btn-secondary" href="#engineering">Skip to the engineering depth</a>
@@ -73,8 +73,8 @@
     <div class="container">
       <p class="kicker">Step 2</p>
       <h2 id="step-key-title" class="ds-headline">Copy your MCP key from the top bar</h2>
-      <!-- claim: docs/ui-screens.md §3.4 (the top bar's MCP-key chip), docs/auth.md §7.4 (login-minted issuance), §7.5 (admin is not a key scope) -->
-      <p class="section-lede"><strong>What you do.</strong> Sign in. That is all it takes to get a key: your MCP key is created for you and waits in the <strong>top bar</strong>, on the right, as the <code>dpk_…</code> chip beside your account menu. <strong>Copy</strong> puts the full key on your clipboard; paste it into the client config in step 3.</p>
+      <!-- claim: docs/ui-screens.md §3.4 (the top bar's MCP-key chip), docs/auth.md §7.4 (login-minted issuance; the forced password change gates that session's mint), §7.5 (the key carries its member's role, capped at author) -->
+      <p class="section-lede"><strong>What you do.</strong> Sign in. That is all it takes to get a key: your MCP key is created for you and waits in the <strong>top bar</strong>, on the right, as the <code>dpk_…</code> chip beside your account menu. <strong>Copy</strong> puts the full key on your clipboard; paste it into the client config in step 3. After the forced password change in step 1, sign out and sign in once more, because the key is created at your first ordinary sign-in.</p>
       <div>
         <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Top bar</span><span class="tag">Screenshot</span></div>
@@ -82,7 +82,7 @@
         <figcaption>The MCP-key chip in the top bar: prefix, Copy, and delete-to-rotate.</figcaption>
         </figure>
       </div>
-      <p><strong>What you see.</strong> You get exactly one key per workspace per person. The demo login's role is admin, so its reach is <code>read</code>, <code>execute</code> and <code>author</code>. That is the whole ladder an authoring agent needs. A viewer's key would carry read and execute. The role decides, never a form.</p>
+      <p><strong>What you see.</strong> You get exactly one key per workspace per person. The key acts as you, with your role in that workspace, capped at author. For the demo admin that is author, which is everything an authoring agent needs. A viewer's key would browse and run. The role decides, never a form.</p>
       <!-- claim: docs/auth.md §7.4 (minted at login; pinned to the workspace; rotation is delete + sign in), docs/rest-api.md §16.1 (the /mine read) -->
       <p><strong>What just happened.</strong> The key was created when you signed in and pinned to the workspace you entered, <code>demo</code> here. It is sealed at rest so the top bar can open it for a copy. There is no endpoint that creates one, on purpose: <code>GET /api/v1/auth/api-keys/mine</code> reads it, and rotating it means deleting it with the chip's button and signing in again. Administration stays with signed-in people; no key can hold it.</p>
     </div>
@@ -185,55 +185,46 @@ anything. Stop after reporting.</code></pre>
     <div class="container">
       <p class="kicker">Step 6</p>
       <h2 id="step-publish-title" class="ds-headline">Publish it as an API</h2>
-      <p class="section-lede"><strong>What you do.</strong> One POST, from a shell, or the <code>endpoints_create</code> MCP tool if the agent is doing it:</p>
+      <p class="section-lede"><strong>What you do.</strong> Ask the agent to publish the pipeline under a path. It calls the <code>endpoints_create</code> MCP tool with the path and the pipeline's name:</p>
       <div class="code-block">
-        <pre><code>curl -X POST http://localhost:8080/api/v1/endpoints \
-  -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;" -H "Content-Type: application/json" \
-  -d '{"path": "/nyc/v1/borough-fare-by-weather",
-       "pipeline": "test/borough_fare_by_weather",
-       "description": "Fare revenue per borough, rainy vs dry days"}'</code></pre>
+        <pre><code>endpoints_create {"path": "/nyc/v1/borough-fare-by-weather",
+                  "pipeline": "test/borough_fare_by_weather",
+                  "description": "Fare revenue per borough, rainy vs dry days"}</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
-      <p><strong>What you see.</strong> <code>201</code>, with the URL the path grammar built:</p>
+      <p><strong>What you see.</strong> The tool answers with the URL the path grammar built:</p>
       <div class="code-block">
-        <pre><code>{"schema_version": 1, "data": {
-  "path": "/nyc/v1/borough-fare-by-weather",
-  "pipeline": "test/borough_fare_by_weather",
-  "enabled": true,
-  "url": "/api/nyc/v1/borough-fare-by-weather", …}}</code></pre>
+        <pre><code>{"path": "/nyc/v1/borough-fare-by-weather",
+ "pipeline": "test/borough_fare_by_weather",
+ "timeout_seconds": 30, "enabled": true,
+ "url": "/api/nyc/v1/borough-fare-by-weather", …}</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
-      <!-- claim: docs/rest-api.md §19.2 (released and side-effect-free), §19.1 (the path grammar; v* and api are reserved categories) -->
-      <p><strong>What just happened.</strong> Publication is refused unless the pipeline has a released version and is side-effect-free. Every node reads, and writes at most to the per-run tempdb or to the caller. That is what makes a <code>GET</code> safe to retry, preload or crawl. The path is <em>category, version, path</em>, and a category like <code>v1</code> or the literal <code>api</code> can never be published, so a published path can never shadow a product route. The API section in the UI lists the endpoint; managing it stays on REST and MCP.</p>
+      <!-- claim: docs/mcp-server.md §6.2.23 (endpoints_create), docs/rest-api.md §19.2 (released and side-effect-free), §19.1 (the path grammar; v* and api are reserved categories), §19.5 (the REST twin), docs/auth.md §7.7 (the MCP key reaches /mcp and nothing else) -->
+      <p><strong>What just happened.</strong> Publication is refused unless the pipeline has a released version and is side-effect-free. Every node reads, and writes at most to the per-run tempdb or to the caller. That is what makes a <code>GET</code> safe to retry, preload or crawl. The path is <em>category, version, path</em>, and a category like <code>v1</code> or the literal <code>api</code> can never be published, so a published path can never shadow a product route. The same publish exists as <code>POST /api/v1/endpoints</code> for a signed-in session. Your MCP key reaches <code>/mcp</code> and nothing else, so a script publishes with a session, not with that key. The API section in the UI lists the endpoint.</p>
     </div>
   </section>
 
-  <!-- ============================ STEP 7: SCOPE A KEY TO IT ============================ -->
+  <!-- ============================ STEP 7: BIND A KEY TO IT ============================ -->
   <section class="section" id="step-endpoint-key" aria-labelledby="step-endpoint-key-title">
     <div class="container">
       <p class="kicker">Step 7</p>
-      <h2 id="step-endpoint-key-title" class="ds-headline">Scope an API key to the endpoint</h2>
-      <p class="section-lede"><strong>What you do.</strong> An <strong>admin creates an API key</strong> on the <strong>API keys</strong> page at <code>/api-keys</code> and <strong>associates</strong> it with the endpoint's path. In the demo you are the admin, so this is you. Pick the kind <em>API key</em>, which is the <code>endpoint</code> kind on the wire, add a name, and set the path under <em>Associated endpoints</em>. Or do it over REST:</p>
-      <div class="code-block">
-        <pre><code>curl -X POST http://localhost:8080/api/v1/auth/api-keys \
-  -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;" -H "Content-Type: application/json" \
-  -d '{"name": "weather-app", "kind": "endpoint",
-       "bindings": ["/nyc/v1/borough-fare-by-weather"]}'</code></pre>
-        <button type="button" class="copy-btn" hidden>Copy</button>
-      </div>
+      <h2 id="step-endpoint-key-title" class="ds-headline">Bind an API key to the endpoint</h2>
+      <p class="section-lede"><strong>What you do.</strong> An <strong>admin creates an API key</strong> on the <strong>API keys</strong> page at <code>/api-keys</code> and <strong>associates</strong> it with the endpoint's path. In the demo you are the admin, so this is you. Choose <strong>New API key</strong> and keep the kind <em>API key</em>, which is the <code>endpoint</code> kind on the wire. Name it <code>weather-app</code>, tick the endpoint's path under <em>Associated endpoints</em>, and choose <strong>Create key</strong>. The key is shown once. Copy it for step 8.</p>
       <div>
         <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>API keys</span><span class="tag">Screenshot</span></div>
         <img src="/site/img/tutorial-endpoint-key.png" width="2880" height="1800" loading="lazy" alt="The API keys page: an API key whose associated-endpoints cell names the bound path.">
-        <figcaption>The API key in the keys table: its reach is the associated path, not a scope list.</figcaption>
+        <figcaption>The API key in the keys table, with the associated path as its reach.</figcaption>
         </figure>
       </div>
-      <!-- claim: docs/auth.md §7.7 (an endpoint key's authority is its bindings; nearest ancestor wins), docs/rest-api.md §19.3 (a session is a 401 here) -->
-      <p><strong>What just happened.</strong> An endpoint key carries no scopes at all. Its authority is exactly its bindings, and the nearest bound ancestor decides: a binding to <code>/nyc</code> would cover every endpoint under it. The negative control, from the same run: the agent's key from step 2, the one that authored the pipeline, is refused here:</p>
+      <!-- claim: docs/auth.md §7.5 (the api_caller key role), §4.7 (the key's own identity), §7.7 (an endpoint key's reach is its bindings; nearest ancestor wins; the MCP key is refused off /mcp), docs/rest-api.md §19.3 (a session is a 401 here) -->
+      <p><strong>What just happened.</strong> The key acts as its own identity with one fixed role, <em>api caller</em>. The keys table's <em>Acts as</em> column names that identity after the key. Its reach is exactly its bindings, and the nearest bound ancestor decides: a binding to <code>/nyc</code> would cover every endpoint under it. The negative control, from the same run: the agent's key from step 2 is refused here, because an MCP key reaches <code>/mcp</code> and nothing else:</p>
       <div class="code-block">
         <pre><code>$ curl http://localhost:8080/api/nyc/v1/borough-fare-by-weather \
     -H "DP-API-Key: dpk_&lt;the agent key&gt;"
-403 — {"error": {"code": "endpoint.key_not_bound", …}}</code></pre>
+403 — {"error": {"code": "endpoint.key_kind_refused",
+       "details": {"reason": "user_key_off_surface"}, …}}</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
       </div>
     </div>
@@ -244,7 +235,7 @@ anything. Stop after reporting.</code></pre>
     <div class="container">
       <p class="kicker">Step 8</p>
       <h2 id="step-call-title" class="ds-headline">Call it, and page the result</h2>
-      <p class="section-lede"><strong>What you do.</strong> A GET with the endpoint key. No session, no SDK:</p>
+      <p class="section-lede"><strong>What you do.</strong> A GET with the API key from step 7. No session, no SDK:</p>
       <div class="code-block">
         <pre><code>curl http://localhost:8080/api/nyc/v1/borough-fare-by-weather \
   -H "DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;"</code></pre>
@@ -253,11 +244,11 @@ anything. Stop after reporting.</code></pre>
       <p><strong>What you see.</strong> <code>200</code>, and the first page with its cursor. The output below is trimmed; the run returned 12 rows:</p>
       <div class="code-block">
         <pre><code>{
-  "execution_id": "2e9236bd-707d-4f23-b71a-8757ad9ae64b",
-  "schema": [{"name": "borough", "type": "STRING"}, …],
-  "rows": [["Bronx", "dry", "290", "5718", 185793.34, …], …],
+  "execution_id": "be1f1c32-f13c-4540-be4c-c9aee8e95fb0",
+  "schema": [{"name": "borough", "type": "STRING", "nullable": true}, …],
+  "rows": [["Bronx", "dry", "290", "5718", "185793.34", "2972693.44"], …],
   "row_count": 12, "total_rows": 12, "has_more": false,
-  "result_url": "http://localhost:8080/api/v1/executions/2e9236bd-…/result",
+  "result_url": "http://localhost:8080/api/v1/executions/be1f1c32-…/result",
   "ttl_seconds": 300
 }</code></pre>
         <button type="button" class="copy-btn" hidden>Copy</button>
@@ -684,7 +675,7 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §10, docs/datasources.md §7.4 -->
           <h3>Append-only audit log</h3>
-          <p>Logins, key lifecycle, scope denials, user admin, workspace events, promotion accept/reject, every MCP tool call and each credential-decryption point, recorded with actor, cause and source IP.</p>
+          <p>Logins, key lifecycle, permission denials, user admin, workspace events, promotion accept/reject, every MCP tool call and each credential-decryption point, recorded with actor, cause and source IP.</p>
         </article>
 
         <article class="card ds-hover-lift">
@@ -746,9 +737,9 @@ anything. Stop after reporting.</code></pre>
           </svg>
           <!-- claim: docs/auth.md §7.7 -->
           <h3>A key has a kind, and the kind decides its reach</h3>
-          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Three kinds.</span> A <code>user</code> key is an agent's key and a program's key. Its authority is its scopes. An <code>endpoint</code> key authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
+          <p><span th:text="|${#strings.capitalize(facts.apiKeyKindCountWord)} kinds.|">Three kinds.</span> A <code>user</code> key is the agent's MCP key. It acts as its member, capped at author, and reaches <code>/mcp</code> and nothing else. An <code>endpoint</code> key carries the <em>api caller</em> role and authorises the published paths it is <em>bound</em> to. A <code>server</code> key opens the promotion routes and nothing else.</p>
           <!-- claim: docs/auth.md §7.7 (the confinement is central) -->
-          <p>The confinement is decided centrally, before any handler's annotation is read. A new route cannot become quietly reachable to a scopeless key.</p>
+          <p>The confinement is decided centrally, before any handler's annotation is read. A new route cannot become quietly reachable to a key of the wrong kind.</p>
           <a class="card-link" th:href="@{/docs/auth}">Read the spec &rarr;</a>
         </article>
 
@@ -772,9 +763,9 @@ anything. Stop after reporting.</code></pre>
             <circle cx="8" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
             <path d="M12 12h9M17 12v3M20 12v2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
-          <!-- claim: docs/auth.md §5.1, §7.1–7.6 -->
-          <h3>OIDC SSO + scoped agent keys</h3>
-          <p>Humans sign in through OIDC SSO. Agents get their own API keys with hierarchical scopes. Separate principals, separate blast radii.</p>
+          <!-- claim: docs/auth.md §5.1, §4.7, §7.1–7.7 -->
+          <h3>OIDC SSO + agent keys that carry a role</h3>
+          <p>Humans sign in through OIDC SSO. An agent's key acts as its person, capped at author. A program's API key acts as its own identity. Separate principals, separate blast radii.</p>
         </article>
 
         <article class="card ds-hover-lift">

@@ -34,7 +34,7 @@
         <li><strong>Revoking one person means rotating a shared password</strong>, and then finding every config that held it.</li>
         <li><strong>There is no audit trail.</strong> The database sees one login. It cannot tell you which agent, on whose behalf, ran what.</li>
       </ul>
-      <p>This server is the other shape: the credentials live in the deployment, the agent gets a key, and the key is the thing you scope, revoke and audit.</p>
+      <p>This server is the other shape: the credentials live in the deployment, the agent gets a key that carries its person's role, and the key is the thing you revoke and audit.</p>
     </div>
   </section>
 
@@ -112,7 +112,7 @@
       <div th:each="g : ${toolGroups}" class="feature-group">
         <h3 class="group-title" th:text="${g.title}">Family</h3>
         <p class="engine-strip-more">
-          <span th:text="${g.tools.size()}">6</span> tools. Every name, its scope and whether it writes is listed on
+          <span th:text="${g.tools.size()}">6</span> tools. Every name, its permission and whether it writes is listed on
           <a th:href="@{/mcp-tools}">the tools page</a>.
         </p>
       </div>

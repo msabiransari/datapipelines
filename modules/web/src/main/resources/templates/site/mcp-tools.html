@@ -10,12 +10,12 @@
     </ol>
   </nav>
 
-  <!--/* Site v2: the tool list, generated — names from McpToolCatalog.ENTRIES, scopes from
-       ScopeMatrix (McpToolGroups). The group introductions are prose, cited; the rows are
+  <!--/* Site v2: the tool list, generated — names and permissions from
+       McpToolCatalog.ENTRIES (McpToolGroups). The group introductions are prose, cited; the rows are
        not typed by hand, so the page cannot name a tool the server does not ship. */-->
   <!-- claim: docs/mcp-server.md §6.1 — the tool naming convention and count -->
   <!-- claim: docs/mcp-server.md §6.2 — the tool definitions -->
-  <!-- claim: docs/auth.md §7.6 — the scope each tool requires -->
+  <!-- claim: docs/auth.md §7.6 — the permission each tool requires -->
   <!-- claim: docs/datasources.md §7C — catalogue statistics -->
   <!-- claim: docs/datasources.md §7D — the SQL probe -->
   <!-- claim: docs/versioning.md §3 — no release tool -->
@@ -26,7 +26,7 @@
       <h1 id="mt-title" class="ds-display">The MCP tools: everything an agent can do against your databases</h1>
       <p class="section-lede">
         <span th:text="${facts.toolCount}">30</span> tools over Streamable HTTP, <span th:text="${facts.mutatingToolCount}">16</span> of
-        them writes, every one gated by the scope its key must hold. The list below is rendered from the same catalogue
+        them writes, every one gated by a permission the key's role must hold. The list below is rendered from the same catalogue
         the server registers at startup, so it cannot drift from what your agent sees in <code>tools/list</code>. What is
         <em>not</em> here is as deliberate as what is: there is no release tool, no promote tool, and no tool that returns
         a credential.
@@ -43,13 +43,13 @@
       <p class="kicker">By family</p>
       <h2 id="mt-groups" class="ds-headline">Read what it may, write only drafts</h2>
       <div class="prose">
-        <!-- claim: docs/mcp-server.md §6.1 -->
+        <!-- claim: docs/mcp-server.md §6.1, docs/auth.md §7.6 (each tool's permission and the roles that hold it) -->
         <p>
-          Names are <code>&lt;family&gt;_&lt;verb&gt;</code>. Reads need <code>read</code>; anything that runs SQL against
-          your data needs <code>execute</code>; anything that creates or changes a draft, registers a lake table or
-          probes a <code>SELECT</code> needs <code>author</code>. Previewing rows and probing SQL are <code>author</code>
-          rather than <code>read</code>, because a schema is metadata and a row is your customer's; catalogue statistics
-          stay <code>read</code>, because a count the engine already stored is shape, not data.
+          Names are <code>&lt;family&gt;_&lt;verb&gt;</code>. Every tool declares one permission, and your key holds the
+          permissions of your role, capped at author. A viewer reads and runs pipelines; an author also creates and
+          changes drafts, registers lake tables and probes a <code>SELECT</code>. Previewing rows and probing SQL are an
+          author's rather than a viewer's, because a schema is metadata and a row is your customer's; catalogue
+          statistics stay a viewer's, because a count the engine already stored is shape, not data.
         </p>
       </div>
       <!-- claim: docs/superpowers/specs/2026-09-11-learned-semantic-layer-design.md §7 (the semantics_* tools), docs/enums.md §19 (the kinds they record) -->
@@ -103,7 +103,7 @@
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Add the server and the skill</a>
-        <a class="btn btn-secondary" th:href="@{/security}">How access is scoped</a>
+        <a class="btn btn-secondary" th:href="@{/security}">How access is decided</a>
       </div>
     </div>
   </section>

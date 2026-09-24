@@ -129,23 +129,27 @@ class SiteV2GuardsTest {
     }
 
     /**
-     * 160 — `admin` is not a key scope (auth.md §7.5: it left the key wire in RBAC round 1;
-     * requesting it is `auth.key_scope_unavailable`). No marketing page may render it as one,
-     * so the literal a scope table or a scope sentence renders — `<code>admin</code>` — is
-     * banned outright: every appearance of that literal on these pages has been a scope claim.
-     * The security page's three-scope wording is the exemplar this guard holds the site to.
+     * 160, re-based by #215 slice (c) — a key carries no scope at all since slice (b) (auth.md
+     * §7.5: the `read` ⊂ `execute` ⊂ `author` ⊂ `admin` axis went with V34; a key holds a ROLE).
+     * No marketing page may render a key scope, so the four literals a scope table or a scope
+     * sentence renders are banned outright: every appearance of them on these pages has been a
+     * scope claim. The last three were the tutorial's step 2 and the tools page's family
+     * paragraph, rewritten to roles in the same slice; 160 banned only `admin`. The security
+     * page's role wording is the exemplar this guard holds the site to.
      */
     @Test
-    fun `no page names admin as a key scope`() {
+    fun `no page names a key scope`() {
         rendered.forEach { (page, html) ->
-            withClue("${page.path}: <code>admin</code> renders — admin is not a key scope (docs/auth.md §7.5)") {
-                html.contains("<code>admin</code>") shouldBe false
+            RETIRED_SCOPE_LITERALS.forEach { literal ->
+                withClue("${page.path}: $literal renders — keys carry roles, not scopes (docs/auth.md §7.5)") {
+                    html.contains(literal) shouldBe false
+                }
             }
         }
         val security = rendered.getValue(SitePages.SECURITY)
-        listOf("<code>read</code>", "<code>execute</code>", "<code>author</code>").forEach { scope ->
-            withClue("the security page no longer names the three key scopes — the arm would pass on an empty page") {
-                security.contains(scope) shouldBe true
+        listOf("capped at author", "api caller").forEach { phrase ->
+            withClue("the security page no longer states the key roles — the arm would pass on an empty page") {
+                security.contains(phrase) shouldBe true
             }
         }
     }
@@ -155,8 +159,8 @@ class SiteV2GuardsTest {
         val html = rendered.getValue(SitePages.MCP_TOOLS)
         val rows = TOOL_ROW.findAll(html).map { it.groupValues[1] to it.groupValues[2] }.toList()
         rows.map { it.first }.sorted() shouldBe McpToolCatalog.NAMES.sorted()
-        // Every row carries its scope from the matrix — never the "—" fallback.
-        rows.forEach { (name, scope) -> withClue("$name has a scope") { (scope != "—") shouldBe true } }
+        // Every row carries its catalog permission — never the "—" fallback.
+        rows.forEach { (name, permission) -> withClue("$name has a permission") { (permission != "—") shouldBe true } }
     }
 
     @Test
@@ -228,6 +232,9 @@ class SiteV2GuardsTest {
 
     private companion object {
         const val ROADMAP_MAX_AGE_DAYS = 120L
+
+        /** The retired key scopes as a scope table or sentence renders them (auth.md §7.5, #215). */
+        val RETIRED_SCOPE_LITERALS = listOf("<code>read</code>", "<code>execute</code>", "<code>author</code>", "<code>admin</code>")
         val MAPPER = ObjectMapper()
         val LD_JSON = Regex("""<script type="application/ld\+json">(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
 
@@ -239,7 +246,7 @@ class SiteV2GuardsTest {
          */
         val DETAILS = Regex("""<details[^>]*>\s*<summary>([^<]*)</summary>\s*<p>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL)
 
-        /** One tool row on /mcp-tools: the name, then its first status chip (the scope). */
+        /** One tool row on /mcp-tools: the name, then its first status chip (the catalog permission). */
         val TOOL_ROW = Regex("""<li>\s*<code>([a-z_]+)</code>\s*<span class="status">([^<]*)</span>""")
         val HREF = Regex("""<a[^>]*\shref="([^"]*)"""")
         val TAG = Regex("<[^>]+>")

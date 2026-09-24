@@ -1007,7 +1007,7 @@
     },
     {
      "level": "SUMMARY",
-     "text": "What scope should the agent's key carry?"
+     "text": "What role does the agent's key carry?"
     },
     {
      "level": "SUMMARY",
@@ -1860,7 +1860,7 @@
     },
     {
      "level": "H3",
-     "text": "One key, a scope, a workspace"
+     "text": "One key, your role, one workspace"
     },
     {
      "level": "H3",
@@ -2943,7 +2943,7 @@
     },
     {
      "level": "H2",
-     "text": "Scope an API key to the endpoint"
+     "text": "Bind an API key to the endpoint"
     },
     {
      "level": "H2",
@@ -3075,7 +3075,7 @@
     },
     {
      "level": "H3",
-     "text": "OIDC SSO + scoped agent keys"
+     "text": "OIDC SSO + agent keys that carry a role"
     },
     {
      "level": "H3",

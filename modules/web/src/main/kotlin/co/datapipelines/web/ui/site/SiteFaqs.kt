@@ -68,7 +68,7 @@ object SiteFaqs {
             FaqEntry(
                 "How is this different from a Postgres MCP server?",
                 "A single-database MCP server gives one agent one database and usually one connection string on a laptop. " +
-                    "This gives the agent all of your databases through one scoped key, a scratch engine to join their results, " +
+                    "This gives the agent all of your databases through one revocable key, a scratch engine to join their results, " +
                     "versioned drafts a person reviews, an audit trail per call, and an HTTP API for what it builds. Every " +
                     "tool is specified in docs/mcp-server.md §6.2.",
                 "docs/mcp-server.md §6.2",
@@ -77,8 +77,8 @@ object SiteFaqs {
                 "What can an agent do, and what can it never do?",
                 "It can read schemas, catalogue statistics and indexes, probe a SELECT, create and iterate a draft pipeline, " +
                     "run it, read the result, and cancel its own runs. It can never release a version, never read a " +
-                    "credential, and never touch a datasource marked read-only with a write. Scopes are per key and the " +
-                    "matrix is docs/auth.md §7.6.",
+                    "credential, and never touch a datasource marked read-only with a write. Its key holds your role, capped " +
+                    "at author, and the permission catalog is docs/auth.md §7.6.",
                 "docs/auth.md §7.6",
             ),
             FaqEntry(
@@ -410,7 +410,7 @@ object SiteFaqs {
             FaqEntry(
                 "Do I have to write anything?",
                 "No. The agent records what it learns while it works; you verify when you want to. Recording needs an " +
-                    "author-scoped key and a release is still a person's act, the same bar as authoring a pipeline. " +
+                    "author's key and a release is still a person's act, the same bar as authoring a pipeline. " +
                     "(docs/auth.md §7.6).",
                 "docs/auth.md §7.6",
             ),

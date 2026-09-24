@@ -19,7 +19,7 @@
       <h1 id="add-title" class="ds-display">Add an MCP server to Claude Code, Cursor or Copilot</h1>
       <p class="section-lede">
         This page sets up <strong>one particular MCP server</strong>, datapipelines.co's, the one that puts your
-        SQL databases behind scoped, audited, read-only-by-default credentials. It is not a general directory of
+        SQL databases behind role-checked, audited, read-only-by-default credentials. It is not a general directory of
         MCP servers. If you came looking for how the <code>mcp add</code> mechanics work, they are the same either
         way, and the four steps below are the whole job.
       </p>
@@ -53,21 +53,21 @@
         clipboard; it never sits in the page. The chip is also where you rotate: delete it, and your next sign-in
         creates a fresh one.
       </p>
-      <p>The key carries your role in that workspace. There is no scope to pick:</p>
+      <p>The key carries your role in that workspace, capped at author. There is nothing to pick:</p>
       <table class="facts-table">
         <caption>What the key may do, by the role you hold in its workspace.</caption>
         <thead>
           <tr><th scope="col">Your role</th><th scope="col">The agent may…</th></tr>
         </thead>
         <tbody>
-          <tr><th scope="row">Viewer</th><td>browse pipelines, templates, datasources and past executions, and run pipelines</td></tr>
-          <tr><th scope="row">Author</th><td>also create and update pipelines and templates, and introspect schemas</td></tr>
-          <tr><th scope="row">Promoter</th><td>read released-and-newer pipelines and templates. That is the promotion reviewer's reach, nothing executable</td></tr>
-          <tr><th scope="row">Workspace admin</th><td>everything the author may do, plus the workspace's administration</td></tr>
+          <tr><th scope="row">Viewer</th><td>browse pipelines, templates and datasources, read schemas, run pipelines and read your own past runs</td></tr>
+          <tr><th scope="row">Author</th><td>also create and update pipelines and templates, probe SQL, preview rows and publish endpoints</td></tr>
+          <tr><th scope="row">Promoter</th><td>read released-and-newer pipelines and templates, and datasource schemas. That is the promotion reviewer's reach, nothing executable</td></tr>
+          <tr><th scope="row">Workspace admin</th><td>the same as an author. A key is capped at author, and administering the workspace is a signed-in person's act</td></tr>
         </tbody>
       </table>
-      <!-- claim: docs/auth.md §7.5 — admin is not a key scope; §11A.4 — the issuer's role is re-read per request -->
-      <p>Administration of the instance is for signed-in people; no key can hold it. The key's reach is re-read
+      <!-- claim: docs/auth.md §7.5 — a key's role is its member's, capped at author, and no key is a super admin; §11A.4 — the role is re-read per request -->
+      <p>Administration, of the workspace or of the instance, is for signed-in people; no key can hold it. The key's reach is re-read
         against your role on every request, so a demotion narrows the key within about a minute with no reissue needed.</p>
       <p>Rotating means deleting the key on the chip and signing in again; it takes effect within about a minute. There is no shared password to rotate.</p>
     </div>
@@ -112,11 +112,11 @@
       <ul class="fact-list fact-list-plain">
         <li><strong><code>401 auth.api_key.missing</code></strong>: the header did not arrive. Check the header name, and that the client sends headers at all on HTTP transports.</li>
         <li><strong><code>401 auth.api_key.invalid</code> or <code>auth.api_key.expired</code></strong>: wrong, revoked, expired, or the owning user is deactivated.</li>
-        <li><strong><code>403 auth.scope.insufficient</code> or <code>auth.role_required</code></strong>: the key is real and your role in that workspace is too small for what the agent tried. The key follows the role: ask a workspace admin to raise it rather than looking for a wider key. None exists.</li>
+        <li><strong><code>auth.key_issuer_role_lost</code> or <code>auth.role_required</code></strong>, as the tool's result: the key is real and your role in that workspace does not reach what the agent tried. The key follows the role: ask a workspace admin to raise it rather than looking for a wider key. None exists.</li>
         <li><strong>Silent rejection of a browser session</strong>: expected. <code>/mcp</code> takes API keys only; a cookie will never work there.</li>
       </ul>
       <p><a th:href="@{/docs/mcp-server}">The MCP server specification &rarr;</a> &middot;
-         <a th:href="@{/docs/auth}">Authentication and scopes &rarr;</a></p>
+         <a th:href="@{/docs/auth}">Authentication and roles &rarr;</a></p>
     </div>
   </section>
 
@@ -124,7 +124,7 @@
     <div class="container">
       <p class="kicker">Asked before</p>
       <!-- claim: docs/mcp-server.md §3.2 — which MCP client should I use -->
-      <!-- claim: docs/auth.md §7.5 — what scope should the key carry -->
+      <!-- claim: docs/auth.md §7.5 — what role the key carries -->
       <!-- claim: docs/deployment.md §3.5 — which drivers ship in the image -->
       <!-- claim: docs/mcp-server.md §4.2 — the tools did not come back -->
       <div th:replace="~{site/_layout :: faq(${faqEntries}, false, 'Client setup, in questions')}"></div>
