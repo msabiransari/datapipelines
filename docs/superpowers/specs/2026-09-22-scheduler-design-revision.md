@@ -922,3 +922,84 @@ behavior is accurate. `current_version` behaves as §3.1 says (D60, D63). `add_d
 and `MailMessage`. V15 is the lake registry. Viewers execute, and runs are own-only under D11. The
 guards the spec names exist, and the pipeline editor already calls `/api/v1` from the browser with
 the CSRF header.
+
+### 9.6 Second review: blockers, proposed defaults and order (2026-09-23)
+
+A second reviewer (the orchestrator session) read §9 and sent the proposals below. They are
+recorded here as received, reworded only for this public document. **Nothing in this subsection is
+ruled.** The owner will take it up after the permissions round (#215) lands.
+
+**What changed after §9 was written:**
+- #213 merged, so the key-surface collision is gone and V32 is taken.
+- The transform engine (#7, lane 7a) merged, and lane 7b is in flight with V33. The first scheduler
+  slice therefore shares files with the transform lanes.
+
+**Five rulings that block the first prompt, with the reviewer's recommendations:**
+1. **Engine shape (B1).** One dispatcher task, as in B1.
+2. **Run states (B2).** A state plus a reason, one mapping table, `instance_lost` → unknown (which
+   blocks the schedule), and the reworded guarantee. Accept as written.
+3. **Where scheduler keys are stored (B4).** A separate table, not a new kind in `api_keys`.
+4. **Who creates scheduler keys (B5).** A new permission for authors to create their own keys;
+   admins may assign any key, with a warning that the runs belong to that key's owner.
+5. **The application credential for the schedule API (B7).** For the first release, a
+   service-account member using its login key, with an admin-created application key tracked as a
+   follow-up. Isolation is per workspace only, so external-customer isolation leaves v1 acceptance.
+
+**Defaults to write in unless the owner objects:**
+- **Capacity:** a separate slot budget for scheduled runs; a run refused for capacity retries within
+  its lateness window.
+- **Pipeline version:** RELEASED only.
+- **Daylight saving:** a run in the spring-forward gap runs just after the gap; a run in the repeated
+  autumn hour runs once.
+- **Lateness:** fixed at 10 minutes. Runs due while paused are not missed. The catch-up value is
+  renamed `latest`. Run now during an active run answers 409.
+- **Notifications:** per-event toggles defaulting to failed, unknown and blocked. Email is off unless
+  explicitly enabled, so a local instance cannot mail real recipients through production SMTP
+  settings. Links use the configured base URL.
+- **Visibility:** viewers see a schedule's name, timing and state; parameter values and recipient
+  lists are for the owner and admins.
+- **Pipeline link:** each schedule stores an indexed pipeline reference, so a pipeline can show which
+  schedules run it.
+- **First-release bindings:** literals plus `TODAY` and `YESTERDAY`.
+- **Deletion:** soft delete; a running execution is left alone unless the caller asks to cancel it.
+- **Limits:** a 5-minute minimum interval, a cap on schedules per workspace, and the error, config
+  and metric catalogs written before code.
+- **Deploys:** accept that a deploy aborts in-flight scheduled runs, with a clear history row; add a
+  shutdown grace period to the compose file.
+- **Execution role:** the role selector is dropped, since running needs only viewer. Background
+  ad-hoc runs become their own later slice.
+- **Name grammar:** moves into the `typesystem` module (A2's first option).
+
+**Order against the transform lanes (the reviewer's proposal):**
+- The core slice cannot start before 7b merges: both edit the scope matrix, the auth role table and
+  the migration numbering.
+- After 7b, the remaining shared files are the error-code count, the configuration doc and the module
+  dependency table, which can be split at merge.
+- It recommends running the scheduler core beside lane 7c. The alternative is starting after 7e,
+  which keeps the strict sequence at the cost of several lane cycles.
+
+**Owner's decision the same day:** security first. The permissions round (#215) follows 7b, and
+lanes 7c–7e are held. The scheduler, including these blockers and the parallel-versus-sequential
+question, comes after #215.
+
+**Reconciliation with the ratified permissions record (#215), for the scheduler round:**
+- **Blocker 4 is largely answered.** Authors and above create scheduler keys
+  (`scheduler_key.create`), and every scheduler key is its own identity. Runs belong to the key's
+  identity, not to an admin or to the author, so the "author cannot see their own schedule's
+  results" problem does not arise in that form. The assignment warning becomes moot, because the
+  creator no longer matters. What remains is who may read a schedule's runs besides the
+  `execution.read_all` holders.
+- **Blocker 3 stays open** (permissions record §8). A separate table gives the strongest guarantee
+  that no bearer lookup matches a scheduler key. An `api_keys` row with no secret for kind
+  `scheduler` keeps one key model and one role CHECK; that is cheaper now than when B4 was written.
+- **Blocker 5 has a cleaner option now.** A service-account member is a machine using a human-kind
+  account, whose MCP key (capped at author) can also edit pipelines. With role-carrying keys, a
+  pre-created key role holding the `schedule.*` permissions, offered to API keys, gives an
+  application a least-privilege credential without a new key kind.
+- **The execution-role default** matches #215: scheduler keys offer `viewer` only.
+- **The visibility default** needs restating as permissions. D2 makes ownership no authorization
+  dimension, so "the owner" cannot gate a read. Instead, for example, `schedule.read` for metadata
+  and a separate permission for parameter values and recipients.
+- **The §9.1 corrections A1, A10 and A11** describe the key model #215 replaces. Re-verify every
+  §9.1 item against main after #215 merges, before the spec is fixed.
+- **The proposed order predates #215.** "After 7b, beside 7c" becomes "after #215".
