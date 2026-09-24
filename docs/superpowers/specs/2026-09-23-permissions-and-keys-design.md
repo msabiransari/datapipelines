@@ -1,6 +1,7 @@
 # Permissions and keys: design record
 
-**Status:** RATIFIED 2026-09-23. The owner ruled PK1–PK9 (§1) and agreed O1–O3 (§9) the same day.
+**Status:** RATIFIED 2026-09-23; **amended 2026-09-24** (§10, the owner's rulings A1–A8 on the
+pre-implementation review). The owner ruled PK1–PK9 (§1) and agreed O1–O3 (§9) on 2026-09-23.
 **Date:** 2026-09-23.
 **Delivery:** [GitHub issue #215](https://github.com/msabiransari/datapipelines/issues/215).
 **Amends:** the [roles and permissions design](2026-09-20-roles-permissions-design.md) (ratified
@@ -24,10 +25,10 @@ comes from `auth.md` §7.6.
 | PK3 | No key can hold workspace admin or super admin. The key dialog never lists them. |
 | PK4 | The MCP key stays automatic: one per user per workspace, minted at login, not in the key dialog. It takes the member's current role, with workspace admin and super admin capped at author. A super admin with no membership in the workspace gets viewer. |
 | PK5 | Every other key gets its own identity: a `users` row that cannot log in, named after the key and used for attribution everywhere. `users` gains a kind: `human`, `service`, `system`. |
-| PK6 | Pre-created key roles: API keys offer `api-caller` and `viewer`; server keys offer `promotion-receiver`; scheduler keys (#9) will offer `viewer`. |
+| PK6 | Pre-created key roles: API keys offer `api_caller`; server keys offer `promotion_receiver`. **Amended 2026-09-24 (A1): no key carries the `viewer` role — `viewer` is a member role for the UI, and a key has no secret it belongs to.** The role a scheduler key (#9) carries is decided in the scheduler round. |
 | PK7 | Creating a key needs that key type's create permission: API keys, workspace admin and super admin; server keys, super admin; scheduler keys (#9), author and above. |
 | PK8 | Key scopes (`read` / `execute` / `author`) are removed; the key's role replaces them. |
-| PK9 | Existing keys migrate: API keys get their own identity and `api-caller`; server keys get their own identity and `promotion-receiver`; MCP keys only take the cap. Past executions keep their attribution. |
+| PK9 | Existing keys migrate: API keys get their own identity and `api_caller`; server keys get their own identity and `promotion_receiver`; MCP keys only take the cap. Past executions keep their attribution. |
 
 Unchanged and restated because they constrain this design:
 - **D2:** ownership is not an authorization dimension.
@@ -44,8 +45,9 @@ The legend for the role columns:
 - **lens:** the promoter lens narrows what is returned
 - **fenced:** reachable only through the promotion server-key route family, whatever the role
 
-For keys: a key holding `viewer` has exactly the viewer column. The MCP key follows PK4. The
-key-only roles are listed in §3.
+For keys: the MCP key follows PK4; the key-only roles (`api_caller`, `promotion_receiver`) are listed
+in §3 — no key holds a member role (A1). A key that serves published endpoints serves only the
+paths bound to it, whatever else it holds (A1; the path-binding rule of auth §7.7 is unchanged).
 
 For browser sessions, every cell is today's access. A cell marked (C1) is where a *key* holding that
 role gains access it lacks today (§5).
@@ -131,7 +133,7 @@ browser route reaches them.
 | `promotion.inventory.read` | `READ_RESOURCES` as the System account | `GET /api/v1/promotion/inventory` (the receiving side) | fenced | fenced | fenced | fenced | fenced |
 | `promotion.push` | `MUTATE_PIPELINES_TEMPLATES` as the System account | `POST /api/v1/promotion/push` (the receiving side) | fenced | fenced | fenced | fenced | fenced |
 
-Only the `promotion-receiver` key role holds the two receiving permissions (§3). The route filter
+Only the `promotion_receiver` key role holds the two receiving permissions (§3). The route filter
 that admits only a server key on `/api/v1/promotion/` stays, so a super admin's session does not
 reach these routes even though D7 would grant the permission.
 
@@ -172,17 +174,19 @@ permissions stay separate even while every role holds both (for example `pipelin
 | Key type (wire kind) | Created by | Roles offered | Acts as | Lifetime |
 |---|---|---|---|---|
 | MCP key (`user`) | automatic at login (D16) | none; the member's role per PK4 | the member | ends with the membership (#200) |
-| API key (`endpoint`) | `api_key.create` | `api-caller`, `viewer` | its own identity (PK5) | until revoked or expired |
-| Server key (`server`) | `server_key.create` | `promotion-receiver` | its own identity | until revoked or expired |
-| Scheduler key (#9) | `scheduler_key.create` (author and above) | `viewer` | its own identity | until revoked; lands with the scheduler |
+| API key (`endpoint`) | `api_key.create` | `api_caller` (A1: `viewer` withdrawn) | its own identity (PK5) | until revoked or expired |
+| Server key (`server`) | `server_key.create` | `promotion_receiver` | its own identity | until revoked or expired |
+| Scheduler key (#9) | `scheduler_key.create` (author and above) | decided in the scheduler round (A1: not `viewer`) | its own identity | until revoked; lands with the scheduler |
 
 ### 3.2 Pre-created key roles
 
 | Key role | Permissions | Notes |
 |---|---|---|
-| `api-caller` | `endpoint.serve` for the paths bound to the key; `execution.result.read` for the executions the key started | Exactly today's endpoint key, which is why every existing API key migrates to it |
-| `viewer` | the viewer column of §2 | Can read the workspace (pipeline definitions, datasource metadata and schemas) and execute. Offered to API keys for applications that call the REST API |
-| `promotion-receiver` | `promotion.inventory.read`, `promotion.push` | Replaces today's System-account-with-author authority on the receiving side |
+| `api_caller` | `endpoint.serve` for the paths bound to the key; `execution.result.read` for the executions the key started | Exactly today's endpoint key, which is why every existing API key migrates to it (PK9). The only role an API key may hold (A1). |
+| `promotion_receiver` | `promotion.inventory.read`, `promotion.push` | Replaces today's System-account-with-author authority on the receiving side |
+
+Spelling (A5): key roles are `snake_case` everywhere — storage, wire, the CHECK and the dialog's
+values — like the member roles (`workspace_admin`); the UI shows a human label.
 
 A key's role is stored on the key row (`api_keys.role`), not on a membership. This is a
 recommendation, because putting it on a membership would make every members list, invitation and
@@ -191,7 +195,7 @@ facts:
 
 ```
 (kind = 'user'     AND role IS NULL)
-OR (kind = 'endpoint' AND role IN ('api_caller', 'viewer'))
+OR (kind = 'endpoint' AND role = 'api_caller')
 OR (kind = 'server'   AND role = 'promotion_receiver')
 ```
 
@@ -206,7 +210,7 @@ later role cannot slip past it.
   row (auth §4.5) and `human` on every other row.
 - The identity is built exactly like the System account, so login is impossible by construction:
   - it is created in the same transaction as the key
-  - `display_name` is the key's name; renaming the key renames the identity
+  - `display_name` is the key's name (keys have no rename; A6)
   - `email` is `<key-id>@keys.invalid`, under RFC 2606's unresolvable `.invalid`
   - `provider` is `key`, reserved at startup like `system`, `local` and `bootstrap`
   - `provider_subject` is the key id
@@ -214,6 +218,17 @@ later role cannot slip past it.
 - Identities hold **no membership**; their authority is the key's role in the key's pinned workspace.
 - Revoking the key deactivates the identity (the deactivation mechanism of roles design §3.5).
   History keeps it and shows "<key name> (API key)".
+- **Lifecycle is derived, never cascaded (A2).** Deactivating or deleting a workspace does NOT
+  revoke its keys or deactivate their identities (that would erase the record of manual
+  deactivations, and reactivating the workspace would re-enable them). Instead the ONE query that
+  resolves a principal's permissions checks that the workspace is active AND that the user,
+  identity or key is active and not revoked, and returns NO permissions otherwise — for sessions,
+  MCP keys, API keys and server keys alike. Reactivating the workspace restores exactly what was
+  active before. A gate per condition (§7, gate 10).
+- **Identities are managed only through their key (A3).** The user-admin routes (`user.manage`,
+  `user.identity_reset`: list, deactivate, reactivate, identity reset, password) refuse a non-human
+  row with not-found semantics, so an admin cannot act on an identity behind its key's back; the
+  admin users page, members lists and invitations show `human` rows only.
 - Attribution: `pipeline_executions.executed_by`, `audit_log.user_id` and every `created_by`
   written on a key's behalf name the identity. `executed_by_key_kind` stays.
 - The per-user concurrency limit (`ExecutionSlots`, keyed on `executed_by`) becomes a per-key
@@ -285,7 +300,12 @@ the first code commit. Migration: the next free number at that point (7b takes V
   table in code.
 - Every handler, UI route and MCP tool declares exactly one catalog permission.
 - `auth.md` §7.6 is rewritten as the catalog table in the same commits.
-- Scopes still exist in this slice, so key behaviour is unchanged.
+- Scopes still exist in this slice, so key behaviour is unchanged — which requires (A4) that each
+  catalog permission carries the operation's former `minScope` in a `Permission → Scope` table the
+  scope check reads; slice (b) deletes that table with the scopes. `RestOperation` may be retired in
+  (a) only if that table replaces it one-for-one.
+- Counts are re-derived from the code on the lane's base, never copied from this record (A7): main
+  carries 42 MCP tools since lane 7b (`templates_evaluate`, on the `templates_render` row).
 - Proof: the role walk passes with unchanged expectations, and the new catalog drift gate fails if
   code and document disagree in either direction.
 
@@ -318,17 +338,24 @@ permission per type. Docs: ui-screens.
 7. **Create permission per key type.** An author cannot create an API or server key; a viewer can
    create no key.
 8. **Visibility.** `ExecutionsVisibilityTest` extended: key-identity runs are visible to
-   `execution.read_all` holders; an `api-caller` key reads only the results of runs it started.
+   `execution.read_all` holders; an `api_caller` key reads only the results of runs it started.
 9. **Promotion receiver.** A server key reaches the inventory and push routes and nothing else, and
    its identity stamps what it receives.
+10. **Derived lifecycle (A2).** With a workspace deactivated, then deleted, every principal pinned to
+    it — a session, an MCP key, an API key, a server key — resolves to no permissions and is refused;
+    reactivating the workspace restores exactly the principals that were active before; a manually
+    deactivated identity stays deactivated through a workspace reactivation.
+11. **Identities through their key only (A3).** Every user-admin route refuses a `service` or
+    `system` row with not-found semantics (extends gate 5's list).
 
 Every slice gets the security pass (auth, keys and the serve path are all touched).
 
 ## 8. What the scheduler (#9) inherits
 
-- Key type `scheduler`, role `viewer`, created with `scheduler_key.create` (author and above), with
-  its own identity per key. This settles scheduler revision §9 B5 (who creates scheduler keys) and
-  B6 (the role).
+- Key type `scheduler`, created with `scheduler_key.create` (author and above), with its own
+  identity per key. This settles scheduler revision §9 B5 (who creates scheduler keys). Its ROLE is
+  the scheduler round's decision (A1 withdrew `viewer` as a key role); the cheap option is a
+  pre-created `scheduler` key role holding exactly `pipeline.execute` and its own executions' reads.
 - **B4 is not settled here.** B4 asks where scheduler keys are stored. §3.2's CHECK assumes an
   `api_keys` row, which would keep one key model and one Keys page. The scheduler review recommends
   a separate table instead: a scheduler key has no bearer secret, and `api_keys.key_hash` is NOT
@@ -351,3 +378,21 @@ Every slice gets the security pass (auth, keys and the serve path are all touche
 - **O2. Accepted.** The §2 granularity stands. For example, `pipeline.version.manage` covers
   discarding a draft, discarding and restoring a released version, and deleting a version.
 - **O3. Accepted.** The creation limit in §3.2 is a rule, pinned by a test.
+
+## 10. Amendments (owner rulings of 2026-09-24, on the pre-implementation review)
+
+The review is `notes/2026-09-24-permissions-record-review.md` in the orchestration store. Every
+claim it verified against main is recorded there; the rulings below are written into the sections
+they change (marked A1–A8).
+
+| # | Ruling | Where |
+|---|---|---|
+| A1 | No key carries the `viewer` role: `viewer` is a member role for the UI and a key has no secret it belongs to. API keys offer `api_caller` only; the scheduler key's role is the scheduler round's. A serving key serves only its bound paths. | PK6, §2 legend, §3.1, §3.2, the CHECK, §8 |
+| A2 | Workspace deactivate/delete cascades nothing; the permission-resolving query checks workspace active AND principal active and returns no permissions otherwise. | §3.3, gate 10 |
+| A3 | Identities are managed only through their key; user-admin routes refuse non-human rows. | §3.3, gate 11 |
+| A4 | Slice (a) keeps a `Permission → Scope` shim until (b) removes the scopes. | §6(a) |
+| A5 | `snake_case` for key roles everywhere (`api_caller`, `promotion_receiver`). | §3.2 |
+| A6 | "Renaming the key renames the identity" dropped — keys have no rename. | §3.3 |
+| A7 | Counts are re-derived on the lane's base (42 tools since 7b). | §6(a) |
+| A8 | The permissions work lands BEFORE the remaining transform lanes (7c → 7d → 7e), which were re-worded to this catalog (transform record v0.4). | — |
+
