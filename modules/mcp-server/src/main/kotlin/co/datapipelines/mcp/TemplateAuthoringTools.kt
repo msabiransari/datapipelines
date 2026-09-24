@@ -15,6 +15,10 @@ import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TemplateVersionDetail
+import co.datapipelines.templates.TransformBlocks
+import co.datapipelines.templates.TransformContract
+import co.datapipelines.templates.TransformInvariant
+import co.datapipelines.templates.TransformTestCase
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
@@ -73,6 +77,67 @@ private fun parseImports(args: McpArguments): List<TemplateImport> =
             alias = map["alias"] as? String ?: throw McpArguments.invalidParams("An 'imports' entry is missing 'alias'."),
         )
     }
+
+/**
+ * The transform blocks of §6.2.8/§6.2.36 (7b): `contract`, `invariants`, `tests` — bound
+ * strictly from the tool arguments through the blocks' own mapper, so a typo inside a block
+ * is `template.contract_invalid` with `unknown_field` and never a silent drop. Absent
+ * arguments stay absent (null) — the validator's `blocks_missing` / `blocks_not_allowed`
+ * rules own that verdict.
+ */
+private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<TransformInvariant>?, List<TransformTestCase>?> {
+    fun bind(
+        name: String,
+        type: com.fasterxml.jackson.databind.JavaType,
+    ): Any? {
+        val raw = args.rawMap()[name] ?: return null
+        return try {
+            TransformBlocks.mapper.convertValue(raw, type)
+        } catch (err: com.fasterxml.jackson.databind.JsonMappingException) {
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.CONTRACT_INVALID,
+                message = "The '$name' block does not bind: ${err.originalMessage}. A typo is a refusal, never a silent drop.",
+                details = mapOf("rule" to "unknown_field", "path" to err.pathReference),
+            )
+        }
+    }
+    val contract =
+        bind("contract", TransformBlocks.mapper.typeFactory.constructType(TransformContract::class.java))
+            as TransformContract?
+    @Suppress("UNCHECKED_CAST")
+    val invariants =
+        bind(
+            "invariants",
+            TransformBlocks.mapper.typeFactory.constructCollectionType(List::class.java, TransformInvariant::class.java),
+        )
+            as List<TransformInvariant>?
+    @Suppress("UNCHECKED_CAST")
+    val tests =
+        bind(
+            "tests",
+            TransformBlocks.mapper.typeFactory.constructCollectionType(List::class.java, TransformTestCase::class.java),
+        )
+            as List<TransformTestCase>?
+    return Triple(contract, invariants, tests)
+}
+
+/** §6.2.8/§6.2.36 — the `contract` block description (7b; transform types only). */
+private const val CONTRACT_DESC =
+    "Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): " +
+        "{ mode: 'row'|'table'|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } " +
+        "or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'|'value'|'object', ... }, rejects?: boolean }. " +
+        "Types are LogicalType wire names; a row-mode contract requires exactly one table input."
+
+/** §6.2.8/§6.2.36 — the `invariants` block description. */
+private const val INVARIANTS_DESC =
+    "Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every " +
+        "test case and every real execution. May be empty but is required on a transform type."
+
+/** §6.2.8/§6.2.36 — the `tests` block description. */
+private const val TESTS_DESC =
+    "Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — " +
+        "non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. " +
+        "Save runs the suite; release re-runs it."
 
 /** §6.2.9 — the render `context` description. */
 private const val RENDER_CONTEXT_DESC =
@@ -187,6 +252,7 @@ class TemplatesCreateTool(
             args
                 .enumString("type", TemplateType.WIRE_VALUES.toSet(), TemplateType.SQL.wire)
                 ?.let { TemplateType.fromWire(it)!! }
+        val blocks = parseBlocks(args)
         val draft =
             TemplateDraft(
                 id = args.string("id"),
@@ -203,6 +269,9 @@ class TemplatesCreateTool(
                 imports = parseImports(args),
                 body = args.requiredString("body"),
                 isLibrary = args.boolean("is_library") ?: false,
+                contract = blocks.first,
+                invariants = blocks.second,
+                tests = blocks.third,
             )
         // D55: authoring lands version 1 DRAFT — the response's `status` says so, and a human
         // releases it from the UI. Pinning it from a draft pipeline is legal meanwhile
@@ -249,6 +318,9 @@ class TemplatesCreateTool(
                 },
                 "is_library": {"type": "boolean", "default": false, "description": "$IS_LIBRARY_DESC"},
                 "body": {"type": "string", "description": "$BODY_DESC"},
+                "contract": {"type": "object", "description": "$CONTRACT_DESC"},
+                "invariants": {"type": "array", "description": "$INVARIANTS_DESC"},
+                "tests": {"type": "array", "description": "$TESTS_DESC"},
                 "confirm_new_root": {"type": "boolean", "description": "${NewRootConfirmation.ARG_DESC}"}
               },
               "additionalProperties": false
@@ -329,6 +401,7 @@ class TemplatesUpdateTool(
         // it no longer defaults to `sql`, which sent every html update to `type_immutable`;
         // a stated type still goes to the service's own immutability refusal.
         val working = templates.findWorking(workspaceId, id) ?: throw McpNotFound.template(id)
+        val blocks = parseBlocks(args)
         val draft =
             TemplateDraft(
                 id = id,
@@ -343,6 +416,9 @@ class TemplatesUpdateTool(
                 imports = parseImports(args),
                 body = args.requiredString("body"),
                 isLibrary = args.boolean("is_library") ?: false,
+                contract = blocks.first,
+                invariants = blocks.second,
+                tests = blocks.third,
             )
         // Parse-only validation (§7.1) exactly as templates_create and the REST PUT run it,
         // then the SAME draft write PUT /templates makes (§8.4) — one write path, two surfaces.
@@ -435,7 +511,10 @@ class TemplatesUpdateTool(
                   }
                 },
                 "is_library": {"type": "boolean", "default": false, "description": "$IS_LIBRARY_DESC"},
-                "body": {"type": "string", "description": "$BODY_DESC"}
+                "body": {"type": "string", "description": "$BODY_DESC"},
+                "contract": {"type": "object", "description": "$CONTRACT_DESC"},
+                "invariants": {"type": "array", "description": "$INVARIANTS_DESC"},
+                "tests": {"type": "array", "description": "$TESTS_DESC"}
               },
               "additionalProperties": false
             }

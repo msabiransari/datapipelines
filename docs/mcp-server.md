@@ -508,6 +508,9 @@ Create a new template.
       },
       "is_library": {"type": "boolean", "default": false, "description": "true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required."},
       "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."},
+      "contract": {"type": "object", "description": "Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): { mode: 'row'|'table'|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'|'value'|'object', ... }, rejects?: boolean }. Types are LogicalType wire names; a row-mode contract requires exactly one table input."},
+      "invariants": {"type": "array", "description": "Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every test case and every real execution. May be empty but is required on a transform type."},
+      "tests": {"type": "array", "description": "Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. Save runs the suite; release re-runs it."},
       "confirm_new_root": {"type": "boolean", "description": "Set true ONLY after a person has agreed to a new top-level folder. A name whose root segment has no pipelines or templates under it yet is refused with details.existing_roots listing the roots that do exist — reuse one of those, or ask the person first and then pass this. 'test/' never needs it."}
     },
     "additionalProperties": false
@@ -1428,7 +1431,10 @@ Update an existing template by writing its DRAFT (versioning §3.2/§5.1/§5.2) 
         }
       },
       "is_library": {"type": "boolean", "default": false, "description": "true if this template exists to be imported by others. A library body contains only <#macro>/<#function> definitions — no output outside macro definitions. body is still required."},
-      "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."}
+      "body": {"type": "string", "description": "Template source. Must not contain <#import> or <#include>."},
+      "contract": {"type": "object", "description": "Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): { mode: 'row'|'table'|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'|'value'|'object', ... }, rejects?: boolean }. Types are LogicalType wire names; a row-mode contract requires exactly one table input."},
+      "invariants": {"type": "array", "description": "Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every test case and every real execution. May be empty but is required on a transform type."},
+      "tests": {"type": "array", "description": "Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. Save runs the suite; release re-runs it."}
     },
     "additionalProperties": false
   }
