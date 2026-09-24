@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspacesProperties
 import co.datapipelines.datasources.Datasource
@@ -96,7 +95,6 @@ class DatasourceBrowseParityTest {
                     UUID.randomUUID(),
                     "a@b.c",
                     "A",
-                    setOf(Scope.ADMIN),
                     AuthMethod.OIDC,
                     workspace = WorkspaceContext(workspaceId, "acme"),
                 ),

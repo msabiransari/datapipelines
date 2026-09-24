@@ -4,7 +4,6 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.JwtService
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
@@ -65,7 +64,6 @@ class WorkspacesUiControllerTest {
             userId,
             "alice@acme.test",
             "Alice",
-            setOf(Scope.AUTHOR),
             AuthMethod.OIDC,
             workspace = WorkspaceContext(UUID.randomUUID(), "acme"),
         )
@@ -570,9 +568,6 @@ class WorkspacesUiControllerTest {
                 userId,
                 "alice@acme.test",
                 "Alice",
-                // A minimum-privilege key — the escalation's whole point is that the USER
-                // behind it is an author or admin.
-                setOf(Scope.READ),
                 AuthMethod.API_KEY,
                 keyId = "dpk_TESTKEY",
                 workspace = WorkspaceContext(UUID.randomUUID(), "acme"),

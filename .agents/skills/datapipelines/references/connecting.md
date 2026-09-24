@@ -1,6 +1,6 @@
-# Connecting: transport, keys, scopes, datasources
+# Connecting: transport, your key, your role, datasources
 
-Open before your first call against a deployment, when a call is refused for scope or credential reasons, or when the client has no MCP transport.
+Open before your first call against a deployment, when a call is refused for role or credential reasons, or when the client has no MCP transport.
 
 Part of the `datapipelines` skill — the operating core is `SKILL.md` beside this file.
 
@@ -18,8 +18,9 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 - **MCP:** Streamable HTTP at `POST {host}/mcp` — stateless, protocol pinned to
   `2025-06-18`. Auth is API-key-only: `DP-API-Key: dpk_<id>.<secret>` or
   `Authorization: Bearer dpk_<id>.<secret>`. Browser session cookies are rejected on
-  `/mcp`. REST lives at `/api/v1/**` with `DP-`-prefixed custom headers and a JSON
-  envelope (`{"data": ...}` / `{"error": {code, user_message, details}}`).
+  `/mcp`. **Your key connects an MCP client and nothing else**: the REST API (`/api/v1/**`)
+  refuses it on every route with `endpoint.key_kind_refused` (`details.reason =
+  user_key_off_surface`), before anything else is checked.
 
 - **MCP tools:** the current catalog is the generated `references/tools.md` — rendered from
   the shipped tools' own descriptions, so it cannot drift; `docs_list` says what is documented.
@@ -29,37 +30,37 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   tools, then author it), `debug_failed_execution` (walk a failed execution to a
   diagnosis).
 
-- **Which key you need.** Your credential is a **`user` key** — the kind the UI calls
-  "Agent / API key" (one kind, two surfaces: MCP and REST). Ask for the LOWEST scope that
-  covers what you were asked to do: `read` to inspect, `execute` to run, `author` to create or
-  change. **`admin` is not a scope a key can hold at all** — asking for one is refused with
-  `auth.key_scope_unavailable`, because release, promotion and membership are human verbs. If
-  a tool answers `auth.scope.insufficient`, name the ONE scope you need and why. The other two
-  key kinds are not yours: an `endpoint` key serves published endpoints, a `server` key is one
-  deployment's credential for another, and `/mcp` refuses both with
-  `endpoint.key_kind_refused`.
+- **Which key you have.** Your credential is your **MCP key** (wire kind `user`). It is
+  minted for you when you sign in: one per workspace, copied once from the top bar's key chip.
+  It acts as YOU, with your role in that workspace: a workspace admin's or super admin's key
+  works as an author, and a super admin with no membership there works as a viewer. There is
+  nothing to choose when it is minted, because there are no scopes any more. The other two key
+  kinds are not yours. An `endpoint` key ("API key") is a program's credential for published
+  endpoints. A `server` key is one deployment's credential for another. `/mcp` refuses both
+  with `endpoint.key_kind_refused`.
 
-- **Scopes** (hierarchical: `author ⊃ execute ⊃ read`): `read` = list/get; `execute` = run;
-  `author` = create/update pipelines + templates (also template render, schema introspection
-  and the three `lake_tables_*` dp-lake registry writes). Creating, updating and deleting a
-  datasource are REST/UI only — **no credential travels through an agent** (094): ask a person
-  to add the datasource in the UI, then use it by name. `datasources_test` DOES exist as a
-  tool, but on the ROLE axis it needs `ws_admin`, so most keys get `auth.role_required` from
-  it — testing opens a live connection with the stored credential and writes the datasource's
-  health down, which is an operator's act, not a read.
+- **What your role lets you do over MCP:**
+  - **viewer:** read everything (pipelines, templates, datasources, endpoints, facts), run
+    pipelines, read and cancel your own executions, introspect schemas and test a datasource
+    connection.
+  - **author:** everything a viewer can do, plus create and change pipelines and templates,
+    render templates, preview rows, `sql_probe`, execute a single node, publish endpoints,
+    record and retire facts, and the three `lake_tables_*` dp-lake registry writes.
+  - **promoter:** reads and introspects, but runs nothing and reads no executions.
 
-- **Your scope is a ceiling, not a grant.** Every request is checked on TWO axes: the key's
-  own scope, and the ROLE its ISSUER holds in the pinned workspace **right now**. So a key can
-  do at most what the person who minted it can do today, and if their role changes the key
-  starts refusing with `auth.key_issuer_role_lost` within about a minute. That one is not
-  retryable at any scope — the fix is a new key from somebody who still holds the role. The
-  key is also TIED to that membership: if the issuer is removed from the workspace, the key
-  stops working with `auth.api_key.invalid` — not retryable either; ask a workspace admin for
-  a re-invite, sign in again, and a fresh key is minted.
+  Each tool's permission is in `references/tools.md`. Creating, updating and deleting a
+  datasource are UI-only: **no credential travels through an agent** (094). Ask a person to add
+  the datasource in the UI, then use it by name.
 
-- **A key whose issuer is now only a viewer can still read and run; it cannot author**
-  (viewers never mint keys — this is the demoted-issuer case). `auth.role_required` means the
-  ROLE is short, not the scope, so asking for a broader key will not help — ask a workspace admin.
+- **Your role is read on every request, not frozen into the key.** If a workspace admin
+  promotes you, your key authors within about a minute (the auth cache's TTL, 60 s by default)
+  with no new key. If your role is lowered, the key starts refusing what the new role lacks,
+  within the same minute. `auth.key_issuer_role_lost` (or `auth.role_required` with a
+  `details.reason`, on the two ownership rules of `executions_cancel` and
+  `templates_purge_draft`) means your ROLE is short. It is not retryable with this key or any
+  other, so ask a workspace admin. The key is also TIED to your membership. If you are removed
+  from the workspace, it stops working with `auth.api_key.invalid`. That is not retryable
+  either: ask for a re-invite, sign in again, and a fresh key is minted.
 
 - **You cannot register a datasource, and there is no tool that lets you.** **No credential
   travels through an agent.** A secret passed through you transits your context, your transcript
@@ -127,7 +128,7 @@ Three facts, and where to go for the rest:
   **`docs/key-providers.md`**. If you are asked to "add KMS support", that document is the task
   — do not redesign the crypto.
 
-## REST fallback (when the client has no MCP transport)
+## When the client has no MCP transport
 
 **The manual needs no MCP at all.** `GET /skill.md` is the operating core; its reference map
 names each `GET /skill/<reference>.md` (e.g. `/skill/authoring-playbook.md`) — unauthenticated,
@@ -135,36 +136,13 @@ names each `GET /skill/<reference>.md` (e.g. `/skill/authoring-playbook.md`) —
 An unknown reference is a `404` whose message points back at the map. Read the core first, then
 follow its map — the same learning path as the MCP one.
 
-Same server, HTTP + JSON, authenticated with `-H "DP-API-Key: dpk_..."`:
+**The API itself is not open to you.** Your key is refused on every `/api/v1/**` route. The
+REST API serves signed-in people, programs holding an `endpoint` key (published endpoints and
+the runs they started) and peer deployments holding a `server` key. It is not a second road for
+an agent. If the client has no MCP transport, say so and ask the person to connect one that
+does. Do not ask for a different kind of key, and never ask for a session cookie.
 
-```bash
-curl -s http://localhost:8080/api/v1/pipelines                     # list
-curl -s http://localhost:8080/api/v1/datasources -X POST           # register (a person, in the UI)
-  -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." -d '{...}'
-curl -s http://localhost:8080/api/v1/pipelines/{id}/execute -X POST # run (SSE stream)
-  -H "Accept: text/event-stream" -H "DP-API-Key: dpk_..." -d '{"parameters": {}}'
-curl -s http://localhost:8080/api/v1/executions/{id}/result?offset=0&limit=100
-curl -s http://localhost:8080/api/v1/executions/{id} -X DELETE     # cancel
-```
-
-**Template addressing (rest-api v2.0):** a template name NEVER travels in a URL path
-segment — a name may contain `/`, and an encoded `%2F` in the path is refused `400` by the
-container before routing. Address templates by query parameter or body field instead:
-
-```bash
-curl -s "http://localhost:8080/api/v1/templates?name=acme/finance/report"        # one template
-curl -s "http://localhost:8080/api/v1/templates/versions?name=acme/finance/report&version=1"
-curl -s http://localhost:8080/api/v1/templates/render -X POST \
-  -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." \
-  -d '{"name": "acme/finance/report", "version": 1, "context": {}}'
-```
-
-`GET /api/v1/templates` answers two shapes on one route: the single-resource envelope
-(`404 template.not_found` on a miss) when `name` is present, the paged list when it is not.
-`PUT /api/v1/templates` takes the `id` in the JSON body; release/draft-discard are
-`POST /api/v1/templates/release` and `/draft/discard` with `{"name": ...}` in the body.
-
-The execution endpoint answers with an SSE stream of events
+For orientation: the REST execution endpoint answers with an SSE stream of events
 (`execution_started`, `node_started`, `node_progress` — measured per-node operation
 samples: state, destination, cumulative counts — `node_completed`, `pipeline_completed`,
 `data_ready`, …) — the agent-facing MCP tool turns that into one blocking call with

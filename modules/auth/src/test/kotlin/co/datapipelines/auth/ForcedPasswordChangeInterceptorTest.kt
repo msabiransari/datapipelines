@@ -38,7 +38,6 @@ class ForcedPasswordChangeInterceptorTest {
                 userId = userId,
                 email = "a@company.com",
                 displayName = "A",
-                scopes = setOf(Scope.READ),
                 authMethod = authMethod,
                 loginMethod = loginMethod,
                 workspace = null,

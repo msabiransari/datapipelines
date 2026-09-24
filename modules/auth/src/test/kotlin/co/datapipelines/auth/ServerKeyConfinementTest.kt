@@ -96,16 +96,17 @@ class ServerKeyConfinementTest {
     }
 
     @Test
-    fun `a user key is untouched by the confinement`() {
-        // The complement, as in the endpoint test: a confinement that also narrowed ordinary
-        // keys would be a silent outage. `read` satisfies the annotated probe's floor.
-        authenticate(ApiKeyKind.USER, Scope.READ)
+    fun `the MCP key is confined to mcp - the promotion routes and every other route refuse it (B2)`() {
+        // Until #215 slice (b) this was the complement — an ordinary key untouched by the server
+        // confinement. Since B2 the MCP key is a confined kind itself: `/mcp` is its whole reach.
+        authenticate(ApiKeyKind.USER)
 
         assertAll(
-            (REACHABLE + REFUSED).map { path ->
-                { withClue(path) { invoke(path, annotated = true).first.shouldBeTrue() } }
+            (REACHABLE + REFUSED).filterNot { it == "/mcp" || it.startsWith("/mcp/") }.map { path ->
+                { withClue(path) { invoke(path, annotated = true).first.shouldBeFalse() } }
             },
         )
+        invoke("/mcp", annotated = true).first.shouldBeTrue()
     }
 
     @Test
@@ -129,20 +130,21 @@ class ServerKeyConfinementTest {
             // A category that merely STARTS with a reserved word is an engineer's namespace.
             { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/v1a/revenue") shouldBe true },
             { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/apis/v1/revenue") shouldBe true },
-            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/api/v1/promotion/push") shouldBe true },
+            // B2: the MCP key reaches `/mcp` and nothing else.
+            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/api/v1/promotion/push") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/api/v1/pipelines") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/mcp") shouldBe true },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/mcp/") shouldBe true },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/mcpx") shouldBe false },
         )
     }
 
-    private fun authenticate(
-        kind: ApiKeyKind,
-        vararg scopes: Scope,
-    ) {
+    private fun authenticate(kind: ApiKeyKind) {
         val principal =
             AuthenticatedPrincipal(
                 userId = UUID.randomUUID(),
                 email = "a@b.com",
                 displayName = "A",
-                scopes = scopes.toSet(),
                 authMethod = AuthMethod.API_KEY,
                 keyId = "dpk_ABCDEFGHIJKL",
                 keyKind = kind,

@@ -41,13 +41,19 @@ import javax.crypto.spec.SecretKeySpec
  * lists, for each principal shape the design names — and asserts exactly the code the boundary
  * table in `docs/auth.md` §11A.3 promises:
  *
- * | principal                                             | REST / MCP                          |
- * |-------------------------------------------------------|-------------------------------------|
- * | session of a deactivated user                         | 401 `auth.principal_deactivated`    |
- * | `user` / `endpoint` / `server` key, owner deactivated | 401 `auth.principal_deactivated`    |
- * | `user` / `endpoint` / `server` key, pin deactivated   | 404 `auth.key_workspace_inactive`   |
- * | server key on the promotion peer, either              | 401 `auth.promotion.key_invalid`    |
- * | any key, a deactivated workspace's published endpoint | 404 — the unknown-path body         |
+ * | principal                                               | REST / MCP                        |
+ * |---------------------------------------------------------|-----------------------------------|
+ * | session of a deactivated user                           | 401 `auth.principal_deactivated`  |
+ * | `user` key whose member is deactivated                  | 401 `auth.principal_deactivated`  |
+ * | `endpoint` / `server` key whose IDENTITY is deactivated | 401 `auth.principal_deactivated`  |
+ * | `user` / `endpoint` / `server` key, pin deactivated     | 404 `auth.key_workspace_inactive` |
+ * | server key on the promotion peer, either                | 401 `auth.promotion.key_invalid`  |
+ * | any key, a deactivated workspace's published endpoint   | 404 — the unknown-path body       |
+ *
+ * Since #215 an `endpoint` or `server` key acts as its own `service` identity, and liveness is
+ * that identity's — never its creator's (record §3.3, A2): the live control keys here were
+ * created by the DEACTIVATED user and still serve. A dead credential is refused before its KIND
+ * is judged, so a dead MCP key gets the liveness code on REST too, not B2's kind refusal.
  *
  * ## What is proven beyond the codes
  * - A deactivated session navigating a PAGE is sent to `/login?error=inactive` with its cookie
@@ -57,8 +63,9 @@ import javax.crypto.spec.SecretKeySpec
  *   deactivated workspace's endpoint and an unmatched path get byte-identical bodies.
  * - The promotion peer's ONE answer: a deactivated owner, a deactivated pin and a wrong key are
  *   byte-identical, and neither liveness code appears.
- * - Zero 5xx from any deactivated principal; a LIVE control principal is refused by none of
- *   these codes on any route and reaches ≥ [CONTROL_REACHED_FLOOR] of them, so a fixture that
+ * - Zero 5xx from any deactivated principal; a LIVE control session (REST is a session's
+ *   surface since #215 B2) is refused by none of these codes on any route and reaches
+ *   ≥ [CONTROL_REACHED_FLOOR] of them, so a fixture that
  *   broke authentication for everyone could not pass as "everything refused". (The control's
  *   own answers are the handlers' — a 500 there is printed and belongs to that route's issue.)
  *
@@ -206,7 +213,7 @@ class DeactivationSweepTest {
         val presented =
             mapOf(
                 "server-key:deactivated-workspace" to DEAD_WS_SERVER_KEY.plaintext,
-                "server-key:deactivated-owner" to DEAD_OWNER_SERVER_KEY.plaintext,
+                "server-key:deactivated-identity" to DEAD_IDENTITY_SERVER_KEY.plaintext,
                 "wrong-key" to "dpk_ZZZZZZZZZZZZ." + "A".repeat(SECRET_CHARS),
             )
         val prints =
@@ -244,8 +251,8 @@ class DeactivationSweepTest {
     @Test
     fun `a deactivated workspace's published endpoint is an unknown path to every caller`() {
         ensureSeeded(context)
-        val deactivated = serve(DEAD_ENDPOINT_PATH, CONTROL_KEY.plaintext)
-        val unknown = serve("/api/dsweep/v1/nothing-here", CONTROL_KEY.plaintext)
+        val deactivated = serve(DEAD_ENDPOINT_PATH, CONTROL_ENDPOINT_KEY.plaintext)
+        val unknown = serve("/api/dsweep/v1/nothing-here", CONTROL_ENDPOINT_KEY.plaintext)
         deactivated.statusCode() shouldBe HTTP_NOT_FOUND
         deactivated.code() shouldBe ENDPOINT_NOT_FOUND
         fingerprint(deactivated, DEAD_ENDPOINT_PATH, "") shouldBe fingerprint(unknown, "/api/dsweep/v1/nothing-here", "")
@@ -259,7 +266,7 @@ class DeactivationSweepTest {
         // Non-vacuity: the live twin is served past the liveness gate (it has no release, so
         // the NEXT stage answers — proof the registry holds the fixture and the gate is what
         // hid the deactivated one).
-        val live = serve(LIVE_ENDPOINT_PATH, CONTROL_KEY.plaintext)
+        val live = serve(LIVE_ENDPOINT_PATH, CONTROL_ENDPOINT_KEY.plaintext)
         withClue("the live twin must be resolved: ${live.asString().take(LEAK_EXCERPT)}") {
             live.code() shouldBe ENDPOINT_PIPELINE_NOT_RELEASED
         }
@@ -338,8 +345,8 @@ class DeactivationSweepTest {
             .filterNot { it.pattern.startsWith(PROMOTION_RECEIVER_PREFIX) }
             .map { Route(it.method, it.pattern, substitute(it.pattern), it.handler) }
             .distinct()
-            // Delete-to-rotate REVOKES the caller's own user key (179) — the control arm walks
-            // it LAST so the rest of its walk is made with a live credential.
+            // Delete-to-rotate REVOKES the caller's own user key (179) — walked LAST so nothing
+            // after it depends on the key it rotated.
             .sortedWith(compareBy({ it.pattern.startsWith(MCP_KEY_ROTATE_PREFIX) }, { it.pattern }, { it.method }))
             // The published-endpoint catch-all, walked at a REAL endpoint of the deactivated
             // workspace as well as at the synthesised path.
@@ -593,8 +600,16 @@ class DeactivationSweepTest {
         private const val LIVE_USER = "0b000000-0000-0000-0000-000000000180"
         private const val ADMIN_USER = "0e000000-0000-0000-0000-000000000180"
 
-        /** Owns [REST_CONTROL_KEY]: V31 allows ONE live user key per (user, workspace), so the REST control needs its own person. */
+        /** The REST control's person: its live SESSION walks every route (#215 B2 — REST is a session's surface). */
         private const val REST_CONTROL_USER = "0c000000-0000-0000-0000-000000000180"
+
+        /** The `service` identities (#215 PK5): two deactivated, four live. */
+        private const val DEAD_ENDPOINT_IDENTITY = "5e000000-0000-0000-0000-000000000181"
+        private const val DEAD_SERVER_IDENTITY = "5e000000-0000-0000-0000-000000000182"
+        private const val DEAD_WS_ENDPOINT_IDENTITY = "5e000000-0000-0000-0000-000000000183"
+        private const val DEAD_WS_SERVER_IDENTITY = "5e000000-0000-0000-0000-000000000184"
+        private const val CONTROL_SERVER_IDENTITY = "5e000000-0000-0000-0000-000000000185"
+        private const val CONTROL_ENDPOINT_IDENTITY = "5e000000-0000-0000-0000-000000000186"
         private const val DEAD_PIPELINE = "abc00000-0000-0000-0000-000000000182"
         private const val LIVE_PIPELINE = "abc00000-0000-0000-0000-000000000183"
         private const val DEAD_ENDPOINT = "abc00000-0000-0000-0000-000000000184"
@@ -602,43 +617,52 @@ class DeactivationSweepTest {
         private const val DEAD_ENDPOINT_PATH = "/api/dsweep/v1/report"
         private const val LIVE_ENDPOINT_PATH = "/api/dsweep-live/v1/report"
 
-        private val SCOPES = arrayOf("read", "execute", "author")
-
-        /** (key, owner, workspace, kind) — every key the sweep presents, seeded by SQL. */
+        /**
+         * (key, who it acts as, who created it, workspace, kind) — every key the sweep presents,
+         * seeded by SQL. An MCP (`user`) key acts as its member, who created it; an `endpoint`
+         * or `server` key acts as its own identity ([identityActive] says whether it is live).
+         */
         private class Seed(
             val key: E2eAuth.SeededKey,
-            val owner: String,
+            val actsAs: String,
+            val createdBy: String,
             val workspace: String,
             val kind: String,
-        )
+            val identityActive: Boolean = true,
+        ) {
+            val role: String? =
+                when (kind) {
+                    "endpoint" -> "api_caller"
+                    "server" -> "promotion_receiver"
+                    else -> null
+                }
+        }
 
-        private val DEAD_OWNER_USER_KEY = E2eAuth.generateKey("dead-owner-user", SCOPES)
-        private val DEAD_WS_USER_KEY = E2eAuth.generateKey("dead-ws-user", SCOPES)
-        private val DEAD_WS_ENDPOINT_KEY = E2eAuth.generateKey("dead-ws-endpoint", emptyArray())
-        private val DEAD_OWNER_ENDPOINT_KEY = E2eAuth.generateKey("dead-owner-endpoint", emptyArray())
-        private val DEAD_WS_SERVER_KEY = E2eAuth.generateKey("dead-ws-server", emptyArray())
-        private val DEAD_OWNER_SERVER_KEY = E2eAuth.generateKey("dead-owner-server", emptyArray())
-        private val CONTROL_KEY = E2eAuth.generateKey("control-user", SCOPES)
+        private val DEAD_OWNER_USER_KEY = E2eAuth.generateKey("dead-owner-user")
+        private val DEAD_WS_USER_KEY = E2eAuth.generateKey("dead-ws-user")
+        private val DEAD_WS_ENDPOINT_KEY = E2eAuth.generateKey("dead-ws-endpoint")
+        private val DEAD_IDENTITY_ENDPOINT_KEY = E2eAuth.generateKey("dead-identity-endpoint")
+        private val DEAD_WS_SERVER_KEY = E2eAuth.generateKey("dead-ws-server")
+        private val DEAD_IDENTITY_SERVER_KEY = E2eAuth.generateKey("dead-identity-server")
 
-        /**
-         * The REST walk's own control: its last route revokes it (see [walkableRoutes]), and the
-         * revoked record then sits in the auth cache for a TTL — so the MCP and serve tests
-         * present [CONTROL_KEY], which no walk ever rotates.
-         */
-        private val REST_CONTROL_KEY = E2eAuth.generateKey("control-rest", SCOPES)
-        private val CONTROL_SERVER_KEY = E2eAuth.generateKey("control-server", emptyArray())
+        /** The MCP test's live key: lists the tool catalogue the dead arms are walked over. */
+        private val CONTROL_KEY = E2eAuth.generateKey("control-user")
+
+        /** Live keys CREATED BY THE DEACTIVATED USER — liveness is the identity's, never the creator's (A2). */
+        private val CONTROL_SERVER_KEY = E2eAuth.generateKey("control-server")
+        private val CONTROL_ENDPOINT_KEY = E2eAuth.generateKey("control-endpoint")
 
         private val SEEDS =
             listOf(
-                Seed(DEAD_OWNER_USER_KEY, DEAD_USER, WS_LIVE, "user"),
-                Seed(DEAD_WS_USER_KEY, LIVE_USER, WS_DEAD, "user"),
-                Seed(DEAD_WS_ENDPOINT_KEY, LIVE_USER, WS_DEAD, "endpoint"),
-                Seed(DEAD_OWNER_ENDPOINT_KEY, DEAD_USER, WS_LIVE, "endpoint"),
-                Seed(DEAD_WS_SERVER_KEY, LIVE_USER, WS_DEAD, "server"),
-                Seed(DEAD_OWNER_SERVER_KEY, DEAD_USER, WS_LIVE, "server"),
-                Seed(CONTROL_KEY, LIVE_USER, WS_LIVE, "user"),
-                Seed(REST_CONTROL_KEY, REST_CONTROL_USER, WS_LIVE, "user"),
-                Seed(CONTROL_SERVER_KEY, LIVE_USER, WS_LIVE, "server"),
+                Seed(DEAD_OWNER_USER_KEY, DEAD_USER, DEAD_USER, WS_LIVE, "user"),
+                Seed(DEAD_WS_USER_KEY, LIVE_USER, LIVE_USER, WS_DEAD, "user"),
+                Seed(DEAD_WS_ENDPOINT_KEY, DEAD_WS_ENDPOINT_IDENTITY, LIVE_USER, WS_DEAD, "endpoint"),
+                Seed(DEAD_IDENTITY_ENDPOINT_KEY, DEAD_ENDPOINT_IDENTITY, LIVE_USER, WS_LIVE, "endpoint", identityActive = false),
+                Seed(DEAD_WS_SERVER_KEY, DEAD_WS_SERVER_IDENTITY, LIVE_USER, WS_DEAD, "server"),
+                Seed(DEAD_IDENTITY_SERVER_KEY, DEAD_SERVER_IDENTITY, LIVE_USER, WS_LIVE, "server", identityActive = false),
+                Seed(CONTROL_KEY, LIVE_USER, LIVE_USER, WS_LIVE, "user"),
+                Seed(CONTROL_SERVER_KEY, CONTROL_SERVER_IDENTITY, DEAD_USER, WS_LIVE, "server"),
+                Seed(CONTROL_ENDPOINT_KEY, CONTROL_ENDPOINT_IDENTITY, DEAD_USER, WS_LIVE, "endpoint"),
             )
 
         private val ARMS: List<Arm> by lazy {
@@ -652,9 +676,9 @@ class DeactivationSweepTest {
                 ),
                 Arm("user-key:deactivated-owner", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_OWNER_USER_KEY),
                 Arm("user-key:deactivated-workspace", HTTP_NOT_FOUND, KEY_WORKSPACE_INACTIVE, DEAD_WS_USER_KEY),
-                Arm("endpoint-key:deactivated-owner", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_OWNER_ENDPOINT_KEY),
+                Arm("endpoint-key:deactivated-identity", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_IDENTITY_ENDPOINT_KEY),
                 Arm("endpoint-key:deactivated-workspace", HTTP_NOT_FOUND, KEY_WORKSPACE_INACTIVE, DEAD_WS_ENDPOINT_KEY),
-                Arm("server-key:deactivated-owner", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_OWNER_SERVER_KEY),
+                Arm("server-key:deactivated-identity", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_IDENTITY_SERVER_KEY),
                 Arm("server-key:deactivated-workspace", HTTP_NOT_FOUND, KEY_WORKSPACE_INACTIVE, DEAD_WS_SERVER_KEY),
             )
         }
@@ -662,7 +686,10 @@ class DeactivationSweepTest {
         /** Every key arm — the session cannot reach `/mcp` at all (auth.md §8.5), so it is not an MCP arm. */
         private val MCP_ARMS: List<Arm> by lazy { ARMS.filter { it.key != null } }
 
-        private val CONTROL: Arm by lazy { Arm("control:live-user-key", 0, "", REST_CONTROL_KEY) }
+        /** A live SESSION — REST is a session's surface since #215 B2 (a live MCP key is refused there by kind). */
+        private val CONTROL: Arm by lazy {
+            Arm("control:live-session", 0, "", key = null, session = sessionJwt(REST_CONTROL_USER, "control@dsweep.test", WS_LIVE_NAME))
+        }
 
         private val random = SecureRandom()
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
@@ -676,7 +703,7 @@ class DeactivationSweepTest {
             val header = b64("""{"alg":"HS256","typ":"JWT"}""")
             val payload =
                 b64(
-                    """{"sub":"$userId","email":"$email","name":"Deactivation Sweep","scopes":[],""" +
+                    """{"sub":"$userId","email":"$email","name":"Deactivation Sweep",""" +
                         """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(3600).epochSecond},""" +
                         """"active_workspace":"$activeWorkspace"}""",
                 )
@@ -696,8 +723,8 @@ class DeactivationSweepTest {
 
         /**
          * The REST walk drives `DELETE /partials/mcp-key` (delete-to-rotate, every role), which
-         * revokes the CONTROL key when the control arm reaches it — and the tests run in any
-         * order. Un-revoke every seeded key before each test, as `RoleWalkE2eTest` does.
+         * revokes the caller's own MCP key — and the tests run in any order. Un-revoke every
+         * seeded key before each test, as `RoleWalkE2eTest` does.
          */
         private fun ensureKeysLive() {
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
@@ -726,6 +753,14 @@ class DeactivationSweepTest {
                             "('$DEAD_USER', 'dead@dsweep.test', 'Dead', 'test', 'dsweep-dead', FALSE, FALSE), " +
                             "('$REST_CONTROL_USER', 'control@dsweep.test', 'Control', 'test', 'dsweep-control', TRUE, FALSE)",
                     )
+                    // Each endpoint/server key's own identity, built as V34 and ApiKeyService build one.
+                    SEEDS.filter { it.kind != "user" }.forEach { seed ->
+                        statement.execute(
+                            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +
+                                "VALUES ('${seed.actsAs}', '${seed.key.id}@keys.invalid', '${seed.key.name}', 'key', " +
+                                "'${seed.key.id}', ${seed.identityActive}, FALSE, 'service')",
+                        )
+                    }
                     statement.execute(
                         "INSERT INTO workspaces (id, name, display_name, created_by, deactivated_at, deactivated_by) VALUES " +
                             "('$WS_LIVE', '$WS_LIVE_NAME', 'Sweep live', '$ADMIN_USER', NULL, NULL), " +
@@ -753,16 +788,18 @@ class DeactivationSweepTest {
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id, kind) VALUES (?, ?, ?, ?, ?, ?::uuid, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?, ?, ?, ?, ?::uuid, ?, ?)",
                     ).use { ps ->
                         SEEDS.forEach { seed ->
                             ps.setString(1, seed.key.id)
-                            ps.setObject(2, UUID.fromString(seed.owner))
-                            ps.setString(3, seed.key.name)
-                            ps.setString(4, seed.key.hash)
-                            ps.setArray(5, connection.createArrayOf("text", seed.key.scopes))
+                            ps.setObject(2, UUID.fromString(seed.actsAs))
+                            ps.setObject(3, UUID.fromString(seed.createdBy))
+                            ps.setString(4, seed.key.name)
+                            ps.setString(5, seed.key.hash)
                             ps.setString(6, seed.workspace)
                             ps.setString(7, seed.kind)
+                            ps.setString(8, seed.role)
                             ps.addBatch()
                         }
                         ps.executeBatch()
@@ -770,7 +807,9 @@ class DeactivationSweepTest {
                 connection.createStatement().use { statement ->
                     statement.execute(
                         "INSERT INTO endpoint_key_bindings (path_prefix, api_key_id, workspace_id, created_by) VALUES " +
-                            "('/dsweep', '${DEAD_WS_ENDPOINT_KEY.id}', '$WS_DEAD', '$LIVE_USER')",
+                            "('/dsweep', '${DEAD_WS_ENDPOINT_KEY.id}', '$WS_DEAD', '$LIVE_USER'), " +
+                            // The live twin's caller (#215 B3: an unbound path serves no key).
+                            "('/dsweep-live', '${CONTROL_ENDPOINT_KEY.id}', '$WS_LIVE', '$LIVE_USER')",
                     )
                 }
             }

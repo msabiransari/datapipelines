@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuditEventSink
-import co.datapipelines.auth.Scope
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.SqlProbe
 import co.datapipelines.executor.ExecutorJson
@@ -62,7 +61,7 @@ class SqlProbeTempdbWireTest {
                     parameters?.let { put("parameters", it) }
                 },
             ),
-            McpFixtures.ctx(Scope.AUTHOR),
+            McpFixtures.ctx(),
         )
 
     private fun text(result: McpSchema.CallToolResult): String = (result.content().single() as McpSchema.TextContent).text()

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.junit.jupiter.api.assertAll
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import java.time.Instant
@@ -156,35 +157,90 @@ class AuthRepositoriesIntegrationTest {
         checkNotNull(users.findById(u.id)).lastLoginAt.shouldNotBeNull()
     }
 
+    /**
+     * V34 (#215): who a key ACTS AS (`user_id`), who CREATED it (`created_by`) and its ROLE are
+     * three columns, and they round-trip as three facts — an `endpoint` key's identity is not its
+     * creator, and its role is written from its kind.
+     */
     @Test
-    fun `api key scopes round-trip through the TEXT array column`() {
+    fun `an api key's identity, creator and role round-trip as three columns`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
+        val identity =
+            users.insert(
+                "dpk_abcdefghijkl@keys.invalid",
+                "ci",
+                null,
+                "key",
+                "dpk_ABCDEFGHIJKL",
+                isAdmin = false,
+                kind = UserKind.SERVICE,
+            )
 
-        val key = keys.insert("dpk_ABCDEFGHIJKL", owner.id, "Claude", "hash", setOf(Scope.READ, Scope.AUTHOR), null, DEFAULT_WORKSPACE_ID)
+        val key = keys.insert("dpk_ABCDEFGHIJKL", identity.id, owner.id, "ci", "hash", null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+        val mcp = keys.insert("dpk_MCP000000001", owner.id, owner.id, "mcp/default", "hash", null, DEFAULT_WORKSPACE_ID)
 
         val found = checkNotNull(keys.findById("dpk_ABCDEFGHIJKL"))
-        found shouldBe key
-        found.scopes shouldContainExactlyInAnyOrder setOf(Scope.READ, Scope.AUTHOR)
+        assertAll(
+            { found shouldBe key },
+            { found.userId shouldBe identity.id },
+            { found.createdBy shouldBe owner.id },
+            { found.role shouldBe KeyRole.API_CALLER },
+            { checkNotNull(users.findById(identity.id)).kind shouldBe UserKind.SERVICE },
+            // The MCP key acts as its member and carries no role of its own (PK4).
+            { checkNotNull(keys.findById(mcp.id)).role.shouldBeNull() },
+            { checkNotNull(keys.findById(mcp.id)).createdBy shouldBe owner.id },
+        )
+    }
+
+    /** V34's two CHECKs make PK3/PK5/PK6 database facts — a row the code would never write is refused anyway. */
+    @Test
+    fun `the database refuses a key whose role contradicts its kind and a user row of an unknown kind`() {
+        val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
+        keys.insert("dpk_EPCHECK00001", owner.id, owner.id, "ep", "hash", null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+
+        assertAll(
+            {
+                shouldThrow<org.springframework.dao.DataIntegrityViolationException> {
+                    jdbc.jdbcTemplate.update("UPDATE api_keys SET role = 'promotion_receiver' WHERE id = 'dpk_EPCHECK00001'")
+                }
+            },
+            {
+                shouldThrow<org.springframework.dao.DataIntegrityViolationException> {
+                    jdbc.jdbcTemplate.update("UPDATE api_keys SET role = NULL WHERE id = 'dpk_EPCHECK00001'")
+                }
+            },
+            {
+                shouldThrow<org.springframework.dao.DataIntegrityViolationException> {
+                    jdbc.jdbcTemplate.update("UPDATE users SET kind = 'robot' WHERE id = ?", owner.id)
+                }
+            },
+        )
     }
 
     @Test
-    fun `revoke hides the key from active listing but keeps the row`() {
+    fun `revoke is the creator's, hides the key from their live keys and keeps the row`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
-        keys.insert("dpk_KEY000000001", owner.id, "k", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
-        keys.findActiveByUser(owner.id) shouldHaveSize 1
+        val stranger = users.insert("stranger@company.com", "Stranger", null, "google", "sub2", isAdmin = false)
+        keys.insert("dpk_KEY000000001", owner.id, owner.id, "k", "hash", null, DEFAULT_WORKSPACE_ID)
+        keys.findByUser(owner.id).filterNot { it.isRevoked } shouldHaveSize 1
 
-        keys.revoke("dpk_KEY000000001", owner.id).shouldBeTrue()
+        keys.revoke("dpk_KEY000000001", stranger.id).shouldBeNull()
+        keys
+            .revoke("dpk_KEY000000001", owner.id)
+            .shouldNotBeNull()
+            .isRevoked
+            .shouldBeTrue()
 
-        keys.findActiveByUser(owner.id) shouldHaveSize 0
+        keys.findByUser(owner.id).filterNot { it.isRevoked } shouldHaveSize 0
         // Row survives (soft flag) so audit_log.key_id keeps resolving (metadata-db §4.2).
         checkNotNull(keys.findById("dpk_KEY000000001")).isRevoked.shouldBeTrue()
-        keys.revoke("dpk_KEY000000001", owner.id).shouldBeFalse()
+        keys.revoke("dpk_KEY000000001", owner.id).shouldBeNull()
     }
 
     @Test
     fun `touchUsage records last_used_ip as INET and the user agent`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
-        keys.insert("dpk_KEY000000002", owner.id, "k", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+        keys.insert("dpk_KEY000000002", owner.id, owner.id, "k", "hash", null, DEFAULT_WORKSPACE_ID)
 
         keys.touchUsage("dpk_KEY000000002", "10.0.0.5", "Claude/1.0")
 
@@ -200,7 +256,7 @@ class AuthRepositoriesIntegrationTest {
     fun `expired key is readable with its expiry so validation can reject it`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
         val past = Instant.now().minusSeconds(3600)
-        keys.insert("dpk_KEY000000003", owner.id, "k", "hash", setOf(Scope.READ), past, DEFAULT_WORKSPACE_ID)
+        keys.insert("dpk_KEY000000003", owner.id, owner.id, "k", "hash", past, DEFAULT_WORKSPACE_ID)
 
         checkNotNull(keys.findById("dpk_KEY000000003")).expiresAt.shouldNotBeNull()
     }
@@ -235,9 +291,9 @@ class AuthRepositoriesIntegrationTest {
             keys.insert(
                 "dpk_MINTED000001",
                 owner.id,
+                owner.id,
                 "mcp/default",
                 "hash",
-                setOf(Scope.READ, Scope.EXECUTE),
                 null,
                 DEFAULT_WORKSPACE_ID,
                 ApiKeyKind.USER,
@@ -253,7 +309,7 @@ class AuthRepositoriesIntegrationTest {
         // …and a pre-V31 row (no sealed copy) reads false, with nothing to open. Another
         // owner: the index allows ONE live user key per (user, workspace).
         val legacyOwner = users.insert("legacy@company.com", "Legacy", null, "google", "sub2", isAdmin = false)
-        val legacy = keys.insert("dpk_LEGACY000001", legacyOwner.id, "old", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+        val legacy = keys.insert("dpk_LEGACY000001", legacyOwner.id, legacyOwner.id, "old", "hash", null, DEFAULT_WORKSPACE_ID)
         legacy.hasSealedSecret.shouldBeFalse()
         legacy.mintedAtLogin.shouldBeFalse()
     }
@@ -268,9 +324,9 @@ class AuthRepositoriesIntegrationTest {
             keys.insert(
                 "dpk_SHOWONCE0001",
                 owner.id,
+                owner.id,
                 "mcp/default",
                 "hash",
-                setOf(Scope.READ),
                 null,
                 DEFAULT_WORKSPACE_ID,
                 ApiKeyKind.USER,
@@ -296,20 +352,20 @@ class AuthRepositoriesIntegrationTest {
     @Test
     fun `one live user key per user and workspace - the index is the arbiter, revocation frees the slot`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
-        keys.insert("dpk_FIRST0000001", owner.id, "k1", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+        keys.insert("dpk_FIRST0000001", owner.id, owner.id, "k1", "hash", null, DEFAULT_WORKSPACE_ID)
 
         // A second live `user` key for the same pair cannot be inserted — the login mint's
         // lost race lands here.
         shouldThrow<org.springframework.dao.DuplicateKeyException> {
-            keys.insert("dpk_SECOND000001", owner.id, "k2", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+            keys.insert("dpk_SECOND000001", owner.id, owner.id, "k2", "hash", null, DEFAULT_WORKSPACE_ID)
         }
 
         // Endpoint keys are NOT one-per: an admin may hold several (the index's WHERE excludes them).
-        keys.insert("dpk_SECOND000001", owner.id, "k2", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+        keys.insert("dpk_SECOND000001", owner.id, owner.id, "k2", "hash", null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
 
         // Revoking the user key frees the slot — rotation is exactly this.
-        keys.revoke("dpk_FIRST0000001", owner.id).shouldBeTrue()
-        keys.insert("dpk_THIRD00000001", owner.id, "k3", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+        keys.revoke("dpk_FIRST0000001", owner.id).shouldNotBeNull()
+        keys.insert("dpk_THIRD00000001", owner.id, owner.id, "k3", "hash", null, DEFAULT_WORKSPACE_ID)
     }
 
     @Test
@@ -317,12 +373,12 @@ class AuthRepositoriesIntegrationTest {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
         keys.findLiveUserKey(owner.id, DEFAULT_WORKSPACE_ID).shouldBeNull()
 
-        val key = keys.insert("dpk_LIVE00000001", owner.id, "mcp/default", "hash", setOf(Scope.READ), null, DEFAULT_WORKSPACE_ID)
+        val key = keys.insert("dpk_LIVE00000001", owner.id, owner.id, "mcp/default", "hash", null, DEFAULT_WORKSPACE_ID)
         keys.findLiveUserKey(owner.id, DEFAULT_WORKSPACE_ID) shouldBe key
 
         // Revoked is invisible; an endpoint key in the same pair is not the answer either.
         keys.revoke(key.id, owner.id)
-        keys.insert("dpk_EP0000000001", owner.id, "ep", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+        keys.insert("dpk_EP0000000001", owner.id, owner.id, "ep", "hash", null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
         keys.findLiveUserKey(owner.id, DEFAULT_WORKSPACE_ID).shouldBeNull()
     }
 
@@ -330,9 +386,9 @@ class AuthRepositoriesIntegrationTest {
     fun `the workspace listing and revoke are kind-pinned and workspace-pinned`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
         val other = users.insert("other@company.com", "Other", null, "google", "sub2", isAdmin = false)
-        keys.insert("dpk_EP0000000001", owner.id, "ep-mine", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
-        keys.insert("dpk_EP0000000002", other.id, "ep-theirs", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
-        keys.insert("dpk_SRV000000001", owner.id, "srv", "hash", emptySet(), null, DEFAULT_WORKSPACE_ID, ApiKeyKind.SERVER)
+        keys.insert("dpk_EP0000000001", owner.id, owner.id, "ep-mine", "hash", null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+        keys.insert("dpk_EP0000000002", other.id, other.id, "ep-theirs", "hash", null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+        keys.insert("dpk_SRV000000001", owner.id, owner.id, "srv", "hash", null, DEFAULT_WORKSPACE_ID, ApiKeyKind.SERVER)
 
         // The /api-keys table: the workspace's keys of one kind, whoever created them.
         keys.findByWorkspaceAndKind(DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT).map { it.name } shouldContainExactlyInAnyOrder

@@ -1,15 +1,15 @@
 # Auth & Security Specification
 
-**Status:** v3.0 (revised — see Change Log)
+**Status:** v3.1 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-09-19
+**Last updated:** 2026-09-24
 
 ---
 
 ## 1. Purpose
 
-This spec defines **how users authenticate** (OIDC via any provider — Google, Microsoft, Okta, Auth0, Keycloak, etc.), **how sessions work** (internal JWT after OIDC login), **how agents authenticate** (API keys), **what authenticated principals can do** (scopes), and the **Spring Security wiring** that ties it all together.
+This spec defines **how users authenticate** (OIDC via any provider — Google, Microsoft, Okta, Auth0, Keycloak, etc.), **how sessions work** (internal JWT after OIDC login), **how agents authenticate** (API keys), **what authenticated principals can do** (roles — a member's, or a key's own, §7.5), and the **Spring Security wiring** that ties it all together.
 
 The product is self-hosted, internal-users-only. Identity is delegated to **any OIDC-compliant provider** via OpenID Connect **by default**; deployments without an IdP may additionally enable optional local password accounts (§5A), stored as Argon2id hashes. After any login, the server issues its own JWT for stateless session management.
 
@@ -23,7 +23,7 @@ The product is self-hosted, internal-users-only. Identity is delegated to **any 
 4. **Internal JWT after OIDC.** Once OIDC validates the user, the server issues its own JWT (8h TTL). The JWT is the session — any instance can validate it statelessly. OIDC tokens are NOT used for ongoing session management.
 5. **API keys per agent, not global.** A user generates one key per agent. Compromised keys are individually revocable. Per-agent usage visible in audit logs.
 6. **Keys hashed at rest.** Same protection as passwords would be. A database leak does not expose working credentials.
-7. **Scopes are explicit and hierarchical.** Every key and session has a scope set. Default: `read`. Higher scopes require deliberate choice.
+7. **Roles decide, and every credential has exactly one.** A session holds its membership's role; the MCP key its member's role, capped at author; an API or server key its own key role (§7.5). There are no scopes (#215 slice (b)).
 8. **Stateless server, near-live revocation.** JWT + API key validation are stateless across instances; both paths re-check the principal's liveness (user `is_active`, key revocation) through a short-TTL cache backed by Postgres (§6.3, §7.3). Deactivating a user or revoking a key takes effect within ~1 minute — never the full JWT lifetime.
 
 ---
@@ -56,7 +56,7 @@ The product is self-hosted, internal-users-only. Identity is delegated to **any 
 │ 2. Agent sends: DP-API-Key: dpk_<id>.<secret>                 │
 │    (or, on /mcp: Authorization: Bearer dpk_<id>.<secret>)     │
 │ 3. Server validates key hash (Argon2id) against Postgres      │
-│ 4. Server resolves user + scopes from key record              │
+│ 4. Server resolves the user the key acts as + its role        │
 │ 5. Request authenticated                                       │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -67,9 +67,10 @@ data class AuthenticatedPrincipal(
     val userId: UUID,
     val email: String,
     val displayName: String,
-    val scopes: Set<Scope>,
-    val authMethod: AuthMethod,       // OIDC or API_KEY
-    val keyId: String?                // present when authMethod = API_KEY
+    val authMethod: AuthMethod,       // OIDC, API_KEY or PROMOTION
+    val keyId: String?,               // present when a key authenticated
+    val workspace: WorkspaceContext?, // the resolved role in the active / pinned workspace
+    val keyRole: KeyRole?,            // an endpoint or server key's own role (§7.5)
 )
 ```
 
@@ -186,11 +187,11 @@ One row serves all of them, provisioned at first boot through the same `createUs
 | `display_name` | `System` | What history and the audit trail render |
 | `is_admin` | `FALSE` | It is an actor, not an authority. Every path that stamps it already knows the workspace it is writing into; nothing here needs a membership bypass |
 
-**Login is disabled by construction, not by a flag.** Three independent facts each make it impossible: no OIDC provider may be named `system`, so no external identity can link to the row; the address cannot resolve; and the local-password paths refuse it — `createLocalUser` at the reserved address answers `EmailTaken` (the row already holds it), and `resetPassword` on a `system`-provider row answers "no such user". There is nothing to disable because there is no credential to hold.
+**Login is disabled by construction, not by a flag.** Three independent facts each make it impossible: no OIDC provider may be named `system`, so no external identity can link to the row; the address cannot resolve; and the local-password paths refuse it — `createLocalUser` at the reserved address answers `EmailTaken` (the row already holds it), and `resetPassword` on a non-human row answers "no such user". Since #215 its row also carries `users.kind = 'system'`, and every login, linking and user-administration path refuses a non-human row by that ONE predicate (§4.7). There is nothing to disable because there is no credential to hold.
 
 **Idempotent.** A restart returns the existing row untouched — no re-grant, no identity rewrite, no `updated_at` bump, the same contract §4.4's pre-provisioning states. Two replicas racing a fresh database settle it by catch-and-reread, exactly as the bootstrap actor does (ARCH-AUDIT M5).
 
-It is deliberately **not** a credential. It holds no API key and no password, and nothing authenticates *as* it; it is the name history writes down when the writer was the system itself. The promotion peer credential is a separate thing entirely (§10.6) — a shared secret between two deployments, with no `users` row of its own.
+It is deliberately **not** a credential. It holds no API key and no password, and nothing authenticates *as* it; it is the name history writes down when the writer was the system itself. The one exception is the promotion receiver's DEPRECATED config-value credential ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)): a shared secret with no row to attach an identity to, so a push it opens acts as this account (#215 B6). A STORED server key acts as its own identity instead (§4.7, §7.7).
 
 ### 4.6 Invitations
 
@@ -251,6 +252,33 @@ workspace, with a role" writes the user row and the membership in one act, becau
 by the time the membership is written — rule 1 doing the work directly.
 
 ---
+
+
+### 4.7 Key identities
+
+Since #215 (the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §3.3, PK5, ratified 2026-09-23) an `endpoint` key and a `server` key each act as **their own non-login identity** — a `users` row with `kind = 'service'` — never as the person who created them. The MCP (`user`) key is the one exception: it acts as its member (§7.5).
+
+`users.kind` is `human` | `service` | `system` (V34; [`UserKind`](enums.md#8-userkind--what-a-users-row-is)). V34 set `system` on the System row (§4.5) and `human` on every other; one identity per existing endpoint/server key was created in the same migration (PK9).
+
+The identity is built exactly like the System account, so login is impossible by construction:
+
+| Column | Value | Why |
+|---|---|---|
+| `kind` | `service` | The ONE predicate every login, linking and administration path refuses (below) |
+| `provider` | `key` | Reserved at startup ([Configuration §7](configuration.md#7-config-validation)) exactly as `system`, `local` and `bootstrap` are: an OIDC provider named `key` could otherwise link an external identity onto the row |
+| `provider_subject` | the key id | A key's identity is its key's, one-to-one |
+| `email` | `<key id>@keys.invalid` | RFC 2606's unresolvable `.invalid` — no mail-based flow can reach it, and `createLocalUser` refuses the domain |
+| `display_name` | the key's name | Keys have no rename (record A6), so the name history shows is the name the key was created with |
+| `is_admin` | `FALSE` | No key is ever a super admin (B1, §7.5) |
+| password | none | Hashless, and the local-credential read returns PEOPLE only |
+
+- **Created with its key, in one transaction** (B4): `ApiKeyService.issue` provisions the identity and inserts the key under `@Transactional("metadataTransactionManager")` — a half-created pair cannot exist. The key row's `user_id` is the identity; `api_keys.created_by` records the person who created it (the Keys page's "Created by").
+- **Revoking the key deactivates the identity** (`is_active = false`, in the same transaction). History keeps the row, so runs and received versions still name it: history renders "<key name> (API key)".
+- **Lifecycle is derived, never cascaded** (record A2). Deactivating or deleting a workspace revokes no key and deactivates no identity; the ONE liveness predicate (§11A.3) reads the identity, the key and the pinned workspace on every request, so reactivating the workspace restores exactly what was live before.
+- **Managed only through its key** (record A3). The user-administration routes — REST (`/api/v1/auth/users/**`) and the admin screen's list, row actions, identity reset, password reset and mail status — look the row up BEFORE any mutation and answer an unknown-user 404 for a non-human row; the admin users page, members lists and invitations show `human` rows only; adding a non-human row to a workspace is refused as "no such person".
+- **Attribution** (record C5, C4): `pipeline_executions.executed_by`, `audit_log.user_id` and every `created_by` written on the key's behalf name the identity. The per-user concurrency limit (`ExecutionSlots`, keyed on `executed_by`) is therefore a per-KEY limit. Runs a key served before V34 keep their original attribution (the key's creator); the serve audit still pairs those with the key (§7.7).
+
+**One predicate: a person is `kind = 'human'`.** It guards OIDC linking (a `service` or `system` row is never claimable, whatever its provider says — the kind is judged before the provider), the identity reset (which refuses a non-human row, so the `bootstrap` flip can never make one claimable — this closed a pre-existing hole for the System row), the local-credential read, the password reset, membership and invitation materialisation, the session filter (a token naming a non-human row is `auth.session.invalid`) and every user-administration route.
 
 ## 5. OIDC Login Flow
 
@@ -594,7 +622,7 @@ On success the flow converges with OIDC: the same `JwtService.issue` mints the s
 
 ### 5A.7 Credential minting is session-only
 
-Any operation that **mints or rotates a usable interactive credential** refuses an API-key principal with `auth.session.required` (§13.7), regardless of scope. The set is exactly:
+Any operation that **mints or rotates a usable interactive credential** refuses an API-key principal with `auth.session.required` (§13.7), regardless of role. The set is exactly:
 
 | Operation | Surface |
 |---|---|
@@ -604,9 +632,9 @@ Any operation that **mints or rotates a usable interactive credential** refuses 
 | Unlock an account | `PATCH /partials/admin/users/{id}/unlock` |
 | Change own password | `POST /partials/account/password` |
 
-**Why scope cannot express this.** `AuthenticatedPrincipal.isAdmin` is *defined as* holding the `admin` scope, so a scope test sees a `dpk_` key and a browser session as one principal. `ApiKeyFilter` applies no path test and `ApiKeyCredentialMatcher` makes key requests CSRF-exempt, so an admin-scoped key reaches these partials with a single header. It could then create a local admin, read the one-time password out of the response body, and sign in — trading a revocable, workspace-pinned, non-interactive credential for a `dp_session` that is **not** pinned and that **outlives revocation of the key that created it**. That defeats the ~60s revocation contract in §8, which is the entire answer to a leaked agent key (§2, principle 5).
+**Why the role matrix cannot express this.** A permission test sees a role, not a credential, so it sees a `dpk_` key and a browser session with the same role as one principal. (Since #215 B2 no key reaches these partials at all — the MCP key is confined to `/mcp` — so this rule is now the second line.) `ApiKeyFilter` applies no path test and `ApiKeyCredentialMatcher` makes key requests CSRF-exempt, so an admin-scoped key reaches these partials with a single header. It could then create a local admin, read the one-time password out of the response body, and sign in — trading a revocable, workspace-pinned, non-interactive credential for a `dp_session` that is **not** pinned and that **outlives revocation of the key that created it**. That defeats the ~60s revocation contract in §8, which is the entire answer to a leaked agent key (§2, principle 5).
 
-The self-service change is the same shape one floor down: its `profile.password` floor is "any authenticated", so without this rule a leaked **read**-scoped key could guess its owner's password and, on a hit, rotate it into a full takeover.
+The self-service change is the same shape one floor down: `profile.password` is every role's, so without this rule a leaked key could guess its owner's password and, on a hit, rotate it into a full takeover.
 
 **Deliberately excluded:** `activate`, `deactivate`, `promote`, `demote`. These administer users without ever emitting a credential, and are already ratified for keys through the documented `/api/v1/auth/users` REST surface (§7.6 `user.manage`). The line this draws is credential-minting, not privilege.
 
@@ -647,7 +675,6 @@ After OIDC login, the server issues its own JWT:
     "sub": "user-uuid",
     "email": "alice@company.com",
     "name": "Alice Wang",
-    "scopes": ["read", "execute", "author"],
     "active_workspace": "acme",
     "iat": 1691234567,
     "exp": 1691263367,
@@ -658,21 +685,22 @@ After OIDC login, the server issues its own JWT:
   workspace *name*, the same value `DP-Workspace` carries (§5.6).
 - **Signing secret:** `DATAPIPELINES_JWT_SECRET` env var (≥ 32 bytes random, base64). Required at startup.
 
-**Scope derivation at token issue (v1 rule):** the `scopes` claim is derived from the user record at login: `is_admin = true` → `["read", "execute", "author", "admin"]`; every other active user → `["read", "execute", "author"]`. Finer per-user scope assignment and IdP group sync are future work (§15). API-key scopes are chosen at key creation (§7.4) and are independent of this rule, bounded by the creator's scopes.
+**No authority rides the token.** What a session may do is its membership's role in the active workspace, resolved per request (§11A), plus the user row's `is_admin` re-read through the §11.4 cache — never a claim, so a demotion or a revoked super admin takes effect within one TTL rather than at token expiry. A `scopes` claim a pre-round-1 token may still carry is ignored (scopes were removed entirely in #215).
 
-A browser session is therefore **the broadest credential in the product** — at least `author`,
-and switchable across every workspace the user belongs to (§5.6), where an API key's workspace
-is pinned at issue and immutable. There is no read-only session: the §7.6 matrix cannot express
+A browser session is therefore **the broadest credential in the product** — switchable across
+every workspace the user belongs to (§5.6), where a key's workspace is pinned at issue and
+immutable. There is no read-only session: the §7.6 matrix cannot express
 "this principal is a browser" or "this principal is a key", so the four gates that need that
 distinction are written outside it, by hand — `requireSessionAdmin` on the credential-minting
 admin actions (§5A.7), `changeOwnPassword` refusing keys (§5A.4), `POST /workspace/switch`
 (§5.6), and the published-endpoint surface refusing sessions (§7.7). Anything that must distinguish the two is a
-fifth one, not a scope.
+fifth one, written outside the matrix too. (Since #215 B2 the MCP key reaches none of the four
+surfaces, so each is also a second line behind the kind confinement, §7.7.)
 
 ### 6.2 Why not use OIDC tokens directly?
 
 - **Decoupled TTL.** Our JWT has its own TTL (8h). OIDC access tokens have provider-specific TTLs (Google = 1h). Using OIDC tokens would require refreshing mid-session.
-- **Scope management.** Our JWT carries our own scopes (`read`, `execute`, `author`, `admin`). OIDC tokens carry provider scopes which don't map to our authorization model.
+- **Our own authorization model.** What a session may do is our roles (§11A), resolved per request. OIDC tokens carry provider scopes which don't map to it.
 - **Stateless validation.** Our JWT is validated with a local HMAC secret. OIDC token validation requires fetching the provider's JWKS (network call).
 - **No vendor lock-in.** If we add a third provider (GitHub, Okta), the internal JWT is identical regardless of which provider authenticated the user.
 
@@ -706,15 +734,11 @@ class JwtAuthenticationFilter(
                     userId = userId,
                     email = claims["email"] as String,
                     displayName = claims["name"] as String,
-                    scopes = (claims["scopes"] as List<*>).map { Scope.valueOf(it as String) }.toSet(),
                     authMethod = AuthMethod.OIDC,
                     keyId = null
                 )
                 SecurityContextHolder.getContext().authentication =
-                    UsernamePasswordAuthenticationToken(
-                        principal, null,
-                        principal.scopes.map { SimpleGrantedAuthority("SCOPE_${it.name}") }
-                    )
+                    UsernamePasswordAuthenticationToken(principal, null, emptyList())
             } catch (e: Exception) {
                 // Invalid/expired JWT or deactivated user — clear cookie, proceed unauthenticated
                 response.addCookie(Cookie("dp_session", "").apply { maxAge = 0 })
@@ -774,174 +798,158 @@ Argon2id hash (same as before). Schema in [Metadata DB spec](metadata-db.md).
 5. expires_at < now → 401 auth.api_key.expired.
 6. Argon2id.verify(key_hash, full_key).
 7. Verify fails → 401 auth.api_key.invalid.
-8. PrincipalLiveness (§11A.3), cached, 60s TTL: the owner's users.is_active
+8. PrincipalLiveness (§11A.3), cached, 60s TTL: the users.is_active of the
+   user the key ACTS AS — its member for the MCP key, its own identity (§4.7)
+   for an endpoint or server key, never its creator
    → inactive is 401 auth.principal_deactivated; the pinned workspace's
    liveness → deactivated is 404 auth.key_workspace_inactive. A server key
    on the promotion route folds both into 401 auth.promotion.key_invalid.
 9. Update last_used_at, last_used_ip (async).
-10. Build principal with userId + scopes from key record.
+10. Build the principal: userId = the user the key acts as. An endpoint or
+    server key carries its KEY ROLE (api_caller / promotion_receiver, §7.5);
+    the MCP key carries its member's CURRENT role in the pinned workspace,
+    capped at author (PK4). No key principal is ever a super admin (B1).
 ```
 
-In-memory cache (`datapipelines.auth.api-keys.cache-ttl-seconds`, default 60s) for recently-validated keys and owner liveness, invalidated on revocation/deactivation on the local instance and by TTL elsewhere.
+In-memory cache (`datapipelines.auth.api-keys.cache-ttl-seconds`, default 60s) for recently-validated keys, user liveness and memberships, invalidated on revocation/deactivation/role change on the local instance and by TTL elsewhere — so a role change, a member removal, a key revocation or a deactivation takes effect **within the auth cache TTL, 60 s by default** (#215 B5, record amendment A9).
 
 ### 7.4 Issuance
 
 Since 179 (roles design D16/D17, 2026-09-20) there is exactly ONE way each kind comes into being; and since #200 (roles record [§3.7](superpowers/specs/2026-09-20-roles-permissions-design.md), owner rulings 2026-09-21) a `user` key's LIFETIME is the membership it was minted by:
 
-- **A `user` key is minted by the login hook and nowhere else.** Every login and every workspace switch (`WorkspaceService.workspaceForLogin`, and the switch handler after it) checks whether the user holds a live `user` key in the workspace being entered; if none exists — and the user does not owe a forced password change (§5A.4) — one is minted: name `mcp/<workspace>`, no expiry, scopes = the role's reach on the credential axis (an author-or-above membership gets `author`, a viewer `execute`, a promoter `read`), `minted_at_login = TRUE`. V31's partial unique index makes "one live `user` key per (user, workspace)" a database fact and is the arbiter of concurrent logins — a lost race re-reads the winner's row. **Rotation is delete + sign in again**: the user deletes the key from the top bar (`mcp_key.own`), and the next login or switch mints a fresh one. No request surface mints a `user` key: REST and the htmx partials refuse `kind = "user"` with `auth.key_kind_not_mintable` (400) for EVERY role. The must-change-password rule (§5A.4) gates a PASSWORD session and, with it, that session's mint; an OIDC session is not gated by it and mints its key like any other entry — the flag belongs to the local credential, not to the person (#210).
+- **A `user` key is minted by the login hook and nowhere else.** Every login and every workspace switch (`WorkspaceService.workspaceForLogin`, and the switch handler after it) checks whether the user holds a live `user` key in the workspace being entered; if none exists — and the user does not owe a forced password change (§5A.4) — one is minted: name `mcp/<workspace>`, no expiry, `minted_at_login = TRUE`, and **no role or scope of its own** — what it may do is its member's role in the workspace, capped at author, re-read on every request (§7.5, PK4). V31's partial unique index makes "one live `user` key per (user, workspace)" a database fact and is the arbiter of concurrent logins — a lost race re-reads the winner's row. **Rotation is delete + sign in again**: the user deletes the key from the top bar (`mcp_key.own`), and the next login or switch mints a fresh one. No request surface mints a `user` key: REST and the htmx partials refuse `kind = "user"` with `auth.key_kind_not_mintable` (400) for EVERY role. The must-change-password rule (§5A.4) gates a PASSWORD session and, with it, that session's mint; an OIDC session is not gated by it and mints its key like any other entry — the flag belongs to the local credential, not to the person (#210).
 - **The key ends with its membership** (#200, §3.7 ruling 1): a `user` key is tied to its user AND its workspace, so removing the member revokes the key in the same act — one transaction, audited `auth.api_key.revoked_by_admin` with reason `member_removed`. A workspace admin can also revoke a member's key WITHOUT removing them (`DELETE /api/v1/workspaces/{name}/members/{user_id}/key` and the members-row verb, `workspace.members.manage`, reason `admin_revoked`) — the member's session keeps working, and their next login or workspace entry mints a fresh key.
 - **No automatic rotation on password or identity events** (#200, §3.7 ruling 2): the product cannot tell a forgotten password from a compromise, so a login that stops working is not a security signal. Recovery is an admin act — removing the user from the workspace, or explicitly removing their key.
-- **An `endpoint` key (shown in the UI as an "API key", D17) is created by a workspace admin or super admin** on `/api-keys` or over REST (`POST /api/v1/auth/api-keys`, `api_key.create`), with its endpoint associations in the same request or added later from the page.
-- **A `server` key is minted — and revoked — by a super admin** (D18; revocation since #215, owner ruling 2026-09-24: #191 had let the `/api-keys` page's workspace admin delete one, and `ApiKeyService.revokeWorkspaceServerKey` now refuses anyone but a super admin with `auth.role_required`).
+- **An `endpoint` key (shown in the UI as an "API key", D17) is created by a workspace admin or super admin** on `/api-keys` or over REST (`POST /api/v1/auth/api-keys`, `api_key.create`), with its endpoint associations in the same request or added later from the page. It acts as its own identity (§4.7) with the `api_caller` role.
+- **A `server` key is minted — and revoked — by a super admin** (`server_key.create`, D18; revocation since #215, owner ruling 2026-09-24: #191 had let the `/api-keys` page's workspace admin delete one, and `ApiKeyService.revokeWorkspaceServerKey` now refuses anyone but a super admin with `auth.role_required`). It acts as its own identity with the `promotion_receiver` role.
 
 A minted-at-login key's plaintext is never shown at mint time — there is no screen in a login redirect — so it is stored SEALED (`api_keys.secret_sealed`, V31: AES-256-GCM under the deployment's credential-encryption key, AAD = the key id) until the top bar's copy endpoint serves it (`GET /partials/mcp-key/secret`, own key only, `no-store`). **Show-once (#213, D16 amended 2026-09-23): the copy exists until its first read and is destroyed by it** — the open and the clear are ONE owner-scoped statement (`ApiKeyRepository.openAndClearSealedSecret`), so a second copy click in any tab answers 404 and the key is hash-only from then on; nothing the server holds can reveal a key that has been read. The route opens nothing for a request a browser marks as cross-site or as a navigation (`Sec-Fetch-Site` ≠ `same-origin`, or `Sec-Fetch-Mode: navigate` → 403): `dp_session` is `SameSite=Lax`, so a hostile page's link would otherwise carry the session and spend the one copy. V32 cleared every sealed copy minted under the pre-amendment rule, so the fleet is hash-only except keys minted since, which stay copyable until their own first Copy; a cleared key's path back to copyable is rotation — delete it and sign in again. The Argon2id hash remains the authentication half (§7.2); the sealed copy is never consulted at validation.
 
-For keys created on demand (the admin kinds), the privilege-escalation guard stands: a key's scopes MUST be a subset of its creator's at issue time (§7.5's ladder; the only scope-taking kind is `user`, which no request surface mints — so in practice the guard's remaining teeth are the service's, not the form's). The workspace pin is unchanged: a key is **pinned to a workspace** (design §5.2) and the pin is the key's request context for its entire lifetime (§5.6). The HTTP surface for key management is defined in [REST API §16](rest-api.md#16-auth--user-admin-endpoints).
+For keys created on demand, three guards run in the service, before anything is written: the kind must be mintable (not `user`); the creator must hold the KIND's create permission in the pinned workspace (`api_key.create` for `endpoint`, `server_key.create` for `server`; record §3.1, gate 7); and **the creation limit** (record O3, ruled) — a key's role must not hold a permission its creator lacks. With the two pre-created roles the limit holds by construction (the two promotion-receiving permissions are held by no person and fall outside it); it is kept as a runtime check so a later key role cannot slip past it. The identity and the key are then created in ONE transaction (§4.7). A request that still sends `scopes` is refused by name (scopes were removed, PK8). The workspace pin is unchanged: a key is **pinned to a workspace** (design §5.2) and the pin is the key's request context for its entire lifetime (§5.6). The HTTP surface for key management is defined in [REST API §16](rest-api.md#16-auth--user-admin-endpoints).
 
-### 7.5 Scopes
+### 7.5 Key roles (scopes removed)
 
-The hierarchical scope system — **the credential axis, and since RBAC round 1 an API-KEY property only**. A session JWT carries no `scopes` claim: what a signed-in person may do is their membership in the active workspace (§11A), not a global grant.
+**Scopes are gone** (#215 slice (b), record PK8). The hierarchical `read` ⊂ `execute` ⊂ `author` ⊂ `admin` credential axis, `api_keys.scopes`, the API-key `default-scopes` setting (an operator who still sets it is ignored, not refused) and the issuance code `auth.key_scope_unavailable` were removed together (V34). What a credential may do is a ROLE's, and only a role's:
 
-| Scope | Includes | Description | Available to keys? |
-|---|---|---|---|
-| `read` | — | Read pipelines, templates, datasources, executions | yes |
-| `execute` | `read` | Execute pipelines; retrieve results | yes |
-| `author` | `execute`, `read` | Create/modify pipelines and templates | yes |
-| `admin` | all | Manage datasources, users, system config | **no** |
+| Credential | Its role | Where it is judged |
+|---|---|---|
+| Session | Its membership's role in the active workspace, or a super admin's authority (§11A) | The §7.6 member columns |
+| MCP (`user`) key | Its MEMBER's current role in the pinned workspace, with workspace admin capped at **author** (PK4); a super admin with a membership there gets that role capped the same way, and one with NO membership gets **viewer** | The §7.6 member columns — re-read on every request, so a role change reaches the key within the §11.4 TTL (C2 as amended by A9) |
+| `endpoint` key | **`api_caller`** — `endpoint.serve` on the paths bound to it, and `execution.read` / `execution.result.read` for the executions it started | The §7.6 `api_caller` column |
+| `server` key (stored, or the deprecated config value) | **`promotion_receiver`** — `promotion.inventory.read`, `promotion.push`, for any workspace (B6) | The §7.6 `promotion_receiver` column |
 
-Default scope on key creation: `read`. Higher scopes require explicit selection.
+Key roles are `snake_case` everywhere — storage, wire, the CHECK — and the UI shows a human label ("api caller"). A key's role is stored on its row (`api_keys.role`), fixed by its kind, and a database CHECK makes it a fact: `user` ⇒ NULL, `endpoint` ⇒ `api_caller`, `server` ⇒ `promotion_receiver` — each non-null arm spelled with `role IS NOT NULL`, because under SQL's three-valued logic the bare comparison would admit a NULL role.
 
-**`admin` left the key wire in round 1** (D-R12, O-2). It was the only scope that ever bought a key an INSTANCE verb, and instance verbs — creating workspaces, managing members, releasing, promoting — are human. Requesting it at issuance is `auth.key_scope_unavailable` (400), and a key minted before the rule is **capped at validation**, not trusted: the migration strips the value from `api_keys.scopes`, and the validation path filters it again, so neither the row nor the code alone is what the rule rests on.
+**No key is ever a super admin** (B1). `superAdmin` is false on every key principal — the MCP key of a super admin included — so no key resolves an instance permission, whoever minted it. No MCP tool needs more than author ([record §3.4](superpowers/specs/2026-09-23-permissions-and-keys-design.md)), so the cap costs an agent nothing and keeps membership administration a signed-in person's act.
 
-A key's scope is a CEILING, never a grant on its own: every request also checks the key ISSUER's current role in the pinned workspace (§7.4), so a key can do at most what its issuer can do *now*. Which scope each catalog permission needs is §7.6's permission key-scope table — the record's A4 shim, which carries every retired operation's floor forward unchanged until #215 slice (b) removes scopes.
+### 7.6 Operation Matrix — the permission catalog (authoritative)
 
-### 7.6 Operation Matrix — two axes (authoritative)
+This matrix is the ONLY place authorization requirements are defined. [REST API](rest-api.md), [MCP Server](mcp-server.md), and [UI Screens](ui-screens.md) reference it; they never assert anything locally. Since #215 slice (a) it is the **permission catalog** of the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §2 (ratified 2026-09-23, amended 2026-09-24): one row per `<functionality>.<permission>` — 65 on this base — and every REST handler, UI route and MCP tool declares exactly ONE of them (`@RequiredScope(Permission.X)` on a handler; the tool's catalog entry, `McpToolCatalog.Entry.permission`, since slice (b)). The thirty coarse operations of v2 (`READ_RESOURCES` … `MANAGE_DATASOURCE_GRANTS`) are retired; each maps onto the permissions its surfaces were spread over.
 
-This matrix is the ONLY place authorization requirements are defined. [REST API](rest-api.md), [MCP Server](mcp-server.md), and [UI Screens](ui-screens.md) reference it; they never assert anything locally. Since #215 slice (a) it is the **permission catalog** of the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §2 (ratified 2026-09-23, amended 2026-09-24): one row per `<functionality>.<permission>` — 65 on this base — and every REST handler, UI route and MCP tool declares exactly ONE of them (`@RequiredScope(Permission.X)` on a handler; the tool's entry in `ScopeMatrix.MCP_TOOL_PERMISSION`). The thirty coarse operations of v2 (`READ_RESOURCES` … `MANAGE_DATASOURCE_GRANTS`) are retired; each maps onto the permissions its surfaces were spread over, with every route's role set and scope floor unchanged.
+Since slice (b) there is **one** axis, the ROLE ([§7.5](#75-key-roles-scopes-removed), [§11A](#11a-roles)):
 
-Every permission carries **two** minimums until slice (b), and both must be met ([§11A Roles](#11a-roles)):
+- **The member roles** — the five columns `viewer` … `super_admin`; in code the ONE role table `RolePermissions`. For a session that is its own membership's role; for the MCP key it is its member's CURRENT role capped at author (PK4), re-read on every request, so a demotion reaches the key inside one validation-cache TTL. Super admin is a property of the USER, held in every workspace (D7): ✓ on every row except the two **fenced** ones — and never on a key (B1).
+- **The key roles** — the two columns `api_caller` and `promotion_receiver` (record §3.2): an `endpoint` or `server` key is judged by its key role's column and nothing else.
 
-- **The roles** — which of the five roles hold it in the ACTIVE WORKSPACE (the five columns; in code, the ONE role table `RolePermissions`). For a session that is its own membership's role; for an API key it is **the key issuer's CURRENT role**, re-read on every request (§7.4), so a demoted issuer's key stops working inside one validation-cache TTL. Super admin is a property of the USER, held in every workspace (D7): ✓ on every row except the two **fenced** ones.
-- **Min scope** — what the CREDENTIAL must carry. Hierarchical (§7.5), and since RBAC round 1 it applies to **API keys only**: a session carries no scopes at all. Each permission carries the `minScope` of the operation or tool it replaced (the record's A4 shim, the table below the catalog), so every API key reaches exactly what it reached under v2; slice (b) removes scopes and the table.
+**Cell alphabet.** ✓ = the role holds the permission; ✗ = refused with `auth.role_required` (the MCP key: `auth.key_issuer_role_lost` — the key is fine, its member's role does not reach this); **own** = held, and the read or cancel path additionally limits the caller to their OWN runs (D11: `executed_by = self`) unless they also hold `execution.read_all` / `execution.cancel_all`; **all** = held, every row of the workspace; **lens** = held, and the promoter LENS (178, §11A.1) narrows WHAT is returned to released objects newer than the promotion target's — a hidden object answers exactly as an absent one, and an unreadable target answers NOTHING (fail closed); **fenced** = no MEMBER role holds it, super admin included — only the `promotion_receiver` key role does, through the promotion server-key route family (§7.7). In the two key-role columns, **own** = the executions the key started (its identity's runs, §4.7) and **bound** = the published paths bound to the key (§7.7). Every ✓ / own / all / lens / bound cell is *allowed* to the role walk; ✗ and fenced are *refused*.
 
-The two axes are not the same ordering and neither is redundant. `pipeline.execute` sits on the `execute` SCOPE but is a **viewer-level** permission (D3, "viewers execute"), so a `read`-scoped key may not execute while a viewer's session may. Schema introspection runs the other way: `author` scope (a `read` key must not reach a live connection) but every role, the promoter included (ratified: "introspection is reading").
-
-**Cell alphabet.** ✓ = the role holds the permission; ✗ = refused with `auth.role_required` (a key: `auth.key_issuer_role_lost`); **own** = held, and the read or cancel path additionally limits the caller to their OWN runs (D11: `executed_by = self`) unless they also hold `execution.read_all` / `execution.cancel_all`; **all** = held, every row of the workspace; **lens** = held, and the promoter LENS (178, §11A.1) narrows WHAT is returned to released objects newer than the promotion target's — a hidden object answers exactly as an absent one, and an unreadable target answers NOTHING (fail closed); **fenced** = no role holds it, super admin included — the row is reachable only through the promotion server-key route family (§7.7), whose principal the matrix admits before it asks about a permission. Every ✓ / own / all / lens cell is *allowed* to the role walk; ✗ and fenced are *refused*.
-
-`ScopeMatrix.allowed(principal, permission, workspace)` answers both axes and is the only function `ScopeInterceptor` and the MCP dispatcher call. A refusal's details name the catalog permission (`required`) and the ROLE it was judged as (`held`: `viewer` … `workspace_admin`, `super_admin` — informative only). Each row's Surfaces cell names every route in code font as the handler maps it (`VERB /path`, a path variable's regex dropped) and, after `MCP:`, every tool by wire name — the drift test, the reachability gate and the role walk read the placement from here, so a route or tool the table does not place, or places on a row other than the one it declares, fails the build. Four rows have no surface of their own — `execution.read_all`, `execution.cancel_all`, `server_key.create`, `server_key.revoke` — because a service asks for them inside another row's route (the own-only execution filters, the cancel paths, the key issuance and revocation services); the reachability gate counts that service check as the row's claim.
+`ScopeMatrix.allowed(principal, permission, workspace)` answers it and is the only function `ScopeInterceptor` and the MCP dispatcher call; a handler or tool that declares no permission is refused with `auth.permission.undeclared`. A refusal's details name the catalog permission (`required`) and the ROLE it was judged as (`held`: `viewer` … `workspace_admin`, `super_admin`, a key role — informative only). Each row's Surfaces cell names every route in code font as the handler maps it (`VERB /path`, a path variable's regex dropped) and, after `MCP:`, every tool by wire name — the drift test, the reachability gate and the role walk read the placement from here, so a route or tool the table does not place, or places on a row other than the one it declares, fails the build. Four rows have no surface of their own — `execution.read_all`, `execution.cancel_all`, `server_key.create`, `server_key.revoke` — because a service asks for them inside another row's route (the own-only execution filters, the cancel paths, the key issuance and revocation services); the reachability gate counts that service check as the row's claim.
 
 **The catalog — permissions and roles:** (record §2, #215 — 65 permissions)
 
-| Permission | Surfaces | viewer | author | promoter | ws_admin | super_admin |
-|---|---|---|---|---|---|---|
-| `pipeline.read` | Read pipelines, their versions, exports and checks; the pipeline pages and partials; the dashboard and the search partial (every role's landing reads). REST/UI: `GET /api/v1/pipelines`, `GET /api/v1/pipelines/{id}`, `GET /api/v1/pipelines/{id}/export`, `GET /api/v1/pipelines/{id}/versions`, `GET /api/v1/pipelines/{id}/versions/{version}`, `GET /api/v1/pipelines/{id}/versions/{version}/checks`, `GET /dashboard`, `GET /partials/dashboard-stats`, `GET /partials/pipelines`, `GET /partials/pipelines/detail`, `GET /partials/pipelines/{id}/nodes/{nodeId}/sql`, `GET /partials/pipelines/{id}/runs`, `GET /partials/pipelines/{id}/usage`, `GET /partials/pipelines/{id}/versions/{version}/checks`, `GET /partials/search`, `GET /pipelines`. MCP: `pipelines_list`, `pipelines_get` | ✓ | ✓ | lens | ✓ | ✓ |
-| `pipeline.create` | Create a pipeline. REST/UI: `POST /api/v1/pipelines`. MCP: `pipelines_create` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `pipeline.update` | Write a pipeline's draft. REST/UI: `PUT /api/v1/pipelines/{id}`. MCP: `pipelines_update` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `pipeline.version.manage` | Discard a draft, discard / restore / purge a version, and the lifecycle dialogs for them. REST/UI: `POST /api/v1/pipelines/{id}/draft/discard`, `DELETE /api/v1/pipelines/{id}/versions/{version}`, `POST /api/v1/pipelines/{id}/versions/{version}/discard`, `POST /api/v1/pipelines/{id}/versions/{version}/restore`, `GET /partials/pipelines/{id}/lifecycle/discard`, `POST /partials/pipelines/{id}/lifecycle/discard`, `GET /partials/pipelines/{id}/lifecycle/purge`, `POST /partials/pipelines/{id}/lifecycle/purge`, `GET /partials/pipelines/{id}/lifecycle/restore`, `POST /partials/pipelines/{id}/lifecycle/restore` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `pipeline.delete` | Delete a pipeline (the editor's purge-entity dialog). REST/UI: `DELETE /api/v1/pipelines/{id}`, `GET /partials/pipelines/{id}/lifecycle/purge-entity`, `POST /partials/pipelines/{id}/lifecycle/purge-entity` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `pipeline.import` | Import a pipeline. REST/UI: `POST /api/v1/pipelines/import` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `pipeline.release` | Release a version (the release dialog). REST/UI: `POST /api/v1/pipelines/{id}/release`, `GET /partials/pipelines/{id}/lifecycle/release`, `POST /partials/pipelines/{id}/lifecycle/release` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `pipeline.switch_version` | Switch the served version — the rollback lever. REST/UI: `POST /api/v1/pipelines/{id}/current`, `GET /partials/pipelines/{id}/lifecycle/switch`, `POST /partials/pipelines/{id}/lifecycle/switch` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `pipeline.execute` | Execute a pipeline; the pipeline editor page floors here (122). REST/UI: `POST /api/v1/pipelines/{id}/execute`, `GET /pipelines/{id}/editor`. MCP: `pipelines_execute` | ✓ | ✓ | ✗ | ✓ | ✓ |
-| `pipeline.run_checks` | Run a version's release checks. REST/UI: `POST /api/v1/pipelines/{id}/versions/{version}/checks/run`, `POST /partials/pipelines/{id}/versions/{version}/checks/run`. MCP: `pipelines_run_checks` | ✓ | ✓ | ✗ | ✓ | ✓ |
-| `pipeline.execute_node` | Execute one node against live data (returns rows). MCP: `pipelines_execute_node` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `template.read` | Read templates, their versions and runs; the template pages, the editor's source. REST/UI: `GET /api/v1/templates`, `GET /api/v1/templates/versions`, `GET /partials/templates`, `GET /partials/templates/editor/source`, `GET /partials/templates/runs`, `GET /partials/templates/versions`, `GET /templates`, `GET /templates/editor`. MCP: `templates_list`, `templates_get`, `templates_used_by` | ✓ | ✓ | lens | ✓ | ✓ |
-| `template.create` | Create a template (the create modal). REST/UI: `POST /api/v1/templates`, `POST /partials/templates`. MCP: `templates_create` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `template.update` | Write a template's draft (the editor's Edit). REST/UI: `PUT /api/v1/templates`, `POST /partials/templates/editor/edit`. MCP: `templates_update` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `template.version.manage` | Discard a draft, discard / restore / purge a version, the lifecycle dialogs; purge a never-released draft over MCP. REST/UI: `POST /api/v1/templates/draft/discard`, `DELETE /api/v1/templates/version`, `POST /api/v1/templates/version/discard`, `POST /api/v1/templates/version/restore`, `GET /partials/templates/lifecycle/discard`, `POST /partials/templates/lifecycle/discard`, `GET /partials/templates/lifecycle/purge`, `POST /partials/templates/lifecycle/purge`, `GET /partials/templates/lifecycle/restore`, `POST /partials/templates/lifecycle/restore`. MCP: `templates_purge_draft` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `template.delete` | Delete a template (the purge-entity dialog). REST/UI: `DELETE /api/v1/templates`, `GET /partials/templates/lifecycle/purge-entity`, `POST /partials/templates/lifecycle/purge-entity` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `template.import` | Import a template. REST/UI: `POST /api/v1/templates/import` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `template.render` | Render a template (the editor preview). REST/UI: `POST /api/v1/templates/render`, `POST /partials/templates/render`. MCP: `templates_render` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `template.evaluate` | Evaluate a transform template over a caller-supplied input (7b, the render row's twin). REST/UI: `POST /api/v1/templates/evaluate`. MCP: `templates_evaluate` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `template.release` | Release a template version (the release dialog). REST/UI: `POST /api/v1/templates/release`, `GET /partials/templates/lifecycle/release`, `POST /partials/templates/lifecycle/release` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `template.switch_version` | Switch a template's served version. REST/UI: `POST /api/v1/templates/current` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `execution.read` | Execution metadata, the executions screens and the SSE replay — own runs unless `execution.read_all` (D11). REST/UI: `GET /api/v1/executions`, `GET /api/v1/executions/{id}`, `GET /api/v1/executions/{id}/events`, `GET /executions`, `GET /executions/{id}`, `GET /partials/executions`, `GET /partials/recent-executions`. MCP: `executions_list`, `executions_get` | own | own | ✗ | ✓ | ✓ |
-| `execution.result.read` | The result cursor — the same own-or-all filter. REST/UI: `GET /api/v1/executions/{id}/result`, `GET /partials/executions/{id}/result`. MCP: `executions_get_result` | own | own | ✗ | ✓ | ✓ |
-| `execution.read_all` | Lifts "own" on the two rows above — no surface of its own; the read paths ask for it | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `execution.cancel` | Cancel a running execution — own runs unless `execution.cancel_all`. REST/UI: `DELETE /api/v1/executions/{id}`, `DELETE /partials/executions/{id}/cancel`. MCP: `executions_cancel` | own | own | ✗ | ✓ | ✓ |
-| `execution.cancel_all` | Lifts "own" on cancel — no surface of its own; the cancel paths ask for it | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `datasource.read` | Datasource metadata, the datasource pages, the registered lake tables, the browse partials, the register form's pool fields. REST/UI: `GET /api/v1/datasources`, `GET /api/v1/datasources/{name}`, `GET /api/v1/datasources/{name}/lake-tables`, `GET /datasources`, `GET /datasources/{name}`, `GET /partials/datasources`, `GET /partials/datasources/pool-fields`, `GET /partials/datasources/{name}/lake-tables`, `GET /partials/datasources/{name}/tables`, `GET /partials/datasources/{name}/tables/{table}/columns`. MCP: `datasources_list`, `datasources_get`, `datasources_get_table_stats` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `datasource.introspect` | Schema introspection over a live connection — introspection is reading (ratified). REST/UI: `GET /api/v1/datasources/{name}/schemas`, `GET /api/v1/datasources/{name}/tables`, `GET /api/v1/datasources/{name}/tables/{table}/columns`. MCP: `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `datasource.test` | Test a datasource connection — follows execute (ratified). REST/UI: `POST /api/v1/datasources/{name}/test`, `POST /partials/datasources/{name}/test`. MCP: `datasources_test` | ✓ | ✓ | ✗ | ✓ | ✓ |
-| `datasource.preview_rows` | Preview a table's rows (row data — author and above). MCP: `datasources_preview_rows` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `datasource.sql_probe` | Run a bounded read-only SQL probe (row data — author and above). MCP: `sql_probe` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `datasource.manage` | Register / update / delete datasources and their dialogs. The `member-datasources-enabled` gate, and the super-admin rule for an INSTANCE or in-process datasource (#186), stay in the service (`DatasourceWorkspaceRules`). REST/UI: `POST /api/v1/datasources`, `PUT /api/v1/datasources/{name}`, `DELETE /api/v1/datasources/{name}`, `POST /partials/datasources`, `POST /partials/datasources/{name}`, `GET /partials/datasources/{name}/delete`, `POST /partials/datasources/{name}/delete`, `GET /partials/datasources/{name}/edit` | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `datasource.grant` | Grant / revoke a datasource to a workspace, and read who holds it (D-R7). REST/UI: `GET /api/v1/datasources/{name}/grants`, `POST /api/v1/datasources/{name}/grants/{workspace}`, `DELETE /api/v1/datasources/{name}/grants/{workspace}`, `GET /partials/datasources/{name}/grants`, `POST /partials/datasources/{name}/grants`, `POST /partials/datasources/{name}/grants/{workspace}/remove` | ✗ | ✗ | ✗ | ✗ | ✓ |
-| `lake_table.manage` | Register / import / unregister lake tables (the dp-lake catalog). REST/UI: `POST /api/v1/datasources/{name}/tables`, `POST /api/v1/datasources/{name}/tables/import`, `DELETE /api/v1/datasources/{name}/tables/{namespace}/{table}`. MCP: `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `endpoint.read` | Read published endpoints; the API console page. REST/UI: `GET /api-console`, `GET /api/v1/endpoints`. MCP: `endpoints_list`, `endpoints_get` | ✓ | ✓ | lens | ✓ | ✓ |
-| `endpoint.publish` | Publish a released pipeline at a URL. REST/UI: `POST /api/v1/endpoints`. MCP: `endpoints_create` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `endpoint.unpublish` | Unpublish. REST/UI: `DELETE /api/v1/endpoints`. MCP: `endpoints_delete` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `endpoint.serve` | Serve a published endpoint — the floor only; the path binding is the gate (§7.7), and an `endpoint`-kind key bypasses both axes. REST/UI: `GET /api/{category}/**`, `POST /api/{category}/**`, `PUT /api/{category}/**`, `PATCH /api/{category}/**`, `DELETE /api/{category}/**` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `semantic.read` | Read learned facts; the datasource facts dialog. REST/UI: `GET /partials/datasources/{name}/facts`. MCP: `semantics_list` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `semantic.record` | Record a learned fact (D-S8); a DATASOURCE-scope record also needs the datasource granted here. MCP: `semantics_record` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `semantic.retire` | Retire a learned fact; retiring a DATASOURCE fact another workspace established additionally needs `datasource.manage`, asked in the service. MCP: `semantics_retire` | ✗ | ✓ | ✗ | ✓ | ✓ |
-| `calculator.read` | The calculator catalog — a property of the build. MCP: `calculators_list`, `calculators_get` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `docs.read` | The shipped skill docs — a property of the build. MCP: `docs_list`, `docs_get` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `promotion.read` | The promotion page (owner rule 13); the promote verb on it renders by `promotion.promote`. REST/UI: `GET /promotion` | ✗ | ✓ | ✓ | ✓ | ✓ |
-| `promotion.promote` | Promote to the higher environment — the sending side (D5). REST/UI: `POST /promotion/promote` | ✗ | ✗ | ✓ | ✓ | ✓ |
-| `promotion.inventory.read` | The RECEIVING side's inventory — the promotion server-key route family only (§7.7). REST/UI: `GET /api/v1/promotion/inventory` | fenced | fenced | fenced | fenced | fenced |
-| `promotion.push` | The RECEIVING side's push — the promotion server-key route family only (§7.7). REST/UI: `POST /api/v1/promotion/push` | fenced | fenced | fenced | fenced | fenced |
-| `mcp_key.own` | See, copy (once, #213) and delete-to-rotate your own MCP key; the key settings page. Minted by the login hook only (D16). REST/UI: `GET /api/v1/auth/api-keys`, `GET /api/v1/auth/api-keys/mine`, `DELETE /api/v1/auth/api-keys/{keyId}`, `DELETE /partials/mcp-key`, `GET /partials/mcp-key/chip`, `GET /partials/mcp-key/secret`, `GET /settings/api-keys` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `api_key.read` | The workspace's API keys page. REST/UI: `GET /api-keys` | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `api_key.create` | Create an `endpoint` or `server` key — a `server` key additionally needs `server_key.create`, asked in the service. REST/UI: `POST /api/v1/auth/api-keys`, `POST /partials/api-keys` | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `api_key.revoke` | Delete a workspace key from the page — a `server` key additionally needs `server_key.revoke`, asked in the service. REST/UI: `DELETE /partials/api-keys/{keyId}` | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `api_key.bind` | Associate an `endpoint` key with published paths (D17). REST/UI: `POST /api/v1/endpoints/bindings`, `DELETE /api/v1/endpoints/bindings`, `POST /partials/api-keys/{keyId}/bindings` | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `server_key.create` | Mint a `server` key (D18) — asked by the issuance service on `api_key.create`'s routes | ✗ | ✗ | ✗ | ✗ | ✓ |
-| `server_key.revoke` | Revoke a `server` key — asked by the revocation service on `api_key.revoke`'s route | ✗ | ✗ | ✗ | ✗ | ✓ |
-| `workspace.switch` | Switch the active workspace, and list your own memberships (D13, D14). REST/UI: `GET /api/v1/workspaces`, `POST /workspace/switch` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `workspace.read` | The workspaces page, one workspace, its members (D13). A SESSION with no reachable workspace may still call it (§11A.1). REST/UI: `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members`, `GET /workspaces` | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `workspace.update` | Rename a workspace's display name. REST/UI: `PUT /api/v1/workspaces/{name}`, `POST /workspaces/{name}/display-name` | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `workspace.members.manage` | Add / remove members, set their role, invite, revoke a member's MCP key (#200) — never your own membership (#208); the last admin stays (`workspace.last_admin`). REST/UI: `DELETE /api/v1/workspaces/{name}/invitations/{email}`, `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{userId}`, `DELETE /api/v1/workspaces/{name}/members/{userId}`, `DELETE /api/v1/workspaces/{name}/members/{userId}/key`, `POST /partials/workspaces/{name}/members/{userId}/role`, `POST /workspaces/{name}/invitations/revoke`, `POST /workspaces/{name}/members`, `POST /workspaces/{name}/members/{userId}/key/revoke`, `POST /workspaces/{name}/members/{userId}/remove` | ✗ | ✗ | ✗ | ✓ | ✓ |
-| `workspace.create` | Create a workspace (D7). REST/UI: `POST /api/v1/workspaces`, `POST /workspaces/create` | ✗ | ✗ | ✗ | ✗ | ✓ |
-| `workspace.lifecycle` | Deactivate, reactivate, delete a workspace (D-R10). REST/UI: `DELETE /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/deactivate`, `POST /api/v1/workspaces/{name}/reactivate`, `POST /workspaces/{name}/deactivate`, `POST /workspaces/{name}/delete`, `POST /workspaces/{name}/reactivate` | ✗ | ✗ | ✗ | ✗ | ✓ |
-| `user.manage` | User administration: list, activate, deactivate, grant / revoke super admin, local accounts. REST/UI: `GET /admin/users`, `GET /api/v1/auth/users`, `GET /api/v1/auth/users/{userId}`, `POST /api/v1/auth/users/{userId}/activate`, `POST /api/v1/auth/users/{userId}/deactivate`, `POST /api/v1/auth/users/{userId}/grant-admin`, `POST /api/v1/auth/users/{userId}/revoke-admin`, `GET /partials/admin/users`, `POST /partials/admin/users`, `GET /partials/admin/users/{userId}/mail/{kind}`, `PATCH /partials/admin/users/{userId}/{action}` | ✗ | ✗ | ✗ | ✗ | ✓ |
-| `user.identity_reset` | Release a user's linked sign-in identity (#187). REST/UI: `PATCH /partials/admin/users/{userId}/identity-reset` | ✗ | ✗ | ✗ | ✗ | ✓ |
-| `profile.read` | The current principal; the settings page. REST/UI: `GET /api/v1/auth/me`, `GET /settings` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `profile.preference` | Your own theme preference. REST/UI: `PATCH /partials/profile/theme` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `profile.password` | Change your own password (current password verified in-handler); the password page. REST/UI: `POST /partials/account/password`, `GET /settings/password` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Read the audit log — **reserved** (D12) | no surface yet: `audit_log` has no page and no endpoint (verified 2026-09-20 — the only reads are the serve/MCP existence checks and the tool learnings, none caller-facing). When one lands it adds a permission on this row | ✗ | ✗ | ✗ | ✓ | ✓ |
+| Permission | Surfaces | viewer | author | promoter | ws_admin | super_admin | api_caller | promotion_receiver |
+|---|---|---|---|---|---|---|---|---|
+| `pipeline.read` | Read pipelines, their versions, exports and checks; the pipeline pages and partials; the dashboard and the search partial (every role's landing reads). REST/UI: `GET /api/v1/pipelines`, `GET /api/v1/pipelines/{id}`, `GET /api/v1/pipelines/{id}/export`, `GET /api/v1/pipelines/{id}/versions`, `GET /api/v1/pipelines/{id}/versions/{version}`, `GET /api/v1/pipelines/{id}/versions/{version}/checks`, `GET /dashboard`, `GET /partials/dashboard-stats`, `GET /partials/pipelines`, `GET /partials/pipelines/detail`, `GET /partials/pipelines/{id}/nodes/{nodeId}/sql`, `GET /partials/pipelines/{id}/runs`, `GET /partials/pipelines/{id}/usage`, `GET /partials/pipelines/{id}/versions/{version}/checks`, `GET /partials/search`, `GET /pipelines`. MCP: `pipelines_list`, `pipelines_get` | ✓ | ✓ | lens | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.create` | Create a pipeline. REST/UI: `POST /api/v1/pipelines`. MCP: `pipelines_create` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.update` | Write a pipeline's draft. REST/UI: `PUT /api/v1/pipelines/{id}`. MCP: `pipelines_update` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.version.manage` | Discard a draft, discard / restore / purge a version, and the lifecycle dialogs for them. REST/UI: `POST /api/v1/pipelines/{id}/draft/discard`, `DELETE /api/v1/pipelines/{id}/versions/{version}`, `POST /api/v1/pipelines/{id}/versions/{version}/discard`, `POST /api/v1/pipelines/{id}/versions/{version}/restore`, `GET /partials/pipelines/{id}/lifecycle/discard`, `POST /partials/pipelines/{id}/lifecycle/discard`, `GET /partials/pipelines/{id}/lifecycle/purge`, `POST /partials/pipelines/{id}/lifecycle/purge`, `GET /partials/pipelines/{id}/lifecycle/restore`, `POST /partials/pipelines/{id}/lifecycle/restore` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.delete` | Delete a pipeline (the editor's purge-entity dialog). REST/UI: `DELETE /api/v1/pipelines/{id}`, `GET /partials/pipelines/{id}/lifecycle/purge-entity`, `POST /partials/pipelines/{id}/lifecycle/purge-entity` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.import` | Import a pipeline. REST/UI: `POST /api/v1/pipelines/import` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.release` | Release a version (the release dialog). REST/UI: `POST /api/v1/pipelines/{id}/release`, `GET /partials/pipelines/{id}/lifecycle/release`, `POST /partials/pipelines/{id}/lifecycle/release` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.switch_version` | Switch the served version — the rollback lever. REST/UI: `POST /api/v1/pipelines/{id}/current`, `GET /partials/pipelines/{id}/lifecycle/switch`, `POST /partials/pipelines/{id}/lifecycle/switch` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.execute` | Execute a pipeline; the pipeline editor page floors here (122). REST/UI: `POST /api/v1/pipelines/{id}/execute`, `GET /pipelines/{id}/editor`. MCP: `pipelines_execute` | ✓ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.run_checks` | Run a version's release checks. REST/UI: `POST /api/v1/pipelines/{id}/versions/{version}/checks/run`, `POST /partials/pipelines/{id}/versions/{version}/checks/run`. MCP: `pipelines_run_checks` | ✓ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `pipeline.execute_node` | Execute one node against live data (returns rows). MCP: `pipelines_execute_node` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `template.read` | Read templates, their versions and runs; the template pages, the editor's source. REST/UI: `GET /api/v1/templates`, `GET /api/v1/templates/versions`, `GET /partials/templates`, `GET /partials/templates/editor/source`, `GET /partials/templates/runs`, `GET /partials/templates/versions`, `GET /templates`, `GET /templates/editor`. MCP: `templates_list`, `templates_get`, `templates_used_by` | ✓ | ✓ | lens | ✓ | ✓ | ✗ | ✗ |
+| `template.create` | Create a template (the create modal). REST/UI: `POST /api/v1/templates`, `POST /partials/templates`. MCP: `templates_create` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `template.update` | Write a template's draft (the editor's Edit). REST/UI: `PUT /api/v1/templates`, `POST /partials/templates/editor/edit`. MCP: `templates_update` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `template.version.manage` | Discard a draft, discard / restore / purge a version, the lifecycle dialogs; purge a never-released draft over MCP. REST/UI: `POST /api/v1/templates/draft/discard`, `DELETE /api/v1/templates/version`, `POST /api/v1/templates/version/discard`, `POST /api/v1/templates/version/restore`, `GET /partials/templates/lifecycle/discard`, `POST /partials/templates/lifecycle/discard`, `GET /partials/templates/lifecycle/purge`, `POST /partials/templates/lifecycle/purge`, `GET /partials/templates/lifecycle/restore`, `POST /partials/templates/lifecycle/restore`. MCP: `templates_purge_draft` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `template.delete` | Delete a template (the purge-entity dialog). REST/UI: `DELETE /api/v1/templates`, `GET /partials/templates/lifecycle/purge-entity`, `POST /partials/templates/lifecycle/purge-entity` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `template.import` | Import a template. REST/UI: `POST /api/v1/templates/import` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `template.render` | Render a template (the editor preview). REST/UI: `POST /api/v1/templates/render`, `POST /partials/templates/render`. MCP: `templates_render` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `template.evaluate` | Evaluate a transform template over a caller-supplied input (7b, the render row's twin). REST/UI: `POST /api/v1/templates/evaluate`. MCP: `templates_evaluate` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `template.release` | Release a template version (the release dialog). REST/UI: `POST /api/v1/templates/release`, `GET /partials/templates/lifecycle/release`, `POST /partials/templates/lifecycle/release` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `template.switch_version` | Switch a template's served version. REST/UI: `POST /api/v1/templates/current` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `execution.read` | Execution metadata, the executions screens and the SSE replay — own runs unless `execution.read_all` (D11). REST/UI: `GET /api/v1/executions`, `GET /api/v1/executions/{id}`, `GET /api/v1/executions/{id}/events`, `GET /executions`, `GET /executions/{id}`, `GET /partials/executions`, `GET /partials/recent-executions`. MCP: `executions_list`, `executions_get` | own | own | ✗ | ✓ | ✓ | own | ✗ |
+| `execution.result.read` | The result cursor — the same own-or-all filter. REST/UI: `GET /api/v1/executions/{id}/result`, `GET /partials/executions/{id}/result`. MCP: `executions_get_result` | own | own | ✗ | ✓ | ✓ | own | ✗ |
+| `execution.read_all` | Lifts "own" on the two rows above — no surface of its own; the read paths ask for it | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `execution.cancel` | Cancel a running execution — own runs unless `execution.cancel_all`. REST/UI: `DELETE /api/v1/executions/{id}`, `DELETE /partials/executions/{id}/cancel`. MCP: `executions_cancel` | own | own | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `execution.cancel_all` | Lifts "own" on cancel — no surface of its own; the cancel paths ask for it | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `datasource.read` | Datasource metadata, the datasource pages, the registered lake tables, the browse partials, the register form's pool fields. REST/UI: `GET /api/v1/datasources`, `GET /api/v1/datasources/{name}`, `GET /api/v1/datasources/{name}/lake-tables`, `GET /datasources`, `GET /datasources/{name}`, `GET /partials/datasources`, `GET /partials/datasources/pool-fields`, `GET /partials/datasources/{name}/lake-tables`, `GET /partials/datasources/{name}/tables`, `GET /partials/datasources/{name}/tables/{table}/columns`. MCP: `datasources_list`, `datasources_get`, `datasources_get_table_stats` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `datasource.introspect` | Schema introspection over a live connection — introspection is reading (ratified). REST/UI: `GET /api/v1/datasources/{name}/schemas`, `GET /api/v1/datasources/{name}/tables`, `GET /api/v1/datasources/{name}/tables/{table}/columns`. MCP: `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `datasource.test` | Test a datasource connection — follows execute (ratified). REST/UI: `POST /api/v1/datasources/{name}/test`, `POST /partials/datasources/{name}/test`. MCP: `datasources_test` | ✓ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `datasource.preview_rows` | Preview a table's rows (row data — author and above). MCP: `datasources_preview_rows` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `datasource.sql_probe` | Run a bounded read-only SQL probe (row data — author and above). MCP: `sql_probe` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `datasource.manage` | Register / update / delete datasources and their dialogs. The `member-datasources-enabled` gate, and the super-admin rule for an INSTANCE or in-process datasource (#186), stay in the service (`DatasourceWorkspaceRules`). REST/UI: `POST /api/v1/datasources`, `PUT /api/v1/datasources/{name}`, `DELETE /api/v1/datasources/{name}`, `POST /partials/datasources`, `POST /partials/datasources/{name}`, `GET /partials/datasources/{name}/delete`, `POST /partials/datasources/{name}/delete`, `GET /partials/datasources/{name}/edit` | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `datasource.grant` | Grant / revoke a datasource to a workspace, and read who holds it (D-R7). REST/UI: `GET /api/v1/datasources/{name}/grants`, `POST /api/v1/datasources/{name}/grants/{workspace}`, `DELETE /api/v1/datasources/{name}/grants/{workspace}`, `GET /partials/datasources/{name}/grants`, `POST /partials/datasources/{name}/grants`, `POST /partials/datasources/{name}/grants/{workspace}/remove` | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| `lake_table.manage` | Register / import / unregister lake tables (the dp-lake catalog). REST/UI: `POST /api/v1/datasources/{name}/tables`, `POST /api/v1/datasources/{name}/tables/import`, `DELETE /api/v1/datasources/{name}/tables/{namespace}/{table}`. MCP: `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `endpoint.read` | Read published endpoints; the API console page. REST/UI: `GET /api-console`, `GET /api/v1/endpoints`. MCP: `endpoints_list`, `endpoints_get` | ✓ | ✓ | lens | ✓ | ✓ | ✗ | ✗ |
+| `endpoint.publish` | Publish a released pipeline at a URL. REST/UI: `POST /api/v1/endpoints`. MCP: `endpoints_create` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `endpoint.unpublish` | Unpublish. REST/UI: `DELETE /api/v1/endpoints`. MCP: `endpoints_delete` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `endpoint.serve` | Serve a published endpoint — the floor only; the path binding is the gate (§7.7), and an `endpoint`-kind key bypasses both axes. REST/UI: `GET /api/{category}/**`, `POST /api/{category}/**`, `PUT /api/{category}/**`, `PATCH /api/{category}/**`, `DELETE /api/{category}/**` | ✓ | ✓ | ✓ | ✓ | ✓ | bound | ✗ |
+| `semantic.read` | Read learned facts; the datasource facts dialog. REST/UI: `GET /partials/datasources/{name}/facts`. MCP: `semantics_list` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `semantic.record` | Record a learned fact (D-S8); a DATASOURCE-scope record also needs the datasource granted here. MCP: `semantics_record` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `semantic.retire` | Retire a learned fact; retiring a DATASOURCE fact another workspace established additionally needs `datasource.manage`, asked in the service. MCP: `semantics_retire` | ✗ | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `calculator.read` | The calculator catalog — a property of the build. MCP: `calculators_list`, `calculators_get` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `docs.read` | The shipped skill docs — a property of the build. MCP: `docs_list`, `docs_get` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `promotion.read` | The promotion page (owner rule 13); the promote verb on it renders by `promotion.promote`. REST/UI: `GET /promotion` | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `promotion.promote` | Promote to the higher environment — the sending side (D5). REST/UI: `POST /promotion/promote` | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `promotion.inventory.read` | The RECEIVING side's inventory — the promotion server-key route family only (§7.7). REST/UI: `GET /api/v1/promotion/inventory` | fenced | fenced | fenced | fenced | fenced | ✗ | ✓ |
+| `promotion.push` | The RECEIVING side's push — the promotion server-key route family only (§7.7). REST/UI: `POST /api/v1/promotion/push` | fenced | fenced | fenced | fenced | fenced | ✗ | ✓ |
+| `mcp_key.own` | See, copy (once, #213) and delete-to-rotate your own MCP key; the key settings page. Minted by the login hook only (D16). REST/UI: `GET /api/v1/auth/api-keys`, `GET /api/v1/auth/api-keys/mine`, `DELETE /api/v1/auth/api-keys/{keyId}`, `DELETE /partials/mcp-key`, `GET /partials/mcp-key/chip`, `GET /partials/mcp-key/secret`, `GET /settings/api-keys` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `api_key.read` | The workspace's API keys page. REST/UI: `GET /api-keys` | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `api_key.create` | Create an `endpoint` or `server` key — a `server` key additionally needs `server_key.create`, asked in the service. REST/UI: `POST /api/v1/auth/api-keys`, `POST /partials/api-keys` | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `api_key.revoke` | Delete a workspace key from the page — a `server` key additionally needs `server_key.revoke`, asked in the service. REST/UI: `DELETE /partials/api-keys/{keyId}` | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `api_key.bind` | Associate an `endpoint` key with published paths (D17). REST/UI: `POST /api/v1/endpoints/bindings`, `DELETE /api/v1/endpoints/bindings`, `POST /partials/api-keys/{keyId}/bindings` | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `server_key.create` | Mint a `server` key (D18) — asked by the issuance service on `api_key.create`'s routes | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| `server_key.revoke` | Revoke a `server` key — asked by the revocation service on `api_key.revoke`'s route | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| `workspace.switch` | Switch the active workspace, and list your own memberships (D13, D14). REST/UI: `GET /api/v1/workspaces`, `POST /workspace/switch` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `workspace.read` | The workspaces page, one workspace, its members (D13). A SESSION with no reachable workspace may still call it (§11A.1). REST/UI: `GET /api/v1/workspaces/{name}`, `GET /api/v1/workspaces/{name}/members`, `GET /workspaces` | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `workspace.update` | Rename a workspace's display name. REST/UI: `PUT /api/v1/workspaces/{name}`, `POST /workspaces/{name}/display-name` | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `workspace.members.manage` | Add / remove members, set their role, invite, revoke a member's MCP key (#200) — never your own membership (#208); the last admin stays (`workspace.last_admin`). REST/UI: `DELETE /api/v1/workspaces/{name}/invitations/{email}`, `POST /api/v1/workspaces/{name}/members`, `PUT /api/v1/workspaces/{name}/members/{userId}`, `DELETE /api/v1/workspaces/{name}/members/{userId}`, `DELETE /api/v1/workspaces/{name}/members/{userId}/key`, `POST /partials/workspaces/{name}/members/{userId}/role`, `POST /workspaces/{name}/invitations/revoke`, `POST /workspaces/{name}/members`, `POST /workspaces/{name}/members/{userId}/key/revoke`, `POST /workspaces/{name}/members/{userId}/remove` | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `workspace.create` | Create a workspace (D7). REST/UI: `POST /api/v1/workspaces`, `POST /workspaces/create` | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| `workspace.lifecycle` | Deactivate, reactivate, delete a workspace (D-R10). REST/UI: `DELETE /api/v1/workspaces/{name}`, `POST /api/v1/workspaces/{name}/deactivate`, `POST /api/v1/workspaces/{name}/reactivate`, `POST /workspaces/{name}/deactivate`, `POST /workspaces/{name}/delete`, `POST /workspaces/{name}/reactivate` | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| `user.manage` | User administration: list, activate, deactivate, grant / revoke super admin, local accounts. REST/UI: `GET /admin/users`, `GET /api/v1/auth/users`, `GET /api/v1/auth/users/{userId}`, `POST /api/v1/auth/users/{userId}/activate`, `POST /api/v1/auth/users/{userId}/deactivate`, `POST /api/v1/auth/users/{userId}/grant-admin`, `POST /api/v1/auth/users/{userId}/revoke-admin`, `GET /partials/admin/users`, `POST /partials/admin/users`, `GET /partials/admin/users/{userId}/mail/{kind}`, `PATCH /partials/admin/users/{userId}/{action}` | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| `user.identity_reset` | Release a user's linked sign-in identity (#187). REST/UI: `PATCH /partials/admin/users/{userId}/identity-reset` | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
+| `profile.read` | The current principal; the settings page. REST/UI: `GET /api/v1/auth/me`, `GET /settings` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `profile.preference` | Your own theme preference. REST/UI: `PATCH /partials/profile/theme` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| `profile.password` | Change your own password (current password verified in-handler); the password page. REST/UI: `POST /partials/account/password`, `GET /settings/password` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| Read the audit log — **reserved** (D12) | no surface yet: `audit_log` has no page and no endpoint (verified 2026-09-20 — the only reads are the serve/MCP existence checks and the tool learnings, none caller-facing). When one lands it adds a permission on this row | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
 
-**Permissions — key scopes** (the credential axis, API keys only — a session has none; the record's A4 shim, removed with scopes in #215 slice (b)):
+(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key is ever a super admin (B1) and the MCP key is capped at author (PK4). 38 of the 42 tools operate inside the API key's pinned workspace; the four exceptions are `calculators_list` / `calculators_get` (072) and `docs_list` / `docs_get` (120), and only because they touch no workspace data at all — the calculator catalog and the shipped skill docs are properties of the BUILD, identical for every caller.)
 
-| Min scope | Permissions |
-|---|---|
-| `read` | `pipeline.read`, `template.read`, `execution.read`, `execution.result.read`, `execution.read_all`, `datasource.read`, `endpoint.read`, `endpoint.serve`, `semantic.read`, `calculator.read`, `docs.read`, `promotion.inventory.read`, `mcp_key.own`, `workspace.switch`, `workspace.read`, `profile.read`, `profile.preference`, `profile.password` |
-| `execute` | `pipeline.execute`, `pipeline.run_checks`, `execution.cancel`, `execution.cancel_all` |
-| `author` | `pipeline.create`, `pipeline.update`, `pipeline.version.manage`, `pipeline.delete`, `pipeline.import`, `pipeline.release`, `pipeline.switch_version`, `pipeline.execute_node`, `template.create`, `template.update`, `template.version.manage`, `template.delete`, `template.import`, `template.render`, `template.evaluate`, `template.release`, `template.switch_version`, `datasource.introspect`, `datasource.test`, `datasource.preview_rows`, `datasource.sql_probe`, `datasource.manage`, `lake_table.manage`, `endpoint.publish`, `endpoint.unpublish`, `semantic.record`, `semantic.retire`, `promotion.read`, `promotion.promote`, `promotion.push`, `api_key.read`, `api_key.create`, `api_key.revoke`, `api_key.bind`, `workspace.update`, `workspace.members.manage` |
-| `admin` | `datasource.grant`, `server_key.create`, `server_key.revoke`, `workspace.create`, `workspace.lifecycle`, `user.manage`, `user.identity_reset` — unobtainable by a key (§7.5), so these are session-only by the scope axis alone |
+**UI screens** reference the same permissions as the routes they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. Since round 2 (114) they also RENDER by it: a verb this matrix would refuse is not drawn at all, and the screen-by-screen inventory — every verb, the role boolean that renders it, and the permission it answers to — is [UI Screens §4.3e](ui-screens.md#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative). There is deliberately no "UI" column here: the rendering rule is derived from the role columns, and a second copy of it in this table would be a second thing to keep true. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's permission with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs every non-public route with the same default-deny: an unannotated handler is refused (`auth.permission.undeclared`), and a mutating partial enforces its twin's permission. Three rail items follow a row since 2026-09-20 and are drawn only for the roles that hold it: Executions (`execution.read`), Promotion (`promotion.read`), Workspaces (`workspace.read`; a principal with no workspace keeps the link because the no-workspace page is the one screen that explains their state).
 
-**MCP tools — key scopes** (the credential axis of the key that calls `/mcp`):
-
-| Min scope | Tools |
-|---|---|
-| `read` | `pipelines_list`, `pipelines_get`, `templates_list`, `templates_get`, `templates_used_by`, `datasources_list`, `datasources_get`, `executions_list`, `executions_get`, `executions_get_result`, `calculators_list`, `calculators_get`, `datasources_get_table_stats`, `endpoints_list`, `endpoints_get`, `semantics_list`, `docs_list`, `docs_get` |
-| `execute` | `pipelines_execute`, `executions_cancel`, `pipelines_run_checks` |
-| `author` | `pipelines_execute_node`, `datasources_get_schemas`, `datasources_get_tables`, `datasources_get_columns`, `datasources_preview_rows`, `sql_probe`, `datasources_test`, `pipelines_create`, `pipelines_update`, `templates_create`, `templates_update`, `templates_render`, `templates_evaluate`, `templates_purge_draft`, `endpoints_create`, `endpoints_delete`, `lake_tables_register`, `lake_tables_import`, `lake_tables_unregister`, `semantics_record`, `semantics_retire` |
-
-(**There is no datasource WRITE on the MCP surface at all** (094): registering one means handing over a live database credential, and no credential travels through an agent — creating, editing and deleting a datasource are UI/REST-only. Nor is there a workspace, membership, release or promote tool: those are human verbs (D-R2, O-2), which is the same reason no key may hold `admin` scope any more. 38 of the 42 tools operate inside the API key's pinned workspace; the four exceptions are `calculators_list` / `calculators_get` (072) and `docs_list` / `docs_get` (120), and only because they touch no workspace data at all — the calculator catalog and the shipped skill docs are properties of the BUILD, identical for every caller.)
-
-**UI screens** reference the same permissions as the routes they call; per-screen minimums are listed in [UI Screens](ui-screens.md) and MUST match this matrix. Since round 2 (114) they also RENDER by it: a verb this matrix would refuse is not drawn at all, and the screen-by-screen inventory — every verb, the role boolean that renders it, and the permission it answers to — is [UI Screens §4.3e](ui-screens.md#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative). There is deliberately no "UI" column here: the rendering rule is derived from the role columns, and a second copy of it in this table would be a second thing to keep true. The htmx partials (`/partials/**`) and the workspace screen actions declare their REST twin's permission with the same `@RequiredScope` mechanism, and the ScopeInterceptor governs every non-public route with the same default-deny: an unannotated handler is refused, and a mutating partial enforces its twin's floor on both axes. Three rail items follow a row since 2026-09-20 and are drawn only for the roles that hold it: Executions (`execution.read`), Promotion (`promotion.read`), Workspaces (`workspace.read`; a principal with no workspace keeps the link because the no-workspace page is the one screen that explains their state).
-
-One PAGE route floors above `read` without being a mutation: the pipeline editor (`GET /pipelines/{id}/editor`) declares `pipeline.execute` (122) — the permission the screen exists to exercise for its LOWEST role (D3: viewers execute what they can read), so an `execute` key and a viewer session reach the page and a `read` key is refused. The AUTHORING state the page renders is read, never written — the authoring verbs on it are role-hidden (114) and every mutating call it makes is verb-guarded or viewer-level. The template editor (`GET /templates/editor`) floors at `template.read` since 143 (T315, owner ruling) for the same reason: the explorer's Open links render for every reader, the page renders read state (a draft body is read, never written, by a GET), and every write it can make — Edit, Preview, the lifecycle dialogs — is its own route on its own permission, hidden by role in the markup ([UI Screens §4.7](ui-screens.md#47-template-editor)). 096 §C's authoring floor stays on those writes. **Every GET declares the LOWEST permission whose row admits it** (`ReadFloorTest`): a read of executions is `execution.read`, not `pipeline.read`, because their role sets differ; a read of the workspaces page is `workspace.read`; a dialog fetched for a verb floors at that verb's permission; every other read a signed-in person may make is one of the every-role reads (`pipeline.read`, `template.read`, `datasource.read`, `endpoint.read`, `semantic.read`, the self rows).
+One PAGE route floors above `read` without being a mutation: the pipeline editor (`GET /pipelines/{id}/editor`) declares `pipeline.execute` (122) — the permission the screen exists to exercise for its LOWEST role (D3: viewers execute what they can read), so a viewer's session reaches the page (no key renders a page — the MCP key is confined to `/mcp`, §7.7). The AUTHORING state the page renders is read, never written — the authoring verbs on it are role-hidden (114) and every mutating call it makes is verb-guarded or viewer-level. The template editor (`GET /templates/editor`) floors at `template.read` since 143 (T315, owner ruling) for the same reason: the explorer's Open links render for every reader, the page renders read state (a draft body is read, never written, by a GET), and every write it can make — Edit, Preview, the lifecycle dialogs — is its own route on its own permission, hidden by role in the markup ([UI Screens §4.7](ui-screens.md#47-template-editor)). 096 §C's authoring floor stays on those writes. **Every GET declares the LOWEST permission whose row admits it** (`ReadFloorTest`): a read of executions is `execution.read`, not `pipeline.read`, because their role sets differ; a read of the workspaces page is `workspace.read`; a dialog fetched for a verb floors at that verb's permission; every other read a signed-in person may make is one of the every-role reads (`pipeline.read`, `template.read`, `datasource.read`, `endpoint.read`, `semantic.read`, the self rows).
 
 ### 7.7 Key kinds and published-endpoint bindings
 
-Round 074 gives every API key a **kind** ([`ApiKeyKind`](enums.md#8a-apikeykind--what-an-api-key-is), `api_keys.kind`, default `user`); round 091 adds the third. Two of the three have an authorisation model that is not scopes at all.
+Round 074 gives every API key a **kind** ([`ApiKeyKind`](enums.md#8a-apikeykind--what-an-api-key-is), `api_keys.kind`, default `user`); round 091 adds the third. A kind answers WHERE a credential may be presented; its role (§7.5) answers what it may do there.
 
 | Kind | Authenticates where | Authority | Minted by |
 |---|---|---|---|
-| `user` | `DP-API-Key` on the REST API, and `DP-API-Key` / `Authorization: Bearer` on `/mcp` — **one kind, two surfaces**: an agent's key and a program's key are the same thing | Its `scopes`, against the §7.6 matrix, inside its pinned workspace — and since 179 the scope set IS the role's reach, never chosen (§7.4) | **Minted at login (or workspace switch) for the user, one per workspace** (D16) — never on demand (`auth.key_kind_not_mintable`); shown in the top bar, deleted there to rotate |
-| `endpoint` | `DP-API-Key` on the published tree — a `GET` under `/api/` whose first segment is not a reserved category (`v[0-9]+` or `api`, R-EP5) — plus `GET /api/v1/executions/{id}` and `.../result` for executions **it** started | Its rows in `endpoint_key_bindings` — no scopes are consulted | **Workspace admins and super admins, on `/api-keys`** (D17) — the UI calls this kind an "API key" |
-| `server` | `DP-Promotion-Key` on `/api/v1/promotion/**`, presented by a SENDING deployment | The route family, and nothing else — no scopes, no bindings | `admin` only |
+| `user` (the MCP key) | `DP-API-Key` / `Authorization: Bearer` on **`/mcp` and nowhere else** (#215 B2, owner ruling 2026-09-24: "MCP key should be only MCP"). On every other route — REST, `/partials/**`, every page, the published tree — the REST key filter refuses it with `403 endpoint.key_kind_refused` and `details.reason = "user_key_off_surface"`, before any permission is judged; the interceptor states the same confinement again | Its member's current role in its pinned workspace, capped at author (PK4, §7.5) — never a super admin's (B1) | **Minted at login (or workspace switch) for the user, one per workspace** (D16) — never on demand (`auth.key_kind_not_mintable`); shown in the top bar, deleted there to rotate |
+| `endpoint` | `DP-API-Key` on the published tree — a `GET` under `/api/` whose first segment is not a reserved category (`v[0-9]+` or `api`, R-EP5) — plus `GET /api/v1/executions/{id}` and `.../result` for executions **it** started | Its own identity (§4.7) with the `api_caller` role; its rows in `endpoint_key_bindings` decide WHICH published paths it serves | **Workspace admins and super admins, on `/api-keys`** (`api_key.create`, D17) — the UI calls this kind an "API key" |
+| `server` | `DP-Promotion-Key` on `/api/v1/promotion/**`, presented by a SENDING deployment | Its own identity with the `promotion_receiver` role — inventory and push, for any workspace (B6) | Super admins only (`server_key.create`, D18) |
 
-A kind is not a scope and is deliberately not modelled as one: scopes answer "how much may this credential do?", a kind answers "what kind of credential is this?", and the two axes do not compose. A scopeless kind (`endpoint`, `server`) is issued with **no scopes**, and asking for some is refused rather than quietly dropped — a caller who writes `{"kind": "endpoint", "scopes": ["admin"]}` holds a mental model this surface has to correct out loud.
+Each kind carries exactly one role (the database CHECK, §7.5), so a request that names a role its kind cannot hold is refused rather than quietly corrected (`endpoint.key_kind_refused`) — a caller who writes `{"kind": "endpoint", "role": "promotion_receiver"}` holds a mental model this surface has to correct out loud. A request that still sends `scopes` is refused by name.
 
-**The confinement is central, not per-handler.** `ScopeInterceptor` refuses a scopeless principal on every route outside its own family, so a new route cannot become reachable to one by someone forgetting a check — the same default-deny reasoning as the unannotated-handler rule in §7.6. Two properties of that check are load-bearing:
+**The confinement is central, not per-handler.** Every key kind is refused on every route outside its own family, so a new route cannot become reachable to one by someone forgetting a check — the same default-deny reasoning as the unannotated-handler rule in §7.6. The MCP key's family is `/mcp`; `ApiKeyFilter` refuses it everywhere else FIRST (the chain stops there — a session cookie on the same request does not rescue it), and `ScopeInterceptor` states the same reach table for every MVC handler (`ScopeInterceptor.reachableBy`). Two properties of the interceptor's check are load-bearing:
 
 - It is decided **before** the handler's `@RequiredScope` is read. A UI page carries no annotation and lives outside the governed prefixes, so an annotation-first order would let every screen in the product answer a credential that authorises none of them (091: a scopeless key could render `/settings/api-keys` and read its owner's key list).
-- The scope floor is deliberately **not** applied on the routes a scopeless kind may reach: its scope set is empty, so any floor would refuse it everywhere.
+- On the routes a confined kind may reach, what it may DO is its key role (§7.5): an `endpoint` key reaches the `DELETE /api/v1/executions/{id}` path (it shares the execution-read pattern) and is refused there by role — `api_caller` does not hold `execution.cancel`.
 
-`/mcp` is a **servlet**, not an MVC handler, so the interceptor never sees it; `McpAuthFilter` makes the same refusal again for both scopeless kinds. Without that second refusal such a key could not CALL a tool (every tool's scope check fails) but could still read the whole catalogue through `tools/list`.
+`/mcp` is a **servlet**, not an MVC handler, so the interceptor never sees it; `McpAuthFilter` refuses both identity-acting kinds (`endpoint`, `server`) there. Without that refusal such a key could not CALL a tool (its key role holds no tool's permission) but could still read the whole catalogue through `tools/list`.
 
 #### Hierarchical bindings (ruling R-EP2)
 
@@ -953,34 +961,34 @@ A deeper binding therefore **replaces** an inherited one rather than adding to i
 
 That is the more conservative of the two readings, and it is chosen deliberately. An operator who binds a narrow key deep in the tree is drawing a boundary; an additive model would silently keep the broad key working across it. The cost of "replace" is a binding an operator can see is missing and add; the cost of "add" is a boundary that was never real.
 
-A bound node decides for **every** credential, `user` keys included — otherwise binding a path would tighten it for machines while leaving it open to every operator key.
+A bound node decides for every credential that reaches it — since B2 that is only ever an `endpoint` key.
 
 #### The unbound case
 
-An endpoint with no binding on any ancestor is not public and not open to any key. It accepts `user` keys **of the endpoint's own workspace holding `execute`**, so operators and agents keep working on endpoints nobody has bound yet, and it refuses `endpoint` keys outright (`403 endpoint.key_kind_refused`).
+An endpoint with no binding on any ancestor is not public and not open to any key: **it is unservable until a key is bound to it** (#215 B3). Serving takes a key (a session is refused with `auth.session.required`), and since B2 the MCP key never reaches a published path — so the only credential that can arrive is an `endpoint` key, refused with `403 endpoint.key_kind_refused`. Until slice (b) a `user` key of the endpoint's own workspace holding `execute` was admitted here; that branch went with the scopes.
 
-That asymmetry is the security property: **an unbound endpoint key authorises nothing.** If an unbound path fell through to "any endpoint key may call it", publishing a new endpoint would silently widen every existing endpoint key's reach at the moment of publication.
+That is the security property: **an unbound path authorises nothing.** If an unbound path fell through to "any endpoint key may call it", publishing a new endpoint would silently widen every existing endpoint key's reach at the moment of publication.
 
 #### Reading results
 
-An endpoint key may read the cursor of executions it started. Ownership is proved by the `endpoint.served` audit row that pairs the **key id** with the **execution id** — not by `pipeline_executions.triggered_by`, which is the key's *owner* and would make two endpoint keys of one person interchangeable. A different endpoint key asking for the same execution is refused.
+An endpoint key may read the metadata and the cursor of executions it started (`api_caller` holds `execution.read` and `execution.result.read`, both *own*). Since #215 its runs carry its own identity in `executed_by` (§4.7), so ownership is the ordinary own-runs rule — `executed_by` = the principal — and the key's creator does NOT see the key's run as their own (only `execution.read_all` does). Runs served BEFORE V34 carry the creator instead; for those, ownership is still proved by the `endpoint.served` audit row that pairs the **key id** with the **execution id**. A different endpoint key asking for the same execution is refused either way.
 
 #### Issuance
 
-`POST /api/v1/auth/api-keys` takes `kind` and `bindings` in the same request, and the bindings are validated **before** the key is minted. They are part of issuance rather than a second call because the plaintext key is returned exactly once: a failure between mint and bind would leave an operator holding a secret they can neither use nor re-read. Since 179 the route is `api_key.create` (workspace admins and super admins), `kind` is `endpoint` or `server` only — `user` is refused with `auth.key_kind_not_mintable`, and an absent `kind` means `user`, so a pre-179 client meets the refusal rather than silently minting a different credential — and the bindings may name the key by `api_key_id` (the `/api-keys` page's shape) or, kept for REST compatibility, by the caller's own key's `api_key_name`. Everything else about an endpoint key is an ordinary key — `dpk_` prefix, Argon2id, expiring, revocable, rate-limited on its owner's budget (§11A).
+`POST /api/v1/auth/api-keys` takes `kind` and `bindings` in the same request, and the bindings are validated **before** the key is minted. They are part of issuance rather than a second call because the plaintext key is returned exactly once: a failure between mint and bind would leave an operator holding a secret they can neither use nor re-read. Since 179 the route is `api_key.create` (workspace admins and super admins), `kind` is `endpoint` or `server` only — `user` is refused with `auth.key_kind_not_mintable`, and an absent `kind` means `user`, so a pre-179 client meets the refusal rather than silently minting a different credential — and the bindings may name the key by `api_key_id` (the `/api-keys` page's shape) or, kept for REST compatibility, by the caller's own key's `api_key_name`. The request may name the key's `role` (only the kind's own); the response carries `role`, the `identity` it acts as (`{id, display_name}`) and `created_by`. Everything else about an endpoint key is an ordinary key — `dpk_` prefix, Argon2id, expiring, revocable, rate-limited on its identity's budget (§11A).
 
 Binding and unbinding are audited (`endpoint.key_bound` / `endpoint.key_unbound`, [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)), as is every serve (`endpoint.served`).
 
 #### The `server` kind (091)
 
-Promotion is one deployment writing RELEASED content into another ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)). Its credential has always been a **server key, not a principal**: no `users` row for the credential itself, no scope-matrix entry, and no human it can be traced to. What changes here is only where the key LIVES.
+Promotion is one deployment writing RELEASED content into another ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)). Its credential is a **server key**, and since #215 a stored one acts as its own `service` identity (§4.7) with the `promotion_receiver` role — no human it can be traced to, and no longer the System account's authority (record C4). 091 changed where the key LIVES.
 
 Until 091 it was a pre-shared configuration value — `datapipelines.deployment.promotion.server-key` — which nobody can mint, list, expire or revoke without editing a file and restarting the deployment. A `server` key is the same credential stored like every other key: Argon2id hash, `dpk_` prefix, an owner, an expiry, a revocation flag and a last-used stamp. The configured value is accepted for **one release** and WARNs at boot ([Configuration §3.19](configuration.md#319-deployment)).
 
-- **Minting is `admin`.** The scope-subset guard of §7.4 is vacuous for a key with no scopes, so the floor is on the CREATOR instead: whoever holds this credential can write pipelines, templates and datasource references into the receiving deployment.
-- **Scope: none.** A server key opens the promotion receiver's routes and nothing else. The confinement is the route family, asserted the same way an endpoint key's is.
-- **Presented as `DP-Promotion-Key`, by a deployment.** `PromotionServerKeyFilter` compares the configured value first (constant time — a deployment that has not migrated pays no database read), then validates the header against the key store. Fail-closed is unchanged: no configured value AND no live `server` key ⇒ every push refused. Missing header, malformed header, wrong key, **wrong kind**, revoked, expired, deactivated owner and "nothing configured here" all answer the same `auth.promotion.key_invalid`, so a caller cannot classify a credential by asking.
-- **The actor is still the system service account** (§4.5), never the admin who minted the key: a promoted version must not be stamped with a person who did not perform the promotion. The key's id rides on the principal so the audit trail can name WHICH key across a rotation, and `last_used_at` is stamped like any other key's.
+- **Minting is `server_key.create` — a super admin's** (D18): whoever holds this credential can write pipelines, templates and datasource references into the receiving deployment.
+- **Role: `promotion_receiver`** — `promotion.inventory.read` and `promotion.push`, and nothing else. The confinement is the route family, asserted the same way an endpoint key's is. **Intake is instance-wide** (#215 B6, owner ruling 2026-09-24; record amendment A11): a batch names its target workspace and the receiver resolves it by name, for ANY workspace — the key's `workspace_id` is where it is listed and administered (the Keys page), not a confinement.
+- **Presented as `DP-Promotion-Key`, by a deployment.** `PromotionServerKeyFilter` compares the configured value first (constant time — a deployment that has not migrated pays no database read), then validates the header against the key store. Fail-closed is unchanged: no configured value AND no live `server` key ⇒ every push refused. Missing header, malformed header, wrong key, **wrong kind**, revoked, expired, a deactivated identity or pinned workspace and "nothing configured here" all answer the same `auth.promotion.key_invalid`, so a caller cannot classify a credential by asking. The creator's liveness is not consulted (PK2).
+- **The actor is the key's own identity** (record C4), never the admin who minted it: received versions and the `auth.promotion.accepted` row name it. The deprecated config value — a bootstrap credential with no row to attach an identity to — stays the System account (§4.5, B6), with the same `promotion_receiver` role. The key's id rides on the principal so the audit trail can name WHICH key across a rotation, and `last_used_at` is stamped like any other key's.
 - **Presented as an ordinary `DP-API-Key` it authenticates a principal that is refused everywhere** — `/api/**`, `/partials/**`, `/mcp` and every UI page — with `403 endpoint.key_kind_refused` and `details.reason = "server_key_off_surface"`.
 
 Rotation, which the config value never had: mint a second `server` key, set it on the sender, revoke the first. No restart, on either side.
@@ -1181,7 +1189,7 @@ CSRF exemption is scoped by **credential type, never by path**: a request is exe
 - `DP-API-Key: dpk_<id>.<secret>` — same as REST.
 - `Authorization: Bearer dpk_<id>.<secret>` — for MCP clients that can only set the standard Authorization header. The `ApiKeyFilter` recognizes the `dpk_` prefix in a Bearer token and routes it through the identical validation path (§7.3).
 
-`/mcp` is CSRF-exempt (no cookie auth) and enforces the same scope matrix (§7.6) per tool.
+`/mcp` is CSRF-exempt (no cookie auth) and enforces the same permission catalog (§7.6) per tool.
 
 The filter chain authenticates on the servlet thread and the MCP layer carries the principal forward in the transport context (`McpToolContext`), because the MCP SDK runs each tool handler on its own scheduler thread — `SecurityContextHolder` is **empty** there. Code reachable from a tool therefore takes the principal and the workspace as arguments and never reads the thread-local; a `@Bean` adapter that did (the save-time datasource lookup, until 134) silently validated every MCP save as "no principal" ([MCP Server §4.1](mcp-server.md#41-auth-model)). Filters, interceptors and MVC controllers run on the request thread and may keep reading it.
 
@@ -1203,15 +1211,14 @@ Codes follow the `{domain}.{entity}.{failure}` convention; the registry of recor
 | `auth.session.expired` | 401 | JWT expired |
 | `auth.session.invalid` | 401 | JWT signature invalid or malformed |
 | `auth.api_key.missing` | 401 | No `DP-API-Key` header, no Bearer `dpk_` token, no `dp_session` cookie |
-| `auth.api_key.invalid` | 401 | Key id not found, revoked, hash mismatch, or the owner row gone — a deactivated owner is `auth.principal_deactivated` |
+| `auth.api_key.invalid` | 401 | Key id not found, revoked, hash mismatch, or the row of the user it acts as gone — a deactivated member or identity is `auth.principal_deactivated` |
 | `auth.api_key.expired` | 401 | Key's `expires_at` is in the past |
-| `auth.scope.insufficient` | 403 | Principal lacks the required SCOPE — the credential axis of the §7.6 matrix. Since RBAC round 1 only an API key can fail this way: a session carries no scopes (§11A) |
-| `auth.role_required` | 403 | Principal's role lacks the required PERMISSION in the active workspace — the role axis of the §7.6 matrix (§11A). `details.required` is the catalog permission (`pipeline.update`); `details.held` the ROLE it was judged as (`viewer` … `workspace_admin`, `super_admin`) — informative only, never compared (#215) |
-| `auth.key_issuer_role_lost` | 403 | The key was valid; its issuer no longer holds the permission (§7.4). Retrying with this key will never work — a new key from somebody who still holds the role is the fix |
-| `auth.key_scope_unavailable` | 400 | Issuance requested `admin`, which keys may no longer hold (§7.5) |
+| `auth.permission.undeclared` | 403 | The route or tool declares no catalog permission, so nothing can judge it (§7.6) — a build defect the coverage guards fail, kept as the runtime defence. `details.route` or `details.tool` names the surface. Replaced `auth.scope.insufficient` (#215 PK8) |
+| `auth.role_required` | 403 | Principal's role lacks the required PERMISSION in the active workspace — the role axis of the §7.6 matrix (§11A). `details.required` is the catalog permission (`pipeline.update`); `details.held` the ROLE it was judged as (`viewer` … `workspace_admin`, `super_admin`, a key role) — informative only, never compared (#215). The one authorization refusal for every principal since slice (b); the MCP ownership rules ride it too (`details.reason`: `not_creator`, `started_outside_mcp`, `different_credential`) |
+| `auth.key_issuer_role_lost` | 403 | The MCP key was valid; its member's role (capped at author) does not hold the permission (§7.5). Retrying with this key will not help — a role is the fix |
 | `auth.key_kind_not_mintable` | 400 | Issuance requested kind `user` on a request surface (§7.4) — user keys are minted at login only, one per user per workspace; rotation is delete + sign in again |
 | `auth.key_workspace_inactive` | 404 | The key's pinned workspace is deactivated (§11A); reactivating it restores the key |
-| `auth.principal_deactivated` | 401 | The principal's user is deactivated (§11A.3) — session, `user` key, or the owner of an `endpoint`/`server` key; judged by `PrincipalLiveness` where the credential becomes a principal, within the §11.4 window. A session's cookie is cleared and an HTML navigation lands on `/login?error=inactive`. Never on `/api/v1/promotion/**`, where every refusal is `auth.promotion.key_invalid` |
+| `auth.principal_deactivated` | 401 | The principal's user is deactivated (§11A.3) — a session's or MCP key's member, or an `endpoint`/`server` key's own identity (§4.7); judged by `PrincipalLiveness` where the credential becomes a principal, within the §11.4 window. A session's cookie is cleared and an HTML navigation lands on `/login?error=inactive`. Never on `/api/v1/promotion/**`, where every refusal is `auth.promotion.key_invalid` |
 | `auth.csrf.invalid` | 403 | CSRF token missing or mismatched on a state-changing UI request (`details.reason`: `missing` \| `mismatch`) |
 | `auth.promotion.key_invalid` | 401 | The promotion peer's pre-shared server key was absent, malformed, or did not match — and the same code when the receiver has no key configured, so promotion-disabled is indistinguishable from wrong-key ([Versioning §10.6](versioning.md#106-the-promotion-peer-credential--a-shared-server-key-ratified-2026-09-01)) |
 
@@ -1339,7 +1346,6 @@ datapipelines:
 
     api-keys:
       cache-ttl-seconds: 60
-      default-scopes: [read]
 ```
 
 **Per provider, three values are required:**
@@ -1386,11 +1392,11 @@ DATAPIPELINES_JWT_SECRET=...
 
 ### 11.4 API key validation cache
 
-Validated API keys and owner-liveness results are cached in-memory per instance for `datapipelines.auth.api-keys.cache-ttl-seconds` (default 60). Revocation/deactivation invalidates the local cache immediately and takes effect elsewhere at TTL expiry.
+Validated API keys, user liveness and memberships are cached in-memory per instance for `datapipelines.auth.api-keys.cache-ttl-seconds` (default 60). Revocation, deactivation and a role change invalidate the local cache immediately and take effect elsewhere **within the TTL — 60 s by default** (#215 B5, record amendment A9: this is the freshness contract; no eviction bus, no Redis stamp).
 
 ### 11.5 Other auth configuration keys
 
-All auth config keys (allowlist domains, JWT TTL, cache TTL, default key scopes, login rate limit) are defined in [Configuration §3.4](configuration.md#34-auth) — the single config authority. This spec does not restate names or defaults.
+All auth config keys (allowlist domains, JWT TTL, cache TTL, login rate limit) are defined in [Configuration §3.4](configuration.md#34-auth) — the single config authority. This spec does not restate names or defaults.
 
 **The login limiter's window is per INSTANCE (096 §F, review finding F8).** It is an in-memory
 fixed one-minute window per client address, held in each replica's own heap — so N replicas
@@ -1415,7 +1421,7 @@ a different budget with a different key and fails CLOSED — the two are not int
 
 A membership row (`workspace_members`, [metadata-db §4.12](metadata-db.md#412-workspace_members)) carries **exactly one role** — `role`, one of `viewer`, `author`, `promoter`, `workspace_admin` (V29; [`WorkspaceRole`](enums.md#8c-workspacerole--the-one-role-a-membership-holds)). V23 had split the role into three additive booleans so that "an author who also releases" could be one row; the 2026-09-20 rulings took release away from the promoter and made it an ops role that authors nothing, so the combination the booleans existed for no longer exists and the row is one value again. The migration's precedence for old rows: admin → `workspace_admin`, else promoter → `promoter`, else author → `author`, else `viewer`. An invitation ([§4.6](#46-invitations)) carries the same one role (D20).
 
-**Vocabulary (D21).** A **role** is what a member holds. A **permission** is an action a role may perform — a ROW of the §7.6 matrix (`Permission` in code: `view`, `execute`, `author`, `promotion_read`, `promote`, `ws_admin`, `super_admin`, each the set of roles it admits). "The author role has the permission to release" is a sentence about a row; a permission is never a free string, and nothing in the product grants or stores one.
+**Vocabulary (D21).** A **role** is what a member holds. A **permission** is an action a role may perform — a ROW of the §7.6 matrix (`Permission` in code: the 65 `<functionality>.<permission>` catalog rows, `pipeline.read` …, each held by the roles its §7.6 row admits). "The author role has the permission to release" is a sentence about a row; a permission is never a free string, and nothing in the product grants or stores one.
 
 The five roles, as the record's §2 ratifies them (the row-by-row table is §7.6; this is the shape):
 
@@ -1441,7 +1447,7 @@ The rule is mechanical, not a convention: every repository read that a caller-su
 
 `workspace.membership_required` (403) survives in exactly one place: a principal with ZERO memberships, which addressed no workspace at all and so has no name to protect. Two permissions are judged WITHOUT a workspace context for a session: `workspace.read` (the page) and `workspace.switch` (the REST list-own, §17.1) — "which workspaces do I belong to" is meaningful when the answer is none, and it is how a zero-membership person reaches the no-workspace page ([UI §4.13](ui-screens.md#413-workspaces-workspaces-design-9-members-and-deactivation-rewritten-by-114)) instead of a JSON 404. A key never gets that exception: a key with no context is a key whose workspace is gone, and it stays the 404.
 
-A second null-context exception stands beside it (#113): a **super admin session** keeps the INSTANCE verbs — the operations whose permission is `super_admin` (create / deactivate / reactivate / delete a workspace, user administration, instance datasources and their grants) — when NO workspace is reachable at all. Those operations are instance-level by construction: none of them reads or writes a workspace's content, and refusing them stranded the one principal who could repair an empty deployment (deactivate the last active workspace, and even the reactivate verb answered `workspace.not_found`). The evidence is the user row's `is_admin`, re-read per request through the auth cache — not a context the request does not have. Every workspace-scoped operation stays the 404 for that principal, and a key never gets this exception either: the `admin` scope floor is unobtainable by a key (§7.5), so the credential axis refuses first.
+A second null-context exception stands beside it (#113): a **super admin session** keeps the INSTANCE verbs — the operations whose permission is `super_admin` (create / deactivate / reactivate / delete a workspace, user administration, instance datasources and their grants) — when NO workspace is reachable at all. Those operations are instance-level by construction: none of them reads or writes a workspace's content, and refusing them stranded the one principal who could repair an empty deployment (deactivate the last active workspace, and even the reactivate verb answered `workspace.not_found`). The evidence is the user row's `is_admin`, re-read per request through the auth cache — not a context the request does not have. Every workspace-scoped operation stays the 404 for that principal, and a key never gets this exception either: no key is ever a super admin (B1, §7.5).
 
 ### 11A.2 Super admins
 
@@ -1458,7 +1464,7 @@ A deactivated workspace is not selectable by a super admin either: [§11A.3](#11
 | where | credential | deactivated USER | deactivated WORKSPACE |
 |---|---|---|---|
 | `JwtAuthenticationFilter` | session | `auth.principal_deactivated` 401 on the API; a page navigation is sent to `/login?error=inactive`, cookie cleared either way | a session never resolves one: the stamped claim falls through to another active membership (§5), `DP-Workspace` naming it is `workspace.not_found` 404 |
-| `ApiKeyService.validate` — REST, `/mcp`, published endpoints | `user` key, `endpoint` key | `auth.principal_deactivated` 401 (the owner) | `auth.key_workspace_inactive` 404 (the pin) |
+| `ApiKeyService.validate` — `/mcp`, published endpoints | MCP key, `endpoint` key | `auth.principal_deactivated` 401 (the member; an endpoint key's own identity) | `auth.key_workspace_inactive` 404 (the pin) |
 | `ApiKeyService.validateServerKey` — `/api/v1/promotion/**` | `server` key | `auth.promotion.key_invalid` 401 — the peer's ONE answer, whatever failed | `auth.promotion.key_invalid` 401 (the pin, closed in 180) |
 | `PublishedEndpointServeService` | any key, the ENDPOINT's own workspace | — | the unknown-path 404, byte-identical, before the pipeline is read |
 
@@ -1472,13 +1478,13 @@ The USER case has one code on every surface but the promotion peer. The WORKSPAC
 4. `WorkspaceLiveness` answers false for it — the question a scheduler will ask (no consumer exists yet; the interface is the hook);
 5. a super admin's listing shows it greyed with the date.
 
-To a MEMBER a deactivated workspace is indistinguishable from one that never existed, so deactivation is not a signal anybody can read. Reactivation is a super-admin verb and is audited. `DeactivationSweepTest` proves the whole table on the live server: every route and every tool, for a deactivated session and for `user`/`endpoint`/`server` keys with a deactivated owner or pin, plus the differential (deactivated vs unknown workspace: same body on every route) and the promotion peer's one body.
+To a MEMBER a deactivated workspace is indistinguishable from one that never existed, so deactivation is not a signal anybody can read. Reactivation is a super-admin verb and is audited. `DeactivationSweepTest` proves the whole table on the live server: every route and every tool, for a deactivated session and for `user`/`endpoint`/`server` keys with a deactivated member, identity or pin, plus the differential (deactivated vs unknown workspace: same body on every route) and the promotion peer's one body.
 
 There is deliberately NO last-active-workspace guard: decommissioning the final workspace is a legitimate operator act, and it is recoverable — with zero active workspaces the super admin's session resolves no workspace at all, and §11A.1's second null-context exception (#113) keeps the instance verbs, reactivation included, available to exactly that principal.
 
 ### 11A.4 Keys
 
-Since 179 (D16/D17): a **`user` key** is minted by the login/switch hook, one per user per workspace, its scope set derived from the role the membership carries (§7.4) — nobody chooses scopes any more, and **no key holds `admin`** (§7.5, O-2). An **`endpoint` key** is created by a workspace admin or super admin (`api_key.create`) and carries no scopes at all. On every request four things are re-read inside the validation-cache TTL (60s by default): the key is active, its owner is active, **its issuer still holds the operation's permission in the pinned workspace**, and the workspace is active. So a demoted or removed issuer's keys stop working within one window rather than at expiry, and the refusal says which (`auth.key_issuer_role_lost`), because retrying with that key will never work and the caller cannot guess that from `auth.role_required`.
+Since #215 slice (b) (record §3, PK4–PK9): a **`user` (MCP) key** is minted by the login/switch hook, one per user per workspace, and acts as its member — with the member's role capped at author, re-read on every request, never a super admin (§7.5). It connects an MCP client to `/mcp` and nothing else (B2). An **`endpoint` key** (`api_caller`) and a **`server` key** (`promotion_receiver`) each act as their OWN identity (§4.7) — who created them does not matter when they are used (PK2). On every request, inside the validation-cache TTL (60 s by default): the key is active, the user it acts as is active, the pinned workspace is active, and — for the MCP key — its member still holds the permission in the pinned workspace. A member's role change therefore reaches their key within one window, and the refusal says which (`auth.key_issuer_role_lost`), because retrying with that key will not help and the caller cannot guess that from `auth.role_required`.
 
 ---
 
@@ -1489,7 +1495,7 @@ Since 179 (D16/D17): a **`user` key** is minted by the login/switch hook, one pe
 `auth` Gradle module:
 - `co.datapipelines.auth.User` data class
 - `co.datapipelines.auth.ApiKey` data class
-- `co.datapipelines.auth.Scope` enum
+- `co.datapipelines.auth.Permission`, `RolePermissions`, `KeyRole`, `UserKind` — the catalog, the one role table, the key roles, what a `users` row is
 - `co.datapipelines.auth.AuthenticatedPrincipal` data class
 - `co.datapipelines.auth.JwtService` — issue + validate internal JWTs
 - `co.datapipelines.auth.ApiKeyService` — issue + validate + revoke API keys
@@ -1549,8 +1555,8 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 - **Additional OIDC providers** (GitHub, Okta, Auth0) — easy to add; just another Spring Security registration.
 - **SAML** — for enterprises that require SAML instead of OIDC. Spring Security SAML extension.
-- **Group/role sync from provider** — map OIDC groups to internal scopes automatically.
-- **Per-datasource ACLs** — fine-grained access beyond scopes.
+- **Group/role sync from provider** — map OIDC groups to internal roles automatically.
+- **Per-datasource ACLs** — fine-grained access beyond roles.
 - **Service accounts** — non-human principals for CI/CD.
 - **MFA** — if provider enforces it (Google/Microsoft MFA is provider-side, transparent to us).
 
@@ -1560,6 +1566,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v3.1 | 215b (#215) key identities, key roles | **Scopes removed; keys carry roles** ([permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §3–§5, PK4–PK9). **§4.7 key identities** (new): an `endpoint`/`server` key acts as its own `users` row (`kind = 'service'`, provider `key`, `<key id>@keys.invalid`), created with the key in one transaction, deactivated by its revocation, managed only through its key; one predicate (`kind = 'human'`) guards every login, linking and user-admin path — closing the pre-existing hole where the identity reset could make the System row claimable. **§7.5 key roles** replaces scopes: `api_caller`, `promotion_receiver`, and the MCP key as its member capped at author (PK4); no key is ever a super admin (B1). **§7.6** gains the two key-role columns; the two key-scope tables are gone; the heading drops "two axes". **§7.7**: the MCP key is confined to `/mcp` (B2, owner ruling 2026-09-24); an unbound published path serves no one (B3); promotion intake is instance-wide and a stored server key acts as its identity (C4, B6). **§9**: `auth.permission.undeclared` replaces `auth.scope.insufficient`; `auth.key_scope_unavailable` retired. **§7.3/§11.4**: authority freshness is the 60 s auth cache TTL (B5, A9). Migration: V34 (PK9). |
 | 2026-09-24 | v3.0 | 215a (#215) the permission catalog | **§7.6 is the permission catalog** ([permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §2, ratified 2026-09-23, amended 2026-09-24): 65 `<functionality>.<permission>` rows replace the thirty coarse operations and the separate MCP role table. Each row's Surfaces cell places every route (`VERB /path`) and tool, so the drift test, the reachability gate and the role walk read the placement from the doc; the cell alphabet gains **fenced** (the two promotion-receiving rows — no role holds them, super admin included). Handlers declare `@RequiredScope(Permission.X)`; tools their entry in `ScopeMatrix.MCP_TOOL_PERMISSION`; the one role table is `RolePermissions`. Every route keeps its role set and scope floor (the A4 shim: the permission key-scope table replaces the REST key-scope table); the MCP role axis moves on five cells — viewer × `datasources_preview_rows`, `sql_probe`, `pipelines_execute_node` and promoter × the two probes — which the record puts at author-and-above (keys minted at login were already refused them by scope; a member demoted from author keeps an author-scoped key, and that key is now refused them). Two named changes by owner ruling (2026-09-24): revoking a SERVER key is a super admin's (`server_key.revoke`; §7.4 — #191 had given it to the page's workspace admin), and retiring another workspace's DATASOURCE fact asks `datasource.manage` (the workspace admin, as before). Refusal details: `required` is the catalog permission, `held` the role (§9). Drifts fixed on the way: `GET /api/v1/endpoints` sits on `endpoint.read` (v2 said the publish row; the handler declared the read row); `DELETE /api/v1/workspaces/{name}` on `workspace.lifecycle` (v2 listed it on the update row too); the pinned-workspace tool count reads 38 of 42. Slice (b) removes scopes and this shim. |
 | 2026-09-23 | v2.37 | 7b (#7) templates_evaluate | §7.6 MCP table 41 → **42** tools: `templates_evaluate` joins the `author`/`author` row — the `templates_render` row (R6: evaluating untrusted code on the server is the same authoring act as rendering; viewer ✗, promoter ✗). The REST twin `POST /api/v1/templates/evaluate` declares the existing `MUTATE_PIPELINES_TEMPLATES` row (no new RestOperation); its row now names the route. Both `ScopeMatrixSpecDriftTest` counts moved 41 → 42 in the same commit. |
 | 2026-09-23 | v2.36 | 213 (#213) show-once MCP key | **§7.4: the login-minted key is copyable ONCE** (D16 amended 2026-09-23): the sealed copy exists until its first read and is destroyed by it — the open and the clear are one owner-scoped statement (`ApiKeyRepository.openAndClearSealedSecret`), a second copy in any tab answers 404, and the key is hash-only from then on; nothing the server holds can reveal a key that has been read. V32 cleared every pre-amendment sealed copy fleet-wide (rotation — delete + sign in — is the path back to a copyable key). §7.6: the `VIEW_OWN_MCP_KEY` row gains `GET /partials/mcp-key/chip` (the post-copy chip re-render); no role cell changed, the secret endpoint's authorization is unchanged — its semantics went one-shot. Merge review: the secret route carries a **fetch-metadata guard** — a request whose `Sec-Fetch-Site` is not `same-origin`, or whose `Sec-Fetch-Mode` is `navigate`, is refused 403 before the open, because `dp_session` is `SameSite=Lax` and would otherwise ride a cross-site top-level navigation that destroys the one copy (never readable by the attacker, but a forced rotation). |

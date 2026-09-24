@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import io.kotest.matchers.collections.shouldBeIn
-import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -54,7 +53,7 @@ class McpToolCatalogBindingTest {
     @Test
     fun `the known writers are all flagged mutating`() {
         knownWriters.forEach { writer ->
-            McpToolCatalog.ENTRIES shouldContain McpToolCatalog.Entry(name = writer, mutating = true)
+            McpToolCatalog.ENTRIES.single { it.name == writer }.mutating shouldBe true
         }
     }
 

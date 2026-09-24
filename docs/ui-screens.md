@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.68
+**Status:** v1.69
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-19 (173)
@@ -24,7 +24,7 @@ These are standard CRUD + list/detail screens. They don't need pipeline-editor-l
    *Before 090 the login page decorated with `layouts/default`, which renders the shell whenever `authenticated` is true, so a signed-in visitor who opened `/login` in a second tab got the sign-in form inside a working app (owner's walk, 2026-09-07). Both halves are closed: the layout above, and the redirect in §4.1.*
 5. **Three URL spaces, never mixed.** Pages, HTML fragments, and JSON live under distinct prefixes — see §2.1.
 6. **The server holds no UI state.** The app is stateless behind a load balancer with no sticky sessions ([Deployment](deployment.md)); every user preference that must survive a request lives on the `users` row, never in an `HttpSession`.
-7. **Scopes are not asserted here.** The per-screen scope column in §4 is a convenience view of the authoritative matrix in [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative).
+7. **Scopes are not asserted here.** The per-screen scope column in §4 is a convenience view of the authoritative matrix in [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative).
 8. **Structure must survive a bad monitor — non-text contrast floors (WCAG 1.4.11).** Boundaries a user needs to identify a component are NOT text and have their own floors, enforced by the design-system audit (its `npm run build` runs it first; the vendored copy is guarded here by `VendoredNonTextContrastTest` in `modules/web`): `border-default`/`border-hover`/`border-focus` at **3:1** on the surface they are drawn on (inputs, panes, cards), `border-subtle` at **2:1** (separators — 3:1 makes every table heavy), `surface-selected` at **1.5:1** with a left accent bar of `border-focus` width `3px` (a tint alone cannot reach 3:1 without turning grey). A pane or card boundary is a `border-default` line, never a tint alone. Text keeps its 4.5:1 floors, unchanged.
 
 ### 2.1 Route Convention
@@ -252,7 +252,7 @@ nav packs to the top; the free space below it is deliberate.
   switcher card, carrying the role the signed-in person holds IN THAT WORKSPACE — `viewer`,
   `author`, `promoter`, `workspace admin`, or `super admin` for an instance super admin in any
   workspace, membership or not (D7). It is the membership's ONE role ([`WorkspaceRole`](enums.md#8c-workspacerole--the-one-role-a-membership-holds), D1), narrowed to
-  `viewer` for an API key whose scope does not reach `author` (143). `data-role` is the
+  nothing else since #215 slice (b): scopes are gone and no key renders a screen (the MCP key is confined to `/mcp`). `data-role` is the
   stable hook the tests read. It sits INSIDE the `app-rail-label` span, so the collapsed rail
   hides it with the workspace name rather than leaving a word with nothing to qualify; at all
   three widths (§3.6) it is the same element in the same place. The role decides what the rest
@@ -372,8 +372,8 @@ stylesheet or template starts naming a font host over the network. The marketing
 |---|---|---|
 | Dashboard recent executions / §4.8 history | (pipeline machine path on `title` only) | display name, status, triggered_by/via, started_at, duration (`.num`) |
 | §4.9 node stats | node id, Context `key → value` | rows in/out, duration (`.num`) |
-| §4.10 API keys | key prefix | name, scopes, created/last_used/expires, status |
-| §4.12 admin users | — | email, display name, provider, created, scopes, actions (`.num`) |
+| §4.19 API keys | key prefix | name, kind, role, acts as, created by, associations, created/expires/last used |
+| §4.12 admin users | — | email, display name, provider, created, status, actions (`.num`) |
 | §4.13 workspaces | workspace name | role, members, created, actions |
 | §4.17 promotion | pipeline/template path, target URL | versions (`.num`), status |
 | §4.5 datasources | JDBC URL, username | name, dialect, workspace, last test |
@@ -420,7 +420,7 @@ Rules the table rides on, all testable:
 
 ## 4. Screen Catalog
 
-**On the "Auth required" column:** it restates, per screen, the minimum scope for the REST operations that screen drives. The **authoritative** definition is the scope ↔ operation matrix in [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) — if this column and that matrix ever disagree, the matrix wins and this doc is wrong. Scopes are hierarchical ([Auth §7.5](auth.md#75-scopes)): `admin` ⊃ `author` ⊃ `execute` ⊃ `read`. Actions the current principal lacks scope for are **not rendered** (not merely disabled), and the server re-checks on every partial request — the UI is a convenience, never the enforcement point.
+**On the "Auth required" column:** it restates, per screen, the permission the REST operations that screen drives declare. The **authoritative** definition is the permission catalog in [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) — if this column and that matrix ever disagree, the matrix wins and this doc is wrong. There are no scopes since #215 ([Auth §7.5](auth.md#75-key-roles-scopes-removed)): a screen renders by the session's ROLE. Actions the current principal's role does not hold are **not rendered** (not merely disabled), and the server re-checks on every partial request — the UI is a convenience, never the enforcement point.
 
 ### 4.1 Login
 
@@ -699,7 +699,7 @@ the dialog fragments a route used to guard alone stamp the role model and guard 
 markup too.
 
 Each boolean narrows for an API-key principal by the key's SCOPE as well as its issuer's role
-([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) — the credential axis), so a
+([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) — the credential axis), so a
 `read` key is never shown an author's affordances because the person who minted it is an author.
 
 | Screen | Verb(s) | Rendered when | §7.6 permission |
@@ -820,7 +820,7 @@ The listing is workspace-scoped exactly like REST §9.2 (`listVisible`: active-b
 
 The POST re-runs the guard regardless: a pipeline can start referencing the datasource between the dialog opening and the button being pressed, and the screen is never the authority. Success is §5.1 Shape A — the success node closes the dialog, the refreshed list and the toast ride along out-of-band. Both dialogs are delivered as a WHOLE backdrop rather than a body swapped into a pre-rendered shell: `.u-backdrop` is `display: flex`, so the dialog is on screen the moment htmx swaps it, with no open() script to fall out of step with the markup, and closing is emptying the container. A 4xx refusal renders inline and does NOT close the dialog — the success node carries a `data-ds-saved` marker the refusal never has, which is the same distinction the register modal draws with `data-error` (022/F9).
 
-**Rendered for (114).** Register, Edit and Delete are `canAdminWorkspace` — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) puts `datasource.manage` on the workspace admin, not on `author`: a datasource is a live database credential. **Test** renders by `canExecute` (`datasource.test` — the connection test **follows execute**, ratified 2026-09-20: every role that may run a pipeline against the datasource may ask whether it answers; the promoter, who runs nothing, may not). An author or viewer sees the list, the badges, the Last test column and Test; a promoter sees no action at all. Register additionally needs the DEPLOYMENT's `member-datasources-enabled` gate — two gates, both required — so a non-admin on a locked-down server sees no Register even if their role would allow it (the demo shape: open datasource creation is an SSRF primitive from the server's network position). The `global` checkbox's admin-only rule is unchanged.
+**Rendered for (114).** Register, Edit and Delete are `canAdminWorkspace` — [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) puts `datasource.manage` on the workspace admin, not on `author`: a datasource is a live database credential. **Test** renders by `canExecute` (`datasource.test` — the connection test **follows execute**, ratified 2026-09-20: every role that may run a pipeline against the datasource may ask whether it answers; the promoter, who runs nothing, may not). An author or viewer sees the list, the badges, the Last test column and Test; a promoter sees no action at all. Register additionally needs the DEPLOYMENT's `member-datasources-enabled` gate — two gates, both required — so a non-admin on a locked-down server sees no Register even if their role would allow it (the demo shape: open datasource creation is an SSRF primitive from the server's network position). The `global` checkbox's admin-only rule is unchanged.
 
 **§4.13's workspaces screen** owns workspace lifecycle; **[§4.5a](#45a-datasource-grants-114)** owns which workspaces can SEE a datasource.
 
@@ -829,7 +829,7 @@ The POST re-runs the guard regardless: a pipeline can start referencing the data
 | Attribute | Value |
 |---|---|
 | URL | `GET /partials/datasources/{name}/grants` (a dialog into `#ds-dialog`) |
-| Auth required | Yes — **super admin** (`datasource.grant`, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)) |
+| Auth required | Yes — **super admin** (`datasource.grant`, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)) |
 | Purpose | Decide which workspaces can see a datasource at all (RBAC design §4, D-R7) |
 | Design primitives | `.u-backdrop`, `.ds-card`, `.ds-table`, `.ds-badge`, `.ds-empty`, `.ds-select` |
 | htmx | Yes — the same whole-backdrop-into-`#ds-dialog` contract §4.5's edit and delete dialogs use (094 §A/§B); each mutation re-renders THIS fragment, so the table and the select stay in step with the rows just written |
@@ -1085,8 +1085,9 @@ and the links.
 ### 4.11 User Settings
 
 **Amended 079 §D** — a two-column card grid at ≥1100px (Profile, Appearance, Session,
-Password, API), one column below; `.app-reading` is gone from this screen (§3.1). Scopes render
-as chips, not four spans strung across the card. Appearance gains a Mode row (Light / Dark /
+Password, API), one column below; `.app-reading` is gone from this screen (§3.1). The API card's
+**Role** row (#215 — it was a Scopes row until scopes were removed) is one chip: the session's
+role in the active workspace. Appearance gains a Mode row (Light / Dark /
 System) alongside the Theme select — **two views of ONE field**, see §3.4 — and a Density row
 whose Compact option is rendered DISABLED: the preference has nowhere to live until `users`
 grows a column, and a control that silently changes nothing is worse than an absent one. The
@@ -1099,7 +1100,7 @@ lives in the avatar menu, where every screen has it.
 | Attribute | Value |
 |---|---|
 | URL | `GET /settings` |
-| Auth required | Yes — any authenticated principal, own profile only (no scope requirement) |
+| Auth required | Yes — any signed-in person, own profile only (no permission requirement) |
 | Purpose | Profile info, theme preference |
 | Design primitives | `.ds-card`, `.ds-avatar`, `.ds-select` |
 | JS | None |
@@ -1122,24 +1123,24 @@ Content:
 | Purpose | View all users, activate/deactivate, grant/revoke admin |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-button` |
 | JS | None |
-| htmx | Yes — search/pagination (`hx-get="/partials/admin/users"`), activate/deactivate and admin grant/revoke (`hx-patch="/partials/admin/users/{id}/{action}"`, row-level swap), identity reset (#187, its own literal route `hx-patch="/partials/admin/users/{id}/identity-reset"` — `user.identity_reset`, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)) |
+| htmx | Yes — search/pagination (`hx-get="/partials/admin/users"`), activate/deactivate and admin grant/revoke (`hx-patch="/partials/admin/users/{id}/{action}"`, row-level swap), identity reset (#187, its own literal route `hx-patch="/partials/admin/users/{id}/identity-reset"` — `user.identity_reset`, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)) |
 
 Content: table of all users (email, display_name, `is_active` and `is_admin` as `.ds-badge` variants — success/danger for status, primary/default for role — local-access status). Admin can toggle `is_active` and `is_admin` per user, and — for local accounts ([Auth §5A.1](auth.md#5a1-accounts)) — create local users, reset passwords, disable local access, and clear lockouts.
 
-- Partials delegate to [REST §16.3](rest-api.md#163-user-administration-admin-scope) (`activate`, `deactivate`, `grant-admin`, `revoke-admin`), which writes the `auth.user.*` audit events. Every row action keeps its `#user-row-{id}` outerHTML swap and reports the outcome as a success toast naming the action and the user's email (§5.1 Shape A).
+- Partials delegate to [REST §16.3](rest-api.md#163-user-administration-super-admin--usermanage) (`activate`, `deactivate`, `grant-admin`, `revoke-admin`), which writes the `auth.user.*` audit events. Every row action keeps its `#user-row-{id}` outerHTML swap and reports the outcome as a success toast naming the action and the user's email (§5.1 Shape A).
 - **Create local user** (rendered only when local accounts are enabled): email + optional display name, plus the OPTIONAL workspace and its role (113 §B.3, [Auth §4.6](auth.md#46-invitations)) — a workspace name field and the same single-select role dropdown the workspaces page uses (D22: `viewer` / `author` / `promoter` / `workspace admin`). When the workspace is named, the new account's membership is written in the same act: no invitation is needed because the user row exists by the time the membership is written ([Auth §4.6](auth.md#46-invitations) rule 1), and a workspace the super admin cannot add to is refused as a toast note while the USER ROW still stands (the fix is the workspaces screen). The server generates a random one-time password shown to the admin exactly once (out-of-band notice — PERSISTENT and inline per §5.1's hard rule; the success toast only points at it) with `must_change_password = TRUE` — there is no email flow, so the admin conveys it out-of-band ([Auth §5A.1](auth.md#5a1-accounts)). A taken email answers `409` and an invalid email `400`, both as danger toasts (§5.1 Shape C) — before the toast bridge existed these refusals were invisible: htmx never swapped the 4xx bodies and the screen had no error listener.
 - **Reset PW** issues a new one-time password under the same rules (and clears any lockout); **Disable local** clears the hash (account becomes OIDC-only); **Unlock** clears the lockout only. The `Local` column shows `local`, `local · locked`, or `—` (OIDC-only).
 - **Reset identity** (#187) — the explicit answer to a refused login with `?error=identity_mismatch`: returns the row to the bootstrap placeholder so the NEXT OIDC sign-in with that email claims it (audited `auth.user.identity_reset`, [Auth §4.2](auth.md#42-user-provisioning)). Liveness, admin flag, password and memberships are untouched — a deactivated user stays deactivated. Never needed after a mere role change; only when an account must move to a different sign-in identity.
 - **When mail is configured** (137, [Configuration §3.27](configuration.md#327-mail), [Auth §5A.8](auth.md#5a8-mail-the-welcome-mail-and-the-new-user-notice)) the create and reset responses **do not show the one-time password** — it was emailed to the user, and two copies of a credential are one too many. The same persistent `#admin-notice` box says *Emailed to \<address\> — sending…* and polls its own outcome (`hx-get="/partials/admin/users/{id}/mail/{kind}?act={act}"`, every 2 s, swapping itself) until the claim row is terminal: *sent* (with the first-login sentence) or *failed: \<error\>* (with "reset the password to send again"). A terminal render carries no `hx-get`. The toast says the password was emailed and, as before, only points at the notice. `AdminUsersPartialController` reads `MailProperties.enabled` — one Thymeleaf branch in `partials/admin-user-saved`; with mail off the password renders exactly as above.
 - Deactivation copy states the effect window: existing JWTs and API keys stop working within the liveness-cache TTL (~60s — `datapipelines.auth.api-keys.cache-ttl-seconds`, default 60), not instantly and not at JWT expiry. Since 180 the refusal is `auth.principal_deactivated` on every API surface, a page navigation lands on `/login?error=inactive`, and the promotion peer folds a deactivated owner into its one answer ([Auth §11A.3](auth.md#11a3-deactivation)). Nothing is revoked: Activate restores the same sessions and keys.
-- Scopes are derived, not assigned, in v1: `is_admin` → `admin`, every other active user → `author` ([Auth §7.5](auth.md#75-scopes)). So the "grant admin" toggle *is* the scope control — there is no per-user scope editor to build.
+- There are no scopes ([Auth §7.5](auth.md#75-key-roles-scopes-removed)): what a person may do is their membership's role in each workspace, and the "grant admin" toggle is the one INSTANCE authority (`users.is_admin`, super admin) — there is no per-user permission editor to build. The list shows people only (`kind = 'human'`, [Auth §4.7](auth.md#47-key-identities)): a key's identity is managed through its key, and every row action answers 404 for one.
 
 ### 4.13 Workspaces (workspaces design §9; members and deactivation rewritten by 114)
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /workspaces` |
-| Auth required | Yes — **a workspace admin's or a super admin's page** (D13, `workspace.read` → workspace admin; [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative), [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). A viewer, author or promoter is refused by role (`auth.role_required`) and the rail does not draw the Workspaces item for them; what every member keeps is the **switcher** in the chrome (§3.4), whose `POST /workspace/switch` is its own row (`workspace.switch`, every role) and re-issues the session token. A principal with NO active workspace still reaches the page — it renders the no-workspace state below, the one screen that explains their situation. Per-verb on the page: members and the display name need `canAdminWorkspace` **in the ACTIVE workspace**; create, deactivate, reactivate and delete need `isSuperAdmin`. The members section carries `id="workspace-members"` (143): it is where the rail's Admin item lands a workspace admin |
+| Auth required | Yes — **a workspace admin's or a super admin's page** (D13, `workspace.read` → workspace admin; [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative), [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). A viewer, author or promoter is refused by role (`auth.role_required`) and the rail does not draw the Workspaces item for them; what every member keeps is the **switcher** in the chrome (§3.4), whose `POST /workspace/switch` is its own row (`workspace.switch`, every role) and re-issues the session token. A principal with NO active workspace still reaches the page — it renders the no-workspace state below, the one screen that explains their situation. Per-verb on the page: members and the display name need `canAdminWorkspace` **in the ACTIVE workspace**; create, deactivate, reactivate and delete need `isSuperAdmin`. The members section carries `id="workspace-members"` (143): it is where the rail's Admin item lands a workspace admin |
 | Purpose | Administer the workspaces you administer: their members and roles, the display name, and — for a super admin — create, deactivate, reactivate and delete |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-button`, `.ds-input`, `.ds-card`, `.ds-empty`, `.app-note` |
 | JS | One `onchange` submit on the rail switcher (`<noscript>` fallback button included). Nothing else — the flags-era "tick author when admin is ticked" listener went with the checkboxes (177) |
@@ -1381,8 +1382,8 @@ segment-wise matching cannot let either shadow the other. It needs no `SecurityC
 that chain's `permitAll` list is explicit and everything else is `.anyRequest().authenticated()`.
 Because `@RequiredScope` is enforced on any path once declared (the `/api` and `/partials`
 prefixes govern only where an UNannotated handler is default-denied), the annotation is a real
-gate here — and it is also what refuses an `endpoint`-kind key, which carries no scopes by
-design ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) and reaches only the published-endpoint surface.
+gate here. No key reaches it: an `endpoint`-kind key reaches only the published-endpoint
+surface ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) and the MCP key only `/mcp` (#215 B2).
 
 **Read-only about everything on it (179).** The keys card and its minting modal lived here
 from 091 to 179; they moved to `/api-keys` (§4.19), the workspace admin's page (D17). What
@@ -1437,7 +1438,10 @@ Two cards.
 | htmx | `hx-post="/partials/api-keys"` (create, into `#keyCreated`); `hx-delete="/partials/api-keys/{id}"` (delete, into `#keys-table-body`); `hx-post="/partials/api-keys/{id}/bindings"` (save an association SET) — each with a §5.1 Shape A out-of-band piece |
 
 The table lists the workspace's API keys, whoever created them: name + `dpk_…` prefix (12
-characters, D16's length), **created by**, associated endpoints (`/nyc/**` form; the root reads
+characters, D16's length), kind, **role** (#215 — `api caller` on an API key, `promotion
+receiver` on a server key; fixed by the kind until slice (c) offers a choice), **acts as** (the
+key's own identity — what its runs and received versions are attributed to, [Auth §4.7](auth.md#47-key-identities)),
+**created by** (the person, `api_keys.created_by`), associated endpoints (`/nyc/**` form; the root reads
 as the whole-tree wildcard), created, expires, last used — relative in the cell, absolute (UTC)
 on hover, like every table here. Deleted and expired keys keep their row and lose their verbs.
 
@@ -1625,6 +1629,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v1.69 | 215b (#215) key identities | **§4.19: the Keys table gains Role and Acts as** — the key's role (`api caller` / `promotion receiver`, fixed by the kind until slice (c)) and the key's own identity, which its runs and received versions are attributed to; Created by is `api_keys.created_by`. **§4.11: the API card's Scopes row is a Role row** (the session's role in the active workspace). §4.12: the users list shows people only (`kind = 'human'`). §3.4's role badge no longer narrows for a key (no key renders a screen, B2); §4.18's refusal note and §3.3's column table follow. |
 | 2026-09-24 | v1.68 | 215a (#215) the permission catalog | **§4.3e's last column is the §7.6 catalog permission** a verb answers to (`pipeline.release`, `datasource.test`, `workspace.members.manage`, …) instead of the retired operation, and every other section names permissions the same way; the booleans and every template are unchanged. §4.19: **a `server` key's Delete renders for a super admin only** (owner ruling 2026-09-24, `server_key.revoke`) — a workspace admin sees the row without the verb. §4.5's "Rendered for" paragraph corrected: Test renders by `canExecute` (`datasource.test` follows execute since 2026-09-20 — the template already did; the prose still said `canAdminWorkspace`). |
 | 2026-09-22 | v1.67 | #208 own row + super admin row | §4.13: no verbs on the caller's own member row (`409 workspace.self_membership` behind them); a super admin member reads "super admin" with no role dropdown. |
 | 2026-09-21 | v1.66 | 200 (#200) membership-bound keys | §4.13 members row: the member's key state ("has a key" / "no key" — never an id or prefix) and a **Revoke key** verb, drawn only when a live key exists, inside the same `canAdminWorkspace` guard; posts `POST /workspaces/{name}/members/{userId}/key/revoke` through the ONE `WorkspaceService.revokeMemberKey` the REST twin calls, and toasts `member_key_revoked` (the member stays; the next sign-in mints fresh). §4.3e's members row lists the verb. |
@@ -1681,7 +1686,7 @@ reachability gap this round left open and the one-line fix it needs.
 | 2026-08-31 | v1.16 | recurrence defect round (034) | §4.5: the OOB whole-table rule recorded beside the swap-root rule — a table partial travels as a whole `<table>` on any out-of-band path; a `<tbody>` carrying `hx-swap-oob` nested in a `<div>` is silently discarded by the browser's fragment parser (030 F-1, previously known only from the §4.10 changelog note). Doc-only; a mechanical guard was judged disproportionate (the shape is only visible to a real HTML parser — a regex over templates cannot tell an OOB `<tbody>` from a legitimate one inside a `<table>`). |
 | 2026-08-31 | v1.15 | website + docs in-app (033) | §4.2 Dashboard moved from `/` to `GET /dashboard` — `/` is now the public marketing site (new §4.15, app-served, cache-defended per OPEN-ITEMS T46, no rate limiter); new §4.16 Documentation — the packaged spec set rendered in-product at `/docs` (session-only), with the §A link-rewrite rule (packaged slug or canonical GitHub URL, never a dead relative href) and `th:utext` doc-body insertion. Navbar gains the Docs entry; error pages and login/workspace-switch redirects point at `/dashboard`. The root `README.md` website pointer and the `website/` directory are gone (the app's vendored design system is the single copy). |
 | 2026-08-05 | v1.0 | initial draft | UI screens inventory: 12 screens (login, dashboard, pipeline list/editor, datasource list, template list/editor, execution history/detail, API keys, user settings, admin users), htmx patterns, error pages |
-| 2026-08-07 | v1.1 | consistency campaign | Per [SPEC-REVIEW-2026-08.md](SPEC-REVIEW-2026-08.md) §2.12: route convention §2.1 (pages / `/partials/**` / `/api/v1/**`, htmx never calls the JSON API) and all `hx-*` endpoints re-pointed at `/partials/**` incl. §4.10 API keys [1]; template-editor context form replaced with free-form key-value/JSON input — templates no longer declare variables [1b, D3]; §5 htmx example fixed (`hx-include` + `th:attr` `hx-vals` instead of `${q}` interpolation) [2]; §4 scope column declared a view of the authoritative [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) matrix, datasource test corrected to `author`, key scopes ⊆ creator's scopes [3, D15]; §4.11 theme preference persisted on the `users` row via `PATCH /partials/profile/theme`, not session state [4]; §4.11 provider badge renders the configured provider `display-name` [5]; §4.9 result panel rebuilt on the uniform cursor with the TTL-expired state and `format`-parameter downloads [6, D9]; new §5.1 standard states (empty / loading via `hx-indicator` / errors via the `response-targets` extension into `#toast`) [7]; CSRF via `dp_csrf` cookie + `DP-CSRF-Token` header wired in the layout [D10] |
+| 2026-08-07 | v1.1 | consistency campaign | Per [SPEC-REVIEW-2026-08.md](SPEC-REVIEW-2026-08.md) §2.12: route convention §2.1 (pages / `/partials/**` / `/api/v1/**`, htmx never calls the JSON API) and all `hx-*` endpoints re-pointed at `/partials/**` incl. §4.10 API keys [1]; template-editor context form replaced with free-form key-value/JSON input — templates no longer declare variables [1b, D3]; §5 htmx example fixed (`hx-include` + `th:attr` `hx-vals` instead of `${q}` interpolation) [2]; §4 scope column declared a view of the authoritative [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) matrix, datasource test corrected to `author`, key scopes ⊆ creator's scopes [3, D15]; §4.11 theme preference persisted on the `users` row via `PATCH /partials/profile/theme`, not session state [4]; §4.11 provider badge renders the configured provider `display-name` [5]; §4.9 result panel rebuilt on the uniform cursor with the TTL-expired state and `format`-parameter downloads [6, D9]; new §5.1 standard states (empty / loading via `hx-indicator` / errors via the `response-targets` extension into `#toast`) [7]; CSRF via `dp_csrf` cookie + `DP-CSRF-Token` header wired in the layout [D10] |
 | 2026-08-28 | v1.9 | workspaces surfaces slice | New **§4.13 Workspaces** screen (create per mode, open-join, owned-workspace member management, switch) + navbar **workspace switcher** (§3: POST /workspace/switch re-stamps the session claim; hx-headers carries DP-Workspace for partials). §4.5 datasource list re-grounded: workspace-scoped listing, workspace/readonly columns, register modal with the D8-gated `global` (admin-only, visible-disabled) and `readonly` checkboxes, Register hidden for gated-off members. |
 | 2026-08-30 | v1.11 | datasources SPA table + toasts | §4.5: search/dialect/pager re-fetch only the list fragment into the stable `#datasource-list-wrapper` swap root (the id moved onto the fragment root — it previously died with the page's placeholder div); the connection test result is a §5.1 toast, ending the row-swap/"Back to list" contract that broke the table layout; the dead View button (REST JSON via hx-get) removed. New §5.1 **Notifications** state: `#toast` stack, server-rendered `partials/toast`, layout-global `toast.js` lifecycle. |
 | 2026-08-30 | v1.10 | local password auth | §4.1 Login: local form + divider + provider buttons, only enabled methods render; `credentials`/`locked` banners join the `?error=` idiom. §4.12 admin users: create local user (one-time password shown once), reset, disable local, unlock; `Local` column. New §4.14 Change password — the §5A.4 forced-change screen. |

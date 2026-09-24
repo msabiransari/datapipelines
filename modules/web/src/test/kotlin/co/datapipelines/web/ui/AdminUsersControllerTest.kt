@@ -8,7 +8,6 @@ import co.datapipelines.auth.MailKind
 import co.datapipelines.auth.MailProperties
 import co.datapipelines.auth.MailSend
 import co.datapipelines.auth.MailSendRepository
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
@@ -23,8 +22,10 @@ import io.mockk.mockk
 import io.mockk.verify
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockServletContext
@@ -53,10 +54,7 @@ class AdminUsersControllerTest {
             email = "admin@example.com",
             displayName = "Admin",
             // RBAC round 1: instance-wide user administration is the SUPER ADMIN's
-            // (`users.is_admin`, auth.md §11A.2). `Scope.ADMIN` is not an authority any
-            // principal can hold — a session has no scopes (D-R1) and no key may hold `admin`
-            // (O-2) — so the fixture states the real one.
-            scopes = emptySet(),
+            // (`users.is_admin`, auth.md §11A.2) — the fixture states the real authority.
             authMethod = AuthMethod.OIDC,
             workspace = WorkspaceContext(workspaceId, "acme"),
             superAdmin = true,
@@ -176,10 +174,7 @@ class AdminUsersPartialControllerTest {
             email = "admin@example.com",
             displayName = "Admin",
             // RBAC round 1: instance-wide user administration is the SUPER ADMIN's
-            // (`users.is_admin`, auth.md §11A.2). `Scope.ADMIN` is not an authority any
-            // principal can hold — a session has no scopes (D-R1) and no key may hold `admin`
-            // (O-2) — so the fixture states the real one.
-            scopes = emptySet(),
+            // (`users.is_admin`, auth.md §11A.2) — the fixture states the real authority.
             authMethod = AuthMethod.OIDC,
             workspace = WorkspaceContext(workspaceId, "acme"),
             superAdmin = true,
@@ -187,6 +182,15 @@ class AdminUsersPartialControllerTest {
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
+
+    /**
+     * #215 A.6: every row action looks its row up (`administrableUser`, people only) BEFORE it
+     * mutates — the target here is a person unless a test says otherwise.
+     */
+    @BeforeEach
+    fun aPersonByDefault() {
+        every { userService.administrableUser(userId) } returns sampleUser()
+    }
 
     private fun authenticate() {
         SecurityContextHolder.getContext().authentication =
@@ -300,6 +304,29 @@ class AdminUsersPartialControllerTest {
         render(partialController.search(model, "nobody", 0, 20)) shouldContain "No users found"
     }
 
+    /**
+     * #215 A.6 (gate 11): a key's identity and the System row are not people — every row action,
+     * the identity reset and the mail-status read answer 404 for them, looked up BEFORE any
+     * mutation, so nothing is flipped, reset or reset-passworded.
+     */
+    @Test
+    fun `every row action answers 404 for a non-person row, before any mutation`() {
+        authenticate()
+        val identity = UUID.randomUUID()
+        every { userService.administrableUser(identity) } returns null
+
+        listOf("activate", "deactivate", "promote", "demote", "disable-local", "unlock", "reset-password").forEach { action ->
+            (partialController.toggle(model, identity, action) as ResponseEntity<*>).statusCode shouldBe HttpStatus.NOT_FOUND
+        }
+        (partialController.resetIdentity(model, identity) as ResponseEntity<*>).statusCode shouldBe HttpStatus.NOT_FOUND
+
+        io.mockk.verify(exactly = 0) { userService.activate(any(), any()) }
+        io.mockk.verify(exactly = 0) { userService.deactivate(any(), any()) }
+        io.mockk.verify(exactly = 0) { userService.grantAdmin(any(), any()) }
+        io.mockk.verify(exactly = 0) { userService.revokeAdmin(any(), any()) }
+        io.mockk.verify(exactly = 0) { userService.resetIdentity(any(), any()) }
+    }
+
     @Test
     fun `toggle unknown action returns bad request`() {
         authenticate()
@@ -310,7 +337,7 @@ class AdminUsersPartialControllerTest {
     fun `identity reset returns the refreshed row and a toast that says what comes next (#187)`() {
         authenticate()
         every { userService.resetIdentity(userId, adminPrincipal.userId) } returns true
-        every { userService.snapshot(userId) } returns sampleUser()
+        every { userService.administrableUser(userId) } returns sampleUser()
 
         val html = render(partialController.resetIdentity(model, userId))
 
@@ -399,7 +426,7 @@ class AdminUsersPartialControllerTest {
     fun `reset password returns the row plus the one-time notice`() {
         authenticate()
         every { localPasswordService.resetPassword(userId, adminPrincipal.userId) } returns "WXYZ-2345-ABCD"
-        every { userService.snapshot(userId) } returns sampleUser()
+        every { userService.administrableUser(userId) } returns sampleUser()
 
         val html = render(partialController.toggle(model, userId, "reset-password"))
 
@@ -412,7 +439,7 @@ class AdminUsersPartialControllerTest {
         authenticate()
         every { localPasswordService.disableLocalAccess(userId, adminPrincipal.userId) } returns true
         every { localPasswordService.unlock(userId, adminPrincipal.userId) } returns true
-        every { userService.snapshot(userId) } returns sampleUser()
+        every { userService.administrableUser(userId) } returns sampleUser()
 
         render(partialController.toggle(model, userId, "disable-local")) shouldContain "user-row-$userId"
         render(partialController.toggle(model, userId, "unlock")) shouldContain "user-row-$userId"
@@ -465,7 +492,7 @@ class AdminUsersPartialControllerTest {
     fun `a row action keeps the row swap and gains a toast naming the action and the email`() {
         authenticate()
         every { userService.deactivate(userId, adminPrincipal.userId) } returns true
-        every { userService.snapshot(userId) } returns sampleUser()
+        every { userService.administrableUser(userId) } returns sampleUser()
 
         val html = render(partialController.toggle(model, userId, "deactivate"))
 
@@ -479,7 +506,7 @@ class AdminUsersPartialControllerTest {
     fun `reset password keeps the notice and only points a toast at it`() {
         authenticate()
         every { localPasswordService.resetPassword(userId, adminPrincipal.userId) } returns "WXYZ-2345-ABCD"
-        every { userService.snapshot(userId) } returns sampleUser()
+        every { userService.administrableUser(userId) } returns sampleUser()
 
         val html = render(partialController.toggle(model, userId, "reset-password"))
 
@@ -539,7 +566,7 @@ class AdminUsersPartialControllerTest {
         pending shouldNotContain "ABCD-EFGH-JKLM"
 
         every { mailSends.find(userId, MailKind.WELCOME, userId) } returns claim(MailKind.WELCOME, MailSend.Status.FAILED)
-        every { userService.snapshot(userId) } returns sampleUser()
+        every { userService.administrableUser(userId) } returns sampleUser()
         model.clear()
         val failed = render(mailOnController.mailStatus(model, userId, "welcome", userId))
 
@@ -552,7 +579,7 @@ class AdminUsersPartialControllerTest {
     fun `with mail on, reset shows the LATEST reset's outcome, not the password`() {
         authenticate()
         every { localPasswordService.resetPassword(userId, adminPrincipal.userId) } returns "WXYZ-2345-ABCD"
-        every { userService.snapshot(userId) } returns sampleUser()
+        every { userService.administrableUser(userId) } returns sampleUser()
         val resetId = UUID.randomUUID()
         every { mailSends.latest(userId, MailKind.PASSWORD_RESET) } returns
             claim(MailKind.PASSWORD_RESET, MailSend.Status.PENDING, actId = resetId)
@@ -580,7 +607,7 @@ class AdminUsersPartialControllerTest {
     fun `the mail-status partial for an unknown claim says nothing was sent and does not poll`() {
         authenticate()
         every { mailSends.find(userId, MailKind.WELCOME, userId) } returns null
-        every { userService.snapshot(userId) } returns sampleUser()
+        every { userService.administrableUser(userId) } returns sampleUser()
 
         val html = render(mailOnController.mailStatus(model, userId, "welcome", userId))
 

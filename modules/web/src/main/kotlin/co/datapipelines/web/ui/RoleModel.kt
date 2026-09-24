@@ -1,9 +1,7 @@
 package co.datapipelines.web.ui
 
-import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceRole
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.ui.Model
@@ -29,12 +27,10 @@ import org.springframework.ui.Model
  * page-wide reads (executions, promotion) and the LABEL — and puts the answers into the model
  * under names the templates agree on.
  *
- * ## The API-key conjunct
- * Every boolean here narrows for an API-key principal exactly as
- * [AuthenticatedPrincipal.isAuthor] does: the credential axis is real (§7.6), so a `read` key
- * must not be shown an author's affordances merely because the person who minted it is an
- * author. A SESSION carries no scopes since D-R1 and is therefore judged on the membership
- * alone.
+ * ## No credential axis
+ * Until #215 slice (b) every boolean here also narrowed for an API-key principal by its scope.
+ * Scopes are gone and no key reaches a screen (the MCP key is confined to `/mcp`, B2), so the
+ * membership role is the whole answer.
  *
  * ## Why an `object` and not a bean
  * It has no collaborators — every input arrives as an argument. `ToastHtml`, `AppNav`,
@@ -85,38 +81,19 @@ object RoleModel {
         // role), `pipeline.execute` and `execution.read` (every role but the promoter, D5),
         // `template.update` for authoring (through `isAuthor`), `promotion.read`,
         // `promotion.promote` (through `isPromoter`), `workspace.members.manage` (through
-        // `isWorkspaceAdmin`). The other question, on every one, is the credential's scope.
-        //
-        // 143: the scope conjunct is stated HERE for author and promoter too. The auth
-        // predicates carry it, but they short-circuit on `superAdmin` before reaching it, so
-        // a super admin's `read` key answered "author" — and, once the template editor opened
-        // to readers, was drawn a textarea on a page whose writes the interceptor refuses on
-        // the scope axis (found by JarSmokeE2eTest). The screen must not offer what the key
-        // cannot do; the predicate itself is the auth module's and is not touched.
-        val canAuthor = principal.isAuthor && principal.scopeReaches(Scope.AUTHOR)
-        val canPromote = principal.isPromoter && principal.scopeReaches(Scope.AUTHOR)
+        // `isWorkspaceAdmin`). The role is the whole answer since slice (b): scopes are gone, and
+        // no key renders a screen — the MCP key is confined to `/mcp` (B2), the other kinds to
+        // their own routes — so every principal here is a signed-in person.
         return Roles(
-            canRead = context.permits(Permission.PIPELINE_READ) && principal.scopeReaches(Scope.READ),
-            canExecute = context.permits(Permission.PIPELINE_EXECUTE) && principal.scopeReaches(Scope.EXECUTE),
-            // `execution.read` floors at `read` on the credential axis (§7.6), so an execute-role
-            // issuer's `read` key still sees the runs it may not start.
-            canReadExecutions = context.permits(Permission.EXECUTION_READ) && principal.scopeReaches(Scope.READ),
-            canAuthor = canAuthor,
-            canReadPromotion = context.permits(Permission.PROMOTION_READ) && principal.scopeReaches(Scope.AUTHOR),
-            canPromote = canPromote,
-            // The scope conjunct is added HERE rather than on `isWorkspaceAdmin`, which has
-            // none: every §7.6 row a workspace admin drives (`MANAGE_WORKSPACE`,
-            // `MANAGE_WORKSPACE_MEMBERS`, `MUTATE_WORKSPACE_DATASOURCES`, `TEST_DATASOURCE`)
-            // carries an `author` SCOPE floor, so a `read` key whose issuer administers the
-            // workspace must not be shown Register/Edit/Delete/Test — the interceptor would
-            // refuse them on the scope arm. `isAuthor` and `isPromoter` already narrow this
-            // way; this is the third rung saying the same thing.
-            canAdminWorkspace = principal.isWorkspaceAdmin && principal.scopeReaches(Scope.AUTHOR),
-            // A key may not hold `admin` scope at all (O-2), so an instance verb is
-            // session-only — the matrix says so on the scope axis, and this says the same
-            // thing on the screen rather than offering a button the interceptor will refuse.
-            isSuperAdmin = principal.isSuperAdmin && principal.scopeReaches(Scope.ADMIN),
-            roleLabel = label(principal.isSuperAdmin, effectiveRole(principal, context.role)),
+            canRead = context.permits(Permission.PIPELINE_READ),
+            canExecute = context.permits(Permission.PIPELINE_EXECUTE),
+            canReadExecutions = context.permits(Permission.EXECUTION_READ),
+            canAuthor = principal.isAuthor,
+            canReadPromotion = context.permits(Permission.PROMOTION_READ),
+            canPromote = principal.isPromoter,
+            canAdminWorkspace = principal.isWorkspaceAdmin,
+            isSuperAdmin = principal.isSuperAdmin,
+            roleLabel = label(principal.isSuperAdmin, context.role),
         )
     }
 
@@ -129,8 +106,7 @@ object RoleModel {
      * - [adminUsers] — instance user administration (`/admin/users`, `USER_ADMINISTRATION`,
      *   super admin only). The instance authority is the USER's, not the membership's, so
      *   it is judged WITHOUT the workspace: a super admin whose active workspace is gone
-     *   still owns the instance. Narrowed by the credential axis like every other rung —
-     *   no key holds `admin` scope (O-2), so a key never shows it.
+     *   still owns the instance. No key is ever a super admin (#215 B1).
      * - [adminMembers] — the ACTIVE workspace's member management (the Workspaces screen's
      *   members section, `MANAGE_WORKSPACE_MEMBERS`) for a workspace admin. This one IS
      *   workspace-bound (§4.13: member verbs follow the active workspace) and is
@@ -159,7 +135,7 @@ object RoleModel {
 
     fun shell(principal: AuthenticatedPrincipal?): Shell {
         if (principal == null) return NO_SHELL
-        val adminUsers = principal.isSuperAdmin && principal.scopeReaches(Scope.ADMIN)
+        val adminUsers = principal.isSuperAdmin
         val roles = roles(principal)
         return Shell(
             adminUsers = adminUsers,
@@ -225,28 +201,11 @@ object RoleModel {
      * in every workspace, including ones they hold no explicit membership in (D7), because
      * that is the authority they are acting with; everyone else reads their role.
      *
-     * `super admin` is the one word not narrowed by the credential — it is what the
-     * credential's OWNER is, not what this credential may do. The role IS narrowed, by
-     * [effectiveRole], so the badge never contradicts the buttons beside it.
      */
     private fun label(
         superAdmin: Boolean,
         role: WorkspaceRole,
     ): String = if (superAdmin) "super admin" else role.label
-
-    /**
-     * The role a CREDENTIAL lets its holder act as: the membership's role, narrowed to
-     * `viewer` for an API key whose scope does not reach `author` — the badge on a `read`
-     * key must not say `author` when every authoring verb beside it is hidden (143).
-     */
-    private fun effectiveRole(
-        principal: AuthenticatedPrincipal,
-        role: WorkspaceRole,
-    ): WorkspaceRole = if (role == WorkspaceRole.VIEWER || principal.scopeReaches(Scope.AUTHOR)) role else WorkspaceRole.VIEWER
-
-    /** The credential axis. A session carries no scopes (D-R1) and is judged on the membership alone. */
-    private fun AuthenticatedPrincipal.scopeReaches(scope: Scope): Boolean =
-        authMethod != AuthMethod.API_KEY || Scope.satisfies(scopes, scope)
 
     /**
      * The answer for "no principal, or no reachable workspace": nothing is rendered. The label

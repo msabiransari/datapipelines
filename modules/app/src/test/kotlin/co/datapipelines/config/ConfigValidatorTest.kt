@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test
  * rule — including the closing rule that the **documented dev setup passes the
  * production checks** — is exercised by feeding a [ConfigSnapshot].
  */
+@Suppress("LargeClass") // the §7 rules as one table of cases over one snapshot builder
 class ConfigValidatorTest {
     /** The shared §7 baseline and secret generator ([ConfigSnapshots]) — one copy, two suites. */
     private fun secret(bytes: Int): String = ConfigSnapshots.secret(bytes)
@@ -462,6 +463,33 @@ class ConfigValidatorTest {
         // `system` would let a real person's identity land on that row through §4.2's linking
         // step — and the account's only defence against login is that nothing can link to it.
         listOf("system", " System ", "SYSTEM").forEach { name ->
+            val report =
+                ConfigValidator.validate(
+                    validSnapshot().copy(
+                        oidcProviders =
+                            listOf(
+                                OidcProviderSnapshot(
+                                    name = name,
+                                    clientId = "id",
+                                    clientSecret = "secret",
+                                    issuerUri = "https://idp.example.com",
+                                ),
+                            ),
+                    ),
+                )
+
+            report.violations.shouldHaveSize(1)
+            report.violations.single().shouldContain("reserved")
+        }
+    }
+
+    @Test
+    fun `key is reserved - a key's identity is safe only while no external identity can link to it`() {
+        // #215 (record §3.3): an `endpoint` or `server` key acts as its own `users` row with
+        // `provider = 'key'`, `provider_subject` = the key id — built like the System account so
+        // that login is impossible by construction. An OIDC provider named `key` would let an IdP
+        // subject equal to a key id land on that row through §4.2's linking step.
+        listOf("key", " Key ", "KEY").forEach { name ->
             val report =
                 ConfigValidator.validate(
                     validSnapshot().copy(

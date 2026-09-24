@@ -40,7 +40,7 @@ class PipelinesExecuteNodeToolTest {
     private val datasources = mockk<DatasourceRegistry>()
     private val runner = mockk<SqlRunner>()
     private val tool = PipelinesExecuteNodeTool(resolver, datasources, runner)
-    private val ctx = McpFixtures.ctx(co.datapipelines.auth.Scope.AUTHOR)
+    private val ctx = McpFixtures.ctx()
 
     private val pipelineId = McpFixtures.PIPELINE_ID
     private val draft =

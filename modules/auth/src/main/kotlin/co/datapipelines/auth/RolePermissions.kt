@@ -76,6 +76,11 @@ import co.datapipelines.auth.Permission.WORKSPACE_UPDATE
  * the promoter reads and promotes but executes nothing (D5), the author releases but does not
  * promote (D8). A super admin is not a role (D7, `users.is_admin`): it holds [SUPER_ADMIN] —
  * every permission but the two [FENCED] ones — in every workspace.
+ *
+ * The two KEY roles (#215 slice (b), record §3.2) are columns of the same table: [of] a
+ * [KeyRole]. A key role never includes an instance permission and never a member-only verb —
+ * `ScopeMatrixSpecDriftTest` compares both columns with auth.md §7.6, and `RoleMatrixTest`
+ * pins that no key role reaches [INSTANCE].
  */
 object RolePermissions {
     /** Reads, runs, reads and cancels its OWN executions, tests a connection (D3). Changes nothing. */
@@ -177,9 +182,22 @@ object RolePermissions {
             )
 
     /**
-     * The promotion RECEIVING rows: no role holds them, a super admin included. Their one path
-     * is the server-key route family (`PromotionServerKeyFilter`, §7.7), whose principal the
-     * matrix admits before it asks about any permission.
+     * An `endpoint` key (record §3.2, owner ruling 2026-09-24): serve the published paths bound to
+     * it, and read the executions it started — their metadata and their result, "own" only (the
+     * read paths judge ownership against the key's identity). Exactly today's endpoint key.
+     */
+    private val API_CALLER: Set<Permission> = setOf(ENDPOINT_SERVE, EXECUTION_READ, EXECUTION_RESULT_READ)
+
+    /**
+     * A `server` key (record §3.2, C4, B6): the promotion receiver's inventory and push — for any
+     * workspace the batch names — and nothing else.
+     */
+    private val PROMOTION_RECEIVER: Set<Permission> = setOf(PROMOTION_INVENTORY_READ, PROMOTION_PUSH)
+
+    /**
+     * The promotion RECEIVING rows: no MEMBER role holds them, a super admin included. Their one
+     * path is the server-key route family (`PromotionServerKeyFilter`, §7.7), whose principal
+     * holds them through the [KeyRole.PROMOTION_RECEIVER] column.
      */
     val FENCED: Set<Permission> = setOf(PROMOTION_INVENTORY_READ, PROMOTION_PUSH)
 
@@ -211,6 +229,13 @@ object RolePermissions {
             WorkspaceRole.AUTHOR -> AUTHOR
             WorkspaceRole.PROMOTER -> PROMOTER
             WorkspaceRole.WORKSPACE_ADMIN -> WORKSPACE_ADMIN
+        }
+
+    /** Every permission a key of [role] holds — one key-role column of the table. */
+    fun of(role: KeyRole): Set<Permission> =
+        when (role) {
+            KeyRole.API_CALLER -> API_CALLER
+            KeyRole.PROMOTION_RECEIVER -> PROMOTION_RECEIVER
         }
 
     /** The workspace roles whose column holds [permission]. */

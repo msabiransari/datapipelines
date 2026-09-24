@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.AbortReason
@@ -83,7 +82,6 @@ class ExecutionControllerTest {
 
     private fun authenticate(
         id: UUID,
-        scopes: Set<Scope>,
         workspaceAdmin: Boolean = false,
     ) {
         val principal =
@@ -91,7 +89,6 @@ class ExecutionControllerTest {
                 id,
                 "u@d.p",
                 "User",
-                scopes,
                 AuthMethod.OIDC,
                 workspace =
                     WorkspaceContext(
@@ -132,7 +129,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `history page returns pipelines and statuses`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         every { pipelines.findAll(any()) } returns listOf(pipelineRecord())
         // §5 (097 §B): the page paints the first fragment too, so it reads the rows as well.
         every { executions.findByUser(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns emptyList()
@@ -148,7 +145,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `history partial returns paginated executions`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         val records = (1..21).map { record() }
         every { executions.findByUser(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns records
 
@@ -164,7 +161,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `history partial empty state when no executions`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         every { executions.findByUser(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns emptyList()
 
         val model = ExtendedModelMap()
@@ -177,7 +174,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `detail page shows execution data`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         every { executions.findById(any(), executionId) } returns record().copy(resultRowCount = 100)
         every { executions.findByRoot(any(), executionId) } returns listOf(record())
         every { pipelines.findById(any(), pipelineId) } returns pipelineRecord()
@@ -195,7 +192,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `detail shows 404 for non-owner`() {
-        authenticate(UUID.randomUUID(), setOf(Scope.READ))
+        authenticate(UUID.randomUUID())
         val otherRecord = record().copy(executedBy = owner)
         every { executions.findById(any(), executionId) } returns otherRecord
 
@@ -206,7 +203,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `detail shows 404 for missing execution`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         every { executions.findById(any(), executionId) } returns null
 
         shouldThrow<ResponseStatusException> {
@@ -217,7 +214,7 @@ class ExecutionControllerTest {
     @Test
     fun `admin can view any execution`() {
         val adminId = UUID.randomUUID()
-        authenticate(adminId, emptySet(), workspaceAdmin = true)
+        authenticate(adminId, workspaceAdmin = true)
         every { executions.findById(any(), executionId) } returns record()
         every { executions.findByRoot(any(), executionId) } returns listOf(record())
         every { pipelines.findById(any(), pipelineId) } returns pipelineRecord()
@@ -234,7 +231,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `detail exposes the whole execution family via the root`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         val childId = UUID.randomUUID()
         val child =
             record().copy(
@@ -260,7 +257,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `detail shows canCancel for running execution with execute scope`() {
-        authenticate(owner, setOf(Scope.EXECUTE))
+        authenticate(owner)
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
         every { executions.findByRoot(any(), executionId) } returns listOf(record(ExecutionStatus.RUNNING))
         every { pipelines.findById(any(), pipelineId) } returns pipelineRecord()
@@ -276,7 +273,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `detail exposes the parsed failure record for a failed execution`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         every { executions.findById(any(), executionId) } returns
             record(ExecutionStatus.FAILED).copy(
                 failedNodeId = "stage_daily_trips",
@@ -304,7 +301,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `the result partial on a failed execution carries the record, not one code string`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         every { cursor.readable(executionId, any()) } throws
             co.datapipelines.web.api.ApiException(
                 co.datapipelines.pipeline.PipelineErrorCodes.Result.EXECUTION_FAILED,
@@ -343,7 +340,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `cancel by owner requests cancellation`() {
-        authenticate(owner, setOf(Scope.EXECUTE))
+        authenticate(owner)
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
         every { cancellation.cancel(executionId, AbortReason.CANCELLED) } returns true
 
@@ -361,7 +358,7 @@ class ExecutionControllerTest {
         // workspace, and without one there is no capability to satisfy.
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
-                AuthenticatedPrincipal(owner, "a@b.c", "A", emptySet(), AuthMethod.OIDC, workspace = null),
+                AuthenticatedPrincipal(owner, "a@b.c", "A", AuthMethod.OIDC, workspace = null),
                 null,
                 emptyList(),
             )
@@ -373,7 +370,7 @@ class ExecutionControllerTest {
 
     @Test
     fun `cancel non-running execution returns conflict`() {
-        authenticate(owner, setOf(Scope.EXECUTE))
+        authenticate(owner)
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
 
         shouldThrow<ResponseStatusException> {

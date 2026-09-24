@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -48,7 +47,7 @@ import java.util.UUID
  * added a field instead of a new error code.
  */
 class McpFolderRequiredTest {
-    private val ctx = McpFixtures.ctx(Scope.AUTHOR)
+    private val ctx = McpFixtures.ctx()
 
     // A real pipeline validator over empty collaborators: nothing but the NAME rule can fire
     // for the payload below, and the name rule needs no datasource, template or child.

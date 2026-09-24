@@ -1,12 +1,11 @@
 package co.datapipelines.web.ui.site
 
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.mcp.McpToolCatalog
 
-/** One row of the public tool list: the name, the scope the matrix requires, whether it writes. */
+/** One row of the public tool list: the name, the catalog permission it declares, whether it writes. */
 data class ToolRow(
     val name: String,
-    val scope: String,
+    val permission: String,
     val mutating: Boolean,
 )
 
@@ -19,9 +18,9 @@ data class ToolGroup(
 
 /**
  * The `/mcp-tools` page's data — derived from [McpToolCatalog.ENTRIES] (the list the server
- * ships, in `tools/list` order) and [ScopeMatrix.requiredScopeForTool] (the authority for the
- * scope column). Nothing here is typed by hand, so the page cannot list a tool that does not
- * exist or misstate its scope; `SiteMcpToolsPageTest` pins that every catalogue name appears.
+ * ships, in `tools/list` order, each entry declaring the catalog permission the dispatcher judges
+ * it by — #215). Nothing here is typed by hand, so the page cannot list a tool that does not
+ * exist or misstate its permission; `SiteMcpToolsPageTest` pins that every catalogue name appears.
  */
 object McpToolGroups {
     private val ORDER: List<Pair<String, String>> =
@@ -39,7 +38,7 @@ object McpToolGroups {
     fun groups(): List<ToolGroup> {
         val rows =
             McpToolCatalog.ENTRIES.map { e ->
-                ToolRow(e.name, ScopeMatrix.requiredScopeForTool(e.name)?.wire ?: "—", e.mutating)
+                ToolRow(e.name, e.permission.wire, e.mutating)
             }
         val byKey = rows.groupBy { keyOf(it.name) }
         val known = ORDER.map { (key, title) -> ToolGroup(key, title, byKey[key].orEmpty()) }.filter { it.tools.isNotEmpty() }

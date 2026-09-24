@@ -59,7 +59,7 @@
         <ul class="tool-list">
           <li th:each="t : ${g.tools}">
             <code th:text="${t.name}">tool_name</code>
-            <span class="status" th:text="${t.scope}">read</span>
+            <span class="status" th:text="${t.permission}">pipeline.read</span>
             <span class="status" th:if="${t.mutating}">writes</span>
           </li>
         </ul>

@@ -555,7 +555,13 @@ object PipelineErrorCodes {
         const val API_KEY_EXPIRED = "auth.api_key.expired"
         const val SESSION_INVALID = "auth.session.invalid"
         const val SESSION_EXPIRED = "auth.session.expired"
-        const val SCOPE_INSUFFICIENT = "auth.scope.insufficient"
+
+        /**
+         * §13.7 (#215 slice (b)) — the handler or tool called declares no catalog permission, so
+         * nothing can judge it and it is refused: a build defect the coverage guards already fail,
+         * kept as the runtime defence. Replaced `auth.scope.insufficient`, which retired with scopes.
+         */
+        const val PERMISSION_UNDECLARED = "auth.permission.undeclared"
         const val CSRF_INVALID = "auth.csrf.invalid"
         const val LOGIN_DOMAIN_NOT_ALLOWED = "auth.login.domain_not_allowed"
         const val LOGIN_USER_INACTIVE = "auth.login.user_inactive"
@@ -580,17 +586,16 @@ object PipelineErrorCodes {
         const val PROMOTION_KEY_INVALID = "auth.promotion.key_invalid"
 
         /**
-         * §13.7 — the principal's ROLE in the active workspace is below the operation's
-         * (RBAC design §2, D-R1). Two segments, not three: the role axis has no ENTITY
-         * dimension — it is a property of the caller's membership, not of a thing they named.
+         * §13.7 — the principal's ROLE does not hold the permission the operation needs (RBAC
+         * design §2, D-R1): a session's membership role, an MCP key's member role capped at author,
+         * or a key's own role (`api_caller`, `promotion_receiver` — #215). Since #215 it is the ONE
+         * authorization refusal: the MCP ownership rules ride it too, told apart by
+         * `details.reason`. Two segments, not three: the role axis has no ENTITY dimension.
          */
         const val ROLE_REQUIRED = "auth.role_required"
 
-        /** §13.7 — the key was valid; its issuer no longer holds the capability (D-R12). */
+        /** §13.7 — the MCP key was valid; its member's role (capped at author) does not reach the call (D-R12, #215 §4). */
         const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
-
-        /** §13.7 — issuance asked for a scope keys may no longer hold; today that is `admin` (O-2). */
-        const val KEY_SCOPE_UNAVAILABLE = "auth.key_scope_unavailable"
 
         /**
          * §13.7 (179, D16) — on-demand issuance asked for a `user` key. User keys are minted
@@ -603,8 +608,8 @@ object PipelineErrorCodes {
         const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
 
         /**
-         * §13.7 (180, D15) — the principal's USER is deactivated: a session, a `user` key, or
-         * the owner of an `endpoint`/`server` key. One predicate judges it where the
+         * §13.7 (180, D15) — the principal's USER is deactivated: a session's or MCP key's
+         * member, or an `endpoint`/`server` key's own identity (#215). One predicate judges it where the
          * credential becomes a principal; a deactivated WORKSPACE keeps the 404 rule instead.
          */
         const val PRINCIPAL_DEACTIVATED = "auth.principal_deactivated"

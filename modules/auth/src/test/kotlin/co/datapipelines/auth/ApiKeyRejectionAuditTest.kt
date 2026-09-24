@@ -28,7 +28,8 @@ class ApiKeyRejectionAuditTest {
     private val apiKeyService = mockk<ApiKeyService>()
     private val apiKeyRepository = mockk<ApiKeyRepository>(relaxed = true)
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
-    private val filter = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger, ClientAddressResolver(emptyList()))
+    private val filter =
+        ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger, ClientAddressResolver(emptyList()), mockk(relaxed = true))
 
     init {
         every { apiKeyService.validate(any()) } throws ApiKeyInvalidException()

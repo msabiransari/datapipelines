@@ -95,11 +95,24 @@ data class ExecutionRecord(
     val executedByKeyKind: ExecutedByKeyKind? = null,
 ) {
     /**
-     * D11 — is this run [userId]'s OWN, as the own-runs filter defines it: they executed it,
-     * and not through an endpoint key (an endpoint-key run belongs to the endpoint, not to the
-     * person who happens to own the key). The SQL twin is [ExecutionRepository.OWN_RUN_PREDICATE].
+     * D11 — is this run [userId]'s OWN, as the own-runs filter defines it.
+     *
+     * - For a PERSON: they executed it, and not through an endpoint key. Before #215 an endpoint
+     *   key's run was stamped with the key's creator; such a run belongs to the endpoint, not to
+     *   that person, and stays out of their own runs forever.
+     * - For a KEY's own identity ([byKeyIdentity], #215 record §3.3 / C5): every run stamped with
+     *   the identity is the key's — since V34 an endpoint key's runs carry its identity in
+     *   `executed_by`, and the identity is nobody else. This is what lets an `api_caller` read
+     *   its own results.
+     *
+     * The SQL twin is [ExecutionRepository.OWN_RUN_PREDICATE], which answers the PERSON form: the
+     * own-runs LIST is a person's question — no key reaches a list route (auth `ScopeInterceptor`
+     * confines an endpoint key to the serve paths and single-execution reads).
      */
-    fun isOwnRunOf(userId: UUID): Boolean = executedBy == userId && executedByKeyKind != ExecutedByKeyKind.ENDPOINT
+    fun isOwnRunOf(
+        userId: UUID,
+        byKeyIdentity: Boolean = false,
+    ): Boolean = executedBy == userId && (byKeyIdentity || executedByKeyKind != ExecutedByKeyKind.ENDPOINT)
 }
 
 /**
@@ -515,9 +528,11 @@ class ExecutionRepository(
             "EXISTS(SELECT 1 FROM pipelines p WHERE p.id = pipeline_executions.pipeline_id AND p.workspace_id = :workspaceId)"
 
         /**
-         * D11 — "the caller's OWN runs": executed by them, and not through an endpoint key. The
-         * Kotlin twin is [ExecutionRecord.isOwnRunOf]; both must say the same thing, because the
-         * list filters in SQL and the single-record reads filter in memory.
+         * D11 — "the caller's OWN runs": executed by them, and not through an endpoint key (the
+         * pre-#215 endpoint runs stamped with a key's creator). The Kotlin twin is
+         * [ExecutionRecord.isOwnRunOf] in its person form; both must say the same thing, because
+         * the list filters in SQL and the single-record reads filter in memory. The twin's
+         * key-identity form has no SQL counterpart because no key lists executions.
          */
         const val OWN_RUN_PREDICATE =
             "executed_by = :userId AND (executed_by_key_kind IS NULL OR executed_by_key_kind <> 'endpoint')"

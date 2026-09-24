@@ -56,13 +56,13 @@ class McpAuthFilter(
             reject(request, response, principal)
             return
         }
-        // §7.7 — a SCOPELESS kind (endpoint, server) authorises a surface `/mcp` is not on: an
+        // §7.7 — an identity-acting kind (endpoint, server) authorises a surface `/mcp` is not on: an
         // endpoint key gets published endpoints and the cursor of executions it started, a server
         // key gets the promotion route family. `/mcp` is a SERVLET, so `ScopeInterceptor`'s
         // central confinement (which only sees MVC handlers) never runs here — the refusal has to
         // be made again, at this filter. Without it such a key could reach `tools/list` and
-        // enumerate the surface: it could call nothing (a scopeless key fails every tool's scope
-        // check) but it could READ the tool catalogue, which is more than either kind authorises.
+        // enumerate the surface: it could call nothing (its key role holds no tool's permission)
+        // but it could READ the tool catalogue, which is more than either kind authorises.
         // Found by probing the live stack, not by any test (074); kept and widened in 091.
         if (principal.isEndpointKey || principal.isServerKey) {
             rejectConfinedKind(request, response, principal)

@@ -23,10 +23,11 @@ class PrincipalLivenessTest {
     private val cache = AuthCache(AuthProperties())
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val userService = UserService(userRepository, cache, AuthProperties(), auditLogger)
+    private val apiKeyRepository = mockk<ApiKeyRepository>(relaxed = true)
     private val workspaceService =
         WorkspaceService(
             workspaceRepository,
-            mockk(relaxed = true),
+            apiKeyRepository,
             userRepository,
             cache,
             null,
@@ -126,7 +127,6 @@ class PrincipalLivenessTest {
                 userId = UUID.randomUUID(),
                 email = "root@c.com",
                 displayName = "Root",
-                scopes = emptySet(),
                 authMethod = AuthMethod.OIDC,
                 superAdmin = true,
             )
@@ -146,5 +146,67 @@ class PrincipalLivenessTest {
         every { workspaceRepository.findById(workspaceId) } returns workspace(true)
         workspaceService.reactivate(superAdmin, "acme")
         liveness.check(userId, PrincipalLiveness.Pin(workspaceId, "acme")).shouldBeNull()
+    }
+
+    /**
+     * #215 A2 (record gate 10): a workspace's lifecycle is DERIVED, never cascaded. Deactivating it
+     * revokes no key and deactivates no identity, so reactivating it restores exactly what was live
+     * before — a live identity serves again, and one deactivated by hand (its key revoked) stays
+     * refused as a USER, not revived by the workspace.
+     */
+    @Test
+    fun `a workspace reactivation restores exactly what was live - a deactivated identity stays deactivated`() {
+        val liveIdentity = UUID.randomUUID()
+        val deadIdentity = UUID.randomUUID()
+
+        fun identity(
+            id: UUID,
+            active: Boolean,
+        ) = User(
+            id,
+            "$id@keys.invalid",
+            "k",
+            null,
+            UserService.KEY_PROVIDER,
+            id.toString(),
+            active,
+            false,
+            Instant.now(),
+            Instant.now(),
+            null,
+            kind = UserKind.SERVICE,
+        )
+        every { userRepository.findById(liveIdentity) } returns identity(liveIdentity, active = true)
+        every { userRepository.findById(deadIdentity) } returns identity(deadIdentity, active = false)
+        stub(userActive = true, workspaceActive = true)
+        val superAdmin =
+            AuthenticatedPrincipal(
+                userId = UUID.randomUUID(),
+                email = "root@c.com",
+                displayName = "Root",
+                authMethod = AuthMethod.OIDC,
+                superAdmin = true,
+            )
+        val pin = PrincipalLiveness.Pin(workspaceId, "acme")
+        every { workspaceRepository.findByName("acme") } returns workspace(true)
+        every { workspaceRepository.deactivate(workspaceId, superAdmin.userId) } returns true
+        every { workspaceRepository.reactivate(workspaceId) } returns true
+        every { workspaceRepository.findMembersOf(workspaceId) } returns emptyList()
+
+        every { workspaceRepository.findById(workspaceId) } returns workspace(false)
+        every { workspaceRepository.findByName("acme") } returns workspace(false)
+        workspaceService.deactivate(superAdmin, "acme")
+        liveness.check(liveIdentity, pin).shouldBeInstanceOf<PrincipalLiveness.Refusal.WorkspaceDeactivated>()
+
+        every { workspaceRepository.findById(workspaceId) } returns workspace(true)
+        workspaceService.reactivate(superAdmin, "acme")
+        liveness.check(liveIdentity, pin).shouldBeNull()
+        liveness.check(deadIdentity, pin).shouldBeInstanceOf<PrincipalLiveness.Refusal.UserDeactivated>()
+
+        // Nothing cascaded either way: no identity was written, no key revoked.
+        io.mockk.verify(exactly = 0) { userRepository.setActive(any(), any()) }
+        io.mockk.verify(exactly = 0) { apiKeyRepository.revoke(any(), any()) }
+        io.mockk.verify(exactly = 0) { apiKeyRepository.revokeInWorkspace(any(), any(), any()) }
+        io.mockk.verify(exactly = 0) { apiKeyRepository.revokeUserKeyForWorkspace(any(), any()) }
     }
 }

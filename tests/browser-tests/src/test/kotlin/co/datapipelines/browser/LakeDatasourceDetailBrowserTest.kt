@@ -1,7 +1,6 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
-import de.mkammerer.argon2.Argon2Factory
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -15,7 +14,6 @@ import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.DriverManager
-import java.util.UUID
 import kotlin.io.path.absolutePathString
 
 /**
@@ -23,8 +21,8 @@ import kotlin.io.path.absolutePathString
  * read-only namespace tree (metadata-db §4.15, ui-screens). A LAKE datasource over a LOCAL
  * `file://` Parquet fixture (no `catalog.kind` — the on-prem shape, no MinIO needed) with
  * two tables in the two-segment namespace `[nyc, mobility]`, registered through the REAL
- * REST surface (registration is REST/MCP-only — R10 — so the test seeds an API key and calls
- * it), then the UI walk: datasources list → the LAKE row's "Tables" link → the detail →
+ * REST surface (registration is REST/MCP-only — R10 — so the test calls it with the signed-in
+ * page's own session, #215 B2), then the UI walk: datasources list → the LAKE row's "Tables" link → the detail →
  * expand `nyc` → expand `mobility` → the leaves with their format and partition badges.
  *
  * The fixture is generated in `@BeforeAll` with the app's own pinned DuckDB JDBC, the
@@ -42,17 +40,17 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
         createWorkspace(workspaceName)
 
         val datasource = "lake-" + generatedPassword("d").take(10).lowercase()
-        val key = seedApiKey(user.email, workspaceName)
-        registerLakeDatasource(key, datasource)
+        val auth = sessionAuth(workspaceName)
+        registerLakeDatasource(auth, datasource)
         registerLakeTable(
-            key,
+            auth,
             datasource,
             """{"namespace": ["nyc", "mobility"], "name": "trips", "format": "parquet",
                "location": "file://${fixtureDir.absolutePathString()}/trips/pickup_date=*/data_*.parquet",
                "partition_column": "pickup_date"}""",
         )
         registerLakeTable(
-            key,
+            auth,
             datasource,
             """{"namespace": ["nyc", "mobility"], "name": "companies", "format": "parquet",
                "location": "file://${fixtureDir.absolutePathString()}/companies/part-0.parquet"}""",
@@ -109,85 +107,32 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ REST seeding
 
-    /** An `admin`-scoped key for the UI user, in the UI-created workspace. */
-    private fun seedApiKey(
-        email: String,
-        workspaceName: String,
-    ): String {
-        val keyId = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-        val plaintext = keyId + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-        val argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id)
-        val hash = argon2.hash(2, 19_456, 1, plaintext.toCharArray())
-        DriverManager
-            .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
-            .use { connection ->
-                val userId =
-                    connection.createStatement().use { statement ->
-                        statement.executeQuery("SELECT id FROM users WHERE email = '$email'").use { rs ->
-                            rs.next()
-                            rs.getObject(1, UUID::class.java)
-                        }
-                    }
-                val workspaceId =
-                    connection.createStatement().use { statement ->
-                        statement.executeQuery("SELECT id FROM workspaces WHERE name = '$workspaceName'").use { rs ->
-                            rs.next()
-                            rs.getObject(1, UUID::class.java)
-                        }
-                    }
-                // 179 (D16/V31): the sign-in and the switch into the workspace minted the
-                // user's login key already — one live `user` key per (user, workspace) is a
-                // UNIQUE INDEX now. The fixture's key replaces it (revoke, never delete:
-                // audit_log.key_id keeps resolving).
-                connection
-                    .prepareStatement(
-                        "UPDATE api_keys SET is_revoked = TRUE WHERE user_id = ? AND workspace_id = ?" +
-                            " AND kind = 'user' AND is_revoked = FALSE",
-                    ).use { ps ->
-                        ps.setObject(1, userId)
-                        ps.setObject(2, workspaceId)
-                        ps.executeUpdate()
-                    }
-                // D-R12: a key can do at most what its ISSUER can do in the pinned workspace
-                // NOW. Without a membership there the issuer is a viewer, and every authoring
-                // call the suite makes would be `auth.key_issuer_role_lost` — a correct refusal
-                // for a fixture that forgot to say who the person is.
-                connection
-                    .prepareStatement(
-                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
-                            " VALUES (?, ?, 'workspace_admin') ON CONFLICT (workspace_id, user_id) DO NOTHING",
-                    ).use { ps ->
-                        ps.setObject(1, workspaceId)
-                        ps.setObject(2, userId)
-                        ps.executeUpdate()
-                    }
-                connection
-                    .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
-                    ).use { ps ->
-                        ps.setString(1, keyId)
-                        ps.setObject(2, userId)
-                        ps.setString(3, "browser-lake-detail-key")
-                        ps.setString(4, hash)
-                        // O-2: `admin` is not a scope a key may hold. A workspace-owned
-                        // datasource registration is `author` on the credential axis and
-                        // `ws_admin` on the role one — and this key's owner is an admin of the
-                        // workspace it is pinned to, which is where that capability now lives.
-                        ps.setArray(5, connection.createArrayOf("text", arrayOf("read", "execute", "author")))
-                        ps.setObject(6, workspaceId)
-                        ps.executeUpdate()
-                    }
-            }
-        return plaintext
+    /**
+     * The signed-in page's OWN session, for the REST fixture calls: REST is a session's surface
+     * since #215 B2 (the MCP key reaches `/mcp` only), and registering an in-process engine is a
+     * super admin's act — which no key is (B1). [workspace] is named explicitly on each call.
+     */
+    private fun sessionAuth(workspace: String): RestAuth {
+        val cookies = page.context().cookies().associate { it.name to it.value }
+        val session = checkNotNull(cookies["dp_session"]) { "no dp_session cookie in the browser context" }
+        val csrf = checkNotNull(cookies["dp_csrf"]) { "no dp_csrf cookie in the browser context" }
+        return RestAuth("dp_session=$session; dp_csrf=$csrf", csrf, workspace)
     }
+
+    /** A session's REST credentials: the cookie pair, the CSRF double-submit value, the workspace. */
+    private class RestAuth(
+        val cookie: String,
+        val csrf: String,
+        val workspace: String,
+    )
 
     /** A LAKE datasource with NO `catalog.kind`: a lake over paths the process can reach. */
     private fun registerLakeDatasource(
-        key: String,
+        auth: RestAuth,
         name: String,
     ) {
         post(
-            key,
+            auth,
             "/api/v1/datasources",
             """{"name": "$name", "display_name": "Browser Lake", "dialect": "LAKE",
                "jdbc_url": "jdbc:duckdb::memory:", "readonly": true,
@@ -197,13 +142,13 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
     }
 
     private fun registerLakeTable(
-        key: String,
+        auth: RestAuth,
         datasource: String,
         body: String,
-    ) = post(key, "/api/v1/datasources/$datasource/tables", body, expected = 201)
+    ) = post(auth, "/api/v1/datasources/$datasource/tables", body, expected = 201)
 
     private fun post(
-        key: String,
+        auth: RestAuth,
         path: String,
         body: String,
         expected: Int,
@@ -211,7 +156,9 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
         val request =
             HttpRequest
                 .newBuilder(URI.create("$baseUrl$path"))
-                .header("DP-API-Key", key)
+                .header("Cookie", auth.cookie)
+                .header("DP-CSRF-Token", auth.csrf)
+                .header("DP-Workspace", auth.workspace)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build()
@@ -222,9 +169,6 @@ class LakeDatasourceDetailBrowserTest : BrowserSuite() {
     }
 
     companion object {
-        private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-        private val random = java.security.SecureRandom()
-
         private lateinit var fixtureDir: Path
 
         /** The local Parquet set: `trips` day-partitioned (20 rows x 2 days), `companies` flat. */

@@ -1,9 +1,12 @@
 package co.datapipelines.web.api
 
+import co.datapipelines.auth.ApiKeyKind
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.auth.RolePermissions
+import co.datapipelines.auth.ScopeInterceptor
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldHaveAtLeastSize
 import io.kotest.matchers.shouldBe
@@ -24,70 +27,73 @@ import kotlin.reflect.full.functions
 import kotlin.reflect.jvm.javaMethod
 
 /**
- * The mutating-floor guard (025 defect round, A1; re-keyed to handlers in the 025b
- * fix round; re-keyed to the permission catalog, #215): every POST/PUT/PATCH/DELETE handler
- * must carry a permission whose §7.6 key floor sits ABOVE `read` — unless the HANDLER is on
- * the explicit allowlist below, each entry justified in place.
+ * The mutating-handler guard (025 defect round, A1; re-keyed to handlers in 025b; to the
+ * permission catalog in #215 slice (a); to KEY KINDS in slice (b)).
  *
- * Why this test exists when [RequiredScopeCoverageTest] already passes: coverage asserts
- * an annotation EXISTS, not what it permits. An API key authenticates on EVERY path
- * (`ApiKeyFilter` has no path test) and is CSRF-exempt (`ApiKeyCredentialMatcher`), so a
- * mutating handler floored at `read` is reachable by a read-scoped key with no CSRF
- * token — the annotation is the only gate (the 022 verified addendum's 37-route scan).
- * `ScopeInterceptor`'s default-deny covers only the un-annotated case, and only under
- * `/api`, `/partials` and `/mcp`; a mis-floored mutation is invisible to every existing
- * check (the "coverage ≠ existence" trap, MISTAKES.md).
+ * Why it exists: an API key is CSRF-exempt (`ApiKeyCredentialMatcher`), so a mutating handler a
+ * key can reach is gated by nothing but the key's authorization. Until #215 slice (b) that was the
+ * key's SCOPE, and this test held every mutating handler above the `read` floor. Scopes are gone:
+ * a key's reach is now its KIND's confined surface (`ScopeInterceptor.reachableBy` — the MCP key
+ * `/mcp` only, B2; an `endpoint` key the serve paths and its own execution reads; a `server` key
+ * the promotion routes) and then its KEY ROLE. So the guard asks the question that replaced the
+ * floor: **which mutating handlers can each key kind reach at all, and does its role decide them
+ * the way the entry says?** Every (kind, handler) pair is listed in [KEY_SURFACE_MUTATIONS] with
+ * its reason; an unlisted one — a new mutating route that falls inside a kind's surface — fails
+ * the build, and a listed one that is no longer reachable fails the non-vacuity arm.
  *
- * The allowlist is keyed on individual HANDLERS (`"ControllerClass#method"`), not on
- * operations. The operation-keyed version is how five `WorkspacesController` mutations
- * slipped through (025 review, blocking): one `MANAGE_WORKSPACE` entry silently exempted
- * every handler declaring that operation — including REST handlers an API key CAN reach —
- * behind a justification written for the session-only UI twins. Two handlers sharing one
- * operation must never be exempted by one entry. The second test below is the
- * non-vacuity half: every allowlist key must resolve to a discovered read-floored
- * mutating handler, so a stale, misspelled, or since-raised entry fails the build
- * instead of exempting nothing (a guard that exempts nothing is exactly how the
- * operation-keyed version rotted).
+ * Coverage asserts an annotation EXISTS ([RequiredScopeCoverageTest]); this asserts who can get
+ * to the handler that carries it (the "coverage ≠ existence" trap, MISTAKES.md).
  *
- * Born red: `PATCH /partials/profile/theme` mutated behind `READ_RESOURCES` until it got
- * its own `PROFILE_PREFERENCE` row (same commit as this test). Falsified again in 025b:
- * re-lowering `WORKSPACE_CREATE`/`MANAGE_WORKSPACE` to `read` names the five
- * `WorkspacesController` handlers.
+ * Born red (025): `PATCH /partials/profile/theme` mutated behind `READ_RESOURCES`. Falsified in
+ * slice (b) by widening `reachableBy(USER, …)` to the whole app — every REST and partial mutation
+ * is then named as reachable by the MCP key.
  */
 class MutatingHandlerScopeFloorTest {
     @Test
-    fun `every mutating handler sits above the read floor or is allowlisted`() {
-        val offenders = mutableListOf<String>()
-        discoveredMutatingHandlers().forEach { handler ->
-            val permission = handler.permission
-            if (permission == null) {
-                if (handler.where !in UNAUTHENTICATED_BY_DESIGN) {
-                    offenders +=
-                        "${handler.where}: mutating handler declares NO @RequiredScope " +
+    fun `every mutating handler declares a permission or is allowlisted as unauthenticated`() {
+        val offenders =
+            discoveredMutatingHandlers()
+                .filter { it.permission == null && it.where !in UNAUTHENTICATED_BY_DESIGN }
+                .map {
+                    "${it.where}: mutating handler declares NO @RequiredScope " +
                         "(if it is unauthenticated by design, add it to UNAUTHENTICATED_BY_DESIGN with its permitAll justification)"
                 }
-            } else if (floorOf(permission) == Scope.READ && handler.where !in READ_FLOORED_MUTATION_HANDLERS) {
-                offenders +=
-                    "${handler.where}: mutating handler is floored at read via ${permission.wire}"
-            }
-        }
         offenders shouldBe emptyList()
     }
 
     /**
-     * Non-vacuity: every allowlist entry must be a REAL, currently read-floored mutating
-     * handler. An entry whose handler was raised above `read`, renamed, or deleted
-     * exempts nothing — and silently rotting entries are how the operation-keyed
-     * allowlist came to certify a lie, so they fail here.
+     * Every mutating handler a key kind can reach, BOTH directions: an unlisted pair is a new
+     * mutation inside a CSRF-exempt credential's surface; a listed pair that no longer resolves
+     * exempts nothing and rots. For each, the kind's KEY ROLE must decide it the way the entry says
+     * — a surface the role does not hold is a second line (refused by `auth.role_required`), not
+     * a grant.
      */
     @Test
-    fun `every allowlist entry is a discovered read-floored mutating handler`() {
-        val readFloored =
+    fun `every mutating handler a key kind can reach is on that kind's declared surface`() {
+        val reached =
             discoveredMutatingHandlers()
-                .filter { handler -> handler.permission?.let(::floorOf) == Scope.READ }
-                .map { it.where }
-                .toSet()
-        (READ_FLOORED_MUTATION_HANDLERS.keys - readFloored) shouldBe emptySet()
+                .filter { it.path != null }
+                .flatMap { handler ->
+                    ApiKeyKind.entries
+                        .filter { kind -> ScopeInterceptor.reachableBy(kind, concrete(handler.path!!)) }
+                        .map { kind -> "${kind.wire} ${handler.where}" to handler }
+                }.toMap()
+
+        reached.keys shouldBe KEY_SURFACE_MUTATIONS.keys
+        reached.forEach { (pair, handler) ->
+            val kind = ApiKeyKind.fromWire(pair.substringBefore(' '))
+            val role = KeyRole.forKind(kind)
+            val held = role != null && handler.permission != null && handler.permission in RolePermissions.of(role)
+            withClue(pair) { held shouldBe KEY_SURFACE_MUTATIONS.getValue(pair).heldByKeyRole }
+        }
+    }
+
+    /** B2 in one line: the MCP key reaches no mutating MVC handler — its whole surface is the `/mcp` servlet. */
+    @Test
+    fun `the MCP key reaches no mutating handler`() {
+        discoveredMutatingHandlers()
+            .filter { it.path != null && ScopeInterceptor.reachableBy(ApiKeyKind.USER, concrete(it.path)) }
+            .map { it.where } shouldBe emptyList()
     }
 
     /**
@@ -151,8 +157,8 @@ class MutatingHandlerScopeFloorTest {
             "co.datapipelines.web.ui.WorkspacesUiController"
     }
 
-    /** #215 slice (a): a permission's KEY floor is the A4 shim's — the operation it replaced carried the same one. */
-    private fun floorOf(permission: Permission): Scope? = ScopeMatrix.PERMISSION_MIN_SCOPE[permission]
+    /** A mapping path as a concrete request path: every `{variable}` and `**` becomes one literal segment. */
+    private fun concrete(path: String): String = path.replace(Regex("\\{[^}]+}"), "x").replace("**", "x")
 
     private data class DiscoveredHandler(
         val where: String,
@@ -175,15 +181,6 @@ class MutatingHandlerScopeFloorTest {
                 }
         }
 
-    /**
-     * The deliberate read-floored mutation handlers, `"ControllerClass#method"` → the
-     * reason `read` is honest FOR THAT HANDLER. Adding an entry requires the same three
-     * things the existing entries have: a §7.6 row, a floor in the permission key-scope table
-     * (`ScopeMatrix.PERMISSION_MIN_SCOPE`) argued honest where it is written, and an
-     * in-handler guard that is the REAL control for whoever the floor lets through —
-     * plus this per-handler justification, because the operation's KDoc cannot know
-     * which credential each of its handlers is reachable by.
-     */
     private companion object {
         /**
          * Mutating handlers that carry NO scope because they are reachable BEFORE any
@@ -205,37 +202,29 @@ class MutatingHandlerScopeFloorTest {
                     "bounded by LoginRateLimitFilter and the per-account lockout (auth.md §5A), not by a scope",
             )
 
-        val READ_FLOORED_MUTATION_HANDLERS: Map<String, String> =
+        /** What a key-surface entry asserts: whether the kind's key role HOLDS the handler's permission, and why the pair exists. */
+        data class SurfaceEntry(
+            val heldByKeyRole: Boolean,
+            val reason: String,
+        )
+
+        /** `"<kind> <Controller#method>"` → the one mutating handler that kind's surface reaches, and why (§7.7, #215). */
+        val KEY_SURFACE_MUTATIONS: Map<String, SurfaceEntry> =
             mapOf(
-                "AuthController#revokeKey" to
-                    "own-resource: revocation is scoped to the caller's own keys in SQL " +
-                    "(ApiKeyService.revoke(keyId, caller.userId)); no payload-chosen target beyond the caller's own key",
-                // 179 (D16) removed the two CREATE entries: key issuance is no longer
-                // 'any authenticated' — `user` keys are login-minted and `endpoint` keys are
-                // the workspace admin's MANAGE_API_KEYS (author scope), so both create
-                // handlers sit above the read floor now and the non-vacuity arm keeps them
-                // off this list.
-                "ApiKeysPartialController#rotate" to
-                    "own-resource delete-to-rotate (D16): resolves the caller's OWN login-minted key in the " +
-                    "ACTIVE workspace — one exists at most (V31's partial unique index) — so the handler takes " +
-                    "no key id at all and there is no payload-chosen target",
-                "UserSettingsController#updateTheme" to
-                    "own-resource: the write targets the caller's own user row (the handler resolves the caller's " +
-                    "userId); there is no payload-chosen target",
-                // Added at the 026 merge, not by either lane: 026 branched BEFORE this guard
-                // existed (025 introduced it), so its new mutating handler met the guard for the
-                // first time here — and the guard did its job by refusing it. That is the
-                // parallel-lane failure this test is for.
-                "UserSettingsController#changeOwnPassword" to
-                    "session-only by construction, then own-resource. The read floor was NOT sufficient on its own: " +
-                    "the handler now refuses any non-OIDC principal (auth.session.required), because a leaked " +
-                    "read-scoped key could otherwise guess the owner's password here — unmetered, since changeOwn " +
-                    "had no lockout — and on a hit rotate it into an interactive takeover. With the key class refused " +
-                    "the floor is moot for the credential that could abuse it, and the CURRENT password is still " +
-                    "verified (now lockout-counted) so a hijacked session cannot rotate it either",
-                "WorkspacesUiController#switch" to
-                    "session-only by construction (requireSessionPrincipal): an API key is refused before the session " +
-                    "mint and a session carries CSRF, so the read floor is moot for the credential that could abuse it",
+                "server PromotionController#push" to
+                    SurfaceEntry(
+                        heldByKeyRole = true,
+                        reason =
+                            "the promotion receiver's push (versioning §10.4): the server key's whole purpose, " +
+                                "held by promotion_receiver",
+                    ),
+                "endpoint ExecutionsController#cancel" to
+                    SurfaceEntry(
+                        heldByKeyRole = false,
+                        reason =
+                            "the execution-read path pattern an endpoint key reaches (to collect its own run) also maps " +
+                                "DELETE — reached by path, refused by role: api_caller does not hold execution.cancel",
+                    ),
             )
 
         /**

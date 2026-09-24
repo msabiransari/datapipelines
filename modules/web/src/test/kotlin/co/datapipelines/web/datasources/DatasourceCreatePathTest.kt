@@ -4,7 +4,6 @@ import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
@@ -73,7 +72,6 @@ class DatasourceCreatePathTest {
             userId,
             "a@b.c",
             "A",
-            setOf(Scope.AUTHOR),
             AuthMethod.API_KEY,
             workspace = workspace.copy(role = WorkspaceRole.WORKSPACE_ADMIN),
             superAdmin = admin,

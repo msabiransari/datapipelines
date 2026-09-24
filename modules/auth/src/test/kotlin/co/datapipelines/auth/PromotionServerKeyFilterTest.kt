@@ -153,7 +153,7 @@ class PromotionServerKeyFilterTest {
     // -------------------------------------------------------------------- 4: the actor
 
     @Test
-    fun `a valid key authenticates as the system service account with author and no workspace`() {
+    fun `the config value authenticates as the system service account with the promotion_receiver role and no workspace`() {
         val chain = MockFilterChain()
 
         filter(configuredKey = KEY).doFilter(promotionRequest(header = KEY), MockHttpServletResponse(), chain)
@@ -163,7 +163,12 @@ class PromotionServerKeyFilterTest {
         principal.userId shouldBe systemActor.id
         principal.email shouldBe UserService.SYSTEM_ACTOR_EMAIL
         principal.authMethod shouldBe AuthMethod.PROMOTION
-        principal.scopes shouldBe setOf(Scope.AUTHOR)
+        // #215 record §3.2 / B6: the receiver's two permissions and nothing else — not the
+        // System-account-with-author authority it used to carry.
+        principal.keyRole shouldBe KeyRole.PROMOTION_RECEIVER
+        principal.holds(Permission.PROMOTION_PUSH) shouldBe true
+        principal.holds(Permission.PROMOTION_INVENTORY_READ) shouldBe true
+        principal.holds(Permission.PIPELINE_CREATE) shouldBe false
         // Not a super admin: the receiver resolves the target workspace by name from the
         // payload, so no membership bypass is needed and none is granted.
         principal.isSuperAdmin shouldBe false
@@ -173,7 +178,7 @@ class PromotionServerKeyFilterTest {
     }
 
     @Test
-    fun `the granted authority is author and nothing above it`() {
+    fun `no Spring authority is granted - the key role is the whole answer`() {
         filter(configuredKey = KEY).doFilter(promotionRequest(header = KEY), MockHttpServletResponse(), MockFilterChain())
 
         val authorities =
@@ -182,13 +187,13 @@ class PromotionServerKeyFilterTest {
                 .authentication
                 ?.authorities
                 ?.map { it.authority }
-        authorities shouldBe listOf("SCOPE_author")
+        authorities shouldBe emptyList()
     }
 
     // -------------------------------------------------------------------- 5: the stored server key (091)
 
     @Test
-    fun `a stored server key authenticates the peer as the same system actor, and stamps its usage`() {
+    fun `a stored server key authenticates the peer as the key's own identity, and stamps its usage`() {
         val chain = MockFilterChain()
         val key = serverKeyRecord()
 
@@ -198,11 +203,13 @@ class PromotionServerKeyFilterTest {
 
         chain.request.shouldNotBeNull()
         val principal = SecurityContextHolder.getContext().authentication?.principal as AuthenticatedPrincipal
-        // The ACTOR is the deployment's system account, never the admin who minted the key: a
-        // promoted version must not be stamped with a person who did not perform the promotion.
-        principal.userId shouldBe systemActor.id
+        // #215 C4: the ACTOR is the key's own `service` identity — never the admin who minted it
+        // (a promoted version must not be stamped with a person who did not perform the
+        // promotion), and no longer the System account either.
+        principal.userId shouldBe keyIdentity.id
+        principal.displayName shouldBe keyIdentity.displayName
         principal.authMethod shouldBe AuthMethod.PROMOTION
-        principal.scopes shouldBe setOf(Scope.AUTHOR)
+        principal.keyRole shouldBe KeyRole.PROMOTION_RECEIVER
         principal.workspace shouldBe null
         // The key's id rides along so the audit trail can name WHICH key across a rotation.
         principal.keyId shouldBe key.id
@@ -375,7 +382,7 @@ class PromotionServerKeyFilterTest {
         if (stored == null) {
             every { keyService.validateServerKey(any()) } throws refusal
         } else {
-            every { keyService.validateServerKey(stored.plaintextFixture()) } returns stored
+            every { keyService.validateServerKey(stored.plaintextFixture()) } returns ValidatedServerKey(stored, keyIdentity)
             every { keyService.validateServerKey(neq(stored.plaintextFixture())) } throws ApiKeyInvalidException()
         }
         return PromotionServerKeyFilter(
@@ -428,7 +435,6 @@ class PromotionServerKeyFilterTest {
                 userId = UUID.randomUUID(),
                 name = "uat receiver",
                 keyHash = "argon2-hash-not-verified-here",
-                scopes = emptySet(),
                 isRevoked = false,
                 createdAt = Instant.EPOCH,
                 lastUsedAt = null,
@@ -436,6 +442,21 @@ class PromotionServerKeyFilterTest {
                 workspaceId = UUID.randomUUID(),
                 workspaceName = "default",
                 kind = ApiKeyKind.SERVER,
+            )
+
+        /** The stored server key's own identity (#215 record §3.3) — what C4 attributes the push to. */
+        val keyIdentity =
+            User(
+                id = UUID.randomUUID(),
+                email = "dpk_serverkey12@keys.invalid",
+                displayName = "uat receiver",
+                provider = UserService.KEY_PROVIDER,
+                providerSubject = "dpk_SERVERKEY12",
+                isActive = true,
+                isAdmin = false,
+                createdAt = Instant.EPOCH,
+                updatedAt = Instant.EPOCH,
+                kind = UserKind.SERVICE,
             )
 
         val systemActor =

@@ -5,7 +5,6 @@ import co.datapipelines.application.checks.PipelineCheckRunRepository
 import co.datapipelines.application.checks.PipelineCheckRunner
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.CheckExpectation
 import co.datapipelines.pipeline.CheckRunOutcome
@@ -57,7 +56,6 @@ class PipelineChecksPartialsControllerTest {
                     userId = USER,
                     email = "probe@test",
                     displayName = "Probe",
-                    scopes = setOf(Scope.EXECUTE),
                     authMethod = method,
                     workspace = WorkspaceContext(WORKSPACE, "probe"),
                 ),

@@ -50,6 +50,13 @@ enum class WorkspaceRole {
     /** The word a screen prints beside a member's name — `workspace admin`, not `workspace_admin`. */
     val label: String get() = wire.replace('_', ' ')
 
+    /**
+     * The role this member's MCP key acts with (#215 PK4, record §3.4): the member's own role,
+     * with workspace admin capped at author — no MCP tool needs more than author, so the cap
+     * costs an agent nothing and keeps membership administration a signed-in person's act.
+     */
+    fun cappedAtAuthor(): WorkspaceRole = if (this == WORKSPACE_ADMIN) AUTHOR else this
+
     companion object {
         /** Parses a wire token; null for anything outside the four values. */
         fun fromWireOrNull(token: String?): WorkspaceRole? = token?.let { t -> entries.firstOrNull { it.wire == t.lowercase() } }

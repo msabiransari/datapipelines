@@ -2,8 +2,6 @@ package co.datapipelines.mcp
 
 import co.datapipelines.application.semantics.SemanticsService
 import co.datapipelines.auth.Permission
-import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.datasources.TableInfo
@@ -67,14 +65,11 @@ class SemanticsToolsTest {
         assertAll(
             { McpToolCatalog.NAMES shouldContain "semantics_record" },
             { McpToolCatalog.isMutating("semantics_record") shouldBe true },
-            { ScopeMatrix.requiredScopeForTool("semantics_record") shouldBe Scope.AUTHOR },
-            { ScopeMatrix.requiredPermissionForTool("semantics_record") shouldBe Permission.SEMANTIC_RECORD },
+            { McpToolCatalog.permissionOf("semantics_record") shouldBe Permission.SEMANTIC_RECORD },
             { McpToolCatalog.isMutating("semantics_list") shouldBe false },
-            { ScopeMatrix.requiredScopeForTool("semantics_list") shouldBe Scope.READ },
-            { ScopeMatrix.requiredPermissionForTool("semantics_list") shouldBe Permission.SEMANTIC_READ },
+            { McpToolCatalog.permissionOf("semantics_list") shouldBe Permission.SEMANTIC_READ },
             { McpToolCatalog.isMutating("semantics_retire") shouldBe true },
-            { ScopeMatrix.requiredScopeForTool("semantics_retire") shouldBe Scope.AUTHOR },
-            { ScopeMatrix.requiredPermissionForTool("semantics_retire") shouldBe Permission.SEMANTIC_RETIRE },
+            { McpToolCatalog.permissionOf("semantics_retire") shouldBe Permission.SEMANTIC_RETIRE },
             {
                 // 120 appended the two docs tools after these three and 140 the check run after
                 // those — the tail is now six.
@@ -107,7 +102,7 @@ class SemanticsToolsTest {
                         "supersedes" to supersedes.toString(),
                     ),
                 ),
-                McpFixtures.ctx(Scope.AUTHOR),
+                McpFixtures.ctx(),
             )
 
         assertAll(
@@ -127,7 +122,6 @@ class SemanticsToolsTest {
     fun `an ungranted datasource is not-found BEFORE the service runs - the grant rule for a DATASOURCE fact`() {
         val other =
             McpFixtures.ctx(
-                Scope.AUTHOR,
                 workspace = co.datapipelines.auth.WorkspaceContext(UUID.randomUUID(), "globex", McpFixtures.WORKSPACE.role),
             )
 
@@ -154,13 +148,13 @@ class SemanticsToolsTest {
     fun `argument-shape faults are -32602 - a bad scope, a ref without a table, a malformed since`() {
         val badScope =
             shouldThrow<McpError> {
-                recordTool().call(McpArguments(recordArgs() + ("scope" to "GLOBAL")), McpFixtures.ctx(Scope.AUTHOR))
+                recordTool().call(McpArguments(recordArgs() + ("scope" to "GLOBAL")), McpFixtures.ctx())
             }
         val badRef =
             shouldThrow<McpError> {
                 recordTool().call(
                     McpArguments(recordArgs() + ("refs" to listOf(mapOf("column" to "x")))),
-                    McpFixtures.ctx(Scope.AUTHOR),
+                    McpFixtures.ctx(),
                 )
             }
         val badSince =
@@ -172,7 +166,7 @@ class SemanticsToolsTest {
                             "since" to "yesterday",
                         ),
                     ),
-                    McpFixtures.ctx(Scope.READ),
+                    McpFixtures.ctx(),
                 )
             }
         val shortReason =
@@ -184,7 +178,7 @@ class SemanticsToolsTest {
                             "reason" to "x",
                         ),
                     ),
-                    McpFixtures.ctx(Scope.AUTHOR),
+                    McpFixtures.ctx(),
                 )
             }
 
@@ -217,14 +211,14 @@ class SemanticsToolsTest {
         val exactMissing =
             tool.call(
                 McpArguments(recordArgs() + ("fact" to "order_items joins to orders on order_id")),
-                McpFixtures.ctx(Scope.AUTHOR),
+                McpFixtures.ctx(),
             ) as Map<*, *>
 
         val nearMiss =
             shouldThrow<DatapipelinesException> {
                 tool.call(
                     McpArguments(recordArgs() + ("fact" to "order_itemz joins to orders on order_id")),
-                    McpFixtures.ctx(Scope.AUTHOR),
+                    McpFixtures.ctx(),
                 )
             }
 
@@ -237,13 +231,13 @@ class SemanticsToolsTest {
                             "refs" to listOf(mapOf("table" to "order_items"), mapOf("table" to "orders")),
                         ),
                 ),
-                McpFixtures.ctx(Scope.AUTHOR),
+                McpFixtures.ctx(),
             ) as Map<*, *>
 
         val proseUnderscores =
             tool.call(
                 McpArguments(recordArgs() + ("fact" to "amount is a row_count-weighted average, closing at the as_of date")),
-                McpFixtures.ctx(Scope.AUTHOR),
+                McpFixtures.ctx(),
             ) as Map<*, *>
 
         assertAll(
@@ -284,17 +278,17 @@ class SemanticsToolsTest {
                 "fact" to "busiest day = taxi trips + rideshare_rides COMBINED, by pickup date",
             )
 
-        val otherDatasourceTableIsProse = tool.call(McpArguments(rule), McpFixtures.ctx(Scope.AUTHOR)) as Map<*, *>
+        val otherDatasourceTableIsProse = tool.call(McpArguments(rule), McpFixtures.ctx()) as Map<*, *>
         val ownTableIsAdded =
             tool.call(
                 McpArguments(rule + ("fact" to "busiest day = taxi_trips + rideshare_rides COMBINED, by pickup date")),
-                McpFixtures.ctx(Scope.AUTHOR),
+                McpFixtures.ctx(),
             ) as Map<*, *>
         val ownNearMissIsRefused =
             shouldThrow<DatapipelinesException> {
                 tool.call(
                     McpArguments(rule + ("fact" to "busiest day = taxi_tripz + rideshare_rides COMBINED, by pickup date")),
-                    McpFixtures.ctx(Scope.AUTHOR),
+                    McpFixtures.ctx(),
                 )
             }
 
@@ -321,7 +315,7 @@ class SemanticsToolsTest {
 
         recordTool(catalog).call(
             McpArguments(recordArgs() + ("fact" to "order_items joins to orders on order_id")),
-            McpFixtures.ctx(Scope.AUTHOR),
+            McpFixtures.ctx(),
         )
 
         verify(exactly = 1) {
@@ -352,7 +346,7 @@ class SemanticsToolsTest {
                         "since" to "2026-09-11T00:00:00Z",
                     ),
                 ),
-                McpFixtures.ctx(Scope.READ),
+                McpFixtures.ctx(),
             ) as Map<*, *>
 
         assertAll(
@@ -373,7 +367,7 @@ class SemanticsToolsTest {
         val result =
             SemanticsRetireTool(
                 service,
-            ).call(McpArguments(mapOf("id" to id.toString(), "reason" to "  no longer true ")), McpFixtures.ctx(Scope.AUTHOR)) as Map<*, *>
+            ).call(McpArguments(mapOf("id" to id.toString(), "reason" to "  no longer true ")), McpFixtures.ctx()) as Map<*, *>
 
         result["trust"] shouldBe "retired"
     }

@@ -1,13 +1,11 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.PromoterLens
-import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.currentPrincipal
 import jakarta.servlet.http.HttpServletRequest
-import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -38,7 +36,6 @@ class PipelineUiController(
     ): String {
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         model.addAttribute("dialects", Dialect.entries.map { it.wire })
-        model.addAttribute("scopes", scopes())
         RoleModel.stamp(model)
         model.addAttribute("q", q ?: "")
         val principal = currentPrincipal()
@@ -50,10 +47,5 @@ class PipelineUiController(
             maxOf(0, offset ?: 0),
         )
         return "pipelines/list"
-    }
-
-    private fun scopes(): Set<String> {
-        val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
-        return principal?.scopes?.map { it.name }?.toSet() ?: emptySet()
     }
 }

@@ -1,5 +1,6 @@
 package co.datapipelines.integration
 
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -72,6 +73,7 @@ class ReleaseCascadeE2eTest {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/mcp"))
+                // The MCP key: /mcp takes a key and refuses a session (§8.5); REST below takes the session (#215 B2).
                 .header("DP-API-Key", ADMIN_KEY.plaintext)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, text/event-stream")
@@ -163,7 +165,7 @@ class ReleaseCascadeE2eTest {
         val request =
             given()
                 .port(port)
-                .header("DP-API-Key", ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .header("If-Match", hash)
         if (cascade) request.queryParam("release_pinned_templates", "true")
         return request.`when`().post("/api/v1/pipelines/$pipelineId/release").then()
@@ -172,7 +174,7 @@ class ReleaseCascadeE2eTest {
     private fun templateStatus(templateId: String): String =
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .queryParam("name", templateId)
             .`when`()
             .get("/api/v1/templates")
@@ -184,7 +186,7 @@ class ReleaseCascadeE2eTest {
     private fun pipelineStatus(pipelineId: String): String =
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/pipelines/$pipelineId")
             .then()
@@ -217,7 +219,7 @@ class ReleaseCascadeE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$DATASOURCE", "display_name": "Release cascade (142)", "dialect": "H2",
@@ -297,7 +299,7 @@ class ReleaseCascadeE2eTest {
         // The released version is the PINNED one — v1 — and the templates' pointers name it.
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .queryParam("name", TEMPLATE_ONE)
             .`when`()
             .get("/api/v1/templates")
@@ -314,7 +316,8 @@ class ReleaseCascadeE2eTest {
             val details = events.single()
             details["template_id"].asText() shouldBe templateId
             details["version"].asInt() shouldBe 1
-            details["via"].asText() shouldBe "api_key"
+            // The release ran on the admin's SESSION (REST is a session's surface since #215 B2).
+            details["via"].asText() shouldBe "session"
             details["cascade_from_pipeline_id"].asText() shouldBe pipelineA
             details["cascade_from_version"].asInt() shouldBe 1
         }
@@ -354,9 +357,15 @@ class ReleaseCascadeE2eTest {
         private const val H2_PASSWORD = "sa"
         private const val STALE_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
 
-        private const val WORKSPACE_ID = "defa0000-0000-0000-0000-000000000001"
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-142-key", arrayOf("read", "execute", "author"))
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the session (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+
+        /** The admin's MCP key for the `/mcp` legs — pinned to `default`, acting as the admin (#215 PK4). */
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-142-key")
+        private const val MCP_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-142@datapipelines.test")
 
         private var pipelineA: String = ""
         private var hashA: String = ""
@@ -380,9 +389,7 @@ class ReleaseCascadeE2eTest {
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
-            registry.add("datapipelines.jwt.secret") {
-                Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
-            }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") {
                 Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
             }
@@ -405,17 +412,24 @@ class ReleaseCascadeE2eTest {
                             ('$ADMIN_USER_ID', 'e2e-142@datapipelines.test', 'E2E 142', 'test', 'e2e-142-sub', TRUE, TRUE)
                         """.trimIndent(),
                     )
+                    // #215 PK4: a super admin's MCP key with NO membership is a viewer, and the suite
+                    // authors over MCP — so the admin is a workspace admin of `default` (an author there).
+                    statement.execute(
+                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
+                            " VALUES ('$MCP_WORKSPACE', '$ADMIN_USER_ID', 'workspace_admin') ON CONFLICT DO NOTHING",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id)" +
+                            " VALUES (?, ?::uuid, ?::uuid, ?, ?, ?::uuid)",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
-                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                        ps.setString(3, ADMIN_KEY.name)
-                        ps.setString(4, ADMIN_KEY.hash)
-                        ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                        ps.setObject(6, UUID.fromString(WORKSPACE_ID))
+                        ps.setString(2, ADMIN_USER_ID)
+                        ps.setString(3, ADMIN_USER_ID)
+                        ps.setString(4, ADMIN_KEY.name)
+                        ps.setString(5, ADMIN_KEY.hash)
+                        ps.setString(6, MCP_WORKSPACE)
                         ps.executeUpdate()
                     }
             }

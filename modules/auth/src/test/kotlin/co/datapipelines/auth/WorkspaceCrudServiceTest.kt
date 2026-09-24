@@ -68,7 +68,6 @@ class WorkspaceCrudServiceTest {
             userId = if (superAdmin) UUID.randomUUID() else adminId,
             email = "alice@company.com",
             displayName = "Alice",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             superAdmin = superAdmin,
         )

@@ -71,7 +71,6 @@ class OidcSignedInBounceFilterTest {
                     userId = userId,
                     email = "a@b.test",
                     displayName = "A",
-                    scopes = emptySet(),
                     authMethod = AuthMethod.OIDC,
                 ),
                 null,

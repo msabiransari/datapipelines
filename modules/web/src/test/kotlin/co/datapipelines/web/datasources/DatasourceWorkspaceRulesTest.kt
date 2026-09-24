@@ -2,7 +2,6 @@ package co.datapipelines.web.datasources
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspacesProperties
@@ -34,7 +33,6 @@ class DatasourceWorkspaceRulesTest {
             UUID.randomUUID(),
             "a@b.c",
             "A",
-            setOf(Scope.AUTHOR),
             AuthMethod.OIDC,
             workspace = activeWorkspace,
         )

@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
@@ -118,7 +119,7 @@ class LakeMinioE2eTest {
         val schemas =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/datasources/$DS/schemas")
                 .then()
@@ -135,7 +136,7 @@ class LakeMinioE2eTest {
         val tables =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .queryParam("namespace", "test.lake")
                 .`when`()
                 .get("/api/v1/datasources/$DS/tables")
@@ -223,7 +224,7 @@ class LakeMinioE2eTest {
     private fun columnNames(table: String): List<String> =
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .queryParam("namespace", "test.lake")
             .`when`()
             .get("/api/v1/datasources/$DS/tables/$table/columns")
@@ -237,7 +238,7 @@ class LakeMinioE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$DS", "display_name": "IT Lake (MinIO)", "dialect": "LAKE",
@@ -262,7 +263,7 @@ class LakeMinioE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"namespace": ["test", "lake"], "name": "$name", "format": "$format",
@@ -287,7 +288,7 @@ class LakeMinioE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "$templateId", "dialect": "LAKE", "display_name": "Lake IT $suffix",
@@ -301,7 +302,7 @@ class LakeMinioE2eTest {
         return given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "test/lake_it_$suffix", "nodes": [{
@@ -326,7 +327,8 @@ class LakeMinioE2eTest {
                 val request =
                     HttpRequest
                         .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                        .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                        .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                        .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                         .header("DP-Correlation-Id", UUID.randomUUID().toString())
                         .header("Content-Type", "application/json")
                         .header("Accept", "text/event-stream")
@@ -345,7 +347,7 @@ class LakeMinioE2eTest {
         val executionId = events.first().second["execution_id"].asText()
         return given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/executions/$executionId/result")
             .then()
@@ -356,7 +358,6 @@ class LakeMinioE2eTest {
     }
 
     companion object {
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val DS = "it_lake_minio"
         private const val BUCKET = "dp-lake-it"
 
@@ -364,7 +365,7 @@ class LakeMinioE2eTest {
         private val EXECUTION_BUDGET: Duration = Duration.ofSeconds(180)
 
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000089"
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-lake-it-key", arrayOf("read", "execute", "author"))
+        private val ADMIN_SESSION get() = E2eSession.jwt(SECRET, ADMIN_USER_ID, "e2e-lake-it@datapipelines.test")
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
 
         private val oidc = OidcDiscoveryStub()
@@ -475,17 +476,6 @@ class LakeMinioE2eTest {
                         ON CONFLICT (id) DO NOTHING
                         """.trimIndent(),
                     )
-                }
-                val insertSql =
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001') ON CONFLICT (id) DO NOTHING"
-                connection.prepareStatement(insertSql).use { ps ->
-                    ps.setString(1, ADMIN_KEY.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, ADMIN_KEY.name)
-                    ps.setString(4, ADMIN_KEY.hash)
-                    ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                    ps.executeUpdate()
                 }
             }
         }

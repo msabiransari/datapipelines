@@ -68,10 +68,9 @@ class JwtFilterLivenessTest {
         val auth = SecurityContextHolder.getContext().authentication
         auth.shouldNotBeNull()
         (auth.principal as AuthenticatedPrincipal).userId shouldBe userId
-        // No SCOPE_ authorities: a session carries no scopes at all since D-R1, so granting
-        // any would be a second, stale source of truth beside the membership.
+        // No authorities: what a session may do is its membership's role (D-R1, #215), so
+        // granting any would be a second, stale source of truth beside the membership.
         auth.authorities.shouldBeEmpty()
-        (auth.principal as AuthenticatedPrincipal).scopes.shouldBeEmpty()
     }
 
     @Test

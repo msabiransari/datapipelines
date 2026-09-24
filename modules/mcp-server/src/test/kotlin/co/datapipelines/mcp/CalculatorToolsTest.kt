@@ -126,10 +126,8 @@ class CalculatorToolsTest {
         // and a read tool wrongly declared mutating is only noise — the reverse is the hole.
         McpToolCatalog.isMutating("calculators_list") shouldBe false
         McpToolCatalog.isMutating("calculators_get") shouldBe false
-        co.datapipelines.auth.ScopeMatrix
-            .requiredScopeForTool("calculators_list") shouldBe co.datapipelines.auth.Scope.READ
-        co.datapipelines.auth.ScopeMatrix
-            .requiredScopeForTool("calculators_get") shouldBe co.datapipelines.auth.Scope.READ
+        McpToolCatalog.permissionOf("calculators_list") shouldBe co.datapipelines.auth.Permission.CALCULATOR_READ
+        McpToolCatalog.permissionOf("calculators_get") shouldBe co.datapipelines.auth.Permission.CALCULATOR_READ
     }
 
     // ---- 121/D6: the output half of the wire shape ----

@@ -27,7 +27,7 @@ class AuditLogoutHandlerTest {
 
     @Test
     fun `logging out audits auth-logout against the principal's user id`() {
-        val principal = AuthenticatedPrincipal(userId, "a@b.com", "A", setOf(Scope.READ), AuthMethod.OIDC, null)
+        val principal = AuthenticatedPrincipal(userId, "a@b.com", "A", AuthMethod.OIDC, null)
         val authentication = UsernamePasswordAuthenticationToken(principal, null, emptyList())
 
         handler.logout(request(), MockHttpServletResponse(), authentication)
@@ -38,7 +38,7 @@ class AuditLogoutHandlerTest {
     @Test
     fun `a key-authenticated logout records the key id too`() {
         val principal =
-            AuthenticatedPrincipal(userId, "a@b.com", "A", setOf(Scope.READ), AuthMethod.API_KEY, "dpk_ABCDEFGHIJKL")
+            AuthenticatedPrincipal(userId, "a@b.com", "A", AuthMethod.API_KEY, "dpk_ABCDEFGHIJKL")
         val authentication = UsernamePasswordAuthenticationToken(principal, null, emptyList())
 
         handler.logout(request(), MockHttpServletResponse(), authentication)

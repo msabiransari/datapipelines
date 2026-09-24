@@ -101,9 +101,15 @@ class UserService(
         provider: String,
         providerSubject: String,
     ): User {
+        // #215 A.6 — a key identity or the System actor is never claimable by a sign-in, whatever
+        // its provider says: the kind is checked before the provider, so even a row somebody
+        // flipped to the bootstrap placeholder by hand stays unclaimable.
         val compatible =
-            stored.provider == BOOTSTRAP_PROVIDER ||
-                (stored.provider == provider && stored.providerSubject == providerSubject)
+            stored.isHuman &&
+                (
+                    stored.provider == BOOTSTRAP_PROVIDER ||
+                        (stored.provider == provider && stored.providerSubject == providerSubject)
+                )
         if (!compatible) {
             throw IdentityMismatchException(
                 userId = stored.id,
@@ -220,6 +226,7 @@ class UserService(
                 pictureUrl = null,
                 provider = SYSTEM_PROVIDER,
                 providerSubject = SYSTEM_ACTOR_SUBJECT,
+                kind = UserKind.SYSTEM,
             )
         } catch (_: DuplicateKeyException) {
             // Two instances seeding one fresh database race here, exactly as the bootstrap
@@ -244,9 +251,52 @@ class UserService(
         }
 
     /**
+     * A key's own identity (#215, record §3.3, PK5): the `service` row an `endpoint` or `server`
+     * key acts as — attribution, liveness, the per-key execution limit, its own results. Built
+     * exactly like the System actor, so login is impossible by construction:
+     *
+     * - `provider` is [KEY_PROVIDER], reserved at startup like `system`, `local` and `bootstrap`
+     *   (configuration.md §7) — no external identity can link to it;
+     * - `email` is `<key id>@keys.invalid` (RFC 2606's unresolvable TLD) — no mail flow reaches it;
+     * - `provider_subject` is the key id, `display_name` the key's name (keys have no rename, A6);
+     * - no password and `is_admin = false` — and the local-password paths, user administration,
+     *   memberships and invitations all refuse a non-`human` row besides.
+     *
+     * Called by `ApiKeyService.issue` INSIDE the issuance transaction (B4), so a key and its
+     * identity exist together or not at all. The identity holds NO membership: its authority is
+     * its key's role in the key's pinned workspace.
+     */
+    fun provisionIdentity(
+        keyId: String,
+        keyName: String,
+    ): User =
+        createUser(
+            normalizedEmail = identityEmail(keyId),
+            displayName = keyName,
+            pictureUrl = null,
+            provider = KEY_PROVIDER,
+            providerSubject = keyId,
+            kind = UserKind.SERVICE,
+        )
+
+    /**
+     * Deactivates a key's identity — the revocation of its key (record §3.3: "Revoking the key
+     * deactivates the identity"). The liveness cache is evicted at once; the key itself is already
+     * revoked, so this is the belt that makes a revoked key's identity inert everywhere it is read.
+     * Refuses a `human` row: a person is deactivated by user administration, never by a key.
+     */
+    fun deactivateIdentity(identityId: UUID) {
+        val identity = userRepository.findById(identityId) ?: return
+        check(identity.kind == UserKind.SERVICE) { "Only a key identity is deactivated with its key; $identityId is ${identity.kind.wire}" }
+        if (userRepository.setActive(identityId, active = false)) authCache.invalidateUser(identityId)
+    }
+
+    /**
      * The ONE path that creates a `users` row (auth.md §4.4): insert, then — and only then —
      * the bootstrap-admin grant and its audit event. §4.2's first login and §6.1's
-     * pre-provisioning are the same act at two different moments, not two mechanisms.
+     * pre-provisioning are the same act at two different moments, not two mechanisms. Only a
+     * `human` row can be the bootstrap admin: an identity's or the System actor's email is never
+     * the configured one, and the kind says so too.
      */
     private fun createUser(
         normalizedEmail: String,
@@ -254,6 +304,7 @@ class UserService(
         pictureUrl: String?,
         provider: String,
         providerSubject: String,
+        kind: UserKind = UserKind.HUMAN,
     ): User {
         val created =
             userRepository.insert(
@@ -262,7 +313,8 @@ class UserService(
                 profilePictureUrl = pictureUrl,
                 provider = provider,
                 providerSubject = providerSubject,
-                isAdmin = isBootstrapAdmin(normalizedEmail),
+                isAdmin = kind == UserKind.HUMAN && isBootstrapAdmin(normalizedEmail),
+                kind = kind,
             )
         if (created.isAdmin) {
             auditLogger.log(
@@ -297,6 +349,10 @@ class UserService(
         require(normalizedEmail != SYSTEM_ACTOR_EMAIL) {
             "$SYSTEM_ACTOR_EMAIL is the reserved system service account (auth.md §4.5); it has no local credential"
         }
+        // #215: the key identities' domain is reserved the same way — no person is created in it.
+        require(!normalizedEmail.endsWith("@$KEY_IDENTITY_DOMAIN")) {
+            "@$KEY_IDENTITY_DOMAIN is reserved for key identities (auth.md §4.5); it has no local credential"
+        }
         return createUser(
             normalizedEmail = normalizedEmail,
             displayName = displayName,
@@ -311,6 +367,13 @@ class UserService(
 
     /** Cached (D13, ~60s) `users` snapshot — backs the API-key principal without a per-request query. */
     fun snapshot(id: UUID): User? = authCache.user(id) { userRepository.findById(it) }
+
+    /**
+     * The row user administration may see and act on (#215 A3): a PERSON. A key identity or the
+     * System actor answers null — "no such user" — on every user-admin route, before any mutation,
+     * so an admin cannot act on an identity behind its key's back.
+     */
+    fun administrableUser(id: UUID): User? = snapshot(id)?.takeIf { it.isHuman }
 
     /** User-administration listing (§7.6 `USER_ADMINISTRATION`). */
     fun search(
@@ -327,19 +390,25 @@ class UserService(
     fun deactivate(
         targetId: UUID,
         actorId: UUID,
-    ): Boolean = setActive(targetId, active = false, actorId = actorId, event = "auth.user.deactivated")
+    ): Boolean =
+        administrableUser(targetId) != null &&
+            setActive(targetId, active = false, actorId = actorId, event = "auth.user.deactivated")
 
     /** Reactivates [targetId] (§10.1 `auth.user.activated`). */
     fun activate(
         targetId: UUID,
         actorId: UUID,
-    ): Boolean = setActive(targetId, active = true, actorId = actorId, event = "auth.user.activated")
+    ): Boolean =
+        administrableUser(targetId) != null &&
+            setActive(targetId, active = true, actorId = actorId, event = "auth.user.activated")
 
     /** Grants admin (§10.1 `auth.user.admin_granted`, actor = the acting admin). */
     fun grantAdmin(
         targetId: UUID,
         actorId: UUID,
-    ): Boolean = auditedFlip(targetId, actorId, "auth.user.admin_granted") { userRepository.grantAdmin(it) }
+    ): Boolean =
+        administrableUser(targetId) != null &&
+            auditedFlip(targetId, actorId, "auth.user.admin_granted") { userRepository.grantAdmin(it) }
 
     /**
      * Revokes admin (§10.1 `auth.user.admin_revoked`). §4.4 is explicit that the
@@ -349,7 +418,9 @@ class UserService(
     fun revokeAdmin(
         targetId: UUID,
         actorId: UUID,
-    ): Boolean = auditedFlip(targetId, actorId, "auth.user.admin_revoked") { userRepository.revokeAdmin(it) }
+    ): Boolean =
+        administrableUser(targetId) != null &&
+            auditedFlip(targetId, actorId, "auth.user.admin_revoked") { userRepository.revokeAdmin(it) }
 
     /**
      * Resets a user's linked identity to the bootstrap placeholder (#187, §4.2): the NEXT
@@ -360,11 +431,16 @@ class UserService(
      * and memberships are untouched; a deactivated user stays deactivated (180).
      *
      * No transition → no event: a row already sitting on the placeholder is a no-op (§10.1).
+     *
+     * A PERSON's row only (#215 A.6): resetting a key identity or the System actor to the bootstrap
+     * placeholder would make it claimable by the next sign-in with its email — true of the System
+     * row before this slice. Refused here and in the SQL (`kind = 'human'`).
      */
     fun resetIdentity(
         targetId: UUID,
         actorId: UUID,
     ): Boolean {
+        if (administrableUser(targetId) == null) return false
         val changed = userRepository.resetIdentityToBootstrap(targetId)
         if (changed) {
             authCache.invalidateUser(targetId)
@@ -446,6 +522,18 @@ class UserService(
 
         /** The system actor's fixed `users.provider_subject` sentinel — never a real subject claim. */
         const val SYSTEM_ACTOR_SUBJECT = "system"
+
+        /**
+         * `users.provider` of a key's own identity (#215, §3.3). Reserved at startup exactly as
+         * [SYSTEM_PROVIDER] is: an OIDC provider named `key` could otherwise link to the row.
+         */
+        const val KEY_PROVIDER = "key"
+
+        /** A key identity's `users.email`: `<key id>@keys.invalid` — RFC 2606, unresolvable by construction. */
+        fun identityEmail(keyId: String): String = "${keyId.lowercase()}@$KEY_IDENTITY_DOMAIN"
+
+        /** The reserved domain of every key identity's email. */
+        const val KEY_IDENTITY_DOMAIN = "keys.invalid"
 
         /** What the system actor is called wherever a display name is rendered (history, audit). */
         const val SYSTEM_ACTOR_DISPLAY_NAME = "System"

@@ -12,10 +12,13 @@ import java.io.File
  * line after its rows that is not a table row — never at a prose sentence about the content (the
  * 068 lesson).
  *
- * The cell alphabet is §7.6's: ✗ and `fenced` refuse; ✓, `own`, `all` and `lens` admit. Anything
- * else throws, naming the cell — a cell that parsed as "refused" by accident would be a row
- * silently refusing a role the record admits, and the walk would then demand a refusal the
- * server rightly does not give.
+ * The cell alphabet is §7.6's: ✗ and `fenced` refuse; ✓, `own`, `all`, `lens` and (in the two
+ * key-role columns) `bound` admit. Anything else throws, naming the cell — a cell that parsed as
+ * "refused" by accident would be a row silently refusing a role the record admits, and the walk
+ * would then demand a refusal the server rightly does not give.
+ *
+ * Since #215 slice (b) each row carries NINE cells: permission, surfaces, the five member columns
+ * and the two key-role columns (`api_caller`, `promotion_receiver` — record §3.2).
  */
 object RoleMatrixDocE2e {
     const val AUTH_SPEC_PATH = "docs/auth.md"
@@ -23,6 +26,11 @@ object RoleMatrixDocE2e {
 
     /** The four workspace roles in the doc's column order, then super admin. */
     val ROLE_COLUMNS = listOf("viewer", "author", "promoter", "workspace_admin", "super_admin")
+
+    /** The two key roles, after the member columns (#215, record §3.2). */
+    val KEY_ROLE_COLUMNS = listOf("api_caller", "promotion_receiver")
+
+    private val ALL_COLUMNS = ROLE_COLUMNS + KEY_ROLE_COLUMNS
 
     /** One row's verdict per role: `role -> admitted`, and the routes and tools the row places. */
     data class Cells(
@@ -38,7 +46,7 @@ object RoleMatrixDocE2e {
     fun permissionRows(doc: String): Map<String, Cells> {
         val result = linkedMapOf<String, Cells>()
         tableRows(doc, CATALOG_MARKER)
-            .filter { it.size == 2 + ROLE_COLUMNS.size }
+            .filter { it.size == 2 + ALL_COLUMNS.size }
             .filterNot { it[0] == "Permission" || it[0].startsWith("---") }
             .forEach { cells ->
                 val permission = PERMISSION.find(cells[0])?.groupValues?.get(1) ?: return@forEach
@@ -78,15 +86,15 @@ object RoleMatrixDocE2e {
     }
 
     private fun decode(cells: List<String>): Map<String, Boolean> {
-        require(cells.size == ROLE_COLUMNS.size) { "expected ${ROLE_COLUMNS.size} role cells, got ${cells.size}: $cells" }
-        return ROLE_COLUMNS.zip(cells.map(::allowsCell)).toMap()
+        require(cells.size == ALL_COLUMNS.size) { "expected ${ALL_COLUMNS.size} role cells, got ${cells.size}: $cells" }
+        return ALL_COLUMNS.zip(cells.map(::allowsCell)).toMap()
     }
 
     private fun allowsCell(cell: String): Boolean =
         when (val token = cell.trim().trim('*').trim()) {
             "✗", "fenced" -> false
-            "✓", "own", "all", "lens" -> true
-            else -> throw IllegalArgumentException("Unknown §7.6 role cell '$token' — the alphabet is ✓ ✗ own all lens fenced")
+            "✓", "own", "all", "lens", "bound" -> true
+            else -> throw IllegalArgumentException("Unknown §7.6 role cell '$token' — the alphabet is ✓ ✗ own all lens bound fenced")
         }
 
     private fun tableRows(

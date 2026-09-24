@@ -2,7 +2,6 @@ package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.datasources.Datasource
@@ -65,7 +64,6 @@ object McpFixtures {
     const val OTHER_KEY_ID: String = "dpk_MNOPQRSTUVWX"
 
     fun principal(
-        vararg scopes: Scope,
         userId: UUID = USER,
         method: AuthMethod = AuthMethod.API_KEY,
         keyId: String = KEY_ID,
@@ -75,7 +73,6 @@ object McpFixtures {
             userId = userId,
             email = "agent@example.test",
             displayName = "Agent",
-            scopes = scopes.toSet(),
             authMethod = method,
             keyId = keyId,
             // Every tool/catalog/reader path resolves the workspace through requireWorkspace().
@@ -83,13 +80,11 @@ object McpFixtures {
         )
 
     fun ctx(
-        vararg scopes: Scope,
         userId: UUID = USER,
         idempotencyKey: String? = null,
         keyId: String = KEY_ID,
         workspace: WorkspaceContext = WORKSPACE,
-    ): McpToolContext =
-        McpToolContext(principal(*scopes, userId = userId, keyId = keyId, workspace = workspace), CORRELATION_ID, idempotencyKey)
+    ): McpToolContext = McpToolContext(principal(userId = userId, keyId = keyId, workspace = workspace), CORRELATION_ID, idempotencyKey)
 
     /**
      * 178 — the promoter lens every read tool takes, as the view every non-promoter gets:

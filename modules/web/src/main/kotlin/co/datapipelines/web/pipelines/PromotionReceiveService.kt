@@ -1,11 +1,7 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.AuditLogger
-import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
-import co.datapipelines.auth.UserService
-import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.web.api.ApiException
@@ -52,7 +48,6 @@ class PromotionReceiveService(
     private val inventory: PromotionInventoryService,
     private val pipelineImportService: PipelineImportService,
     private val templateImportService: TemplateImportService,
-    private val userService: UserService,
     private val auditLogger: AuditLogger,
     private val transactionTemplate: TransactionTemplate,
     private val authoringEnabled: Boolean,
@@ -63,11 +58,24 @@ class PromotionReceiveService(
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
-    fun apply(batch: PromotionWire.Batch): PromotionWire.Applied {
+    /**
+     * Applies [batch] as [peer] — the principal `PromotionServerKeyFilter` authenticated. Every
+     * received row and the audit row are attributed to [peer]'s user (#215 record C4): a stored
+     * server key's `service` identity, or the System actor for the deprecated config value, which
+     * has no row of its own (B6).
+     */
+    fun apply(
+        batch: PromotionWire.Batch,
+        peer: AuthenticatedPrincipal,
+    ): PromotionWire.Applied {
         refuseIfAuthoring()
         val workspace = inventory.contextFor(batch.workspace)
-        val actor = userService.systemActor()
-        val promoter = promotionPrincipal(actor, workspace)
+        val actor = peer.userId
+        // The batch's target workspace is stamped on the principal handed to
+        // [EndpointPromotion.apply] as an ARGUMENT — never installed in the security context:
+        // the import path reads no ambient principal since 134. Its authority stays the peer's
+        // key role, `promotion_receiver` (#215 record §3.2).
+        val promoter = peer.copy(workspaceName = workspace.name, workspace = workspace)
 
         // The import services take the TARGET workspace explicitly, and since 134 so does
         // everything beneath them: the datasource port `PipelineValidator` resolves a node's
@@ -93,14 +101,14 @@ class PromotionReceiveService(
         // deliberately NOT persisted: the pipelines do not exist on the receiver yet, so no
         // `pipeline_check_runs` row can key to them; the receiver's first persisted run is
         // the first one commissioned after the batch lands.
-        gateChecks(batch, workspace.id, actor.id)
+        gateChecks(batch, workspace.id, actor)
 
         transactionTemplate.executeWithoutResult {
             if (batch.templates.isNotEmpty()) {
-                templateImportService.import(templatesPayload(batch), workspace.id, actor.id)
+                templateImportService.import(templatesPayload(batch), workspace.id, actor)
             }
             batch.pipelines.forEach { pipeline ->
-                pipelineImportService.import(pipeline.toString(), workspace.id, actor.id)
+                pipelineImportService.import(pipeline.toString(), workspace.id, actor)
             }
             // AFTER the pipelines: an endpoint over a pipeline this same batch is bringing
             // must find it already stored. Republishing an unchanged endpoint is a no-op
@@ -108,12 +116,12 @@ class PromotionReceiveService(
             batch.endpoints.forEach { entry -> endpointPromotion.apply(entry, promoter) }
         }
 
-        // R7: the promoted rows are stamped with the system actor, and WHERE they came from is
-        // recorded here — the source deployment's name and a fingerprint of the key that
+        // C4: the promoted rows are stamped with the peer's identity (the System actor for the
+        // config value), and WHERE they came from is recorded here — the source deployment's name and a fingerprint of the key that
         // authorised the push. Never the key.
         auditLogger.log(
             event = AUDIT_ACCEPTED,
-            userId = actor.id,
+            userId = actor,
             details =
                 mapOf(
                     "source_env" to batch.sourceEnv,
@@ -130,7 +138,7 @@ class PromotionReceiveService(
             batch.workspace,
             batch.templates.size,
             batch.pipelines.size,
-            actor.id,
+            actor,
         )
         return PromotionWire.Applied(
             workspace = batch.workspace,
@@ -140,32 +148,6 @@ class PromotionReceiveService(
             endpoints = batch.endpoints.size,
         )
     }
-
-    /**
-     * The system actor as a principal for the duration of the import.
-     *
-     * The promotion credential pins no workspace (§10.6), but publishing resolves its pipeline
-     * and writes its row against one — so the batch's target workspace is stamped here, on the
-     * principal handed to [EndpointPromotion.apply] as an ARGUMENT (never installed in the
-     * security context: the import path reads no ambient principal since 134).
-     */
-    private fun promotionPrincipal(
-        actor: co.datapipelines.auth.User,
-        workspace: WorkspaceContext,
-    ): AuthenticatedPrincipal =
-        AuthenticatedPrincipal(
-            userId = actor.id,
-            email = actor.email,
-            displayName = actor.displayName,
-            // No scopes. A promotion principal's authority is its ROUTE FAMILY, enforced by
-            // `PromotionServerKeyFilter` upstream and exempted in `ScopeMatrix.allowed` — it
-            // used to carry `Scope.ADMIN`, which nothing reads any more and which would now
-            // claim an authority no credential can hold (O-2).
-            scopes = emptySet(),
-            authMethod = AuthMethod.PROMOTION,
-            workspaceName = workspace.name,
-            workspace = workspace,
-        )
 
     /**
      * §10.1 D7 — promotion into an authoring-enabled deployment is refused.

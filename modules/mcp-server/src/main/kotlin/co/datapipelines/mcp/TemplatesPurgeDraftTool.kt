@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -80,10 +81,19 @@ class TemplatesPurgeDraftTool(
             )
         }
         if (versions[0].createdBy != ctx.principal.userId) {
+            // Ownership, not permission — but `auth.role_required` is the ONE authorization
+            // refusal (#215, owner ruling 2026-09-24): `details.reason` names the rule that fired,
+            // `required`/`held` what the role was judged as.
             throw DatapipelinesException(
-                code = PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT,
+                code = PipelineErrorCodes.Auth.ROLE_REQUIRED,
                 message = "Template '$id' was created by someone else; a key purges only its own user's drafts.",
-                details = mapOf("template_id" to id, "reason" to "not_creator"),
+                details =
+                    mapOf(
+                        "template_id" to id,
+                        "reason" to "not_creator",
+                        "required" to Permission.TEMPLATE_VERSION_MANAGE.wire,
+                        "held" to ctx.principal.heldRole,
+                    ),
             )
         }
         val pinners = usage.referencedAnywhere(workspaceId, id)

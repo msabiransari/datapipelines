@@ -27,10 +27,10 @@ class ApiKeyVerificationCacheTest {
     private val workspaceService =
         mockk<WorkspaceService>(relaxed = true) {
             // A relaxed mock answers `isActive` false, which would refuse every key here for
-            // the wrong reason. The default is the live workspace and an author issuer.
+            // the wrong reason. The default is the live workspace and a workspace-admin issuer.
             every { isActive(any()) } returns true
-            every { issuerContext(any(), any(), any(), any()) } answers {
-                WorkspaceContext(thirdArg(), arg(3), WorkspaceRole.AUTHOR)
+            every { requireIssuancePermission(any(), any(), any()) } answers {
+                WorkspaceContext(secondArg(), "acme", WorkspaceRole.WORKSPACE_ADMIN)
             }
         }
     private val service =
@@ -40,12 +40,12 @@ class ApiKeyVerificationCacheTest {
             cache,
             auditLogger,
             hasher,
-            AuthProperties(),
             workspaceService,
             PrincipalLiveness(userService, workspaceService),
         )
 
     private val ownerId = UUID.randomUUID()
+    private val identityId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
 
     /**
@@ -57,9 +57,8 @@ class ApiKeyVerificationCacheTest {
             userId = ownerId,
             email = "owner@company.com",
             displayName = "Owner",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
-            workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.AUTHOR),
+            workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.WORKSPACE_ADMIN),
         )
 
     /** Counts verifications so "how often did Argon2 run?" is an assertion, not a guess. */
@@ -77,15 +76,45 @@ class ApiKeyVerificationCacheTest {
         }
     }
 
+    /** The key's own `service` identity (#215 record §3.3). */
+    private fun identity() =
+        User(
+            id = identityId,
+            email = "dpk_k@keys.invalid",
+            displayName = "k",
+            provider = UserService.KEY_PROVIDER,
+            providerSubject = "dpk_k",
+            isActive = true,
+            isAdmin = false,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now(),
+            kind = UserKind.SERVICE,
+        )
+
     private fun issueKey(): IssuedApiKey {
         val hash = slot<String>()
-        every { repo.insert(any(), ownerId, any(), capture(hash), any(), any(), any()) } answers {
-            ApiKey(firstArg(), ownerId, thirdArg(), hash.captured, arg(4), false, Instant.now(), null, arg(5), arg(6), "acme")
+        // #215: an `endpoint` key acts as its own identity (B4) — created with it, validated as it.
+        every { userService.provisionIdentity(any(), any()) } answers { identity() }
+        every { repo.insert(any(), identityId, ownerId, any(), capture(hash), any(), any(), ApiKeyKind.ENDPOINT) } answers {
+            ApiKey(
+                id = firstArg(),
+                userId = identityId,
+                name = arg(3),
+                keyHash = hash.captured,
+                isRevoked = false,
+                createdAt = Instant.now(),
+                lastUsedAt = null,
+                expiresAt = arg(5),
+                workspaceId = arg(6),
+                workspaceName = "acme",
+                kind = ApiKeyKind.ENDPOINT,
+                createdBy = ownerId,
+            )
         }
-        every { userService.isActive(ownerId) } returns true
-        every { userService.snapshot(ownerId) } returns
-            User(ownerId, "o@c.com", "O", null, "kc", "s", true, false, Instant.now(), Instant.now(), null)
-        val issued = service.issue(issuerPrincipal, ownerId, "k", setOf(Scope.READ), workspaceId)
+        every { userService.isActive(identityId) } returns true
+        every { userService.snapshot(identityId) } returns identity()
+        every { userService.deactivateIdentity(identityId) } returns Unit
+        val issued = service.issue(issuerPrincipal, "k", workspaceId, kind = ApiKeyKind.ENDPOINT)
         every { repo.findById(issued.record.id) } returns issued.record
         return issued
     }
@@ -118,7 +147,7 @@ class ApiKeyVerificationCacheTest {
     fun `revoking a key evicts its cached verification outcome`() {
         val issued = issueKey()
         service.validate(issued.plaintext)
-        every { repo.revoke(issued.record.id, ownerId) } returns true
+        every { repo.revoke(issued.record.id, ownerId) } returns issued.record.copy(isRevoked = true)
         every { repo.findById(issued.record.id) } returns issued.record.copy(isRevoked = true)
 
         service.revoke(issued.record.id, ownerId)

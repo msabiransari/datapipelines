@@ -30,7 +30,6 @@ object ApiKeyForm {
         val wire: String,
         val label: String,
         val summary: String,
-        val takesScope: Boolean,
         val takesBindings: Boolean,
     )
 
@@ -66,18 +65,17 @@ object ApiKeyForm {
                 wire = ApiKeyKind.ENDPOINT.wire,
                 label = "API key",
                 summary =
-                    "Calls the published endpoints it is associated with, and nothing else. It carries no " +
-                        "scope at all: the paths you bind it to are its whole authority.",
-                takesScope = false,
+                    "Calls the published endpoints it is associated with, and reads the runs it started — " +
+                        "nothing else. It acts as its own identity with the api caller role; the paths you bind " +
+                        "it to are its whole reach.",
                 takesBindings = true,
             ),
             KindChoice(
                 wire = ApiKeyKind.SERVER.wire,
                 label = "Server key",
                 summary =
-                    "The credential another deployment presents to promote into this one. No scope, no bindings " +
-                        "— it opens the promotion routes and nothing else.",
-                takesScope = false,
+                    "The credential another deployment presents to promote into this one. The promotion " +
+                        "receiver role, no bindings — it opens the promotion routes and nothing else.",
                 takesBindings = false,
             ).takeIf { isAdmin },
         )

@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -104,7 +105,7 @@ class DraftFirstGoldenPathE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(
                     """
                     {"id": "$TEMPLATE_ID", "dialect": "H2", "display_name": "Draft-first template",
@@ -127,7 +128,7 @@ class DraftFirstGoldenPathE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header(IF_MATCH, template.jsonPath().getString("data.body_hash"))
             .body("""{"name": "$TEMPLATE_ID"}""")
             .`when`()
@@ -140,7 +141,7 @@ class DraftFirstGoldenPathE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(pipelineBody(SELECT_ID_ONLY))
                 .`when`()
                 .post("/api/v1/pipelines")
@@ -181,7 +182,7 @@ class DraftFirstGoldenPathE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body("""{"path": "/draftfirst/v1/rows", "pipeline": "$PIPELINE_NAME"}""")
                 .`when`()
                 .post("/api/v1/endpoints")
@@ -200,7 +201,7 @@ class DraftFirstGoldenPathE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .header(IF_MATCH, draftHash)
                 .`when`()
                 .post("/api/v1/pipelines/$pipelineId/release")
@@ -227,7 +228,7 @@ class DraftFirstGoldenPathE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .header(IF_MATCH, releasedHash())
                 .body(pipelineBody(SELECT_ID_AND_LABEL))
                 .`when`()
@@ -256,7 +257,7 @@ class DraftFirstGoldenPathE2eTest {
         val executions =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions?limit=50")
                 .then()
@@ -286,7 +287,8 @@ class DraftFirstGoldenPathE2eTest {
             val request =
                 HttpRequest
                     .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                    .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                    .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                    .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                     .header("DP-Correlation-Id", UUID.randomUUID().toString())
                     .header("Content-Type", "application/json")
                     .header("Accept", "text/event-stream")
@@ -300,7 +302,7 @@ class DraftFirstGoldenPathE2eTest {
     private fun releasedHash(): String =
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/pipelines/$pipelineId")
             .then()
@@ -348,7 +350,7 @@ class DraftFirstGoldenPathE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$H2_DATASOURCE", "display_name": "Draft-first H2", "dialect": "H2",
@@ -380,25 +382,12 @@ class DraftFirstGoldenPathE2eTest {
                     """.trimIndent(),
                 )
             }
-            connection
-                .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
-                ).use { ps ->
-                    ps.setString(1, ADMIN_KEY.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, ADMIN_KEY.name)
-                    ps.setString(4, ADMIN_KEY.hash)
-                    ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                    ps.executeUpdate()
-                }
         }
     }
 
     companion object {
         private const val SECRET_BYTES = 32
         private const val SSE_BUDGET_MINUTES = 2L
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val IF_MATCH = "If-Match"
 
         private const val H2_DATASOURCE = "h2-draft-first"
@@ -427,7 +416,10 @@ class DraftFirstGoldenPathE2eTest {
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val random = SecureRandom()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-draft-first-key", arrayOf("read", "execute", "author"))
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the session (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-draft-first@datapipelines.test")
 
         private var pipelineId: String = ""
         private var draftHash: String = ""
@@ -459,7 +451,7 @@ class DraftFirstGoldenPathE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
             listOf("google").forEachIndexed { index, name ->

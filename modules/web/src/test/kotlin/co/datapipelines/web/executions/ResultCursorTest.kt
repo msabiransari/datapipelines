@@ -2,7 +2,6 @@ package co.datapipelines.web.executions
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionRecord
@@ -42,13 +41,11 @@ class ResultCursorTest {
 
     private fun principal(
         userId: UUID = owner,
-        scopes: Set<Scope> = setOf(Scope.READ),
         workspaceAdmin: Boolean = false,
     ) = AuthenticatedPrincipal(
         userId,
         "a@b.c",
         "A",
-        scopes,
         AuthMethod.API_KEY,
         "dpk_x",
         workspace =

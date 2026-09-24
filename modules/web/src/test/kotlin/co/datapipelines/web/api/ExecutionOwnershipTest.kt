@@ -3,8 +3,10 @@ package co.datapipelines.web.api
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
+import co.datapipelines.executor.ExecutedByKeyKind
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
@@ -61,17 +63,35 @@ class ExecutionOwnershipTest {
         run(executedBy = someoneElse).cancellableBy(superAdmin) shouldBe true
     }
 
+    /**
+     * #215 A.5: an endpoint key acts as its OWN identity, so it owns exactly the runs stamped with
+     * that identity — it reads them (`execution.result.read` own) and cancels nothing. A run its
+     * CREATOR started is not the key's, whoever the creator is; and the creator does not see the
+     * key's run as their own (it is visible to them only through `execution.read_all`).
+     */
     @Test
-    fun `an endpoint key owns nothing - not even a run its owner started`() {
+    fun `an endpoint key owns the runs its identity executed - never its creator's, and cancels nothing`() {
+        val identity = UUID.randomUUID()
         val endpointKey =
-            session(WorkspaceRole.WORKSPACE_ADMIN).copy(
+            AuthenticatedPrincipal(
+                userId = identity,
+                email = "dpk_endpoint@keys.invalid",
+                displayName = "ci",
                 authMethod = AuthMethod.API_KEY,
                 keyId = "dpk_ENDPOINT",
+                workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.VIEWER),
                 keyKind = ApiKeyKind.ENDPOINT,
+                keyRole = KeyRole.API_CALLER,
             )
+        val keysRun = run(executedBy = identity).copy(executedByKeyKind = ExecutedByKeyKind.ENDPOINT)
 
+        keysRun.visibleTo(endpointKey) shouldBe true
+        keysRun.cancellableBy(endpointKey) shouldBe false
         run(executedBy = me).visibleTo(endpointKey) shouldBe false
-        run(executedBy = me).cancellableBy(endpointKey) shouldBe false
+        // The creator is not the key: the key's run is not the creator's own…
+        keysRun.visibleTo(session(WorkspaceRole.AUTHOR)) shouldBe false
+        // …and a workspace admin sees it through `execution.read_all`, as every run of the workspace.
+        keysRun.visibleTo(session(WorkspaceRole.WORKSPACE_ADMIN)) shouldBe true
     }
 
     private fun session(role: WorkspaceRole) =
@@ -79,7 +99,6 @@ class ExecutionOwnershipTest {
             userId = me,
             email = "me@company.com",
             displayName = "Me",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspace = WorkspaceContext(workspaceId, "acme", role),
         )

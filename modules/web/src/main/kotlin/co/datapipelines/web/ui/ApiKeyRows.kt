@@ -25,8 +25,11 @@ class ApiKeyRows(
      * which exists only in the response that minted it (and, since V31, in the sealed column
      * the top bar's copy endpoint opens).
      *
-     * [createdBy] is the OWNER's display label — the `/api-keys` page lists the whole
+     * [createdBy] is the CREATOR's display label — the `/api-keys` page lists the whole
      * workspace's API keys (D17), so who created each one is a column, not an assumption.
+     * [actsAs] is the key's own identity (#215, record §3.3) — the name its runs and received
+     * versions are attributed to — and [role] its key role's label (`api caller`,
+     * `promotion receiver`).
      */
     data class Row(
         val id: String,
@@ -34,7 +37,8 @@ class ApiKeyRows(
         val kind: String,
         val prefix: String,
         val createdBy: String,
-        val scopes: List<String>,
+        val actsAs: String,
+        val role: String?,
         val boundPaths: List<String>,
         val createdRelative: String,
         val createdAbsolute: String,
@@ -58,28 +62,31 @@ class ApiKeyRows(
      *
      * Bindings are read once per ENDPOINT key, and only for endpoint keys: no other kind has
      * any, and a per-row query for keys that cannot have bindings is a page of empty reads.
+     *
+     * [userLabels] maps every user id the rows name — creators and identities — to its label.
      */
     fun of(
         keys: List<ApiKey>,
         now: Instant,
-        ownerLabels: Map<UUID, String> = emptyMap(),
+        userLabels: Map<UUID, String> = emptyMap(),
     ): List<Row> =
         keys
             .sortedWith(compareBy({ it.isRevoked }, { -it.createdAt.epochSecond }))
-            .map { key -> row(key, now, ownerLabels) }
+            .map { key -> row(key, now, userLabels) }
 
     private fun row(
         key: ApiKey,
         now: Instant,
-        ownerLabels: Map<UUID, String>,
+        userLabels: Map<UUID, String>,
     ): Row =
         Row(
             id = key.id,
             name = key.name,
             kind = key.kind.wire,
             prefix = key.id.take(PREFIX_CHARS) + "…",
-            createdBy = ownerLabels[key.userId] ?: UNKNOWN_OWNER,
-            scopes = key.scopes.map { it.wire }.sorted(),
+            createdBy = userLabels[key.createdBy] ?: UNKNOWN_OWNER,
+            actsAs = userLabels[key.userId] ?: UNKNOWN_OWNER,
+            role = key.role?.label,
             boundPaths =
                 if (key.kind == ApiKeyKind.ENDPOINT) {
                     bindings.findByKey(key.id).map { it.pathPrefix }.sorted()

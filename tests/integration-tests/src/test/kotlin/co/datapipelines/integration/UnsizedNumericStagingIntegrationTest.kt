@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -79,7 +80,7 @@ class UnsizedNumericStagingIntegrationTest {
         val result =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
                 .then()
@@ -136,18 +137,6 @@ class UnsizedNumericStagingIntegrationTest {
                     """.trimIndent(),
                 )
             }
-            connection
-                .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001') ON CONFLICT (id) DO NOTHING",
-                ).use { ps ->
-                    ps.setString(1, ADMIN_KEY.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, ADMIN_KEY.name)
-                    ps.setString(4, ADMIN_KEY.hash)
-                    ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                    ps.executeUpdate()
-                }
         }
     }
 
@@ -155,7 +144,7 @@ class UnsizedNumericStagingIntegrationTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "pg-unsized-numeric", "display_name": "Unsized Numeric Source", "dialect": "POSTGRES",
@@ -175,7 +164,7 @@ class UnsizedNumericStagingIntegrationTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "test/unsized_fares.sql", "dialect": "POSTGRES", "display_name": "Unsized Fares",
@@ -193,7 +182,7 @@ class UnsizedNumericStagingIntegrationTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "test/unsized_fares_report.sql", "dialect": "H2", "display_name": "Unsized Fares Report",
@@ -211,7 +200,7 @@ class UnsizedNumericStagingIntegrationTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(
                     """
                     {"schema_version": 1, "name": "test/unsized_numeric", "display_name": "Unsized Numeric",
@@ -239,7 +228,8 @@ class UnsizedNumericStagingIntegrationTest {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                 .header("DP-Correlation-Id", UUID.randomUUID().toString())
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
@@ -251,12 +241,13 @@ class UnsizedNumericStagingIntegrationTest {
     }
 
     companion object {
-        private const val API_KEY_HEADER = "DP-API-Key"
-
         private val EXECUTION_BUDGET: Duration = Duration.ofMinutes(2)
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-unsized-numeric-key", arrayOf("read", "execute", "author"))
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the session (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-unsized-numeric@datapipelines.test")
 
         private val random = SecureRandom()
 
@@ -284,7 +275,7 @@ class UnsizedNumericStagingIntegrationTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
             registry.add("datapipelines.auth.oidc.providers[0].name") { "google" }

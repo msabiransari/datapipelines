@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceSessionRequiredException
 import co.datapipelines.typesystem.DatapipelinesException
@@ -47,7 +46,6 @@ class PromotionUiControllerTest {
                     userId,
                     "a@b.c",
                     "A",
-                    setOf(Scope.ADMIN),
                     method,
                     workspace = WorkspaceContext(workspaceId, "acme"),
                 ),

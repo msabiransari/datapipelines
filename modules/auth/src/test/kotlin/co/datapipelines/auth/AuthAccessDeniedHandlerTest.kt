@@ -35,10 +35,10 @@ class AuthAccessDeniedHandlerTest {
     }
 
     @Test
-    fun `a generic authorization denial reports no fabricated required or held scopes`() {
+    fun `a generic authorization denial reports no fabricated required or held permission`() {
         val error = deny()["error"] as Map<*, *>
 
-        error["code"] shouldBe AuthErrorCodes.SCOPE_INSUFFICIENT
+        error["code"] shouldBe AuthErrorCodes.PERMISSION_UNDECLARED
         // The whole point: no `required`, no `held`, rather than a plausible lie.
         (error["details"] as Map<*, *>).shouldBeEmpty()
     }
@@ -52,7 +52,7 @@ class AuthAccessDeniedHandlerTest {
         val error = body["error"] as Map<*, *>
         error["message"] shouldBe "Access denied by the authorization layer"
         error["user_message"] shouldBe "You do not have permission to perform this action."
-        error["doc_url"] shouldBe AuthErrorCodes.docUrl(AuthErrorCodes.SCOPE_INSUFFICIENT)
+        error["doc_url"] shouldBe AuthErrorCodes.docUrl(AuthErrorCodes.PERMISSION_UNDECLARED)
     }
 
     private companion object {

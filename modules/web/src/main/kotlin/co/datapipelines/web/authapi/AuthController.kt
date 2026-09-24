@@ -5,9 +5,9 @@ import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
@@ -32,17 +32,28 @@ import org.springframework.web.bind.annotation.RestController
 import java.time.Instant
 import java.util.UUID
 
-/** §16.1 create body. `scopes` defaults server-side (configuration `auth.api-keys.default-scopes`). */
+/**
+ * §16.1 create body. A key carries a ROLE, never scopes (#215, record PK8): `role` may be omitted
+ * (it follows the kind — `api_caller` for `endpoint`, `promotion_receiver` for `server`) and is
+ * refused when it names a role the kind cannot hold.
+ */
 data class CreateApiKeyRequest(
     @field:JsonProperty("name") @get:JsonProperty("name") @param:JsonProperty("name")
     val name: String,
+    @field:JsonProperty("role") @get:JsonProperty("role") @param:JsonProperty("role")
+    val role: String? = null,
+    /**
+     * Retired with the scopes (#215 PK8) and kept ONLY so a request that still sends it is refused
+     * by name: a caller who writes `"scopes": ["author"]` believes the key will carry it, and
+     * silently ignoring the field would leave that belief standing.
+     */
     @field:JsonProperty("scopes") @get:JsonProperty("scopes") @param:JsonProperty("scopes")
     val scopes: List<String>? = null,
     @field:JsonProperty("expires_at") @get:JsonProperty("expires_at") @param:JsonProperty("expires_at")
     val expiresAt: Instant? = null,
     /**
-     * §7.7 — `user` (the default, and every key that existed before 074) or `endpoint`.
-     * Absent means `user`, so every existing client's request means exactly what it did.
+     * §7.7 — `endpoint` or `server`. Absent means `user`, which the service refuses for every
+     * role (`auth.key_kind_not_mintable`, D16): the login hook mints those.
      */
     @field:JsonProperty("kind") @get:JsonProperty("kind") @param:JsonProperty("kind")
     val kind: String? = null,
@@ -59,15 +70,15 @@ data class CreateApiKeyRequest(
  * The auth surface under `/api/v1/auth` (rest-api.md §16): own API-key management, the current
  * principal, and user administration.
  *
- * Scope enforcement is the annotation + `auth`'s ScopeInterceptor ([ScopeMatrix] rows
- * `VIEW_OWN_MCP_KEY`, `MANAGE_API_KEYS`, `CURRENT_PRINCIPAL`, `USER_ADMINISTRATION`); the
- * privilege-escalation guard on key scopes (§7.4) lives in [ApiKeyService.issue]. Audit
- * events are written by the services, not here (auth.md §10.1).
+ * Enforcement is the annotation + `auth`'s ScopeInterceptor, which asks [ScopeMatrix] for the
+ * declared catalog permission (`mcp_key.own`, `api_key.create`, `profile.read`, `user.manage`);
+ * the per-kind create permission and the creation limit (#215, record §3.1/O3) live in
+ * [ApiKeyService.issue]. Audit events are written by the services, not here (auth.md §10.1).
  *
- * Since 179 (D16/D17) issuance and the self surface are DIFFERENT rows: a `user` key is
+ * Since 179 (D16/D17) issuance and the self surface are DIFFERENT permissions: a `user` key is
  * minted by the login hook and nowhere else (`auth.key_kind_not_mintable` answers any
- * attempt), and creating `endpoint` keys is the workspace admin's `MANAGE_API_KEYS`. What
- * every role keeps is the view/delete of its OWN login-minted key — `VIEW_OWN_MCP_KEY`.
+ * attempt), and creating `endpoint` keys is the workspace admin's `api_key.create`. What
+ * every role keeps is the view/delete of its OWN login-minted key — `mcp_key.own`.
  *
  * ## Catalog gaps — reported, not papered over
  * §13 has no `auth.user.not_found` and no "api key not found" code. Unknown users are answered
@@ -132,11 +143,15 @@ class AuthController(
         @RequestBody body: CreateApiKeyRequest,
     ): ApiResponse<Map<String, Any?>> {
         val principal = currentPrincipal()
-        val scopes =
-            body.scopes
-                ?.map { parseScope(it) }
-                ?.toSet()
-                .orEmpty()
+        if (body.scopes != null) {
+            throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "API keys carry a role, not scopes. Remove \"scopes\"; the role follows the kind " +
+                    "(${KeyRole.WIRE_VALUES.joinToString(", ")}).",
+                mapOf("field" to "scopes", "supported_roles" to KeyRole.WIRE_VALUES),
+            )
+        }
+        val role = body.role?.let(::parseRole)
         val kind =
             body.kind?.let {
                 ApiKeyKind.fromWireOrNull(it)
@@ -153,22 +168,17 @@ class AuthController(
             endpointKeys.issue(
                 principal = principal,
                 name = body.name,
-                scopes = scopes,
+                role = role,
                 kind = kind,
                 bindingPaths = body.bindings.orEmpty(),
                 expiresAt = body.expiresAt,
             )
         return ApiResponse.of(
-            mapOf(
-                "id" to issued.record.id,
-                "name" to issued.record.name,
-                "scopes" to issued.record.scopes.map { it.wire },
-                "kind" to issued.record.kind.wire,
-                "bindings" to body.bindings.orEmpty(),
-                "key" to issued.plaintext,
-                "created_at" to issued.record.createdAt.toString(),
-                "expires_at" to issued.record.expiresAt?.toString(),
-            ),
+            issued.record.toResponse() - listOf("last_used_at", "is_revoked") +
+                mapOf(
+                    "bindings" to body.bindings.orEmpty(),
+                    "key" to issued.plaintext,
+                ),
         )
     }
 
@@ -182,7 +192,7 @@ class AuthController(
         apiKeys.revoke(keyId, currentPrincipal().userId)
     }
 
-    /** §16.2 — the current principal, for agents and the UI to discover their scope set. */
+    /** §16.2 — the current principal, for agents and the UI to discover who they act as and with what role. */
     @GetMapping("/me")
     @RequiredScope(Permission.PROFILE_READ)
     fun me(): ApiResponse<Map<String, Any?>> {
@@ -192,7 +202,9 @@ class AuthController(
                 "user_id" to principal.userId.toString(),
                 "email" to principal.email,
                 "display_name" to principal.displayName,
-                "scopes" to principal.scopes.map { it.wire },
+                // #215: the role this principal is judged as — a key role, `super_admin`, or the
+                // active membership's (an MCP key's capped at author). Informative; scopes are gone.
+                "role" to principal.heldRole,
                 "auth_method" to principal.authMethod.name,
                 "key_id" to principal.keyId,
             ),
@@ -220,7 +232,7 @@ class AuthController(
     fun getUser(
         @PathVariable userId: UUID,
     ): ResponseEntity<Any> {
-        val user = users.snapshot(userId) ?: return userNotFound(userId)
+        val user = users.administrableUser(userId) ?: return userNotFound(userId)
         return ResponseEntity.ok(ApiResponse.of(user.toResponse()))
     }
 
@@ -252,14 +264,18 @@ class AuthController(
         @PathVariable userId: UUID,
     ): ResponseEntity<Any> = flip(userId) { users.revokeAdmin(it, currentPrincipal().userId) }
 
-    /** Applies an admin mutation and answers with the updated record; 404 for an unknown user. */
+    /**
+     * Applies an admin mutation and answers with the updated record; 404 for an unknown user AND for
+     * a row that is not a person — the System account or a key's identity (#215 A.6/A3: an identity
+     * is managed only through its key) — decided BEFORE the mutation runs.
+     */
     private fun flip(
         userId: UUID,
         mutation: (UUID) -> Boolean,
     ): ResponseEntity<Any> {
-        if (users.snapshot(userId) == null) return userNotFound(userId)
+        if (users.administrableUser(userId) == null) return userNotFound(userId)
         mutation(userId)
-        val updated = users.snapshot(userId) ?: return userNotFound(userId)
+        val updated = users.administrableUser(userId) ?: return userNotFound(userId)
         return ResponseEntity.ok(ApiResponse.of(updated.toResponse()))
     }
 
@@ -274,19 +290,26 @@ class AuthController(
             ),
         )
 
-    private fun parseScope(raw: String): Scope =
-        runCatching { Scope.fromWire(raw) }.getOrNull()
-            ?: throw co.datapipelines.web.api.ApiException(
+    private fun parseRole(raw: String): KeyRole =
+        KeyRole.find(raw)
+            ?: throw ApiException(
                 PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
-                "Unknown scope '$raw'.",
-                mapOf("scope" to raw.take(MAX_ECHOED_VALUE_CHARS), "supported" to Scope.entries.map { it.wire }),
+                "Unknown key role '$raw'.",
+                mapOf("role" to raw.take(MAX_ECHOED_VALUE_CHARS), "supported" to KeyRole.WIRE_VALUES),
             )
 
+    /**
+     * §16.1's key shape (#215): `role` (null for the MCP key, whose role is its member's), the
+     * `identity` the key ACTS AS — its own `service` identity, or the member for the MCP key — and
+     * `created_by`, the person who created it.
+     */
     private fun ApiKey.toResponse(): Map<String, Any?> =
         mapOf(
             "id" to id,
             "name" to name,
-            "scopes" to scopes.map { it.wire },
+            "role" to role?.wire,
+            "identity" to mapOf("id" to userId.toString(), "display_name" to users.snapshot(userId)?.displayName),
+            "created_by" to createdBy.toString(),
             "kind" to kind.wire,
             "created_at" to createdAt.toString(),
             "expires_at" to expiresAt?.toString(),

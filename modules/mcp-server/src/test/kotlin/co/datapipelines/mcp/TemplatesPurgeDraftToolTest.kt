@@ -29,7 +29,7 @@ class TemplatesPurgeDraftToolTest {
     private val pipelines = mockk<PipelineRepository>()
     private val usage = TemplateUsageService(templates, pipelines)
     private val tool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true))
-    private val ctx = McpFixtures.ctx(co.datapipelines.auth.Scope.AUTHOR)
+    private val ctx = McpFixtures.ctx()
 
     private val id = "test/scratch.sql"
 
@@ -103,7 +103,7 @@ class TemplatesPurgeDraftToolTest {
         val thrown = shouldThrow<DatapipelinesException> { tool.call(McpArguments(mapOf("id" to id)), ctx) }
 
         assertAll(
-            { thrown.code shouldBe PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT },
+            { thrown.code shouldBe PipelineErrorCodes.Auth.ROLE_REQUIRED },
             { thrown.details["reason"] shouldBe "not_creator" },
         )
         verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }

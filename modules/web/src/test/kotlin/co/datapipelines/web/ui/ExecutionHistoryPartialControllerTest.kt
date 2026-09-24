@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionRecord
@@ -50,17 +49,13 @@ class ExecutionHistoryPartialControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(
-        scopes: Set<Scope>,
-        workspaceAdmin: Boolean = false,
-    ) {
+    private fun authenticate(workspaceAdmin: Boolean = false) {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
                 AuthenticatedPrincipal(
                     userId,
                     "a@b.c",
                     "A",
-                    scopes,
                     AuthMethod.OIDC,
                     workspace =
                         WorkspaceContext(
@@ -89,7 +84,7 @@ class ExecutionHistoryPartialControllerTest {
 
     @Test
     fun `a user listing fetches page size plus one and computes hasMore from the overflow`() {
-        authenticate(setOf(Scope.AUTHOR))
+        authenticate()
         val twentyOne = List(21) { record() }
         every {
             executions.findByUser(workspaceId, userId, null, null, null, null, any(), any())
@@ -107,7 +102,7 @@ class ExecutionHistoryPartialControllerTest {
 
     @Test
     fun `a full page exactly is the last page - nextOffset null`() {
-        authenticate(setOf(Scope.AUTHOR))
+        authenticate()
         every {
             executions.findByUser(workspaceId, userId, null, null, null, null, any(), any())
         } returns List(20) { record() }
@@ -121,7 +116,7 @@ class ExecutionHistoryPartialControllerTest {
 
     @Test
     fun `status filters parse and an unknown status degrades to no filter`() {
-        authenticate(emptySet(), workspaceAdmin = true)
+        authenticate(workspaceAdmin = true)
         every {
             executions.findAll(workspaceId, any(), any(), any(), any(), any(), any())
         } returns emptyList()
@@ -135,7 +130,7 @@ class ExecutionHistoryPartialControllerTest {
 
     @Test
     fun `time bounds are parsed as instants and forwarded`() {
-        authenticate(emptySet(), workspaceAdmin = true)
+        authenticate(workspaceAdmin = true)
         every {
             executions.findAll(workspaceId, any(), any(), any(), any(), any(), any())
         } returns emptyList()
@@ -149,7 +144,7 @@ class ExecutionHistoryPartialControllerTest {
 
     @Test
     fun `an admin listing goes through findAll with the pipeline filter`() {
-        authenticate(emptySet(), workspaceAdmin = true)
+        authenticate(workspaceAdmin = true)
         val pipelineId = UUID.randomUUID()
         every {
             executions.findAll(workspaceId, any(), any(), any(), any(), any(), any())
@@ -164,7 +159,7 @@ class ExecutionHistoryPartialControllerTest {
 
     @Test
     fun `the partial view name is returned`() {
-        authenticate(setOf(Scope.AUTHOR))
+        authenticate()
         every {
             executions.findByUser(workspaceId, userId, null, null, null, null, any(), any())
         } returns emptyList()

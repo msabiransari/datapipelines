@@ -43,9 +43,10 @@ class ExecutionVisibility(
         when {
             record.visibleTo(principal) -> true
 
-            // §7.7 — an endpoint key sees exactly what its OWN serve started. `executed_by` is
-            // the key's owner, so it would make two endpoint keys of one person interchangeable;
-            // the serve audit row is the only place the key id and the execution id meet.
+            // §7.7 — an endpoint key sees exactly what its OWN serve started. Since #215 its runs
+            // carry its identity and `visibleTo` answers them; this arm stays for the runs served
+            // BEFORE V34, whose `executed_by` is the key's creator — there the serve audit row is
+            // the only place the key id and the execution id meet.
             principal.isEndpointKey -> principal.keyId?.let { serveAudit?.servedByKey(executionId, it) } ?: false
 
             else -> false

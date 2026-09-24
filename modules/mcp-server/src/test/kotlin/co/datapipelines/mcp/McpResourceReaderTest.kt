@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRecord
 import co.datapipelines.executor.ExecutionEventRepository
@@ -32,7 +31,7 @@ class McpResourceReaderTest {
     private val datasources = mockk<DatasourceRegistry>()
     private val executions = mockk<ExecutionRepository>()
     private val events = mockk<ExecutionEventRepository>()
-    private val ctx = McpFixtures.ctx(Scope.READ)
+    private val ctx = McpFixtures.ctx()
 
     // 120 — a REAL in-memory sink, never a strict mock: the contract is "the read is
     // recorded", and a strict double is green precisely when the call is missing (MISTAKES).
@@ -257,20 +256,31 @@ class McpResourceReaderTest {
         )
     }
 
-    /** F3: the resource read path asserts the `read` floor rather than assuming it. */
+    /**
+     * F3, re-keyed by #215: the resource read path asserts the ROLE's read permission for the
+     * family rather than assuming it. A promoter reads no executions (D5), so its key cannot read
+     * one through the resource surface either — refused before the repository is asked.
+     */
     @Test
-    fun `a key holding no scope cannot read a resource`() {
+    fun `a promoter's key cannot read an execution resource`() {
+        val promoter =
+            McpFixtures.principal(
+                workspace =
+                    co.datapipelines.auth.WorkspaceContext(
+                        McpFixtures.WORKSPACE_ID,
+                        "acme",
+                        co.datapipelines.auth.WorkspaceRole.PROMOTER,
+                    ),
+            )
         val error =
             shouldThrow<McpError> {
-                reader.read(
-                    McpResourceUri.pipeline(McpFixtures.PIPELINE_ID),
-                    McpToolContext(McpFixtures.principal(), McpFixtures.CORRELATION_ID),
-                )
+                reader.read(McpResourceUri.execution(McpFixtures.EXECUTION_ID), McpToolContext(promoter, McpFixtures.CORRELATION_ID))
             }
 
         assertAll(
             { error.jsonRpcError.code() shouldBe McpArguments.FORBIDDEN },
-            { verify(exactly = 0) { pipelines.findById(any(), any()) } },
+            { error.jsonRpcError.message() shouldContain "auth.role_required" },
+            { verify(exactly = 0) { executions.findById(any(), any()) } },
         )
     }
 

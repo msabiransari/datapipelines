@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.29 (frozen contract — additive-only changes after this point; see the 2026-09-20 row for the two deliberate breaks)
+**Status:** v2.30 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-09-21
+**Last updated:** 2026-09-24
 
 ---
 
@@ -47,9 +47,9 @@ https://{host}/api/v1
 Every `/api/v1/**` endpoint requires authentication via one of:
 
 - **Session cookie** (`dp_session`) — for browser-based UI flows. Set by the OIDC login flow (`GET /oauth2/authorization/{provider}` → callback), not by any REST endpoint. There are no `/auth/login` or `/auth/refresh` endpoints — see [Auth §5](auth.md#5-oidc-login-flow).
-- **API key** — for programmatic clients. Sent in header: `DP-API-Key: dpk_...`.
+- **API key** — for programmatic clients, in the header `DP-API-Key: dpk_...`: an `endpoint` key or a `server` key, each confined to its own routes (below). The MCP key is refused here.
 
-Required scopes per operation are defined once in the [Auth §7.6 scope matrix](auth.md#76-operation-matrix--two-axes-authoritative). API keys are issued per-user-per-agent from the UI (management endpoints in §16).
+The permission every operation declares is defined once in the [Auth §7.6 permission catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative); what a principal holds is a ROLE (scopes were removed, #215). **This REST API is a SESSION's surface, plus two confined key kinds:** an `endpoint` key on the published tree and its own executions, a `server` key on the promotion routes (§18). The MCP key connects an MCP client to `/mcp` and nothing else — on every route here it is refused with `403 endpoint.key_kind_refused`, `details.reason = "user_key_off_surface"` (B2, [Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)). Key management is §16.
 
 ### 3.3 Content negotiation
 
@@ -335,9 +335,9 @@ transaction back. Each cascaded release is audited as `template.version.released
 query like `override_checks_reason`, for the same reason: the endpoint has no body. The same
 role holds both release verbs (auth §7.6), so the flag grants no new capability.
 UI-driven in practice — agents never release (versioning D4); no MCP tool exists. Over REST
-the verb needs `pipeline.release` (`author` scope on a key whose issuer is an author or workspace
-admin, or such a session — release is the author's since 2026-09-20, D8), so an author's own CI
-key may release; a key issued by a viewer or a promoter cannot. **Audited** as `pipeline.version.released` with the version and `via` (`session` /
+the verb needs `pipeline.release` — an author's or workspace admin's session (release is the
+author's since 2026-09-20, D8); no key reaches it (the MCP key is confined to `/mcp` since #215
+B2). **Audited** as `pipeline.version.released` with the version and `via` (`session` /
 `api_key`) — the record of who made the D4 decision and through what (T187).
 
 Response: `200 OK` with the released version's full shape (`status: "RELEASED"`).
@@ -428,7 +428,7 @@ server-run cross-checks that gate §5.10's release. The agent writes the query a
 expectation; **only the server's own run produces `observed`** — there is no endpoint,
 and no tool, that records an observed value from a caller.
 
-**Run** (`execute` scope — it writes `pipeline_check_runs` rows, like execute writes
+**Run** (`pipeline.run_checks` — it writes `pipeline_check_runs` rows, like execute writes
 executions): runs the version's checks NOW against their datasources, bound with the
 pipeline's declared parameters (defaults filled the way §6's execute fills them — the
 calculator context is NOT available to a check), through the same bounded probe path as
@@ -448,7 +448,7 @@ the expectation cannot compare (a `value`/`range` check requires exactly one row
 column) — with the reason in `message`. A version with no checks answers `200` with an
 empty `runs` list.
 
-**Latest** (`read` scope): the version's check definitions each with their LATEST run
+**Latest** (`pipeline.read`): the version's check definitions each with their LATEST run
 (latest per `(version, check_id)` of the append-only `pipeline_check_runs`), or `null`
 runs when none was ever recorded. This is what the UI's release dialog and version page
 read.
@@ -909,7 +909,7 @@ Every completed execution with a caller node has its full result **materialized 
 GET /executions/{execution_id}/result?offset=0&limit=10000&format=json
 ```
 
-Auth: `read` scope + the `execution.result.read` row (D11, 177): the caller's OWN execution — `executed_by = self`, not an endpoint-key run — or any execution with `execution.read_all` (a workspace admin's); a promoter is refused by role, and another member's execution is `404 result.execution_not_found`, never 403. The URL is not a capability — an unauthenticated request 401s ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
+Auth: the `execution.result.read` row (D11, 177): the caller's OWN execution — `executed_by = self` (an `endpoint` key's identity owns the runs it started, #215 A.5; a person does not own a run a key they created started) — or any execution with `execution.read_all` (a workspace admin's); a promoter is refused by role, and another member's execution is `404 result.execution_not_found`, never 403. The URL is not a capability — an unauthenticated request 401s ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)).
 
 ### 7.3 Response (JSON format, default)
 
@@ -1322,7 +1322,7 @@ GET /datasources/{name}/tables?schema={schema}
 GET /datasources/{name}/tables/{table}/columns?schema={schema}
 ```
 
-Read-only live schema metadata ([Datasources §7A](datasources.md#7a-schema-introspection)) over JDBC `DatabaseMetaData`, with column types mapped to the canonical Type System types. Scope: `author` ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)) — same precedent as the connection test, since each call opens a live connection.
+Read-only live schema metadata ([Datasources §7A](datasources.md#7a-schema-introspection)) over JDBC `DatabaseMetaData`, with column types mapped to the canonical Type System types. Scope: `author` ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)) — same precedent as the connection test, since each call opens a live connection.
 
 Responses (the §4.1 envelope around `data`):
 
@@ -1387,7 +1387,7 @@ POST   /datasources/{name}/tables/import
 GET    /datasources/{name}/lake-tables
 ```
 
-The registry of tables a **LAKE**-dialect datasource serves ([metadata-db §4.15](metadata-db.md#415-lake_tables), the 2026-09-07 lake-datasource design record §2). A LAKE datasource reads object storage in place and the engine cannot LIST a bucket — these rows are its catalog. Scope: `author` for the three writes ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)); mutating a GLOBAL datasource's registry additionally requires admin (workspaces D8, enforced in-handler). The listing is `read`. Every operation refuses a non-LAKE datasource with `400 datasource.validation.lake_dialect_required`.
+The registry of tables a **LAKE**-dialect datasource serves ([metadata-db §4.15](metadata-db.md#415-lake_tables), the 2026-09-07 lake-datasource design record §2). A LAKE datasource reads object storage in place and the engine cannot LIST a bucket — these rows are its catalog. Scope: `author` for the three writes ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)); mutating a GLOBAL datasource's registry additionally requires admin (workspaces D8, enforced in-handler). The listing is `read`. Every operation refuses a non-LAKE datasource with `400 datasource.validation.lake_dialect_required`.
 
 **Register one table** — `POST /datasources/{name}/tables`, 201:
 
@@ -1472,7 +1472,7 @@ result is unexpired):
 | `parent_node_id` | string \| null | That node's id; null for a root |
 | `root_execution_id` | uuid | The family's top ancestor; equals `execution_id` for a root |
 
-Ownership (roles design D11, ratified 2026-09-20 — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) `execution.read`): a **workspace admin** (or super admin — `execution.read_all`) reads every execution in the workspace, optionally pipeline-narrowed; a **viewer** or **author** reads only their OWN runs — `executed_by = self` and not started through an endpoint key; a **promoter** is refused the list, the read, the result and the replay by role (`403 auth.role_required`) before any row is consulted. The filter is SQL, so the page is cut after it and `has_more` is honest. Another member's execution is `404 result.execution_not_found` on the single reads, never 403 ([Auth §11A.1](auth.md#11a1-the-404-rule)).
+Ownership (roles design D11, ratified 2026-09-20 — [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) `execution.read`): a **workspace admin** (or super admin — `execution.read_all`) reads every execution in the workspace, optionally pipeline-narrowed; a **viewer** or **author** reads only their OWN runs — `executed_by = self` and not started through an endpoint key; a **promoter** is refused the list, the read, the result and the replay by role (`403 auth.role_required`) before any row is consulted. The filter is SQL, so the page is cut after it and `has_more` is honest. Another member's execution is `404 result.execution_not_found` on the single reads, never 403 ([Auth §11A.1](auth.md#11a1-the-404-rule)).
 
 ### 10.2 Get execution metadata
 
@@ -1530,7 +1530,7 @@ Availability: the Redis event log lives **1 hour** past completion (not configur
 DELETE /executions/{execution_id}
 ```
 
-Cancels a RUNNING execution: in-flight statements are interrupted (`Statement.cancel()`), connections released, status set to `ABORTED`, and `execution_aborted` (§6.4.8) emitted to any connected stream. Scope: `execute` + ownership (`admin` may cancel any) — [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative).
+Cancels a RUNNING execution: in-flight statements are interrupted (`Statement.cancel()`), connections released, status set to `ABORTED`, and `execution_aborted` (§6.4.8) emitted to any connected stream. Scope: `execute` + ownership (`admin` may cancel any) — [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative).
 
 Works from **any** instance: the request writes a Redis cancellation flag that the executing instance honors within ~one heartbeat interval ([DAG Executor §8.3.1](dag-executor.md#831-the-registry)). The `204` acknowledges the cancellation *request*; the `execution_aborted` event marks its completion.
 
@@ -1645,14 +1645,14 @@ A complete OpenAPI 3.1 spec lives in `docs/api/openapi.yaml` and is published at
 
 ## 16. Auth & User Admin Endpoints
 
-Flows and rules are specified in [Auth](auth.md) (§7.4 issuance, §7.6 scope matrix); this section defines the HTTP surface. All endpoints below live under `/api/v1`.
+Flows and rules are specified in [Auth](auth.md) (§4.7 key identities, §7.4 issuance, §7.5 key roles, §7.6 the permission catalog); this section defines the HTTP surface. All endpoints below live under `/api/v1`.
 
 ### 16.1 API keys (own keys; creation is a workspace admin's — 179)
 
 ```
 GET /auth/api-keys
 ```
-Lists the caller's keys (id, name, `kind`, scopes, created_at, expires_at, last_used_at, is_revoked). Never returns secrets. (`mcp_key.own` — every role.)
+Lists the keys the caller CREATED — their own MCP key and any key they minted (id, name, `kind`, `role`, `identity`, `created_by`, created_at, expires_at, last_used_at, is_revoked). Never returns secrets. (`mcp_key.own` — every role.)
 
 ```
 GET /auth/api-keys/mine
@@ -1663,9 +1663,9 @@ The caller's ONE live `user` key in the active workspace — the login-minted MC
 POST /auth/api-keys
 Content-Type: application/json
 
-{"name": "nightly-sync", "kind": "endpoint", "bindings": ["/nyc"], "expires_at": "2027-08-07T00:00:00Z"}
+{"name": "nightly-sync", "kind": "endpoint", "role": "api_caller", "bindings": ["/nyc"], "expires_at": "2027-08-07T00:00:00Z"}
 ```
-**Workspace admins and super admins only** (`api_key.create`, since 179 — D17; a `server` key additionally `server_key.create`, super admins only). `expires_at` optional. Response `201`:
+**Workspace admins and super admins only** (`api_key.create`, since 179 — D17; a `server` key additionally `server_key.create`, super admins only). `role` and `expires_at` optional — the role follows the kind. The key is created with its own identity in one transaction ([Auth §4.7](auth.md#47-key-identities)). Response `201`:
 
 ```json
 {
@@ -1675,7 +1675,9 @@ Content-Type: application/json
     "id": "dpk_ab12cd34ef56",
     "name": "nightly-sync",
     "kind": "endpoint",
-    "scopes": [],
+    "role": "api_caller",
+    "identity": {"id": "uuid", "display_name": "nightly-sync"},
+    "created_by": "uuid",
     "bindings": ["/nyc"],
     "key": "dpk_ab12cd34ef56.9f8e7d6c...",
     "created_at": "2026-09-08T09:00:00Z",
@@ -1688,27 +1690,29 @@ Content-Type: application/json
 
 **`kind`** ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Enums §8A](enums.md#8a-apikeykind--what-an-api-key-is)) is `user`, `endpoint`, or `server`. It changes what the rest of the body means:
 
-| `kind` | `scopes` | `bindings` | Who may mint |
+| `kind` | `role` | `bindings` | Who may mint |
 |---|---|---|---|
 | `user` | — | — | **Nobody, on any request surface (179, D16)**: minted by the login/switch hook, one per user per workspace. `400 auth.key_kind_not_mintable` for every role — and an ABSENT `kind` means `user`, so a pre-179 client gets the refusal, not a silently different credential |
-| `endpoint` | **Refused if present** — an endpoint key's authority is its bindings | The endpoint-tree nodes it authorises, validated BEFORE the key is minted — and since 2026-09-21 (#191) each must be the root or lie at or above a path the CALLER'S workspace publishes (`400 endpoint.path_invalid`, naming only the caller's own tree) | Workspace admins and super admins (`api_key.create`) |
-| `server` | **Refused if present** — a server key's authority is a route family | Refused | Super admin only |
+| `endpoint` | `api_caller` (the only one offered, record A1); another role is `403 endpoint.key_kind_refused` | The endpoint-tree nodes it authorises, validated BEFORE the key is minted — and since 2026-09-21 (#191) each must be the root or lie at or above a path the CALLER'S workspace publishes (`400 endpoint.path_invalid`, naming only the caller's own tree) | Workspace admins and super admins (`api_key.create`) |
+| `server` | `promotion_receiver`; another role is `403 endpoint.key_kind_refused` | Refused | Super admin only |
+
+**`scopes` is refused by name** (`400 pipeline.execution.invalid_parameter_type`, `details.field = "scopes"`): scopes were removed (#215, PK8), and a caller who still sends them believes the key will carry them. An unknown `role` token is the same 400 with `details.supported`. **An unbound published path is unservable until a key is bound to it** (#215 B3) — a session is refused on the published tree, and no other key kind reaches it.
 
 An unknown `kind` is `403 endpoint.key_kind_refused`, naming the supported values. A `server` key is the credential a SENDING deployment presents as `DP-Promotion-Key` (§18); it authenticates nothing on this API — presented as `DP-API-Key` it is refused on every route with `403 endpoint.key_kind_refused` and `details.reason = "server_key_off_surface"`.
 
 ```
 DELETE /auth/api-keys/{key_id}
 ```
-Revokes the caller's OWN key (owner-scoped; `mcp_key.own`, every role — this is also the MCP key's delete-to-rotate). Effective ≤ cache TTL, ~60s. `204 No Content`.
+Revokes a key the caller CREATED (creator-scoped; `mcp_key.own`, every role — this is also the MCP key's delete-to-rotate). Revoking an `endpoint` or `server` key deactivates its identity in the same transaction. Effective ≤ cache TTL, ~60s. `204 No Content`.
 
 ### 16.2 Current principal
 
 ```
 GET /auth/me
 ```
-Returns the authenticated principal: `user_id`, `email`, `display_name`, `scopes`, `auth_method`, `key_id` (when key-authenticated). Lets agents and the UI discover their own scope set.
+Returns the authenticated principal: `user_id`, `email`, `display_name`, `role` (the role it is judged as — the active membership's, `super_admin`, or a key role; informative), `auth_method`, `key_id` (when key-authenticated). A session's surface — the MCP key is refused here (B2).
 
-### 16.3 User administration (`admin` scope)
+### 16.3 User administration (super admin — `user.manage`)
 
 ```
 GET  /auth/users?q={search}&offset=0&limit=50     — list users
@@ -1719,7 +1723,7 @@ POST /auth/users/{user_id}/grant-admin             — is_admin = true
 POST /auth/users/{user_id}/revoke-admin            — is_admin = false
 ```
 
-All return the standard envelopes; mutations return the updated user record and write the corresponding `auth.user.*` audit events ([Auth §10.1](auth.md#101-events)). There is no user-create endpoint — users are provisioned by OIDC first login only ([Auth §4.2](auth.md#42-user-provisioning)).
+All return the standard envelopes; mutations return the updated user record and write the corresponding `auth.user.*` audit events ([Auth §10.1](auth.md#101-events)). Every route answers people only: a key's identity or the System row is the unknown-user `404` (`details.reason = "user_not_found"`), looked up BEFORE any mutation ([Auth §4.7](auth.md#47-key-identities)), and the list returns `human` rows only. There is no user-create endpoint — users are provisioned by OIDC first login only ([Auth §4.2](auth.md#42-user-provisioning)).
 
 ### 16.4 Logout (browser session)
 
@@ -1732,7 +1736,7 @@ Clears the `dp_session` cookie ([Auth §6.5](auth.md#65-logout)). Root-level (no
 
 ## 17. Workspace Endpoints
 
-Workspaces are the unit of team isolation ([workspaces design](superpowers/specs/2026-08-16-workspaces-design.md) §9; [Auth §5.6](auth.md#56-workspace-resolution--the-dp-workspace-header) resolves the ACTIVE workspace per request). Every endpoint below lives under `/api/v1`. Scope minimums are in [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative); the role/mode gates (owner-or-admin, provisioning mode, `open-join`) are enforced in the service layer, default-deny.
+Workspaces are the unit of team isolation ([workspaces design](superpowers/specs/2026-08-16-workspaces-design.md) §9; [Auth §5.6](auth.md#56-workspace-resolution--the-dp-workspace-header) resolves the ACTIVE workspace per request). Every endpoint below lives under `/api/v1`. Scope minimums are in [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative); the role/mode gates (owner-or-admin, provisioning mode, `open-join`) are enforced in the service layer, default-deny.
 
 **The no-oracle rule** ([pipeline-contract §13.12](pipeline-contract.md#1312-workspace-resolution)): for anyone but a global admin, an unknown workspace name and a workspace the caller is not a member of are the SAME `403 workspace.membership_required` — a name cannot be probed. A global admin (who could otherwise see any workspace) gets a real `404 workspace.not_found`. A member who is not the owner of a workspace they ARE in gets the same 403 for management operations — role probing is an oracle too.
 
@@ -1845,11 +1849,11 @@ The RECEIVER half of promotion ([Versioning §10](versioning.md#10-promotion-ui-
 
 **Authentication is different here, and deliberately narrower.** These routes are gated by the server key of §10.6, presented as `DP-Promotion-Key`. The header is read on this prefix and no other, so the credential authenticates nothing anywhere else and grants no read access outside this pair. The converse also holds: an ordinary API key or a session cookie does **not** open these routes — promotion is a deployment-to-deployment channel, not a privileged human one.
 
-**How the receiver mints one (091; the page moved in 179).** On the receiver, a super admin opens the API keys page (`/api-keys`), creates a key of kind **`server`** (no scope, no bindings — the form hides both for this kind) and copies the plaintext, which is shown once. That value goes into the SENDER's `datapipelines.deployment.promotion.target.server-key`. Equivalently over REST, on the receiver:
+**How the receiver mints one (091; the page moved in 179).** On the receiver, a super admin opens the API keys page (`/api-keys`), creates a key of kind **`server`** (the `promotion_receiver` role, no bindings — the form hides bindings for this kind) and copies the plaintext, which is shown once. That value goes into the SENDER's `datapipelines.deployment.promotion.target.server-key`. Equivalently over REST, on the receiver:
 
 ```
 POST /auth/api-keys   {"name": "uat receiver", "kind": "server"}
-→ 201 {"data": {"id": "dpk_…", "kind": "server", "scopes": [], "key": "dpk_….<secret>"}}
+→ 201 {"data": {"id": "dpk_…", "kind": "server", "role": "promotion_receiver", "key": "dpk_….<secret>"}}
 ```
 
 Rotation is then a receiver-side act with no restart on either side: mint a second `server` key, set it on the sender, revoke the first. The older pre-shared config value (`datapipelines.deployment.promotion.server-key`) is still accepted for one release and WARNs at boot ([Configuration §3.19](configuration.md#319-deployment)).
@@ -2005,7 +2009,9 @@ query string. `timeout_seconds` is clamped to `datapipelines.endpoints.timeout-m
 
 Authentication is an API key (`DP-API-Key`), never a browser session — this is a machine surface,
 and a session is `401`. Authorisation is the key's hierarchical bindings
-([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)).
+([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): an `endpoint` key (role
+`api_caller`) serves what is bound to it, the MCP key is refused here by kind, and so **a published
+path with no binding on any ancestor serves no one until a key is bound to it** (#215 B3).
 
 The accepted parameters are the released version's declared ones: **path variables** bind by
 name, and the **query string** supplies the rest. Validation is strict and **reports every defect
@@ -2100,6 +2106,7 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v2.30 | 215b (#215) key identities, key roles | **Deliberate breaks, owner-ruled (2026-09-24):** (1) **the MCP key is refused on every REST route** (§3.2 — B2: "MCP key should be only MCP"; `403 endpoint.key_kind_refused`, `details.reason = user_key_off_surface`) — REST is a session's surface plus the two confined key kinds; (2) **an unbound published path is unservable** until a key is bound (B3). §16.1: create takes `role` (never `scopes` — refused by name) and returns `role`, `identity {id, display_name}` and `created_by`; the list is the keys the caller created; revoking an endpoint/server key deactivates its identity. §16.2 `/auth/me` returns `role`, not `scopes`. §16.3: every user-admin route answers the unknown-user 404 for a non-person row, before any mutation. §5.16/§7.2: permissions named, not scopes. |
 | 2026-09-24 | v2.29 | 215a (#215) the permission catalog | No route, field or status changes. The inline authorization names are the §7.6 catalog's `<functionality>.<permission>` permissions instead of the retired operations (`RELEASE_VERSION` → `pipeline.release`, `READ_EXECUTIONS` → `execution.read`, `MANAGE_API_KEYS` → `api_key.create` / `api_key.bind`, …); §5's release sentence corrected — release is the author's since 2026-09-20 (D8), so a promoter's key cannot release (the text still described the pre-D8 rule). A `role_required` refusal's `details.held` is the role the caller was judged as (auth §9). Status caught up with the change log (it read v2.27). |
 | 2026-09-23 | v2.28 | 213 (#213) show-once MCP key | §16.1: `/mine`'s `copyable` is false once the key has been copied — the first read of the copy endpoint destroys the copyable secret in the same statement (auth.md §7.4). No wire shape changed. |
 | 2026-09-22 | v2.27 | #212 doc_url | §4.2: `doc_url` is `https://datapipelines.co/docs/pipeline-contract#<section anchor>` — the catalog page at the code's §13 section. The previous shape (`https://docs.datapipelines.co/errors/<code>`) named a host that does not exist. |

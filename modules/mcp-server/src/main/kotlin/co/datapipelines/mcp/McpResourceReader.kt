@@ -78,10 +78,10 @@ class McpResourceReader(
         uri: String,
         ctx: McpToolContext,
     ): McpSchema.ReadResourceResult {
-        requireReadScope(ctx)
         val workspaceId = ctx.principal.requireWorkspace().id
         val view = lens.viewFor(ctx.principal)
         val parsed = McpResourceUri.parse(uri) ?: throw notFound(uri)
+        McpResourcePermissions.requireRead(ctx, parsed)
         val contents =
             when (parsed) {
                 is McpResourceUri.PipelineLatest -> {

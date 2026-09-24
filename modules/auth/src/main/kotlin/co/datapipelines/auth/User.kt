@@ -47,4 +47,12 @@ data class User(
     val hasLocalPassword: Boolean = false,
     /** `users.locked_until` — the lockout horizon (§5A.3), for the admin table. */
     val lockedUntil: Instant? = null,
-)
+    /**
+     * `users.kind` (V34, #215 PK5): a person, a key's own identity, or the System actor. Only a
+     * [UserKind.HUMAN] row signs in, is administered, is listed, becomes a member or is invited.
+     */
+    val kind: UserKind = UserKind.HUMAN,
+) {
+    /** True for a person — the one kind every login and administration path accepts. */
+    val isHuman: Boolean get() = kind == UserKind.HUMAN
+}

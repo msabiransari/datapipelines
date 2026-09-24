@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
@@ -49,9 +50,10 @@ class WorkspaceSurfacesE2eTest {
     @LocalServerPort
     private var port: Int = 0
 
-    private val aliceKey get() = ALICE_KEY.plaintext
-    private val bobKey get() = BOB_KEY.plaintext
-    private val carolKey get() = CAROL_KEY.plaintext
+    /** #215 B2: REST is a session's surface — each person signs in, pinned by their ACTIVE workspace. */
+    private val aliceSession get() = sessionJwt(ALICE, "alice@acme.test", "acme")
+    private val bobSession get() = sessionJwt(BOB, "bob@globex.test", "globex")
+    private val carolSession get() = sessionJwt(CAROL, "carol@acme.test", "acme")
 
     // ------------------------------------------------------------ datasource isolation (§5.3)
 
@@ -62,14 +64,14 @@ class WorkspaceSurfacesE2eTest {
         // D-R7: "global" is gone. An INSTANCE datasource (no owning workspace) is visible to
         // nobody until a super admin GRANTS it — which is the whole change, so this asserts
         // both sides of it rather than only the end state.
-        datasources(aliceKey).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_ACME, DS_GLOBAL)
-        datasources(bobKey).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_GLOBEX, DS_GLOBAL)
+        datasources(aliceSession).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_ACME, DS_GLOBAL)
+        datasources(bobSession).map { it["name"] } shouldContainExactlyInAnyOrder listOf(DS_GLOBEX, DS_GLOBAL)
 
         // …and a datasource granted to NEITHER is invisible to both, which is the half that
         // makes the two above a statement about grants rather than about registration.
         registerInstanceDatasource(DS_UNGRANTED, H2_GLOBAL_URL)
-        datasources(aliceKey).map { it["name"] } shouldNotContain DS_UNGRANTED
-        datasources(bobKey).map { it["name"] } shouldNotContain DS_UNGRANTED
+        datasources(aliceSession).map { it["name"] } shouldNotContain DS_UNGRANTED
+        datasources(bobSession).map { it["name"] } shouldNotContain DS_UNGRANTED
     }
 
     /** Grants [datasource] to [workspace] as the super admin — the D-R7 verb, session-only. */
@@ -94,7 +96,7 @@ class WorkspaceSurfacesE2eTest {
         ensureDatasourcesRegistered()
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .get("/api/v1/datasources?offset=0&limit=1")
             .then()
@@ -113,7 +115,7 @@ class WorkspaceSurfacesE2eTest {
         ensureDatasourcesRegistered()
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .get("/api/v1/datasources/$DS_GLOBEX")
             .then()
@@ -122,7 +124,7 @@ class WorkspaceSurfacesE2eTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .get("/api/v1/datasources/$DS_ACME")
             .then()
@@ -132,7 +134,7 @@ class WorkspaceSurfacesE2eTest {
     }
 
     @Test
-    fun `the session switcher path scopes datasource visibility exactly like the pinned key`() {
+    fun `the session switcher path scopes datasource visibility exactly like the active workspace`() {
         ensureSeeded()
         ensureDatasourcesRegistered()
         given()
@@ -166,7 +168,7 @@ class WorkspaceSurfacesE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, bobKey)
+            .asSession(bobSession)
             // #186: the dialect is a SERVER one — an in-process engine is refused at the
             // super-admin gate one step EARLIER, and this case's subject is the name collision.
             .body(
@@ -183,20 +185,20 @@ class WorkspaceSurfacesE2eTest {
 
     @Test
     fun `create returns 201 with the creator as the workspace ADMIN - and it is session-only`() {
-        // D-R11: workspaces are created by SUPER ADMINS, and O-2 removed `admin` from the key
-        // wire — so no API key reaches this at all, on either axis. Alice's key is refused
-        // below; the verb runs on ROOT's session.
+        // D-R11: workspaces are created by SUPER ADMINS — `workspace.create` is an INSTANCE
+        // permission, so Alice, a workspace admin, is refused by ROLE below (and no key reaches
+        // this route at all, #215 B2); the verb runs on ROOT's session.
         ensureSeeded()
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .body("""{"name":"$FRESH_WS","display_name":"Fresh"}""")
             .`when`()
             .post("/api/v1/workspaces")
             .then()
             .statusCode(403)
-            .body("error.code", Matchers.equalTo("auth.scope.insufficient"))
+            .body("error.code", Matchers.equalTo("auth.role_required"))
 
         given()
             .port(port)
@@ -262,7 +264,7 @@ class WorkspaceSurfacesE2eTest {
         for (name in listOf("ghost", "globex")) {
             given()
                 .port(port)
-                .header(API_KEY_HEADER, aliceKey)
+                .asSession(aliceSession)
                 .`when`()
                 .get("/api/v1/workspaces/$name")
                 .then()
@@ -319,26 +321,24 @@ class WorkspaceSurfacesE2eTest {
     }
 
     @Test
-    fun `update is ws_admin - a plain author's key is refused, the workspace admin renames`() {
+    fun `update is ws_admin - a plain author is refused, the workspace admin renames`() {
         ensureSeeded()
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, carolKey)
+            .asSession(carolSession)
             .body("""{"display_name":"Hijacked"}""")
             .`when`()
             .put("/api/v1/workspaces/acme")
             .then()
-            // Carol is an AUTHOR of acme, not an admin. Her key's SCOPE is fine, so the axis
-            // that refuses is the role one — and because the credential is a key, the code
-            // says the issuer's role is short rather than the caller's (D-R12).
+            // Carol is an AUTHOR of acme, not an admin: refused by ROLE, the session's code.
             .statusCode(403)
-            .body("error.code", Matchers.equalTo("auth.key_issuer_role_lost"))
+            .body("error.code", Matchers.equalTo("auth.role_required"))
 
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .body("""{"display_name":"Acme Renamed"}""")
             .`when`()
             .put("/api/v1/workspaces/acme")
@@ -354,7 +354,7 @@ class WorkspaceSurfacesE2eTest {
         ensureSeeded()
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .get("/api/v1/workspaces/acme/members")
             .then()
@@ -367,7 +367,7 @@ class WorkspaceSurfacesE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .body("""{"email":"bob@globex.test"}""")
             .`when`()
             .post("/api/v1/workspaces/acme/members")
@@ -378,7 +378,7 @@ class WorkspaceSurfacesE2eTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .delete("/api/v1/workspaces/acme/members/$BOB")
             .then()
@@ -388,7 +388,7 @@ class WorkspaceSurfacesE2eTest {
         // else would have applied — nobody administers their own row.
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .delete("/api/v1/workspaces/acme/members/$ALICE")
             .then()
@@ -418,7 +418,7 @@ class WorkspaceSurfacesE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .body("""{"email":"ghost@nowhere.test"}""")
             .`when`()
             .post("/api/v1/workspaces/acme/members")
@@ -431,7 +431,7 @@ class WorkspaceSurfacesE2eTest {
         // The ghost sits in ITS array, and in no member's array.
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .get("/api/v1/workspaces/acme/members")
             .then()
@@ -443,7 +443,7 @@ class WorkspaceSurfacesE2eTest {
         // test below sees the empty invitations[] it asserts.
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .delete("/api/v1/workspaces/acme/invitations/ghost@nowhere.test")
             .then()
@@ -452,7 +452,7 @@ class WorkspaceSurfacesE2eTest {
         // A second revoke has nothing to remove: `workspace.invitation.not_found`.
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .delete("/api/v1/workspaces/acme/invitations/ghost@nowhere.test")
             .then()
@@ -502,7 +502,7 @@ class WorkspaceSurfacesE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .body(body)
             .`when`()
             .post("/api/v1/templates")
@@ -512,7 +512,7 @@ class WorkspaceSurfacesE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .body(body)
             .`when`()
             .post("/api/v1/templates")
@@ -615,10 +615,10 @@ class WorkspaceSurfacesE2eTest {
 
     // ------------------------------------------------------------ helpers
 
-    private fun datasources(key: String): List<Map<String, String>> =
+    private fun datasources(session: String): List<Map<String, String>> =
         given()
             .port(port)
-            .header(API_KEY_HEADER, key)
+            .asSession(session)
             .`when`()
             .get("/api/v1/datasources?limit=200")
             .then()
@@ -705,7 +705,6 @@ class WorkspaceSurfacesE2eTest {
     companion object {
         private var datasourcesRegistered = false
 
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val WORKSPACE_HEADER = "DP-Workspace"
         private const val SESSION_COOKIE = "dp_session"
         private const val CSRF_COOKIE = "dp_csrf"
@@ -745,11 +744,6 @@ class WorkspaceSurfacesE2eTest {
 
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
 
-        private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
-        private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
-        private val CAROL_KEY = E2eAuth.generateKey("carol-key", arrayOf("read", "execute", "author"), ownerId = CAROL)
-        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author"), ownerId = ROOT)
-
         private fun sessionJwt(
             userId: String,
             email: String,
@@ -760,7 +754,7 @@ class WorkspaceSurfacesE2eTest {
             val workspaceClaim = activeWorkspace?.let { ""","active_workspace":"$it"""" } ?: ""
             val payload =
                 b64(
-                    """{"sub":"$userId","email":"$email","name":"Test User","scopes":["read","execute","author"],""" +
+                    """{"sub":"$userId","email":"$email","name":"Test User",""" +
                         """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(3600).epochSecond}$workspaceClaim}""",
                 )
             val signature =
@@ -813,7 +807,6 @@ class WorkspaceSurfacesE2eTest {
                     )
                     seedInUseContent(statement)
                 }
-                seedKeys(connection)
             }
         }
 
@@ -843,24 +836,6 @@ class WorkspaceSurfacesE2eTest {
                     ('$TPL_ACME_ID', 1, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 1', 'seed-hash', 'RELEASED', '$ALICE', '$ALICE', NOW())
                 """.trimIndent(),
             )
-        }
-
-        private fun seedKeys(connection: java.sql.Connection) {
-            val pins = mapOf(ALICE_KEY to WS_ACME, CAROL_KEY to WS_ACME, ADMIN_KEY to WS_ACME, BOB_KEY to WS_GLOBEX)
-            connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                .use { ps ->
-                    for ((key, workspace) in pins) {
-                        ps.setString(1, key.id)
-                        ps.setObject(2, UUID.fromString(key.ownerId))
-                        ps.setString(3, key.name)
-                        ps.setString(4, key.hash)
-                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                        ps.setObject(6, UUID.fromString(workspace))
-                        ps.addBatch()
-                    }
-                    ps.executeBatch()
-                }
         }
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */

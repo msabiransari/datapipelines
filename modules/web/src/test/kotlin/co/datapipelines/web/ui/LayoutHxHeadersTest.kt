@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceService
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -54,7 +53,6 @@ class LayoutHxHeadersTest {
                 UUID.randomUUID(),
                 "a@b.c",
                 "A",
-                setOf(Scope.AUTHOR),
                 AuthMethod.OIDC,
                 workspace = workspaceName?.let { WorkspaceContext(UUID.randomUUID(), it) },
             )

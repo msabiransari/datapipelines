@@ -5,7 +5,6 @@ import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.datasources.ColumnInfo
@@ -77,16 +76,12 @@ class DatasourcesControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(
-        scopes: Set<Scope> = setOf(Scope.AUTHOR),
-        superAdmin: Boolean = true,
-    ) {
+    private fun authenticate(superAdmin: Boolean = true) {
         val principal =
             AuthenticatedPrincipal(
                 userId,
                 "a@b.c",
                 "A",
-                scopes,
                 AuthMethod.OIDC,
                 workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.WORKSPACE_ADMIN),
                 superAdmin = superAdmin,

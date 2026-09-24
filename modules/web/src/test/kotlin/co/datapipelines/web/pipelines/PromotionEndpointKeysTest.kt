@@ -10,9 +10,9 @@ import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuditLogger
-import co.datapipelines.auth.Scope
-import co.datapipelines.auth.User
-import co.datapipelines.auth.UserService
+import co.datapipelines.auth.AuthMethod
+import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRecord
@@ -47,7 +47,6 @@ class PromotionEndpointKeysTest {
     private val inventory = mockk<PromotionInventoryService>()
     private val pipelineImport = mockk<PipelineImportService>(relaxed = true)
     private val templateImport = mockk<TemplateImportService>(relaxed = true)
-    private val userService = mockk<UserService>()
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val publishing = mockk<EndpointPublishService>(relaxed = true)
     private val endpointKeys = mockk<EndpointKeyService>(relaxed = true)
@@ -67,7 +66,6 @@ class PromotionEndpointKeysTest {
             inventory,
             pipelineImport,
             templateImport,
-            userService,
             auditLogger,
             // A template with no real manager: this suite never reaches a commit, and the two
             // paths it does reach are "refuse before the transaction" and "apply inside it".
@@ -112,7 +110,7 @@ class PromotionEndpointKeysTest {
         every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, "neighbour") } returns emptyList()
         every { publishing.get(any(), any()) } returns null
 
-        service.apply(batch("dev", entries))
+        service.apply(batch("dev", entries), peer)
 
         assertAll(
             { verify(exactly = 1) { endpointKeys.bind(any(), "dpk_AAAAAAAAAAAA", "/lending/v1/home") } },
@@ -125,7 +123,7 @@ class PromotionEndpointKeysTest {
         stubContext()
         every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, any()) } returns emptyList()
 
-        val refused = shouldThrow<DatapipelinesException> { service.apply(batch("ci-lending", "ci-trade")) }
+        val refused = shouldThrow<DatapipelinesException> { service.apply(batch("ci-lending", "ci-trade"), peer) }
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.PROMOTION_KEY_MISSING },
@@ -142,7 +140,7 @@ class PromotionEndpointKeysTest {
         stubContext()
         every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, any()) } returns emptyList()
 
-        shouldThrow<DatapipelinesException> { service.apply(batch("absent")) }
+        shouldThrow<DatapipelinesException> { service.apply(batch("absent"), peer) }
 
         verify(exactly = 0) { publishing.publish(any(), any(), any(), any(), any()) }
         verify(exactly = 0) { endpointKeys.bind(any(), any(), any()) }
@@ -154,7 +152,7 @@ class PromotionEndpointKeysTest {
         every { apiKeys.findByWorkspaceAndName(WORKSPACE_ID, "ci-lending") } returns listOf(key("dpk_AAAAAAAAAAAA", "ci-lending"))
         every { publishing.get(any(), any()) } returns null
 
-        service.apply(batch("ci-lending"))
+        service.apply(batch("ci-lending"), peer)
 
         verify(exactly = 1) { publishing.publish(any(), "/lending/home", "lending_home", 30, "") }
         verify(exactly = 1) { endpointKeys.bind(any(), "dpk_AAAAAAAAAAAA", "/lending/home") }
@@ -170,7 +168,7 @@ class PromotionEndpointKeysTest {
             listOf(key("dpk_AAAAAAAAAAAA", "shared"), key("dpk_BBBBBBBBBBBB", "shared"))
         every { publishing.get(any(), any()) } returns null
 
-        service.apply(batch("shared"))
+        service.apply(batch("shared"), peer)
 
         assertAll(
             { verify(exactly = 1) { endpointKeys.bind(any(), "dpk_AAAAAAAAAAAA", "/lending/home") } },
@@ -180,20 +178,20 @@ class PromotionEndpointKeysTest {
 
     private fun stubContext() {
         every { inventory.contextFor(WORKSPACE_NAME) } returns WorkspaceContext(WORKSPACE_ID, WORKSPACE_NAME)
-        every { userService.systemActor() } returns
-            User(
-                id = ACTOR,
-                email = "system@datapipelines.test",
-                displayName = "System",
-                provider = "system",
-                providerSubject = "system",
-                isActive = true,
-                isAdmin = true,
-                createdAt = Instant.EPOCH,
-                updatedAt = Instant.EPOCH,
-                lastLoginAt = null,
-            )
     }
+
+    /**
+     * The peer `PromotionServerKeyFilter` authenticated — the config-value credential, so the
+     * System actor (#215 B6), with the receiver's key role. The batch is applied AS this principal.
+     */
+    private val peer =
+        AuthenticatedPrincipal(
+            userId = ACTOR,
+            email = "system@datapipelines.test",
+            displayName = "System",
+            authMethod = AuthMethod.PROMOTION,
+            keyRole = KeyRole.PROMOTION_RECEIVER,
+        )
 
     private fun batch(vararg keyNames: String) =
         batch(
@@ -227,7 +225,6 @@ class PromotionEndpointKeysTest {
         userId = ACTOR,
         name = name,
         keyHash = "hash",
-        scopes = setOf(Scope.READ),
         isRevoked = false,
         createdAt = Instant.EPOCH,
         lastUsedAt = null,

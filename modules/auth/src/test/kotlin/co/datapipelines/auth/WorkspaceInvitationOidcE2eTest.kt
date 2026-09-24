@@ -110,7 +110,6 @@ class WorkspaceInvitationOidcE2eTest {
             userId = aliceId,
             email = "alice@datapipelines.co",
             displayName = "Alice",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             superAdmin = true,
         )

@@ -118,11 +118,10 @@
       <div class="app-card-b app-card-b-flush">
         <div class="app-rows">
           <div class="app-row">
-            <span class="app-row-k">Scopes</span>
-            <!-- §D: this row used to spread four bare comma-separated spans across the card.
-                 Scopes are a SET of grants, and a set reads as chips. -->
+            <span class="app-row-k">Role</span>
+            <!-- #215: the session's role in the active workspace — what it may do. Scopes are gone. -->
             <span class="app-chips">
-              <span class="app-chip app-chip-mono" th:each="s : ${sessionScopes}" th:text="${s}">read</span>
+              <span class="app-chip app-chip-mono" th:text="${sessionRole}">viewer</span>
             </span>
           </div>
           <div class="app-row">

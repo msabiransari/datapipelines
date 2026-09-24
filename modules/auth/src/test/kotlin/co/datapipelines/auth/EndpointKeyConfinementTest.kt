@@ -26,8 +26,8 @@ import java.util.UUID
  * that must NOT open.
  *
  * The complement matters as much: a `user` key must be unaffected by any of this. A confinement
- * that also narrowed ordinary keys would be a silent outage, so `a user key is untouched` drives
- * the same routes with the same scopes and expects them all to proceed.
+ * applies to the MCP key too since #215 B2 — it is confined to `/mcp` — so the MCP-key test drives
+ * the same routes and expects them all refused.
  */
 class EndpointKeyConfinementTest {
     private val mapper = ObjectMapper()
@@ -72,16 +72,19 @@ class EndpointKeyConfinementTest {
     }
 
     @Test
-    fun `a user key is untouched by the confinement`() {
-        // The complement: every route above, driven by an ordinary key, must still behave exactly
-        // as it did before 074. A confinement that also narrowed user keys is a silent outage.
-        authenticate(ApiKeyKind.USER, Scope.READ)
+    fun `the MCP key is confined to mcp - every route above refuses it (B2)`() {
+        // Until #215 slice (b) this was the complement — an ordinary key untouched by the
+        // endpoint confinement. The owner's B2 ruling ("MCP key should be only MCP") made the
+        // MCP key a confined kind too: every MVC route is off its surface, the endpoint key's
+        // included, and `/mcp` is its whole reach.
+        authenticate(ApiKeyKind.USER)
 
         assertAll(
-            (REACHABLE + REFUSED).map { path ->
-                { withClue(path) { invoke(path).first.shouldBeTrue() } }
+            (REACHABLE + REFUSED).filterNot { it == "/mcp" || it.startsWith("/mcp/") }.map { path ->
+                { withClue(path) { invoke(path).first.shouldBeFalse() } }
             },
         )
+        invoke("/mcp").first.shouldBeTrue()
     }
 
     @Test
@@ -99,16 +102,12 @@ class EndpointKeyConfinementTest {
         )
     }
 
-    private fun authenticate(
-        kind: ApiKeyKind,
-        vararg scopes: Scope,
-    ) {
+    private fun authenticate(kind: ApiKeyKind) {
         val principal =
             AuthenticatedPrincipal(
                 userId = UUID.randomUUID(),
                 email = "a@b.com",
                 displayName = "A",
-                scopes = scopes.toSet(),
                 authMethod = AuthMethod.API_KEY,
                 keyId = "dpk_ABCDEFGHIJKL",
                 keyKind = kind,

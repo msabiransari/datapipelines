@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
@@ -32,7 +31,7 @@ import java.util.UUID
  */
 class DatasourceSchemaToolsTest {
     private val introspector = mockk<SchemaIntrospector>()
-    private val authorCtx = McpFixtures.ctx(Scope.AUTHOR)
+    private val authorCtx = McpFixtures.ctx()
 
     /** A gate registry where each of [names] is a GLOBAL datasource (visible to every key). */
     private fun gateRegistry(vararg names: String) = FakeDatasourceRegistry(names.map { McpFixtures.datasource(name = it) })

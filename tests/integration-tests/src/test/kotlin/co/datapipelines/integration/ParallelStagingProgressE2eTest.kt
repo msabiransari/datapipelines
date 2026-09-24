@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
@@ -133,7 +134,8 @@ class ParallelStagingProgressE2eTest {
     private fun executeRequest(pipelineId: String): HttpRequest =
         HttpRequest
             .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+            .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
             .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream")
             .POST(HttpRequest.BodyPublishers.ofString("""{"parameters": {}}"""))
@@ -173,7 +175,7 @@ class ParallelStagingProgressE2eTest {
         val detail =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId")
                 .thenReturn()
@@ -258,18 +260,6 @@ class ParallelStagingProgressE2eTest {
                     """.trimIndent(),
                 )
             }
-            connection
-                .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, '$DEFAULT_WORKSPACE') ON CONFLICT (id) DO NOTHING",
-                ).use { ps ->
-                    ps.setString(1, ADMIN_KEY.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, ADMIN_KEY.name)
-                    ps.setString(4, ADMIN_KEY.hash)
-                    ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                    ps.execute()
-                }
         }
     }
 
@@ -277,7 +267,7 @@ class ParallelStagingProgressE2eTest {
         val existing =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/datasources/$DATASOURCE")
                 .then()
@@ -286,7 +276,7 @@ class ParallelStagingProgressE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$DATASOURCE", "display_name": "Parallel source", "dialect": "POSTGRES",
@@ -307,7 +297,7 @@ class ParallelStagingProgressE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(
                     """
                     {"id": "$id", "dialect": "$dialect", "display_name": "$id",
@@ -343,7 +333,7 @@ class ParallelStagingProgressE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(body)
                 .`when`()
                 .post("/api/v1/pipelines")
@@ -355,10 +345,8 @@ class ParallelStagingProgressE2eTest {
     }
 
     companion object {
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val DATASOURCE = "pg-parallel"
         private const val ADMIN_EMAIL = "e2e-parallel-admin@datapipelines.test"
-        private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
 
         /** Generous against a real runtime of seconds — it can only fire on a stream that stopped. */
         private const val SSE_BUDGET_MINUTES = 3L
@@ -376,7 +364,10 @@ class ParallelStagingProgressE2eTest {
         private const val PROGRESS_POLL_MS = 25L
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-parallel-admin-key", arrayOf("read", "execute", "author"))
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the session (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "$ADMIN_EMAIL")
 
         private var authSeeded = false
         private val authLock = Any()
@@ -414,7 +405,7 @@ class ParallelStagingProgressE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
             registry.add("datapipelines.auth.oidc.providers[0].name") { "google" }

@@ -12,10 +12,10 @@ import org.springframework.security.web.csrf.MissingCsrfTokenException
  * Maps Spring Security access-denied outcomes to the §13.7 envelope.
  *
  * A CSRF failure is reported as `auth.csrf.invalid` (403) with `details.reason` =
- * `missing` | `mismatch` (auth.md §9) — **never** as `auth.scope.insufficient`
+ * `missing` | `mismatch` (auth.md §9) — **never** as the generic authorization refusal
  * (AUTH-SEC-1): the whole [CsrfException] hierarchy is matched, not just the two
  * concrete subclasses, so a new Spring CSRF exception type cannot silently fall
- * through to the scope branch.
+ * through to the other branch.
  *
  * `missing` vs `mismatch` is decided by what the request actually presented rather
  * than by which exception type Spring chose: Spring raises
@@ -23,10 +23,10 @@ import org.springframework.security.web.csrf.MissingCsrfTokenException
  * that sent the `dp_csrf` cookie but no `DP-CSRF-Token` header arrives as an
  * `InvalidCsrfTokenException` even though the caller sent no token at all.
  *
- * Anything else is [AccessDeniedWithoutScopeException] — the §13.7 code with honest,
- * empty details. Scope denials that DO know their requirement come from
- * [ScopeInterceptor], which raises [ScopeInsufficientException] with the real
- * `required`/`held` pair; this handler never invents one (security NEW-7).
+ * Anything else is [AccessDeniedUndeclaredException] — `auth.permission.undeclared` with honest,
+ * empty details. Refusals that DO know their requirement come from [ScopeInterceptor] through
+ * [ScopeMatrix.allowed], with the real `required`/`held` pair; this handler never invents one
+ * (security NEW-7).
  */
 class AuthAccessDeniedHandler(
     private val errorWriter: AuthErrorWriter,
@@ -58,7 +58,7 @@ class AuthAccessDeniedHandler(
             clientAddressResolver.clientAddressOf(request),
             accessDeniedException.javaClass.simpleName,
         )
-        errorWriter.write(request, response, AccessDeniedWithoutScopeException())
+        errorWriter.write(request, response, AccessDeniedUndeclaredException())
     }
 
     private fun csrfReason(

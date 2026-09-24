@@ -1,7 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
-import de.mkammerer.argon2.Argon2Factory
+import co.datapipelines.integration.E2eSession.asSession
 import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -88,7 +88,7 @@ class TemplateAddressingE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(bodyV1)
                 .`when`()
                 .post("/api/v1/templates")
@@ -104,7 +104,7 @@ class TemplateAddressingE2eTest {
         return given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", draftHash)
             .body("""{"name": "$name"}""")
             .`when`()
@@ -122,7 +122,7 @@ class TemplateAddressingE2eTest {
     private fun assertBothGetShapes(name: String) {
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .queryParam("name", name)
             .`when`()
             .get("/api/v1/templates")
@@ -133,7 +133,7 @@ class TemplateAddressingE2eTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/templates")
             .then()
@@ -143,7 +143,7 @@ class TemplateAddressingE2eTest {
         // the single-resource shape keeps template.not_found — never an empty list.
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .queryParam("name", "acme/finance/nonexistent")
             .`when`()
             .get("/api/v1/templates")
@@ -156,7 +156,7 @@ class TemplateAddressingE2eTest {
     private fun assertVersionedRead(name: String) {
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .queryParam("name", name)
             .queryParam("version", 1)
             .`when`()
@@ -175,7 +175,7 @@ class TemplateAddressingE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", releasedHash)
             .body(bodyV1.replace("SELECT ${'$'}{x} AS v", "SELECT ${'$'}{x} AS v, 'v2' AS rev"))
             .`when`()
@@ -195,7 +195,7 @@ class TemplateAddressingE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", draftHash)
             .body("""{"name": "$name"}""")
             .`when`()
@@ -211,7 +211,7 @@ class TemplateAddressingE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body("""{"name": "$name", "version": 2, "context": {"x": 42}}""")
             .`when`()
             .post("/api/v1/templates/render")
@@ -221,27 +221,27 @@ class TemplateAddressingE2eTest {
     }
 
     /**
-     * delete — DELETE /api/v1/templates?name=<path>; a KEY gets the 101 session gate.
+     * delete — DELETE /api/v1/templates?name=<path>.
      *
-     * 101: the entity purge is session-only, so the key-driven leg proves the NEW gate
-     * (auth.session.required) and that nothing was purged behind it. The 204 path needs a
-     * browser session and is the UI round's (102); the route's name-addressability was
-     * proven pre-101 and is unchanged by this round.
+     * The session reaches the purge (the key-driven leg that proved 101's session gate is gone
+     * with #215 B2: no key reaches REST at all), and the purge RESOLVES the hierarchical name —
+     * then refuses, because the template has released versions: `template.version.last_release`
+     * (409), not a 404. Nothing is purged behind the refusal, which the read below proves.
      */
     private fun deleteTemplate(name: String) {
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .queryParam("name", name)
             .`when`()
             .delete("/api/v1/templates")
             .then()
-            .statusCode(403)
-            .body("error.code", equalTo("auth.session.required"))
+            .statusCode(409)
+            .body("error.code", equalTo("template.version.last_release"))
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .queryParam("name", name)
             .`when`()
             .get("/api/v1/templates")
@@ -258,7 +258,7 @@ class TemplateAddressingE2eTest {
         given()
             .port(port)
             .urlEncodingEnabled(false)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/templates/acme%2Ffinance%2Freport")
             .then()
@@ -268,7 +268,7 @@ class TemplateAddressingE2eTest {
         // silent match on some leftover /{id} mapping.
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/templates/acme")
             .then()
@@ -290,7 +290,7 @@ class TemplateAddressingE2eTest {
         ).forEach { path ->
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .request(
                     when {
@@ -303,14 +303,14 @@ class TemplateAddressingE2eTest {
         }
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .delete("/api/v1/templates/acme")
             .then()
             .statusCode(404)
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .put("/api/v1/templates/acme")
             .then()
@@ -320,14 +320,14 @@ class TemplateAddressingE2eTest {
         // /templates/{id}/editor and /partials/templates/{id}/versions/{v}/render are gone too.
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/templates/acme/editor")
             .then()
             .statusCode(404)
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .post("/partials/templates/acme/versions/1/render")
             .then()
@@ -344,7 +344,7 @@ class TemplateAddressingE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "scratch", "dialect": "POSTGRES", "display_name": "Scratch",
@@ -360,7 +360,7 @@ class TemplateAddressingE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"schema_version": 1, "name": "scratch", "display_name": "Scratch",
@@ -386,7 +386,7 @@ class TemplateAddressingE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "test/scratch", "dialect": "POSTGRES", "display_name": "Scratch",
@@ -399,15 +399,6 @@ class TemplateAddressingE2eTest {
             .body("data.id", equalTo("test/scratch"))
     }
 
-    /** A generated `dpk_<id>.<secret>` key and its stored Argon2id hash (auth.md §7.1/§7.2). */
-    private class SeededKey(
-        val name: String,
-        val scopes: Array<out String>,
-        val id: String,
-        val plaintext: String,
-        val hash: String,
-    )
-
     companion object {
         fun seedAuthRows() {
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
@@ -419,53 +410,17 @@ class TemplateAddressingE2eTest {
                         """.trimIndent(),
                     )
                 }
-                connection
-                    .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                            " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
-                    ).use { ps ->
-                        ps.setString(1, ADMIN_KEY.id)
-                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                        ps.setString(3, ADMIN_KEY.name)
-                        ps.setString(4, ADMIN_KEY.hash)
-                        ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                        ps.executeUpdate()
-                    }
             }
         }
 
         private const val SECRET_BYTES = 32
-        private const val API_KEY_HEADER = "DP-API-Key"
-        private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val random = SecureRandom()
 
-        // Argon2id with auth's exact parameters (SecretHasher.kt: 2 / 19 456 / 1) on the same
-        // pinned library — the TracerBulletE2eTest pattern, including the char[] wipe.
-        private val argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id)
-
-        private fun argon2Hash(raw: String): String {
-            val chars = raw.toCharArray()
-            return try {
-                argon2.hash(2, 19_456, 1, chars)
-            } finally {
-                argon2.wipeArray(chars)
-            }
-        }
-
-        private val ADMIN_KEY =
-            run {
-                val id = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-                val plaintext = id + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-                SeededKey(
-                    name = "e2e-043-key",
-                    scopes = arrayOf("read", "execute", "author"),
-                    id = id,
-                    plaintext = plaintext,
-                    hash = argon2Hash(plaintext),
-                )
-            }
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret`; REST is a session's surface (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-043@datapipelines.test")
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedE2e.postgres
@@ -494,7 +449,7 @@ class TemplateAddressingE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
             listOf("google", "microsoft").forEachIndexed { index, name ->

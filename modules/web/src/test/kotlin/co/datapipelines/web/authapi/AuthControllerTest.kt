@@ -10,7 +10,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
-import co.datapipelines.auth.Scope
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
@@ -22,14 +22,16 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import java.time.Instant
 import java.util.UUID
 
 /**
- * §16 over mocked services: own-key management (including the scopes-⊆-caller guard surfacing as
- * 403), the `/auth/me` shape, and the admin user mutations returning the updated record.
+ * §16 over mocked services: own-key management, the create request's role (never scopes, #215),
+ * the `/auth/me` shape, and the admin user mutations returning the updated record — or the
+ * not-found a non-person row gets (A.6).
  */
 class AuthControllerTest {
     private val apiKeyService = mockk<ApiKeyService>()
@@ -55,7 +57,6 @@ class AuthControllerTest {
     fun clearContext() = SecurityContextHolder.clearContext()
 
     private fun authenticate(
-        scopes: Set<Scope>,
         method: AuthMethod = AuthMethod.API_KEY,
         keyId: String? = "dpk_abc",
     ) {
@@ -64,7 +65,6 @@ class AuthControllerTest {
                 userId,
                 "a@b.c",
                 "Alice",
-                scopes,
                 method,
                 keyId,
                 workspace = WorkspaceContext(workspaceId, "acme"),
@@ -81,7 +81,6 @@ class AuthControllerTest {
         userId = userId,
         name = "agent",
         keyHash = "hash",
-        scopes = setOf(Scope.READ),
         isRevoked = revoked,
         createdAt = Instant.parse("2026-08-01T00:00:00Z"),
         lastUsedAt = null,
@@ -108,8 +107,9 @@ class AuthControllerTest {
 
     @Test
     fun `api-keys lists ALL the caller's keys, revoked included, and never a hash or secret`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         every { apiKeyRepository.findByUser(userId) } returns listOf(key("dpk_live", false), key("dpk_dead", true))
+        every { userService.snapshot(userId) } returns user(userId)
 
         val items = controller.listKeys().data
 
@@ -121,16 +121,30 @@ class AuthControllerTest {
         }
     }
 
+    /**
+     * #215 §16.1: the create response names the key's ROLE, the IDENTITY it acts as and the
+     * person who CREATED it — three facts, since an `endpoint` key is no longer its creator.
+     */
     @Test
-    fun `create returns the plaintext exactly once`() {
-        authenticate(setOf(Scope.AUTHOR))
-        every { apiKeyService.issue(any(), userId, "ci", emptySet(), any(), null, ApiKeyKind.ENDPOINT) } returns
-            IssuedApiKey(key("dpk_new", false).copy(kind = ApiKeyKind.ENDPOINT, scopes = emptySet()), "dpk_new.secret")
+    fun `create returns the plaintext exactly once, with the role, the identity and the creator`() {
+        authenticate()
+        val identity = UUID.randomUUID()
+        every { apiKeyService.issue(any(), "ci", any(), null, ApiKeyKind.ENDPOINT) } returns
+            IssuedApiKey(
+                key("dpk_new", false).copy(kind = ApiKeyKind.ENDPOINT, role = KeyRole.API_CALLER, userId = identity, createdBy = userId),
+                "dpk_new.secret",
+            )
+        every { userService.snapshot(identity) } returns user(identity).copy(displayName = "ci")
 
         val data = controller.createKey(CreateApiKeyRequest(name = "ci", kind = "endpoint")).data
-        data["key"] shouldBe "dpk_new.secret"
-        data["kind"] shouldBe "endpoint"
-        data["scopes"] shouldBe emptyList<String>()
+        assertAll(
+            { data["key"] shouldBe "dpk_new.secret" },
+            { data["kind"] shouldBe "endpoint" },
+            { data["role"] shouldBe "api_caller" },
+            { data["identity"] shouldBe mapOf("id" to identity.toString(), "display_name" to "ci") },
+            { data["created_by"] shouldBe userId.toString() },
+            { data.containsKey("scopes") shouldBe false },
+        )
     }
 
     /**
@@ -140,56 +154,64 @@ class AuthControllerTest {
      */
     @Test
     fun `an absent or user kind is the not-mintable refusal, and no key is issued`() {
-        authenticate(setOf(Scope.AUTHOR))
+        authenticate()
 
-        val defaulted =
-            shouldThrow<DatapipelinesException> {
-                controller.createKey(CreateApiKeyRequest(name = "claude", scopes = listOf("read")))
-            }
+        val defaulted = shouldThrow<DatapipelinesException> { controller.createKey(CreateApiKeyRequest(name = "claude")) }
         defaulted.code shouldBe "auth.key_kind_not_mintable"
 
         val explicit =
-            shouldThrow<DatapipelinesException> {
-                controller.createKey(CreateApiKeyRequest(name = "claude", kind = "user", scopes = listOf("read")))
-            }
+            shouldThrow<DatapipelinesException> { controller.createKey(CreateApiKeyRequest(name = "claude", kind = "user")) }
         explicit.code shouldBe "auth.key_kind_not_mintable"
-        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any()) }
     }
 
+    /** #215 PK8: scopes are gone — a request that still sends them is refused BY NAME, before any mint. */
     @Test
-    fun `scopes on a scopeless kind are refused before any mint`() {
-        authenticate(setOf(Scope.AUTHOR))
+    fun `a request that still sends scopes is refused by name before any mint`() {
+        authenticate()
 
-        // The funnel owns this refusal (§7.7): an endpoint key's authority is its bindings,
-        // and a scope on it is a mental model to correct out loud, not to drop quietly.
         val error =
             shouldThrow<DatapipelinesException> {
-                controller.createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", scopes = listOf("admin")))
+                controller.createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", scopes = listOf("author")))
             }
-        error.code shouldBe "endpoint.key_kind_refused"
-        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any(), any()) }
+        error.code shouldBe "pipeline.execution.invalid_parameter_type"
+        error.details["field"] shouldBe "scopes"
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun `an unknown scope token is a 400, never minted`() {
-        authenticate(setOf(Scope.ADMIN))
-        shouldThrow<Exception> { controller.createKey(CreateApiKeyRequest(name = "x", scopes = listOf("superuser"))) }
-        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any()) }
+    fun `an unknown role token is a 400, and a role the kind cannot hold is refused - neither is minted`() {
+        authenticate()
+
+        val unknown =
+            shouldThrow<DatapipelinesException> {
+                controller.createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", role = "admin"))
+            }
+        unknown.code shouldBe "pipeline.execution.invalid_parameter_type"
+
+        val mismatched =
+            shouldThrow<DatapipelinesException> {
+                controller.createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", role = "promotion_receiver"))
+            }
+        mismatched.code shouldBe "endpoint.key_kind_refused"
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `me returns the principal shape`() {
-        authenticate(setOf(Scope.EXECUTE))
+        authenticate()
         val data = controller.me().data
         data["user_id"] shouldBe userId.toString()
-        data["scopes"] shouldBe listOf("execute")
+        // #215: the role the principal is judged as, never a scope set.
+        data["role"] shouldBe "viewer"
+        data.containsKey("scopes") shouldBe false
         data["auth_method"] shouldBe "API_KEY"
         data["key_id"] shouldBe "dpk_abc"
     }
 
     @Test
-    fun `revoke is owner-scoped and idempotent`() {
-        authenticate(setOf(Scope.READ))
+    fun `revoke is creator-scoped and idempotent`() {
+        authenticate()
         every { apiKeyService.revoke("dpk_x", userId) } returns false
         controller.revokeKey("dpk_x")
         verify(exactly = 1) { apiKeyService.revoke("dpk_x", userId) }
@@ -197,22 +219,46 @@ class AuthControllerTest {
 
     @Test
     fun `user admin mutations return the updated record, and an unknown user is 404`() {
-        authenticate(setOf(Scope.ADMIN))
+        authenticate()
         val target = UUID.randomUUID()
-        every { userService.snapshot(target) } returnsMany listOf(user(target, admin = false), user(target, admin = true))
+        every { userService.administrableUser(target) } returnsMany listOf(user(target, admin = false), user(target, admin = true))
         every { userService.grantAdmin(target, userId) } returns true
 
         val response = controller.grantAdmin(target)
         response.statusCode.value() shouldBe 200
 
         val unknown = UUID.randomUUID()
-        every { userService.snapshot(unknown) } returns null
+        every { userService.administrableUser(unknown) } returns null
         controller.deactivate(unknown).statusCode.value() shouldBe 404
+    }
+
+    /**
+     * #215 A.6 (gate 11): a key's identity and the System row are not people — every user-admin
+     * route answers the unknown-user 404 for them, looked up BEFORE the mutation, so nothing is
+     * flipped. `administrableUser` is the one lookup (human rows only); the service guards again.
+     */
+    @Test
+    fun `every user-admin route answers 404 for a non-person row, before any mutation`() {
+        authenticate()
+        val identity = UUID.randomUUID()
+        every { userService.administrableUser(identity) } returns null
+
+        assertAll(
+            { controller.getUser(identity).statusCode.value() shouldBe 404 },
+            { controller.deactivate(identity).statusCode.value() shouldBe 404 },
+            { controller.activate(identity).statusCode.value() shouldBe 404 },
+            { controller.grantAdmin(identity).statusCode.value() shouldBe 404 },
+            { controller.revokeAdmin(identity).statusCode.value() shouldBe 404 },
+        )
+        verify(exactly = 0) { userService.deactivate(any(), any()) }
+        verify(exactly = 0) { userService.activate(any(), any()) }
+        verify(exactly = 0) { userService.grantAdmin(any(), any()) }
+        verify(exactly = 0) { userService.revokeAdmin(any(), any()) }
     }
 
     @Test
     fun `user listing paginates`() {
-        authenticate(setOf(Scope.ADMIN))
+        authenticate()
         every { userService.search("", 0, 3) } returns listOf(user(UUID.randomUUID()), user(UUID.randomUUID()), user(UUID.randomUUID()))
         val data = controller.listUsers(q = null, offset = 0, limit = 2).data
         data.items.size shouldBe 2

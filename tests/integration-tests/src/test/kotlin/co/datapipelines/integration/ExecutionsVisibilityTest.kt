@@ -29,19 +29,24 @@ import javax.crypto.spec.SecretKeySpec
  * every surface the runs are read through — the REST list and read, the executions screen,
  * and the three MCP tools.
  *
- * The fixture is three runs of one pipeline in one workspace: Alice's (an author, a session
- * run), Vera's (a viewer, a session run), and a run started by a PUBLISHED ENDPOINT whose key
- * Alice owns (`executed_by = alice`, `executed_by_key_kind = endpoint`). The record's §2 row
- * then says, and this suite holds it to:
+ * The fixture is four runs of one pipeline in one workspace: Alice's (an author, a session
+ * run), Vera's (a viewer, a session run), a run a PUBLISHED ENDPOINT started before V34 with a
+ * key Alice owned (`executed_by = alice`, `executed_by_key_kind = endpoint` — past runs keep
+ * their attribution, PK9), and one started since #215 by an API key that acts as its OWN
+ * identity (`executed_by` = the key's `service` user, record C5). The record's §2 row then
+ * says, and this suite holds it to:
  *
  * - **own**: Alice lists exactly her own session run; Vera's and the endpoint's are not hers
- *   — the endpoint's not even though she owns the key (the run is the endpoint's, D11);
+ *   — the endpoint's not even though she owns the key (the run is the endpoint's, D11) — and
+ *   neither is the identity's, though Wanda created that key;
+ * - **the key's own (#215 A12)**: the API key reads the run it started, and only that one;
  * - the **404 rule**: another member's run is *not found*, never 403, so a run's existence is
  *   not an oracle (auth.md §11A.1);
  * - **all**: a workspace admin lists all three, the endpoint run included, and reads Vera's;
  * - **none**: a promoter is refused the list, the read, the screen and the tools by ROLE
  *   (`auth.role_required`) — before any row is consulted;
- * - the **MCP twins** answer identically for the same people's keys.
+ * - the **MCP twins** answer the same way for the same people's keys, except that an admin's MCP
+ *   key is capped at author (#215 PK4, record C3) and so sees only its own runs over MCP.
  *
  * Beside `WorkspaceSurfacesE2eTest`, whose session-JWT and seeding shape this follows.
  */
@@ -88,7 +93,7 @@ class ExecutionsVisibilityTest {
     @Test
     fun `a workspace admin lists every run of the workspace, the endpoint-key run included, and reads any of them`() {
         ensureSeeded()
-        listedFor(WANDA) shouldContainExactlyInAnyOrder listOf(RUN_ALICE, RUN_VERA, RUN_ENDPOINT)
+        listedFor(WANDA) shouldContainExactlyInAnyOrder listOf(RUN_ALICE, RUN_VERA, RUN_ENDPOINT, RUN_IDENTITY)
         session(WANDA).get("/api/v1/executions/$RUN_VERA").then().statusCode(200)
         session(WANDA)
             .get("/api/v1/executions/$RUN_ENDPOINT")
@@ -100,6 +105,27 @@ class ExecutionsVisibilityTest {
             .get("/executions")
             .then()
             .statusCode(200)
+    }
+
+    @Test
+    fun `an API key's run is its identity's - the key reads it, its creator does not, an admin does`() {
+        ensureSeeded()
+        // C5: attributed to the key's own identity, so it is nobody's OWN run but the key's —
+        // not even Wanda's, who created the key (she sees it as an admin); the 404 rule, never 403.
+        session(ALICE).get("/api/v1/executions/$RUN_IDENTITY").then().statusCode(404)
+        session(WANDA)
+            .get("/api/v1/executions/$RUN_IDENTITY")
+            .then()
+            .statusCode(200)
+            .body("data.executed_by", Matchers.equalTo(KEY_IDENTITY))
+        // A12: api_caller holds execution.read for the runs the key started — this one…
+        withKey(API_KEY.plaintext)
+            .get("/api/v1/executions/$RUN_IDENTITY")
+            .then()
+            .statusCode(200)
+            .body("data.executed_by_key_kind", Matchers.equalTo("endpoint"))
+        // …and no other: another run is not found, never 403.
+        withKey(API_KEY.plaintext).get("/api/v1/executions/$RUN_ALICE").then().statusCode(404)
     }
 
     @Test
@@ -124,17 +150,18 @@ class ExecutionsVisibilityTest {
     }
 
     @Test
-    fun `the MCP tools answer the same way for the same people's keys`() {
+    fun `the MCP tools answer the same way for the same people's keys - an admin's key capped at author`() {
         ensureSeeded()
         // executions_list: own for the author, all for the admin, refused for the promoter.
         toolIds(tool("executions_list", ALICE_KEY.plaintext)) shouldContainExactlyInAnyOrder listOf(RUN_ALICE)
-        toolIds(tool("executions_list", WANDA_KEY.plaintext)) shouldContainExactlyInAnyOrder listOf(RUN_ALICE, RUN_VERA, RUN_ENDPOINT)
+        // PK4 / C3: Wanda's MCP key is capped at author, so over MCP she sees her OWN runs (none);
+        // the admin's all-runs view is her session's.
+        toolIds(tool("executions_list", WANDA_KEY.plaintext)) shouldContainExactlyInAnyOrder emptyList()
         tool("executions_list", PAM_KEY.plaintext) shouldContain "auth.key_issuer_role_lost"
         // executions_get: the 404 rule for another member's run; the admin reads it.
         tool("executions_get", ALICE_KEY.plaintext, """{"execution_id":"$RUN_VERA"}""") shouldContain "execution_not_found"
         tool("executions_get", ALICE_KEY.plaintext, """{"execution_id":"$RUN_ENDPOINT"}""") shouldContain "execution_not_found"
-        unescape(tool("executions_get", WANDA_KEY.plaintext, """{"execution_id":"$RUN_VERA"}""")) shouldContain
-            "\"execution_id\":\"$RUN_VERA\""
+        tool("executions_get", WANDA_KEY.plaintext, """{"execution_id":"$RUN_VERA"}""") shouldContain "execution_not_found"
         tool("executions_get", PAM_KEY.plaintext, """{"execution_id":"$RUN_ALICE"}""") shouldContain "auth.key_issuer_role_lost"
         // executions_get_result: the same door, on the result.
         tool("executions_get_result", ALICE_KEY.plaintext, """{"execution_id":"$RUN_VERA"}""") shouldContain "execution_not_found"
@@ -178,6 +205,12 @@ class ExecutionsVisibilityTest {
 
     private fun unescape(body: String): String = body.replace("\\\"", "\"")
 
+    private fun withKey(key: String): RequestSpecification =
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, key)
+            .accept("application/json")
+
     private fun session(userId: String): RequestSpecification =
         given()
             .port(port)
@@ -204,10 +237,15 @@ class ExecutionsVisibilityTest {
         private const val RUN_ALICE = "e1000000-0000-0000-0000-000000000006"
         private const val RUN_VERA = "e2000000-0000-0000-0000-000000000006"
         private const val RUN_ENDPOINT = "e3000000-0000-0000-0000-000000000006"
+        private const val RUN_IDENTITY = "e4000000-0000-0000-0000-000000000006"
+        private const val KEY_IDENTITY = "5e500000-0000-0000-0000-000000000006"
 
-        private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
-        private val WANDA_KEY = E2eAuth.generateKey("wanda-key", arrayOf("read", "execute", "author"), ownerId = WANDA)
-        private val PAM_KEY = E2eAuth.generateKey("pam-key", arrayOf("read", "execute", "author"), ownerId = PAM)
+        private val ALICE_KEY = E2eAuth.generateKey("alice-key", ownerId = ALICE)
+        private val WANDA_KEY = E2eAuth.generateKey("wanda-key", ownerId = WANDA)
+        private val PAM_KEY = E2eAuth.generateKey("pam-key", ownerId = PAM)
+
+        /** An API (`endpoint`) key acting as its own identity, created by Wanda (#215 B4). */
+        private val API_KEY = E2eAuth.generateKey("report-caller", ownerId = KEY_IDENTITY)
 
         private val EXECUTION_ID = Regex("\"execution_id\"\\s*:\\s*\"([0-9a-f-]{36})\"")
 
@@ -223,7 +261,7 @@ class ExecutionsVisibilityTest {
             val exp = now.plusSeconds(TOKEN_TTL_SECONDS).epochSecond
             val payload =
                 b64(
-                    """{"sub":"$userId","email":"$email","name":"Test User","scopes":[],""" +
+                    """{"sub":"$userId","email":"$email","name":"Test User",""" +
                         """"iss":"datapipelines","iat":${now.epochSecond},"exp":$exp,"active_workspace":"acme"}""",
                 )
             val signature =
@@ -261,6 +299,11 @@ class ExecutionsVisibilityTest {
                     ('$WANDA', '$WANDA@acme.test', 'Wanda', 'test', 'wanda-sub', TRUE, FALSE),
                     ('$PAM', '$PAM@acme.test', 'Pam', 'test', 'pam-sub', TRUE, FALSE)
                 """.trimIndent(),
+                // The API key's identity, built the way V34 and ApiKeyService build one (record §3.3).
+                """
+                INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES
+                    ('$KEY_IDENTITY', '${API_KEY.id}@keys.invalid', 'report-caller', 'key', '${API_KEY.id}', TRUE, FALSE, 'service')
+                """.trimIndent(),
                 """
                 INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
                     ('$WS_ACME', '$ALICE', 'author'),
@@ -288,21 +331,30 @@ class ExecutionsVisibilityTest {
                     ('$RUN_ALICE', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', NULL, 'UI', '$RUN_ALICE', NOW(), NOW(), 12),
                     ('$RUN_VERA', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$VERA', NULL, 'UI', '$RUN_VERA', NOW(), NOW(), 12),
                     ('$RUN_ENDPOINT', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$ALICE', 'endpoint', 'ENDPOINT',
-                     '$RUN_ENDPOINT', NOW(), NOW(), 12)
+                     '$RUN_ENDPOINT', NOW(), NOW(), 12),
+                    ('$RUN_IDENTITY', '$PIPE_ID', 1, 'SUCCESS', '{}'::jsonb, '$KEY_IDENTITY', 'endpoint', 'ENDPOINT',
+                     '$RUN_IDENTITY', NOW(), NOW(), 12)
                 """.trimIndent(),
             )
 
         private fun insertKeys(connection: Connection) {
             connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                .use { ps ->
-                    listOf(ALICE_KEY, WANDA_KEY, PAM_KEY).forEach { key ->
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ).use { ps ->
+                    // The three MCP keys act as their members (created_by = user_id, no role);
+                    // the API key acts as its identity and was created by Wanda.
+                    listOf(ALICE_KEY, WANDA_KEY, PAM_KEY, API_KEY).forEach { key ->
+                        val apiKey = key === API_KEY
                         ps.setString(1, key.id)
                         ps.setObject(2, UUID.fromString(key.ownerId))
-                        ps.setString(3, key.name)
-                        ps.setString(4, key.hash)
-                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
+                        ps.setObject(3, UUID.fromString(if (apiKey) WANDA else key.ownerId))
+                        ps.setString(4, key.name)
+                        ps.setString(5, key.hash)
                         ps.setObject(6, UUID.fromString(WS_ACME))
+                        ps.setString(7, if (apiKey) "endpoint" else "user")
+                        ps.setString(8, if (apiKey) "api_caller" else null)
                         ps.addBatch()
                     }
                     ps.executeBatch()

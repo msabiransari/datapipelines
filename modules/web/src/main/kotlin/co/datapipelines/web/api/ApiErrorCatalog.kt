@@ -79,7 +79,8 @@ object ApiErrorCatalog {
             // API key, so it gets its own family rather than borrowing `auth.api_key.`.
             "auth.promotion." to HttpStatus.UNAUTHORIZED,
             "auth.session." to HttpStatus.UNAUTHORIZED,
-            "auth.scope." to HttpStatus.FORBIDDEN,
+            // #215 — the undeclared-permission refusal (was `auth.scope.insufficient`, retired).
+            "auth.permission." to HttpStatus.FORBIDDEN,
             "auth.csrf." to HttpStatus.FORBIDDEN,
             "auth.login." to HttpStatus.FORBIDDEN,
             "auth.password." to HttpStatus.FORBIDDEN,
@@ -234,12 +235,9 @@ object ApiErrorCatalog {
             // `auth.` code with no dotted family, so it is wired explicitly like the two 403s
             // above rather than resolving to the catalog's 500 for an unknown code.
             co.datapipelines.auth.AuthErrorCodes.PRINCIPAL_DEACTIVATED to HttpStatus.UNAUTHORIZED,
-            // The credential making the request is fine; the requested scope is not one keys
-            // have (O-2) — a 400, like `auth.api_key.expiry_invalid` and for the same reason.
-            co.datapipelines.auth.AuthErrorCodes.KEY_SCOPE_UNAVAILABLE to HttpStatus.BAD_REQUEST,
-            // 179 (D16) — a `user` key is minted by the login hook, never on demand. The same
-            // 400 shape as the scope refusal beside it: the credential is fine, the KIND is
-            // not mintable on a request surface.
+            // 179 (D16) — a `user` key is minted by the login hook, never on demand. A 400 like
+            // `auth.api_key.expiry_invalid`: the credential is fine, the KIND is not mintable on
+            // a request surface.
             co.datapipelines.auth.AuthErrorCodes.KEY_KIND_NOT_MINTABLE to HttpStatus.BAD_REQUEST,
             // D-R7: an ungranted datasource is INVISIBLE, so its refusal is the not-found
             // status, not the datasource family's default.

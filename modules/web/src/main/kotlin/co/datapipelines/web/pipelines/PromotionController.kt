@@ -3,6 +3,7 @@ package co.datapipelines.web.pipelines
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.web.api.ApiResponse
+import co.datapipelines.web.api.currentPrincipal
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -57,5 +58,5 @@ class PromotionController(
     @RequiredScope(Permission.PROMOTION_PUSH)
     fun push(
         @RequestBody batch: PromotionWire.Batch,
-    ): ApiResponse<PromotionWire.Applied> = ApiResponse.of(receiveService.apply(batch))
+    ): ApiResponse<PromotionWire.Applied> = ApiResponse.of(receiveService.apply(batch, currentPrincipal()))
 }

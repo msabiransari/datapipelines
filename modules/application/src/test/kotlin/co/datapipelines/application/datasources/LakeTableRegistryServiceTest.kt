@@ -2,7 +2,6 @@ package co.datapipelines.application.datasources
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
@@ -74,7 +73,6 @@ class LakeTableRegistryServiceTest {
             userId,
             "agent@example.test",
             "Agent",
-            setOf(Scope.AUTHOR),
             AuthMethod.API_KEY,
             workspace = WorkspaceContext(workspaceId, "acme"),
         )

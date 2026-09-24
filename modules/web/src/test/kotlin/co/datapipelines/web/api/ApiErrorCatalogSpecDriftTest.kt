@@ -227,8 +227,14 @@ class ApiErrorCatalogSpecDriftTest {
          * (`contract_invalid`, `invariant_invalid`, `test_failed`, `blocks_not_allowed`,
          * `render_not_applicable`), all 400, landed in the SAME commit as their constants and
          * their catalog rows. Re-derived from the document's own parse.
+         *
+         * 189 → 188 with #215 slice (b) (scopes removed, record PK8): §13.7 retires
+         * `auth.scope.insufficient` and `auth.key_scope_unavailable` and gains
+         * `auth.permission.undeclared` (403 — a route or tool that declares no permission), landed
+         * in the SAME commit as the constants (both mirrors) and the exception class. Re-derived
+         * from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 189
+        const val SECTION_13_ROW_COUNT = 188
 
         /**
          * §12's distinct validation codes.

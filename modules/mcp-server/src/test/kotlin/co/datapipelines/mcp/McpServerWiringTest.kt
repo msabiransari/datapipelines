@@ -1,8 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuditLogger
-import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
 import co.datapipelines.executor.ExecutionEventRepository
@@ -119,7 +117,7 @@ class McpServerWiringTest {
 
         assertAll(
             { dispatcher.toolNames().size shouldBe McpToolCatalog.NAMES.size },
-            { dispatcher.toolNames() shouldContainExactlyInAnyOrder ScopeMatrix.MCP_TOOL_PERMISSION.keys },
+            { dispatcher.toolNames() shouldContainExactlyInAnyOrder McpToolCatalog.NAMES },
         )
     }
 
@@ -268,7 +266,7 @@ class McpServerWiringTest {
     private fun context(): McpTransportContext =
         McpTransportContext.create(
             mapOf(
-                McpTransportKeys.PRINCIPAL to McpFixtures.principal(Scope.READ),
+                McpTransportKeys.PRINCIPAL to McpFixtures.principal(),
                 McpTransportKeys.CORRELATION_ID to McpFixtures.CORRELATION_ID,
             ),
         )

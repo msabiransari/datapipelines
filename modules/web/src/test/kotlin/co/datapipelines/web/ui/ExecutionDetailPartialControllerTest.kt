@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
@@ -55,17 +54,13 @@ class ExecutionDetailPartialControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(
-        scopes: Set<Scope>,
-        asUser: UUID = userId,
-    ) {
+    private fun authenticate(asUser: UUID = userId) {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
                 AuthenticatedPrincipal(
                     asUser,
                     "a@b.c",
                     "A",
-                    scopes,
                     AuthMethod.OIDC,
                     workspace = WorkspaceContext(workspaceId, "acme"),
                 ),
@@ -104,7 +99,7 @@ class ExecutionDetailPartialControllerTest {
 
     @Test
     fun `a readable execution pages the stored result with next and prev offsets`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         every { cursor.readable(executionId, any()) } returns record(ExecutionStatus.SUCCESS)
         every { resultStore.keyFor(executionId) } returns "key"
         every { resultStore.page("key", 0, 20) } returns page(20, 45)
@@ -120,7 +115,7 @@ class ExecutionDetailPartialControllerTest {
 
     @Test
     fun `an expired result renders the expired card, not an error page`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         every { cursor.readable(executionId, any()) } returns record(ExecutionStatus.SUCCESS)
         every { resultStore.keyFor(executionId) } returns "key"
         every { resultStore.page("key", any(), any()) } returns null
@@ -131,7 +126,7 @@ class ExecutionDetailPartialControllerTest {
 
     @Test
     fun `a FAILED execution renders its structured failure record - not a bare code`() {
-        authenticate(setOf(Scope.ADMIN))
+        authenticate()
         every { cursor.readable(executionId, any()) } throws
             ApiException(PipelineErrorCodes.Result.EXECUTION_FAILED, "failed", mapOf("execution_id" to executionId))
         every { executions.findById(workspaceId, executionId) } returns record(ExecutionStatus.FAILED)
@@ -143,7 +138,7 @@ class ExecutionDetailPartialControllerTest {
 
     @Test
     fun `a non-FAILED refusal keeps the bare code card`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         every { cursor.readable(executionId, any()) } throws
             ApiException(PipelineErrorCodes.Result.EXECUTION_NOT_FOUND, "nope")
 
@@ -161,7 +156,7 @@ class ExecutionDetailPartialControllerTest {
         // no capability to satisfy. Any member of the workspace may cancel (EXECUTE is viewer-level).
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
-                AuthenticatedPrincipal(userId, "a@b.c", "A", emptySet(), AuthMethod.OIDC, workspace = null),
+                AuthenticatedPrincipal(userId, "a@b.c", "A", AuthMethod.OIDC, workspace = null),
                 null,
                 emptyList(),
             )
@@ -175,7 +170,7 @@ class ExecutionDetailPartialControllerTest {
 
     @Test
     fun `cancel on an invisible execution is a 404 - never a hint it exists`() {
-        authenticate(setOf(Scope.EXECUTE), asUser = UUID.randomUUID())
+        authenticate(asUser = UUID.randomUUID())
         every { executions.findById(workspaceId, executionId) } returns record(ExecutionStatus.RUNNING)
 
         val error =
@@ -187,7 +182,7 @@ class ExecutionDetailPartialControllerTest {
 
     @Test
     fun `cancel on a finished execution is a conflict`() {
-        authenticate(setOf(Scope.EXECUTE))
+        authenticate()
         every { executions.findById(workspaceId, executionId) } returns record(ExecutionStatus.SUCCESS)
 
         val error =
@@ -200,7 +195,7 @@ class ExecutionDetailPartialControllerTest {
 
     @Test
     fun `cancel on a running execution cancels with CLIENT-chosen reason and renders the fragment`() {
-        authenticate(setOf(Scope.EXECUTE))
+        authenticate()
         every { executions.findById(workspaceId, executionId) } returns record(ExecutionStatus.RUNNING)
 
         controller.cancel(executionId, model) shouldBe "partials/execution-cancelled"

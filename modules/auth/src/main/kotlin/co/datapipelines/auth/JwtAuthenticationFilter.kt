@@ -92,17 +92,18 @@ class JwtAuthenticationFilter(
             // 8h life. The predicate just read this row, so this is a cache hit; a row that
             // vanished between the two reads is a token for nobody, not a deactivated person.
             val user = userService.snapshot(userId) ?: throw SessionInvalidException("Session subject no longer exists")
+            // #215 A.6 (gate 5): a session is a PERSON's. The System actor and a key's identity
+            // have no credential that could mint one, so a token naming either is forged or
+            // stale — refused as a session for nobody, never honoured as that row.
+            if (!user.isHuman) throw SessionInvalidException("Session subject is not a person")
             val principal =
                 AuthenticatedPrincipal(
                     userId = userId,
                     email = claims["email"] as String,
                     displayName = claims["name"] as String,
-                    // D-R1 — a SESSION carries no scopes. Permission is the membership's role, resolved
-                    // per request by `WorkspaceResolutionFilter` into `workspace.role`. The
-                    // `scopes` claim `JwtService` used to stamp derived a global `author` for
-                    // every non-admin, which is precisely the global capability being removed;
-                    // any token still carrying it is ignored rather than honoured.
-                    scopes = emptySet(),
+                    // Permission is the membership's role, resolved per request by
+                    // `WorkspaceResolutionFilter` into `workspace.role` (D-R1). A `scopes` claim a
+                    // pre-round-1 token may still carry is ignored rather than honoured.
                     authMethod = AuthMethod.OIDC,
                     loginMethod = LoginMethod.fromAmr(claims[JwtService.AMR_CLAIM] as String?),
                     keyId = null,

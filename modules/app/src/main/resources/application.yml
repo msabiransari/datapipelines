@@ -182,7 +182,6 @@ datapipelines:
       domains: ${DATAPIPELINES_AUTH_ALLOWLIST_DOMAINS:}
     api-keys:
       cache-ttl-seconds: ${DATAPIPELINES_AUTH_API_KEYS_CACHE_TTL_SECONDS:60}
-      default-scopes: ${DATAPIPELINES_AUTH_API_KEYS_DEFAULT_SCOPES:read}
     rate-limit:
       login-per-minute: ${DATAPIPELINES_AUTH_RATE_LIMIT_LOGIN_PER_MINUTE:10}
     # §3.4 / deployment.md §6.2 — CIDRs of proxies whose X-Forwarded-For names the real

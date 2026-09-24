@@ -2,7 +2,6 @@ package co.datapipelines.web.workspaces
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceDuplicateNameException
 import co.datapipelines.auth.WorkspaceInUseException
@@ -60,7 +59,6 @@ class WorkspacesControllerTest {
                     userId,
                     "alice@company.com",
                     "Alice",
-                    Scope.AUTHOR.expand(),
                     AuthMethod.OIDC,
                     workspace = WorkspaceContext(ws.id, "acme"),
                 ),

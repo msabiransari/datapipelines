@@ -94,7 +94,7 @@ class UiExceptionHandlerTest {
         result.statusCode shouldBe HttpStatus.FORBIDDEN
         result.headers.getFirst("HX-Retarget") shouldBe "#toast"
         val body = result.body as String
-        body shouldContain "auth.scope.insufficient"
+        body shouldContain "auth.permission.undeclared"
         body shouldContain correlationId.toString()
     }
 

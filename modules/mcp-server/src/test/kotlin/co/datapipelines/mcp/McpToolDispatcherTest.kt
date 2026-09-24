@@ -1,14 +1,15 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuditLogger
-import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
@@ -91,7 +92,7 @@ class McpToolDispatcherTest {
     @Test
     fun `success carries the payload, isError false and the correlation id in _meta`() {
         val tool = SpyTool("pipelines_list") { listOf(mapOf("id" to "p1")) }
-        val result = dispatcher(tool).call(McpFixtures.request("pipelines_list"), McpFixtures.ctx(Scope.READ))
+        val result = dispatcher(tool).call(McpFixtures.request("pipelines_list"), McpFixtures.ctx())
 
         assertAll(
             { result.isError() shouldBe false },
@@ -102,58 +103,73 @@ class McpToolDispatcherTest {
         )
     }
 
+    /**
+     * #215 A.4: a KEY ROLE that lacks the tool's catalog permission is refused with
+     * `auth.role_required`, `held` naming the key role — the successor of the scope refusal. (No
+     * key-role credential reaches `/mcp` in production — `McpAuthFilter` refuses the kind first —
+     * so this pins the matrix's answer at the dispatcher, the layer that must not depend on it.)
+     */
     @Test
-    fun `a principal without the tool's scope is refused and the tool never runs`() {
+    fun `a key role lacking the tool's permission is refused and the tool never runs`() {
         val tool = SpyTool("pipelines_create")
-        val result = dispatcher(tool).call(McpFixtures.request("pipelines_create"), McpFixtures.ctx(Scope.EXECUTE))
+        val apiCaller = McpFixtures.principal().copy(keyKind = ApiKeyKind.ENDPOINT, keyRole = KeyRole.API_CALLER)
+        val result = dispatcher(tool).call(McpFixtures.request("pipelines_create"), McpToolContext(apiCaller, McpFixtures.CORRELATION_ID))
 
         val error = McpFixtures.payloadOf(result)["error"]
         assertAll(
             { result.isError() shouldBe true },
-            { error["code"].asText() shouldBe PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT },
-            { error["details"]["required"].asText() shouldBe "author" },
+            { error["code"].asText() shouldBe PipelineErrorCodes.Auth.ROLE_REQUIRED },
+            { error["details"]["required"].asText() shouldBe "pipeline.create" },
+            { error["details"]["held"].asText() shouldBe "api_caller" },
             { error["details"]["tool"].asText() shouldBe "pipelines_create" },
             { tool.calls shouldBe 0 },
         )
     }
 
     /**
-     * The §13 checklist item, once per tool: "one test per tool asserting the next-lower scope is
-     * refused with `auth.scope.insufficient`". The lower scope is derived from the matrix itself,
-     * so a matrix change re-derives the expectation instead of silently passing.
+     * The §13 checklist item, once per tool and per role an MCP key can act with (PK4: viewer,
+     * promoter, author — a workspace admin's key is capped at author): the tool runs exactly when
+     * the role's column holds the permission the catalog entry declares, and is refused with the
+     * member-role code otherwise. The expectation is derived from [RolePermissions] and
+     * [McpToolCatalog], so a change to either re-derives it instead of silently passing.
      */
     @Test
-    fun `every tool refuses the next-lower scope`() {
+    fun `every tool admits exactly the MCP-key roles whose column holds its permission`() {
+        val roles = listOf(WorkspaceRole.VIEWER, WorkspaceRole.PROMOTER, WorkspaceRole.AUTHOR)
         assertAll(
-            ScopeMatrix.MCP_TOOL_PERMISSION.keys.map { tool ->
-                {
-                    val required = requireNotNull(ScopeMatrix.requiredScopeForTool(tool))
-                    val spy = SpyTool(tool)
-                    val held = Scope.entries.filter { it.ordinal < required.ordinal }.toTypedArray()
-                    val result = dispatcher(spy).call(McpFixtures.request(tool), McpFixtures.ctx(*held))
-                    McpFixtures.payloadOf(result)["error"]["code"].asText() shouldBe PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT
-                    result.isError() shouldBe true
-                    spy.calls shouldBe 0
+            McpToolCatalog.ENTRIES.flatMap { entry ->
+                roles.map { role ->
+                    {
+                        val spy = SpyTool(entry.name)
+                        val context = WorkspaceContext(McpFixtures.WORKSPACE_ID, "acme", role)
+                        val result = dispatcher(spy).call(McpFixtures.request(entry.name), McpFixtures.ctx(workspace = context))
+                        val admitted = context.permits(entry.permission)
+                        withClue("${entry.name} as ${role.wire}") {
+                            result.isError() shouldBe !admitted
+                            spy.calls shouldBe if (admitted) 1 else 0
+                            if (!admitted) {
+                                McpFixtures.payloadOf(result)["error"]["code"].asText() shouldBe
+                                    PipelineErrorCodes.Auth.KEY_ISSUER_ROLE_LOST
+                            }
+                        }
+                    }
                 }
             },
         )
     }
 
+    /** Record §3.4: no MCP tool needs more than author — so the cap costs an admin's agent nothing. */
     @Test
-    fun `the top of BOTH axes satisfies every tool - author scope, workspace admin role`() {
+    fun `an author's key satisfies every tool - the PK4 cap withholds nothing an agent can call`() {
+        val author = WorkspaceContext(McpFixtures.WORKSPACE_ID, "acme", WorkspaceRole.AUTHOR)
         assertAll(
-            ScopeMatrix.MCP_TOOL_PERMISSION.keys.map { tool ->
+            McpToolCatalog.NAMES.map { tool ->
                 {
                     val spy = SpyTool(tool)
-                    // `author` is the top KEY scope (O-2 removed `admin` from that axis) and
-                    // `ws_admin` the top role a membership carries — one tool, `datasources_test`,
-                    // sits on that rung, so a scope-only fixture no longer satisfies everything.
-                    dispatcher(spy)
-                        .call(
-                            McpFixtures.request(tool),
-                            McpFixtures.ctx(Scope.AUTHOR, workspace = McpFixtures.WORKSPACE_ADMIN),
-                        ).isError() shouldBe false
-                    spy.calls shouldBe 1
+                    withClue(tool) {
+                        dispatcher(spy).call(McpFixtures.request(tool), McpFixtures.ctx(workspace = author)).isError() shouldBe false
+                        spy.calls shouldBe 1
+                    }
                 }
             },
         )
@@ -169,7 +185,7 @@ class McpToolDispatcherTest {
     fun `a role refusal names the tool's catalog permission and the issuer's role`() {
         val tool = SpyTool("pipelines_create")
         val viewer = WorkspaceContext(McpFixtures.WORKSPACE_ID, "acme", WorkspaceRole.VIEWER)
-        val result = dispatcher(tool).call(McpFixtures.request("pipelines_create"), McpFixtures.ctx(Scope.AUTHOR, workspace = viewer))
+        val result = dispatcher(tool).call(McpFixtures.request("pipelines_create"), McpFixtures.ctx(workspace = viewer))
 
         val error = McpFixtures.payloadOf(result)["error"]
         assertAll(
@@ -183,15 +199,16 @@ class McpToolDispatcherTest {
     }
 
     @Test
-    fun `a tool with no row in the auth matrix is refused, never executed`() {
+    fun `a tool the catalog declares no permission for is refused, never executed`() {
         val tool = SpyTool("pipelines_delete")
-        ScopeMatrix.requiredScopeForTool("pipelines_delete") shouldBe null
+        McpToolCatalog.permissionOf("pipelines_delete") shouldBe null
 
-        val result = dispatcher(tool).call(McpFixtures.request("pipelines_delete"), McpFixtures.ctx(Scope.AUTHOR))
+        val result = dispatcher(tool).call(McpFixtures.request("pipelines_delete"), McpFixtures.ctx())
 
         assertAll(
             { result.isError() shouldBe true },
-            { McpFixtures.payloadOf(result)["error"]["code"].asText() shouldBe PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT },
+            { McpFixtures.payloadOf(result)["error"]["code"].asText() shouldBe PipelineErrorCodes.Auth.PERMISSION_UNDECLARED },
+            { McpFixtures.payloadOf(result)["error"]["details"]["tool"].asText() shouldBe "pipelines_delete" },
             { tool.calls shouldBe 0 },
         )
     }
@@ -206,7 +223,7 @@ class McpToolDispatcherTest {
                     details = mapOf("pipeline_id" to "p1"),
                 )
             }
-        val result = dispatcher(tool).call(McpFixtures.request("pipelines_get"), McpFixtures.ctx(Scope.READ))
+        val result = dispatcher(tool).call(McpFixtures.request("pipelines_get"), McpFixtures.ctx())
         val error = McpFixtures.payloadOf(result)["error"]
 
         assertAll(
@@ -222,7 +239,7 @@ class McpToolDispatcherTest {
     fun `an unknown tool is a protocol error`() {
         val error =
             shouldThrow<McpError> {
-                dispatcher(SpyTool("pipelines_list")).call(McpFixtures.request("nope"), McpFixtures.ctx(Scope.AUTHOR))
+                dispatcher(SpyTool("pipelines_list")).call(McpFixtures.request("nope"), McpFixtures.ctx())
             }
         error.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
     }
@@ -234,7 +251,7 @@ class McpToolDispatcherTest {
 
         dispatcher(SpyTool("pipelines_get")).call(
             McpFixtures.request("pipelines_get", mapOf("id" to McpFixtures.PIPELINE_ID.toString())),
-            McpFixtures.ctx(Scope.READ),
+            McpFixtures.ctx(),
         )
 
         verify { auditLogger.log(event = "mcp.tool.called", userId = McpFixtures.USER, keyId = any(), details = any()) }
@@ -260,7 +277,7 @@ class McpToolDispatcherTest {
 
         val error =
             shouldThrow<McpError> {
-                dispatcher(tool).call(McpFixtures.request("pipelines_list"), McpFixtures.ctx(Scope.READ))
+                dispatcher(tool).call(McpFixtures.request("pipelines_list"), McpFixtures.ctx())
             }
 
         assertAll(
@@ -288,7 +305,7 @@ class McpToolDispatcherTest {
 
         dispatcher.call(
             McpFixtures.request("pipelines_create", mapOf("name" to "nightly_etl")),
-            McpFixtures.ctx(Scope.AUTHOR),
+            McpFixtures.ctx(),
         )
 
         sink.writes() shouldHaveSize 1
@@ -312,7 +329,7 @@ class McpToolDispatcherTest {
         val sink = RecordingAuditSink()
         val dispatcher = McpToolDispatcher(listOf(SpyTool("pipelines_list")), sink)
 
-        dispatcher.call(McpFixtures.request("pipelines_list"), McpFixtures.ctx(Scope.READ))
+        dispatcher.call(McpFixtures.request("pipelines_list"), McpFixtures.ctx())
 
         assertAll(
             { sink.writes() shouldHaveSize 0 },
@@ -336,7 +353,7 @@ class McpToolDispatcherTest {
         val result =
             dispatcher.call(
                 McpFixtures.request("pipelines_execute", mapOf("id" to McpFixtures.PIPELINE_ID.toString())),
-                McpFixtures.ctx(Scope.EXECUTE),
+                McpFixtures.ctx(),
             )
 
         sink.writes() shouldHaveSize 1
@@ -368,7 +385,7 @@ class McpToolDispatcherTest {
                     "version" to 3,
                 ),
             ),
-            McpFixtures.ctx(Scope.AUTHOR),
+            McpFixtures.ctx(),
         )
 
         val row = sink.writes().single()
@@ -381,15 +398,16 @@ class McpToolDispatcherTest {
 
     /** The §7.6 refusal never invoked the tool, so it exercised no write path — the refusal rides `mcp.tool.called` alone. */
     @Test
-    fun `a scope-refused mutating call records the refusal but writes no write event`() {
+    fun `a permission-refused mutating call records the refusal but writes no write event`() {
         val sink = RecordingAuditSink()
         val dispatcher = McpToolDispatcher(listOf(SpyTool("pipelines_create")), sink)
+        val viewer = WorkspaceContext(McpFixtures.WORKSPACE_ID, "acme", WorkspaceRole.VIEWER)
 
-        dispatcher.call(McpFixtures.request("pipelines_create"), McpFixtures.ctx(Scope.READ))
+        dispatcher.call(McpFixtures.request("pipelines_create"), McpFixtures.ctx(workspace = viewer))
 
         assertAll(
             { sink.writes() shouldHaveSize 0 },
-            { sink.calls().single().details["outcome"] shouldBe "scope_refused" },
+            { sink.calls().single().details["outcome"] shouldBe "permission_refused" },
         )
     }
 
@@ -406,7 +424,7 @@ class McpToolDispatcherTest {
 
         dispatcher.call(
             McpFixtures.request("sql_probe", mapOf("name" to "pg-prod", "sql" to sql)),
-            McpFixtures.ctx(Scope.AUTHOR),
+            McpFixtures.ctx(),
         )
 
         val row = sink.calls().single()
@@ -441,7 +459,7 @@ class McpToolDispatcherTest {
             }
         val dispatcher = McpToolDispatcher(listOf(SpyTool("pipelines_list") { mapOf("ok" to true) }), sink)
 
-        val result = dispatcher.call(McpFixtures.request("pipelines_list"), McpFixtures.ctx(Scope.READ))
+        val result = dispatcher.call(McpFixtures.request("pipelines_list"), McpFixtures.ctx())
 
         assertAll(
             { result.isError() shouldBe false },
@@ -490,7 +508,7 @@ class McpToolDispatcherTest {
                 ),
                 sink,
             )
-        val ctx = McpFixtures.ctx(Scope.READ)
+        val ctx = McpFixtures.ctx()
 
         dispatcher.call(
             McpFixtures.request(

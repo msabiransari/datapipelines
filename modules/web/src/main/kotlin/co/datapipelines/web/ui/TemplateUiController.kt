@@ -1,7 +1,6 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.PromoterLens
-import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.TemplateType
@@ -9,7 +8,6 @@ import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.currentPrincipal
 import jakarta.servlet.http.HttpServletRequest
-import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -41,7 +39,6 @@ class TemplateUiController(
         @RequestParam(required = false) offset: Int?,
     ): String {
         model.addAttribute("activeTheme", themeResolver.resolve(request))
-        model.addAttribute("scopes", scopes())
         RoleModel.stamp(model)
         TemplateFilters.fill(model, dialect, type)
         // §9.5: the create form's name check is rendered from the SERVER's own grammar —
@@ -64,11 +61,6 @@ class TemplateUiController(
             offset = offset ?: 0,
         )
         return "templates/list"
-    }
-
-    private fun scopes(): Set<String> {
-        val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
-        return principal?.scopes?.map { it.name }?.toSet() ?: emptySet()
     }
 }
 

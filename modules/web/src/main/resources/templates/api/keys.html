@@ -37,6 +37,8 @@
       <tr>
         <th>Key</th>
         <th>Kind</th>
+        <th>Role</th>
+        <th>Acts as</th>
         <th>Created by</th>
         <th>Associated endpoints</th>
         <th>Created</th>
@@ -48,7 +50,7 @@
       <tbody id="keys-table-body">
       <th:block th:fragment="keyRows(keys)">
         <tr th:if="${keys == null || keys.isEmpty()}">
-          <td colspan="8">
+          <td colspan="10">
             <div class="app-empty">
               <b>No API keys</b>
               An API key is how a program calls this workspace's published endpoints. Create one with
@@ -62,6 +64,9 @@
             <span class="app-path ds-mono" th:text="${k.prefix}">dpk_RGAXQ7T2…</span>
           </td>
           <td><span class="app-chip app-chip-mono" th:text="${k.kindLabel}">API key</span></td>
+          <td><span class="app-chip app-chip-mono" th:text="${k.role}">api caller</span></td>
+          <!-- #215: the key's own identity — what its runs and received versions are attributed to. -->
+          <td><span th:text="${k.actsAs}">ci (API key)</span></td>
           <td><span th:text="${k.createdBy}">Alice</span></td>
           <td>
             <!-- The root binding reads as the whole-tree wildcard, not a doubled slash: it
@@ -120,7 +125,8 @@
   <!-- The form's order: Kind → Name → Expiry → Associations. Every option is rendered
        from ApiKeyForm, which the partial controller also validates against, so a select
        can never offer a value the server refuses. There is NO user kind (D16) and no
-       scope field: an API key's authority is its associations, not a scope. -->
+       scope field: an API key's role is `api caller`, its reach is its associations (#215);
+       the role choice is slice (c)'s dialog. -->
   <div th:if="${canAdminWorkspace == true or isSuperAdmin == true}" id="key-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-md">
       <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" data-action="key-modal-close">

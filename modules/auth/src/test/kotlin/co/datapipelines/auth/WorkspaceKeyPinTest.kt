@@ -83,7 +83,6 @@ class WorkspaceKeyPinTest {
             ownerId,
             "alice@company.com",
             "Alice",
-            setOf(Scope.AUTHOR),
             AuthMethod.API_KEY,
             keyId = "dpk_TESTKEY",
             workspaceName = "acme",
@@ -95,8 +94,6 @@ class WorkspaceKeyPinTest {
             ownerId,
             "alice@company.com",
             "Alice",
-            // D-R1: a session carries no scopes; its capability is the membership.
-            emptySet(),
             AuthMethod.OIDC,
         )
 

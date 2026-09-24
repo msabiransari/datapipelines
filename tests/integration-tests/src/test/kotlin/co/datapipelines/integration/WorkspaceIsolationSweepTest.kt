@@ -85,12 +85,22 @@ class WorkspaceIsolationSweepTest {
     }
 
     @Test
-    fun `no REST route hands an ACME key a GLOBEX row`() {
+    fun `no REST route answers an ACME MCP key at all - each refuses it by kind before any row is read`() {
         WorkspaceIsolationIntegrationTest.ensureSeeded()
+        // #215 B2 (owner ruling 2026-09-24): the MCP key reaches /mcp and nothing else, so the
+        // key-shaped REST sweep states the stronger fact — not "no foreign row leaks" but
+        // "no route is reached": every one refuses the key by KIND.
+        val reached =
+            sweepableRoutes().mapNotNull { route ->
+                val answer = call(route) { spec -> spec.header(API_KEY_HEADER, WorkspaceIsolationIntegrationTest.acmeKey()) }
+                if (answer.status == HTTP_FORBIDDEN && answer.fingerprint.contains(USER_KEY_OFF_SURFACE)) {
+                    null
+                } else {
+                    "${route.method} ${route.path} (${route.handler}) -> ${answer.status} ${answer.fingerprint.take(LEAK_EXCERPT)}"
+                }
+            }
 
-        val leaks = sweep { spec -> spec.header(API_KEY_HEADER, WorkspaceIsolationIntegrationTest.acmeKey()) }
-
-        leaks.joinToString("\n") shouldBe ""
+        reached.joinToString("\n") shouldBe ""
     }
 
     @Test
@@ -488,6 +498,7 @@ class WorkspaceIsolationSweepTest {
 
         val SUCCESS_RANGE = 200..299
         const val HTTP_FORBIDDEN = 403
+        const val USER_KEY_OFF_SURFACE = "user_key_off_surface"
         const val HTTP_NOT_FOUND = 404
         const val LEAK_EXCERPT = 300
 

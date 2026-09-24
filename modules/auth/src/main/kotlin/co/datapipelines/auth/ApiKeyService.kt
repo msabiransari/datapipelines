@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import org.slf4j.LoggerFactory
+import org.springframework.transaction.annotation.Transactional
 import java.security.SecureRandom
 import java.time.Instant
 import java.util.UUID
@@ -10,25 +11,36 @@ import java.util.UUID
  * only the Argon2id hash of the *full* key is stored (§7.2), and the plaintext is
  * returned exactly once at creation (§7.4).
  *
- * Validation (§7.3) reads the key record and the owner snapshot through the 60s
- * [AuthCache] (D13): a revoked key or a deactivated owner is rejected within one
- * TTL — immediately on the instance that performed the mutation.
+ * ## Who a key acts as (#215 slice (b), record §3)
+ * - the MCP (`user`) key acts as its MEMBER, with the member's role capped at author (PK4) —
+ *   `workspace_admin` → author, a super admin's membership role capped the same way, a super admin
+ *   with no membership → viewer — and NEVER as a super admin (B1);
+ * - an `endpoint` or `server` key acts as its OWN `service` identity (PK5), created with it in one
+ *   transaction (B4), holding its [KeyRole] (`api_caller`, `promotion_receiver`) and nothing else.
+ *   Who created it does not matter when it is used (PK2).
+ *
+ * Validation (§7.3) reads the key record, the acting user and the pinned workspace through the
+ * 60 s [AuthCache] (D13, B5): a revoked key, a deactivated member or identity, a demoted member
+ * and a deactivated workspace all take effect within one TTL — immediately on the instance that
+ * made the change.
  *
  * ## Cost of a rejected credential (AUTH-SEC-3 / AUTH-SEC-4)
  * A presented credential is shape-checked ([ApiKeyCredential.hasValidShape]) before
  * anything reads the cache or the database, and a *successful* Argon2id verification
  * is cached for the TTL ([AuthCache.verifiedSecret]) so a busy agent hashes once per
- * key per TTL rather than once per request. The record, its revocation flag, its
- * expiry and the owner's liveness are still re-read on **every** request — the D13
- * revocation-latency contract is untouched by the hash cache.
+ * key per TTL rather than once per request.
+ *
+ * ## Why the class and every public method are `open`
+ * [issue] and the revocations are multi-statement metadata writes carried by
+ * `@Transactional("metadataTransactionManager")`; CGLIB must intercept every public method or a
+ * final one runs on the proxy with null fields (`TransactionRollbackIntegrationTest`).
  */
-class ApiKeyService(
+open class ApiKeyService(
     private val apiKeyRepository: ApiKeyRepository,
     private val userService: UserService,
     private val authCache: AuthCache,
     private val auditLogger: AuditLogger,
     private val secretHasher: SecretHasher,
-    private val authProperties: AuthProperties,
     private val workspaceService: WorkspaceService,
     /** 180 (D15) — the ONE liveness predicate, judged here for every key kind (§7.3 step 8). */
     private val principalLiveness: PrincipalLiveness,
@@ -45,71 +57,60 @@ class ApiKeyService(
     private val random = SecureRandom()
 
     /**
-     * Issues a key for [ownerId], pinned to [workspaceId] (D3). Two guards, both
-     * server-side: the requested [scopes] MUST be a subset of the creator's effective
-     * scopes ([ceilingFor] the issuer) — the privilege-escalation guard (§7.4) — and the creator
-     * MUST be a member of [workspaceId] (the §7.4 workspace restriction, design §5.2),
-     * else [WorkspaceMembershipRequiredException]. No default on [workspaceId]: issuance
-     * without an explicit workspace decision must not compile.
+     * Issues a key of [kind] — `endpoint` or `server` — pinned to [workspaceId] (D3), created by
+     * [issuer], acting as a NEW `service` identity named [name] (PK5). Key and identity are created
+     * in ONE transaction (B4): a half-created pair cannot exist.
      *
-     * An empty [scopes] falls back to `datapipelines.auth.api-keys.default-scopes`
-     * ([Configuration §3.4]) — the operator's default, not a hard-coded `read`.
+     * Three guards, all server-side, in this order:
+     * - the kind must be mintable on demand: the MCP key is minted at login only (D16);
+     * - the ISSUER must hold the kind's create permission (PK7): `api_key.create` in the pinned
+     *   workspace for an `endpoint` key (workspace admin, super admin), `server_key.create` for a
+     *   `server` key (super admin) — and reach the workspace at all (D-R5's 404 otherwise);
+     * - the creation limit (O3): the key's role holds nothing its creator lacks — every
+     *   permission of the role but the two FENCED promotion-receiving ones, which no person holds
+     *   and which exist only for the `promotion_receiver` key.
      */
-    @Suppress("LongParameterList", "ThrowsCount") // the issuance contract; each refusal has its own catalogued code
-    fun issue(
+    @Transactional("metadataTransactionManager")
+    @Suppress("LongParameterList") // the issuance contract
+    open fun issue(
         issuer: AuthenticatedPrincipal,
-        ownerId: UUID,
         name: String,
-        scopes: Set<Scope>,
         workspaceId: UUID,
         expiresAt: Instant? = null,
-        kind: ApiKeyKind = ApiKeyKind.DEFAULT,
+        kind: ApiKeyKind,
     ): IssuedApiKey {
-        // §7.7 — a SCOPELESS kind (endpoint, server) carries no scopes by design, so the
-        // default-scopes fallback must not apply to it: falling back would hand it `read` across
-        // the whole API and make "its authority is its bindings / its route family" false. Caught
-        // by the 074 E2E, which asserted the minted key's scope set was empty and found `[read]`.
-        val requested = if (kind in ApiKeyKind.SCOPELESS) emptySet() else scopes.ifEmpty { defaultScopes() }
-        // D-R12 / O-2 — `admin` left the key wire in RBAC round 1: release, promote and
-        // membership are human verbs, and `admin` was the only scope that ever bought a key an
-        // INSTANCE verb. Refused by name so a caller learns which scopes exist rather than
-        // silently receiving a weaker key than it asked for.
-        requested.firstOrNull { it !in KEY_SCOPES }?.let { throw KeyScopeUnavailableException(it) }
-        val ceiling = ceilingFor(issuer)
-        if (!ScopeMatrix.keyScopesWithinCreator(requested, ceiling)) {
-            val overreach = requested.maxByOrNull { s -> Scope.entries.indexOf(s) } ?: Scope.READ
-            throw ScopeInsufficientException(required = overreach, held = ceiling)
-        }
-        // §7.7 — a SERVER key is the promotion receiver's whole credential: whoever holds it can
-        // write pipelines, templates and datasource references into this deployment. Minting one
-        // is therefore `server_key.create` — a super admin's instance permission (#215) — and the
-        // check is here rather than at a surface so that every caller — REST, the partial, a
-        // future CLI — inherits it. It is not a scope subset check (a server key HAS no scopes,
-        // so the guard above is vacuous for it) but a floor on the CREATOR.
-        if (kind == ApiKeyKind.SERVER && !issuer.holds(Permission.SERVER_KEY_CREATE)) {
-            throw RoleRequiredException(Permission.SERVER_KEY_CREATE, issuer.heldRole)
-        }
-        // O-2: viewers never mint keys. The issuance gate is the ISSUER's permission in the
-        // pinned workspace — `author` — and the workspace must be one they can reach at all
-        // (D-R5's 404 otherwise). Both answers come from ONE resolution, so "can they see it"
-        // and "may they act in it" cannot disagree.
-        workspaceService.requireIssuancePermission(issuer, workspaceId)
+        if (kind !in ApiKeyKind.IDENTITY_KINDS) throw KeyKindNotMintableException(kind)
+        val role = requireNotNull(KeyRole.forKind(kind)) { "an identity kind carries a key role" }
+        val context = workspaceService.requireIssuancePermission(issuer, workspaceId, kind)
+        requireWithinCreator(role, issuer, context)
 
         val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
         val secret = randomBase32(SECRET_LEN)
         val fullKey = "$keyId.$secret"
         val hash = secretHasher.hash(fullKey)
 
-        val record = apiKeyRepository.insert(keyId, ownerId, name, hash, requested, expiresAt, workspaceId, kind)
+        val identity = userService.provisionIdentity(keyId, name)
+        val record =
+            apiKeyRepository.insert(
+                id = keyId,
+                userId = identity.id,
+                createdBy = issuer.userId,
+                name = name,
+                keyHash = hash,
+                expiresAt = expiresAt,
+                workspaceId = workspaceId,
+                kind = kind,
+            )
         authCache.invalidateKey(keyId)
         auditLogger.log(
             event = "auth.api_key.created",
-            userId = ownerId,
+            userId = issuer.userId,
             keyId = keyId,
             details =
                 mapOf(
                     "name" to name,
-                    "scopes" to requested.map { it.wire },
+                    "role" to role.wire,
+                    "identity_id" to identity.id.toString(),
                     "workspace_id" to workspaceId.toString(),
                     "kind" to kind.wire,
                 ),
@@ -118,124 +119,101 @@ class ApiKeyService(
     }
 
     /**
-     * The most a key this issuer mints may hold (§7.4, D-R12).
+     * The creation limit (record O3, ruled 2026-09-23): a key's role must not hold a permission
+     * its creator lacks. With the two pre-created roles it holds by construction for `api_caller`
+     * (a workspace admin holds every one of its permissions); the two FENCED permissions of
+     * `promotion_receiver` are held by NO person — they exist only for that key — so they are
+     * outside the comparison, and the super-admin floor on `server_key.create` stands in for it.
+     * Kept as a runtime check so a later key role cannot slip past it; `ApiKeyServiceTest` pins it.
+     */
+    private fun requireWithinCreator(
+        role: KeyRole,
+        issuer: AuthenticatedPrincipal,
+        context: WorkspaceContext,
+    ) {
+        val creator = issuer.copy(workspace = context)
+        val excess = (RolePermissions.of(role) - RolePermissions.FENCED).firstOrNull { !creator.holds(it) }
+        if (excess != null) throw RoleRequiredException(excess, creator.heldRole, context.name)
+    }
+
+    /**
+     * Validates a presented full key and resolves the principal (§7.3). Throws the specific
+     * [AuthException] for each rejection so the entry point emits the exact §13.7 code
+     * (`auth.api_key.invalid` / `auth.api_key.expired` / `auth.principal_deactivated` /
+     * `auth.key_workspace_inactive`).
      *
-     * It used to be the creator's own SCOPE set, passed in by the caller. That stopped being
-     * answerable in RBAC round 1: a session carries no scopes at all (D-R1), so the subset
-     * guard compared every request against the empty set and **no signed-in person could mint
-     * any key**. Found by `JarSmokeE2eTest`, whose whole subject is a real jar minting one.
-     *
-     * The honest ceiling is the one the design states: *scope ≤ the issuer's capability in
-     * that workspace*. Issuance already requires `author` there (O-2 — viewers never mint
-     * keys), so a human's ceiling is every scope a key may hold. A KEY minting a key is capped
-     * additionally by its OWN scopes, which is the original privilege-escalation guard and the
-     * half that must not be lost: a `read` key must never mint an `author` one.
+     * The principal is the user the key ACTS AS ([ApiKey.userId]): the member for the MCP key,
+     * the key's identity otherwise. `superAdmin` is FALSE for every key (B1): no key resolves an
+     * instance permission, whoever minted it.
      */
-    private fun ceilingFor(issuer: AuthenticatedPrincipal): Set<Scope> = issuanceCeiling(issuer)
-
-    /**
-     * The configured default scopes for a new key, falling back to `read` when the
-     * operator configured nothing usable (§7.5: "Default scope on key creation: read").
-     */
-    private fun defaultScopes(): Set<Scope> =
-        authProperties.apiKeys.defaultScopes
-            .mapNotNull { token -> parseConfiguredScope(token.trim()) }
-            .toSet()
-            .ifEmpty { setOf(Scope.READ) }
-
-    /**
-     * Parses one configured `default-scopes` token, or `null` if it is not a §7.5 wire
-     * scope. An operator typo silently degrading key issuance to `read` is exactly the
-     * kind of misconfiguration nobody discovers until a key mysteriously lacks
-     * permission, so the bad token is named in a WARN (rules/02) rather than dropped.
-     */
-    private fun parseConfiguredScope(token: String): Scope? =
-        runCatching { Scope.fromWire(token) }.getOrElse {
-            log.warn(
-                "Ignoring unrecognized datapipelines.auth.api-keys.default-scopes token '{}'; valid scopes are {}",
-                token,
-                Scope.entries.map { it.wire },
-            )
-            null
-        }
-
-    /**
-     * Validates a presented full key and resolves the principal (§7.3). Throws the
-     * specific [AuthException] for each rejection so the entry point emits the exact
-     * §13.7 code (`auth.api_key.invalid` / `auth.api_key.expired`).
-     */
-    fun validate(presentedKey: String): AuthenticatedPrincipal {
+    open fun validate(presentedKey: String): AuthenticatedPrincipal {
         val record = verifiedRecord(presentedKey)
-        val owner = liveOwner(record)
+        val actor = liveActor(record)
         return AuthenticatedPrincipal(
-            userId = owner.id,
-            email = owner.email,
-            displayName = owner.displayName,
-            // D-R12 — capped at what a key MAY hold, not at what its row says. A key minted
-            // before round 1 can carry `admin` in `api_keys.scopes`; trusting the row would let
-            // exactly the credential the rule removes keep working until it expires. The
-            // migration strips the value too; this is the belt that does not depend on it.
-            scopes = record.scopes.filterTo(mutableSetOf()) { it in KEY_SCOPES },
+            userId = actor.id,
+            email = actor.email,
+            displayName = actor.displayName,
             authMethod = AuthMethod.API_KEY,
             keyId = record.id,
             // D3: the key's pinned workspace IS the context — resolved at validation,
             // no per-request switch exists (design §5.2).
             workspaceName = record.workspaceName,
-            workspace = pinnedContext(record, owner),
+            workspace = if (record.kind == ApiKeyKind.USER) mcpKeyContext(record, actor) else identityContext(record),
             // §7.7 — what the credential IS travels with it, so every downstream gate reads one
             // answer rather than re-deriving it.
             keyKind = record.kind,
-            superAdmin = owner.isAdmin,
+            superAdmin = false,
+            keyRole = record.role,
         )
     }
 
     /**
-     * The pinned workspace as this key's ISSUER can currently act in it (D-R12) — the last of
-     * the four per-request re-reads (key active, issuer active, workspace active — the middle
-     * two are [liveOwner]'s predicate — and issuer still holds the role), all inside the same
-     * `AuthCache` TTL.
-     *
-     * A removed issuer resolves to no role, which becomes VIEWER rather than a refusal: the
-     * key still authenticates and every permission above viewer then refuses with
-     * `auth.key_issuer_role_lost`, which is the answer the caller can act on. Refusing the
-     * credential outright would report "your key is invalid" for a key that is entirely valid.
-     *
-     * Since #200 (roles record §3.7, ruling 1) the REMOVED-MEMBER case no longer reaches this
-     * fallback: removing a membership revokes the member's `user` key in the same act, so
-     * [usableRecord] refuses it with `auth.api_key.invalid` long before a context is asked
-     * for. The fallback stays as the totality branch — a resolution that finds nothing must
-     * still produce a principal — but a key landing here today means its membership ended
-     * without the revocation that is supposed to accompany it, which is a defect, not a
-     * posture (the viewer floor keeps even that hypothetical to reads).
+     * The MCP key's context (PK4): its member's role in the pinned workspace, capped at author —
+     * re-read per request through the cache, so a role change takes effect within one TTL (B5).
+     * A super admin with an explicit membership is capped the same way; one with NO membership
+     * acts as a viewer there (marked implicit, so their reads keep the D-R8 audit). A member with
+     * no membership at all lands on the viewer floor — the totality branch: since #200 removing a
+     * member revokes the key in the same act, so a live key reaching here is a defect, and the
+     * floor keeps even that to reads.
      */
-    private fun pinnedContext(
+    private fun mcpKeyContext(
         record: ApiKey,
-        owner: User,
-    ): WorkspaceContext =
-        workspaceService.issuerContext(owner.id, owner.isAdmin, record.workspaceId, record.workspaceName)
-            ?: WorkspaceContext(record.workspaceId, record.workspaceName, WorkspaceRole.VIEWER)
+        member: User,
+    ): WorkspaceContext {
+        val role = workspaceService.activeRoleIn(member.id, record.workspaceId)
+        return when {
+            role != null -> WorkspaceContext(record.workspaceId, record.workspaceName, role.cappedAtAuthor())
+            member.isAdmin -> WorkspaceContext(record.workspaceId, record.workspaceName, WorkspaceRole.VIEWER, implicit = true)
+            else -> WorkspaceContext(record.workspaceId, record.workspaceName, WorkspaceRole.VIEWER)
+        }
+    }
+
+    /**
+     * An identity-acting key's context: its pinned workspace, where its KEY ROLE is judged. The
+     * member role here is the floor and is never consulted — `AuthenticatedPrincipal.holds` and
+     * `ScopeMatrix.allowed` answer from the key role alone.
+     */
+    private fun identityContext(record: ApiKey): WorkspaceContext =
+        WorkspaceContext(record.workspaceId, record.workspaceName, WorkspaceRole.VIEWER)
 
     /**
      * Validates a presented key as the promotion peer's credential (§7.7, versioning §10.6):
      * the same shape gate, record read, revocation/expiry re-check, Argon2id verify and
-     * liveness predicate [validate] applies (owner active AND pinned workspace active — 180
-     * closed the gap where only the owner was read here) — and then the kind, which is the
-     * whole point.
+     * liveness predicate [validate] applies — the IDENTITY's liveness and the pinned workspace's
+     * (A2), never the creator's (PK2) — and then the kind, which is the whole point.
      *
      * A key of any other kind is refused with the SAME [ApiKeyInvalidException] a wrong key
      * gets, because `PromotionServerKeyFilter` answers every refusal with one code: a caller
      * must not be able to tell "your key is the wrong kind" from "your key is wrong", which
      * would turn the promotion route into an oracle for classifying stolen keys.
      *
-     * Returns the RECORD, not a principal: the promotion filter authenticates the peer as R7's
-     * system service account (the credential is not a human, §10.6) and needs the key's id for
-     * the audit trail, not its owner's identity.
+     * Returns the key and the identity it acts as (record C4): received versions and the audit
+     * row are attributed to that identity, not to the System actor.
      */
-    fun validateServerKey(presentedKey: String): ApiKey {
+    open fun validateServerKey(presentedKey: String): ValidatedServerKey {
         val record = verifiedRecord(presentedKey)
         if (!record.isServerKey) throw ApiKeyInvalidException()
-        liveOwner(record)
-        return record
+        return ValidatedServerKey(key = record, identity = liveActor(record))
     }
 
     /**
@@ -280,54 +258,47 @@ class ApiKeyService(
     }
 
     /**
-     * §7.3 step 8 — the owner snapshot the principal is built from, and the D13/D15 liveness
-     * re-check through [PrincipalLiveness]: a deactivated owner is `auth.principal_deactivated`,
-     * a deactivated pin `auth.key_workspace_inactive` (the 404 rule), both within the cache TTL.
-     * An owner row that is GONE is not a person who was deactivated — that stays the plain
-     * invalid-key answer.
+     * §7.3 step 8 — the user the key ACTS AS ([ApiKey.userId]: the member, or the key's identity),
+     * and the D13/D15/A2 liveness re-check through [PrincipalLiveness]: a deactivated member or
+     * identity is `auth.principal_deactivated`, a deactivated pin `auth.key_workspace_inactive`
+     * (the 404 rule), both within the cache TTL. A row that is GONE is not a principal that was
+     * deactivated — that stays the plain invalid-key answer. The key's own liveness (revoked,
+     * expired) was judged by [usableRecord] before this.
      */
-    private fun liveOwner(record: ApiKey): User {
-        val owner = userService.snapshot(record.userId) ?: throw ApiKeyInvalidException()
-        principalLiveness.require(owner.id, PrincipalLiveness.Pin(record.workspaceId, record.workspaceName))
-        return owner
-    }
-
-    /** Revokes a key the caller owns, evicting the local cache immediately (§11.4). */
-    fun revoke(
-        keyId: String,
-        ownerId: UUID,
-    ): Boolean {
-        val revoked = apiKeyRepository.revoke(keyId, ownerId)
-        if (revoked) {
-            authCache.invalidateKey(keyId)
-            auditLogger.log(event = "auth.api_key.revoked", userId = ownerId, keyId = keyId)
-        }
-        return revoked
+    private fun liveActor(record: ApiKey): User {
+        val actor = userService.snapshot(record.userId) ?: throw ApiKeyInvalidException()
+        principalLiveness.require(actor.id, PrincipalLiveness.Pin(record.workspaceId, record.workspaceName))
+        return actor
     }
 
     /**
-     * Revokes an `endpoint` key of [workspaceId], whoever owns it — the `/api-keys` page's
-     * delete (D17, `MANAGE_API_KEYS`). The caller's ROLE was judged at the route; the kind
-     * and workspace predicates in SQL are what keep this from ever touching a user's MCP
-     * key or another workspace's.
+     * Revokes a key the caller CREATED — the member's own MCP key, or a key they minted — evicting
+     * the local cache immediately (§11.4). An identity-acting key's identity is deactivated in the
+     * same transaction (record §3.3).
      */
-    fun revokeWorkspaceEndpointKey(
+    @Transactional("metadataTransactionManager")
+    open fun revoke(
+        keyId: String,
+        ownerId: UUID,
+    ): Boolean {
+        val revoked = apiKeyRepository.revoke(keyId, ownerId) ?: return false
+        retire(revoked)
+        auditLogger.log(event = "auth.api_key.revoked", userId = ownerId, keyId = keyId)
+        return true
+    }
+
+    /**
+     * Revokes an `endpoint` key of [workspaceId], whoever created it — the `/api-keys` page's
+     * delete (D17, `api_key.revoke`). The caller's ROLE was judged at the route; the kind and
+     * workspace predicates in SQL are what keep this from ever touching a user's MCP key or
+     * another workspace's. Its identity is deactivated in the same transaction.
+     */
+    @Transactional("metadataTransactionManager")
+    open fun revokeWorkspaceEndpointKey(
         keyId: String,
         workspaceId: UUID,
         actorId: UUID,
-    ): Boolean {
-        val revoked = apiKeyRepository.revokeInWorkspace(keyId, workspaceId, ApiKeyKind.ENDPOINT)
-        if (revoked) {
-            authCache.invalidateKey(keyId)
-            auditLogger.log(
-                event = "auth.api_key.revoked",
-                userId = actorId,
-                keyId = keyId,
-                details = mapOf("workspace_id" to workspaceId.toString(), "kind" to ApiKeyKind.ENDPOINT.wire),
-            )
-        }
-        return revoked
-    }
+    ): Boolean = revokeInWorkspace(keyId, workspaceId, ApiKeyKind.ENDPOINT, actorId)
 
     /**
      * Revokes a `server` key of [workspaceId] — the `/api-keys` page's delete extended to the
@@ -337,12 +308,12 @@ class ApiKeyService(
      *
      * **`server_key.revoke`, a super admin's** (#215, owner ruling 2026-09-24 — the permissions
      * record's row): a server key is the promotion receiver's whole credential and
-     * only a super admin mints one (D18), so only a super admin ends one. #191 had let the
-     * page's workspace admin revoke it; the ruling narrowed that. The check is HERE, not at the
-     * surface, for the reason [issue]'s mint floor is: every caller inherits it. The page
+     * only a super admin mints one (D18), so only a super admin ends one. The check is HERE, not
+     * at the surface, for the reason [issue]'s floor is: every caller inherits it. The page
      * draws the row's Delete only for a principal who passes it.
      */
-    fun revokeWorkspaceServerKey(
+    @Transactional("metadataTransactionManager")
+    open fun revokeWorkspaceServerKey(
         keyId: String,
         workspaceId: UUID,
         actor: AuthenticatedPrincipal,
@@ -350,17 +321,30 @@ class ApiKeyService(
         if (!actor.holds(Permission.SERVER_KEY_REVOKE)) {
             throw RoleRequiredException(Permission.SERVER_KEY_REVOKE, actor.heldRole, actor.workspace?.name)
         }
-        val revoked = apiKeyRepository.revokeInWorkspace(keyId, workspaceId, ApiKeyKind.SERVER)
-        if (revoked) {
-            authCache.invalidateKey(keyId)
-            auditLogger.log(
-                event = "auth.api_key.revoked",
-                userId = actor.userId,
-                keyId = keyId,
-                details = mapOf("workspace_id" to workspaceId.toString(), "kind" to ApiKeyKind.SERVER.wire),
-            )
-        }
-        return revoked
+        return revokeInWorkspace(keyId, workspaceId, ApiKeyKind.SERVER, actor.userId)
+    }
+
+    private fun revokeInWorkspace(
+        keyId: String,
+        workspaceId: UUID,
+        kind: ApiKeyKind,
+        actorId: UUID,
+    ): Boolean {
+        if (!apiKeyRepository.revokeInWorkspace(keyId, workspaceId, kind)) return false
+        apiKeyRepository.findById(keyId)?.let(::retire)
+        auditLogger.log(
+            event = "auth.api_key.revoked",
+            userId = actorId,
+            keyId = keyId,
+            details = mapOf("workspace_id" to workspaceId.toString(), "kind" to kind.wire),
+        )
+        return true
+    }
+
+    /** A revoked key's aftermath: its cache entry goes, and an identity-acting key's identity is deactivated. */
+    private fun retire(revoked: ApiKey) {
+        authCache.invalidateKey(revoked.id)
+        if (revoked.kind in ApiKeyKind.IDENTITY_KINDS) userService.deactivateIdentity(revoked.userId)
     }
 
     /**
@@ -368,11 +352,9 @@ class ApiKeyService(
      * workspace switch through the `McpKeyMint` port, never from a request surface. If the
      * user holds no live `user` key in [context]'s workspace, mint one:
      *
-     * - scopes = the role's reach on the CREDENTIAL axis, derived from the matrix rather than
-     *   chosen by anyone: an AUTHOR-or-above context gets `author` (which subsumes execute
-     *   and read, §7.5), an EXECUTE-only context (the viewer) `execute`, everything else
-     *   (the promoter) `read`. With D16 the key IS the member's credential, so its scope
-     *   set is the role's, re-read per request as today (§7.4's issuer check is unchanged);
+     * - it acts as [user] — `user_id = created_by` — and carries no role of its own: what it may
+     *   do is the member's role in the pinned workspace, capped at author, re-read per request
+     *   ([validate], PK4). Nothing about the member's role is frozen into the row (PK8);
      * - no expiry, name `mcp/<workspace>`;
      * - `minted_at_login = TRUE`, and the plaintext SEALED into `secret_sealed` so the top
      *   bar can offer Copy — ONCE (#213: the first open destroys the sealed copy in the same
@@ -391,7 +373,7 @@ class ApiKeyService(
      * Returns the new record, or null when no mint happened (key exists, password change
      * owed). The plaintext deliberately does NOT leave this method.
      */
-    fun mintLoginKey(
+    open fun mintLoginKey(
         user: User,
         context: WorkspaceContext,
         loginMethod: LoginMethod,
@@ -407,21 +389,6 @@ class ApiKeyService(
         val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
         val secret = randomBase32(SECRET_LEN)
         val fullKey = "$keyId.$secret"
-        // The role's reach on the credential axis — and a super admin's context here is the
-        // membership the resolution returned (the demo join is a VIEWER row), while their
-        // authority is D7's instance-wide one: `user.isAdmin` is what validation will
-        // re-read on every request, so it is what the mint reads too. A super admin's key
-        // carrying `read` would be capped BELOW its issuer forever.
-        //
-        // #215 slice (a) re-keys the two role questions to the author row's and the execute row's
-        // representative permissions — the same roles as the retired AUTHOR and EXECUTE — and
-        // changes nothing else; slice (b) replaces this mint's scopes.
-        val scopes =
-            when {
-                user.isAdmin || context.permits(Permission.TEMPLATE_UPDATE) -> Scope.AUTHOR.expand()
-                context.permits(Permission.PIPELINE_EXECUTE) -> Scope.EXECUTE.expand()
-                else -> setOf(Scope.READ)
-            }
         val sealed =
             secretSealer?.seal(fullKey, keyId)
                 ?: run {
@@ -433,9 +400,9 @@ class ApiKeyService(
                 apiKeyRepository.insert(
                     id = keyId,
                     userId = user.id,
+                    createdBy = user.id,
                     name = loginKeyName(context.name),
                     keyHash = secretHasher.hash(fullKey),
-                    scopes = scopes,
                     expiresAt = null,
                     workspaceId = context.id,
                     kind = ApiKeyKind.USER,
@@ -453,7 +420,6 @@ class ApiKeyService(
             details =
                 mapOf(
                     "name" to record.name,
-                    "scopes" to scopes.map { it.wire },
                     "workspace_id" to context.id.toString(),
                     "kind" to ApiKeyKind.USER.wire,
                     "minted_at_login" to true,
@@ -473,7 +439,7 @@ class ApiKeyService(
      * Not cached and deliberately not routed through [AuthCache]: a copy click is rare, and
      * a cached copyable secret would be exactly the recoverable-at-rest copy show-once removes.
      */
-    fun openOwnMcpKey(
+    open fun openOwnMcpKey(
         userId: UUID,
         workspaceId: UUID,
     ): String? {
@@ -490,20 +456,6 @@ class ApiKeyService(
     }
 
     companion object {
-        /**
-         * The scopes a key minted by [issuer] may hold — the same rule [issue] enforces, exposed
-         * so the console's form offers exactly what the service would accept (112 merge review:
-         * the form used to read the session's scope set, which is EMPTY for every human since
-         * D-R1, and offered nothing). A person's ceiling is every key scope; a key minting a key
-         * is capped by its own scopes — the privilege-escalation guard that must not be lost.
-         */
-        fun issuanceCeiling(issuer: AuthenticatedPrincipal): Set<Scope> =
-            if (issuer.authMethod == AuthMethod.API_KEY) {
-                Scope.effective(issuer.scopes).intersect(KEY_SCOPES)
-            } else {
-                KEY_SCOPES
-            }
-
         private const val KEY_PREFIX = ApiKeyCredential.KEY_PREFIX
         private const val ID_LEN = 12
         private const val SECRET_LEN = 48

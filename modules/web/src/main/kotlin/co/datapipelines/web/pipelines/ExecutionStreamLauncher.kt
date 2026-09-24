@@ -354,7 +354,8 @@ class ExecutionStreamLauncher(
 
 /**
  * D11 — the credential kind an execution is attributed to: the presented API key's kind when
- * one authenticated this request (`user`; an `endpoint` key never reaches an execute route and a
- * `server` key never executes, so those map only for completeness), null for a session.
+ * one authenticated this request, null for a session. The ONE derivation every launcher uses —
+ * this one (a `user` key over MCP) and the published-endpoint serve path (an `endpoint` key,
+ * #215 A.5) — so no launcher hard-codes a kind the credential does not have.
  */
-private fun AuthenticatedPrincipal.executedByKeyKind(): ExecutedByKeyKind? = keyKind?.let { ExecutedByKeyKind.fromWire(it.wire) }
+internal fun AuthenticatedPrincipal.executedByKeyKind(): ExecutedByKeyKind? = keyKind?.let { ExecutedByKeyKind.fromWire(it.wire) }

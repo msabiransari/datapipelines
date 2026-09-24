@@ -2,7 +2,6 @@ package co.datapipelines.web.executions
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.AbortReason
@@ -67,7 +66,6 @@ class ExecutionsControllerTest {
 
     private fun authenticate(
         userId: UUID,
-        scopes: Set<Scope>,
         workspaceAdmin: Boolean = false,
     ) {
         val principal =
@@ -75,7 +73,6 @@ class ExecutionsControllerTest {
                 userId,
                 "a@b.c",
                 "A",
-                scopes,
                 AuthMethod.API_KEY,
                 "dpk_x",
                 workspace =
@@ -93,7 +90,7 @@ class ExecutionsControllerTest {
 
     @Test
     fun `cancel by the owner requests cancellation and returns 204`() {
-        authenticate(owner, setOf(Scope.EXECUTE))
+        authenticate(owner)
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
         every { cancellation.cancel(executionId, AbortReason.CANCELLED) } returns true
 
@@ -104,7 +101,7 @@ class ExecutionsControllerTest {
 
     @Test
     fun `cancel by a non-owner is a 404 and never reaches the cancellation service`() {
-        authenticate(UUID.randomUUID(), setOf(Scope.EXECUTE))
+        authenticate(UUID.randomUUID())
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
 
         shouldThrow<ApiException> { controller.cancel(executionId) }.code shouldBe "result.execution_not_found"
@@ -113,7 +110,7 @@ class ExecutionsControllerTest {
 
     @Test
     fun `admin may cancel any execution`() {
-        authenticate(UUID.randomUUID(), setOf(Scope.READ), workspaceAdmin = true)
+        authenticate(UUID.randomUUID(), workspaceAdmin = true)
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.RUNNING)
         every { cancellation.cancel(executionId, AbortReason.CANCELLED) } returns true
 
@@ -124,7 +121,7 @@ class ExecutionsControllerTest {
 
     @Test
     fun `cancelling a terminal execution is 409 not_running`() {
-        authenticate(owner, setOf(Scope.EXECUTE))
+        authenticate(owner)
         every { executions.findById(any(), executionId) } returns record(ExecutionStatus.SUCCESS)
 
         val error = shouldThrow<ApiException> { controller.cancel(executionId) }
@@ -137,7 +134,7 @@ class ExecutionsControllerTest {
         // versioning §8: an execution of version N was a draft run when started_at <
         // released_at, or when that version has no released_at (still DRAFT/DISCARDED).
         // The marker is informational — a history label, never behaviour.
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         val running = record(ExecutionStatus.SUCCESS)
         val key = running.pipelineId to running.pipelineVersion
         every { executions.findByUser(any(), owner, any(), any(), any(), any(), any(), any()) } returns listOf(running)
@@ -162,12 +159,12 @@ class ExecutionsControllerTest {
 
     @Test
     fun `the user listing reads findByUser, the admin listing findAll`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         every { executions.findByUser(any(), owner, any(), any(), any(), any(), any(), any()) } returns emptyList()
         controller.list(null, null, null, null, null, null)
         verify(exactly = 1) { executions.findByUser(any(), owner, null, null, null, null, any(), any()) }
 
-        authenticate(UUID.randomUUID(), setOf(Scope.READ), workspaceAdmin = true)
+        authenticate(UUID.randomUUID(), workspaceAdmin = true)
         every { executions.findAll(any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
         controller.list(null, null, null, null, null, null)
         verify(exactly = 1) { executions.findAll(any(), null, null, null, null, any(), any()) }
@@ -175,7 +172,7 @@ class ExecutionsControllerTest {
 
     @Test
     fun `list filters are pushed into the repository query, not applied after the page cut`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         val after = Instant.parse("2026-08-01T00:00:00Z")
         every {
             executions.findByUser(any(), owner, any(), ExecutionStatus.SUCCESS, after, any(), any(), any())
@@ -197,7 +194,7 @@ class ExecutionsControllerTest {
      */
     @Test
     fun `execution metadata exposes the composition lineage a child execution carries`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         val parentExecutionId = UUID.randomUUID()
         every { executions.findById(any(), executionId) } returns
             record(ExecutionStatus.SUCCESS).copy(
@@ -217,7 +214,7 @@ class ExecutionsControllerTest {
     /** A root's lineage is present and honest: no parent, and it is its own family root. */
     @Test
     fun `a root execution reports a null parent and itself as the family root`() {
-        authenticate(owner, setOf(Scope.READ))
+        authenticate(owner)
         every { executions.findById(any(), executionId) } returns
             record(ExecutionStatus.SUCCESS).copy(rootExecutionId = executionId)
 

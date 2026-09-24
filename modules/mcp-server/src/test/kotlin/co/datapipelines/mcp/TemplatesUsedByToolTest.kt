@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.templates.TemplateUsageService
 import io.kotest.assertions.throwables.shouldThrow
@@ -21,7 +20,7 @@ import java.util.UUID
  */
 class TemplatesUsedByToolTest {
     private val usage = mockk<TemplateUsageService>()
-    private val ctx = McpFixtures.ctx(Scope.READ)
+    private val ctx = McpFixtures.ctx()
     private val tool = TemplatesUsedByTool(usage, McpFixtures.EVERYTHING_LENS)
 
     private val pipelineId = UUID.fromString("11111111-1111-1111-1111-111111111111")

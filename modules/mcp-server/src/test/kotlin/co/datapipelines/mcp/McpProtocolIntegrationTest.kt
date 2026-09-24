@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuditLogger
-import co.datapipelines.auth.Scope
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
@@ -77,13 +76,12 @@ class McpProtocolIntegrationTest {
     private fun call(
         method: String,
         params: Any?,
-        scope: Scope = Scope.READ,
     ): McpSchema.JSONRPCResponse =
         transport.handler!!
             .handleRequest(
                 McpTransportContext.create(
                     mapOf(
-                        McpTransportKeys.PRINCIPAL to McpFixtures.principal(scope),
+                        McpTransportKeys.PRINCIPAL to McpFixtures.principal(),
                         McpTransportKeys.CORRELATION_ID to McpFixtures.CORRELATION_ID,
                     ),
                 ),

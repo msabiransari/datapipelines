@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
@@ -72,6 +73,7 @@ import java.util.UUID
  * `SampleDataBootstrapE2eTest` drives `afterSingletonsInstantiated`. The alternative — driving
  * the UI form — would need a minted session cookie and would test the screen, not the rule.
  */
+@Suppress("LargeClass") // one ordered two-deployment scenario; splitting it would boot the pair twice
 @Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class PromotionTwoDeploymentE2eTest {
@@ -371,6 +373,54 @@ class PromotionTwoDeploymentE2eTest {
             uatJdbc.scalar("SELECT (last_used_at IS NOT NULL)::text FROM api_keys WHERE id = '${minted.id}'").toBoolean(),
             "last_used_at was not stamped on the promotion key",
         )
+        // #215 C4: a STORED server key acts as its own identity — the received version and the
+        // accepted-audit row name the key's identity, not the System actor (the config value's
+        // shape, order 11) and not the admin who created the key.
+        assertAll(
+            { assertEquals("key", uatCreatedByProvider(TX_OK)) },
+            { assertEquals("${minted.id}@keys.invalid", uatCreatedByEmail(TX_OK)) },
+            {
+                assertEquals(
+                    uatJdbc.scalar("SELECT user_id::text FROM api_keys WHERE id = '${minted.id}'"),
+                    uatJdbc.scalar(
+                        "SELECT user_id::text FROM audit_log WHERE event = 'auth.promotion.accepted' ORDER BY timestamp DESC LIMIT 1",
+                    ),
+                    "the accepted batch is attributed to the key's identity",
+                )
+            },
+        )
+    }
+
+    @Test
+    @Order(53)
+    fun `a stored server key takes a batch for ANY workspace - intake is instance-wide`() {
+        // #215 B6 (owner ruling 2026-09-24, record A11): a server key's workspace_id is where it
+        // is ADMINISTERED, not a confinement. The key below is pinned to `default`; the batch
+        // names another workspace of uat, and is accepted — the inventory for it too.
+        uatJdbc.execute(
+            "INSERT INTO workspaces (id, name, display_name) VALUES ('$OTHER_WORKSPACE_ID', '$OTHER_WORKSPACE', 'Promotion other')" +
+                " ON CONFLICT (id) DO NOTHING",
+        )
+        val key = seedServerKeyOnUat("instance-wide receiver")
+
+        val inventory =
+            httpClient.send(
+                HttpRequest
+                    .newBuilder(URI.create("http://localhost:$portUat/api/v1/promotion/inventory?workspace=$OTHER_WORKSPACE"))
+                    .header(PROMOTION_HEADER, key.plaintext)
+                    .GET()
+                    .build(),
+                HttpResponse.BodyHandlers.ofString(),
+            )
+        assertEquals(200, inventory.statusCode(), "the inventory of another workspace was refused: ${inventory.body()}")
+
+        val response =
+            pushTo(
+                portUat,
+                key = key.plaintext,
+                body = """{"source_env":"dev","key_fingerprint":"none","workspace":"$OTHER_WORKSPACE","templates":[],"pipelines":[]}""",
+            )
+        assertEquals(200, response.statusCode(), "a batch for another workspace was refused: ${response.body()}")
     }
 
     @Test
@@ -381,8 +431,8 @@ class PromotionTwoDeploymentE2eTest {
         // not be able to classify a credential by presenting it here. Each key is presented for
         // the FIRST time in this test: a key validated once is cached for the TTL (auth §7.3),
         // so revoking a key mid-test would prove the cache, not the check.
-        // 179 (V31): one live `user` key per (user, workspace) — uatKey already holds that
-        // slot for the admin, so the wrong-kind probe gets its own owner.
+        // The wrong-kind probe is an MCP key of its own member (one live `user` key per
+        // (user, workspace), V31).
         uatJdbc.execute(
             "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)" +
                 " VALUES ('$WRONG_KIND_USER_ID', 'e2e-wrong-kind@datapipelines.test', 'E2E WrongKind'," +
@@ -438,12 +488,27 @@ class PromotionTwoDeploymentE2eTest {
         expiresAt: String? = null,
         ownerId: String = ADMIN_USER_ID,
     ): E2eAuth.SeededKey {
-        val key = E2eAuth.generateKey(name, emptyArray())
+        val key = E2eAuth.generateKey(name)
         val expiry = expiresAt?.let { "'$it'::timestamptz" } ?: "NULL"
+        // #215 (record §3.3, PK5): a server key acts as its OWN `service` identity, created with
+        // it — inactive when the key is revoked — and created BY the admin. An MCP (`user`) key
+        // acts as its member, who created it.
+        val actsAs =
+            if (kind == "server") {
+                val identity = UUID.randomUUID().toString()
+                uatJdbc.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind)" +
+                        " VALUES ('$identity', '${key.id}@keys.invalid', '$name', 'key', '${key.id}', ${!revoked}, FALSE, 'service')",
+                )
+                identity
+            } else {
+                ownerId
+            }
+        val role = if (kind == "server") "'promotion_receiver'" else "NULL"
         uatJdbc.execute(
-            "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id, kind, is_revoked, expires_at)" +
-                " VALUES ('${key.id}', '$ownerId', '$name', '${key.hash}', '{}'::text[], '$WORKSPACE_ID_TEXT'," +
-                " '$kind', $revoked, $expiry)",
+            "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role, is_revoked, expires_at)" +
+                " VALUES ('${key.id}', '$actsAs', '$ownerId', '$name', '${key.hash}', '$WORKSPACE_ID_TEXT'," +
+                " '$kind', $role, $revoked, $expiry)",
         )
         return key
     }
@@ -555,14 +620,14 @@ class PromotionTwoDeploymentE2eTest {
         val existing =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, keyFor(port))
+                .asSession(adminSession())
                 .`when`()
                 .get("/api/v1/datasources/$name")
         if (existing.statusCode == 200) return
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, keyFor(port))
+            .asSession(adminSession())
             .body(
                 """
                 {"name": "$name", "display_name": "Promotion E2E", "dialect": "H2",
@@ -587,7 +652,7 @@ class PromotionTwoDeploymentE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, keyFor(port))
+            .asSession(adminSession())
             .body(
                 """
                 {"id": "$id", "dialect": "H2", "display_name": "Promotion E2E $id",
@@ -615,7 +680,7 @@ class PromotionTwoDeploymentE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, keyFor(port))
+            .asSession(adminSession())
             .header("If-Match", hash)
             .body("""{"name": "$id"}""")
             .`when`()
@@ -643,7 +708,7 @@ class PromotionTwoDeploymentE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, keyFor(port))
+            .asSession(adminSession())
             .body(body)
             .`when`()
             .post("/api/v1/pipelines")
@@ -665,7 +730,7 @@ class PromotionTwoDeploymentE2eTest {
     ) {
         given()
             .port(port)
-            .header(API_KEY_HEADER, keyFor(port))
+            .asSession(adminSession())
             .header("If-Match", hash)
             .`when`()
             .post("/api/v1/pipelines/$id/release")
@@ -684,7 +749,7 @@ class PromotionTwoDeploymentE2eTest {
         val full =
             given()
                 .port(portDev)
-                .header(API_KEY_HEADER, keyFor(portDev))
+                .asSession(adminSession())
                 .`when`()
                 .get("/api/v1/pipelines/$id")
                 .then()
@@ -698,7 +763,7 @@ class PromotionTwoDeploymentE2eTest {
         given()
             .port(portDev)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, keyFor(portDev))
+            .asSession(adminSession())
             .header("If-Match", hash)
             .body(mapper.writeValueAsString(tree))
             .`when`()
@@ -709,7 +774,7 @@ class PromotionTwoDeploymentE2eTest {
         val draftHash =
             given()
                 .port(portDev)
-                .header(API_KEY_HEADER, keyFor(portDev))
+                .asSession(adminSession())
                 .`when`()
                 .get("/api/v1/pipelines/$id")
                 .then()
@@ -719,7 +784,7 @@ class PromotionTwoDeploymentE2eTest {
 
         given()
             .port(portDev)
-            .header(API_KEY_HEADER, keyFor(portDev))
+            .asSession(adminSession())
             .header("If-Match", draftHash)
             .`when`()
             .post("/api/v1/pipelines/$id/release")
@@ -876,33 +941,24 @@ class PromotionTwoDeploymentE2eTest {
             }
         }
 
-        fun seedKey(key: E2eAuth.SeededKey) {
-            DriverManager.getConnection(url, user, password).use { connection ->
-                connection.createStatement().use { statement ->
-                    statement.execute(
-                        """
-                        INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)
-                        VALUES ('$ADMIN_USER_ID', 'e2e-promotion@datapipelines.test', 'E2E Promotion', 'test', 'e2e-promo-sub', TRUE, TRUE)
-                        ON CONFLICT (id) DO NOTHING
-                        """.trimIndent(),
-                    )
-                }
-                val sql =
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, '$WORKSPACE_ID_TEXT') ON CONFLICT (id) DO NOTHING"
-                connection.prepareStatement(sql).use { ps ->
-                    ps.setString(1, key.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, key.name)
-                    ps.setString(4, key.hash)
-                    ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                    ps.executeUpdate()
-                }
-            }
+        /** The deployment's admin — a super admin, signed in as a session for every REST step (#215 B2). */
+        fun seedAdmin() {
+            execute(
+                """
+                INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)
+                VALUES ('$ADMIN_USER_ID', 'e2e-promotion@datapipelines.test', 'E2E Promotion', 'test', 'e2e-promo-sub', TRUE, TRUE)
+                ON CONFLICT (id) DO NOTHING
+                """.trimIndent(),
+            )
         }
     }
 
-    private fun keyFor(port: Int): String = if (port == portDev) devKey.plaintext else uatKey.plaintext
+    /**
+     * The admin's SESSION on either deployment — the fixture's authoring and reads go over REST,
+     * which is a session's surface since #215 B2. Both contexts share [SECRET] as their JWT
+     * secret and seed the same admin id, so one signer serves both.
+     */
+    private fun adminSession(): String = E2eSession.jwt(SECRET, ADMIN_USER_ID, "e2e-promotion@datapipelines.test", WORKSPACE)
 
     companion object {
         private const val REDIS_PORT = 6379
@@ -921,6 +977,10 @@ class PromotionTwoDeploymentE2eTest {
         private val WORKSPACE_ID: UUID = UUID.fromString(WORKSPACE_ID_TEXT)
         private const val ADMIN_USER_ID = "aaaa0000-0000-0000-0000-0000000000e2"
         private const val WRONG_KIND_USER_ID = "aaaa0000-0000-0000-0000-0000000000e3"
+
+        /** A second workspace on uat — B6's cross-workspace batch target. */
+        private const val OTHER_WORKSPACE = "promo-other"
+        private const val OTHER_WORKSPACE_ID = "aaaa0000-0000-0000-0000-0000000000e4"
 
         private const val DATASOURCE = "promo_e2e_ds"
         private const val ABSENT_DATASOURCE = "promo_e2e_missing_on_uat"
@@ -971,8 +1031,6 @@ class PromotionTwoDeploymentE2eTest {
 
         private lateinit var devJdbc: Jdbc
         private lateinit var uatJdbc: Jdbc
-        private lateinit var devKey: E2eAuth.SeededKey
-        private lateinit var uatKey: E2eAuth.SeededKey
 
         @BeforeAll
         @JvmStatic
@@ -1015,10 +1073,8 @@ class PromotionTwoDeploymentE2eTest {
 
             devJdbc = Jdbc(postgresDev.jdbcUrl, postgresDev.username, postgresDev.password)
             uatJdbc = Jdbc(postgresUat.jdbcUrl, postgresUat.username, postgresUat.password)
-            devKey = E2eAuth.generateKey("promotion-e2e-dev", arrayOf("read", "execute", "author"))
-            uatKey = E2eAuth.generateKey("promotion-e2e-uat", arrayOf("read", "execute", "author"))
-            devJdbc.seedKey(devKey)
-            uatJdbc.seedKey(uatKey)
+            devJdbc.seedAdmin()
+            uatJdbc.seedAdmin()
         }
 
         @AfterAll

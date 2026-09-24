@@ -5,7 +5,6 @@ import co.datapipelines.application.datasources.LakeManifestUrl
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.datasources.BootstrapDatasourceFileException
 import co.datapipelines.datasources.BootstrapLakeImport
@@ -214,11 +213,8 @@ class LakeBootstrapSeeder(
             userId = user.id,
             email = user.email,
             displayName = user.displayName,
-            // The `admin` SCOPE is gone as an authority since RBAC round 1 (D-R1): what makes
-            // the bootstrap actor able to register an instance datasource is `users.is_admin`,
-            // i.e. SUPER ADMIN. The scope stays for the credential axis of anything that still
-            // reads it; the flag is what the capability axis judges.
-            scopes = setOf(Scope.AUTHOR),
+            // What makes the bootstrap actor able to register an instance datasource is
+            // `users.is_admin`, i.e. SUPER ADMIN (D-R1) — the role is the whole answer (#215).
             authMethod = AuthMethod.OIDC,
             superAdmin = true,
         )

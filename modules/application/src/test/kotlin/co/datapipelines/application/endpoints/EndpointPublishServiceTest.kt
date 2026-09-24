@@ -5,7 +5,6 @@ import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.Node
 import co.datapipelines.pipeline.NodeOutput
@@ -399,7 +398,6 @@ class EndpointPublishServiceTest {
             userId = ACTOR,
             email = "a@b.c",
             displayName = "A",
-            scopes = setOf(Scope.AUTHOR),
             authMethod = AuthMethod.API_KEY,
             keyId = "dpk_ABCDEFGHIJKL",
             workspaceName = "default",

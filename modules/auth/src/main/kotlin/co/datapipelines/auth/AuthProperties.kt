@@ -104,7 +104,6 @@ data class AuthProperties(
 
     data class ApiKeys(
         val cacheTtlSeconds: Long = 60,
-        val defaultScopes: List<String> = listOf("read"),
     )
 
     data class RateLimit(

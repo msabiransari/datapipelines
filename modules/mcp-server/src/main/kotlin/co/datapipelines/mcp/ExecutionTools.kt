@@ -2,7 +2,6 @@ package co.datapipelines.mcp
 
 import co.datapipelines.application.mcp.McpCallAudit
 import co.datapipelines.auth.Permission
-import co.datapipelines.auth.Scope
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionRecord
@@ -14,27 +13,6 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.modelcontextprotocol.spec.McpError
 import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
-
-/**
- * The `read` floor every resource path enforces explicitly (mcp-server.md §7.3, §13 checklist:
- * "`resources/list` filtered by the caller's scope").
- *
- * The tools get this from [ScopeMatrix] via the dispatcher; the resource methods have no matrix row
- * of their own, and relying on `Scope.READ` being ordinal 0 would make the guarantee accidental —
- * an operator who set `datapipelines.auth.api-keys.default-scopes` to something empty or exotic
- * would mint a key that reads every pipeline body and template through the `resources` methods while every
- * tool refuses it. So the floor is asserted, not assumed.
- *
- * @throws McpError `-32003` when the caller cannot read. the `resources` methods have no `isError` content
- *   channel, so a refusal can only be a JSON-RPC error ([McpArguments.FORBIDDEN]).
- */
-internal fun requireReadScope(ctx: McpToolContext) {
-    if (!Scope.satisfies(ctx.principal.scopes, Scope.READ)) {
-        throw McpArguments.forbidden(
-            "${PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT}: this key holds no scope that grants read.",
-        )
-    }
-}
 
 /**
  * Execution **ownership** (mcp-server.md §13 security checklist; D11): a key reads its issuer's
@@ -248,6 +226,7 @@ class ExecutionsCancelTool(
                 id,
                 "started_outside_mcp",
                 "Execution '$id' was started outside MCP; a key cancels only executions its own MCP calls started.",
+                ctx,
             )
         }
         val keyId = ctx.principal.keyId
@@ -260,6 +239,7 @@ class ExecutionsCancelTool(
                 id,
                 "different_credential",
                 "Execution '$id' was started by a different credential; a key cancels only executions its own MCP calls started.",
+                ctx,
             )
         }
         cancellation.cancel(id, AbortReason.CANCELLED)
@@ -267,19 +247,26 @@ class ExecutionsCancelTool(
     }
 
     /**
-     * The same-credential refusals: `auth.scope.insufficient` is the catalog's one authorization
-     * refusal code (§13.7) — the catalog has no "not yours" code and this surface invents none.
-     * `details.reason` names which rule fired; the messages are static and leak nothing beyond
-     * what the caller's own visibility already established.
+     * The same-credential refusals: ownership, not permission — carried by `auth.role_required`,
+     * the ONE authorization refusal (#215, owner ruling 2026-09-24), with `details.reason` naming
+     * which rule fired and `required`/`held` what the role was judged as. The messages are static
+     * and leak nothing beyond what the caller's own visibility already established.
      */
     private fun sameCredentialRefusal(
         id: UUID,
         reason: String,
         message: String,
+        ctx: McpToolContext,
     ): DatapipelinesException =
         DatapipelinesException(
-            code = PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT,
+            code = PipelineErrorCodes.Auth.ROLE_REQUIRED,
             message = message,
-            details = mapOf("execution_id" to id.toString(), "reason" to reason),
+            details =
+                mapOf(
+                    "execution_id" to id.toString(),
+                    "reason" to reason,
+                    "required" to Permission.EXECUTION_CANCEL.wire,
+                    "held" to ctx.principal.heldRole,
+                ),
         )
 }

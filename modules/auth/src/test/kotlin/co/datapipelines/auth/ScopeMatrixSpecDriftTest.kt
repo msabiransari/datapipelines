@@ -1,11 +1,8 @@
 package co.datapipelines.auth
 
 import io.kotest.assertions.withClue
-import io.kotest.matchers.booleans.shouldBeFalse
-import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
-import io.kotest.matchers.maps.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
@@ -15,18 +12,16 @@ import org.junit.jupiter.api.Test
  * counts — so a row added to the doc without code fails the build, and a permission added to
  * the code (or a role cell flipped in it) without the doc does too.
  *
- * Four comparisons, each naming what disagrees:
+ * The comparisons, each naming what disagrees:
  * - the catalog's rows ARE `Permission.entries`, in declaration order, plus the listed reserved
  *   rows (a real row cannot hide as a reserved one);
- * - every CELL — role × permission — reads the same in the doc and in [RolePermissions], and a
- *   `fenced` row is exactly a [RolePermissions.FENCED] permission;
- * - the A4 shim: the **Permissions — key scopes** table equals [ScopeMatrix.PERMISSION_MIN_SCOPE],
- *   which must be total — a permission with no scope floor is a build failure;
- * - the MCP surface: every tool sits on the catalog row of the permission it declares in
- *   [ScopeMatrix.MCP_TOOL_PERMISSION], and the MCP key-scope table equals the scope the shim
- *   gives it.
+ * - every MEMBER-role CELL — role × permission — reads the same in the doc and in
+ *   [RolePermissions], and a `fenced` row is exactly a [RolePermissions.FENCED] permission;
+ * - every KEY-role cell (slice (b): `api_caller`, `promotion_receiver`) reads the same in the doc
+ *   and in [RolePermissions.of] — the key roles hold exactly what the record's §3.2 lists.
  *
- * Also exercises the key-scope-subset privilege-escalation guard (§7.4).
+ * The MCP tool placement moved with the tool permission onto `McpToolCatalog` (a module this one
+ * cannot see); web's `MatrixRowReachabilityTest` holds it to the doc.
  */
 class ScopeMatrixSpecDriftTest {
     private val doc = RepoFiles.read(RepoFiles.AUTH_SPEC_PATH)
@@ -71,36 +66,26 @@ class ScopeMatrixSpecDriftTest {
     }
 
     @Test
-    fun `the A4 shim is total and every permission's key scope matches the doc`() {
-        ScopeMatrix.PERMISSION_MIN_SCOPE.keys shouldBe Permission.entries.toSet()
-        RoleMatrixDoc.permissionKeyScopes(doc) shouldContainExactly ScopeMatrix.PERMISSION_MIN_SCOPE
+    fun `every key-role cell of the catalog matches the key-role table - both directions`() {
+        val mismatches = mutableListOf<String>()
+        rows.forEach { row ->
+            val permission = row.permission ?: return@forEach
+            KeyRole.entries.forEach { role ->
+                val inDoc = role in row.keyRoles
+                val inCode = permission in RolePermissions.of(role)
+                if (inDoc != inCode) mismatches += cellMismatch(permission, role.wire, row.keyRoleRaw[role], inCode)
+            }
+        }
+        withClue(mismatches.joinToString("\n")) { mismatches.shouldBeEmpty() }
     }
 
+    /** Non-vacuity for the key-role columns: a parse that found no `✓` would pass the test above for a table of ✗. */
     @Test
-    fun `every MCP tool sits on the catalog row of the permission it declares`() {
-        val fromDoc = RoleMatrixDoc.toolPermissions(doc)
-
-        fromDoc.size shouldBe TOOL_COUNT
-        fromDoc shouldContainExactly ScopeMatrix.MCP_TOOL_PERMISSION
-    }
-
-    @Test
-    fun `every MCP tool's minimum key scope matches the doc - through the shim`() {
-        val fromDoc = RoleMatrixDoc.mcpKeyScopes(doc)
-
-        fromDoc.size shouldBe TOOL_COUNT
-        fromDoc shouldContainExactly ScopeMatrix.MCP_TOOL_PERMISSION.keys.associateWith { ScopeMatrix.requiredScopeForTool(it) }
-    }
-
-    @Test
-    fun `key-scope-subset guard - requested must be within creator effective scopes`() {
-        // A read-scoped creator cannot mint an author key (§7.4).
-        ScopeMatrix.keyScopesWithinCreator(setOf(Scope.AUTHOR), setOf(Scope.READ)).shouldBeFalse()
-        // An author creator can mint read/execute/author (hierarchy expansion), but not admin.
-        ScopeMatrix.keyScopesWithinCreator(setOf(Scope.READ, Scope.EXECUTE, Scope.AUTHOR), setOf(Scope.AUTHOR)).shouldBeTrue()
-        ScopeMatrix.keyScopesWithinCreator(setOf(Scope.ADMIN), setOf(Scope.AUTHOR)).shouldBeFalse()
-        // Admin creator can mint anything.
-        ScopeMatrix.keyScopesWithinCreator(setOf(Scope.ADMIN), setOf(Scope.ADMIN)).shouldBeTrue()
+    fun `the key-role columns name exactly the record's section 3-2 permissions`() {
+        rows.filter { KeyRole.API_CALLER in it.keyRoles }.mapNotNull { it.permission }.toSet() shouldBe
+            setOf(Permission.ENDPOINT_SERVE, Permission.EXECUTION_READ, Permission.EXECUTION_RESULT_READ)
+        rows.filter { KeyRole.PROMOTION_RECEIVER in it.keyRoles }.mapNotNull { it.permission }.toSet() shouldBe
+            setOf(Permission.PROMOTION_INVENTORY_READ, Permission.PROMOTION_PUSH)
     }
 
     private fun cellMismatch(
@@ -113,12 +98,6 @@ class ScopeMatrixSpecDriftTest {
     private companion object {
         /** The record's 64 + `template.evaluate` (7b), re-derived on the lane's base (A7). */
         const val PERMISSION_COUNT = 65
-
-        /**
-         * 42 since 7b's `templates_evaluate` — the full history is in auth.md's change log
-         * (18 → … → 41 with 140's `pipelines_run_checks`, 42 with 7b).
-         */
-        const val TOOL_COUNT = 42
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

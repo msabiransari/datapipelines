@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -33,7 +34,9 @@ import javax.crypto.spec.SecretKeySpec
  *   less. Its answer moved from 403 to the D-R5 404.
  * - **F5**: a global datasource referenced only by ANOTHER workspace's pipeline is still
  *   `datasource.in_use` (409 naming the reference).
- * - **F6**: a read-scoped key cannot reach the mutating UI partials; an author key can.
+ * - **F6**: a viewer cannot reach the mutating UI partials (by ROLE since #215 — scopes are gone,
+ *   and the suite drives sessions: REST and the UI are a session's surface, B2); a workspace
+ *   admin can. The viewer's connection TEST is admitted now (record C1).
  * - **F9**: the register modal's refusal is a 400 whose body the page injects into
  *   `#register-result`.
  * - **below-cap**: a missing member email is the generic bad-parameter 400, not the
@@ -47,16 +50,17 @@ class WorkspaceSurfacesFixRoundE2eTest {
     @LocalServerPort
     private var port: Int = 0
 
-    private val aliceKey get() = ALICE_KEY.plaintext
-    private val bobKey get() = BOB_KEY.plaintext
-    private val adminKey get() = ADMIN_KEY.plaintext
-    private val readonlyKey get() = READONLY_KEY.plaintext
+    /** #215 B2: REST and the UI are a session's surface — each person signs in, pinned by their ACTIVE workspace. */
+    private val aliceSession get() = sessionJwt(ALICE, "alice@acme.test", "acme")
+    private val bobSession get() = sessionJwt(BOB, "bob@globex.test", "globex")
+    private val rootSession get() = sessionJwt(ROOT, "root@company.test", "acme")
+    private val eveSession get() = sessionJwt(EVE, "eve@acme.test", "acme")
 
     /**
      * The 025 blocking finding, still guarded — the feature that opened it is gone, the hole
      * it opened is not.
      *
-     * `open-join` let a key pinned to globex write a `workspace_members` row into ANY live
+     * `open-join` let a caller in globex write a `workspace_members` row into ANY live
      * workspace: a row that outlives revocation of the key, and that alone passes the checks
      * in `read` and `members`, neither of which consulted the pin. One leaked agent key could
      * walk every workspace's roster (emails, display names, user ids) at scope `read`.
@@ -67,12 +71,12 @@ class WorkspaceSurfacesFixRoundE2eTest {
      * elsewhere" and "does not exist" must stay indistinguishable or the pin is an oracle.
      */
     @Test
-    fun `F4b - a key pinned to globex cannot write a membership row into acme`() {
+    fun `F4b - a globex member cannot write a membership row into acme`() {
         ensureSeeded()
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, bobKey) // pinned to globex
+            .asSession(bobSession) // active in globex, no acme membership
             .body("""{"email":"bob@globex.test"}""")
             .`when`()
             .post("/api/v1/workspaces/acme/members")
@@ -91,7 +95,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, bobKey)
+            .asSession(bobSession)
             .body(
                 """{"id": "test/globex_tpl", "dialect": "H2", "display_name": "Globex",
                    "description": "F5", "imports": [], "body": "SELECT 1"}""",
@@ -103,7 +107,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, bobKey)
+                .asSession(bobSession)
                 .body(
                     """{"schema_version":1,"name":"test/globex_report","display_name":"G","description":"",""" +
                         """"nodes":[{"id":"n1","type":"DQL","source":"$DS_GLOBAL","template":{"id":"test/globex_tpl","version":1}}]}""",
@@ -118,7 +122,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
         try {
             given()
                 .port(port)
-                .header(API_KEY_HEADER, adminKey)
+                .asSession(rootSession)
                 .`when`()
                 .delete("/api/v1/datasources/$DS_GLOBAL")
                 .then()
@@ -126,8 +130,8 @@ class WorkspaceSurfacesFixRoundE2eTest {
                 .body("error.code", Matchers.equalTo("datasource.in_use"))
                 .body("error.details.referencing_pipelines", Matchers.hasItem("test/globex_report"))
         } finally {
-            // 101: the entity purges are session-only, so cleanup goes through the metadata
-            // DB directly (this suite drives keys, and the delete-under-test is the DATASOURCE's).
+            // 101: the entity purges are their own verbs, so cleanup goes through the metadata
+            // DB directly (the delete-under-test is the DATASOURCE's).
             java.sql.DriverManager
                 .getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password)
                 .use { c ->
@@ -141,12 +145,12 @@ class WorkspaceSurfacesFixRoundE2eTest {
     }
 
     @Test
-    fun `F6 - a read-scoped key cannot reach the mutating UI partials - the REST twin's floor applies`() {
+    fun `F6 - a viewer cannot reach the mutating UI partials - the REST twin's floor applies`() {
         ensureSeeded()
         ensureDatasourcesRegistered()
         given()
             .port(port)
-            .header(API_KEY_HEADER, readonlyKey)
+            .asSession(eveSession)
             .contentType(ContentType.URLENC)
             .formParam("name", "readonly-smuggle")
             .formParam("dialect", "H2")
@@ -157,22 +161,22 @@ class WorkspaceSurfacesFixRoundE2eTest {
             .post("/partials/datasources")
             .then()
             .statusCode(403)
-            .body("error.code", Matchers.equalTo("auth.scope.insufficient"))
+            .body("error.code", Matchers.equalTo("auth.role_required"))
 
+        // Record C1: the connection test follows execute, and a viewer executes — admitted.
         given()
             .port(port)
-            .header(API_KEY_HEADER, readonlyKey)
+            .asSession(eveSession)
             .contentType(ContentType.URLENC)
             .`when`()
             .post("/partials/datasources/$DS_ACME/test")
             .then()
-            .statusCode(403)
-            .body("error.code", Matchers.equalTo("auth.scope.insufficient"))
+            .statusCode(200)
 
-        // The read floor itself is untouched: the listing partial still serves a read key.
+        // The read floor itself is untouched: the listing partial still serves a viewer.
         given()
             .port(port)
-            .header(API_KEY_HEADER, readonlyKey)
+            .asSession(eveSession)
             .`when`()
             .get("/partials/datasources")
             .then()
@@ -180,14 +184,14 @@ class WorkspaceSurfacesFixRoundE2eTest {
     }
 
     @Test
-    fun `F6 - an author key CAN register through the partial - the floor is not a wall`() {
+    fun `F6 - a workspace admin CAN register through the partial - the floor is not a wall`() {
         ensureSeeded()
         // #186: the engine is a SERVER dialect — an in-process engine is super-admin-only now,
-        // and this case's subject is the SCOPE floor (an author key passes it), not the engine.
+        // and this case's subject is the ROLE floor (a workspace admin passes it), not the engine.
         // The URL never connects: registration validates without opening a connection.
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .contentType(ContentType.URLENC)
             .formParam("name", "partial-reg")
             .formParam("dialect", "POSTGRES")
@@ -208,7 +212,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
         // Cleanup through the REST twin.
         given()
             .port(port)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .`when`()
             .delete("/api/v1/datasources/partial-reg")
             .then()
@@ -245,7 +249,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, aliceKey)
+            .asSession(aliceSession)
             .body("""{}""")
             .`when`()
             .post("/api/v1/workspaces/acme/members")
@@ -265,7 +269,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
      * #186: in-process engines register as the SUPER ADMIN (the H2 `mem:` URLs below), so the
      * workspace-bound rows go through the root session with an explicit `workspace` binding —
      * the same ownership shape Alice's key used to produce. The suite's D8 premise still
-     * needs `member-datasources-enabled=true` (set in the context): it is what the scope-floor
+     * needs `member-datasources-enabled=true` (set in the context): it is what the role-floor
      * cases exercise.
      */
     private fun ensureDatasourcesRegistered() {
@@ -281,7 +285,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
         grant(DS_GLOBAL, "globex")
     }
 
-    /** Registers a datasource no workspace owns — session-only since O-2 (it needs `admin` scope). */
+    /** Registers a datasource no workspace owns — a super admin's verb (O-2). */
     private fun registerInstanceDatasource(
         name: String,
         jdbcUrl: String,
@@ -341,7 +345,6 @@ class WorkspaceSurfacesFixRoundE2eTest {
     companion object {
         private var datasourcesRegistered = false
 
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val SESSION_COOKIE = "dp_session"
         private const val FIX_ROUND_CSRF = "fix-round-csrf"
         private const val CSRF_COOKIE = "dp_csrf"
@@ -369,16 +372,6 @@ class WorkspaceSurfacesFixRoundE2eTest {
 
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
 
-        private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
-        private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
-        private val ADMIN_KEY = E2eAuth.generateKey("admin-key", arrayOf("read", "execute", "author"), ownerId = ROOT)
-
-        /**
-         * 179 (V31): one live `user` key per (user, workspace) — Alice's read-only key moved
-         * to EVE, a viewer in acme: the same read-scope assertions, a legal pair.
-         */
-        private val READONLY_KEY = E2eAuth.generateKey("readonly-key", arrayOf("read"), ownerId = EVE)
-
         private fun sessionJwt(
             userId: String,
             email: String,
@@ -389,7 +382,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
             val workspaceClaim = activeWorkspace?.let { ""","active_workspace":"$it"""" } ?: ""
             val payload =
                 b64(
-                    """{"sub":"$userId","email":"$email","name":"Test User","scopes":["read","execute","author"],""" +
+                    """{"sub":"$userId","email":"$email","name":"Test User",""" +
                         """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(3600).epochSecond}$workspaceClaim}""",
                 )
             val signature =
@@ -441,27 +434,7 @@ class WorkspaceSurfacesFixRoundE2eTest {
                         """.trimIndent(),
                     )
                 }
-                seedKeys(connection)
             }
-        }
-
-        private fun seedKeys(connection: java.sql.Connection) {
-            val pins =
-                mapOf(ALICE_KEY to WS_ACME, ADMIN_KEY to WS_ACME, BOB_KEY to WS_GLOBEX, READONLY_KEY to WS_ACME)
-            connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                .use { ps ->
-                    for ((key, workspace) in pins) {
-                        ps.setString(1, key.id)
-                        ps.setObject(2, UUID.fromString(key.ownerId))
-                        ps.setString(3, key.name)
-                        ps.setString(4, key.hash)
-                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                        ps.setObject(6, UUID.fromString(workspace))
-                        ps.addBatch()
-                    }
-                    ps.executeBatch()
-                }
         }
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */

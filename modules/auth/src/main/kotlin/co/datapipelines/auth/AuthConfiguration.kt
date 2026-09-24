@@ -150,7 +150,6 @@ class AuthConfiguration {
         authCache: AuthCache,
         auditLogger: AuditLogger,
         secretHasher: SecretHasher,
-        authProperties: AuthProperties,
         workspaceService: WorkspaceService,
         principalLiveness: PrincipalLiveness,
         secretSealer: ObjectProvider<SecretSealer>,
@@ -161,7 +160,6 @@ class AuthConfiguration {
             authCache,
             auditLogger,
             secretHasher,
-            authProperties,
             workspaceService,
             principalLiveness,
             // D16 — bound in `web` (`DomainConfiguration`) to the datasources module's
@@ -256,7 +254,7 @@ class AuthConfiguration {
         principalLiveness: PrincipalLiveness,
     ): AuthFilters =
         AuthFilters(
-            apiKey = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger, clientAddressResolver),
+            apiKey = ApiKeyFilter(apiKeyService, apiKeyRepository, auditLogger, clientAddressResolver, authErrorWriter),
             jwt = JwtAuthenticationFilter(jwtService, userService, clientAddressResolver, principalLiveness),
             oidcSignedInBounce = OidcSignedInBounceFilter(jwtService, userService),
             loginRateLimit =

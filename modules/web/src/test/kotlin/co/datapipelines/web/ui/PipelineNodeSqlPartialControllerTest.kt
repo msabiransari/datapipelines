@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
@@ -106,7 +105,6 @@ class PipelineNodeSqlPartialControllerTest {
                 UUID.randomUUID(),
                 "a@b.c",
                 "A",
-                setOf(Scope.READ),
                 AuthMethod.OIDC,
                 workspace = WorkspaceContext(workspaceId, "acme"),
             )

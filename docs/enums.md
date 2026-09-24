@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.17 (living document — updated as enums evolve)
+**Status:** v1.18 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -188,34 +188,33 @@ Fixed at template **create** and identical on every version of a template (`temp
 
 ---
 
-## 8. `Scope` — API key authorization scope
+## 8. `UserKind` — what a `users` row is
 
-**Source:** [Auth §7.5](auth.md#75-scopes)
-**Used by:** auth, every endpoint and MCP tool (scope enforcement — each catalog permission's key floor, auth.md §7.6's permission key-scope table; removed with scopes in #215 slice (b)).
+**Source:** [Auth §4.7](auth.md#47-key-identities); [metadata-db §4.1](metadata-db.md#41-users) (`users.kind`, V34, CHECK `chk_users_kind`)
+**Used by:** auth (`UserKind`, `User.isHuman`, `UserService`, `UserRepository`), the session filter, every user-administration route, `ActorNames` (history's "<key name> (API key)").
 
-Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope has all lower scopes too.
+| Value | Description |
+|---|---|
+| `human` | A person — the only kind that can log in, be linked to an OIDC identity, hold a membership, be invited or be administered on the admin users page |
+| `service` | An `endpoint` or `server` key's own identity (#215, PK5): provider `key`, email `<key id>@keys.invalid`, no password, never an admin. Created and deactivated with its key; managed only through it |
+| `system` | The System service account (auth §4.5, R7) — the actor for writes no human made; nothing authenticates as it |
 
-| Value | Includes | Description | Issuable to a key? |
-|---|---|---|---|
-| `read` | — | Read pipelines, templates, datasources (metadata), executions | yes |
-| `execute` | `read` | Execute pipelines; retrieve execution results | yes |
-| `author` | `execute`, `read` | Create / modify pipelines and templates | yes |
-| `admin` | `author`, `execute`, `read` | Manage datasources, users, system config | **no** — RBAC round 1 removed it from the key wire (O-2): it was the only scope that bought a key an INSTANCE verb, and instance verbs are human |
+One predicate — `kind = 'human'` — guards every login, linking and administration path (auth §4.7). V34 backfilled `system` on the System row and `human` on every other; the wire and database token is the lowercase name.
 
-**This is the CREDENTIAL axis, and since RBAC round 1 it is an API-key property only** — a session JWT carries no `scopes` claim. What a signed-in person may do is [`Permission`](#8b-permission--an-action-a-role-may-perform-was-capability) in the active workspace. Both axes are enforced for a key: its scope AND its issuer's current role ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
+(Until #215 slice (b) this section was `Scope`, the API-key credential axis; scopes were removed — see §8D.)
 
 ---
 
 ## 8B. `Permission` — an action a role may perform (was `Capability`)
 
-**Source:** [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) — **the catalog table is the single authority** (the value set, the roles each value admits, the surfaces placed on it); the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §2 (#215, ratified 2026-09-23) is its design.
-**Used by:** auth (`Permission`, `RolePermissions`, `ScopeMatrix.allowed`, `AuthenticatedPrincipal.holds`), every REST handler (`@RequiredScope(Permission.X)`), every MCP tool (`ScopeMatrix.MCP_TOOL_PERMISSION`), and the service checks that ask for one (`execution.read_all`, `server_key.create`, …).
+**Source:** [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) — **the catalog table is the single authority** (the value set, the roles each value admits, the surfaces placed on it); the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §2 (#215, ratified 2026-09-23) is its design.
+**Used by:** auth (`Permission`, `RolePermissions`, `ScopeMatrix.allowed`, `AuthenticatedPrincipal.holds`), every REST handler (`@RequiredScope(Permission.X)`), every MCP tool (its catalog entry, `McpToolCatalog.Entry.permission`), and the service checks that ask for one (`execution.read_all`, `server_key.create`, …).
 
 Since #215 slice (a) a permission is a **`<functionality>.<permission>` catalog value** — `pipeline.read`, `template.release`, `workspace.members.manage` — one per piece of functionality a person can take separately (PK1); 65 on this version. The wire form is the dotted token; the Kotlin constant is its upper-snake spelling (`PIPELINE_READ`). The seven coarse values of v1.16 (`view`, `execute`, `author`, `promotion_read`, `promote`, `ws_admin`, `super_admin`) are retired: every one maps onto the catalog values whose surfaces it covered, with each surface's roles unchanged. The values are not restated here — a second list is a second thing to keep true; read them in auth §7.6.
 
-It is the ROLE axis. It travels with a **membership**, not with a credential: the same person is a viewer in one workspace and an author in another. **Not a hierarchy**, unlike [`Scope`](#8-scope--api-key-authorization-scope): the roles are not a chain, so the ONE role table (`RolePermissions`) lists each role's permissions outright. A super admin (`users.is_admin`) holds every value in every workspace (D7) except the two **fenced** promotion-receiving values, which no role holds — they are reached only through the promotion server-key route family. Code asks whether a principal holds a permission; it never compares role names (PK1).
+It is the ROLE axis. It travels with a **membership**, not with a credential: the same person is a viewer in one workspace and an author in another. **Not a hierarchy**: the roles are not a chain, so the ONE role table (`RolePermissions`) lists each role's permissions outright. A super admin (`users.is_admin`) holds every value in every workspace (D7) except the two **fenced** promotion-receiving values, which no member role holds — only the `promotion_receiver` key role (§8D) does. Code asks whether a principal holds a permission; it never compares role names (PK1).
 
-**Where the two axes disagree until slice (b) removes scopes:** `pipeline.execute` floors at the `execute` SCOPE but is viewer-level — a `read` key may not execute, a viewer's session may. Schema introspection (`datasource.introspect`) runs the other way: `author` scope but every role.
+**One axis since slice (b):** scopes were removed (#215, PK8), so a permission is held by ROLES only — the four member roles and super admin (the §7.6 member columns), and the two key roles (§8D).
 
 ---
 
@@ -244,15 +243,29 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 
 | Value | Description |
 |---|---|
-| `user` | Every key that existed before round 074, and — since 179 (D16) — minted ONLY by the login/switch hook, one per user per workspace: scopes derived from the role, a pinned workspace, and the whole API surface those scopes allow |
-| `endpoint` | A credential for published endpoints only: no scopes are consulted, workspace-pinned, and it authorises exactly the endpoints its bindings cover plus the result cursor of executions it started |
-| `server` | The promotion peer's credential (091): minted by an `admin`, presented as `DP-Promotion-Key` by a SENDING deployment, and accepted on the promotion receiver's routes and nowhere else. No scopes are consulted; its authority is that route family |
+| `user` | The MCP key: minted ONLY by the login/switch hook, one per user per workspace (179, D16); acts as its member with the member's role capped at author (PK4); presented on `/mcp` and nowhere else (#215 B2) |
+| `endpoint` | A credential for published endpoints only: acts as its own identity with the `api_caller` role (§8D), workspace-pinned, and serves exactly the endpoints its bindings cover plus the metadata and result cursor of executions it started |
+| `server` | The promotion peer's credential (091): minted by a super admin, presented as `DP-Promotion-Key` by a SENDING deployment, and accepted on the promotion receiver's routes and nowhere else. Acts as its own identity with the `promotion_receiver` role (§8D), for any workspace (B6) |
 
-> A kind is **not** a scope and is deliberately not modelled as one. Scopes answer "how much may this credential do?" along one hierarchy; a kind answers "what kind of credential is this?", and the two axes do not compose — an endpoint key is not "a user key with fewer scopes". The wire form is the lowercase name, as with [`Scope`](#8-scope--api-key-authorization-scope).
+> A kind answers "where may this credential be presented?"; its ROLE (§8D, or the member's for the MCP key) answers "what may it do there?". Each kind carries exactly one role — the database CHECK (`chk_api_keys_role`) makes it a fact. The wire form is the lowercase name.
 
 > **A `server` key authenticates nothing outside the promotion routes.** Presented as an ordinary `DP-API-Key` it is refused on every route — REST, htmx partials, `/mcp` and every UI page — with `endpoint.key_kind_refused`. Same rule as the endpoint kind, different family.
 
-> **An endpoint key with no binding on any ancestor of the path it presents at authorises nothing.** The absence of a binding is never a fall-through to the user-key rule; if it were, publishing a new endpoint would silently widen every existing endpoint key's reach at the moment of publication.
+> **An endpoint key with no binding on any ancestor of the path it presents at authorises nothing.** The absence of a binding is never a fall-through (since #215 B3 an unbound path serves no key at all); if it were, publishing a new endpoint would silently widen every existing endpoint key's reach at the moment of publication.
+
+---
+
+## 8D. `KeyRole` — the role a key carries
+
+**Source:** [Auth §7.5](auth.md#75-key-roles-scopes-removed) and the two key-role columns of the §7.6 catalog; the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §3.2
+**Used by:** auth (`KeyRole`, `RolePermissions.of(KeyRole)`, `AuthenticatedPrincipal.keyRole`), persistence (`api_keys.role`, V34, CHECK `chk_api_keys_role`), the REST `role` field of key creation (rest-api §16.1), the Keys page's Role column.
+
+| Value | Carried by | Permissions |
+|---|---|---|
+| `api_caller` | every `endpoint` key | `endpoint.serve` (the paths bound to the key), `execution.read` and `execution.result.read` (the executions it started) |
+| `promotion_receiver` | every `server` key (and the deprecated config-value peer) | `promotion.inventory.read`, `promotion.push` — for any workspace (B6) |
+
+Pre-created and fixed: a key role is a function of the key's kind, the MCP (`user`) key carries none (it acts as its member, capped at author — PK4), and no key role holds workspace admin or super admin authority (PK3). `snake_case` everywhere (A5); the UI prints it with a space (`api caller`).
 
 ---
 
@@ -374,7 +387,7 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 | `auth.api_key.revoked_by_admin` | A workspace admin or super admin revoked a member's login-minted key — with the membership's removal (`reason: member_removed`) or as an explicit act that keeps the member (`reason: admin_revoked`; the member's session keeps working, the next sign-in mints fresh) (#200, [Auth §7.4](auth.md#74-issuance)) |
 | `auth.api_key.used` | API key validated (sampled 1/100) |
 | `auth.api_key.rejected` | API key validation failed |
-| `auth.scope.denied` | Request rejected for insufficient scope |
+| `auth.scope.denied` | Request refused by the authorization layer — a role that lacks the permission, an undeclared handler, or a key off its kind's surface (the event keeps its historical name) |
 | `auth.user.deactivated` | Admin deactivated a user |
 | `auth.user.activated` | Admin reactivated a user |
 | `auth.user.admin_granted` | Admin granted admin scope to user |
@@ -473,7 +486,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `pipeline.node.*` | Individual node execution failures | pipeline-contract §13.4 |
 | `pipeline.staging.*` | Tempdb / staging failures | pipeline-contract §13.5 |
 | `type_mapping.*` | Type mapping warnings (not errors — in response `warnings` array) | pipeline-contract §13.6 |
-| `auth.api_key.*`, `auth.scope.*`, `auth.session.*`, `auth.login.*`, `auth.csrf.*`, `auth.password.*` | Authentication / authorization errors | pipeline-contract §13.7 (defined in [Auth §9](auth.md#9-auth-errors)) |
+| `auth.api_key.*`, `auth.permission.*`, `auth.session.*`, `auth.login.*`, `auth.csrf.*`, `auth.password.*` | Authentication / authorization errors | pipeline-contract §13.7 (defined in [Auth §9](auth.md#9-auth-errors)) |
 | `datasource.*` (incl. `datasource.validation.*`) | Datasource CRUD, validation, driver availability | pipeline-contract §13.8 (defined in [Datasources §9](datasources.md#9-validation-rules)) |
 | `template.*` (incl. `template.validation.*`) | Template CRUD, validation failures (incl. import cycles: `template.validation.import_cycle`) | pipeline-contract §13.9 (defined in [Templates §7](templates.md#7-validation-rules)) |
 | `result.*` | Result cursor retrieval failures | pipeline-contract §13.10 (defined in [REST API §7](rest-api.md#7-result-delivery)) |
@@ -503,7 +516,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `204 No Content` | Success, no body | DELETE |
 | `400 Bad Request` | Client-side validation failure | All `pipeline.validation.*`, `template.validation.*`, `datasource.validation.*`, `result.format_unsupported` |
 | `401 Unauthorized` | Auth missing or invalid | `auth.api_key.missing`, `auth.api_key.invalid`, `auth.session.*` |
-| `403 Forbidden` | Auth valid but insufficient scope | `auth.scope.insufficient`, `auth.csrf.*` |
+| `403 Forbidden` | Auth valid but the role does not hold the permission, or the route declares none | `auth.role_required`, `auth.permission.undeclared`, `auth.csrf.*` |
 | `404 Not Found` | Resource doesn't exist | `pipeline.execution.not_found`, `result.execution_not_found`, etc. |
 | `409 Conflict` | State conflict | `pipeline.import.version_conflict`, `result.execution_incomplete`, `idempotency.key_reused_for_different_request` |
 | `410 Gone` | Resource expired / terminally unavailable | `result.expired`, `result.execution_failed` |
@@ -621,7 +634,8 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 | `TemplateEngine` | templates | templates |
 | `TemplateType` | template-hierarchy-design | templates, pipeline-contract |
 | `StagingEngine` | pipeline-contract | staging, dag-executor |
-| `Scope` | auth | every endpoint (API keys only since RBAC round 1) |
+| `UserKind` | [auth.md §4.7](auth.md#47-key-identities) | auth, metadata-db (the V34 CHECK) |
+| `KeyRole` | [auth.md §7.5](auth.md#75-key-roles-scopes-removed) | auth, metadata-db (the V34 CHECK), rest-api §16.1 |
 | `Permission` | [auth.md §11A](auth.md#11a-roles) / §7.6 | auth, every endpoint and MCP tool |
 | `WorkspaceRole` | [auth.md §11A](auth.md#11a-roles) | auth, metadata-db (the V29 CHECKs), rest-api §17, the members dropdown |
 | `NodeStatus` | dag-executor | rest-api, mcp-server |
@@ -658,6 +672,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v1.18 | 215b (#215) key identities, key roles | **§8 `Scope` is replaced by §8 `UserKind`** (`human` / `service` / `system`, V34) and new **§8D `KeyRole`** (`api_caller`, `promotion_receiver`) — scopes were removed (PK8). §8A's kinds restated as where a credential may be presented, the role as what it may do; §8B is one axis. §15's `auth.scope.denied` keeps its name, now for every authorization refusal; §16/§17 name `auth.permission.undeclared`. Cross-reference rows for the two new enums. |
 | 2026-09-24 | v1.17 | 215a (#215) the permission catalog | **§8B `Permission` is the catalog**: the seven coarse values (`view` … `super_admin`) are replaced by the 65 `<functionality>.<permission>` values of auth §7.6, which is now their single authority — this section points there instead of restating them. §8 and §8C name the new code homes (`RolePermissions`, the permission key-scope table). Status caught up with the change log (it read v1.15 while the rows had reached v1.16). |
 | 2026-09-21 | v1.14 | 179 (#179) keys | §8A `user`: minted ONLY by the login/switch hook, one per user per workspace (D16) — the "default for any key minted without an explicit kind" sentence is gone with on-demand minting. No value added, removed or renamed; the wire set is unchanged |
 | 2026-09-20 | v1.16 | 177 (#177) roles R1 | §8B `Capability` → **`Permission`** (D21), redefined as the role SETS of the ratified matrix: `switch` gone (release and switch are the author's, D8), **`promotion_read`** new (owner rule 13), `execute` no longer admits the promoter (D5), `ws_admin` gains the workspaces page (D13). New **§8C `WorkspaceRole`** — the ONE role a membership holds (V29; `viewer` \| `author` \| `promoter` \| `workspace_admin`). New **§18A `ExecutedByKeyKind`** (`user` \| `endpoint` \| `server`, V30) beside the `executed_by` rename in §18. §15: `workspace.member_flags_changed` → `workspace.member_role_changed`; the member-added / invited / materialised rows carry `role`, not `flags`. |

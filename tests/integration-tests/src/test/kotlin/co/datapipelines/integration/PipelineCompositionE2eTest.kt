@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
@@ -105,7 +106,7 @@ class PipelineCompositionE2eTest {
         val correlationId = UUID.randomUUID().toString()
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, correlationId)
+                consumeExecutionStream(port, ADMIN_SESSION, mapper, parentId, correlationId)
             }
         events.lifecycleNames() shouldContainExactly
             listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
@@ -153,7 +154,7 @@ class PipelineCompositionE2eTest {
 
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, rootId, UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_SESSION, mapper, rootId, UUID.randomUUID().toString())
             }
         events.last().first shouldBe "data_ready"
         val rootExecutionId = events.last().second["execution_id"].asText()
@@ -226,7 +227,7 @@ class PipelineCompositionE2eTest {
 
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_SESSION, mapper, parentId, UUID.randomUUID().toString())
             }
         // The parent's own outcome is unchanged by this fix: a timeout is a FAILURE (§8.1).
         events.last().first shouldBe "pipeline_failed"
@@ -285,7 +286,7 @@ class PipelineCompositionE2eTest {
 
         val cancelBudget = Duration.ofSeconds(CANCEL_BUDGET_SECONDS)
         val correlationId = UUID.randomUUID().toString()
-        val stream = CompletableFuture.supplyAsync { consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, correlationId) }
+        val stream = CompletableFuture.supplyAsync { consumeExecutionStream(port, ADMIN_SESSION, mapper, parentId, correlationId) }
 
         // The child's row is written as the child execution starts — before its node runs, and so
         // before the statement exists. Cancelling on that signal puts the DELETE inside the window
@@ -297,7 +298,7 @@ class PipelineCompositionE2eTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .delete("/api/v1/executions/$parentExecutionId")
             .then()
@@ -428,7 +429,7 @@ class PipelineCompositionE2eTest {
 
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_SESSION, mapper, parentId, UUID.randomUUID().toString())
             }
         events.last().first shouldBe "data_ready"
         val parentExecutionId = events.last().second["execution_id"].asText()
@@ -461,7 +462,7 @@ class PipelineCompositionE2eTest {
     fun `the child run standalone computes the quarter itself`() {
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, childPipelineId(), UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_SESSION, mapper, childPipelineId(), UUID.randomUUID().toString())
             }
         events.last().first shouldBe "data_ready"
         val executionId = events.last().second["execution_id"].asText()
@@ -501,7 +502,7 @@ class PipelineCompositionE2eTest {
 
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(port, ADMIN_KEY.plaintext, mapper, parentId, UUID.randomUUID().toString())
+                consumeExecutionStream(port, ADMIN_SESSION, mapper, parentId, UUID.randomUUID().toString())
             }
         events.last().first shouldBe "data_ready"
         val parentExecutionId = events.last().second["execution_id"].asText()
@@ -536,7 +537,7 @@ class PipelineCompositionE2eTest {
         val resultResponse =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
                 .then()
@@ -599,7 +600,7 @@ class PipelineCompositionE2eTest {
         val resultResponse =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
                 .then()
@@ -711,7 +712,7 @@ class PipelineCompositionE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$name", "display_name": "Composition H2", "dialect": "H2",
@@ -733,7 +734,7 @@ class PipelineCompositionE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(
                     """
                     {"id": "$id", "dialect": "$dialect", "display_name": "$displayName",
@@ -750,7 +751,7 @@ class PipelineCompositionE2eTest {
         val hash = response.jsonPath().getString("data.body_hash")
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", hash)
             .contentType(ContentType.JSON)
             .body("""{"name": "$id"}""")
@@ -794,7 +795,7 @@ class PipelineCompositionE2eTest {
         val hash = response.jsonPath().getString("data.body_hash")
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", hash)
             .`when`()
             .post("/api/v1/pipelines/$id/release")
@@ -822,7 +823,7 @@ class PipelineCompositionE2eTest {
         return given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(bodyJson)
             .`when`()
             .post("/api/v1/pipelines")
@@ -867,18 +868,6 @@ class PipelineCompositionE2eTest {
                     """.trimIndent(),
                 )
             }
-            connection
-                .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
-                ).use { ps ->
-                    ps.setString(1, ADMIN_KEY.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, ADMIN_KEY.name)
-                    ps.setString(4, ADMIN_KEY.hash)
-                    ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                    ps.executeUpdate()
-                }
         }
     }
 
@@ -892,7 +881,6 @@ class PipelineCompositionE2eTest {
          * own 60-second `node-query-timeout-seconds` backstop.
          */
         private const val CANCEL_BUDGET_SECONDS = 12L
-        private const val API_KEY_HEADER = "DP-API-Key"
 
         private const val H2_DATASOURCE = "h2-comp"
         private const val H2_JDBC_URL = "jdbc:h2:mem:compdb;DB_CLOSE_DELAY=-1"
@@ -933,7 +921,9 @@ class PipelineCompositionE2eTest {
 
         private val random = SecureRandom()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-composition-key", arrayOf("read", "execute", "author"))
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the session (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-composition@datapipelines.test")
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedE2e.postgres
@@ -963,7 +953,7 @@ class PipelineCompositionE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
             listOf("google", "microsoft").forEachIndexed { index, name ->
@@ -1032,7 +1022,7 @@ private const val EXECUTION_POLL_MS = 25L
  */
 private fun consumeExecutionStream(
     port: Int,
-    apiKey: String,
+    session: String,
     mapper: ObjectMapper,
     pipelineId: String,
     correlationId: String,
@@ -1040,7 +1030,8 @@ private fun consumeExecutionStream(
     val request =
         HttpRequest
             .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-            .header("DP-API-Key", apiKey)
+            .header("Cookie", E2eSession.cookieHeader(session))
+            .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
             .header("DP-Correlation-Id", correlationId)
             .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream")

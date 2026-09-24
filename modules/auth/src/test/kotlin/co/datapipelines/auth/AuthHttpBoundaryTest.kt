@@ -70,7 +70,6 @@ class AuthHttpBoundaryTest {
 
     private val mapper = ObjectMapper()
 
-    private lateinit var superAdminIssuer: AuthenticatedPrincipal
     private lateinit var user: User
     private lateinit var readKey: String
     private lateinit var expiredKey: String
@@ -191,23 +190,25 @@ class AuthHttpBoundaryTest {
         }
     }
 
+    /** A live MCP key row for [owner] with a fixed plaintext — the minimal stand-in for the login mint. */
+    private fun seedUserKey(
+        id: String,
+        owner: UUID,
+        name: String,
+        expiresAt: Instant?,
+    ): String {
+        val plaintext = "$id.${"A".repeat(SECRET_CHARS)}"
+        ApiKeyRepository(jdbc).insert(id, owner, owner, name, Argon2SecretHasher().hash(plaintext), expiresAt, DEFAULT_WORKSPACE_ID)
+        return plaintext
+    }
+
     @BeforeAll
     fun seed() {
         // The shared container arrives migrated; apiKeyService.issue writes
         // api_keys.workspace_id (the V4 pin).
         user = UserRepository(jdbc).insert("agent@company.com", "Agent", null, "keycloak", "sub-1", isAdmin = true)
-        superAdminIssuer =
-            AuthenticatedPrincipal(
-                userId = user.id,
-                email = user.email,
-                displayName = user.displayName,
-                scopes = emptySet(),
-                authMethod = AuthMethod.OIDC,
-                superAdmin = true,
-            )
-        // Keys pin the seeded `default` workspace. The issuer is a SUPER ADMIN here, which is
-        // what reaches a workspace this user holds no membership row in (D-R8) — round 1 moved
-        // that bypass off the `admin` SCOPE, which no key may hold any more (O-2).
+        // Keys pin the seeded `default` workspace. Their owner is a SUPER ADMIN with no membership
+        // row there, so the MCP key acts as a viewer in it (#215 PK4) — enough for `/mcp`.
         //
         // 179 (V31): ONE live `user` key per (user, workspace) — so the dead keys this
         // fixture needs belong to OTHER users; an expired-but-unrevoked key still counts as
@@ -217,24 +218,12 @@ class AuthHttpBoundaryTest {
         val revokedKeyOwner =
             UserRepository(jdbc)
                 .insert("agent-revoked@company.com", "Agent Revoked", null, "keycloak", "sub-3", isAdmin = false)
-        readKey =
-            apiKeyService
-                .issue(superAdminIssuer, user.id, "read-key", setOf(Scope.READ), DEFAULT_WORKSPACE_ID)
-                .plaintext
-        expiredKey =
-            apiKeyService
-                .issue(
-                    superAdminIssuer,
-                    deadKeyOwner.id,
-                    "expired-key",
-                    setOf(Scope.READ),
-                    DEFAULT_WORKSPACE_ID,
-                    Instant.now().minusSeconds(3600),
-                ).plaintext
-        val revocable =
-            apiKeyService.issue(superAdminIssuer, revokedKeyOwner.id, "revoked-key", setOf(Scope.READ), DEFAULT_WORKSPACE_ID)
-        apiKeyService.revoke(revocable.plaintext.substringBefore('.'), revokedKeyOwner.id)
-        revokedKey = revocable.plaintext
+        // #215 slice (b): `issue` mints only identity-acting kinds, and these are MCP (`user`)
+        // keys — the login hook's kind — so they are seeded as rows with a known plaintext.
+        readKey = seedUserKey("dpk_READKEYAAAAA", user.id, "read-key", expiresAt = null)
+        expiredKey = seedUserKey("dpk_EXPIREDKEYAA", deadKeyOwner.id, "expired-key", Instant.now().minusSeconds(3600))
+        revokedKey = seedUserKey("dpk_REVOKEDKEYAA", revokedKeyOwner.id, "revoked-key", expiresAt = null)
+        apiKeyService.revoke(revokedKey.substringBefore('.'), revokedKeyOwner.id)
         session = jwtService.issue(user)
 
         // A user mid forced-change (§5A.4): the gate reads must_change_password
@@ -326,7 +315,7 @@ class AuthHttpBoundaryTest {
                 Case(HttpMethod.GET, "/api/v1/probe", 401),
                 Case(HttpMethod.POST, "/mcp", 401),
                 Case(HttpMethod.GET, "/pipelines/abc-123/editor", 401),
-                Case(HttpMethod.GET, "/api/v1/probe/stream", 200, headers(apiKey = readKey)),
+                Case(HttpMethod.GET, "/api/v1/probe/stream", 200, headers(cookies = listOf("dp_session=$session"))),
             )
         cases.forEach { case ->
             val path = case.path
@@ -384,26 +373,55 @@ class AuthHttpBoundaryTest {
     }
 
     @Test
-    fun `a valid api key authenticates and reaches the handler`() {
-        val response = call(HttpMethod.GET, "/api/v1/probe", headers(apiKey = readKey))
+    fun `a valid api key authenticates and reaches the handler - on mcp, its whole surface`() {
+        val response = call(HttpMethod.POST, "/mcp", headers(apiKey = readKey))
 
         response.statusCode.value() shouldBe 200
         mapper.readValue(response.body, Map::class.java)["auth_method"] shouldBe "API_KEY"
     }
 
+    /**
+     * #215 B2 (owner ruling 2026-09-24, "MCP key should be only MCP"): the MCP key is refused on
+     * every route off `/mcp` — REST, UI pages, partials, an unannotated handler — by the REST key
+     * filter, before any permission is judged, with the confinement code. A non-vacuity count is
+     * the route list's size.
+     */
     @Test
-    fun `an insufficient scope is 403 auth-scope-insufficient`() {
+    fun `an MCP key is refused on every route off mcp with the confinement code, before its permission is judged (B2)`() {
+        val routes =
+            listOf(
+                HttpMethod.GET to "/api/v1/probe",
+                HttpMethod.POST to "/api/v1/probe",
+                HttpMethod.GET to "/api/v1/admin-probe",
+                HttpMethod.GET to "/api/v1/unannotated",
+                HttpMethod.GET to "/pipelines",
+                HttpMethod.GET to "/brand-new-route",
+            )
+        routes.forEach { (method, path) ->
+            val response = call(method, path, headers(apiKey = readKey))
+            withClue("$method $path") {
+                response.statusCode.value() shouldBe 403
+                code(response) shouldBe "endpoint.key_kind_refused"
+                (error(response)["details"] as Map<*, *>)["reason"] shouldBe "user_key_off_surface"
+            }
+        }
+        routes.size shouldBe 6
+    }
+
+    @Test
+    fun `a key off its surface is 403 endpoint-key_kind_refused, never a permission refusal`() {
         val response = call(HttpMethod.GET, "/api/v1/admin-probe", headers(apiKey = readKey))
 
         response.statusCode.value() shouldBe 403
-        code(response) shouldBe "auth.scope.insufficient"
+        code(response) shouldBe "endpoint.key_kind_refused"
     }
 
     @Test
     fun `an unannotated api handler is denied by default (AUTH-SEC-9)`() {
-        val response = call(HttpMethod.GET, "/api/v1/unannotated", headers(apiKey = readKey))
+        val response = call(HttpMethod.GET, "/api/v1/unannotated", headers(cookies = listOf("dp_session=$session")))
 
         response.statusCode.value() shouldBe 403
+        code(response) shouldBe "auth.permission.undeclared"
         (error(response)["details"] as Map<*, *>)["reason"] shouldBe "handler_not_annotated"
     }
 
@@ -450,10 +468,11 @@ class AuthHttpBoundaryTest {
 
     @Test
     fun `an api key wins over a session cookie when both are present (AU-TEST-11)`() {
+        // On `/mcp`, the MCP key's own surface (B2) — where both credentials could be honoured.
         val response =
             call(
-                HttpMethod.GET,
-                "/api/v1/probe",
+                HttpMethod.POST,
+                "/mcp",
                 headers(apiKey = readKey, cookies = listOf("dp_session=$session")),
             )
 
@@ -516,7 +535,7 @@ class AuthHttpBoundaryTest {
 
             withClue(path) {
                 response.statusCode.value() shouldBe 403
-                code(response) shouldBe "auth.scope.insufficient"
+                code(response) shouldBe "endpoint.key_kind_refused"
             }
         }
     }
@@ -530,7 +549,7 @@ class AuthHttpBoundaryTest {
     }
 
     @Test
-    fun `an author session reaches both editors, and a read key still renders the list page`() {
+    fun `an author session reaches both editors, and a key renders no page at all (B2)`() {
         listOf("/pipelines/42/editor", "/templates/editor").forEach { path ->
             withClue(path) {
                 call(HttpMethod.GET, path, headers(cookies = listOf("dp_session=$session")))
@@ -538,9 +557,8 @@ class AuthHttpBoundaryTest {
                     .value() shouldBe 200
             }
         }
-        // Unchanged by 096 §C: the read floor on the list screens is what a read key had
-        // implicitly, and it still has it.
-        call(HttpMethod.GET, "/pipelines", headers(apiKey = readKey)).statusCode.value() shouldBe 200
+        // #215 B2: a key renders no screen — the MCP key's surface is `/mcp` alone.
+        call(HttpMethod.GET, "/pipelines", headers(apiKey = readKey)).statusCode.value() shouldBe 403
     }
 
     // ---------------------------------------------------------- /mcp (AUTH-SEC-1)
@@ -624,7 +642,7 @@ class AuthHttpBoundaryTest {
 
     @Test
     fun `an api-key state change needs no csrf token at all`() {
-        call(HttpMethod.POST, "/api/v1/probe", headers(apiKey = readKey)).statusCode.value() shouldBe 200
+        call(HttpMethod.POST, "/mcp", headers(apiKey = readKey)).statusCode.value() shouldBe 200
     }
 
     // ----------------------------------- filter execution count (B12 behavioral, 015)
@@ -778,6 +796,9 @@ class AuthHttpBoundaryTest {
 
         /** Pinned login rate limit for the filter-once test — see [props]. */
         const val LOGIN_LIMIT = 4
+
+        /** A key's secret half is 48 base32 characters (auth.md §7.1). */
+        const val SECRET_CHARS = 48
 
         // The module's shared container: already started and migrated by the time any
         // @DynamicPropertySource supplier resolves (first touch starts it).

@@ -1,5 +1,6 @@
 package co.datapipelines.integration
 
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -72,6 +73,7 @@ class ReleaseChecksE2eTest {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/mcp"))
+                // The MCP key: /mcp takes a key and refuses a session (§8.5); REST below takes the session (#215 B2).
                 .header("DP-API-Key", ADMIN_KEY.plaintext)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, text/event-stream")
@@ -107,7 +109,7 @@ class ReleaseChecksE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$DATASOURCE", "display_name": "Release checks (140)", "dialect": "H2",
@@ -137,7 +139,7 @@ class ReleaseChecksE2eTest {
         withClue("templates_get must succeed: $templateRead") { readError shouldBe false }
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", templateRead["body_hash"].asText())
             .contentType(ContentType.JSON)
             .body("""{"name": "$TEMPLATE_ID"}""")
@@ -210,7 +212,7 @@ class ReleaseChecksE2eTest {
     fun `release over REST is refused pipeline check failed with every failing check in details`() {
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", draftHash)
             .`when`()
             .post("/api/v1/pipelines/$pipelineId/release")
@@ -226,7 +228,7 @@ class ReleaseChecksE2eTest {
         // And the draft is still a draft: the flip never happened.
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/pipelines/$pipelineId")
             .then()
@@ -239,7 +241,7 @@ class ReleaseChecksE2eTest {
     fun `release with override_checks_reason releases - and the audit row carries the ids and the reason`() {
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", draftHash)
             .queryParam("override_checks_reason", OVERRIDE_REASON)
             .`when`()
@@ -289,7 +291,7 @@ class ReleaseChecksE2eTest {
     fun `the latest-run read shows the release runs beside every definition`() {
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/pipelines/$pipelineId/versions/$version/checks")
             .then()
@@ -311,7 +313,7 @@ class ReleaseChecksE2eTest {
 
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", plainHash)
             .`when`()
             .post("/api/v1/pipelines/$plainId/release")
@@ -409,9 +411,15 @@ class ReleaseChecksE2eTest {
         private const val CHECK_VALUE_BROKEN = 1.0
         private const val OVERRIDE_REASON = "Rollup lags one day; verified by hand against the source."
 
-        private const val WORKSPACE_ID = "defa0000-0000-0000-0000-000000000001"
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-140-key", arrayOf("read", "execute", "author"))
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the session (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+
+        /** The admin's MCP key for the `/mcp` legs — pinned to `default`, acting as the admin (#215 PK4). */
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-140-key")
+        private const val MCP_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-140@datapipelines.test")
 
         private var pipelineId: String = ""
         private var draftHash: String = ""
@@ -434,9 +442,7 @@ class ReleaseChecksE2eTest {
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
-            registry.add("datapipelines.jwt.secret") {
-                Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
-            }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") {
                 Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
             }
@@ -459,17 +465,24 @@ class ReleaseChecksE2eTest {
                             ('$ADMIN_USER_ID', 'e2e-140@datapipelines.test', 'E2E 140', 'test', 'e2e-140-sub', TRUE, TRUE)
                         """.trimIndent(),
                     )
+                    // #215 PK4: a super admin's MCP key with NO membership is a viewer, and the suite
+                    // authors over MCP — so the admin is a workspace admin of `default` (an author there).
+                    statement.execute(
+                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
+                            " VALUES ('$MCP_WORKSPACE', '$ADMIN_USER_ID', 'workspace_admin') ON CONFLICT DO NOTHING",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id)" +
+                            " VALUES (?, ?::uuid, ?::uuid, ?, ?, ?::uuid)",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
-                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                        ps.setString(3, ADMIN_KEY.name)
-                        ps.setString(4, ADMIN_KEY.hash)
-                        ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                        ps.setObject(6, UUID.fromString(WORKSPACE_ID))
+                        ps.setString(2, ADMIN_USER_ID)
+                        ps.setString(3, ADMIN_USER_ID)
+                        ps.setString(4, ADMIN_KEY.name)
+                        ps.setString(5, ADMIN_KEY.hash)
+                        ps.setString(6, MCP_WORKSPACE)
                         ps.executeUpdate()
                     }
             }

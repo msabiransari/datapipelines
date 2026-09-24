@@ -196,10 +196,10 @@ class LocalPasswordService(
         actorId: UUID,
     ): String? {
         val user = userRepository.findById(userId) ?: return null
-        // auth.md §4.5: the system service account can never acquire a credential. `null` is
-        // the same answer the caller already handles for "no such user" — which is exactly what
-        // this row is, as far as interactive login is concerned.
-        if (user.provider == UserService.SYSTEM_PROVIDER) return null
+        // auth.md §4.5/§4.7 (#215 A.6): the System account and a key's identity can never acquire
+        // a credential. `null` is the same answer the caller already handles for "no such user" —
+        // which is exactly what such a row is, as far as interactive login is concerned.
+        if (!user.isHuman) return null
         val oneTime = generateOneTimePassword()
         userRepository.setPassword(userId, secretHasher.hash(oneTime), mustChange = true)
         authCache.invalidateUser(userId)

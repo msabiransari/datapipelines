@@ -7,7 +7,6 @@ import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.executor.ResultConfig
@@ -73,7 +72,7 @@ class PublishedEndpointSessionRefusalTest {
     @Test
     fun `an admin session is refused too — the surface is about the CREDENTIAL, not the scopes`() {
         service
-            .serve("/nyc/v1/revenue/Manhattan", session(AuthMethod.OIDC, Scope.ADMIN), request())
+            .serve("/nyc/v1/revenue/Manhattan", session(AuthMethod.OIDC), request())
             .shouldBeInstanceOf<PublishedEndpointServeService.Outcome.Refused>()
             .status shouldBe 401
     }
@@ -87,18 +86,15 @@ class PublishedEndpointSessionRefusalTest {
             .status shouldBe 401
     }
 
-    private fun session(
-        method: AuthMethod,
-        scope: Scope = Scope.EXECUTE,
-    ) = AuthenticatedPrincipal(
-        userId = UUID.randomUUID(),
-        email = "a@b.c",
-        displayName = "A",
-        scopes = setOf(scope),
-        authMethod = method,
-        workspaceName = "default",
-        workspace = WorkspaceContext(UUID.fromString("defa0000-0000-0000-0000-000000000001"), "default"),
-    )
+    private fun session(method: AuthMethod) =
+        AuthenticatedPrincipal(
+            userId = UUID.randomUUID(),
+            email = "a@b.c",
+            displayName = "A",
+            authMethod = method,
+            workspaceName = "default",
+            workspace = WorkspaceContext(UUID.fromString("defa0000-0000-0000-0000-000000000001"), "default"),
+        )
 
     private fun request() =
         EndpointRequestValidator.Request(

@@ -164,7 +164,21 @@ class WorkspacesController(
                     "A member email is required.",
                     mapOf("field" to "email"),
                 )
-        return when (val outcome = workspaces.addMember(currentPrincipal(), name, email, roleOf(body))) {
+        val outcome =
+            try {
+                workspaces.addMember(currentPrincipal(), name, email, roleOf(body))
+            } catch (e: WorkspaceService.UnknownMemberEmailException) {
+                // #215 A.6 — the email names the System row or a key's identity: no person. The
+                // same 404 stand-in `AuthController` answers an unknown user with (§13 has no
+                // `auth.user.not_found`); `details.reason` removes the ambiguity.
+                throw ApiException(
+                    PipelineErrorCodes.Execution.NOT_FOUND,
+                    "No person with email '${e.email}'.",
+                    mapOf("reason" to "user_not_found"),
+                    e,
+                )
+            }
+        return when (outcome) {
             is WorkspaceService.AddMemberOutcome.Added -> {
                 ResponseEntity.ok(ApiResponse.of(outcome.row.toResponse()))
             }

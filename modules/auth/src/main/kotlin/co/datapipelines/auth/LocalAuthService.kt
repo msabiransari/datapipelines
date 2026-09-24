@@ -59,6 +59,9 @@ class LocalAuthService(
     ): LocalLoginResult {
         // §4.2: one canonical form at the boundary, exactly as the OIDC path.
         val normalized = email.trim().lowercase()
+        // `findLocalCredential` reads PEOPLE only (`kind = 'human'`, #215 A.6): the System row and
+        // a key's identity are hashless by construction, and the query refuses them by kind as
+        // well, so a hash that somehow reached one still opens nothing — the unknown-user answer.
         val credential =
             userRepository.findLocalCredential(normalized)
                 ?: return rejectUnknown(normalized, password, sourceIp, userAgent)

@@ -2,7 +2,6 @@ package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
@@ -95,7 +94,6 @@ class McpNotFoundTest {
                         UUID.randomUUID(),
                         "a@b.c",
                         "A",
-                        setOf(Scope.READ),
                         AuthMethod.OIDC,
                         workspace = WorkspaceContext(workspaceId, "acme"),
                     ),

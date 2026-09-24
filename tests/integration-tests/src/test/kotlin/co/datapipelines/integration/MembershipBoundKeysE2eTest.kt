@@ -26,23 +26,24 @@ import java.util.Base64
  * **A member's login-minted key ends with the membership it is pinned to — and a workspace
  * admin can revoke it** (#200, roles record §3.7), proven at the wire against the FULL
  * application: real logins through `POST /login`, the real `workspaceForLogin` mint hook,
- * the real member-removal and key-revoke verbs, and the three surfaces the key serves —
- * REST (`GET /api/v1/pipelines`), `/mcp` (`pipelines_list`) and a published endpoint whose
- * unbound admission takes a same-workspace `user` key with `execute` (auth.md §7.7).
+ * the real member-removal and key-revoke verbs, and three surfaces: `/mcp` (`pipelines_list`),
+ * the ONE surface the key serves, and REST (`GET /api/v1/pipelines`) and a published endpoint,
+ * which refuse a live MCP key (`403 endpoint.key_kind_refused`, `user_key_off_surface` —
+ * #215 B2) but answer a DEAD one like any dead credential, because the key is validated first.
  *
- *  - **(a) removal revokes the key (§3.7 ruling 1).** A member's key serves all three
- *    surfaces; the admin removes the member; the SAME key answers `auth.api_key.invalid`
+ *  - **(a) removal revokes the key (§3.7 ruling 1).** A member's key serves `/mcp` and is
+ *    refused off it; the admin removes the member; the SAME key answers `auth.api_key.invalid`
  *    (401) on all three. Re-invite + next login mints a NEW key that serves again — removal
  *    is a membership fact, not an identity ban.
  *  - **(b) an admin revoke keeps the member (§3.7 ruling 3).** A fresh member's key serves
- *    all three; the admin revokes it (`DELETE .../members/{id}/key`, `204`); the key refuses
- *    all three while the member's SESSION keeps working — revoking a key is not
+ *    `/mcp`; the admin revokes it (`DELETE .../members/{id}/key`, `204`); the key answers 401
+ *    on all three while the member's SESSION keeps working — revoking a key is not
  *    deactivation — and the next login mints a fresh key. The verb is idempotent: revoking
  *    again is another `204`, and no automatic rotation exists to do this for anyone
  *    (§3.7 ruling 2 — recovery is an admin act).
  *
- * Non-vacuity: each revocation is preceded by ≥ [SERVED_FLOOR] answered `200`s on each of
- * the three surfaces, printed per phase (`event=keybound.phase …`).
+ * Non-vacuity: each revocation is preceded by ≥ [SERVED_FLOOR] answered `200`s on `/mcp`, and
+ * the two off-surface refusals, printed per phase (`event=keybound.phase …`).
  *
  * Namespaced (`kbound-*`) because the module's containers are shared between suites in one
  * JVM run; the suite creates its world through the app (the creation IS the subject), so it
@@ -63,7 +64,7 @@ class MembershipBoundKeysE2eTest {
         val world = ensureWorld()
         val bob = memberSession(BOB_EMAIL, world.bobOneTime)
 
-        // Non-vacuity: the key the login minted serves all three surfaces BEFORE anything ends it.
+        // Non-vacuity: the key the login minted serves /mcp BEFORE anything ends it.
         val servedBefore = serveAll(bob.key)
         val before = servedBefore.entries.joinToString(" ") { "${it.key}:${it.value}" }
         println("event=keybound.phase phase=removal_before served=$before")
@@ -71,7 +72,7 @@ class MembershipBoundKeysE2eTest {
 
         withAdmin { removeMember(it, world.acme, bob.userId) }
 
-        // The SAME key, the SAME three surfaces: refused — the credential, not the person.
+        // The SAME key, all three surfaces: 401 — the credential, not the person.
         serveAllExpectInvalid(bob.key)
 
         // Re-entry: re-invite, sign in again — a NEW key, and the surfaces answer again.
@@ -102,7 +103,7 @@ class MembershipBoundKeysE2eTest {
             revokeMemberKey(admin, world.acme, carol.userId)
         }
 
-        // The key is dead on all three surfaces…
+        // The key is dead: 401 on all three surfaces…
         serveAllExpectInvalid(carol.key)
 
         // …but the MEMBER is not: the session keeps working (§3.7 ruling 2 — revoking the
@@ -148,17 +149,16 @@ class MembershipBoundKeysE2eTest {
         val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
         admin.statusCode shouldBe 302
 
-        // The workspace, then the admin's ENTRY into it — the switch mints the admin's own
-        // `user` key there, and that key drives the whole publishing fixture (its pin decides
-        // the workspace every write lands in, exactly the `PublishedEndpointE2eTest` shape).
+        // The workspace, then the admin's ENTRY into it. The re-stamped SESSION drives the
+        // publishing fixture — its active workspace decides where every write lands; the MCP
+        // key the switch minted is confined to /mcp (#215 B2) and plays no part here.
         createWorkspace(admin.sessionCookie(), admin.csrfToken, WS_ACME)
-        val switched = switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
-        val adminKey = secretOf(switched)
+        val publisher = AdminAuth(switch(admin.sessionCookie(), admin.csrfToken, WS_ACME), admin.csrfToken)
 
-        registerDatasource(adminKey)
-        createTemplate(adminKey)
-        createPipeline(adminKey)
-        publish(adminKey)
+        registerDatasource(publisher)
+        createTemplate(publisher)
+        createPipeline(publisher)
+        publish(publisher)
 
         val bobOneTime = createLocalUser(admin.sessionCookie(), admin.csrfToken, BOB_EMAIL, WS_ACME, "author")
         val carolOneTime = createLocalUser(admin.sessionCookie(), admin.csrfToken, CAROL_EMAIL, WS_ACME, "author")
@@ -167,12 +167,16 @@ class MembershipBoundKeysE2eTest {
 
     // ------------------------------------------------------------------ the surfaces
 
-    /** The three surfaces the member's key serves, counted so non-vacuity has a number. */
+    /**
+     * `/mcp` serves the member's live key — counted, so non-vacuity has a number — and the two
+     * other surfaces refuse it as an MCP key (#215 B2), counted the same way.
+     */
     private fun serveAll(key: String): Map<String, Int> =
         mapOf(
-            "rest" to count(200) { rest(key) },
             "mcp" to count(200) { mcp(key) },
-            "endpoint" to count(200) { endpoint(key) },
+            "rest_refused" to count(403) { rest(key).also { it.then().body("error.details.reason", Matchers.equalTo(OFF_SURFACE)) } },
+            "endpoint_refused" to
+                count(403) { endpoint(key).also { it.then().body("error.details.reason", Matchers.equalTo(OFF_SURFACE)) } },
         )
 
     /** The same three surfaces, all of which must now answer `401 auth.api_key.invalid`. */
@@ -451,11 +455,13 @@ class MembershipBoundKeysE2eTest {
         }.groupValues[1]
     }
 
-    private fun registerDatasource(adminKey: String) {
+    private fun registerDatasource(admin: AdminAuth) {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, adminKey)
+            .cookie("dp_session", admin.session)
+            .cookie("dp_csrf", admin.csrf)
+            .header("DP-CSRF-Token", admin.csrf)
             .body(
                 """
                 {"name": "kbound-source", "display_name": "Keybound source", "dialect": "POSTGRES",
@@ -474,11 +480,13 @@ class MembershipBoundKeysE2eTest {
         }
     }
 
-    private fun createTemplate(adminKey: String) {
+    private fun createTemplate(admin: AdminAuth) {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, adminKey)
+            .cookie("dp_session", admin.session)
+            .cookie("dp_csrf", admin.csrf)
+            .header("DP-CSRF-Token", admin.csrf)
             .body(
                 """
                 {"id": "kbound/report.sql", "dialect": "POSTGRES", "display_name": "Keybound report",
@@ -493,7 +501,9 @@ class MembershipBoundKeysE2eTest {
         val hash =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, adminKey)
+                .cookie("dp_session", admin.session)
+                .cookie("dp_csrf", admin.csrf)
+                .header("DP-CSRF-Token", admin.csrf)
                 .queryParam("name", "kbound/report.sql")
                 .`when`()
                 .get("/api/v1/templates")
@@ -505,7 +515,9 @@ class MembershipBoundKeysE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, adminKey)
+            .cookie("dp_session", admin.session)
+            .cookie("dp_csrf", admin.csrf)
+            .header("DP-CSRF-Token", admin.csrf)
             .header("If-Match", hash)
             .body("""{"name": "kbound/report.sql"}""")
             .`when`()
@@ -514,12 +526,14 @@ class MembershipBoundKeysE2eTest {
             .statusCode(200)
     }
 
-    private fun createPipeline(adminKey: String) {
+    private fun createPipeline(admin: AdminAuth) {
         val created =
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, adminKey)
+                .cookie("dp_session", admin.session)
+                .cookie("dp_csrf", admin.csrf)
+                .header("DP-CSRF-Token", admin.csrf)
                 .body(
                     """
                     {"schema_version": 1, "name": "kbound/report", "display_name": "Keybound report",
@@ -537,7 +551,9 @@ class MembershipBoundKeysE2eTest {
         val id = created.jsonPath().getString("data.id")
         given()
             .port(port)
-            .header(API_KEY_HEADER, adminKey)
+            .cookie("dp_session", admin.session)
+            .cookie("dp_csrf", admin.csrf)
+            .header("DP-CSRF-Token", admin.csrf)
             .header("If-Match", created.jsonPath().getString("data.body_hash"))
             .`when`()
             .post("/api/v1/pipelines/$id/release")
@@ -546,11 +562,13 @@ class MembershipBoundKeysE2eTest {
             .body("data.status", Matchers.equalTo("RELEASED"))
     }
 
-    private fun publish(adminKey: String) {
+    private fun publish(admin: AdminAuth) {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, adminKey)
+            .cookie("dp_session", admin.session)
+            .cookie("dp_csrf", admin.csrf)
+            .header("DP-CSRF-Token", admin.csrf)
             .body("""{"path": "/kbound/v1/report", "pipeline": "kbound/report", "timeout_seconds": 60}""")
             .`when`()
             .post("/api/v1/endpoints")
@@ -737,8 +755,11 @@ class MembershipBoundKeysE2eTest {
         private const val ADMIN_PASSWORD = "a-brand-new-admin-password"
         private const val MEMBER_PASSWORD = "a-brand-new-member-password"
 
-        /** Non-vacuity: the key must serve, not merely authenticate — three 200s per surface. */
+        /** Non-vacuity: the key must serve, not merely authenticate — three answers per surface (200 on /mcp, 403 off it). */
         private const val SERVED_FLOOR = 3
+
+        /** #215 B2: the reason a live MCP key is refused off `/mcp`. */
+        private const val OFF_SURFACE = "user_key_off_surface"
         private const val SERVE_ATTEMPTS = 3
 
         private val CSRF_FIELD = Regex("""name="_csrf" value="([^"]+)"""")

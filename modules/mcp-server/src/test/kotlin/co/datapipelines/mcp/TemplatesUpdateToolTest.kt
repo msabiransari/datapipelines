@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -35,7 +34,7 @@ class TemplatesUpdateToolTest {
     private val templates = mockk<TemplateRepository>()
     private val validator = mockk<TemplateValidator>()
     private val authoring = AuthoringGuard(true)
-    private val ctx = McpFixtures.ctx(Scope.AUTHOR)
+    private val ctx = McpFixtures.ctx()
 
     /** The REAL service REST §8.4 goes through — the tool must not re-decide any of its rules. */
     private fun updateTool() = TemplatesUpdateTool(templates, TemplateDraftService(templates, authoring), validator)

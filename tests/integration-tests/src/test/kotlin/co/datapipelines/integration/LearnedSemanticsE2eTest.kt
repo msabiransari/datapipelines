@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -123,11 +124,11 @@ class LearnedSemanticsE2eTest {
             { seenByGlobex["from_this_workspace"].asBoolean() shouldBe false },
             { seenByGlobex.has("source_pipeline") shouldBe false },
         )
-        // The REST twin serves the identical block from the same code.
+        // The REST twin serves the identical block from the same code (Bob signed in — #215 B2).
         val restColumns =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, BOB_KEY.plaintext)
+                .asSession(E2eSession.jwt(jwtSecret, BOB, "bob@globex.test", "globex"))
                 .`when`()
                 .get("/api/v1/datasources/$DATASOURCE/tables/readings/columns")
                 .then()
@@ -136,7 +137,8 @@ class LearnedSemanticsE2eTest {
                 .asString()
         mapper.readTree(restColumns)["data"].first { it["name"].asText() == "value_c" }["facts"][0]["id"].asText() shouldBe factId
 
-        // A viewer key (read scope) is refused the record by the real matrix — nothing written.
+        // A viewer's key is refused the record by the real matrix — the member's ROLE does not
+        // hold `semantic.record` (#215: no scopes; a key's refusal names the role) — nothing written.
         val refused =
             mcpRaw(
                 VIEWER_KEY.plaintext,
@@ -149,7 +151,7 @@ class LearnedSemanticsE2eTest {
                     "refs" to listOf(mapOf("table" to "readings")),
                 ),
             )
-        refused shouldContain "auth.scope.insufficient"
+        refused shouldContain "auth.key_issuer_role_lost"
     }
 
     /** 3 — the audit row the §9 acceptance counts: kind and id, never the fact text. */
@@ -361,7 +363,7 @@ class LearnedSemanticsE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ALICE_KEY.plaintext)
+            .asSession(E2eSession.jwt(jwtSecret, ALICE, "alice@acme.test", "acme"))
             .body(
                 """
                 {"name": "$DATASOURCE", "display_name": "Sensor warehouse", "dialect": "POSTGRES",
@@ -438,7 +440,7 @@ class LearnedSemanticsE2eTest {
         }
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
             connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
+                .prepareStatement("INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
                 .use { ps ->
                     for ((key, owner, workspace) in listOf(
                         Triple(ALICE_KEY, ALICE, WS_ACME),
@@ -447,9 +449,9 @@ class LearnedSemanticsE2eTest {
                     )) {
                         ps.setString(1, key.id)
                         ps.setObject(2, UUID.fromString(owner))
-                        ps.setString(3, key.name)
-                        ps.setString(4, key.hash)
-                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
+                        ps.setObject(3, UUID.fromString(owner))
+                        ps.setString(4, key.name)
+                        ps.setString(5, key.hash)
                         ps.setObject(6, UUID.fromString(workspace))
                         ps.addBatch()
                     }
@@ -499,9 +501,9 @@ class LearnedSemanticsE2eTest {
             """{"schema_version":1,"name":"finance/revenue","display_name":"Revenue","description":"",""" +
                 """"nodes":[{"id":"n1","type":"DQL","source":"tempdb","template":{"id":"test/t","version":1}}]}"""
 
-        private val ALICE_KEY = E2eAuth.generateKey("sem-alice-key", arrayOf("read", "execute", "author"))
-        private val BOB_KEY = E2eAuth.generateKey("sem-bob-key", arrayOf("read", "execute", "author"))
-        private val VIEWER_KEY = E2eAuth.generateKey("sem-vera-key", arrayOf("read"))
+        private val ALICE_KEY = E2eAuth.generateKey("sem-alice-key")
+        private val BOB_KEY = E2eAuth.generateKey("sem-bob-key")
+        private val VIEWER_KEY = E2eAuth.generateKey("sem-vera-key")
 
         private val random = SecureRandom()
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })

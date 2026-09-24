@@ -1,10 +1,18 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.auth.ApiKeyKind
+import co.datapipelines.auth.AuthMethod
+import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.KeyRole
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.context.SecurityContextHolder
+import java.util.UUID
 
 /**
  * [PromotionController] — the two receiver routes' unit contract beside the
@@ -17,6 +25,19 @@ class PromotionControllerTest {
     private val inventoryService = mockk<PromotionInventoryService>()
     private val receiveService = mockk<PromotionReceiveService>()
     private val controller = PromotionController(inventoryService, receiveService)
+    private val peer =
+        AuthenticatedPrincipal(
+            userId = UUID.randomUUID(),
+            email = "dpk_peer@keys.invalid",
+            displayName = "prod-receiver",
+            authMethod = AuthMethod.PROMOTION,
+            keyId = "dpk_PEER00000001",
+            keyKind = ApiKeyKind.SERVER,
+            keyRole = KeyRole.PROMOTION_RECEIVER,
+        )
+
+    @AfterEach
+    fun clearContext() = SecurityContextHolder.clearContext()
 
     @Test
     fun `inventory returns the service's answer`() {
@@ -52,11 +73,14 @@ class PromotionControllerTest {
                 templates = 0,
                 pipelines = 0,
             )
-        every { receiveService.apply(batch) } returns applied
+        every { receiveService.apply(batch, peer) } returns applied
+        SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(peer, null, emptyList())
 
         val response = controller.push(batch)
 
         response.data shouldBe applied
-        verify(exactly = 1) { receiveService.apply(batch) }
+        // #215 C4: the batch is applied AS the authenticated peer — its identity is what the
+        // received rows are attributed to.
+        verify(exactly = 1) { receiveService.apply(batch, peer) }
     }
 }

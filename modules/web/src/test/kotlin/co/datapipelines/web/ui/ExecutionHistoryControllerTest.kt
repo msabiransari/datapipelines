@@ -40,7 +40,6 @@ class ExecutionHistoryControllerTest {
                     UUID.randomUUID(),
                     "a@b.c",
                     "A",
-                    setOf(co.datapipelines.auth.Scope.AUTHOR),
                     co.datapipelines.auth.AuthMethod.OIDC,
                     workspace = co.datapipelines.auth.WorkspaceContext(workspaceId, "acme"),
                 ),
