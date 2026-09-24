@@ -74,7 +74,10 @@ class TemplateTransferRoundTripIntegrationTest {
             ),
         )
 
-    /** The exported released template and its import-bound draft, built once per test. */
+    /** The exported released template and its import-bound draft, built ONCE for the class:
+     *  the create inserts a fixed name into the source workspace, so a second build collides. */
+    private val roundTrip: Pair<Template, TemplateDraft> by lazy { exportAndRebind() }
+
     private fun exportAndRebind(): Pair<Template, TemplateDraft> {
         val draft =
             TemplateFixtures.draft(
@@ -96,7 +99,7 @@ class TemplateTransferRoundTripIntegrationTest {
 
     @Test
     fun `the blocks survive the wire crossing`() {
-        val (exported, imported) = exportAndRebind()
+        val (exported, imported) = roundTrip
 
         assertSoftly {
             imported.type shouldBe TemplateType.JSONATA
@@ -109,7 +112,7 @@ class TemplateTransferRoundTripIntegrationTest {
 
     @Test
     fun `the import hash guard recomputes over the blocks`() {
-        val (exported, imported) = exportAndRebind()
+        val (exported, imported) = roundTrip
         // The receiver's guard (versioning §9.2): the recompute over the imported fields —
         // blocks included — reproduces the declared hash.
         val recomputed =
