@@ -17,6 +17,14 @@ dependencies {
     implementation("org.jlleitschuh.gradle:ktlint-gradle:${libs.versions.ktlint.plugin.get()}")
     implementation("io.gitlab.arturbosch.detekt:detekt-gradle-plugin:${libs.versions.detekt.get()}")
     implementation("org.jetbrains.kotlinx:kover-gradle-plugin:${libs.versions.kover.get()}")
+    constraints {
+        // GHSA-27j2-h3m2-8237 / CVE-2026-84939 (#223): the Kover report tooling drags
+        // freemarker 2.3.32 onto the build classpath; build-time only, never packaged,
+        // constrained to the catalog's patched version so the lockfile scan stays honest.
+        implementation("org.freemarker:freemarker:${libs.versions.freemarker.get()}") {
+            because("GHSA-27j2-h3m2-8237: path traversal fixed in 2.3.35; see gradle/libs.versions.toml")
+        }
+    }
 
     // Guard tests (012/F6) — the COVERAGE_FLOORS / -Pkover.off configuration-time
     // behaviour is proven with Gradle TestKit (see

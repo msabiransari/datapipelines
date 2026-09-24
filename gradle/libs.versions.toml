@@ -97,6 +97,19 @@ jackson = "2.21.5"
 # 4.1.137.Final verified on Maven Central (4.1.138 exists; smallest step, as before).
 netty = "4.1.137.Final"
 
+# freemarker — GHSA-27j2-h3m2-8237 / CVE-2026-84939 (CRITICAL 9.1, path traversal in the
+# template-loading mechanism when a malformed locale identifier reaches a localized
+# lookup). OSV, verified 2026-09-24:
+#   vulnerable = ">= 2.2.0, < 2.3.35"   first_patched_version = "2.3.35"
+# The Spring Boot 3.5.16 BOM pins 2.3.34 — vulnerable. Pinned to 2.3.35: the patch
+# release on the same 2.3 line (smallest step; 2.3.35 verified on Maven Central).
+# Our only loader is RegistryTemplateLoader (no file or classpath loader, no
+# caller-supplied locale), so the practical exposure is low; fixed, not ignored,
+# because the scan is the gate and the rating is Critical (#223).
+# buildSrc carries its own 2.3.32 through the Kover report tooling — constrained to
+# the same version in buildSrc/build.gradle.kts. RETIRE when the BOM reaches >= 2.3.35.
+freemarker = "2.3.35"
+
 # httpcomponents 5 — GHSA-hjcp-jmpx-g3qm (httpclient5 < 5.6.3, connection leak on
 # Content-Encoding decode) and GHSA-hf6x-8p5f-cgmf / GHSA-v3jc-474w-2wm6 (httpcore5 and
 # httpcore5-h2 < 5.4.3, header-parsing memory exhaustion / unbounded HPACK header list).
@@ -235,7 +248,7 @@ flyway-core = { module = "org.flywaydb:flyway-core" }
 flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql" }
 
 # --- Templating / pooling (BOM-managed) --------------------------------------
-freemarker = { module = "org.freemarker:freemarker" }
+freemarker = { module = "org.freemarker:freemarker", version.ref = "freemarker" }
 hikaricp = { module = "com.zaxxer:HikariCP" }
 
 # --- JDBC drivers ------------------------------------------------------------

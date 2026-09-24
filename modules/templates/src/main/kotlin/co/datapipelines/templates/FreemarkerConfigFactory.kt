@@ -41,7 +41,7 @@ object FreemarkerConfigFactory {
      * `FreemarkerConfigFactoryTest` asserts this constant still equals the artifact on the
      * classpath, which is what turns a bump into a red build and a deliberate decision.
      */
-    val PINNED_VERSION: Version = Version(2, 3, 34)
+    val PINNED_VERSION: Version = Version(2, 3, 35)
 
     /**
      * The `sql` render configuration — exactly the one configuration this factory built before
