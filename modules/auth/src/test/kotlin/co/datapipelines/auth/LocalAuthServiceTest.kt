@@ -53,6 +53,8 @@ class LocalAuthServiceTest {
         hasher = CountingHasher()
         service = LocalAuthService(users, hasher, properties, audit)
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        // The CASCADE takes `workspaces` with it (by constraint, not data); both go back (#146).
+        DefaultWorkspaceFixture.ensure(jdbc)
         jdbc.jdbcTemplate.execute("TRUNCATE audit_log")
     }
 

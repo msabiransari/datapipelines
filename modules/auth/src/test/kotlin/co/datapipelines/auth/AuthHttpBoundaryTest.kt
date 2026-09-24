@@ -193,8 +193,11 @@ class AuthHttpBoundaryTest {
 
     @BeforeAll
     fun seed() {
-        // The shared container arrives migrated; apiKeyService.issue writes
-        // api_keys.workspace_id (the V4 pin).
+        // The shared container arrives migrated — but a TRUNCATE users CASCADE from an
+        // earlier suite in this JVM takes `workspaces` with it (the FK cascade is by
+        // constraint, not by data), and apiKeyService.issue writes api_keys.workspace_id
+        // (the V4 pin). The fixture makes its own world instead of assuming one (#146).
+        DefaultWorkspaceFixture.ensure(jdbc)
         user = UserRepository(jdbc).insert("agent@company.com", "Agent", null, "keycloak", "sub-1", isAdmin = true)
         superAdminIssuer =
             AuthenticatedPrincipal(

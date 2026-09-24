@@ -37,6 +37,8 @@ class MailSendRepositoryIntegrationTest {
         users = UserRepository(jdbc)
         sends = MailSendRepository(jdbc)
         jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
+        // The CASCADE takes `workspaces` with it (by constraint, not data); both go back (#146).
+        DefaultWorkspaceFixture.ensure(jdbc)
         user = users.insert("ada@company.com", "Ada", null, "local", "ada@company.com", isAdmin = false)
     }
 
