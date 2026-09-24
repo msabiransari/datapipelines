@@ -1,7 +1,7 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.api.currentPrincipal
@@ -26,7 +26,7 @@ class ExecutionHistoryController(
     private val browse: ExecutionHistoryBrowseModel,
 ) {
     @GetMapping("/executions")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
+    @RequiredScope(Permission.EXECUTION_READ)
     @Suppress("LongParameterList") // the filter bar's fields, one parameter each (the §5 idiom)
     fun list(
         model: Model,

@@ -2,9 +2,9 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -263,17 +263,17 @@ class TemplateEditorControllerTest {
 
     /** 143 — the page route floors at READ: the screen's lowest role reads it (the 122 rule). */
     @Test
-    fun `the editor page route is floored at READ_RESOURCES and the writes stay at MUTATE`() {
+    fun `the editor page route is floored at template read and the writes stay on their authoring permissions`() {
         val scopeOf = { name: String ->
             TemplateEditorController::class.java.methods
                 .single { it.name == name }
                 .getAnnotation(RequiredScope::class.java)
                 .value
         }
-        scopeOf("editor") shouldBe ScopeMatrix.RestOperation.READ_RESOURCES
-        scopeOf("source") shouldBe ScopeMatrix.RestOperation.READ_RESOURCES
-        scopeOf("edit") shouldBe ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES
-        scopeOf("renderPreview") shouldBe ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES
+        scopeOf("editor") shouldBe Permission.TEMPLATE_READ
+        scopeOf("source") shouldBe Permission.TEMPLATE_READ
+        scopeOf("edit") shouldBe Permission.TEMPLATE_UPDATE
+        scopeOf("renderPreview") shouldBe Permission.TEMPLATE_RENDER
     }
 
     @Test

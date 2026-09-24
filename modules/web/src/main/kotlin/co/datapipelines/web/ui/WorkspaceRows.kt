@@ -80,7 +80,7 @@ data class WorkspaceRowView(
                 roleLabel = RoleModel.labelOf(membership.role),
                 active = membership.workspaceActive,
                 isCurrent = membership.workspaceName == activeWorkspace,
-                canAdmin = Permission.WS_ADMIN.satisfiedBy(membership.role, superAdmin),
+                canAdmin = Permission.WORKSPACE_MEMBERS_MANAGE.satisfiedBy(membership.role, superAdmin),
             )
     }
 }

@@ -8,7 +8,6 @@ import co.datapipelines.auth.JwtService
 import co.datapipelines.auth.LoginMethod
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceLastAdminException
 import co.datapipelines.auth.WorkspaceRole
@@ -54,7 +53,7 @@ class WorkspacesUiController(
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/workspaces")
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACES_READ)
+    @RequiredScope(Permission.WORKSPACE_READ)
     fun screen(
         model: Model,
         request: HttpServletRequest,
@@ -94,7 +93,7 @@ class WorkspacesUiController(
         // reactivate first (auth.md 11A.2).
         val administered =
             memberships.filter {
-                it.workspaceActive && Permission.WS_ADMIN.satisfiedBy(it.role, principal.isSuperAdmin)
+                it.workspaceActive && Permission.WORKSPACE_MEMBERS_MANAGE.satisfiedBy(it.role, principal.isSuperAdmin)
             }
         val listings =
             administered
@@ -142,7 +141,7 @@ class WorkspacesUiController(
                     .filter {
                         it.workspaceActive &&
                             it.workspaceName != activeWorkspace &&
-                            Permission.WS_ADMIN.satisfiedBy(it.role, superAdmin = false)
+                            Permission.WORKSPACE_MEMBERS_MANAGE.satisfiedBy(it.role, superAdmin = false)
                     }.map { it.workspaceName }
             },
         )
@@ -161,7 +160,7 @@ class WorkspacesUiController(
 
     /** The create action; refusals (mode, name, duplicate) bounce back with the message. */
     @PostMapping("/workspaces/create")
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACE_CREATE)
+    @RequiredScope(Permission.WORKSPACE_CREATE)
     fun create(
         @RequestParam name: String,
         @RequestParam(required = false) displayName: String?,
@@ -188,7 +187,7 @@ class WorkspacesUiController(
      * the membership checks are enforced once.
      */
     @PostMapping("/workspaces/{name}/members")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun addMember(
         @PathVariable name: String,
         @RequestParam email: String,
@@ -212,7 +211,7 @@ class WorkspacesUiController(
      * make both the router's business.
      */
     @PostMapping("/workspaces/{name}/invitations/revoke")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun revokeInvitation(
         @PathVariable name: String,
         @RequestParam email: String,
@@ -232,7 +231,7 @@ class WorkspacesUiController(
      * position and re-fetches every section for one cell that changed.
      */
     @PostMapping("/partials/workspaces/{name}/members/{userId}/role")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun setMemberRole(
         model: Model,
         @PathVariable name: String,
@@ -272,7 +271,7 @@ class WorkspacesUiController(
 
     /** A workspace admin removes a member; the last admin is the `workspace.last_admin` refusal. */
     @PostMapping("/workspaces/{name}/members/{userId}/remove")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun removeMember(
         @PathVariable name: String,
         @PathVariable userId: UUID,
@@ -286,7 +285,7 @@ class WorkspacesUiController(
      * and the next sign-in mints a fresh one.
      */
     @PostMapping("/workspaces/{name}/members/{userId}/key/revoke")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun revokeMemberKey(
         @PathVariable name: String,
         @PathVariable userId: UUID,
@@ -294,7 +293,7 @@ class WorkspacesUiController(
 
     /** The workspace's display name — a workspace admin's verb (section 7.6, `MANAGE_WORKSPACE`). */
     @PostMapping("/workspaces/{name}/display-name")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
+    @RequiredScope(Permission.WORKSPACE_UPDATE)
     fun renameDisplay(
         @PathVariable name: String,
         @RequestParam displayName: String,
@@ -310,14 +309,14 @@ class WorkspacesUiController(
      * and schedules stop answering.
      */
     @PostMapping("/workspaces/{name}/deactivate")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    @RequiredScope(Permission.WORKSPACE_LIFECYCLE)
     fun deactivate(
         @PathVariable name: String,
     ): String = action("deactivated") { workspaceService.deactivate(requireSessionPrincipal(), name) }
 
     /** Reactivate — the audited, reversible other half of [deactivate]. */
     @PostMapping("/workspaces/{name}/reactivate")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    @RequiredScope(Permission.WORKSPACE_LIFECYCLE)
     fun reactivate(
         @PathVariable name: String,
     ): String = action("reactivated") { workspaceService.reactivate(requireSessionPrincipal(), name) }
@@ -330,7 +329,7 @@ class WorkspacesUiController(
      * the last place still claiming a workspace admin could do it.
      */
     @PostMapping("/workspaces/{name}/delete")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    @RequiredScope(Permission.WORKSPACE_LIFECYCLE)
     fun delete(
         @PathVariable name: String,
     ): String = action("deleted") { workspaceService.delete(requireSessionPrincipal(), name) }
@@ -343,7 +342,7 @@ class WorkspacesUiController(
      * hx-headers). A refused switch falls back to the workspaces screen with the error.
      */
     @PostMapping("/workspace/switch")
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACE_SWITCH)
+    @RequiredScope(Permission.WORKSPACE_SWITCH)
     fun switch(
         response: jakarta.servlet.http.HttpServletResponse,
         @RequestParam name: String,

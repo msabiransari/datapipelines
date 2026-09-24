@@ -1,7 +1,7 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.web.api.ApiResponse
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -44,7 +44,7 @@ class PromotionController(
      * the answer its operator needs.
      */
     @GetMapping("/inventory")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PROMOTION_INVENTORY_READ)
     fun inventory(
         @RequestParam workspace: String,
     ): ApiResponse<PromotionWire.Inventory> = ApiResponse.of(inventoryService.inventoryOf(workspace.trim()))
@@ -54,7 +54,7 @@ class PromotionController(
      * order and is applied in the order given.
      */
     @PostMapping("/push")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PROMOTION_PUSH)
     fun push(
         @RequestBody batch: PromotionWire.Batch,
     ): ApiResponse<PromotionWire.Applied> = ApiResponse.of(receiveService.apply(batch))

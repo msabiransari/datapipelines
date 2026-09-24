@@ -1,7 +1,7 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -25,7 +25,7 @@ class SearchController(
     private val search: SearchBrowseModel,
 ) {
     @GetMapping("/partials/search")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun results(
         model: Model,
         @RequestParam(required = false) q: String?,

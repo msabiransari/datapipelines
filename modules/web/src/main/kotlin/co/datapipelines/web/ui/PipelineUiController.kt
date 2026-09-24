@@ -2,8 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.api.currentPrincipal
 import jakarta.servlet.http.HttpServletRequest
@@ -29,7 +29,7 @@ class PipelineUiController(
     private val lens: PromoterLens,
 ) {
     @GetMapping("/pipelines")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun list(
         model: Model,
         request: HttpServletRequest,

@@ -3,8 +3,8 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.LocalPasswordService
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.SessionRequiredException
 import co.datapipelines.auth.UserRepository
 import jakarta.servlet.http.HttpServletRequest
@@ -27,7 +27,7 @@ class UserSettingsController(
     private val localPasswordService: LocalPasswordService,
 ) {
     @GetMapping("/settings")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PROFILE_READ)
     fun settings(
         model: Model,
         request: HttpServletRequest,
@@ -60,7 +60,7 @@ class UserSettingsController(
      * request after it (measured; see partials/password-card.html).
      */
     @GetMapping("/settings/password")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PROFILE_PASSWORD)
     fun changePassword(
         model: Model,
         request: HttpServletRequest,
@@ -86,7 +86,7 @@ class UserSettingsController(
      * ([UiProperties.theme]) — not a hardcoded name.
      */
     @PatchMapping("/partials/profile/theme")
-    @RequiredScope(ScopeMatrix.RestOperation.PROFILE_PREFERENCE)
+    @RequiredScope(Permission.PROFILE_PREFERENCE)
     fun updateTheme(
         @RequestParam theme: String,
         model: Model,
@@ -129,7 +129,7 @@ class UserSettingsController(
      * [LocalPasswordService.changeOwn] is the second layer, for a hijacked session.
      */
     @PostMapping("/partials/account/password")
-    @RequiredScope(ScopeMatrix.RestOperation.CHANGE_OWN_PASSWORD)
+    @RequiredScope(Permission.PROFILE_PASSWORD)
     fun changeOwnPassword(
         @RequestParam currentPassword: String,
         @RequestParam newPassword: String,

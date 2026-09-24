@@ -11,9 +11,9 @@ import org.springframework.web.util.pattern.PathPattern
 import org.springframework.web.util.pattern.PathPatternParser
 
 /**
- * Enforces the §7.6 scope matrix on controller handlers (auth.md §8.1, filter step 7)
- * via [RequiredScope]. The check is hierarchical ([Scope.satisfies]) — the annotated
- * operation's [ScopeMatrix.RestOperation.minScope] is the minimum.
+ * Enforces the §7.6 matrix on controller handlers (auth.md §8.1, filter step 7) via
+ * [RequiredScope]: the declared catalog [Permission] is judged by [ScopeMatrix.allowed] — the
+ * caller's role for every principal, and for an API key also the permission's scope floor.
  *
  * ## Default deny (AUTH-SEC-9)
  * A handler the §8.3 allowlist does **not** make public and that carries **no**
@@ -64,11 +64,11 @@ class ScopeInterceptor(
             return denyKind(request, response, principal, confined)
         }
 
-        val operation = declaredOperation(handler)
+        val permission = declaredPermission(handler)
         return when {
-            // No declared operation: allowed off the governed prefixes (the login page, static
+            // No declared permission: allowed off the governed prefixes (the login page, static
             // assets, health probes are gated by the chain's `permitAll`), default-denied on them.
-            operation == null -> {
+            permission == null -> {
                 if (isScopeGoverned(request)) denyUnannotated(request, response, handler) else true
             }
 
@@ -88,14 +88,14 @@ class ScopeInterceptor(
             }
 
             else -> {
-                when (val decision = ScopeMatrix.allowed(principal, operation, principal.workspace)) {
+                when (val decision = ScopeMatrix.allowed(principal, permission, principal.workspace)) {
                     is ScopeMatrix.Decision.Allowed -> {
-                        auditSuperAdminAction(request, principal, operation)
+                        auditSuperAdminAction(request, principal, permission)
                         true
                     }
 
                     is ScopeMatrix.Decision.Refused -> {
-                        deny(request, response, principal, operation, decision)
+                        deny(request, response, principal, permission, decision)
                     }
                 }
             }
@@ -108,14 +108,14 @@ class ScopeInterceptor(
      * passes, so no route can be added that reaches a foreign workspace unaudited (the same
      * default-deny reasoning the unannotated branch exists for).
      *
-     * Reads only (`VIEW`-capability operations) are deliberately included: D-R5's whole promise
+     * Reads are deliberately included: D-R5's whole promise
      * is that a workspace's contents are invisible from outside, and the one principal exempted
      * from that promise is the one whose reads most need to be on the record.
      */
     private fun auditSuperAdminAction(
         request: HttpServletRequest,
         principal: AuthenticatedPrincipal,
-        operation: ScopeMatrix.RestOperation,
+        permission: Permission,
     ) {
         val context = principal.workspace ?: return
         if (!context.actingViaSuperAdmin) return
@@ -125,7 +125,7 @@ class ScopeInterceptor(
             keyId = principal.keyId,
             details =
                 mapOf(
-                    "operation" to operation.name,
+                    "operation" to permission.wire,
                     "workspace" to context.name,
                     "path" to request.requestURI,
                     "method" to request.method,
@@ -180,18 +180,18 @@ class ScopeInterceptor(
         request: HttpServletRequest,
         response: HttpServletResponse,
         principal: AuthenticatedPrincipal,
-        operation: ScopeMatrix.RestOperation,
+        permission: Permission,
         decision: ScopeMatrix.Decision.Refused,
     ): Boolean {
         auditLogger.log(
             event = "auth.scope.denied",
             userId = principal.userId,
             keyId = principal.keyId,
-            details = mapOf("operation" to operation.name, "code" to decision.code) + decision.details,
+            details = mapOf("operation" to permission.wire, "code" to decision.code) + decision.details,
         )
         // A PERSON with no reachable workspace, navigating to a page: the one screen that can
         // explain their state is the workspaces screen (ui-screens §4.13 no-workspace page,
-        // reachable by auth.md §11A.1's `WORKSPACES_READ` exception). A JSON envelope in a
+        // reachable by auth.md §11A.1's `workspace.read` exception). A JSON envelope in a
         // browser tab explains nothing. Keys, partial swaps and the API keep the envelope —
         // htmx does not follow a redirect into a fragment, and a client wants the code.
         if (isPageNavigationWithoutWorkspace(request, principal, decision)) {
@@ -233,8 +233,8 @@ class ScopeInterceptor(
      */
     private fun statusFor(code: String): Int = if (code == WorkspaceErrorCodes.NOT_FOUND) HTTP_NOT_FOUND else HTTP_FORBIDDEN
 
-    /** The §7.6 operation this handler declares — method annotation first, class-level fallback. */
-    private fun declaredOperation(handler: HandlerMethod): ScopeMatrix.RestOperation? =
+    /** The §7.6 catalog permission this handler declares — method annotation first, class-level fallback. */
+    private fun declaredPermission(handler: HandlerMethod): Permission? =
         handler.getMethodAnnotation(RequiredScope::class.java)?.value
             ?: handler.beanType.getAnnotation(RequiredScope::class.java)?.value
 
@@ -268,7 +268,7 @@ class ScopeInterceptor(
     ): Boolean {
         log.error(
             "DEFAULT DENY: handler {}#{} serves {} {} without @RequiredScope. Annotate it with the " +
-                "auth.md §7.6 operation it implements (ScopeMatrix.RestOperation).",
+                "auth.md §7.6 catalog permission it requires (Permission).",
             handler.beanType.name,
             handler.method.name,
             request.method,
@@ -279,7 +279,7 @@ class ScopeInterceptor(
             response = response,
             status = HTTP_FORBIDDEN,
             code = AuthErrorCodes.SCOPE_INSUFFICIENT,
-            message = "Handler declares no §7.6 operation; denied by default",
+            message = "Handler declares no §7.6 permission; denied by default",
             userMessage = "You do not have permission to perform this action.",
             details = mapOf("reason" to "handler_not_annotated"),
         )

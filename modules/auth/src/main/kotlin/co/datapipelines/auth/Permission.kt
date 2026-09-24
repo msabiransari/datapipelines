@@ -1,100 +1,121 @@
 package co.datapipelines.auth
 
 /**
- * A permission is a ROW of the matrix, not a string (roles design 2026-09-20, D21 and the
- * owner's standing principle: "we don't have permissions but actions to put the check
- * on"). Each constant names the set of [WorkspaceRole]s that may perform the actions
- * mapped onto it in [ScopeMatrix]; a super admin (D7) holds every one of them in every
- * workspace, so [satisfiedBy] short-circuits on that flag first.
+ * The permission CATALOG (#215; the permissions and keys record,
+ * `docs/superpowers/specs/2026-09-23-permissions-and-keys-design.md` §2, ratified 2026-09-23):
+ * one `<functionality>.<permission>` per piece of functionality a
+ * person can take separately (PK1). Every REST handler, UI route and MCP tool declares exactly
+ * ONE of these, and code asks whether a principal HOLDS one — it never compares role names.
  *
- * This is the second axis of the §7.6 matrix. The first is [Scope], which travels with a
- * CREDENTIAL (an API key's grant); this one travels with a MEMBERSHIP, because the same
- * person is a viewer in one workspace and an author in another.
+ * The wire form ([wire], `pipeline.read`) is what auth.md §7.6's catalog table, the refusal's
+ * `required` detail and the audit carry; the constant name is its code spelling. Which roles
+ * hold a permission is NOT written here: [RolePermissions] is the one role table, and [roles]
+ * and [satisfiedBy] are derived from it, so a permission cannot carry a role list that
+ * disagrees with the table.
  *
- * ## Why role SETS and not a chain
- * [Scope] is a strict chain (`read ⊂ execute ⊂ author ⊂ admin`) and compares by ordinal.
- * The roles are not a chain: the promoter reads datasources and promotes, but executes
- * nothing and reads no executions (D5, ratified 2026-09-20), so it sits BELOW the viewer
- * on [EXECUTE] and ABOVE the author on [PROMOTE]. Each constant therefore lists its roles
- * outright — the §2 table's row, read left to right — and nothing infers one row from
- * another. `RoleMatrixTest` asserts the rows as behaviour; `ScopeMatrixSpecDriftTest`
- * asserts them against the doc's five role columns.
- *
- * Declaration order follows the doc's usual reading (broadest first) and carries no meaning.
+ * Granularity rule (record §2): two permissions stay separate even while every role holds
+ * both (`pipeline.create`, `pipeline.import`), so a later ruling can split them without
+ * touching a handler. Declaration order is the record's §2 order and auth.md §7.6's row order.
  */
 enum class Permission(
-    /** The workspace roles this permission admits. A super admin is admitted regardless (D7). */
-    val roles: Set<WorkspaceRole>,
+    /** The `<functionality>.<permission>` token — auth.md §7.6's first column. */
+    val wire: String,
 ) {
-    /**
-     * Read the workspace's objects: every role. The promoter's LENS over WHAT it reads is a
-     * value on every read, not a row here (178, auth.md §11A.1).
-     */
-    VIEW(setOf(WorkspaceRole.VIEWER, WorkspaceRole.AUTHOR, WorkspaceRole.PROMOTER, WorkspaceRole.WORKSPACE_ADMIN)),
+    // §2.1 — pipelines and templates
+    PIPELINE_READ("pipeline.read"),
+    PIPELINE_CREATE("pipeline.create"),
+    PIPELINE_UPDATE("pipeline.update"),
+    PIPELINE_VERSION_MANAGE("pipeline.version.manage"),
+    PIPELINE_DELETE("pipeline.delete"),
+    PIPELINE_IMPORT("pipeline.import"),
+    PIPELINE_RELEASE("pipeline.release"),
+    PIPELINE_SWITCH_VERSION("pipeline.switch_version"),
+    PIPELINE_EXECUTE("pipeline.execute"),
+    PIPELINE_RUN_CHECKS("pipeline.run_checks"),
+    PIPELINE_EXECUTE_NODE("pipeline.execute_node"),
+    TEMPLATE_READ("template.read"),
+    TEMPLATE_CREATE("template.create"),
+    TEMPLATE_UPDATE("template.update"),
+    TEMPLATE_VERSION_MANAGE("template.version.manage"),
+    TEMPLATE_DELETE("template.delete"),
+    TEMPLATE_IMPORT("template.import"),
+    TEMPLATE_RENDER("template.render"),
+    TEMPLATE_EVALUATE("template.evaluate"),
+    TEMPLATE_RELEASE("template.release"),
+    TEMPLATE_SWITCH_VERSION("template.switch_version"),
 
-    /**
-     * Execute pipelines, cancel runs, read executions and results, test a datasource
-     * connection: every role EXCEPT the promoter (§2 rows 2, 3 and 9 — "the connection
-     * test follows execute"). Execution reads are additionally narrowed to the caller's
-     * OWN runs unless they administer the workspace (D11) — a read-path filter, not a
-     * role: the matrix admits the viewer to the row, the query admits them to their rows.
-     *
-     * This is exactly where the two axes stop agreeing: `execute` is the second SCOPE,
-     * while EXECUTE is a viewer-level PERMISSION. A `read`-scoped key may not execute; a
-     * viewer session may.
-     */
-    EXECUTE(setOf(WorkspaceRole.VIEWER, WorkspaceRole.AUTHOR, WorkspaceRole.WORKSPACE_ADMIN)),
+    // §2.2 — executions. The two `_all` rows have no surface of their own: they lift "own"
+    // (D11) where a read or cancel path asks for them.
+    EXECUTION_READ("execution.read"),
+    EXECUTION_RESULT_READ("execution.result.read"),
+    EXECUTION_READ_ALL("execution.read_all"),
+    EXECUTION_CANCEL("execution.cancel"),
+    EXECUTION_CANCEL_ALL("execution.cancel_all"),
 
-    /**
-     * Create, edit, discard, restore, purge, RELEASE, switch the served version, publish
-     * endpoints, register lake tables, record and retire learned facts (D4, D8). Release
-     * moved here from the promoter on 2026-09-20 ("author releases, promoter promotes").
-     */
-    AUTHOR(setOf(WorkspaceRole.AUTHOR, WorkspaceRole.WORKSPACE_ADMIN)),
+    // §2.3 — datasources and the lake catalog
+    DATASOURCE_READ("datasource.read"),
+    DATASOURCE_INTROSPECT("datasource.introspect"),
+    DATASOURCE_TEST("datasource.test"),
+    DATASOURCE_PREVIEW_ROWS("datasource.preview_rows"),
+    DATASOURCE_SQL_PROBE("datasource.sql_probe"),
+    DATASOURCE_MANAGE("datasource.manage"),
+    DATASOURCE_GRANT("datasource.grant"),
+    LAKE_TABLE_MANAGE("lake_table.manage"),
 
-    /**
-     * Read the promotion page (owner rule 13): the author who released sees what is
-     * promotable, the promoter who promotes sees the same list. The promote ACTION is
-     * [PROMOTE]; this row exists so the PAGE can be wider than the verb on it.
-     */
-    PROMOTION_READ(setOf(WorkspaceRole.AUTHOR, WorkspaceRole.PROMOTER, WorkspaceRole.WORKSPACE_ADMIN)),
+    // §2.4 — published endpoints, semantics, reference
+    ENDPOINT_READ("endpoint.read"),
+    ENDPOINT_PUBLISH("endpoint.publish"),
+    ENDPOINT_UNPUBLISH("endpoint.unpublish"),
+    ENDPOINT_SERVE("endpoint.serve"),
+    SEMANTIC_READ("semantic.read"),
+    SEMANTIC_RECORD("semantic.record"),
+    SEMANTIC_RETIRE("semantic.retire"),
+    CALCULATOR_READ("calculator.read"),
+    DOCS_READ("docs.read"),
 
-    /** Promote to the higher environment (D5, D8): the promoter's one verb, and the admin's. */
-    PROMOTE(setOf(WorkspaceRole.PROMOTER, WorkspaceRole.WORKSPACE_ADMIN)),
+    // §2.5 — promotion. The two receiving rows are FENCED ([RolePermissions.FENCED]).
+    PROMOTION_READ("promotion.read"),
+    PROMOTION_PROMOTE("promotion.promote"),
+    PROMOTION_INVENTORY_READ("promotion.inventory.read"),
+    PROMOTION_PUSH("promotion.push"),
 
-    /**
-     * Members, roles and invitations, workspace-bound datasources, the workspaces page,
-     * the workspace audit trail (D6, D12, D13).
-     */
-    WS_ADMIN(setOf(WorkspaceRole.WORKSPACE_ADMIN)),
-
-    /** Instance verbs: workspaces, users, global datasources and their grants (D7). No workspace role holds it. */
-    SUPER_ADMIN(emptySet()),
+    // §2.6 — keys, workspaces, users, profile
+    MCP_KEY_OWN("mcp_key.own"),
+    API_KEY_READ("api_key.read"),
+    API_KEY_CREATE("api_key.create"),
+    API_KEY_REVOKE("api_key.revoke"),
+    API_KEY_BIND("api_key.bind"),
+    SERVER_KEY_CREATE("server_key.create"),
+    SERVER_KEY_REVOKE("server_key.revoke"),
+    WORKSPACE_SWITCH("workspace.switch"),
+    WORKSPACE_READ("workspace.read"),
+    WORKSPACE_UPDATE("workspace.update"),
+    WORKSPACE_MEMBERS_MANAGE("workspace.members.manage"),
+    WORKSPACE_CREATE("workspace.create"),
+    WORKSPACE_LIFECYCLE("workspace.lifecycle"),
+    USER_MANAGE("user.manage"),
+    USER_IDENTITY_RESET("user.identity_reset"),
+    PROFILE_READ("profile.read"),
+    PROFILE_PREFERENCE("profile.preference"),
+    PROFILE_PASSWORD("profile.password"),
     ;
 
-    /** The doc token for this permission — what `auth.md §7.6`'s prose and the refusal's `required` detail carry. */
-    val wire: String get() = name.lowercase()
+    /** The workspace roles holding this permission — [RolePermissions]' column read as a row. A super admin is not a role (D7). */
+    val roles: Set<WorkspaceRole> get() = RolePermissions.rolesHolding(this)
 
     /**
-     * True when a member holding [role] — or any super admin — may perform this permission's
-     * actions. The ONE place the §2 table is code; [ScopeMatrix.allowed] and the
-     * principal's derived predicates are its callers.
+     * True when a member holding [role] — or a super admin — holds this permission; the one
+     * question [WorkspaceContext.permits] and the principal's predicates ask. A null [role] is
+     * "no membership": only the super admin flag can answer yes then.
      */
     fun satisfiedBy(
-        role: WorkspaceRole,
+        role: WorkspaceRole?,
         superAdmin: Boolean,
-    ): Boolean = superAdmin || role in roles
+    ): Boolean = RolePermissions.holds(role, superAdmin, this)
 
     companion object {
-        /** Parses a doc token (`view`, `ws_admin`). Throws on an unknown token. */
+        /** Parses a wire token (`pipeline.read`). Throws on an unknown token — a permission that does not exist is a defect. */
         fun fromWire(token: String): Permission =
-            entries.firstOrNull { it.wire == token.lowercase() }
-                ?: throw IllegalArgumentException("Unknown permission: $token")
-
-        /** Every permission [role] holds — the row read as a column, for refusal details and the UI. */
-        fun heldBy(
-            role: WorkspaceRole,
-            superAdmin: Boolean,
-        ): Set<Permission> = entries.filterTo(mutableSetOf()) { it.satisfiedBy(role, superAdmin) }
+            entries.firstOrNull { it.wire == token } ?: throw IllegalArgumentException("Unknown permission: $token")
     }
 }

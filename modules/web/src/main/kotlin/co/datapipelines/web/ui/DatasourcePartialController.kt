@@ -2,8 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceGrantRepository
@@ -57,7 +57,7 @@ class DatasourcePartialController(
     private val references: DatasourceReferences,
 ) {
     @GetMapping("/partials/datasources")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun list(
         model: Model,
         @RequestParam(required = false) q: String?,
@@ -79,7 +79,7 @@ class DatasourcePartialController(
      * probe, the same refusal the REST §9.6 probe expresses as 404.
      */
     @PostMapping("/partials/datasources/{name}/test")
-    @RequiredScope(ScopeMatrix.RestOperation.TEST_DATASOURCE)
+    @RequiredScope(Permission.DATASOURCE_TEST)
     fun test(
         model: Model,
         @PathVariable name: String,
@@ -117,7 +117,7 @@ class DatasourcePartialController(
      */
     @Suppress("LongParameterList") // the register form's fields, one parameter each (the §5 form-encoding idiom)
     @PostMapping("/partials/datasources")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    @RequiredScope(Permission.DATASOURCE_MANAGE)
     fun register(
         model: Model,
         @RequestParam name: String,
@@ -196,7 +196,7 @@ class DatasourcePartialController(
      * that disagrees, silently.
      */
     @GetMapping("/partials/datasources/pool-fields")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun poolFields(
         model: Model,
         @RequestParam(required = false) dialect: String?,
@@ -220,7 +220,7 @@ class DatasourcePartialController(
 
     /** The edit dialog, prefilled from the row — including its effective pool settings. */
     @GetMapping("/partials/datasources/{name}/edit")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    @RequiredScope(Permission.DATASOURCE_MANAGE)
     fun editForm(
         model: Model,
         @PathVariable name: String,
@@ -249,7 +249,7 @@ class DatasourcePartialController(
      */
     @Suppress("LongParameterList") // the edit form's fields, one parameter each (the §5 form idiom)
     @PostMapping("/partials/datasources/{name}")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    @RequiredScope(Permission.DATASOURCE_MANAGE)
     fun update(
         model: Model,
         @PathVariable name: String,
@@ -315,7 +315,7 @@ class DatasourcePartialController(
      * clicked past. The same rows the REST 409's `details` carries (061/T79), rendered.
      */
     @GetMapping("/partials/datasources/{name}/delete")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    @RequiredScope(Permission.DATASOURCE_MANAGE)
     fun deleteDialog(
         model: Model,
         @PathVariable name: String,
@@ -352,7 +352,7 @@ class DatasourcePartialController(
      * the authority for "is it still unused" is the delete itself, never the screen.
      */
     @PostMapping("/partials/datasources/{name}/delete")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    @RequiredScope(Permission.DATASOURCE_MANAGE)
     fun delete(
         model: Model,
         @PathVariable name: String,

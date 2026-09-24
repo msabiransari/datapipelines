@@ -1,8 +1,8 @@
 package co.datapipelines.web.datasources
 
 import co.datapipelines.application.semantics.FactEnrichment
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
 import co.datapipelines.datasources.SchemaIntrospector
@@ -70,7 +70,7 @@ class DatasourceSchemaController(
      * a valid answer on schemaless dialects.
      */
     @GetMapping("/{name}/schemas")
-    @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
+    @RequiredScope(Permission.DATASOURCE_INTROSPECT)
     fun schemas(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> = ApiResponse.of(visible(name) { introspector.schemas(it).toWireMap() })
@@ -86,7 +86,7 @@ class DatasourceSchemaController(
      * a listing gave it. `namespace` wins when both are present.
      */
     @GetMapping("/{name}/tables")
-    @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
+    @RequiredScope(Permission.DATASOURCE_INTROSPECT)
     fun tables(
         @PathVariable name: String,
         @RequestParam(required = false) schema: String?,
@@ -110,7 +110,7 @@ class DatasourceSchemaController(
      * readable columns is a valid empty result.
      */
     @GetMapping("/{name}/tables/{table}/columns")
-    @RequiredScope(ScopeMatrix.RestOperation.INTROSPECT_DATASOURCE)
+    @RequiredScope(Permission.DATASOURCE_INTROSPECT)
     fun columns(
         @PathVariable name: String,
         @PathVariable table: String,

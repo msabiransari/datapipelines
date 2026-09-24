@@ -3,9 +3,9 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.TemplateType
@@ -58,7 +58,7 @@ class TemplatePartialController(
     private val lens: PromoterLens,
 ) {
     @GetMapping("/partials/templates")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.TEMPLATE_READ)
     fun list(
         model: Model,
         @RequestParam(required = false) q: String?,
@@ -109,7 +109,7 @@ class TemplatePartialController(
      * fragments below take `name` as a parameter where the pipelines twin can use `{id}`.
      */
     @GetMapping("/partials/templates/versions")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.TEMPLATE_READ)
     fun versions(
         model: Model,
         @RequestParam name: String,
@@ -127,7 +127,7 @@ class TemplatePartialController(
      * runs, everyone else sees their own.
      */
     @GetMapping("/partials/templates/runs")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.TEMPLATE_READ)
     fun runs(
         model: Model,
         @RequestParam name: String,
@@ -139,7 +139,7 @@ class TemplatePartialController(
             lens.viewFor(principal),
             name,
             principal.userId,
-            principal.isWorkspaceAdmin,
+            principal.holds(Permission.EXECUTION_READ_ALL),
         )
     }
 
@@ -155,7 +155,7 @@ class TemplatePartialController(
      * §4.5 offers no rename: `name` is a create-time input, full stop.
      */
     @PostMapping("/partials/templates")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_CREATE)
     fun create(
         model: Model,
         @RequestParam name: String,

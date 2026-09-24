@@ -2,9 +2,9 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.web.api.currentPrincipal
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
@@ -43,7 +43,7 @@ class PipelinePartialController(
     private val lens: PromoterLens,
 ) {
     @GetMapping("/partials/pipelines")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun list(
         model: Model,
         @RequestParam(required = false) q: String?,
@@ -81,7 +81,7 @@ class PipelinePartialController(
      * for a UUID).
      */
     @GetMapping("/partials/pipelines/detail")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun detail(
         model: Model,
         @RequestParam id: UUID,
@@ -100,7 +100,7 @@ class PipelinePartialController(
      * one — that would be a read-scope hole opened by a UI convenience.
      */
     @GetMapping("/partials/pipelines/{id}/runs")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun runs(
         model: Model,
         @PathVariable id: UUID,
@@ -112,7 +112,7 @@ class PipelinePartialController(
             lens.viewFor(principal),
             id,
             principal.userId,
-            principal.isWorkspaceAdmin,
+            principal.holds(Permission.EXECUTION_READ_ALL),
         )
     }
 
@@ -126,7 +126,7 @@ class PipelinePartialController(
      * when 092 lands; there is no schedule table to query today.
      */
     @GetMapping("/partials/pipelines/{id}/usage")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun usage(
         model: Model,
         @PathVariable id: UUID,

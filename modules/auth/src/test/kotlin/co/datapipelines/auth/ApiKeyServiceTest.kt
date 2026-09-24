@@ -327,7 +327,7 @@ class ApiKeyServiceTest {
         // The floor moved from a SCOPE to the issuer's super-admin flag (D-R1): a server key
         // is the promotion receiver's whole credential, and "who may mint one" is an instance
         // question, which is exactly the kind of question a scope stopped being able to answer.
-        refusal.details["required"] shouldBe Permission.SUPER_ADMIN.wire
+        refusal.details["required"] shouldBe Permission.SERVER_KEY_CREATE.wire
     }
 
     @Test

@@ -3,6 +3,7 @@ package co.datapipelines.web.datasources
 import co.datapipelines.application.datasources.DatasourceCreateService
 import co.datapipelines.application.datasources.DatasourcePayloadBinder
 import co.datapipelines.application.datasources.DatasourceUpdateService
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
@@ -90,7 +91,7 @@ class DatasourcesController(
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    @RequiredScope(Permission.DATASOURCE_MANAGE)
     fun create(
         @RequestBody body: JsonNode,
     ): ApiResponse<Map<String, Any?>> = ApiResponse.of(registrations.create(body, currentPrincipal()).toResponse())
@@ -104,7 +105,7 @@ class DatasourcesController(
      * client makes first — and the REST twin appended `facts` on the detail only.
      */
     @GetMapping
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun list(
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) offset: Int?,
@@ -134,7 +135,7 @@ class DatasourcesController(
      * connection, so there is nothing to recompute drift against.
      */
     @GetMapping("/{name}")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun get(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> {
@@ -155,7 +156,7 @@ class DatasourcesController(
      * write. Every accepted write crosses `registry.save` → pool eviction.
      */
     @PutMapping("/{name}")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    @RequiredScope(Permission.DATASOURCE_MANAGE)
     fun update(
         @PathVariable name: String,
         @RequestBody body: JsonNode,
@@ -190,7 +191,7 @@ class DatasourcesController(
      */
     @DeleteMapping("/{name}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_WORKSPACE_DATASOURCES)
+    @RequiredScope(Permission.DATASOURCE_MANAGE)
     @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued code
     fun delete(
         @PathVariable name: String,
@@ -245,7 +246,7 @@ class DatasourcesController(
      * row (§8.1B), which is what puts it on the list screen.
      */
     @PostMapping("/{name}/test")
-    @RequiredScope(ScopeMatrix.RestOperation.TEST_DATASOURCE)
+    @RequiredScope(Permission.DATASOURCE_TEST)
     fun test(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> {

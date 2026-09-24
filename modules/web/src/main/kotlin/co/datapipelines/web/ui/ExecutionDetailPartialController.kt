@@ -4,7 +4,6 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionRepository
@@ -13,6 +12,7 @@ import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.api.cancellableBy
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.visibleTo
 import co.datapipelines.web.executions.ResultCursor
@@ -37,7 +37,7 @@ class ExecutionDetailPartialController(
     private val cancellation: ExecutionCancellationService,
 ) {
     @GetMapping("/{id}/result")
-    @RequiredScope(ScopeMatrix.RestOperation.RETRIEVE_RESULT)
+    @RequiredScope(Permission.EXECUTION_RESULT_READ)
     fun result(
         @PathVariable id: UUID,
         @RequestParam(required = false, defaultValue = "0") offset: Long,
@@ -99,7 +99,7 @@ class ExecutionDetailPartialController(
 
     @Suppress("ThrowsCount")
     @DeleteMapping("/{id}/cancel")
-    @RequiredScope(ScopeMatrix.RestOperation.CANCEL_EXECUTION)
+    @RequiredScope(Permission.EXECUTION_CANCEL)
     fun cancel(
         @PathVariable id: UUID,
         model: Model,
@@ -110,11 +110,11 @@ class ExecutionDetailPartialController(
         // FALSE for a session once sessions stopped carrying scopes (D-R1), so no signed-in human
         // could cancel. Permission, not scope, is what a session holds.
         val context = principal.workspace ?: throw ResponseStatusException(HttpStatus.FORBIDDEN, "No active workspace")
-        if (!context.permits(Permission.EXECUTE)) {
+        if (!context.permits(Permission.EXECUTION_CANCEL)) {
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Execute capability required")
         }
         val record =
-            executions.findById(principal.requireWorkspace().id, id)?.takeIf { it.visibleTo(principal) }
+            executions.findById(principal.requireWorkspace().id, id)?.takeIf { it.cancellableBy(principal) }
                 ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Execution not found")
         if (record.status != ExecutionStatus.RUNNING) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Execution is not running")

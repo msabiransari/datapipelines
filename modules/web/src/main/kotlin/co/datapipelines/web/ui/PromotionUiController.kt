@@ -2,8 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceSessionRequiredException
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.pipelines.PromotionService
@@ -60,7 +60,7 @@ class PromotionUiController(
      * refused by role, which is also why the rail draws the item only for those three.
      */
     @GetMapping("/promotion")
-    @RequiredScope(ScopeMatrix.RestOperation.PROMOTION_READ)
+    @RequiredScope(Permission.PROMOTION_READ)
     fun screen(
         model: Model,
         request: HttpServletRequest,
@@ -95,7 +95,7 @@ class PromotionUiController(
      * rather than on a generic error page.
      */
     @PostMapping("/promotion/promote")
-    @RequiredScope(ScopeMatrix.RestOperation.PROMOTE_VERSION)
+    @RequiredScope(Permission.PROMOTION_PROMOTE)
     fun promote(
         @RequestParam(name = "name", required = false) names: List<String>?,
     ): String {

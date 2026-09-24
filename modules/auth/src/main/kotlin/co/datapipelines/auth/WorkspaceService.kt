@@ -281,7 +281,7 @@ open class WorkspaceService(
         name: String,
         displayName: String,
     ): Workspace {
-        requireSuperAdmin(principal)
+        requireInstancePermission(principal, Permission.WORKSPACE_CREATE)
         if (!NAME_REGEX.matches(name)) throw WorkspaceNameInvalidException(name)
         if (workspaceRepository.nameExists(name)) throw WorkspaceDuplicateNameException(name)
         val created =
@@ -341,7 +341,7 @@ open class WorkspaceService(
         displayName: String,
     ): Workspace {
         val workspace = read(principal, name)
-        requirePermission(principal, workspace, Permission.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WORKSPACE_UPDATE)
         val updated =
             workspaceRepository.updateDisplayName(workspace.id, displayName)
                 // The row vanished between read() and the write: the 404 rule answers the race
@@ -369,7 +369,7 @@ open class WorkspaceService(
         // caller cannot reach answers "no such workspace" whatever their role — a role refusal
         // reached before the 404 would confirm the workspace exists.
         val workspace = read(principal, name)
-        requireSuperAdmin(principal)
+        requireInstancePermission(principal, Permission.WORKSPACE_LIFECYCLE)
         if (!workspaceRepository.deactivate(workspace.id, principal.userId)) {
             throw WorkspaceInactiveException(name)
         }
@@ -387,7 +387,7 @@ open class WorkspaceService(
         // caller cannot reach answers "no such workspace" whatever their role — a role refusal
         // reached before the 404 would confirm the workspace exists.
         val workspace = read(principal, name)
-        requireSuperAdmin(principal)
+        requireInstancePermission(principal, Permission.WORKSPACE_LIFECYCLE)
         if (!workspaceRepository.reactivate(workspace.id)) {
             // Already active: the same 404 body, because "it was not deactivated" is not a
             // fact this surface owes a caller who could not have addressed it wrongly.
@@ -417,7 +417,7 @@ open class WorkspaceService(
     ) {
         // read() FIRST, for the reason [deactivate] gives.
         val workspace = read(principal, name)
-        requireSuperAdmin(principal)
+        requireInstancePermission(principal, Permission.WORKSPACE_LIFECYCLE)
         val counts = contentCheck.nonDeletedCounts(workspace.id).filterValues { it > 0 }
         if (counts.isNotEmpty()) throw WorkspaceInUseException(name, counts)
         val members = workspaceRepository.findMembersOf(workspace.id)
@@ -491,7 +491,7 @@ open class WorkspaceService(
     ) {
         val normalized = email.trim().lowercase()
         val workspace = read(principal, name)
-        requirePermission(principal, workspace, Permission.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WORKSPACE_MEMBERS_MANAGE)
         if (!invitationRepository.delete(workspace.id, normalized)) {
             throw WorkspaceInvitationNotFoundException(name, normalized)
         }
@@ -538,7 +538,7 @@ open class WorkspaceService(
     ): AddMemberOutcome {
         val normalized = email.trim().lowercase()
         val workspace = read(principal, name)
-        requirePermission(principal, workspace, Permission.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WORKSPACE_MEMBERS_MANAGE)
         // §B.5: a deactivated workspace refuses invites. A member never gets here (their 404
         // rule answered already); this is the super admin, who CAN see the greyed workspace,
         // being told the same thing the members-verbs would tell any other role.
@@ -604,7 +604,7 @@ open class WorkspaceService(
         role: WorkspaceRole,
     ): WorkspaceMemberRow {
         val workspace = read(principal, name)
-        requirePermission(principal, workspace, Permission.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WORKSPACE_MEMBERS_MANAGE)
         val target = workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
         requireNotSelf(principal, workspace, userId)
         if (target.role == WorkspaceRole.WORKSPACE_ADMIN && role != WorkspaceRole.WORKSPACE_ADMIN) {
@@ -650,7 +650,7 @@ open class WorkspaceService(
         userId: UUID,
     ) {
         val workspace = read(principal, name)
-        requirePermission(principal, workspace, Permission.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WORKSPACE_MEMBERS_MANAGE)
         val target = workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
         requireNotSelf(principal, workspace, userId)
         if (target.role == WorkspaceRole.WORKSPACE_ADMIN) requireAnotherAdmin(workspace, userId)
@@ -706,7 +706,7 @@ open class WorkspaceService(
         userId: UUID,
     ) {
         val workspace = read(principal, name)
-        requirePermission(principal, workspace, Permission.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WORKSPACE_MEMBERS_MANAGE)
         workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
         requireNotSelf(principal, workspace, userId)
         val revokedKeyId = apiKeyRepository.revokeUserKeyForWorkspace(userId, workspace.id)
@@ -737,7 +737,7 @@ open class WorkspaceService(
         name: String,
     ): Set<UUID> {
         val workspace = read(principal, name)
-        requirePermission(principal, workspace, Permission.WS_ADMIN)
+        requirePermission(principal, workspace, Permission.WORKSPACE_MEMBERS_MANAGE)
         return apiKeyRepository.liveUserKeyOwnerIds(workspace.id)
     }
 
@@ -804,9 +804,11 @@ open class WorkspaceService(
 
     /**
      * The membership guard API-key issuance extends (auth.md §7.4): a key may only be pinned to
-     * a workspace its creator can reach, and — since D-R12/O-2 — only by an AUTHOR there.
-     * Throws [WorkspaceNotFoundException] for the unreachable case (D-R5) and
-     * [RoleRequiredException] for the viewer.
+     * a workspace its creator can reach, and — since D-R12/O-2 — only by an AUTHOR there, asked
+     * through the author row's representative permission `template.update` (#215 slice (a)
+     * re-keys the check and keeps the rule; slice (b) replaces it with the record's O3, "a key's
+     * role never exceeds its creator's permissions"). Throws [WorkspaceNotFoundException] for the
+     * unreachable case (D-R5) and [RoleRequiredException] for the viewer.
      */
     @Suppress("ThrowsCount") // three distinct refusals: unknown workspace, unreachable, wrong role
     open fun requireIssuancePermission(
@@ -815,8 +817,8 @@ open class WorkspaceService(
     ): WorkspaceContext {
         val workspace = workspaceRepository.findById(workspaceId) ?: throw WorkspaceNotFoundException(workspaceId.toString())
         val context = contextFor(principal, workspace.name) ?: throw WorkspaceNotFoundException(workspace.name)
-        if (!context.permits(Permission.AUTHOR)) {
-            throw RoleRequiredException(Permission.AUTHOR, context.held(), workspace.name)
+        if (!context.permits(Permission.TEMPLATE_UPDATE)) {
+            throw RoleRequiredException(Permission.TEMPLATE_UPDATE, context.heldRole, workspace.name)
         }
         return context
     }
@@ -897,9 +899,17 @@ open class WorkspaceService(
     private fun context(membership: WorkspaceMembership): WorkspaceContext =
         WorkspaceContext(membership.workspaceId, membership.workspaceName, membership.role)
 
-    private fun requireSuperAdmin(principal: AuthenticatedPrincipal) {
-        if (!principal.isSuperAdmin) {
-            throw RoleRequiredException(Permission.SUPER_ADMIN, emptySet())
+    /**
+     * An INSTANCE permission (#215, [RolePermissions.INSTANCE]): a super admin's, judged without
+     * a workspace — [AuthenticatedPrincipal.holds] answers it with no reachable context too,
+     * which is #113's recovery path for an instance whose every workspace is deactivated.
+     */
+    private fun requireInstancePermission(
+        principal: AuthenticatedPrincipal,
+        permission: Permission,
+    ) {
+        if (!principal.holds(permission)) {
+            throw RoleRequiredException(permission, principal.heldRole)
         }
     }
 
@@ -928,7 +938,7 @@ open class WorkspaceService(
             } else {
                 WorkspaceContext(workspace.id, workspace.name, explicit ?: throw WorkspaceNotFoundException(workspace.name))
             }
-        if (!context.permits(permission)) throw RoleRequiredException(permission, context.held(), workspace.name)
+        if (!context.permits(permission)) throw RoleRequiredException(permission, context.heldRole, workspace.name)
     }
 
     /** The last-admin rule: [excluding] is the member about to lose admin (design §1). */

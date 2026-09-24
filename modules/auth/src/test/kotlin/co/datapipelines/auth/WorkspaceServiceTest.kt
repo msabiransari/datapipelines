@@ -325,7 +325,7 @@ class WorkspaceServiceTest {
         val refusal = shouldThrow<RoleRequiredException> { service().create(principal, "acme", "Acme") }
 
         refusal.code shouldBe AuthErrorCodes.ROLE_REQUIRED
-        refusal.details["required"] shouldBe Permission.SUPER_ADMIN.wire
+        refusal.details["required"] shouldBe Permission.WORKSPACE_CREATE.wire
         verify(exactly = 0) { repository.create(any(), any(), any(), any()) }
     }
 

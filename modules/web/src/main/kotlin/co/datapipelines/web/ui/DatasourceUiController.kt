@@ -1,8 +1,8 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspacesProperties
 import co.datapipelines.datasources.CredentialKind
 import co.datapipelines.typesystem.Dialect
@@ -29,7 +29,7 @@ class DatasourceUiController(
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/datasources")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun list(
         model: Model,
         request: HttpServletRequest,

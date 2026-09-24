@@ -34,7 +34,7 @@ class EndpointKeyConfinementTest {
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val interceptor = ScopeInterceptor(AuthErrorWriter(mapper), auditLogger)
 
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     class ProbeController {
         fun anything() = Unit
     }

@@ -1,7 +1,7 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.web.api.currentPrincipal
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
@@ -21,7 +21,7 @@ class ExecutionHistoryPartialController(
     private val browse: ExecutionHistoryBrowseModel,
 ) {
     @GetMapping("/executions")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
+    @RequiredScope(Permission.EXECUTION_READ)
     @Suppress("LongParameterList") // the filter bar's fields, one parameter each (the §5 idiom)
     fun listPartial(
         @RequestParam(name = "pipeline_id", required = false) pipelineId: UUID?,

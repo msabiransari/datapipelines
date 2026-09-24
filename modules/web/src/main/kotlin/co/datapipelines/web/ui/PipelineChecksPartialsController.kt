@@ -6,8 +6,8 @@ import co.datapipelines.application.checks.PipelineCheckRunner
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.CheckExpectation
 import co.datapipelines.pipeline.CheckRunOutcome
 import co.datapipelines.pipeline.CheckRunVerdict
@@ -58,7 +58,7 @@ class PipelineChecksPartialsController(
     private val lens: PromoterLens,
 ) {
     @GetMapping("/partials/pipelines/{id}/versions/{version}/checks")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun checks(
         model: Model,
         @PathVariable id: UUID,
@@ -73,7 +73,7 @@ class PipelineChecksPartialsController(
     }
 
     @PostMapping("/partials/pipelines/{id}/versions/{version}/checks/run")
-    @RequiredScope(ScopeMatrix.RestOperation.EXECUTE_PIPELINE)
+    @RequiredScope(Permission.PIPELINE_RUN_CHECKS)
     fun run(
         model: Model,
         @PathVariable id: UUID,

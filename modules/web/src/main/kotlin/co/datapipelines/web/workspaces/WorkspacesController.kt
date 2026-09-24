@@ -1,7 +1,7 @@
 package co.datapipelines.web.workspaces
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceInvitation
 import co.datapipelines.auth.WorkspaceMemberRow
@@ -48,12 +48,12 @@ class WorkspacesController(
      * the switcher's row (`WORKSPACE_SWITCH`), not on the page's (D13 narrowed the PAGE).
      */
     @GetMapping
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACE_SWITCH)
+    @RequiredScope(Permission.WORKSPACE_SWITCH)
     fun list(): ApiResponse<List<Map<String, Any?>>> = ApiResponse.of(workspaces.listOwn(currentPrincipal()).map { it.toResponse() })
 
     /** §17.2 — one workspace. Members share one 403 for unknown and not-a-member; only an admin gets the 404. */
     @GetMapping("/{name}")
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACES_READ)
+    @RequiredScope(Permission.WORKSPACE_READ)
     fun get(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> = ApiResponse.of(workspaces.read(currentPrincipal(), name).toResponse())
@@ -61,7 +61,7 @@ class WorkspacesController(
     /** §17.3 — create per provisioning mode; the creator enters as `owner`. */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACE_CREATE)
+    @RequiredScope(Permission.WORKSPACE_CREATE)
     fun create(
         @RequestBody body: JsonNode,
     ): ApiResponse<Map<String, Any?>> {
@@ -78,7 +78,7 @@ class WorkspacesController(
 
     /** §17.4 — rename the display name; `name` is immutable v1. Owner or admin. An absent `display_name` keeps the current one. */
     @PutMapping("/{name}")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE)
+    @RequiredScope(Permission.WORKSPACE_UPDATE)
     fun update(
         @PathVariable name: String,
         @RequestBody body: JsonNode,
@@ -99,7 +99,7 @@ class WorkspacesController(
      */
     @DeleteMapping("/{name}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    @RequiredScope(Permission.WORKSPACE_LIFECYCLE)
     fun delete(
         @PathVariable name: String,
     ) {
@@ -115,7 +115,7 @@ class WorkspacesController(
      * `members[]`, and a pending invitation never upgrades anybody.
      */
     @GetMapping("/{name}/members")
-    @RequiredScope(ScopeMatrix.RestOperation.WORKSPACES_READ)
+    @RequiredScope(Permission.WORKSPACE_READ)
     fun members(
         @PathVariable name: String,
     ): ApiResponse<Map<String, List<Map<String, Any?>>>> {
@@ -147,7 +147,7 @@ class WorkspacesController(
      * `workspace.inactive` (404).
      */
     @PostMapping("/{name}/members")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun addMember(
         @PathVariable name: String,
         @RequestBody body: JsonNode,
@@ -185,7 +185,7 @@ class WorkspacesController(
      */
     @DeleteMapping("/{name}/members/{userId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun removeMember(
         @PathVariable name: String,
         @PathVariable userId: UUID,
@@ -206,7 +206,7 @@ class WorkspacesController(
      */
     @DeleteMapping("/{name}/members/{userId}/key")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun revokeMemberKey(
         @PathVariable name: String,
         @PathVariable userId: UUID,
@@ -223,7 +223,7 @@ class WorkspacesController(
      */
     @DeleteMapping("/{name}/invitations/{email}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun revokeInvitation(
         @PathVariable name: String,
         @PathVariable email: String,
@@ -240,7 +240,7 @@ class WorkspacesController(
      * wire (rest-api.md §17 change log, 2026-09-20).
      */
     @PutMapping("/{name}/members/{userId}")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_WORKSPACE_MEMBERS)
+    @RequiredScope(Permission.WORKSPACE_MEMBERS_MANAGE)
     fun setMemberRole(
         @PathVariable name: String,
         @PathVariable userId: UUID,
@@ -254,14 +254,14 @@ class WorkspacesController(
      * super admin's listing greys it. Reversible by [reactivate].
      */
     @PostMapping("/{name}/deactivate")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    @RequiredScope(Permission.WORKSPACE_LIFECYCLE)
     fun deactivate(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> = ApiResponse.of(workspaces.deactivate(currentPrincipal(), name).toResponse())
 
     /** D-R10 — reactivate a deactivated workspace. Super admin, audited. */
     @PostMapping("/{name}/reactivate")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_INSTANCE_WORKSPACES)
+    @RequiredScope(Permission.WORKSPACE_LIFECYCLE)
     fun reactivate(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> = ApiResponse.of(workspaces.reactivate(currentPrincipal(), name).toResponse())

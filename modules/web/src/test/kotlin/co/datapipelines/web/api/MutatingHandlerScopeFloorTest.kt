@@ -1,5 +1,6 @@
 package co.datapipelines.web.api
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
@@ -24,9 +25,9 @@ import kotlin.reflect.jvm.javaMethod
 
 /**
  * The mutating-floor guard (025 defect round, A1; re-keyed to handlers in the 025b
- * fix round): every POST/PUT/PATCH/DELETE handler must carry an operation whose §7.6
- * floor sits ABOVE `read` — unless the HANDLER is on the explicit allowlist below, each
- * entry justified in place.
+ * fix round; re-keyed to the permission catalog, #215): every POST/PUT/PATCH/DELETE handler
+ * must carry a permission whose §7.6 key floor sits ABOVE `read` — unless the HANDLER is on
+ * the explicit allowlist below, each entry justified in place.
  *
  * Why this test exists when [RequiredScopeCoverageTest] already passes: coverage asserts
  * an annotation EXISTS, not what it permits. An API key authenticates on EVERY path
@@ -58,16 +59,16 @@ class MutatingHandlerScopeFloorTest {
     fun `every mutating handler sits above the read floor or is allowlisted`() {
         val offenders = mutableListOf<String>()
         discoveredMutatingHandlers().forEach { handler ->
-            val operation = handler.operation
-            if (operation == null) {
+            val permission = handler.permission
+            if (permission == null) {
                 if (handler.where !in UNAUTHENTICATED_BY_DESIGN) {
                     offenders +=
                         "${handler.where}: mutating handler declares NO @RequiredScope " +
                         "(if it is unauthenticated by design, add it to UNAUTHENTICATED_BY_DESIGN with its permitAll justification)"
                 }
-            } else if (operation.minScope == Scope.READ && handler.where !in READ_FLOORED_MUTATION_HANDLERS) {
+            } else if (floorOf(permission) == Scope.READ && handler.where !in READ_FLOORED_MUTATION_HANDLERS) {
                 offenders +=
-                    "${handler.where}: mutating handler is floored at read via ${operation.name}"
+                    "${handler.where}: mutating handler is floored at read via ${permission.wire}"
             }
         }
         offenders shouldBe emptyList()
@@ -83,7 +84,7 @@ class MutatingHandlerScopeFloorTest {
     fun `every allowlist entry is a discovered read-floored mutating handler`() {
         val readFloored =
             discoveredMutatingHandlers()
-                .filter { it.operation?.minScope == Scope.READ }
+                .filter { handler -> handler.permission?.let(::floorOf) == Scope.READ }
                 .map { it.where }
                 .toSet()
         (READ_FLOORED_MUTATION_HANDLERS.keys - readFloored) shouldBe emptySet()
@@ -100,7 +101,7 @@ class MutatingHandlerScopeFloorTest {
     fun `every unauthenticated-by-design entry is a discovered unannotated mutating handler`() {
         val unannotated =
             discoveredMutatingHandlers()
-                .filter { it.operation == null }
+                .filter { it.permission == null }
                 .map { it.where }
                 .toSet()
         (UNAUTHENTICATED_BY_DESIGN.keys - unannotated) shouldBe emptySet()
@@ -150,22 +151,25 @@ class MutatingHandlerScopeFloorTest {
             "co.datapipelines.web.ui.WorkspacesUiController"
     }
 
+    /** #215 slice (a): a permission's KEY floor is the A4 shim's — the operation it replaced carried the same one. */
+    private fun floorOf(permission: Permission): Scope? = ScopeMatrix.PERMISSION_MIN_SCOPE[permission]
+
     private data class DiscoveredHandler(
         val where: String,
-        val operation: ScopeMatrix.RestOperation?,
+        val permission: Permission?,
         /** The handler's full path — class-level prefix plus the mapping's own — or null. */
         val path: String?,
     )
 
     private fun discoveredMutatingHandlers(): List<DiscoveredHandler> =
         allControllers().flatMap { controller ->
-            val classOperation = controller.findAnnotation<RequiredScope>()?.value
+            val classPermission = controller.findAnnotation<RequiredScope>()?.value
             controller.functions
                 .filter { mutatingMethodOf(it.javaMethod) != null }
                 .map { fn ->
                     DiscoveredHandler(
                         where = "${controller.simpleName}#${fn.name}",
-                        operation = fn.findAnnotation<RequiredScope>()?.value ?: classOperation,
+                        permission = fn.findAnnotation<RequiredScope>()?.value ?: classPermission,
                         path = pathOf(controller, fn.javaMethod),
                     )
                 }
@@ -174,8 +178,8 @@ class MutatingHandlerScopeFloorTest {
     /**
      * The deliberate read-floored mutation handlers, `"ControllerClass#method"` → the
      * reason `read` is honest FOR THAT HANDLER. Adding an entry requires the same three
-     * things the existing entries have: a §7.6 row, a KDoc on the
-     * [ScopeMatrix.RestOperation] constant arguing why `read` is honest, and an
+     * things the existing entries have: a §7.6 row, a floor in the permission key-scope table
+     * (`ScopeMatrix.PERMISSION_MIN_SCOPE`) argued honest where it is written, and an
      * in-handler guard that is the REAL control for whoever the floor lets through —
      * plus this per-handler justification, because the operation's KDoc cannot know
      * which credential each of its handlers is reachable by.

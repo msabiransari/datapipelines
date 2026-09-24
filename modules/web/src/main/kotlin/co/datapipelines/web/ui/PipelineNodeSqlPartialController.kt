@@ -1,8 +1,8 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRepository
@@ -62,7 +62,7 @@ class PipelineNodeSqlPartialController(
     private val mapper: ObjectMapper = PipelineJson.objectMapper()
 
     @GetMapping("/partials/pipelines/{id}/nodes/{nodeId}/sql")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun nodeSql(
         @PathVariable id: UUID,
         @PathVariable nodeId: String,

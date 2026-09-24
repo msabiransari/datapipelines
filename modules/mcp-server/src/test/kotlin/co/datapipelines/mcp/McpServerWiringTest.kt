@@ -119,7 +119,7 @@ class McpServerWiringTest {
 
         assertAll(
             { dispatcher.toolNames().size shouldBe McpToolCatalog.NAMES.size },
-            { dispatcher.toolNames() shouldContainExactlyInAnyOrder ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys },
+            { dispatcher.toolNames() shouldContainExactlyInAnyOrder ScopeMatrix.MCP_TOOL_PERMISSION.keys },
         )
     }
 

@@ -35,9 +35,10 @@ import javax.crypto.spec.SecretKeySpec
  * For each of the five roles, EVERY REST route the running application registers (read off
  * Spring's own `RequestMappingHandlerMapping`, so a route added tomorrow is walked without
  * anybody remembering to add it) and EVERY MCP tool in auth.md §7.6 is called with a principal
- * of that role, and the answer is asserted allowed or refused **exactly as the §7.6 role table
- * says** — the table is parsed ([RoleMatrixDocE2e]), so the doc IS the expectation and a cell
- * flipped in the doc fails here against the live server.
+ * of that role, and the answer is asserted allowed or refused **exactly as the §7.6 permission
+ * catalog says** for the permission the route or tool declares (#215) — the catalog is parsed
+ * ([RoleMatrixDocE2e]), so the doc IS the expectation and a cell flipped in the doc fails here
+ * against the live server.
  *
  * ## What "allowed" and "refused" mean here
  * The subject is the INTERCEPTOR's decision, not the handler's: a refused role gets 403
@@ -52,9 +53,9 @@ import javax.crypto.spec.SecretKeySpec
  * - A non-public handler with NO `@RequiredScope` fails by name — the runtime half of gate 1
  *   over every module the application registers a controller from (`modules/app`'s health
  *   controller is public and is asserted SEEN, so the walk provably reaches past `web`).
- * - Every `RestOperation` the doc names is claimed by ≥ 1 walked handler, and every handler's
- *   operation has a doc row (gate 3, the REST half); every doc MCP tool answers as a known tool
- *   (the MCP half — an unknown tool is a row nothing implements).
+ * - Every catalog row that places a route is claimed by ≥ 1 walked handler, and every handler's
+ *   permission has a catalog row (gate 3, the REST half); every doc MCP tool answers as a known
+ *   tool (the MCP half — an unknown tool is a row nothing implements).
  *
  * ## Non-vacuity
  * The route count, and per role the allowed AND refused counts, are printed
@@ -79,7 +80,7 @@ class RoleWalkE2eTest {
     private lateinit var context: ApplicationContext
 
     private val doc = RoleMatrixDocE2e.read()
-    private val restRows = RoleMatrixDocE2e.restRows(doc)
+    private val permissionRows = RoleMatrixDocE2e.permissionRows(doc)
     private val mcpRows = RoleMatrixDocE2e.mcpRows(doc)
 
     @Test
@@ -125,6 +126,11 @@ class RoleWalkE2eTest {
         tallies.values.flatMap { it.mismatches }.joinToString("\n") shouldBe ""
 
         mcpRows.size shouldBeGreaterThanOrEqual MINIMUM_TOOLS
+        // #215 — the five cells the catalog moved (record §2.3: the row-data tools are author and
+        // above). Asserted by name, with the CODE: every walked key carries `author` scope, so the
+        // refusal must come from the role axis (the demoted-issuer code), never the scope axis.
+        val moved = MOVED_MCP_CELLS.map { (role, tool) -> "$role $tool -> ${tallies.getValue(role).codes[tool]}" }
+        moved shouldBe MOVED_MCP_CELLS.map { (role, tool) -> "$role $tool -> $KEY_ISSUER_ROLE_LOST" }
         counts.getValue("viewer").second shouldBeGreaterThanOrEqual MCP_VIEWER_REFUSED_FLOOR
         counts.getValue("promoter").second shouldBeGreaterThanOrEqual MCP_PROMOTER_REFUSED_FLOOR
         counts.getValue("super_admin").second shouldBe 0
@@ -138,6 +144,9 @@ class RoleWalkE2eTest {
         val mismatches = mutableListOf<String>()
         val unknown = mutableListOf<String>()
 
+        /** MCP: the refusal code each tool answered with (null = admitted). */
+        val codes = mutableMapOf<String, String?>()
+
         fun record(wasRefused: Boolean) = if (wasRefused) refused++ else allowed++
     }
 
@@ -150,12 +159,12 @@ class RoleWalkE2eTest {
     ): Tally {
         val tally = Tally()
         routes.forEach { route ->
-            val expectAllowed = restRows.getValue(route.operation).allows(role)
+            val expectAllowed = permissionRows.getValue(route.permission).allows(role)
             val answer = call(route, sessionFor(role))
             tally.record(answer.roleRefused)
             if (answer.roleRefused == expectAllowed) {
                 tally.mismatches +=
-                    "$role ${route.method} ${route.pattern} (${route.handler}, ${route.operation}) -> " +
+                    "$role ${route.method} ${route.pattern} (${route.handler}, ${route.permission}) -> " +
                     "${answer.status} ${answer.code ?: ""} but §7.6 says ${if (expectAllowed) "allowed" else "refused"}"
             }
         }
@@ -180,6 +189,7 @@ class RoleWalkE2eTest {
                 return@forEach
             }
             val wasRefused = MCP_ROLE_REFUSALS.any { body.contains(it) }
+            tally.codes[tool] = (MCP_ROLE_REFUSALS + SCOPE_INSUFFICIENT).firstOrNull { body.contains(it) }
             tally.record(wasRefused)
             if (wasRefused == cells.allows(role)) {
                 tally.mismatches +=
@@ -207,22 +217,27 @@ class RoleWalkE2eTest {
 
     /**
      * Gate 1 (runtime) and gate 3: the handlers the application registers, classified. An
-     * unannotated non-public handler and an operation with no doc row fail BY NAME; every
-     * doc constant is claimed by at least one handler.
+     * unannotated non-public handler and a permission with no catalog row fail BY NAME; every
+     * catalog row that places a route is claimed by at least one handler (a row that places only
+     * tools, or nothing — the service-checked `_all` and server-key rows — is claimed elsewhere,
+     * and `MatrixRowReachabilityTest` counts those claims).
      */
     @Test
-    fun `every non-public handler declares an operation the doc has a row for, and every row is claimed`() {
+    fun `every non-public handler declares a permission the doc has a row for, and every routed row is claimed`() {
         val handlers = handlerMappings()
-        val unannotated = handlers.filter { !it.public && it.operation == null }.map { "${it.handler} ${it.method} ${it.pattern}" }
+        val unannotated = handlers.filter { !it.public && it.permission == null }.map { "${it.handler} ${it.method} ${it.pattern}" }
         val undocumented =
-            handlers.mapNotNull { it.operation }.distinct().filter { it !in restRows.keys }
-        val unclaimed = restRows.keys - handlers.mapNotNull { it.operation }.toSet()
+            handlers.mapNotNull { it.permission }.distinct().filter { it !in permissionRows.keys }
+        val routedRows = permissionRows.filterValues { it.routes.isNotEmpty() }.keys
+        val unclaimed = routedRows - handlers.mapNotNull { it.permission }.toSet()
 
         withClue("non-public handlers without @RequiredScope (the default-deny would refuse them at runtime)") {
             unannotated.shouldBeEmpty()
         }
-        withClue("operations declared by a handler but absent from auth.md §7.6") { undocumented.shouldBeEmpty() }
-        withClue("auth.md §7.6 rows no handler claims — a row nothing uses is a lie in the doc") { unclaimed.shouldBeEmpty() }
+        withClue("permissions declared by a handler but absent from the auth.md §7.6 catalog") { undocumented.shouldBeEmpty() }
+        withClue("auth.md §7.6 rows that place routes no handler declares — a row nothing uses is a lie in the doc") {
+            unclaimed.shouldBeEmpty()
+        }
 
         // The walk reaches past `web`: the health controller lives in `modules/app`.
         handlers.map { it.handler } shouldContainAll listOf("HealthController#health", "HealthController#ready")
@@ -236,14 +251,14 @@ class RoleWalkE2eTest {
         val pattern: String,
         val path: String,
         val handler: String,
-        val operation: String,
+        val permission: String,
     )
 
     private data class Handler(
         val method: String,
         val pattern: String,
         val handler: String,
-        val operation: String?,
+        val permission: String?,
         val public: Boolean,
     )
 
@@ -264,7 +279,7 @@ class RoleWalkE2eTest {
                     h.pattern,
                     substitute(h.pattern),
                     h.handler,
-                    requireNotNull(h.operation) { "${h.handler} has no operation" },
+                    requireNotNull(h.permission) { "${h.handler} has no permission" },
                 )
             }.distinct()
             .sortedWith(compareBy({ it.pattern }, { it.method }))
@@ -282,10 +297,10 @@ class RoleWalkE2eTest {
             val verbs = verbsOf(info)
             val method = handlerMethod!!.javaClass.getMethod("getMethod").invoke(handlerMethod) as java.lang.reflect.Method
             val beanType = handlerMethod.javaClass.getMethod("getBeanType").invoke(handlerMethod) as Class<*>
-            val operation = requiredScopeOf(method) ?: requiredScopeOf(beanType)
+            val permission = requiredScopeOf(method) ?: requiredScopeOf(beanType)
             patterns.flatMap { pattern ->
                 verbs.map { verb ->
-                    Handler(verb, pattern, "${beanType.simpleName}#${method.name}", operation, isPublic(pattern))
+                    Handler(verb, pattern, "${beanType.simpleName}#${method.name}", permission, isPublic(pattern))
                 }
             }
         }
@@ -303,10 +318,14 @@ class RoleWalkE2eTest {
         return methods.map { (it as Enum<*>).name }.toSet().ifEmpty { setOf("GET") }
     }
 
+    /** The declared permission's WIRE name (`pipeline.read`) — the catalog's first column — read by reflection. */
     private fun requiredScopeOf(element: java.lang.reflect.AnnotatedElement): String? =
         element.annotations
             .firstOrNull { it.annotationClass.simpleName == "RequiredScope" }
-            ?.let { annotation -> (annotation.javaClass.getMethod("value").invoke(annotation) as Enum<*>).name }
+            ?.let { annotation ->
+                val permission = annotation.javaClass.getMethod("value").invoke(annotation)
+                permission.javaClass.getMethod("getWire").invoke(permission) as String
+            }
 
     /** The runtime's own allowlist (`PublicPaths.PATTERNS`), read by reflection, matched Ant-style as the interceptor matches it. */
     private fun isPublic(pattern: String): Boolean {
@@ -460,16 +479,36 @@ class RoleWalkE2eTest {
         private const val ABSENT_UUID = "0d0e0000-0000-0000-0000-0000000000ff"
         private val MAPPER = ObjectMapper()
 
+        private const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
+        private const val SCOPE_INSUFFICIENT = "auth.scope.insufficient"
+
         /** A key's refusal on the role axis is the issuer-demotion code (D-R12); a session's is `auth.role_required`. */
-        private val MCP_ROLE_REFUSALS = listOf("auth.key_issuer_role_lost", ROLE_REQUIRED)
+        private val MCP_ROLE_REFUSALS = listOf(KEY_ISSUER_ROLE_LOST, ROLE_REQUIRED)
+
+        /**
+         * #215 — the five MCP cells the catalog moves from ✓ to ✗ (record §2.3): the row-data
+         * tools are author-and-above. Keys a LOGIN mints never reached them (a viewer's key is
+         * `execute`, a promoter's `read`, and these need `author`); the walk's author-scoped keys
+         * show the role axis now refusing what it used to admit.
+         */
+        private val MOVED_MCP_CELLS =
+            listOf(
+                "viewer" to "datasources_preview_rows",
+                "viewer" to "sql_probe",
+                "viewer" to "pipelines_execute_node",
+                "promoter" to "datasources_preview_rows",
+                "promoter" to "sql_probe",
+            )
         private val MCP_UNKNOWN_TOOL = listOf("Unknown tool", "tool_not_found", "Tool not found")
         private val PATH_NAMED_ARGUMENTS = setOf("name", "datasource", "path", "id", "pipeline")
 
         /**
          * Floors, not targets. The 2026-09-20 walk: 175 routes — viewer allowed 73 / refused 102,
          * author 127 / 48, promoter 58 / 117, workspace admin 150 / 25, super admin 175 / 0; 42
-         * tools — viewer 28 / 13, author 42 / 0, promoter 20 / 21, admins 42 / 0. A walk well under
-         * these numbers is a broken scan, not a leaner app.
+         * tools — viewer 28 / 13, author 42 / 0, promoter 20 / 21, admins 42 / 0. The #215 catalog
+         * leaves the REST numbers where the base had them and moves five MCP cells to refused
+         * (viewer 25 / 16, promoter 18 / 23 on 42 tools — the five named in [MOVED_MCP_CELLS]).
+         * A walk well under these numbers is a broken scan, not a leaner app.
          */
         private const val MINIMUM_ROUTES = 60
         private const val MINIMUM_HANDLERS = 100

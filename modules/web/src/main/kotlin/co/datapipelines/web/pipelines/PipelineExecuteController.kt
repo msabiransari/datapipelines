@@ -1,7 +1,7 @@
 package co.datapipelines.web.pipelines
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
@@ -55,7 +55,7 @@ class PipelineExecuteController(
         "/{id}/execute",
         produces = [MediaType.TEXT_EVENT_STREAM_VALUE, MediaType.APPLICATION_JSON_VALUE],
     )
-    @RequiredScope(ScopeMatrix.RestOperation.EXECUTE_PIPELINE)
+    @RequiredScope(Permission.PIPELINE_EXECUTE)
     fun execute(
         @PathVariable id: UUID,
         @RequestBody(required = false) body: String?,

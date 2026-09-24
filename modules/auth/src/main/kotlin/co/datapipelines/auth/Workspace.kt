@@ -63,7 +63,7 @@ data class WorkspaceMemberRow(
  * The resolved active workspace a request pipeline carries (design §5): everything
  * downstream — repositories, execution records, template resolution — is scoped to it,
  * and [role] + [superAdmin] are what [ScopeMatrix.allowed] reads to answer "may this
- * principal do this here" (roles design §2).
+ * principal do this here" (roles design §2; the catalog, #215).
  *
  * Resolution produces this exactly once per request (see `WorkspaceResolutionFilter`):
  * from the JWT `active_workspace` claim or a `DP-Workspace` switch for session
@@ -71,7 +71,7 @@ data class WorkspaceMemberRow(
  * admin resolves ANY workspace (D7) with [superAdmin] set and [implicit] true when they
  * hold no explicit membership — which is what the `acting_via=super_admin` audit flag is
  * read from. Their [role] is the explicit membership's when they have one and [WorkspaceRole.VIEWER]
- * otherwise; [Permission.satisfiedBy] admits a super admin before it looks at the role.
+ * otherwise; [RolePermissions.holds] admits a super admin before it looks at the role.
  */
 data class WorkspaceContext(
     val id: UUID,
@@ -83,13 +83,20 @@ data class WorkspaceContext(
     /** D7 — this action is being taken by a super admin outside their own memberships. */
     val actingViaSuperAdmin: Boolean get() = implicit
 
-    /** May a principal in this context perform [permission]'s actions? The matrix's one question. */
+    /** Does a principal in this context hold [permission]? The matrix's one question. */
     fun permits(permission: Permission): Boolean = permission.satisfiedBy(role, superAdmin)
 
-    /** The permissions this context holds — the refusal's `held` detail and the UI's role model. */
-    fun held(): Set<Permission> = Permission.heldBy(role, superAdmin)
+    /**
+     * The ROLE this context was judged as — a refusal's `held` detail (#215 A.6): `super_admin`
+     * for a super admin, else the membership's wire (`viewer` … `workspace_admin`). Informative
+     * only: no code compares it, every decision asks [permits].
+     */
+    val heldRole: String get() = if (superAdmin) SUPER_ADMIN_WIRE else role.wire
 
     companion object {
+        /** [heldRole]'s token for the instance super admin — the fifth column of auth.md §7.6. */
+        const val SUPER_ADMIN_WIRE = "super_admin"
+
         /** The context a super admin runs in inside a workspace: their explicit [role] if any, [implicit] otherwise. */
         fun superAdminOver(
             id: UUID,

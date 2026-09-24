@@ -168,7 +168,10 @@ class SemanticsServiceTest {
 
         assertAll(
             { refused.code shouldBe AuthErrorCodes.ROLE_REQUIRED },
-            { refused.details["required"] shouldBe "ws_admin" },
+            // #215 (owner ruling 2026-09-24): the cross-workspace retire asks `datasource.manage`,
+            // the workspace admin's — not `semantic.retire`, which the author holds too.
+            { refused.details["required"] shouldBe "datasource.manage" },
+            { refused.details["held"] shouldBe "author" },
             { result["trust"] shouldBe "retired" },
             { audit.rows.map { it.event } shouldContainExactly listOf(SemanticsAuditEvents.RETIRED) },
             { audit.rows.single().details["recorded_in_this_workspace"] shouldBe false },

@@ -2,8 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.WriteSurface
@@ -50,7 +50,7 @@ class TemplateEditorController(
     // it can make — Edit, Preview, the lifecycle dialogs — is its own verb-guarded route,
     // and the markup hides those verbs by role (§4.3e). 096 §C's "authoring state" floor
     // stays on the writes below, where it belongs.
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.TEMPLATE_READ)
     fun editor(
         @RequestParam name: String,
         @RequestParam(required = false) version: Int?,
@@ -78,7 +78,7 @@ class TemplateEditorController(
      * and swaps `#template-source` only).
      */
     @GetMapping("/partials/templates/editor/source")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.TEMPLATE_READ)
     fun source(
         @RequestParam name: String,
         @RequestParam(required = false) version: Int?,
@@ -108,7 +108,7 @@ class TemplateEditorController(
      * `createDraft`'s guard reads — not the hash of the version being copied.
      */
     @PostMapping("/partials/templates/editor/edit")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_UPDATE)
     @ResponseBody
     fun edit(
         @RequestParam name: String,
@@ -238,7 +238,7 @@ class TemplateEditorController(
     }
 
     @PostMapping("/partials/templates/render")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_RENDER)
     fun renderPreview(
         @RequestParam name: String,
         @RequestParam version: Int,

@@ -421,24 +421,30 @@ class PrincipalDeactivatedException(
     )
 
 /**
- * The principal's ROLE in the active workspace is below what the operation needs (RBAC
- * design §2). Raised by boundaries that authorize outside the interceptor — services and
- * partials — so they answer with the SAME code the interceptor writes rather than a
- * hand-rolled 403; the interceptor itself renders [ScopeMatrix.Decision.Refused] directly.
+ * The principal's ROLE in the active workspace does not hold the permission the action needs
+ * (RBAC design §2; the catalog, #215). Raised by boundaries that authorize outside the
+ * interceptor — services and partials — so they answer with the SAME code the interceptor
+ * writes rather than a hand-rolled 403; the interceptor itself renders
+ * [ScopeMatrix.Decision.Refused] directly.
+ *
+ * Details (#215 A.6): `required` is the catalog permission's wire (`workspace.members.manage`);
+ * `held` is the ROLE the principal was judged as ([WorkspaceContext.heldRole] — `viewer` …
+ * `workspace_admin`, `super_admin`), absent when there was no workspace to hold a role in.
+ * Informative only — no code compares it.
  */
 class RoleRequiredException(
     required: Permission,
-    held: Set<Permission>,
+    heldRole: String?,
     workspace: String? = null,
 ) : AuthException(
         AuthErrorCodes.ROLE_REQUIRED,
         HTTP_FORBIDDEN,
-        "Principal lacks the '${required.wire}' role for this operation",
+        "Principal lacks the '${required.wire}' permission for this operation",
         "You do not have the role needed for this action in this workspace.",
         details =
             buildMap {
                 put("required", required.wire)
-                put("held", held.map { it.wire }.sorted())
+                heldRole?.let { put("held", it) }
                 workspace?.let { put("workspace", it) }
             },
     )

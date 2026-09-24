@@ -3,8 +3,8 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineService
@@ -49,7 +49,7 @@ class PipelineLifecycleDialogController(
     // ------------------------------------------------------------------ release
 
     @GetMapping("/partials/pipelines/{id}/lifecycle/release")
-    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
+    @RequiredScope(Permission.PIPELINE_RELEASE)
     fun releaseDialog(
         model: Model,
         @PathVariable id: UUID,
@@ -65,7 +65,7 @@ class PipelineLifecycleDialogController(
     }
 
     @PostMapping("/partials/pipelines/{id}/lifecycle/release")
-    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
+    @RequiredScope(Permission.PIPELINE_RELEASE)
     fun release(
         model: Model,
         response: HttpServletResponse,
@@ -120,7 +120,7 @@ class PipelineLifecycleDialogController(
     // ------------------------------------------------------------------ purge draft (the versioned verb)
 
     @GetMapping("/partials/pipelines/{id}/lifecycle/purge")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun purgeDialog(
         model: Model,
         @PathVariable id: UUID,
@@ -137,7 +137,7 @@ class PipelineLifecycleDialogController(
     }
 
     @PostMapping("/partials/pipelines/{id}/lifecycle/purge")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun purge(
         model: Model,
         response: HttpServletResponse,
@@ -194,7 +194,7 @@ class PipelineLifecycleDialogController(
     // ------------------------------------------------------------------ discard release
 
     @GetMapping("/partials/pipelines/{id}/lifecycle/discard")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun discardDialog(
         model: Model,
         @PathVariable id: UUID,
@@ -211,7 +211,7 @@ class PipelineLifecycleDialogController(
     }
 
     @PostMapping("/partials/pipelines/{id}/lifecycle/discard")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun discard(
         model: Model,
         response: HttpServletResponse,
@@ -247,7 +247,7 @@ class PipelineLifecycleDialogController(
     // ------------------------------------------------------------------ restore
 
     @GetMapping("/partials/pipelines/{id}/lifecycle/restore")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun restoreDialog(
         model: Model,
         @PathVariable id: UUID,
@@ -264,7 +264,7 @@ class PipelineLifecycleDialogController(
     }
 
     @PostMapping("/partials/pipelines/{id}/lifecycle/restore")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun restore(
         model: Model,
         response: HttpServletResponse,
@@ -295,7 +295,7 @@ class PipelineLifecycleDialogController(
     // ------------------------------------------------------------------ purge entity
 
     @GetMapping("/partials/pipelines/{id}/lifecycle/purge-entity")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_DELETE)
     fun purgeEntityDialog(
         model: Model,
         @PathVariable id: UUID,
@@ -311,7 +311,7 @@ class PipelineLifecycleDialogController(
     }
 
     @PostMapping("/partials/pipelines/{id}/lifecycle/purge-entity")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_DELETE)
     fun purgeEntity(
         @PathVariable id: UUID,
         @RequestParam("include_exclusive", required = false, defaultValue = "false") includeExclusive: Boolean,
@@ -349,7 +349,7 @@ class PipelineLifecycleDialogController(
     // ------------------------------------------------------------------ switch
 
     @GetMapping("/partials/pipelines/{id}/lifecycle/switch")
-    @RequiredScope(ScopeMatrix.RestOperation.SWITCH_SERVED_VERSION)
+    @RequiredScope(Permission.PIPELINE_SWITCH_VERSION)
     fun switchDialog(
         model: Model,
         @PathVariable id: UUID,
@@ -366,7 +366,7 @@ class PipelineLifecycleDialogController(
     }
 
     @PostMapping("/partials/pipelines/{id}/lifecycle/switch")
-    @RequiredScope(ScopeMatrix.RestOperation.SWITCH_SERVED_VERSION)
+    @RequiredScope(Permission.PIPELINE_SWITCH_VERSION)
     fun switchCurrent(
         model: Model,
         response: HttpServletResponse,

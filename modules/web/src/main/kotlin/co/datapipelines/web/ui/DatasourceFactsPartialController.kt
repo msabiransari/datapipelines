@@ -2,8 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.semantics.SemanticsService
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import org.springframework.security.core.context.SecurityContextHolder
@@ -38,7 +38,7 @@ class DatasourceFactsPartialController(
 ) {
     /** The dialog: every live fact on the datasource this workspace may see, oldest first. */
     @GetMapping("/partials/datasources/{name}/facts")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.SEMANTIC_READ)
     fun dialog(
         model: Model,
         @PathVariable name: String,

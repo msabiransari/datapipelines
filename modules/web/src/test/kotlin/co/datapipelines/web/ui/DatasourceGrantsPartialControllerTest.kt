@@ -55,19 +55,19 @@ class DatasourceGrantsPartialControllerTest {
     fun clearContext() = SecurityContextHolder.clearContext()
 
     /**
-     * The operation is `MANAGE_DATASOURCE_GRANTS` (§7.6: `admin` scope, `super_admin` role) —
-     * NOT `MUTATE_WORKSPACE_DATASOURCES`, which is the workspace admin's registration verb.
+     * The permission is `datasource.grant` (§7.6: `admin` scope, `super_admin` role) —
+     * NOT `datasource.manage`, which is the workspace admin's registration verb.
      * The prompt for this round asked for the latter; §7.6 and the REST controller both say
      * the former, and the reason is in that controller's KDoc: a grant list names every
      * workspace on the instance holding one, which is the disclosure D-R5 exists to prevent.
      */
     @Test
-    fun `every handler declares the super-admin grants operation`() {
+    fun `every handler declares the super-admin grants permission`() {
         listOf("dialog", "grant", "revoke").forEach { name ->
             val method = DatasourceGrantsPartialController::class.java.methods.first { it.name == name }
             method
                 .getAnnotation(co.datapipelines.auth.RequiredScope::class.java)
-                .value shouldBe co.datapipelines.auth.ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS
+                .value shouldBe co.datapipelines.auth.Permission.DATASOURCE_GRANT
         }
     }
 

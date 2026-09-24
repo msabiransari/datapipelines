@@ -196,7 +196,7 @@ class McpPromptCatalogTest {
     @Test
     fun `every tool a prompt names is a shipped tool`() {
         val toolPattern = Regex("""\b([a-z]+_[a-z_]+)\b""")
-        val known = ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys
+        val known = ScopeMatrix.MCP_TOOL_PERMISSION.keys
         val prompts =
             listOf(
                 catalog.get("analyze_pipeline", mapOf("pipeline_id" to McpFixtures.PIPELINE_ID.toString()))!!,

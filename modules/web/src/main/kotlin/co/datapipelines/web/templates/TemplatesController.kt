@@ -1,8 +1,8 @@
 package co.datapipelines.web.templates
 
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
@@ -102,7 +102,7 @@ class TemplatesController(
     /** §8.1 — create; the server assigns version 1 RELEASED (and the id when the body omits one). */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_CREATE)
     fun create(
         @RequestBody body: String,
     ): ApiResponse<Template> {
@@ -126,7 +126,7 @@ class TemplatesController(
      * is present, with `404 template.not_found` on a miss — never an empty list.
      */
     @GetMapping(params = ["name"])
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.TEMPLATE_READ)
     fun get(
         @RequestParam name: String,
     ): ApiResponse<JsonNode> {
@@ -143,7 +143,7 @@ class TemplatesController(
 
     /** §8.3 — a specific version, including of a soft-deleted template (templates.md §5.1). */
     @GetMapping("/versions")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.TEMPLATE_READ)
     fun getVersion(
         @RequestParam name: String,
         @RequestParam version: Int,
@@ -172,7 +172,7 @@ class TemplatesController(
      * `prefix` are both ABSENT.
      */
     @GetMapping(params = ["!name", "!prefix"])
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.TEMPLATE_READ)
     fun list(
         @RequestParam(required = false) dialect: String?,
         @RequestParam(required = false) type: String?,
@@ -215,7 +215,7 @@ class TemplatesController(
      * already settled on.
      */
     @GetMapping(params = ["!name", "prefix"])
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.TEMPLATE_READ)
     fun browse(
         @RequestParam prefix: String,
         @RequestParam(required = false) dialect: String?,
@@ -267,7 +267,7 @@ class TemplatesController(
      * `template.not_found` from the write, exactly as before.
      */
     @PutMapping
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_UPDATE)
     fun update(
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestBody body: String,
@@ -296,7 +296,7 @@ class TemplatesController(
      * The name is the body's `name` field (§9.6).
      */
     @PostMapping("/release")
-    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
+    @RequiredScope(Permission.TEMPLATE_RELEASE)
     fun release(
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestBody body: String,
@@ -322,7 +322,7 @@ class TemplatesController(
      */
     @PostMapping("/draft/discard")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun discard(
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
         @RequestBody body: String,
@@ -347,7 +347,7 @@ class TemplatesController(
      * audited.
      */
     @PostMapping("/version/discard")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun discardVersion(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
@@ -367,7 +367,7 @@ class TemplatesController(
 
     /** §8 (101) — restore DISCARDED version v to RELEASED; pointer moves only above-current-or-NULL. */
     @PostMapping("/version/restore")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun restoreVersion(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
@@ -388,7 +388,7 @@ class TemplatesController(
     /** §8 (101) — purge DRAFT version v (drafts only; the sole-draft case takes the entity). Irreversible. */
     @DeleteMapping("/version")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun purgeVersion(
         @RequestParam name: String,
         @RequestParam version: Int,
@@ -407,7 +407,7 @@ class TemplatesController(
 
     /** §8 (101) — the manual switch: `current = version`, live and posture-eligible. The receiver's lever. */
     @PostMapping("/current")
-    @RequiredScope(ScopeMatrix.RestOperation.SWITCH_SERVED_VERSION)
+    @RequiredScope(Permission.TEMPLATE_SWITCH_VERSION)
     fun switchCurrent(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
@@ -466,7 +466,7 @@ class TemplatesController(
      */
     @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_DELETE)
     fun delete(
         @RequestParam name: String,
     ) {
@@ -488,7 +488,7 @@ class TemplatesController(
      * render — `template.render_not_applicable` points at `/evaluate` (7b, record §9.1).
      */
     @PostMapping("/render")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_RENDER)
     fun render(
         @RequestBody body: String,
     ): ApiResponse<String> {
@@ -526,7 +526,7 @@ class TemplatesController(
      */
     @Suppress("ThrowsCount") // each request-shape refusal is its own catalogued outcome
     @PostMapping("/evaluate")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_EVALUATE)
     fun evaluate(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {
@@ -552,7 +552,7 @@ class TemplatesController(
      * retry, and transactional multi-row semantics are not something the repositories offer.
      */
     @PostMapping("/import")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_IMPORT)
     fun import(
         @RequestBody body: String,
     ): ApiResponse<Map<String, Any?>> {

@@ -1,7 +1,7 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
@@ -40,7 +40,7 @@ class PipelineEditorController(
     // written — every authoring verb on the page is role-hidden (RoleVisibilityRenderTest)
     // and every mutating call it can make is verb-guarded or viewer-level (122 §A.2).
     // The template editor keeps the author floor: nothing a viewer may DO lives there.
-    @RequiredScope(ScopeMatrix.RestOperation.EXECUTE_PIPELINE)
+    @RequiredScope(Permission.PIPELINE_EXECUTE)
     fun editor(
         @PathVariable id: UUID,
         model: Model,

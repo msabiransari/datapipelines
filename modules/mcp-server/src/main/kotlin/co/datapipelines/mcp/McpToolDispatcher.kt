@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuditEventSink
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.CauseChain
@@ -15,13 +14,12 @@ import org.slf4j.LoggerFactory
  *
  * Three things happen here and nowhere else:
  *
- * 1. **The per-tool authorization gate.** The minimum scope comes from
- *    [ScopeMatrix.requiredScopeForTool] — the auth module's projection of the
- *    [auth.md §7.6 matrix](../../../../../../../docs/auth.md), which is authoritative on any
- *    conflict with §6.2's restated values. A tool whose requirement the matrix does not know is
- *    **refused**, never executed: fail-closed is the only safe reading of "no tool runs without
- *    its documented minimum". Scopes are hierarchical, so the check is [Scope.satisfies], not set
- *    membership (§7.5).
+ * 1. **The per-tool authorization gate.** Each tool declares ONE catalog permission
+ *    ([ScopeMatrix.MCP_TOOL_PERMISSION], #215) — the auth module's projection of the
+ *    [auth.md §7.6 catalog](../../../../../../../docs/auth.md), which is authoritative on any
+ *    conflict with §6.2's restated values — judged on the key issuer's role and, through the A4
+ *    shim, the key's scope. A tool that declares no permission is **refused**, never executed:
+ *    fail-closed is the only safe reading of "no tool runs without its documented minimum".
  * 2. **The §6.3 result envelope**, including the `_meta.correlation_id` echo.
  * 3. **Error mapping** (§9.2): every catalogued domain failure becomes a tool result with
  *    `isError: true`; only protocol faults ([McpError]) travel as JSON-RPC errors (§9.1).
@@ -51,7 +49,7 @@ class McpToolDispatcher(
     /** The registered tools' definitions, in `tools/list` order (§6.1). */
     fun definitions(): List<McpSchema.Tool> = byName.values.map { it.definition }
 
-    /** The registered tool names — the surface `ScopeMatrix.MCP_TOOL_MIN_SCOPE` must cover exactly. */
+    /** The registered tool names — the surface `ScopeMatrix.MCP_TOOL_PERMISSION` must cover exactly. */
     fun toolNames(): Set<String> = byName.keys
 
     /**
@@ -140,7 +138,7 @@ class McpToolDispatcher(
      *
      * Delegates entirely to [ScopeMatrix.allowedTool]: the scope minimum, the key issuer's
      * current capability in the pinned workspace, the unreachable-workspace 404 and the
-     * fail-closed "this tool is in neither map" branch are all decided there, so this surface
+     * fail-closed "this tool declares no permission" branch are all decided there, so this surface
      * and the REST interceptor cannot answer the same question two ways.
      */
     private fun scopeRefusal(
