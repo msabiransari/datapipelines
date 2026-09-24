@@ -24,14 +24,14 @@
 
   <section class="section page-hero" aria-labelledby="st-title">
     <div class="container">
-      <p class="kicker">Embedded analytics — the half that ships today</p>
+      <p class="kicker">Embedded analytics: the half that ships today</p>
       <h1 id="st-title" class="ds-display">Embedded analytics without a warehouse: customers see their own numbers, in your app</h1>
       <p class="section-lede">
         Every product team eventually gets the same request: customers want <em>their</em> numbers inside the
-        product — their usage, their cohort, their region — not a login to somebody else's analytics portal.
+        product, their usage, their cohort, their region, not a login to somebody else's analytics portal.
         Customer facing analytics, in other words, and self-hosted analytics at that: the data never leaves your
         infrastructure to be served. This page is that story: the expensive way it usually goes, and the shorter
-        one — an agent authors the pipeline
+        one, where an agent authors the pipeline
         against your databases, a person releases it, and a versioned endpoint serves each customer their own rows.
         The API half ships today; the dashboard half is planned, and the page keeps them labelled.
       </p>
@@ -50,22 +50,22 @@
         <p>
           A company buys the analytics platform. A consultancy builds beautiful dashboards over a dataset that took
           months of preparation flows, a warehouse nobody wanted, and a nightly job that breaks on the first schema
-          change. The bill — licence plus engagement — lands in the six figures. Then the product team asks for the
+          change. The bill, licence plus engagement, lands in the six figures. Then the product team asks for the
           same numbers inside the application customers actually log into, and the answer comes back: the contract
           does not allow embedding on those terms.
         </p>
         <p>
-          So an engineer rebuilds the dashboard by hand — screen after screen, in the front-end framework of the
-          month — against an API that does not exist yet. Because "expose the dataset as an API" is a second
+          So an engineer rebuilds the dashboard by hand, screen after screen, in the front-end framework of the
+          month, against an API that does not exist yet. Because "expose the dataset as an API" is a second
           project: a service to write and deploy, an auth story to design, pagination, on-call. Three projects,
-          then: the dataset, the API, the embedding. The dashboard — the thing everyone assumed was the point —
+          then: the dataset, the API, the embedding. The dashboard, the thing everyone assumed was the point,
           was never the expensive part.
         </p>
         <p>
           datapipelines collapses the first two. The dataset is a versioned pipeline across your databases, drafted
           by an agent that reads your real schemas and released by a person. The API is one step after the release:
           a published endpoint under your own <code>/api</code> namespace, parameters bound from the request, keys scoped to the
-          path. What remains is the embedding — the dashboard your agent creates is a planned roadmap item.
+          path. What remains is the embedding. The dashboard your agent creates is a planned roadmap item.
           It would consume the same published endpoint contract instead of needing a hand-built API.
         </p>
       </div>
@@ -75,12 +75,12 @@
   <section class="section band" aria-labelledby="st-shipped">
     <div class="container">
       <p class="kicker"><span class="status status-shipped">Ships today</span></p>
-      <h2 id="st-shipped" class="ds-headline">From data to an API in a day — the shipped half</h2>
+      <h2 id="st-shipped" class="ds-headline">From data to an API in a day: the shipped half</h2>
       <div class="prose">
         <!-- claim: docs/rest-api.md §19 -->
         <p>
           The mechanic: release the pipeline, publish it under a path, bind a key. A <code>GET</code> runs the
-          released version with the query string bound to its declared parameters and returns typed JSON — schema,
+          released version with the query string bound to its declared parameters and returns typed JSON: schema,
           rows, cursor. The response carries <code>Cache-Control: no-store</code> on purpose: each call is a fresh
           execution, so a customer never sees another customer's cached answer.
         </p>
@@ -88,18 +88,18 @@
         <p>
           Per-viewer filtering rides on parameter binding: the customer id your backend already authenticates
           becomes a declared parameter of the released pipeline, and the released SQL filters on it as a bound
-          scalar — never pasted SQL. One pipeline serves every tenant; the request decides whose rows come back.
+          scalar, never pasted SQL. One pipeline serves every tenant; the request decides whose rows come back.
         </p>
         <!-- claim: docs/auth.md §7.7 -->
         <p>
           The key you give each customer integration is bound to a path prefix: it reaches that endpoint subtree
-          and nothing else — not your product API, not another tenant's endpoints — and revoking it is a checkbox
+          and nothing else, not your product API and not another tenant's endpoints. Revoking it is a checkbox
           that takes effect in about a minute.
         </p>
         <p>
           The authoring half is where the agent earns the headline. It drafts the pipeline against your real
-          schemas, iterates until the run succeeds, and — when your analyst changes the definition of "active
-          customer" next quarter — redoes the walk and produces the diff. The artifact under review is always a
+          schemas, iterates until the run succeeds, and, when your analyst changes the definition of "active
+          customer" next quarter, redoes the walk and produces the diff. The artifact under review is always a
           JSON document of SQL nodes a person on your team can read end to end; the agent accelerates the drafting,
           and the release keeps the judgment where it belongs.
         </p>
@@ -128,10 +128,10 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
         <!-- claim: docs/rest-api.md §19 -->
         <p>
           That is the entire server-side integration: a URL, a key, a typed JSON body your front-end renders. No
-          service to write, no deployment to schedule, no gateway to configure — and because the response is
+          service to write, no deployment to schedule, no gateway to configure. And because the response is
           <code>no-store</code>, every render is a fresh execution of the version you released. When the definition
           of "active seats" changes, the fix is a new draft, a review, a release: the endpoint's contract stays
-          put and the version pointer moves, which is the change your customers actually feel — none.
+          put and the version pointer moves, which is a change your customers actually feel none of.
         </p>
       </div>
     </div>
@@ -148,13 +148,13 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
           released pipelines and APIs, filtered per viewer."</em> Created by the same agent that authors the
           pipeline; embedded behind your login, not hosted in a portal; fed by the released pipelines that already
           serve the endpoints; filtered so each viewer sees their rows. Named as roadmap here and on the
-          <a th:href="@{/roadmap}">roadmap page</a> — not described as if it shipped, because it has not.
+          <a th:href="@{/roadmap}">roadmap page</a>, not described as if it shipped, because it has not.
         </p>
         <p>
           For planning purposes, the useful reading is architectural: the dashboard is a <em>consumer</em> of the
-          same released pipeline and endpoint you can publish today — a rendering over the contract, not a new
+          same released pipeline and endpoint you can publish today, a rendering over the contract, not a new
           one. Teams that publish the endpoint now are not building throwaway work; they are building the exact
-          surface the dashboard will render from.
+          thing the dashboard will render from.
         </p>
       </div>
     </div>
@@ -168,27 +168,27 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
         <article class="card">
           <!-- claim: docs/datasources.md §7 -->
           <h3>No credential reaches the customer path</h3>
-          <p>Database credentials are encrypted at rest on the server and never returned — not through a tool, not through the API. The customer integration holds a path-scoped key to the endpoint, nothing more.</p>
+          <p>Database credentials are encrypted at rest on the server and never returned, not through a tool and not through the API. The customer integration holds a path-scoped key to the endpoint, nothing more.</p>
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §7.7 -->
           <h3>Keys are scoped, small and revocable</h3>
-          <p>An endpoint key reaches one path subtree and expires when you say; revoking it takes about a minute, and it never unlocks the product's own API. The surface you present a customer is exactly the surface you published.</p>
+          <p>An endpoint key reaches one path subtree and expires when you say; revoking it takes about a minute, and it never unlocks the product's own API. What you present a customer is exactly the API you published.</p>
         </article>
         <article class="card">
           <!-- claim: docs/versioning.md §3 -->
           <h3>A person controls what customers see</h3>
-          <p>The agent iterates drafts; releasing is a human verb and a release is immutable. The numbers customers see are a version your team named — and a change is a new release, not a surprise.</p>
+          <p>The agent iterates drafts; releasing is a human verb and a release is immutable. The numbers customers see are a version your team named, and a change is a new release, not a surprise.</p>
         </article>
         <article class="card">
           <!-- claim: docs/auth.md §10 -->
           <h3>Every call is audited, values are not</h3>
-          <p>Each endpoint call is audited with the key, the endpoint and the execution — never the SQL text, the rows or the parameter values, which are your customers' data and stay out of the log.</p>
+          <p>Each endpoint call is audited with the key, the endpoint and the execution, never the SQL text, the rows or the parameter values, which are your customers' data and stay out of the log.</p>
         </article>
         <article class="card">
           <!-- claim: docs/rest-api.md §19 -->
           <h3>Bounded by construction</h3>
-          <p>GET only — every other method is refused; a released pipeline cannot carry a write-shaped node, and the check re-runs at serve time; timeouts and concurrency ceilings bound every run. <a th:href="@{/security}">The full trust model.</a></p>
+          <p>GET only, and every other method is refused. A released pipeline cannot carry a write-shaped node, and the check re-runs at serve time; timeouts and concurrency ceilings bound every run. <a th:href="@{/security}">The full trust model.</a></p>
         </article>
       </div>
     </div>
@@ -200,7 +200,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
       <h2 id="st-shot" class="ds-headline">The two screens the flow runs through</h2>
       <div class="shots">
         <figure class="shot">
-          <figcaption>The pipeline the agent drafted against your databases — the graph, the SQL, the result dock with a real run's rows.</figcaption>
+          <figcaption>The pipeline the agent drafted against your databases: the graph, the SQL, the result dock with a real run's rows.</figcaption>
           <div class="dag-embed">
             <div th:replace="~{site/_demo-dag :: dag(${facts.demo})}"></div>
           </div>
@@ -231,7 +231,7 @@ DP-API-Key: dpk_&lt;id&gt;.&lt;secret&gt;
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">
         Point the demo stack at one real query your customers ask for, release it, and call the endpoint from your
-        staging front-end. That afternoon is the whole pitch — the rest is the rest of your customers.
+        staging front-end. That afternoon is the whole pitch. The rest is the rest of your customers.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/deployment}">Demo quickstart</a>

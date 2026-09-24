@@ -28,11 +28,11 @@
       <h1 id="an-title" class="ds-display">The AI data analyst with governance: ask in your words, get a pipeline you can read</h1>
       <p class="section-lede">
         The analyst's day is spread across the tools: the trip data in Postgres, the reference tables in SQLite, the
-        weather feed in MySQL, the exports on S3 — and no one tool sees two of them. An AI SQL assistant changes
+        weather feed in MySQL, the exports on S3, and no one tool sees two of them. An AI SQL assistant changes
         the drafting;
         this server changes what the draft becomes: a versioned pipeline over your real schemas, joined in a scratch
-        database, released when you trust it, served as an endpoint when someone else needs the number. No
-        natural-language box — your agent is the interface, and it works through governed tools.
+        database, released when you trust it, served as an endpoint when someone else needs the number. There is
+        no natural-language box. Your agent is the interface, and it works through governed tools.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/add-mcp-server-to-claude-code}">Connect your agent</a>
@@ -49,8 +49,8 @@
         <!-- claim: docs/mcp-server.md §6.2 -->
         <p>
           You describe the question the way you would to a colleague: "rideshare share of trips per borough, split
-          by rainy and dry days". The agent grounds itself first — your real schemas, catalogue statistics, the
-          indexes — then drafts the pipeline, runs it, reads the failure when there is one, and fixes the shape.
+          by rainy and dry days". The agent grounds itself first, on your real schemas, catalogue statistics and the
+          indexes, then drafts the pipeline, runs it, reads the failure when there is one, and fixes the shape.
           What lands in front of you is not a chat answer: it is a JSON document of named SQL nodes you can open,
           read, and argue with. The SQL is yours to audit, because an analysis you cannot read is an analysis you
           cannot defend.
@@ -62,11 +62,11 @@
           at run time. The agent explores; it does not mutate.
         </p>
         <p>
-          And the loop is fast in the way that matters: because the agent holds the whole tool surface — schemas,
-          statistics, probe, draft, run, result — the distance between "question" and "checked answer" is one
+          And the loop is fast in the way that matters: because the agent holds every tool, from schemas and
+          statistics to probe, draft, run and result, the distance between "question" and "checked answer" is one
           session. You stay the editor; the agent is the desk researcher who never gets bored of re-running the
-          query with the join fixed. The parts of the craft that were never typing — judgment about which numbers
-          matter, skepticism about the convenient answer — stay yours, and the pipeline format is what makes your
+          query with the join fixed. The parts of the craft that were never typing, the judgment about which numbers
+          matter and the skepticism about the convenient answer, stay yours. The pipeline format is what makes your
           review of the machine's work possible at all.
         </p>
       </div>
@@ -80,12 +80,12 @@
       <ol class="steps">
         <li>
           <h3>Ask the question in your words</h3>
-          <p>"Revenue by borough, with the rainy-day split, against last quarter." No tool selection, no export plan — the agent plans the sources.</p>
+          <p>"Revenue by borough, with the rainy-day split, against last quarter." No tool selection, no export plan. The agent plans the sources.</p>
         </li>
         <li>
           <h3>The agent reads before it writes</h3>
           <!-- claim: docs/mcp-server.md §6.2 -->
-          <p>Schemas, tables, columns and a few real values from each of the five sources — the grounding pass that keeps a plausible query over a misremembered column out of your morning.</p>
+          <p>Schemas, tables, columns and a few real values from each of the five sources: the grounding pass that keeps a plausible query over a misremembered column out of your morning.</p>
         </li>
         <li>
           <h3>The pipeline runs where the data lives</h3>
@@ -94,12 +94,12 @@
         </li>
         <li>
           <h3>You read the SQL, not a vibe</h3>
-          <p>The deliverable is a JSON document of named nodes — the join is right there in the file, so the review is a read, and the question "why this number?" has a line-numbered answer.</p>
+          <p>The deliverable is a JSON document of named nodes. The join is right there in the file, so the review is a read, and the question "why this number?" has a line-numbered answer.</p>
         </li>
         <li>
           <h3>Release it, and Monday stops asking</h3>
           <!-- claim: docs/rest-api.md §19 -->
-          <p>When you trust it: release, publish, and the endpoint serves the version you signed — the same answer, on demand, for whoever asks next.</p>
+          <p>When you trust it: release, publish, and the endpoint serves the version you signed. The same answer, on demand, for whoever asks next.</p>
         </li>
       </ol>
     </div>
@@ -112,17 +112,17 @@
       <div class="prose">
         <!-- claim: docs/staging.md §3 -->
         <p>
-          The question that breaks single-tool workflows — revenue by borough, where the trips are in Postgres and
-          the zone lookup is in SQLite — is an ordinary pipeline here. Each source node runs as a query at its own
+          The question that breaks single-tool workflows, revenue by borough where the trips are in Postgres and
+          the zone lookup is in SQLite, is an ordinary pipeline here. Each source node runs as a query at its own
           engine, in that engine's dialect; each result is staged as a table in a scratch database created for that
           one run; the join is ordinary SQL over those tables; and the scratch database is dropped when the run
-          ends. Five sources, one analyst, nothing landed anywhere — the worked example runs it on real NYC data,
+          ends. Five sources, one analyst, nothing landed anywhere. The worked example runs it on real NYC data,
           and the lake reads Parquet and Iceberg on S3 in place when the fifth source is a bucket rather than a
           database.
         </p>
       </div>
       <figure class="shot">
-        <figcaption>The agent's session: schemas read across engines, the draft iterated, the run verified — the loop that used to be five browser tabs.</figcaption>
+        <figcaption>The agent's session: schemas read across engines, the draft iterated, the run verified. It is the loop that used to be five browser tabs.</figcaption>
         <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
       </figure>
     </div>
@@ -136,12 +136,12 @@
         <!-- claim: docs/datasources.md §7C -->
         <p>
           Two agent tools turn "it feels slow" into a diagnosis. Catalogue statistics read one table's row
-          estimates, indexes and per-column bounds from the engine's own catalog — never a scan — so the agent sees
+          estimates, indexes and per-column bounds from the engine's own catalog, never a scan, so the agent sees
           that the filter it wrote matches 40 million rows, not 40 thousand.
         </p>
         <!-- claim: docs/datasources.md §7D -->
         <p>
-          The SQL probe runs one bounded SELECT — row cap and time box — and captures the EXPLAIN plan
+          The SQL probe runs one bounded SELECT with a row cap and a time box, and captures the EXPLAIN plan
           <em>before</em> the query, so the plan survives the timeout it explains. The agent fixes the shape from
           evidence: push the aggregation into the source node, add the predicate the index wants, stop staging a
           billion rows to count them.
@@ -149,13 +149,13 @@
         <p>
           The loop closes without you in the middle: the agent that drafted the query is the one holding the
           probe's output, so "why is it slow" and "fix it" happen in the same session instead of across a ticket.
-          What comes back is a changed draft and a re-run with numbers attached — diagnosis and fix in one
+          What comes back is a changed draft and a re-run with numbers attached, diagnosis and fix in one
           artifact, which you read the way you would read a colleague's work: quickly, because the reasoning is
           written down.
         </p>
       </div>
       <figure class="shot">
-        <figcaption>The execution detail after a run: per-node status, rows and timing — the evidence the probes and the run leave behind. The panel is the demo workspace's recorded run, the same artifact the home page shows, so the numbers a reviewer reads here are reproduced, not invented.</figcaption>
+        <figcaption>The execution detail after a run: per-node status, rows and timing, the evidence the probes and the run leave behind. The panel is the demo workspace's recorded run, the same artifact the home page shows, so the numbers a reviewer reads here are reproduced, not invented.</figcaption>
         <div th:replace="~{site/_demo-console :: console(${facts.demo})}"></div>
       </figure>
     </div>
@@ -164,25 +164,25 @@
   <section class="section" aria-labelledby="an-release">
     <div class="container">
       <p class="kicker">The hand-off</p>
-      <h2 id="an-release" class="ds-headline">Release when you trust it — and it is an API</h2>
+      <h2 id="an-release" class="ds-headline">Release when you trust it, and it is an API</h2>
       <div class="prose">
         <!-- claim: docs/versioning.md §3 -->
         <p>
           When the numbers are the numbers, you release: a person's verb, an immutable version, a diff anyone can
-          read next quarter when the figure is questioned. The draft stays a draft until then — the agent can
+          read next quarter when the figure is questioned. The draft stays a draft until then. The agent can
           iterate all day, but the version your team repeats is the one a person signed off.
         </p>
         <!-- claim: docs/rest-api.md §19 -->
         <p>
           And the release is the last step of the analyst's job and the first step of everyone else's: publish the
           endpoint and the finance team's script, the dashboard's refresh, or the PM's curl call all read the same
-          versioned answer — parameters bound, keys scoped — instead of asking you to re-run it every Monday. The
+          versioned answer, parameters bound and keys scoped, instead of asking you to re-run it every Monday. The
           question stops being yours to carry, and the answer stops depending on your calendar.
         </p>
         <p>
           The quieter benefit compounds: because every analysis is a versioned document rather than a session that
           ended, the person who joins next quarter inherits readable pipelines instead of folklore. The query the
-          team "always runs" has a name, a history, and a diff for every time its definition changed — which is
+          team "always runs" has a name, a history, and a diff for every time its definition changed. That is
           the difference between an analysis and an opinion with a chart.
         </p>
       </div>
@@ -206,8 +206,8 @@
       <!-- claim: docs/deployment.md §Appendix B -->
       <p class="section-lede">
         The demo stack is five minutes and four sources; the question you hand the agent first should be the one you
-        answer by hand every week. Compare its pipeline with your spreadsheet, and keep whichever you can defend —
-        only one of them has a diff.
+        answer by hand every week. Compare its pipeline with your spreadsheet, and keep whichever you can defend.
+        Only one of them has a diff.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/deployment}">Run the demo</a>
