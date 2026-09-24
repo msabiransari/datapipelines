@@ -26,7 +26,7 @@
   {
     "@context": "https://schema.org",
     "@type": "Article",
-    "headline": "Pricing — free and open source",
+    "headline": "Pricing: free and open source",
     "datePublished": "2026-09-11",
     "dateModified": "2026-09-16",
     "author": { "@type": "Organization", "name": "datapipelines.co" },
@@ -40,7 +40,7 @@
       <p class="eyebrow">Open source. No software subscription.</p>
       <h1 id="pricing-title" class="ds-display">Free. Open source. Yours to run.</h1>
       <!-- claim: docs/deployment.md §10 -->
-      <p class="lede">The software costs $0 — not a trial, not a freemium tier, not “free up to N rows”. You bring the infrastructure, your databases and your AI client. Here’s what that means in practice, including the costs nobody else puts on their pricing page.</p>
+      <p class="lede">The software costs $0. Not a trial, not a freemium tier, not “free up to N rows”. You bring the infrastructure, your databases and your AI client. Here’s what that means in practice, including the costs nobody else puts on their pricing page.</p>
       <p class="dateline" data-roadmap-updated="2026-09-16">Last updated 2026-09-16</p>
     </div>
   </section>
@@ -52,7 +52,7 @@
           <span class="tag live">Self-hosted · public beta</span>
           <div class="price">$0 <small>software licence fee</small></div>
           <!-- claim: docs/deployment.md §10 (every feature, every deployment, no seat count) -->
-          <p>One open-source product, with all currently available features. Your whole company, your contractors, your agents — everyone who can reach the server may use it.</p>
+          <p>One open-source product, with all currently available features. Your whole company, your contractors and your agents, everyone who can reach the server may use it.</p>
           <!-- claim: docs/datasources.md §4 (the engines and S3), docs/datasources.md §7E (learned facts), docs/templates.md §5 and docs/versioning.md §3 (versioned templates and pipelines, human release), docs/pipeline-contract.md §12.12 (release checks), docs/rest-api.md §19 (published APIs), docs/auth.md §5.6 (workspaces) -->
           <ul class="plain-list">
             <li>Supported SQL databases and S3 data</li>
@@ -81,7 +81,7 @@
           <div class="cost-row">
             <h3>Operations and review</h3>
             <!-- claim: docs/deployment.md §7 (backups, with a restore drill), §8 (upgrades on your schedule) -->
-            <p>Someone to deploy, secure, back up and update the server — with a restore drill you have actually run — and someone to verify that the answers match your business definitions. The runbooks are in <a th:href="@{/docs/deployment}">deployment.md</a>, the same docs that ship inside the product.</p>
+            <p>Someone to deploy, secure, back up and update the server, with a restore drill you have actually run, and someone to verify that the answers match your business definitions. The runbooks are in <a th:href="@{/docs/deployment}">deployment.md</a>, the same docs that ship inside the product.</p>
           </div>
         </article>
       </div>
@@ -96,12 +96,12 @@
         <article class="card">
           <!-- claim: docs/deployment.md §10 -->
           <h3>No seat count</h3>
-          <p>Your whole company, your contractors, your agents — everyone who can reach the server may use it. Licences are counted in obligations, not people.</p>
+          <p>Your whole company, your contractors and your agents, everyone who can reach the server may use it. Licences are counted in obligations, not people.</p>
         </article>
         <article class="card">
           <!-- claim: docs/deployment.md §10 -->
           <h3>No feature gate</h3>
-          <p>Federated joins, dp-lake, promotion between environments, the MCP tools — there is no paid tier that unlocks more, because there is no paid tier.</p>
+          <p>Federated joins, dp-lake, promotion between environments and the MCP tools are all included. There is no paid tier that unlocks more, because there is no paid tier.</p>
         </article>
         <article class="card">
           <!-- claim: docs/deployment.md §4.3, §11 -->
@@ -144,7 +144,7 @@
       <!-- claim: docs/deployment.md §10 — the AGPL-3.0 licence; docs/dag-executor.md §5 — what a pipeline run is -->
       <p class="section-lede">
         If you searched for an open-source ETL tool, be precise about what this is: an open-source data pipeline
-        server that reads sources where they live and runs on demand — no extract-and-load on a schedule into a
+        server that reads sources where they live and runs on demand, with no extract-and-load on a schedule into a
         warehouse you then keep. The licence below is the whole of the price.
       </p>
       <div class="split">
@@ -152,7 +152,7 @@
           <!-- claim: docs/deployment.md §10 -->
           <h3>Running it inside your company</h3>
           <ul>
-            <li><b>Asks nothing of you</b> — internal use at any scale carries no obligation to share anything.</li>
+            <li><b>Asks nothing of you</b>, since internal use at any scale carries no obligation to share anything.</li>
             <li>Custom pipelines, agents and integrations you write <em>against</em> the server are yours; the AGPL reaches the server's code, not your data or your SQL.</li>
           </ul>
         </div>
@@ -161,7 +161,7 @@
           <h3>Offering it to others as a service</h3>
           <ul>
             <li><b>Publish your changes</b>: if you modify the server and offer it over a network, the licence asks for those modifications under the AGPL.</li>
-            <li>Unmodified self-hosting for customers asks nothing — that is what "AGPL is fine for a self-hosting business" means in practice.</li>
+            <li>Unmodified self-hosting for customers asks nothing. That is what "AGPL is fine for a self-hosting business" means in practice.</li>
           </ul>
         </div>
       </div>

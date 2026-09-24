@@ -22,7 +22,7 @@
   {
     "@context": "https://schema.org",
     "@type": "Article",
-    "headline": "datapipelines.co roadmap — what ships now, what is planned, and what comes later",
+    "headline": "datapipelines.co roadmap: what ships now, what is planned, and what comes later",
     "datePublished": "2026-09-09",
     "dateModified": "2026-09-16",
     "author": { "@type": "Organization", "name": "datapipelines.co" },
@@ -57,7 +57,7 @@
         <article class="card">
           <!-- claim: docs/datasources.md §4 -->
           <h3 th:text="|${#strings.capitalize(facts.engineCountWord)} engines, one pipeline|">Eight engines, one pipeline</h3>
-          <p th:text="|${facts.engines} — Parquet and Iceberg on S3, read in place. Each node runs where its data lives.|">PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake — Parquet and Iceberg on S3, read in place. Each node runs where its data lives.</p>
+          <p th:text="|${facts.engines}, plus Parquet and Iceberg on S3, read in place. Each node runs where its data lives.|">PostgreSQL, MySQL, SQL Server, Oracle, SQLite, DuckDB, H2 and dp-lake, plus Parquet and Iceberg on S3, read in place. Each node runs where its data lives.</p>
         </article>
         <article class="card">
           <!-- claim: docs/staging.md §3 -->
@@ -77,7 +77,7 @@
         <article class="card">
           <!-- claim: docs/datasources.md §7C -->
           <h3>Agent probes</h3>
-          <p>Catalogue statistics and indexes per table, and a bounded <code>sql_probe</code> that returns rows, wall time and the plan — so an agent fixes a slow shape from evidence.</p>
+          <p>Catalogue statistics and indexes per table, and a bounded <code>sql_probe</code> that returns rows, wall time and the plan, so an agent fixes a slow shape from evidence.</p>
         </article>
       </div>
     </div>
@@ -96,29 +96,29 @@
       <p class="section-lede">
         At production standard today: the pipeline lifecycle (draft, human release, immutable versions),
         API keys and the role-based scope matrix, purge, discard and restore, and promotion between
-        deployments. What follows is <em>scope</em>, not warning — each line is a roadmap row, linked,
+        deployments. What follows is <em>scope</em>, not warning. Each line is a roadmap row, linked,
         with where it lands on this page.
       </p>
       <ul>
-        <li><strong>No in-browser pipeline or template authoring without an agent</strong> — the editors
+        <li><strong>No in-browser pipeline or template authoring without an agent</strong>: the editors
           preview, execute, release and discard; authoring is MCP-first today.
           <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>No scheduler, and no scheduler UI</strong> — the design is ratified and implementation is planned (below). <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>No JSONata or JavaScript transform nodes yet</strong> — designed and planned.
+        <li><strong>No scheduler, and no scheduler UI</strong>: the design is ratified and implementation is planned, below. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
+        <li><strong>No JSONata or JavaScript transform nodes yet</strong>: designed and planned.
           <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>No dashboards or report generation yet</strong> — the API a report or a dashboard
+        <li><strong>No dashboards or report generation yet</strong>: the API a report or a dashboard
           would read ships today; the surfaces do not. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>No email delivery yet</strong> — alerts, report delivery and email output targets
+        <li><strong>No email delivery yet</strong>: alerts, report delivery and email output targets
           all wait on it. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>No audit-log screen yet</strong> — the audit log is written on every call and read
+        <li><strong>No audit-log screen yet</strong>: the audit log is written on every call and read
           by SQL today; the filter screen is on the backlog. <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §2.2</a></li>
-        <li><strong>The v2 band is design-stage</strong> — nested types, conditional execution, per-node
+        <li><strong>The v2 band is design-stage</strong>: nested types, conditional execution, per-node
           retries, SAML, MFA and the rest of <a th:href="@{/docs/roadmap}">docs/ROADMAP.md §3</a> are decided
           direction, not shipped product.</li>
       </ul>
       <p class="how-footnote">
         Found something that is not on this list?
-        <a th:href="${reportProblemUrl}">Report what breaks</a> — the bug form asks for the version and
+        <a th:href="${reportProblemUrl}">Report what breaks</a>. The bug form asks for the version and
         the correlation id, so a fix starts from evidence.
       </p>
     </div>
@@ -134,7 +134,7 @@
           <h3>Scheduler</h3>
           <ul>
             <li><b>Schedules live in folders</b> beside the pipelines they run, versioned like everything else.</li>
-            <li><b>Fired exactly once</b> across every instance of the server — no duplicate runs when you scale out.</li>
+            <li><b>Fired exactly once</b> across every instance of the server, with no duplicate runs when you scale out.</li>
             <li><b>Every run is a first-class execution</b>: same history, same result, same cancel, same audit.</li>
             <li>The design is ratified; the implementation round is written.</li>
           </ul>
@@ -144,7 +144,7 @@
           <h3>Dashboards</h3>
           <ul>
             <li><b>Created by your agent</b>, the way it creates a pipeline today.</li>
-            <li><b>Embedded in your own product</b> — not a portal you send people to.</li>
+            <li><b>Embedded in your own product</b>, not a portal you send people to.</li>
             <li><b>Fed by released pipelines and APIs</b>, so the numbers are the ones a person released.</li>
             <li><b>Filtered per viewer</b>: the same dashboard shows each user their own rows.</li>
           </ul>
@@ -153,7 +153,7 @@
           <!-- claim: docs/superpowers/specs/2026-09-09-transform-nodes-design.md -->
           <h3>JSONata and JavaScript nodes</h3>
           <ul>
-            <li><b>Two new template types</b>, not new entities — they inherit versioning, pins and the release rule.</li>
+            <li><b>Two new template types</b>, not new entities. They inherit versioning, pins and the release rule.</li>
             <li><b>One <code>TRANSFORM</code> node type</b> with <code>row</code>, <code>table</code> and <code>value</code> modes: shape a nested API response, derive parameters, pivot what SQL cannot.</li>
             <li><b>Sandboxed and bounded</b>: pure functions over staged data, no network, no filesystem, a wall-clock deadline.</li>
           </ul>
@@ -171,7 +171,7 @@
           <!-- claim: docs/ROADMAP.md §3 -->
           <h3>Scheduled extracts to your lake</h3>
           <ul>
-            <li>A scheduled pipeline materialises to Parquet on your own bucket; DuckDB — and Tableau — read it back at interactive speed.</li>
+            <li>A scheduled pipeline materialises to Parquet on your own bucket; DuckDB, and Tableau too, read it back at interactive speed.</li>
             <li>The lake you already own becomes the extract store, with no second copy of the data anywhere else.</li>
           </ul>
         </div>
@@ -202,9 +202,9 @@
       <p class="kicker">If you came here from Tableau</p>
       <h2 id="rm-tableau" class="ds-headline">What this means beside Tableau</h2>
       <p class="section-lede">
-        Today datapipelines gets a governed dataset <em>into</em> Tableau — as an API or into a database it reads.
+        Today datapipelines gets a governed dataset <em>into</em> Tableau, as an API or into a database it reads.
         Planned: dashboards you embed in your own product. Later, extracts on your own bucket. The
-        <a th:href="@{/tableau}">Tableau page</a> keeps the two columns — ships today, roadmap — side by side.
+        <a th:href="@{/tableau}">Tableau page</a> keeps the two columns, ships today and roadmap, side by side.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/tableau}">Using datapipelines with Tableau</a>

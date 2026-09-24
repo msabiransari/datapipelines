@@ -35,7 +35,7 @@
         <li><strong>The schema was a guess.</strong> Without introspection the model infers columns from names, and a plausible query over a wrong column returns a plausible wrong number.</li>
         <li><strong>The answer was a message.</strong> It is in a chat log. It is not versioned, not reviewable, and not runnable by anyone else.</li>
         <li><strong>The failure was a stack trace.</strong> When the query breaks, the agent gets a driver exception to guess at rather than a code to branch on.</li>
-        <li><strong>One database at a time.</strong> Real questions cross two — the facts here, the lookup there.</li>
+        <li><strong>One database at a time.</strong> Real questions cross two, with the facts here and the lookup there.</li>
       </ul>
     </div>
   </section>
@@ -48,7 +48,7 @@
         <article class="card">
           <!-- claim: docs/mcp-server.md §6.1 -->
           <h3>Your actual schema, before the query</h3>
-          <p><code>datasources_get_schemas</code>, <code>datasources_get_tables</code>, <code>datasources_get_columns</code> and <code>datasources_preview_rows</code> — the agent looks at the columns and a few real values first, so its SQL is grounded rather than inferred.</p>
+          <p><code>datasources_get_schemas</code>, <code>datasources_get_tables</code>, <code>datasources_get_columns</code> and <code>datasources_preview_rows</code>. The agent looks at the columns and a few real values first, so its SQL is grounded rather than inferred.</p>
         </article>
         <article class="card">
           <!-- claim: docs/pipeline-contract.md §3.1 -->
@@ -63,7 +63,7 @@
         <article class="card">
           <!-- claim: docs/pipeline-contract.md §13 -->
           <h3>Failures the agent can act on</h3>
-          <p>Catalogued <code>{domain}.{entity}.{failure}</code> codes with details — a missing parameter, an unreachable datasource, a refused write — instead of a driver message to parse.</p>
+          <p>Catalogued <code>{domain}.{entity}.{failure}</code> codes with details such as a missing parameter, an unreachable datasource or a refused write, instead of a driver message to parse.</p>
         </article>
         <article class="card">
           <!-- claim: docs/mcp-server.md §6.2.15 -->
@@ -73,7 +73,7 @@
         <article class="card">
           <!-- claim: docs/mcp-server.md §8.3 -->
           <h3>A prompt for the debugging loop</h3>
-          <p>The server ships a <code>debug_failed_execution</code> prompt that walks a failed run to a diagnosis — the failure path, treated as a first-class part of the agent's job.</p>
+          <p>The server ships a <code>debug_failed_execution</code> prompt that walks a failed run to a diagnosis. The failure path is treated as a first-class part of the agent's job.</p>
         </article>
       </div>
     </div>
@@ -84,8 +84,8 @@
       <h2 id="cross-title" class="ds-headline">And the question that crosses two databases</h2>
       <!-- claim: docs/staging.md §1 -->
       <p class="section-lede">
-        The question that stops a single-database text-to-SQL tool dead — "revenue by borough", where the trips are
-        in Postgres and the zone lookup is in SQLite — is an ordinary pipeline here. Each source is read in place,
+        The question that stops a single-database text-to-SQL tool dead, "revenue by borough" where the trips are
+        in Postgres and the zone lookup is in SQLite, is an ordinary pipeline here. Each source is read in place,
         staged into an in-memory database created for that one execution, and joined there.
         <a th:href="@{/federated-query}">The worked example, with its SQL</a>.
       </p>
@@ -122,7 +122,7 @@
       <!-- claim: docs/deployment.md Appendix B -->
       <p class="section-lede">
         The one you answered three times this month is the right pilot. On the demo stack, the answer becomes a
-        pipeline with a version number — and the fourth time, nobody asks you.
+        pipeline with a version number. And the fourth time, nobody asks you.
       </p>
       <div class="btn-row">
         <a class="btn btn-primary" th:href="@{/docs/deployment}">Run the demo</a>

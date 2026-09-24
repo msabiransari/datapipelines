@@ -18,7 +18,7 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "Can it replace a nightly sync?",
-                "Not the copy itself — populating a warehouse is the job an ELT tool does, and the honest page " +
+                "Not the copy itself. Populating a warehouse is the job an ELT tool does, and the honest page " +
                     "says so. What replaces the nightly script is the pipeline: the join an agent drafts, a person " +
                     "releases, and an API serves; write-back can also land a result in one table you already have. " +
                     "Publishing is docs/rest-api.md §19.",
@@ -27,8 +27,8 @@ object SiteFaqsBatch2 {
             FaqEntry(
                 "What about history the source overwrites?",
                 "This does not keep history: the query sees the source as it is now, and the per-run scratch " +
-                    "database is dropped after the run. A scheduled extract to your own lake — where that history " +
-                    "would land — is a later roadmap item, and the roadmap page labels it as such. The roadmap is " +
+                    "database is dropped after the run. A scheduled extract to your own lake, where that history " +
+                    "would land, is a later roadmap item, and the roadmap page labels it as such. The roadmap is " +
                     "docs/ROADMAP.md §3.",
                 "docs/ROADMAP.md §3",
             ),
@@ -48,7 +48,7 @@ object SiteFaqsBatch2 {
                 "When is Postgres alone the right call?",
                 "When one database holds the data and the people asking questions can query it directly: no second " +
                     "system to keep, no copy to go stale, and a warehouse would be an empty room. The moment a " +
-                    "second engine arrives, a cross-engine join needs somewhere to happen — docs/staging.md §3 is " +
+                    "second engine arrives, a cross-engine join needs somewhere to happen, and docs/staging.md §3 is " +
                     "where it happens here.",
                 "docs/staging.md §3",
             ),
@@ -69,8 +69,8 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "Who is allowed to change what runs?",
-                "A person. The agent authors and iterates a draft and can run it, but releasing — the step that " +
-                    "makes the pipeline what production serves — is a human verb, and a released version is " +
+                "A person. The agent authors and iterates a draft and can run it, but releasing, the step that " +
+                    "makes the pipeline what production serves, is a human verb, and a released version is " +
                     "immutable. The lifecycle is docs/versioning.md §3.",
                 "docs/versioning.md §3",
             ),
@@ -90,14 +90,14 @@ object SiteFaqsBatch2 {
                 "What does Tableau Prep still do better?",
                 "Visual profiling and the click-to-pivot are real strengths, and a one-off reshape by a person " +
                     "who lives in Prep is not a problem this needs to solve. The pipeline earns its keep when the " +
-                    "preparation must be repeatable, reviewable and agent-authored — the authoring surface is " +
+                    "preparation must be repeatable, reviewable and agent-authored. The authoring surface is " +
                     "docs/mcp-server.md §6.2.",
                 "docs/mcp-server.md §6.2",
             ),
             FaqEntry(
                 "Can an agent build the pipeline for me?",
                 "That is the intended workflow: the agent reads your schemas, catalogue statistics and indexes, " +
-                    "drafts the pipeline, runs it, and reads the failure when there is one — then leaves a draft " +
+                    "drafts the pipeline, runs it, and reads the failure when there is one, then leaves a draft " +
                     "that a person releases. The tool surface is docs/mcp-server.md §6.2.",
                 "docs/mcp-server.md §6.2",
             ),
@@ -116,7 +116,7 @@ object SiteFaqsBatch2 {
         listOf(
             FaqEntry(
                 "Are the embedded dashboards available today?",
-                "No — they are planned, with no announced release date: dashboards created by your agent, " +
+                "No. They are planned, with no announced release date: dashboards created by your agent, " +
                     "embedded in your own product, fed by released pipelines and APIs, filtered per viewer. What " +
                     "ships today is the released pipeline and the GET endpoint a dashboard will consume. The " +
                     "endpoint contract is docs/rest-api.md §19.",
@@ -124,22 +124,22 @@ object SiteFaqsBatch2 {
             ),
             FaqEntry(
                 "When do scheduled extracts to my own S3 bucket arrive?",
-                "Later — decided, not dated. The scheduler that would run them is the planned roadmap item; the " +
+                "Later, decided but not dated. The scheduler that would run them is the planned roadmap item; the " +
                     "extract itself would land a Parquet file on your own bucket, which Tableau reads natively. " +
                     "The scheduler design is docs/superpowers/specs/2026-09-07-scheduler-design.md.",
                 "docs/superpowers/specs/2026-09-07-scheduler-design.md",
             ),
             FaqEntry(
                 "Will there be Slack alerts?",
-                "No — the roadmap names email alerts and nothing beyond them: a scheduled pipeline, a condition, " +
+                "No. The roadmap names email alerts and nothing beyond them: a scheduled pipeline, a condition, " +
                     "an email. Later, not dated, and deliberately no Slack. The roadmap item is docs/ROADMAP.md §3.",
                 "docs/ROADMAP.md §3",
             ),
             FaqEntry(
                 "What does filtered per viewer mean?",
                 "That the same dashboard shows each viewer their own rows: a value bound from the viewer's request " +
-                    "becomes a declared parameter of the released pipeline, and the released SQL filters on it — " +
-                    "the binding mechanism released pipelines already serve today. Binding is docs/templates.md §4.5.",
+                    "becomes a declared parameter of the released pipeline, and the released SQL filters on it. " +
+                    "That binding mechanism ships in released pipelines today. Binding is docs/templates.md §4.5.",
                 "docs/templates.md §4.5",
             ),
         )
@@ -149,14 +149,14 @@ object SiteFaqsBatch2 {
         listOf(
             FaqEntry(
                 "Can each client be kept separate from the others?",
-                "Yes — one workspace per client. A key is pinned to one workspace at issuance, so an agent or a " +
+                "Yes, one workspace per client. A key is pinned to one workspace at issuance, so an agent or a " +
                     "colleague working client A sees nothing of client B: the other workspace's pipelines, " +
                     "datasources and executions are absent, not hidden. Scopes and pinning are docs/auth.md §7.5.",
                 "docs/auth.md §7.5",
             ),
             FaqEntry(
                 "Can a client's key reach only that client's numbers?",
-                "Yes — endpoint keys are bound to a path prefix of the published tree, so the key you hand a client calls " +
+                "Yes. Endpoint keys are bound to a path prefix of the published tree, so the key you hand a client calls " +
                     "its endpoints and nothing else, and you revoke it without touching anyone else's access. Key " +
                     "kinds and bindings are docs/auth.md §7.7.",
                 "docs/auth.md §7.7",
@@ -164,14 +164,14 @@ object SiteFaqsBatch2 {
             FaqEntry(
                 "Who does the work, and who signs it off?",
                 "Your agent drafts each client's pipeline over the same authoring surface every user gets, and a " +
-                    "person on your team releases it: agents cannot release, and a released version is immutable — " +
-                    "which is the version you can name in the invoice. The lifecycle is docs/versioning.md §3.",
+                    "person on your team releases it. Agents cannot release, and a released version is immutable. " +
+                    "That is the version you can name in the invoice. The lifecycle is docs/versioning.md §3.",
                 "docs/versioning.md §3",
             ),
             FaqEntry(
                 "What do we put in the client's portal today?",
                 "The API: a released pipeline published as a GET endpoint returns JSON with the query string bound " +
-                    "to its declared parameters — the thing a portal, a scheduled report or a white-label page " +
+                    "to its declared parameters, which is what a portal, a scheduled report or a white-label page " +
                     "calls. Embedded dashboards are the planned roadmap item. The contract is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",
             ),
@@ -184,13 +184,13 @@ object SiteFaqsBatch2 {
                 "Is this embedded analytics?",
                 "The API half of embedded analytics ships today: a released pipeline becomes a versioned GET " +
                     "endpoint your application calls, with per-viewer values bound as parameters. The dashboard " +
-                    "half — created by your agent, embedded in your product — is the planned roadmap item. " +
+                    "half, created by your agent and embedded in your product, is the planned roadmap item. " +
                     "Publishing is docs/rest-api.md §19.",
                 "docs/rest-api.md §19",
             ),
             FaqEntry(
                 "How does each customer see only their own rows?",
-                "Every viewer's request carries a value — from the query string or the path — that binds to a " +
+                "Every viewer's request carries a value, from the query string or the path, that binds to a " +
                     "declared parameter of the released pipeline, and the released SQL filters on it. The value is " +
                     "a bound scalar on a prepared statement, never pasted SQL. Binding is docs/templates.md §4.5.",
                 "docs/templates.md §4.5",
@@ -205,13 +205,13 @@ object SiteFaqsBatch2 {
             FaqEntry(
                 "Who controls what customers see?",
                 "A person on your team. The agent iterates drafts, but releasing is a human verb and a release is " +
-                    "immutable — so the numbers your customers see are a version you can name, restore and audit. " +
+                    "immutable, so the numbers your customers see are a version you can name, restore and audit. " +
                     "The lifecycle is docs/versioning.md §3.",
                 "docs/versioning.md §3",
             ),
             FaqEntry(
                 "What does the audit log record about a customer request?",
-                "Every call is audited with the key that made it, the endpoint and the execution — and never the " +
+                "Every call is audited with the key that made it, the endpoint and the execution, and never the " +
                     "SQL text, the row data or the parameter values, which are your customers' data. The audit log " +
                     "is docs/auth.md §10.",
                 "docs/auth.md §10",
@@ -223,7 +223,7 @@ object SiteFaqsBatch2 {
         listOf(
             FaqEntry(
                 "Do I have to write the SQL myself?",
-                "No — that is the agent's job: it reads your real schemas, catalogue statistics and indexes " +
+                "No, that is the agent's job: it reads your real schemas, catalogue statistics and indexes " +
                     "first, drafts the pipeline, runs it and reads the failure when there is one. You read the SQL " +
                     "it left, because a pipeline is a JSON document of named SQL nodes. The authoring tools are " +
                     "docs/mcp-server.md §6.2.",
@@ -238,9 +238,9 @@ object SiteFaqsBatch2 {
                 "docs/staging.md §3",
             ),
             FaqEntry(
-                "A query is slow — how do I find out why?",
-                "Two agent tools answer it: catalogue statistics per table — row estimates, indexes and " +
-                    "per-column bounds from the engine's own catalog — and the SQL probe, which runs one bounded " +
+                "A query is slow: how do I find out why?",
+                "Two agent tools answer it: catalogue statistics per table, giving row estimates, indexes and " +
+                    "per-column bounds from the engine's own catalog, and the SQL probe, which runs one bounded " +
                     "SELECT and captures the EXPLAIN plan before the query, so the plan survives the timeout it " +
                     "explains. They are docs/datasources.md §7C and §7D.",
                 "docs/datasources.md §7C",
@@ -248,8 +248,8 @@ object SiteFaqsBatch2 {
             FaqEntry(
                 "How does a query become something my team can rerun?",
                 "It already is one: the agent saves its work as a versioned pipeline, you review and release it, " +
-                    "and the released version can be published as a GET endpoint with declared parameters — " +
-                    "rerun by anyone with the key, served by the version you released. The lifecycle is " +
+                    "and the released version can be published as a GET endpoint with declared parameters, " +
+                    "rerun by anyone with the key and served by the version you released. The lifecycle is " +
                     "docs/versioning.md §3.",
                 "docs/versioning.md §3",
             ),
