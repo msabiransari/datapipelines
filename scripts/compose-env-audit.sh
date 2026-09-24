@@ -142,6 +142,11 @@ DECLARED_OVERRIDES = {
     # split a comma list and the app's key IS a comma list (configuration.md §3.18).
     "DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE": "derived from SAMPLE_NYC_ON / SAMPLE_TRADE_ON / SAMPLE_LAKE_ON",
     "DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE": "derived from SAMPLE_NYC_ON / SAMPLE_TRADE_ON / SAMPLE_LAKE_ON",
+    # 224 — the demo key is passed in the UNSET-fallback form (`-`, no colon): an operator's
+    # EXPLICITLY EMPTY value in deploy/secrets.env is the kill switch, and `:-` would
+    # resurrect the committed default and make the feature impossible to turn off under
+    # compose. The default itself still mirrors application.yml's.
+    "DATAPIPELINES_DEMO_API_KEY": "unset-fallback form (`-` not `:-`): an explicitly EMPTY value is the kill switch",
 }
 
 # Vars whose compose default deliberately mirrors the DOCKERFILE's ENV, not application.yml

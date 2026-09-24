@@ -3,6 +3,7 @@ package co.datapipelines.web.bootstrap
 import co.datapipelines.auth.WorkspaceContentSeeder
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.pipelines.PipelineImportService
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.JsonNode
@@ -73,6 +74,45 @@ class ExampleContentSeeder(
     /** Empty when no examples file is configured — the seeder is then a deliberate no-op. */
     private val contents: List<Content> = properties.examplesPaths().map(::load)
 
+    /**
+     * The pipelines THIS deployment's examples files would seed into [workspaceId] — the same
+     * files, the same §089 gate, evaluated exactly as [seed] evaluates it — as names plus
+     * whether the file's gate names a visible LAKE-dialect datasource (#224: the lake family's
+     * endpoints pay S3 egress per run, so the demo endpoint seeder publishes them only when
+     * the per-key request budget stands behind them).
+     *
+     * The demo endpoint seeder consumes this so its wanted-path set is derived from the ONE
+     * loader, never from a second parsing of the files that could drift from what [seed]
+     * actually seeded.
+     */
+    fun seedablePipelines(workspaceId: UUID): List<SeedablePipeline> {
+        val eligible = eligibleContents(workspaceId)
+        return eligible.flatMap { examples ->
+            val lakeBacked =
+                examples.requiresDatasources.any { name ->
+                    datasources.getVisible(name, workspaceId)?.dialect == Dialect.LAKE
+                }
+            examples.pipelines.map { SeedablePipeline(name = it.name, lakeBacked = lakeBacked) }
+        }
+    }
+
+    /** The files whose gate passes for [workspaceId] — the exact filter [seed] acts on, logged the same way. */
+    private fun eligibleContents(workspaceId: UUID): List<Content> =
+        contents.filter { examples ->
+            val missing = examples.requiresDatasources.filter { datasources.getVisible(it, workspaceId) == null }
+            if (missing.isNotEmpty()) {
+                log.info(
+                    "event=workspace.examples_gate_skipped workspace_id={} file={} missing_datasources={} " +
+                        "message=\"the file declares requires_datasources and not every named datasource is " +
+                        "registered and visible; its content is not seeded\"",
+                    workspaceId,
+                    examples.source,
+                    missing.joinToString(","),
+                )
+            }
+            missing.isEmpty()
+        }
+
     override fun seed(
         workspaceId: UUID,
         userId: UUID,
@@ -80,21 +120,7 @@ class ExampleContentSeeder(
         if (contents.isEmpty()) return
         // The requires_datasources gate (089 §E), evaluated per workspace at SEED time — a
         // datasource registered after boot still counts for the next workspace provisioned.
-        val eligible =
-            contents.filter { examples ->
-                val missing = examples.requiresDatasources.filter { datasources.getVisible(it, workspaceId) == null }
-                if (missing.isNotEmpty()) {
-                    log.info(
-                        "event=workspace.examples_gate_skipped workspace_id={} file={} missing_datasources={} " +
-                            "message=\"the file declares requires_datasources and not every named datasource is " +
-                            "registered and visible; its content is not seeded\"",
-                        workspaceId,
-                        examples.source,
-                        missing.joinToString(","),
-                    )
-                }
-                missing.isEmpty()
-            }
+        val eligible = eligibleContents(workspaceId)
         // All templates across all files first, then all pipelines: a pipeline in the second
         // family may reference a template seeded from the first, and §12 resolves templates at
         // save time. File order is the configured order (BootstrapProperties).
@@ -254,6 +280,15 @@ class ExampleContentSeeder(
     private class Fixture(
         val name: String,
         val body: String,
+    )
+
+    /**
+     * One seeded pipeline as the demo endpoint seeder sees it: its name (the portable identity)
+     * and whether the file it ships in names a visible LAKE-dialect datasource in its gate.
+     */
+    data class SeedablePipeline(
+        val name: String,
+        val lakeBacked: Boolean,
     )
 
     /** The import request bodies, derived once at startup so seeding is pure string handoff. */

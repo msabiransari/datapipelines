@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui.site
 
+import co.datapipelines.web.bootstrap.BootstrapProperties
 import co.datapipelines.web.ui.DocsCatalog
 import co.datapipelines.web.ui.DocsController
 import co.datapipelines.web.ui.SiteController
@@ -39,7 +40,11 @@ object SitePageRenderer {
         }
 
     private val siteController = SiteController()
-    private val pagesController = SitePagesController(SiteDemoData(javaClass.classLoader))
+
+    // #224 — the offline renderer constructs the controller with the DEFAULT configuration, so
+    // the exported page and every guard see the shipped demo key, exactly what a bare
+    // deployment (no env overrides) serves.
+    private val pagesController = SitePagesController(SiteDemoData(javaClass.classLoader), BootstrapProperties())
 
     /** The packaged docs, memoized once per JVM like the production bean. */
     val docs: DocsCatalog by lazy { DocsCatalog(javaClass.classLoader) }

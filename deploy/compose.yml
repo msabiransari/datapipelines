@@ -125,6 +125,15 @@ services:
       # the one-shot loaders populate.
       DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/bootstrap-datasources-nyc.yml}${SAMPLE_TRADE_ON:+,/srv/sample/bootstrap-datasources-census.yml}${SAMPLE_LAKE_ON:+,/srv/sample/bootstrap-datasources-lake.yml}"
       DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE: "${SAMPLE_NYC_ON:+/srv/sample/examples-nyc.json}${SAMPLE_TRADE_ON:+,/srv/sample/examples-trade.json}${SAMPLE_LAKE_ON:+,/srv/sample/examples-lake.json}"
+      # 224 — the demo workspace's public api_caller key (configuration.md §3.18). The
+      # UNSET-fallback form (`-`, no colon) is deliberate: an operator's EXPLICITLY EMPTY value
+      # in deploy/secrets.env must pass through as empty — that is the kill switch — where
+      # `:-` would resurrect the committed default and make the feature impossible to turn off
+      # under compose. The default itself mirrors application.yml (compose-env-audit check 2).
+      DATAPIPELINES_DEMO_API_KEY: ${DATAPIPELINES_DEMO_API_KEY-dpk_DEMOPUBLIC42.THISKEYISPUBLICBYDESIGNDEMOONLYREADONLY222222222}
+      # 224 — the serve path's per-key request budget (configuration.md §3.22).
+      DATAPIPELINES_ENDPOINTS_KEY_REQUEST_BUDGET_WINDOW_SECONDS: ${DATAPIPELINES_ENDPOINTS_KEY_REQUEST_BUDGET_WINDOW_SECONDS:-60}
+      DATAPIPELINES_ENDPOINTS_KEY_REQUEST_BUDGET_MAX_REQUESTS: ${DATAPIPELINES_ENDPOINTS_KEY_REQUEST_BUDGET_MAX_REQUESTS:-60}
 
       # The full DATAPIPELINES_* pass-through contract (T32). Every such variable the
       # app binds from its environment is passed here with the SAME default

@@ -2097,8 +2097,59 @@ The same operations exist as MCP tools ([MCP Server §6.2](mcp-server.md#62-tool
 
 `POST` endpoints (parameters in a body, side-effecting pipelines — the read-only rule is what
 makes `GET` safe, and a write surface needs its own ruling); anonymous or embed tokens for public
-dashboards; per-endpoint rate limits; response caching across callers (results are per execution
-by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); custom domains.
+dashboards; response caching across callers (results are per execution by design); CSV/Arrow by
+`Accept` (the cursor's `format` already serves them); custom domains.
+
+### 19.8 The demo API — the worked example (#224)
+
+The demo workspace the product ships doubles as this section's worked example. When a deployment
+seeds a demo family (`--demo nyc,trade,lake`), the bootstrap seeder **publishes every seeded demo
+pipeline** as an endpoint under the `demo` category, deriving the path from the pipeline name by
+one rule: the name's first segment is the version segment, and underscores fold to hyphens —
+
+| Seeded pipeline | Published endpoint |
+|---|---|
+| `nyc/mobility/revenue_by_borough` | `GET /api/demo/nyc/mobility/revenue-by-borough` |
+| `trade/balance_by_partner` | `GET /api/demo/trade/balance-by-partner` |
+| `nyc/mobility/taxi_vs_rideshare` (the lake showcase) | `GET /api/demo/nyc/mobility/taxi-vs-rideshare` |
+
+Re-seeding is idempotent: an endpoint already published at a derived path over the same pipeline
+is left alone, a changed pipeline set adds and retires paths, and a family without seeded
+pipelines publishes nothing.
+
+**One key bound to all of them.** The seeder also mints exactly ONE `endpoint` key named
+`demo-public-key` — an ordinary `api_caller` ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)),
+acting as its own identity, bound to every published demo path. Its plaintext comes from
+configuration, `datapipelines.bootstrap.demo-api-key`
+([Configuration §3.18](configuration.md#318-bootstrap)), and the site's
+[demo-data page](https://datapipelines.co/demo-data) renders the same value, so an outsider can
+copy the key and call any demo endpoint with `DP-API-Key` — no account:
+
+```bash
+curl -H "DP-API-Key: dpk_…" https://datapipelines.co/api/demo/nyc/mobility/revenue-by-borough?year=2024
+```
+
+```json
+{"execution_id": "…", "schema": ["column", "…"], "rows": [["value", "…"]], "row_count": 1,
+ "total_rows": 1, "has_more": false, "result_url": "…", "expires_at": "…"}
+```
+
+The key is **public by design** and its reach is exactly this section's surface: the bound demo
+paths, plus the executions it started. On anything else it is refused like any other `api_caller`
+— an unbound published path is `403 endpoint.key_not_bound`, `/mcp` and the product's own routes
+are `403 endpoint.key_kind_refused`, and it can create nothing. Blank the setting and the public
+API is retracted on the next boot (no key minted, the demo endpoints unpublished, the page's
+section hidden); change the value and the next boot is the rotation — the old key revoked, the
+new one minted and bound.
+
+**The per-key request budget.** The serve path applies a budget to EVERY `api_caller` key —
+`datapipelines.endpoints.key-request-budget` ([Configuration §3.22](configuration.md#322-published-endpoints)),
+default 60 requests per 60-second window per key, per instance. The (N+1)th request inside the
+window answers `429 rate_limit.exceeded` with `Retry-After` — the same code §12 meters with —
+before the pipeline runs, and the key serves again when the window rolls over. A budget is a
+product property of a public credential first; the demo key merely needs it first. It is also the
+lake family's gate: the lake showcase's endpoint pays S3 egress on every call, so it is published
+and bound only while a budget stands behind it (`max-requests` > 0).
 
 ---
 
@@ -2106,6 +2157,8 @@ by design); CSV/Arrow by `Accept` (the cursor's `format` already serves them); c
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v2.31 | 224 (#224) demo API | New **§19.8**: the demo family seeding publishes every seeded demo pipeline under `/demo/…` (the name-to-path mapping table), mints one configured `api_caller` key (`demo-public-key`) bound to all of them, and the demo-data page renders the same plaintext; the serve path's per-key request budget (`datapipelines.endpoints.key-request-budget`, 60/60, `429 rate_limit.exceeded` + `Retry-After`, per instance, every `api_caller` key; the lake endpoint's gate). §19.7 drops "per-endpoint rate limits" — a per-KEY budget now exists. |
+
 | 2026-09-24 | v2.30 | 215b (#215) key identities, key roles | **Deliberate breaks, owner-ruled (2026-09-24):** (1) **the MCP key is refused on every REST route** (§3.2 — B2: "MCP key should be only MCP"; `403 endpoint.key_kind_refused`, `details.reason = user_key_off_surface`) — REST is a session's surface plus the two confined key kinds; (2) **an unbound published path is unservable** until a key is bound (B3). §16.1: create takes `role` (never `scopes` — refused by name) and returns `role`, `identity {id, display_name}` and `created_by`; the list is the keys the caller created; revoking an endpoint/server key deactivates its identity. §16.2 `/auth/me` returns `role`, not `scopes`. §16.3: every user-admin route answers the unknown-user 404 for a non-person row, before any mutation. §5.16/§7.2: permissions named, not scopes. |
 | 2026-09-24 | v2.29 | 215a (#215) the permission catalog | No route, field or status changes. The inline authorization names are the §7.6 catalog's `<functionality>.<permission>` permissions instead of the retired operations (`RELEASE_VERSION` → `pipeline.release`, `READ_EXECUTIONS` → `execution.read`, `MANAGE_API_KEYS` → `api_key.create` / `api_key.bind`, …); §5's release sentence corrected — release is the author's since 2026-09-20 (D8), so a promoter's key cannot release (the text still described the pre-D8 rule). A `role_required` refusal's `details.held` is the role the caller was judged as (auth §9). Status caught up with the change log (it read v2.27). |
 | 2026-09-23 | v2.28 | 213 (#213) show-once MCP key | §16.1: `/mine`'s `copyable` is false once the key has been copied — the first read of the copy endpoint destroys the copyable secret in the same statement (auth.md §7.4). No wire shape changed. |

@@ -1,5 +1,6 @@
 package co.datapipelines.web.ui.site
 
+import co.datapipelines.web.bootstrap.BootstrapProperties
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Controller
@@ -26,6 +27,7 @@ import org.springframework.web.servlet.ModelAndView
 @Controller
 class SitePagesController(
     private val demoData: SiteDemoData,
+    private val bootstrapProperties: BootstrapProperties,
 ) {
     @GetMapping("/mcp-server-for-sql-databases")
     fun pillar(
@@ -164,6 +166,10 @@ class SitePagesController(
      * 116 — the demo-data page. Its one live input is [SiteDemoData], parsed from the
      * vendored manifests at startup and constant from then on — the same "constant content"
      * shape as every handler above: GET-only, anonymous, no datastore, no principal.
+     *
+     * #224 — the page also renders the demo workspace's public API key from the deployment's
+     * configuration ([BootstrapProperties.demoApiKey], with its committed default): the value
+     * on the page IS the value that works, and a blank configuration hides the section.
      */
     @GetMapping("/demo-data")
     fun demoData(
@@ -178,7 +184,12 @@ class SitePagesController(
             model,
             response,
             SitePages.DEMO_DATA,
-            facts = SiteFacts.current(demoData.families.associate { it.key to it.engineCount }),
+            // Blank is the kill switch (§3.18), the same answer as unset: no section at all.
+            facts =
+                SiteFacts.current(
+                    demoData.families.associate { it.key to it.engineCount },
+                    bootstrapProperties.demoApiKey?.takeIf { it.isNotBlank() },
+                ),
             faq = SiteFaqs.DEMO_DATA,
         )
     }

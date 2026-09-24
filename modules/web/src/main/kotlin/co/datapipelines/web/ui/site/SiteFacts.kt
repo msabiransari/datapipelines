@@ -6,6 +6,7 @@ import co.datapipelines.datasources.semantics.LearnedFactKind
 import co.datapipelines.datasources.semantics.LearnedFactScope
 import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.typesystem.Dialect
+import co.datapipelines.web.bootstrap.DemoEndpointPaths
 
 /**
  * The numbers the marketing site states (124 §A) — built from the code that OWNS each fact,
@@ -48,6 +49,13 @@ data class SiteFacts(
      * reproduced from the bucket, and the site presents it as exactly that.
      */
     val demo: DemoShowcase = DEMO_SHOWCASE,
+    /**
+     * #224 — the demo workspace's public `api_caller` key, as the deployment configures it
+     * (`datapipelines.bootstrap.demo-api-key`), the same value the seeder mints the key from.
+     * A configuration value with a committed default, so the static export renders it too.
+     * Null when the feature is off: the demo-data page's API section then does not render.
+     */
+    val demoApiKey: String? = null,
 ) {
     /** The read-only majority of the tool surface. */
     val readToolCount: Int get() = toolCount - mutatingToolCount
@@ -61,6 +69,19 @@ data class SiteFacts(
     /** The engine count of one demo family as a prose word — the manifest's own fact, via the handler. */
     fun demoEngineCountWord(family: String): String =
         numberWord(checkNotNull(demoEngineCounts[family]) { "no demo engine count for family '$family'" })
+
+    /** The showcase endpoints the demo-data page renders a curl for — constant, see the companion. */
+    val demoApiEndpoints: List<DemoApiEndpoint> get() = DEMO_API_ENDPOINTS
+
+    /**
+     * The curl line the demo-data page renders for [endpoint] (#224). The key travels inside
+     * the command because the page's whole point is "copy this and it works"; the command is
+     * transcript, not prose, and the site guards treat it as such.
+     */
+    fun demoApiCurl(
+        endpoint: DemoApiEndpoint,
+        apiKey: String,
+    ): String = "curl -H \"DP-API-Key: $apiKey\" ${endpoint.url}"
 
     /**
      * The engines as copy names them, in [Dialect] declaration order:
@@ -82,8 +103,15 @@ data class SiteFacts(
     }
 
     companion object {
-        /** The facts as the code states them right now — the only constructor call site. */
-        fun current(demoEngineCounts: Map<String, Int> = emptyMap()): SiteFacts =
+        /**
+         * The facts as the code states them right now — the only constructor call site.
+         * [demoApiKey] is the one runtime input (the deployment's configured demo key); when it
+         * is null the demo-data page's API section renders nothing.
+         */
+        fun current(
+            demoEngineCounts: Map<String, Int> = emptyMap(),
+            demoApiKey: String? = null,
+        ): SiteFacts =
             SiteFacts(
                 engineCount = Dialect.entries.size,
                 toolCount = McpToolCatalog.NAMES.size,
@@ -94,8 +122,50 @@ data class SiteFacts(
                 learnedFactScopeCount = LearnedFactScope.entries.size,
                 semanticsToolCount = McpToolCatalog.NAMES.count { it.startsWith("semantics_") },
                 demoEngineCounts = demoEngineCounts,
+                demoApiKey = demoApiKey,
+            )
+
+        /**
+         * #224 — one showcase endpoint per demo family, the URL a visitor's curl names: the
+         * pipeline names are the example fixtures' own (the same names the page's "what you can
+         * ask" section cites), and the paths derive from [DemoEndpointPaths.pathFor] — the ONE
+         * mapping the seeder publishes under, so the curl a visitor copies is the URL that
+         * answers. The lake row's S3 note is B5's page obligation.
+         */
+        val DEMO_API_ENDPOINTS: List<DemoApiEndpoint> =
+            listOf(
+                DemoApiEndpoint(
+                    family = "NYC mobility",
+                    pipeline = "nyc/mobility/revenue_by_borough",
+                    path = DemoEndpointPaths.pathFor("nyc/mobility/revenue_by_borough"),
+                ),
+                DemoApiEndpoint(
+                    family = "US trade",
+                    pipeline = "trade/balance_by_partner",
+                    path = DemoEndpointPaths.pathFor("trade/balance_by_partner"),
+                ),
+                DemoApiEndpoint(
+                    family = "dp-lake",
+                    pipeline = "nyc/mobility/taxi_vs_rideshare",
+                    path = DemoEndpointPaths.pathFor("nyc/mobility/taxi_vs_rideshare"),
+                    note = "reads from S3 and may take a few seconds",
+                ),
             )
     }
+}
+
+/**
+ * One demo API endpoint the demo-data page shows a curl for (#224). [path] is the stored
+ * endpoint path — the URL is `$SITE_ORIGIN/api$path`.
+ */
+data class DemoApiEndpoint(
+    val family: String,
+    val pipeline: String,
+    val path: String,
+    val note: String? = null,
+) {
+    /** The absolute URL the page's curl examples name. */
+    val url: String get() = "$SITE_ORIGIN/api$path"
 }
 
 /**

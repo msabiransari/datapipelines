@@ -959,6 +959,8 @@ A binding names a **node of the endpoint tree**, not a pattern: `/lending` autho
 
 A deeper binding therefore **replaces** an inherited one rather than adding to it: a binding at `/lending/private` hides the one at `/lending` for that subtree, and the key bound at `/lending` stops working there. Bind both keys at the deeper node when both should work.
 
+**The demo workspace's public key (#224) is an ordinary `endpoint` key** — an `api_caller` minted at bootstrap from `datapipelines.bootstrap.demo-api-key`, named `demo-public-key`, bound to the demo family's published paths and shown on the site's demo-data page; nothing about it is a fourth kind, and its budget is the serve path's per-key budget (rest-api §19.8).
+
 That is the more conservative of the two readings, and it is chosen deliberately. An operator who binds a narrow key deep in the tree is drawing a boundary; an additive model would silently keep the broad key working across it. The cost of "replace" is a binding an operator can see is missing and add; the cost of "add" is a boundary that was never real.
 
 A bound node decides for every credential that reaches it — since B2 that is only ever an `endpoint` key.

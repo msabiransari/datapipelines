@@ -65,6 +65,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/MailRules.kt",
                 // 7b — the §3.28 transform bounds, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/TransformRules.kt",
+                // 224 — the demo-key and key-budget rules, split out for the same size reason.
+                "modules/app/src/main/kotlin/co/datapipelines/config/DemoApiRules.kt",
             )
     }
 }

@@ -351,6 +351,13 @@ datapipelines:
   bootstrap:
     datasources-file: ${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:}
     examples-file: ${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:}
+    # 224 — the demo workspace's public api_caller key, minted at boot from this plaintext and
+    # shown on the demo-data page. The fallback literal IS the committed default (the page is a
+    # public marketing page and the key is public by design); its Kotlin twin is
+    # BootstrapProperties.DEFAULT_DEMO_API_KEY, pinned to this line by
+    # BootstrapConfigKeysSpecDriftTest. BLANK is the kill switch (`DATAPIPELINES_DEMO_API_KEY=`
+    # in deploy/secrets.env); a changed value rotates the key on the next boot.
+    demo-api-key: ${DATAPIPELINES_DEMO_API_KEY:dpk_DEMOPUBLIC42.THISKEYISPUBLICBYDESIGNDEMOONLYREADONLY222222222}
 
   # Organisation facts (configuration.md §3.21, calculators design §0.1). Every value below
   # enters every execution's Context as `org_<path with dots and dashes as _>` — a node binds
@@ -379,6 +386,13 @@ datapipelines:
     timeout-default-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_DEFAULT_SECONDS:30}
     timeout-min-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MIN_SECONDS:1}
     timeout-max-seconds: ${DATAPIPELINES_ENDPOINTS_TIMEOUT_MAX_SECONDS:300}
+    # 224 — the per-key request budget on the serve path, applied to EVERY api_caller key
+    # (configuration.md §3.22): at most max-requests per window-seconds, then 429
+    # rate_limit.exceeded with Retry-After. max-requests: 0 turns the budget off — and with it
+    # the lake family's endpoint publishing (#224: the lake's endpoints pay S3 egress per run).
+    key-request-budget:
+      window-seconds: ${DATAPIPELINES_ENDPOINTS_KEY_REQUEST_BUDGET_WINDOW_SECONDS:60}
+      max-requests: ${DATAPIPELINES_ENDPOINTS_KEY_REQUEST_BUDGET_MAX_REQUESTS:60}
 
   # 075 — the two variables an org actually sets (configuration.md §3.23, docs/environments.md).
   # Appended after the whole datapipelines: tree on purpose: a block inserted between two

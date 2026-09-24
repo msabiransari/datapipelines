@@ -736,6 +736,22 @@ and licence per family, generated from the same manifest files the loader verifi
 (vendored at `modules/web/src/main/resources/site/demo/`, pinned to the versions
 above). It is the page to hand anyone who asks what the demo contains.
 
+### The demo API: every seeded pipeline is a published endpoint (#224)
+
+Seeding a demo family now also publishes each seeded pipeline as a **`GET`
+endpoint** under `/demo/…` and binds them all to ONE public `api_caller` key —
+`demo-public-key`, minted at boot from `datapipelines.bootstrap.demo-api-key`
+(default `dpk_DEMOPUBLIC42.…`, configuration.md §3.18). The key is **public by
+design**: the same value renders on the `/demo-data` page's "Call it as an API"
+section, and an outsider can call any demo endpoint with it and no account
+(rest-api.md §19.8 is the worked example, including the per-key request budget —
+60 requests per 60 s per key, `429 rate_limit.exceeded` — and the lake family's
+gate: the lake endpoint pays S3 egress per call, so it is published only while a
+budget stands behind it). Blank the setting in `deploy/secrets.env` and the next
+boot retracts the public API — no key, no demo endpoints, no page section; change
+the value and the next boot rotates the key. Nothing changes for keys real users
+mint on the `/api-keys` page.
+
 The **lake** family is different in kind from the other two and the difference is
 worth stating before the commands: it has a compose profile and a `--demo` flag
 like its siblings, but **no loader service**, because nothing is loaded. What
@@ -1022,6 +1038,8 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v1.30 | 224 (#224) demo API | New Appendix B subsection "The demo API": seeding a demo family publishes every seeded pipeline under `/demo/…` and binds them to one public `api_caller` key minted from `DATAPIPELINES_DEMO_API_KEY` (blank = off, changed = rotation); the per-key request budget and the lake family's budget gate are the same act (rest-api.md §19.8). |
+
 | 2026-09-22 | v1.28 | key wording | Appendix B step 2 says what the product does since R3: the MCP key is created at sign-in and copied from the top bar; nothing is "minted" by hand and there is no create endpoint. `app.sh`'s demo message says the same. |
 | 2026-09-22 | v1.27 | #207 relative redirects | §8 edge contract: every app `Location` is RELATIVE (`server.tomcat.use-relative-redirects=true`), so the public scheme never leaks into a redirect and the edge needs no `X-Forwarded-Proto` handling for them. Behind a TLS-terminating edge the absolute `http://` Locations Tomcat built by default were refused by the browser (CSP `form-action` on plain forms, mixed content on htmx requests) after the server had already acted — logout, workspace switch and member removal on datapipelines.co, 2026-09-22. |
 | 2026-09-21 | v1.26 | 199 (#196) the Redis password leaves argv | §4.2.1 gains "Where the password lives": the reference redis services (`deploy/compose.yml`, `deploy/compose.laptop-infra.yml`, Appendix A) start `redis-server -` — configuration from stdin, `requirepass` fed by a heredoc from `REDISCLI_AUTH`, `exec` so the server stays PID 1, `user: redis` because the wrapper is `sh` — so no argv, and no file, carries the value; `--maxmemory`/`noeviction` stay on argv. §9's argv line closes the "tracked separately" remainder and names the two commands that check it. Operators: the next start recreates the Redis container (§7 says what a restart loses). Numbered on base db12e043; the merger renumbers if another lane took v1.26. |

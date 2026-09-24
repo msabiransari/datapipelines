@@ -102,6 +102,16 @@ data class EndpointsProperties(
      * longest a serve may block before it answers `202` and leaves the execution running.
      */
     val timeoutMaxSeconds: Int = 300,
+    /**
+     * `key-request-budget` (#224, configuration.md §3.22) — the per-key request budget the
+     * serve path applies to EVERY `api_caller` key: at most [KeyRequestBudget.maxRequests]
+     * requests per [KeyRequestBudget.windowSeconds], then `429 rate_limit.exceeded`. A public
+     * key is a product property first (the demo key merely needs it first), so the budget is
+     * not a demo-only knob. `max-requests: 0` turns it off — and with it the lake family's
+     * endpoint publishing (#224 B5: the lake's endpoints pay S3 egress per run, so they are
+     * published only when a budget stands behind them).
+     */
+    val keyRequestBudget: KeyRequestBudget = KeyRequestBudget(),
 ) {
     init {
         // configuration.md §7 — the validator asserts exactly this ordering at startup.
@@ -113,6 +123,27 @@ data class EndpointsProperties(
 
     /** The §5.5 clamp a publish applies to a requested timeout. */
     fun clampTimeout(requested: Int): Int = requested.coerceIn(timeoutMinSeconds, timeoutMaxSeconds)
+
+    /** True when the serve path's per-key budget is active (`max-requests` > 0). */
+    val keyRequestBudgetActive: Boolean get() = keyRequestBudget.maxRequests > 0
+}
+
+/** The `datapipelines.endpoints.key-request-budget.*` values (#224) — see [EndpointsProperties]. */
+data class KeyRequestBudget(
+    /** `window-seconds` — the fixed window every key's counter rolls over on. */
+    val windowSeconds: Int = 60,
+    /**
+     * `max-requests` — the most requests one `api_caller` key may serve per window. Zero is
+     * off: the budget never answers 429 and the lake family's endpoints are not published.
+     */
+    val maxRequests: Int = 60,
+) {
+    init {
+        require(windowSeconds > 0) { "datapipelines.endpoints.key-request-budget.window-seconds must be > 0" }
+        require(maxRequests >= 0) {
+            "datapipelines.endpoints.key-request-budget.max-requests must be >= 0 (zero = the budget is off)"
+        }
+    }
 }
 
 /**
