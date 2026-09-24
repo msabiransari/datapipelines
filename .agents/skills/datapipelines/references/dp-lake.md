@@ -7,9 +7,9 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 ## dp-lake — register your bucket, register tables, ask
 
 A **LAKE** datasource reads Parquet and Apache Iceberg tables on S3 or S3-compatible object
-storage **in place** — no warehouse, no load step, nothing copied — and it is **read-only**.
-DuckDB is the engine; the catalog is the server's own registry (dp-catalog), because the
-engine cannot list a bucket: a LAKE datasource's tables are exactly the rows you register.
+storage **in place**, without a persistent bulk load into a warehouse, and it is **read-only**.
+DuckDB is the engine; the catalog is the server's own registry (dp-catalog): a LAKE
+datasource exposes the tables you register. Querying still transfers data to the engine.
 
 The workflow is three steps:
 
@@ -43,8 +43,8 @@ the pool's routine connection replacement. Two consequences for how you read a t
 probe that ran fast may be fast because an earlier query already pulled those objects —
 never infer the steady-state cost of a cold read from one warm measurement, and expect the
 FIRST scan after a datasource edit or a table registration to be cold again, because those
-rebuild the pool and start a fresh engine. Partition pruning (below) is what bounds the cold
-cost; the cache only removes the repeat.
+rebuild the pool and start a fresh engine. Pruning and column selection (below) can reduce
+cold-read work; caching may reduce repeat transfers, but one warm timing is not a cold-read budget.
 
 **Bare vs qualified table names.** When ALL of the datasource's registered tables share
 exactly ONE namespace, the server sets the search path at connect, so a template reads
@@ -57,18 +57,32 @@ use the full three-part name, `FROM acme.analytics.events_by_day`.
 metadata file — `s3://bucket/table/metadata/00042-<uuid>.metadata.json`. A table that still
 receives commits gets a new metadata file per commit: re-register to follow it.
 
-**Every query prunes on the partition column — egress is real.** A lake table's bytes cross
-the network from S3 when the engine scans them, and you pay for what you scan: a predicate on
-the partition column (`WHERE event_date = DATE '2024-06-01'` or
-`WHERE event_date BETWEEN :start_date AND :end_date`) makes the engine read only the
-matching partitions, while an unfiltered `SELECT *` over a partitioned table downloads every
-partition. **First check the table HAS one — the stats read is the only place that says.**
-`datasources_get_table_stats` reports a registered partition column as `partition_column`
-(and an index entry of kind `partition`); `partition_column: null` means the table is ONE
-unpartitioned file and every read scans it whole — row-group filter pushdown inside a file
-is not pruning, whatever the plan's `READ_PARQUET` filter line shows. Never write "the read
-prunes on the partition column" into a description from a plan alone. Write the predicate
-into the template by default, not as an afterthought:
+**Select fewer columns and prune where the question permits.** The table listing and
+`datasources_get_table_stats` expose a registered `partition_column` (also an index entry
+of kind `partition` in stats). `null` means no registered partition key; it does not tell
+you the file count, prove the physical layout, or rule out data skipping.
+
+- A compatible predicate on a Hive partition key can exclude files in other partitions.
+  One partition may contain many files; one Parquet file may contain many row groups.
+- Parquet column projection avoids reading unneeded column data. Predicate pushdown lets
+  the reader use statistics to skip row groups when their bounds exclude a match, even
+  without Hive partitioning. Layout and selectivity determine how much work this saves.
+- Remote Parquet reads can fetch metadata and selected byte ranges. This is not a general
+  row-level index lookup: metadata requests and relevant data still have to be read. A
+  pushed `READ_PARQUET` filter alone proves neither skipped files nor bytes saved.
+
+Inspect available file/partition counts and timings; compare cold and warm reads before
+claiming an improvement. Sorting, repartitioning and file maintenance belong to the writer
+or operator; current LAKE queries cannot change stored layout. A tempdb `CREATE INDEX`
+indexes only staged data, after it has been transferred.
+
+S3 bills storage, requests and applicable transfer; DuckDB also needs compute. S3 itself
+does not impose a query charge per byte scanned. Same-region transfer from S3 to AWS
+services is generally free, while other transfer paths and network services can cost money.
+Measure placement and requests as well as bytes; do not call every S3 read paid egress.
+
+Use a bound partition predicate when it matches the requested window, and preserve the
+keys and aggregate components needed downstream (`authoring-playbook.md` §4):
 
 ```sql
 SELECT event_date, region_id, SUM(event_count) AS events
@@ -76,3 +90,8 @@ FROM events_by_day
 WHERE event_date BETWEEN :start_date AND :end_date
 GROUP BY event_date, region_id
 ```
+
+Sources: [Hive partitioning](https://duckdb.org/docs/current/data/partitioning/hive_partitioning),
+[Parquet projection and filter pushdown](https://duckdb.org/docs/current/data/parquet/overview),
+[partial remote reads](https://duckdb.org/docs/current/core_extensions/httpfs/https),
+[S3 pricing](https://aws.amazon.com/s3/pricing/).
