@@ -345,6 +345,40 @@
     </div>
   </section>
 
+  <!-- ============================ CALL THE API ============================ -->
+  <!-- claim: docs/rest-api.md §19 — the demo key, the published demo paths and the request budget -->
+  <section class="section" aria-labelledby="dd-api" th:if="${facts.demoApiKey != null}">
+    <div class="container">
+      <p class="kicker">Call it as an API</p>
+      <h2 id="dd-api" class="ds-headline">Call the demo pipelines as APIs, no account needed</h2>
+      <div class="prose">
+        <p>
+          The demo workspace also ships a working API key, printed below. It is public by design, and it serves
+          the demo workspace only: it can call the demo endpoints published beneath <code>/api/demo/</code> and
+          read the executions it started, and nothing else. Pass it in the <code>DP-API-Key</code> header and
+          read the JSON.
+        </p>
+        <pre><code th:text="${facts.demoApiKey}">dpk_DEMOPUBLIC42.THISKEYISPUBLICBYDESIGNDEMOONLYREADONLY222222222</code></pre>
+        <div th:each="e : ${facts.demoApiEndpoints}">
+          <h3 th:text="|${e.family}: ${e.pipeline}|">NYC mobility: nyc/mobility/revenue_by_borough</h3>
+          <pre><code th:text="${facts.demoApiCurl(e, facts.demoApiKey)}">curl -H &quot;DP-API-Key: dpk_&quot; https://datapipelines.co/api/demo/nyc/mobility/revenue-by-borough</code></pre>
+          <p th:if="${e.note != null}" th:text="${e.note}">reads from S3 and may take a few seconds</p>
+        </div>
+        <p>
+          The response is one JSON document: the execution id, the result schema, the first page of rows, the
+          total, and a cursor URL for the rest.
+        </p>
+        <pre th:inline="none"><code>{"execution_id": "…", "schema": ["column", "…"], "rows": [["value", "…"]], "row_count": 1, "total_rows": 1, "has_more": false, "result_url": "…", "expires_at": "…"}</code></pre>
+        <p>
+          A request budget applies to the key, so one script cannot run the demo nonstop. When a key spends its
+          budget the API answers <code>429</code> with a retry hint, and the key works again when the window rolls
+          over. Every demo datasource is read-only, and the published pipelines take the parameters their
+          descriptions declare.
+        </p>
+      </div>
+    </div>
+  </section>
+
   <!-- ============================ LICENCE ============================ -->
   <section class="section band" aria-labelledby="dd-licence">
     <div class="container">

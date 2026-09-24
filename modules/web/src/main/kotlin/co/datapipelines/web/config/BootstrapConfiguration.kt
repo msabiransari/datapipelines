@@ -9,6 +9,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceRepository
 import co.datapipelines.web.bootstrap.BootstrapDatasourceStartup
 import co.datapipelines.web.bootstrap.BootstrapProperties
+import co.datapipelines.web.bootstrap.DemoEndpointSeeder
 import co.datapipelines.web.bootstrap.ExampleContentSeeder
 import co.datapipelines.web.bootstrap.LakeBootstrapSeeder
 import co.datapipelines.web.pipelines.PipelineImportService
@@ -61,4 +62,48 @@ class BootstrapConfiguration {
         templateImportService: TemplateImportService,
         datasources: DatasourceRegistry,
     ): WorkspaceContentSeeder = ExampleContentSeeder(properties, pipelineImportService, templateImportService, datasources)
+
+    /**
+     * #224 — the demo workspace's public API: one endpoint per seeded pipeline, one configured
+     * `api_caller` key bound to all of them. `@DependsOn` the demo workspace startup: on a fresh
+     * database the examples must already be imported, and on every boot the workspace row and its
+     * content must already be resolved before the wanted-path set is derived from them. The
+     * budget filter it presupposes lives beside the serve path's other guards
+     * (`EndpointKeyBudgetFilter`); the two settings the seeder reads are `datapipelines.bootstrap.demo-api-key`
+     * (the plaintext) and `datapipelines.endpoints.key-request-budget` (the lake gate).
+     */
+    @Bean
+    @org.springframework.context.annotation.DependsOn("demoWorkspaceStartup")
+    // The wiring bean — every parameter is an @Bean reference (019 precedent).
+    @Suppress("LongParameterList")
+    fun demoEndpointSeeder(
+        properties: BootstrapProperties,
+        endpointsProperties: EndpointsProperties,
+        examples: ExampleContentSeeder,
+        demoWorkspaceSeeder: co.datapipelines.auth.DemoWorkspaceSeeder,
+        pipelineRepository: co.datapipelines.pipeline.PipelineRepository,
+        publishService: co.datapipelines.application.endpoints.EndpointPublishService,
+        keyService: co.datapipelines.application.endpoints.EndpointKeyService,
+        endpointRepository: co.datapipelines.application.endpoints.PublishedEndpointRepository,
+        bindingRepository: co.datapipelines.application.endpoints.EndpointKeyBindingRepository,
+        keyRepository: co.datapipelines.auth.ApiKeyRepository,
+        apiKeyService: co.datapipelines.auth.ApiKeyService,
+        secretHasher: co.datapipelines.auth.SecretHasher,
+        users: UserService,
+    ): DemoEndpointSeeder =
+        DemoEndpointSeeder(
+            properties,
+            endpointsProperties,
+            examples,
+            demoWorkspaceSeeder,
+            pipelineRepository,
+            publishService,
+            keyService,
+            bindingRepository,
+            endpointRepository,
+            keyRepository,
+            apiKeyService,
+            secretHasher,
+            users,
+        )
 }

@@ -57,9 +57,10 @@ class ConfigValidator(
          * name. 24 since 137 added the two mail rules (`MailRules`). 25 since 156 added
          * `checkExecutorQueryTimeoutByDialect` (#2). 26 since 188 added
          * `PostureRules.checkHardenedRedisPassword` (#189). 27 since 7b added
-         * `checkTransformBounds` (#7 — evaluate ≤ suite, abandon-grace ≥ 1).
+         * `checkTransformBounds` (#7 — evaluate ≤ suite, abandon-grace ≥ 1). 29 since 224 added
+         * `checkDemoApiKey` and `checkEndpointKeyBudget`.
          */
-        internal const val CHECK_COUNT = 27
+        internal const val CHECK_COUNT = 29
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -110,6 +111,7 @@ class ConfigValidator(
             checkOidcProviders(snapshot, violations)
             checkResultTtlOrdering(snapshot, violations)
             checkEndpointsTimeoutOrdering(snapshot, violations)
+            DemoApiRules.enforceDemoApiRules(snapshot, violations)
             // §3.23 (075) — the posture rules live in their own file (PostureRules); the
             // CHECK_COUNT guard counts `check*` across both, so moving them cannot hide one.
             PostureRules.checkEnvName(snapshot, violations, warnings)
@@ -820,6 +822,10 @@ class ConfigValidator(
                 endpointsTimeoutDefaultSeconds =
                     environment.getProperty("datapipelines.endpoints.timeout-default-seconds", Int::class.java),
                 endpointsTimeoutMaxSeconds = environment.getProperty("datapipelines.endpoints.timeout-max-seconds", Int::class.java),
+                endpointsKeyRequestBudgetWindowSeconds =
+                    environment.getProperty("datapipelines.endpoints.key-request-budget.window-seconds", Int::class.java),
+                endpointsKeyRequestBudgetMaxRequests =
+                    environment.getProperty("datapipelines.endpoints.key-request-budget.max-requests", Int::class.java),
                 workspacesProvisioningMode = environment.getProperty("datapipelines.workspaces.provisioning-mode"),
                 // Whether the key is PRESENT, not what it says: a removed key is refused for
                 // being set at all, and `open-join: false` is still a deployment that believes
@@ -827,6 +833,7 @@ class ConfigValidator(
                 workspacesOpenJoinSet = environment.getProperty("datapipelines.workspaces.open-join") != null,
                 bootstrapDatasourcesFile = environment.getProperty("datapipelines.bootstrap.datasources-file"),
                 bootstrapExamplesFile = environment.getProperty("datapipelines.bootstrap.examples-file"),
+                bootstrapDemoApiKey = environment.getProperty("datapipelines.bootstrap.demo-api-key"),
                 bootstrapAdminEmail = environment.getProperty("datapipelines.auth.bootstrap-admin-email"),
                 localEnabled = environment.getProperty("datapipelines.auth.local.enabled", Boolean::class.java) ?: false,
                 // Presence flags ONLY — the seed values are credentials and must never
@@ -1055,6 +1062,9 @@ internal data class ConfigSnapshot(
     val endpointsTimeoutMinSeconds: Int? = null,
     val endpointsTimeoutDefaultSeconds: Int? = null,
     val endpointsTimeoutMaxSeconds: Int? = null,
+    /** §3.22 (#224) — the serve path's per-key request budget; null = key absent, the binder default applies. */
+    val endpointsKeyRequestBudgetWindowSeconds: Int? = null,
+    val endpointsKeyRequestBudgetMaxRequests: Int? = null,
     val workspacesProvisioningMode: String?,
     /** §3.17 — read here only for the open-join/closed cross-key rule; auth owns its semantics. */
     val workspacesOpenJoinSet: Boolean = false,
@@ -1062,6 +1072,8 @@ internal data class ConfigSnapshot(
     val bootstrapDatasourcesFile: String?,
     /** §3.18 — unset (or blank) = example seeding is off. Carried so the §7 log reports it. */
     val bootstrapExamplesFile: String?,
+    /** §3.18 (#224) — the demo workspace's public api_caller key; blank = the demo API is off. */
+    val bootstrapDemoApiKey: String? = null,
     /** §3.4 — read here only for the §3.18 cross-key rule; auth owns its semantics. */
     val bootstrapAdminEmail: String?,
     /** §3.4 — local password accounts enabled (auth.md §5A). */

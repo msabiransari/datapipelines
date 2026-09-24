@@ -244,7 +244,7 @@ What it loads: two independent families of published sample data, each downloade
 
 The third family, `lake`, is the exception to "downloaded": it has **no loader** — nothing is fetched or restored at demo start, because dp-lake reads the published Parquet/Iceberg objects **in place over HTTPS** at query time. A demo with `lake` therefore needs egress to S3 (or to a mirror you have configured in its place) not just at load time but whenever a lake query runs.
 
-**The `hardened` posture refuses a non-empty `DATAPIPELINES_DEMO` at boot.** Demo registers datasources and seeds content; that is evaluation, and it does not belong in an environment you have declared hardened.
+**The `hardened` posture refuses a non-empty `DATAPIPELINES_DEMO` at boot.** Demo registers datasources and seeds content; that is evaluation, and it does not belong in an environment you have declared hardened. It also refuses a set `DATAPIPELINES_DEMO_API_KEY`: seeding a demo family now publishes its pipelines as public demo endpoints and mints the demo-data page's public key from that setting (#224, [Deployment Appendix B](deployment.md#appendix-b-demo-quickstart--the-published-sample-data)) — blank it, or stay off `hardened`.
 
 ---
 

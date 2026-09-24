@@ -54,6 +54,10 @@ class WebPropertiesSpecDriftTest {
         documented.getValue("datapipelines.endpoints.timeout-default-seconds") shouldBe props.timeoutDefaultSeconds.toString()
         documented.getValue("datapipelines.endpoints.timeout-min-seconds") shouldBe props.timeoutMinSeconds.toString()
         documented.getValue("datapipelines.endpoints.timeout-max-seconds") shouldBe props.timeoutMaxSeconds.toString()
+        documented.getValue("datapipelines.endpoints.key-request-budget.window-seconds") shouldBe
+            props.keyRequestBudget.windowSeconds.toString()
+        documented.getValue("datapipelines.endpoints.key-request-budget.max-requests") shouldBe
+            props.keyRequestBudget.maxRequests.toString()
     }
 
     @Test

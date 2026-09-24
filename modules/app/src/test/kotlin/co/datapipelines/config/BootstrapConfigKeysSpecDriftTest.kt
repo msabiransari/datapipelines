@@ -1,5 +1,6 @@
 package co.datapipelines.config
 
+import co.datapipelines.web.bootstrap.BootstrapProperties
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.shouldBe
@@ -49,11 +50,31 @@ class BootstrapConfigKeysSpecDriftTest {
     }
 
     @Test
-    fun `both bootstrap keys ship OFF by default`() {
+    fun `the two file keys ship OFF by default`() {
         // "Unset = feature off" is the only switch (§3.18); the shipped default must therefore
         // resolve to empty when the env var is absent, exactly like bootstrap-admin-email.
         loaded["$PREFIX.datasources-file"] shouldBe "\${DATAPIPELINES_BOOTSTRAP_DATASOURCES_FILE:}"
         loaded["$PREFIX.examples-file"] shouldBe "\${DATAPIPELINES_BOOTSTRAP_EXAMPLES_FILE:}"
+    }
+
+    @Test
+    fun `the demo key ships its COMMITTED default, the same literal the Kotlin default carries`() {
+        // #224 — the third key is a credential value, not a path: its default is committed
+        // ON PURPOSE (the demo-data page renders it, and the static export renders the Kotlin
+        // constant with no Spring present). Two copies of one default drift silently, so this
+        // pins the YAML fallback to the constant — which is itself the single authority the
+        // seeder and the site both read.
+        val expected = "\${DATAPIPELINES_DEMO_API_KEY:${BootstrapProperties.DEFAULT_DEMO_API_KEY}}"
+        loaded["$PREFIX.demo-api-key"] shouldBe expected
+        // And the committed value is a credential the §7.1 shape gate would admit, so the
+        // shipped default never teaches an operator the malformed shape the §7 check refuses.
+        BootstrapProperties.DEFAULT_DEMO_API_KEY.shouldMatchDemoKeyShape()
+    }
+
+    /** The auth.md §7.1 shape, restated here because auth is not on this module's compile classpath. */
+    private fun String.shouldMatchDemoKeyShape() {
+        val dot = indexOf('.')
+        (length <= 80 && dot > 0 && dot < length - 1 && Regex("^dpk_[A-Z2-7]{12}$").matches(substring(0, dot))) shouldBe true
     }
 
     @Test
@@ -92,7 +113,7 @@ class BootstrapConfigKeysSpecDriftTest {
     private companion object {
         const val PREFIX = "datapipelines.bootstrap"
 
-        val EXPECTED = listOf("$PREFIX.datasources-file", "$PREFIX.examples-file")
+        val EXPECTED = listOf("$PREFIX.datasources-file", "$PREFIX.demo-api-key", "$PREFIX.examples-file")
 
         val KEY_REGEX = Regex("""datapipelines\.bootstrap\.[a-z0-9-]+""")
     }

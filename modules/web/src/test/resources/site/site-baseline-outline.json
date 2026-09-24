@@ -3155,6 +3155,7 @@
     "dd-trade",
     "dd-lake",
     "dd-ask",
+    "dd-api",
     "dd-licence",
     "dd-reproduce",
     "faq",
@@ -3184,6 +3185,10 @@
     {
      "level": "H2",
      "text": "Pipelines the demo ships, and the question each answers"
+    },
+    {
+     "level": "H2",
+     "text": "Call the demo pipelines as APIs, no account needed"
     },
     {
      "level": "H2",

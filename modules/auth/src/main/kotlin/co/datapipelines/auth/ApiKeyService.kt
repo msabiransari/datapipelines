@@ -78,15 +78,58 @@ open class ApiKeyService(
         workspaceId: UUID,
         expiresAt: Instant? = null,
         kind: ApiKeyKind,
+    ): IssuedApiKey =
+        issueInternal(issuer, name, workspaceId, expiresAt, kind) {
+            val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
+            "$keyId.${randomBase32(SECRET_LEN)}"
+        }
+
+    /**
+     * The issuance contract with the credential SUPPLIED (#224) — the bootstrap seeder's mint:
+     * the demo workspace's public `api_caller` key is minted from the configured plaintext, so
+     * the value on the demo-data page is the value that works. Every guard of [issue] runs
+     * unchanged (kind mintable, the issuer's `api_key.create` in the pinned workspace, the
+     * creation limit); the only difference is where the credential comes from, and that the
+     * supplied value must already pass the §7.1 shape gate — a malformed configured key is a
+     * configuration error and refuses the boot, not a first failed login.
+     *
+     * The overload exists for the bootstrap actor alone (there is exactly one caller); it is a
+     * companion to the random mint, not a second credential policy.
+     *
+     * @throws IllegalArgumentException when [plaintext] is not a well-formed `dpk_` credential.
+     */
+    @Transactional("metadataTransactionManager")
+    @Suppress("LongParameterList") // the issuance contract
+    open fun issue(
+        issuer: AuthenticatedPrincipal,
+        name: String,
+        workspaceId: UUID,
+        expiresAt: Instant?,
+        kind: ApiKeyKind,
+        plaintext: String,
+    ): IssuedApiKey {
+        require(ApiKeyCredential.hasValidShape(plaintext)) {
+            "The supplied key plaintext is not a well-formed dpk_<id>.<secret> credential (auth.md §7.1)."
+        }
+        return issueInternal(issuer, name, workspaceId, expiresAt, kind) { plaintext }
+    }
+
+    /** The shared mint: [credential] supplies the plaintext, randomly when the caller does not. */
+    private fun issueInternal(
+        issuer: AuthenticatedPrincipal,
+        name: String,
+        workspaceId: UUID,
+        expiresAt: Instant?,
+        kind: ApiKeyKind,
+        credential: () -> String,
     ): IssuedApiKey {
         if (kind !in ApiKeyKind.IDENTITY_KINDS) throw KeyKindNotMintableException(kind)
         val role = requireNotNull(KeyRole.forKind(kind)) { "an identity kind carries a key role" }
         val context = workspaceService.requireIssuancePermission(issuer, workspaceId, kind)
         requireWithinCreator(role, issuer, context)
 
-        val keyId = "$KEY_PREFIX${randomBase32(ID_LEN)}"
-        val secret = randomBase32(SECRET_LEN)
-        val fullKey = "$keyId.$secret"
+        val fullKey = credential()
+        val keyId = fullKey.substringBefore('.')
         val hash = secretHasher.hash(fullKey)
 
         val identity = userService.provisionIdentity(keyId, name)

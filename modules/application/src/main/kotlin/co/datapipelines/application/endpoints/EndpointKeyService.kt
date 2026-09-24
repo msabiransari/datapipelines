@@ -59,6 +59,36 @@ class EndpointKeyService(
         kind: ApiKeyKind,
         bindingPaths: List<String>,
         expiresAt: Instant?,
+    ): IssuedApiKey = issueInternal(principal, name, role, kind, bindingPaths, expiresAt, plaintext = null)
+
+    /**
+     * The issuance contract with the credential SUPPLIED (#224) — the bootstrap seeder's mint of
+     * the demo workspace's public `api_caller` key from its configured plaintext. Every guard of
+     * [issue] runs unchanged; the plaintext reaches [ApiKeyService]'s supplied-credential mint,
+     * which owns the §7.1 shape gate. This overload and the `ApiKeyService` one are the lane's
+     * listed signature changes — both exist for exactly one caller, the bootstrap seeder.
+     */
+    @Suppress("LongParameterList", "ThrowsCount") // the issuance contract; each refusal has its own catalogued code
+    fun issue(
+        principal: AuthenticatedPrincipal,
+        name: String,
+        role: KeyRole?,
+        kind: ApiKeyKind,
+        bindingPaths: List<String>,
+        expiresAt: Instant?,
+        plaintext: String,
+    ): IssuedApiKey = issueInternal(principal, name, role, kind, bindingPaths, expiresAt, plaintext)
+
+    /** The shared funnel: [plaintext] null = the random mint, else the supplied credential. */
+    @Suppress("LongParameterList", "ThrowsCount") // the issuance contract; each refusal has its own catalogued code
+    private fun issueInternal(
+        principal: AuthenticatedPrincipal,
+        name: String,
+        role: KeyRole?,
+        kind: ApiKeyKind,
+        bindingPaths: List<String>,
+        expiresAt: Instant?,
+        plaintext: String?,
     ): IssuedApiKey {
         val workspaceId = principal.requireWorkspace().id
         val normalized = bindingPaths.map(::normalizeBinding)
@@ -98,13 +128,24 @@ class EndpointKeyService(
         normalized.forEach { requireInsideWorkspace(it, workspaceId) }
 
         val issued =
-            apiKeys.issue(
-                issuer = principal,
-                name = name,
-                workspaceId = workspaceId,
-                expiresAt = expiresAt,
-                kind = kind,
-            )
+            if (plaintext == null) {
+                apiKeys.issue(
+                    issuer = principal,
+                    name = name,
+                    workspaceId = workspaceId,
+                    expiresAt = expiresAt,
+                    kind = kind,
+                )
+            } else {
+                apiKeys.issue(
+                    issuer = principal,
+                    name = name,
+                    workspaceId = workspaceId,
+                    expiresAt = expiresAt,
+                    kind = kind,
+                    plaintext = plaintext,
+                )
+            }
 
         normalized.forEach { prefix ->
             bindings.insert(
