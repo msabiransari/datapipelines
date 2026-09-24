@@ -1,6 +1,6 @@
 # Design: TRANSFORM nodes — JSONata and JavaScript as template types, one node type, one contract, tested like code
 
-**Status:** v0.3, RATIFIED for dispatch (2026-09-23) on the owner's nine rulings R1–R9 (§0.1).
+**Status:** v0.4 (2026-09-24): v0.3 RATIFIED for dispatch (2026-09-23) on the owner's nine rulings R1–R9 (§0.1); v0.4 restates every authorization row in the vocabulary of the permissions-and-keys record (`2026-09-23-permissions-and-keys-design.md`, RATIFIED 2026-09-23, #215), which lands BEFORE the remaining transform lanes (owner, 2026-09-24).
 Supersedes v0.2 (2026-09-17) in place; every v0.2 decision stands, and the pre-dispatch review
 of 2026-09-23 (store: `notes/2026-09-23-transform-spec-review.md`) corrected eight statements
 that disagreed with the tree at `be0305b3` (§0.2) and closed nine holes with the owner. GitHub
@@ -665,25 +665,38 @@ mode, output, rejects, strict), read-only as every node is today. A `needs_revie
 shows its marker in both explorers and on the card. Every verb sits inside the role guard
 its row in §9.4 names.
 
-### 9.4 Roles (AGENTS.md rule of 2026-09-20; R6)
+### 9.4 Roles (AGENTS.md rule of 2026-09-20; R6; vocabulary of the permissions record, v0.4)
 
-| Action (route / tool / verb) | viewer | author | promoter | ws_admin | super_admin | `RestOperation` or tool row | Guard |
+Authorization is a catalog permission per surface (`<functionality>.<permission>`, PK1); roles hold
+permissions; no code compares role names. The cells are the permissions record's §2.1 rows; R6's
+choice (the `templates_render` row for evaluation) is unchanged. Lane 7b landed `templates_evaluate`
+and `POST /api/v1/templates/evaluate` in the pre-catalog vocabulary (`Scope.AUTHOR` / `Permission.AUTHOR`);
+#215's slice (a) migrates them to `template.evaluate`. No transform surface gains or loses access.
+
+| Action (route / tool / verb) | viewer | author | promoter | ws_admin | super_admin | Catalog permission | Guard |
 |---|---|---|---|---|---|---|---|
-| `templates_evaluate` (MCP) | ✗ | ✓ | ✗ | ✓ | ✓ | `MCP_TOOL_MIN_SCOPE` = `AUTHOR`, `MCP_TOOL_MIN_PERMISSION` = `AUTHOR` (the `templates_render` row) | `ScopeMatrixSpecDriftTest`, `RoleWalkE2eTest` via auth.md §7.6 |
-| `POST /api/v1/templates/evaluate` | ✗ | ✓ | ✗ | ✓ | ✓ | `MUTATE_PIPELINES_TEMPLATES` (existing; `POST /render` declares it, and auth.md §7.6's REST row "POST/PUT/DELETE on /api/v1/templates" already covers the path) — no new `RestOperation` | `MatrixRowReachabilityTest`, `RoleWalkE2eTest` |
-| `contract`/`invariants`/`tests`/`implements` on `templates_create`/`_update` and `POST`/`PUT /api/v1/templates` | ✗ | ✓ | ✗ | ✓ | ✓ | no new row — fields on existing mutating actions | existing |
-| `templates_list?implements=` / `GET /api/v1/templates?implements=` | ✓ | ✓ | ✓ | ✓ | ✓ | no new row — a filter on an existing read | `ReadFloorTest` |
-| `semantics_list` `implemented_by` | ✓ | ✓ | ✓ | ✓ | ✓ | no new row — a field on an existing read | existing |
-| UI: run suite, the transform face's Save/Release | ✗ | ✓ | ✗ | ✓ | ✓ | the existing template-editor verbs' guard | `RoleVisibilityRenderTest` |
-| UI: the `needs_review` marker, the node card | ✓ | ✓ | ✓ | ✓ | ✓ | read-only rendering | `RoleVisibilityRenderTest` (no verb) |
+| `templates_evaluate` (MCP), `POST /api/v1/templates/evaluate` | ✗ | ✓ | ✗ | ✓ | ✓ | `template.evaluate` (7b landed it on the `templates_render` row; #215(a) renames) | catalog drift (`ScopeMatrixSpecDriftTest` as extended by #215), `RequiredScopeCoverageTest`, `MatrixRowReachabilityTest`, `RoleWalkE2eTest` |
+| `contract`/`invariants`/`tests`/`implements` on `templates_create` / `POST /api/v1/templates` | ✗ | ✓ | ✗ | ✓ | ✓ | `template.create` — fields on an existing action | existing |
+| the same on `templates_update` / `PUT /api/v1/templates` (`implements` on a released version too) | ✗ | ✓ | ✗ | ✓ | ✓ | `template.update` | existing |
+| `templates_list?implements=` / `GET /api/v1/templates?implements=`, `needs_review` on read | ✓ | ✓ | lens | ✓ | ✓ | `template.read` — a filter/field on an existing read | `ReadFloorTest` |
+| `semantics_list` `implemented_by` | ✓ | ✓ | ✓ | ✓ | ✓ | `semantic.read` — a field on an existing read | existing |
+| the release `warnings` (a `needs_review` pin) | ✗ | ✓ | ✗ | ✓ | ✓ | `pipeline.release` — a field on the existing release | existing |
+| UI: Save draft on the transform face (`POST /partials/templates/transform-face/save`) | ✗ | ✓ | ✗ | ✓ | ✓ | `template.update` | `RequiredScopeCoverageTest`, `MutatingHandlerScopeFloorTest`, `RoleVisibilityRenderTest` |
+| UI: Run suite (`POST /partials/templates/transform-face/run-suite`) | ✗ | ✓ | ✗ | ✓ | ✓ | `template.evaluate` | the same |
+| UI: the face read-only, the `needs_review` marker, the node card | ✓ | ✓ | lens | ✓ | ✓ | `template.read` / `pipeline.read` | `ReadFloorTest`, `RoleVisibilityRenderTest` (no verb) |
+| `pipelines_execute_node` on a TRANSFORM | ✗ | ✓ | ✗ | ✓ | ✓ | `pipeline.execute_node` — unchanged row; REFUSES the type | existing |
+
+Keys: the MCP key holds the member's role (capped at author, PK4), so a member's agent can
+evaluate exactly when the member can. No API-key role holds `template.evaluate`, `template.create`
+or `template.update` (§3.2 of the permissions record; the `api_caller` role serves endpoints only).
 
 ### 9.5 Security (AGENTS.md rule of 2026-09-21)
 
 - **The body is untrusted code evaluated on the server.** Its blast radius is §4.5's table:
   CPU (bounded between steps + pool + abandon), depth (bounded), heap (NOT bounded by the
   library — input/output caps only), no host access (no registered functions; `$now`/`$millis`
-  pinned). A template author must hold `author` in the workspace (the roles table): the
-  evaluation surface is never reachable with a read-only key.
+  pinned). A template author must hold `template.evaluate` (author and above, §9.4): the evaluation
+  surface is reachable through a member's MCP key only, never through an API key.
 - **Injection:** no Freemarker on transform bodies (D-T9); a body is never spliced with any
   value; inputs reach the function as a JSON object, never as source.
 - **SQL:** every tempdb table name a TRANSFORM writes is validated by §6.1's regex and passed
@@ -816,7 +829,10 @@ blending → the tempdb join; Ask/Explain Data → the agent; Prep flows → pip
 | **7d — the UI** | `web` templates/JS/browser tests for the explorer faces, the transform editor face, the node card | §9.3 with screenshots. | 7b merged (may overlap 7c: `web` vs `dag`) |
 | **7e — the semantic link** | `datasources/semantics`, `templates` (the join table + `implements` on write/read), `mcp-server` (`semantics_list` field, `templates_list` filter), `web` (the marker, the release warning, the list filter), `app` (its migration), docs, the skill's learn-first step | §2.3, §8.2, §8.3 (R9). | 7b merged; after 7d (both touch `web`) |
 
-Round two (#8, the JavaScript engine) and the parameter engine follow the scheduler (R8).
+**Order (owner, 2026-09-24):** 7a and 7b are on main (`ad183ebc`, `4e3134cd`); the permissions work
+(#215, three slices) lands next and BEFORE 7c; then 7c → 7d → 7e in strict sequence, each
+prompt naming its base at dispatch. Round two (#8, the JavaScript engine) and the parameter engine
+follow the scheduler (R8).
 
 ---
 
@@ -827,4 +843,5 @@ Round two (#8, the JavaScript engine) and the parameter engine follow the schedu
 | 2026-09-09 | v0.1 | orchestrator, after the owner's brainstorm | Initial record: six decisions; engine and sandbox facts verified against graalvm.org and Maven Central; decimal-as-string rule. |
 | 2026-09-17 | v0.2 | orchestrator, after the owner's second brainstorm | Rewritten in place. Pure function only — no tempdb handle, no `emit` (D-T4); one Context namespace, `params`/`context` removed from the input object (D-T10); `meta` block; mode moves to the template's contract; **contract, invariants, tests on the version inside the body hash** (D-T7), a scoped D3 exception (D-T8); no Freemarker on transform bodies (D-T9); rejects + strict (D-T11); exact canonical equality + invariants on every case (D-T12); invariants always JSONata (D-T13); `implements` + `needs_review` drift + discovery (§8); `templates_evaluate` returns invariants; two rounds, JSONata first (D-T14); the `UNTRUSTED` host-collection rule and its JSON-text consequence recorded for round two (§4.4); `values` in the result payload considered and dropped (dashboards are a separate runtime); v0.1's O-1..O-5 resolved. |
 | 2026-09-23 | v0.3 | orchestrator, after the pre-dispatch review and the owner's rulings R1–R9 | Ratified for dispatch. Corrections against the tree at `be0305b3` (§0.2): `LogicalType` vocabulary replaces the invented type table (D-T5, §6); the body hash is the SQL `jsonb_build_object` expression, extended, with export/import carrying the blocks (§2.2); `execute_node` refuses a TRANSFORM (§9.1); `engine` type-conditional, `imports`/`is_library` refused (§2.1); textarea panes (§9.3); one save-time `type_unsupported`; nullability always scanned (§5.1). Rulings: `DECIMAL` rounding at the gate (R1, §5.3); row-mode cases mirror production (R2, §2.2); no JSON result bodies, value mode writes a key only (R3, §3.1, §9.6, §11); object keys readable by TRANSFORM only (R4, §3.1, §7); rejects-on-caller refused (R5); the roles table (R6, §9.4); D-T15 + §4.5 the honest JSONata bounds, the evaluation pool, the caps, the breach suite (R7); build order transforms → scheduler → parameters (R8); `implements` in round one as lane 7e (R9). New §9.2 REST, §9.5 Security, §14 lane split. |
+| 2026-09-24 | v0.4 | orchestrator, after the permissions record | §9.4 rewritten in the catalog vocabulary (`template.evaluate` / `template.create` / `template.update` / `template.read` / `semantic.read` / `pipeline.release` / `pipeline.execute_node`; guards as #215 extends them); §9.5's holder sentence; §14 order: #215 before 7c (owner). No cell changed. |
 | 2026-09-23 | v0.3.1 | orchestrator, at the 7a merge | §4.3 pool: the bulkhead — an abandoned evaluation keeps its slot until its thread ends; `pool-queue` bounds total admissions; a caller waits at most its own wall clock. §4.5: depth catches expression nesting, time catches recursive lambdas; the breach suite's measured outcomes recorded. §2.2: a test case may pin the clock with `now` (7a's A.3 made `$now()` refuse when unpinned). |
