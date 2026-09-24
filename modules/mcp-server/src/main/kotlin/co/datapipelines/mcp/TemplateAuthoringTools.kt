@@ -491,17 +491,16 @@ class TemplatesRenderTool(
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredString("id")
-        val version = resolveVersion(args, workspaceId, id)
+        val (version, type) = resolveVersion(args, workspaceId, id)
         // 7b (record §9.1): a transform type has nothing to render — the refusal points at
         // the evaluate tool, the way the REST /render twin does.
-        val stored = templates.lookupVersion(workspaceId, id, version)
-        if (stored != null && stored.type.isTransform) {
+        if (type != null && type.isTransform) {
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
                 message =
-                    "Template '$id' has type '${stored.type.wire}' — a transform is evaluated, not rendered; " +
+                    "Template '$id' has type '${type.wire}' — a transform is evaluated, not rendered; " +
                         "use templates_evaluate.",
-                details = mapOf("type" to stored.type.wire, "use" to "templates_evaluate"),
+                details = mapOf("type" to type.wire, "use" to "templates_evaluate"),
             )
         }
         return engines.engineFor(workspaceId).render(TemplateRef(id, version), args.requiredObject("context"))
@@ -511,13 +510,17 @@ class TemplatesRenderTool(
         args: McpArguments,
         workspaceId: java.util.UUID,
         id: String,
-    ): Int {
+    ): Pair<Int, TemplateType?> {
         // The working version (D55/§7.1): a template created and not yet released has only a
         // draft, and defaulting to the released one would refuse to render it.
-        val version = args.version() ?: return templates.findWorking(workspaceId, id)?.version ?: throw McpNotFound.template(id)
-        if (templates.lookupVersion(workspaceId, id, version) == null) {
-            throw if (templates.existsId(workspaceId, id)) McpNotFound.templateVersion(id, version) else McpNotFound.template(id)
+        val explicit = args.version()
+        if (explicit == null) {
+            val working = templates.findWorking(workspaceId, id) ?: throw McpNotFound.template(id)
+            return working.version to working.type
         }
-        return version
+        val stored =
+            templates.lookupVersion(workspaceId, id, explicit)
+                ?: throw if (templates.existsId(workspaceId, id)) McpNotFound.templateVersion(id, explicit) else McpNotFound.template(id)
+        return explicit to stored.type
     }
 }
