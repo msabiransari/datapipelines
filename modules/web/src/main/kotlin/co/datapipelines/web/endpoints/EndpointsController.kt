@@ -7,8 +7,8 @@ import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.web.api.ApiErrors
@@ -86,7 +86,7 @@ class EndpointsController(
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_ENDPOINTS)
+    @RequiredScope(Permission.ENDPOINT_PUBLISH)
     @Transactional("metadataTransactionManager")
     fun create(
         @RequestBody body: CreateEndpointRequest,
@@ -104,7 +104,7 @@ class EndpointsController(
 
     /** §19.5 — the workspace's endpoints, or one of them with `?path=`. */
     @GetMapping
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.ENDPOINT_READ)
     fun list(
         @RequestParam(required = false) path: String?,
     ): ApiResponse<Any> {
@@ -120,7 +120,7 @@ class EndpointsController(
     /** §19.5 — unpublish. Idempotent-ish: an unknown path is a 404, never a silent success. */
     @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_ENDPOINTS)
+    @RequiredScope(Permission.ENDPOINT_UNPUBLISH)
     @Transactional("metadataTransactionManager")
     fun delete(
         @RequestParam path: String,
@@ -138,7 +138,7 @@ class EndpointsController(
      */
     @PostMapping("/bindings")
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
+    @RequiredScope(Permission.API_KEY_BIND)
     @Transactional("metadataTransactionManager")
     fun bind(
         @RequestBody body: BindEndpointKeyRequest,
@@ -152,7 +152,7 @@ class EndpointsController(
     /** §19.5 — unbind. Both addressing forms, exactly as [bind]. */
     @DeleteMapping("/bindings")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
+    @RequiredScope(Permission.API_KEY_BIND)
     @Transactional("metadataTransactionManager")
     fun unbind(
         @RequestParam pathPrefix: String,

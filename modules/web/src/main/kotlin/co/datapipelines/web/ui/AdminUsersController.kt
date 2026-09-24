@@ -1,8 +1,8 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthProperties
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceRole
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.stereotype.Controller
@@ -30,7 +30,7 @@ class AdminUsersController(
      * which scope cannot express (auth.md §5A.7).
      */
     @GetMapping("/admin/users")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun users(
         model: Model,
         request: HttpServletRequest,

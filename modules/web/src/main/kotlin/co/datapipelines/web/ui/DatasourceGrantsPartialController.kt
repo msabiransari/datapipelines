@@ -2,8 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.datasources.DatasourceAuditEvents
 import co.datapipelines.datasources.DatasourceGrantRepository
@@ -53,7 +53,7 @@ class DatasourceGrantsPartialController(
 ) {
     /** The dialog: the grants this datasource holds, plus the add form. */
     @GetMapping("/partials/datasources/{name}/grants")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
+    @RequiredScope(Permission.DATASOURCE_GRANT)
     fun dialog(
         model: Model,
         @PathVariable name: String,
@@ -64,7 +64,7 @@ class DatasourceGrantsPartialController(
      * keeps the original actor — the first grant is the decision.
      */
     @PostMapping("/partials/datasources/{name}/grants")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
+    @RequiredScope(Permission.DATASOURCE_GRANT)
     fun grant(
         model: Model,
         @PathVariable name: String,
@@ -83,7 +83,7 @@ class DatasourceGrantsPartialController(
      * credential — and the workspace that loses it simply stops being able to see the row.
      */
     @PostMapping("/partials/datasources/{name}/grants/{workspace}/remove")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
+    @RequiredScope(Permission.DATASOURCE_GRANT)
     fun revoke(
         model: Model,
         @PathVariable name: String,

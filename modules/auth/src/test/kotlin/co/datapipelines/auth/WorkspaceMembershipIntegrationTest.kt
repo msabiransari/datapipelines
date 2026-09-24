@@ -129,9 +129,9 @@ class WorkspaceMembershipIntegrationTest {
         workspaces.roleOf(ws.id, alice.id) shouldBe promoterOnly
         // …and the two permissions that separates (D5, D8): promote yes, authoring no —
         // and since 2026-09-20 release and switch are the author's, not the promoter's.
-        Permission.PROMOTE.satisfiedBy(promoterOnly, superAdmin = false).shouldBeTrue()
-        Permission.AUTHOR.satisfiedBy(promoterOnly, superAdmin = false).shouldBeFalse()
-        Permission.EXECUTE.satisfiedBy(promoterOnly, superAdmin = false).shouldBeFalse()
+        Permission.PROMOTION_PROMOTE.satisfiedBy(promoterOnly, superAdmin = false).shouldBeTrue()
+        Permission.TEMPLATE_UPDATE.satisfiedBy(promoterOnly, superAdmin = false).shouldBeFalse()
+        Permission.PIPELINE_EXECUTE.satisfiedBy(promoterOnly, superAdmin = false).shouldBeFalse()
     }
 
     @Test

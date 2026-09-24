@@ -68,13 +68,13 @@ class SemanticsToolsTest {
             { McpToolCatalog.NAMES shouldContain "semantics_record" },
             { McpToolCatalog.isMutating("semantics_record") shouldBe true },
             { ScopeMatrix.requiredScopeForTool("semantics_record") shouldBe Scope.AUTHOR },
-            { ScopeMatrix.requiredPermissionForTool("semantics_record") shouldBe Permission.AUTHOR },
+            { ScopeMatrix.requiredPermissionForTool("semantics_record") shouldBe Permission.SEMANTIC_RECORD },
             { McpToolCatalog.isMutating("semantics_list") shouldBe false },
             { ScopeMatrix.requiredScopeForTool("semantics_list") shouldBe Scope.READ },
-            { ScopeMatrix.requiredPermissionForTool("semantics_list") shouldBe Permission.VIEW },
+            { ScopeMatrix.requiredPermissionForTool("semantics_list") shouldBe Permission.SEMANTIC_READ },
             { McpToolCatalog.isMutating("semantics_retire") shouldBe true },
             { ScopeMatrix.requiredScopeForTool("semantics_retire") shouldBe Scope.AUTHOR },
-            { ScopeMatrix.requiredPermissionForTool("semantics_retire") shouldBe Permission.AUTHOR },
+            { ScopeMatrix.requiredPermissionForTool("semantics_retire") shouldBe Permission.SEMANTIC_RETIRE },
             {
                 // 120 appended the two docs tools after these three and 140 the check run after
                 // those — the tail is now six.

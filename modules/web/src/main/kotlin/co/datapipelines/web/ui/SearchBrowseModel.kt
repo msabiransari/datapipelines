@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -142,7 +143,7 @@ class SearchBrowseModel(
         status: ExecutionStatus?,
         pipelineId: UUID?,
     ): List<ExecutionRecord> =
-        if (principal.isWorkspaceAdmin) {
+        if (principal.holds(Permission.EXECUTION_READ_ALL)) {
             executions.findAll(workspaceId, pipelineId, status, limit = GROUP_LIMIT + 1)
         } else {
             executions.findByUser(workspaceId, principal.userId, pipelineId, status, limit = GROUP_LIMIT + 1)

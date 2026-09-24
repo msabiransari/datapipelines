@@ -1,8 +1,8 @@
 package co.datapipelines.web.pipelines
 
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
@@ -65,7 +65,7 @@ class PipelineTransferController(
      * the created/updated distinction → status code.
      */
     @PostMapping("/import")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_IMPORT)
     fun import(
         @RequestBody body: String,
     ): ResponseEntity<ApiResponse<JsonNode>> {
@@ -90,7 +90,7 @@ class PipelineTransferController(
     /** §5.9 — export bundle: pipeline, referenced template versions, manifest. */
     @Suppress("ThrowsCount") // the misses are the same catalogued 404 for different absent reads
     @GetMapping("/{id}/export")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun export(
         @PathVariable id: UUID,
         @RequestParam(name = "include_templates", required = false) includeTemplates: Boolean = true,

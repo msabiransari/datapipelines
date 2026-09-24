@@ -2,6 +2,7 @@ package co.datapipelines.web.datasources
 
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.datasources.toWireMap
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.DatasourceRegistry
@@ -50,7 +51,7 @@ class LakeTablesController(
      */
     @PostMapping("/{name}/tables")
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_LAKE_TABLES)
+    @RequiredScope(Permission.LAKE_TABLE_MANAGE)
     fun register(
         @PathVariable name: String,
         @RequestBody body: JsonNode,
@@ -67,7 +68,7 @@ class LakeTablesController(
      */
     @DeleteMapping("/{name}/tables/{namespace}/{table}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_LAKE_TABLES)
+    @RequiredScope(Permission.LAKE_TABLE_MANAGE)
     fun unregister(
         @PathVariable name: String,
         @PathVariable namespace: String,
@@ -90,7 +91,7 @@ class LakeTablesController(
      * Idempotent: already-registered triples are reported, not errors.
      */
     @PostMapping("/{name}/tables/import")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_LAKE_TABLES)
+    @RequiredScope(Permission.LAKE_TABLE_MANAGE)
     fun import(
         @PathVariable name: String,
         @RequestBody body: JsonNode,
@@ -106,7 +107,7 @@ class LakeTablesController(
      * reads live metadata. Read scope; the tree UI renders this.
      */
     @GetMapping("/{name}/lake-tables")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun listRegistered(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> {

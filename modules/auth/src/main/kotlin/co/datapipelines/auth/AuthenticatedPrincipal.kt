@@ -119,29 +119,27 @@ data class AuthenticatedPrincipal(
     val isSuperAdmin: Boolean get() = superAdmin
 
     /**
-     * True when this principal administers the ACTIVE workspace — the `workspace_admin` role,
-     * or super admin (D-R8, who administers every workspace).
+     * True when this principal administers the ACTIVE workspace's members — the workspace
+     * admin's representative permission, `workspace.members.manage` — or is super admin (D-R8,
+     * who administers every workspace).
      *
-     * The successor to `Scope.satisfies(scopes, ADMIN)`, which a dozen surfaces used as "is
-     * this an administrator" and which round 1 made permanently FALSE: a session carries no
-     * scopes (D-R1) and no key may hold `admin` (O-2). Every one of those sites had silently
-     * become "nobody", and the two that were load-bearing — the admin user screens and
-     * execution visibility — were found by E2Es rather than by the compiler, because a scope
-     * test still compiles perfectly after the scope stops being reachable.
-     *
-     * Spelled ONCE here for that reason: the next person to ask "is this an administrator"
-     * should find one answer, not re-derive a tenth.
+     * Kept for the screens' "administers this workspace" question (the role model, the shell).
+     * A CHECK asks for the permission it is about instead (#215 A.3): the own-only execution
+     * filters ask `execution.read_all`, the cross-workspace fact retire `datasource.manage` —
+     * so a later ruling that splits one of those from membership administration moves only
+     * that check. The successor, before that, to `Scope.satisfies(scopes, ADMIN)`, which round
+     * 1 made permanently FALSE (a session carries no scopes, D-R1; no key holds `admin`, O-2).
      */
     val isWorkspaceAdmin: Boolean
-        get() = superAdmin || holds(Permission.WS_ADMIN)
+        get() = superAdmin || holds(Permission.WORKSPACE_MEMBERS_MANAGE)
 
     /**
-     * "May this principal AUTHOR here" — the same question [isWorkspaceAdmin] answers one rung
-     * up, and it had the same defect for the same reason: the UI asked it as
-     * `Scope.satisfies(scopes, AUTHOR)`, and a SESSION carries no scopes at all since D-R1. Two
-     * screens' entire action columns — every Test/Edit/Delete button on `/datasources`, the
-     * Create Template button — were therefore invisible to every signed-in human, including a
-     * workspace admin, with no refusal to explain it. Found by the browser suite.
+     * "May this principal AUTHOR here" — asked through the author row's representative
+     * permission, `template.update` (#215: every authoring permission is held by exactly the
+     * author and workspace-admin columns). The same defect [isWorkspaceAdmin] had, for the same
+     * reason: the UI once asked it as `Scope.satisfies(scopes, AUTHOR)`, and a SESSION carries no
+     * scopes at all since D-R1, so two screens' action columns were invisible to every
+     * signed-in human. Found by the browser suite.
      *
      * A KEY still answers on the scope axis, which is why the scope is consulted when there is
      * one: a `read` key must not see an author's affordances just because its owner is an
@@ -151,12 +149,12 @@ data class AuthenticatedPrincipal(
         get() =
             superAdmin ||
                 (
-                    holds(Permission.AUTHOR) &&
+                    holds(Permission.TEMPLATE_UPDATE) &&
                         (authMethod != AuthMethod.API_KEY || Scope.satisfies(scopes, Scope.AUTHOR))
                 )
 
     /**
-     * "May this principal PROMOTE here" — [Permission.PROMOTE], the third rung of the same
+     * "May this principal PROMOTE here" — [Permission.PROMOTION_PROMOTE], the third rung of the same
      * question [isWorkspaceAdmin] and [isAuthor] answer, spelled here for the same reason: the
      * screens ask it, and a screen that re-derives a permission predicate is one more place the
      * matrix can drift away from (114 — the round that made the UI stop offering verbs the
@@ -164,7 +162,7 @@ data class AuthenticatedPrincipal(
      *
      * Deliberately NOT implied by [isAuthor] and not implying it: since the 2026-09-20 rulings
      * an author RELEASES and a promoter PROMOTES (D5, D8) — the two roles hold different rows,
-     * which is the whole reason [Permission] is a set of role sets rather than a chain.
+     * which is the whole reason [RolePermissions] writes each role's column out rather than a chain.
      *
      * The API-key conjunct is [isAuthor]'s, and for the same reason: the credential axis has no
      * promoter, so `author` is the scope the promote row carries in §7.6 and a `read` key must
@@ -174,7 +172,7 @@ data class AuthenticatedPrincipal(
         get() =
             superAdmin ||
                 (
-                    holds(Permission.PROMOTE) &&
+                    holds(Permission.PROMOTION_PROMOTE) &&
                         (authMethod != AuthMethod.API_KEY || Scope.satisfies(scopes, Scope.AUTHOR))
                 )
 
@@ -202,8 +200,28 @@ data class AuthenticatedPrincipal(
     val isLensed: Boolean
         get() = workspaceRole == WorkspaceRole.PROMOTER && !superAdmin
 
-    /** [Permission.satisfiedBy] over the active context; false with no context. The one spelling every predicate above shares. */
-    fun holds(permission: Permission): Boolean = workspace?.permits(permission) ?: false
+    /**
+     * Does this principal hold [permission] — the ONE question a service asks (#215 A.3), and
+     * the one spelling every predicate above shares.
+     *
+     * An INSTANCE permission ([RolePermissions.INSTANCE] — workspaces, users, grants, server
+     * keys) is the USER's authority, not a membership's, so it is judged on [superAdmin] alone,
+     * with or without a reachable workspace (#113's empty-instance recovery) — exactly the
+     * `isSuperAdmin` checks it replaced, including for a context resolved from a plain membership
+     * row. Every other permission is judged over the active context; with none, it is the D-R5
+     * 404 and is not held. Scopes are the credential axis and are not consulted here; the matrix
+     * asks them at the route.
+     */
+    fun holds(permission: Permission): Boolean =
+        if (permission in RolePermissions.INSTANCE) superAdmin else workspace?.permits(permission) ?: false
+
+    /**
+     * The role this principal would be judged as — a refusal's informative `held` detail (#215
+     * A.6): `super_admin` for the instance super admin, else the active membership's role, or
+     * null with no reachable workspace.
+     */
+    val heldRole: String?
+        get() = if (superAdmin) WorkspaceContext.SUPER_ADMIN_WIRE else workspace?.heldRole
 
     /**
      * The resolved active workspace, or [WorkspaceMembershipRequiredException] (403)

@@ -3,9 +3,9 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.semantics.SemanticsService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.datasources.Datasource
@@ -51,11 +51,11 @@ class DatasourceFactsPartialControllerTest {
     fun clearContext() = SecurityContextHolder.clearContext()
 
     @Test
-    fun `the dialog is a member read - READ_RESOURCES, the listing's own floor`() {
+    fun `the dialog is a member read - semantic read, the listing's own permission`() {
         DatasourceFactsPartialController::class.java.methods
             .first { it.name == "dialog" }
             .getAnnotation(RequiredScope::class.java)
-            .value shouldBe ScopeMatrix.RestOperation.READ_RESOURCES
+            .value shouldBe Permission.SEMANTIC_READ
     }
 
     @Test

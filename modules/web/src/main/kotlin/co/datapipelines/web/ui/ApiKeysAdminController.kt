@@ -8,8 +8,8 @@ import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -51,7 +51,7 @@ class ApiKeysAdminController(
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/api-keys")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
+    @RequiredScope(Permission.API_KEY_READ)
     fun page(
         model: Model,
         request: HttpServletRequest,
@@ -68,7 +68,7 @@ class ApiKeysAdminController(
      * source — a hand-crafted POST gets exactly the answer the form's user would.
      */
     @PostMapping("/partials/api-keys")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
+    @RequiredScope(Permission.API_KEY_CREATE)
     fun create(
         @RequestParam(required = false) kind: String?,
         @RequestParam name: String,
@@ -128,10 +128,11 @@ class ApiKeysAdminController(
      * used to carry a delete button whose service verb refused them, silently doing nothing.
      * The key is resolved inside the caller's workspace FIRST (a foreign id is not-found, the
      * non-disclosure rule), then revoked through the kind's own workspace-scoped verb — never
-     * by key id alone.
+     * by key id alone. A SERVER key's delete is a super admin's (#215, owner ruling
+     * 2026-09-24): the service refuses anyone else, and the row draws its Delete for nobody else.
      */
     @DeleteMapping("/partials/api-keys/{keyId}")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
+    @RequiredScope(Permission.API_KEY_REVOKE)
     fun revoke(
         @PathVariable keyId: String,
         model: Model,
@@ -141,7 +142,7 @@ class ApiKeysAdminController(
         val kind = apiKeyRepository.findById(keyId)?.takeIf { it.workspaceId == workspaceId }?.kind
         when (kind) {
             ApiKeyKind.SERVER -> {
-                apiKeyService.revokeWorkspaceServerKey(keyId, workspaceId, principal.userId)
+                apiKeyService.revokeWorkspaceServerKey(keyId, workspaceId, principal)
             }
 
             ApiKeyKind.ENDPOINT -> {
@@ -165,7 +166,7 @@ class ApiKeysAdminController(
      * rendered: a hand-crafted path fails normalization there, not here.
      */
     @PostMapping("/partials/api-keys/{keyId}/bindings")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
+    @RequiredScope(Permission.API_KEY_BIND)
     fun associate(
         @PathVariable keyId: String,
         @RequestParam("bindings", required = false) selected: List<String>?,

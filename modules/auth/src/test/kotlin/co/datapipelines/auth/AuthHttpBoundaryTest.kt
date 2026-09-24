@@ -102,17 +102,17 @@ class AuthHttpBoundaryTest {
 
             @GetMapping("/api/v1/probe")
             @ResponseBody
-            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            @RequiredScope(Permission.PIPELINE_READ)
             fun read() = principalPayload()
 
             @PostMapping("/api/v1/probe")
             @ResponseBody
-            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            @RequiredScope(Permission.PIPELINE_READ)
             fun write() = principalPayload()
 
             @GetMapping("/api/v1/admin-probe")
             @ResponseBody
-            @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
+            @RequiredScope(Permission.DATASOURCE_GRANT)
             fun adminOnly() = principalPayload()
 
             /** Deliberately unannotated — the default-deny case (AUTH-SEC-9). */
@@ -133,7 +133,7 @@ class AuthHttpBoundaryTest {
              */
             @GetMapping("/brand-new-route")
             @ResponseBody
-            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            @RequiredScope(Permission.PIPELINE_READ)
             @Suppress("FunctionOnlyReturningConstant") // the body is irrelevant — the GATE before it is the assertion
             fun brandNew() = "ok"
 
@@ -144,12 +144,12 @@ class AuthHttpBoundaryTest {
              */
             @GetMapping("/pipelines/{id}/editor")
             @ResponseBody
-            @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+            @RequiredScope(Permission.PIPELINE_UPDATE)
             fun pipelineEditor() = principalPayload()
 
             @GetMapping("/templates/editor")
             @ResponseBody
-            @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+            @RequiredScope(Permission.PIPELINE_UPDATE)
             fun templateEditor() = principalPayload()
 
             /**
@@ -158,12 +158,12 @@ class AuthHttpBoundaryTest {
              */
             @GetMapping("/pipelines")
             @ResponseBody
-            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            @RequiredScope(Permission.PIPELINE_READ)
             fun pipelineList() = principalPayload()
 
             @PostMapping("/mcp")
             @ResponseBody
-            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            @RequiredScope(Permission.PIPELINE_READ)
             fun mcp() = principalPayload()
 
             /**
@@ -172,7 +172,7 @@ class AuthHttpBoundaryTest {
              * Authenticated like the real events route, so the stream is opened with a key.
              */
             @GetMapping("/api/v1/probe/stream", produces = [org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE])
-            @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+            @RequiredScope(Permission.PIPELINE_READ)
             fun probeStream(): org.springframework.web.servlet.mvc.method.annotation.SseEmitter =
                 org.springframework.web.servlet.mvc.method.annotation.SseEmitter().apply {
                     send("ok")

@@ -81,8 +81,11 @@ object RoleModel {
     fun roles(principal: AuthenticatedPrincipal?): Roles {
         if (principal == null) return NONE
         val context = principal.workspace ?: return NONE
-        // VIEW is every role; EXECUTE is every role but the promoter (D5). On both the other
-        // question is the credential's scope.
+        // #215: each boolean asks ONE representative catalog permission — `pipeline.read` (every
+        // role), `pipeline.execute` and `execution.read` (every role but the promoter, D5),
+        // `template.update` for authoring (through `isAuthor`), `promotion.read`,
+        // `promotion.promote` (through `isPromoter`), `workspace.members.manage` (through
+        // `isWorkspaceAdmin`). The other question, on every one, is the credential's scope.
         //
         // 143: the scope conjunct is stated HERE for author and promoter too. The auth
         // predicates carry it, but they short-circuit on `superAdmin` before reaching it, so
@@ -93,11 +96,11 @@ object RoleModel {
         val canAuthor = principal.isAuthor && principal.scopeReaches(Scope.AUTHOR)
         val canPromote = principal.isPromoter && principal.scopeReaches(Scope.AUTHOR)
         return Roles(
-            canRead = context.permits(Permission.VIEW) && principal.scopeReaches(Scope.READ),
-            canExecute = context.permits(Permission.EXECUTE) && principal.scopeReaches(Scope.EXECUTE),
-            // READ_EXECUTIONS floors at `read` on the credential axis (§7.6), so an execute-role
+            canRead = context.permits(Permission.PIPELINE_READ) && principal.scopeReaches(Scope.READ),
+            canExecute = context.permits(Permission.PIPELINE_EXECUTE) && principal.scopeReaches(Scope.EXECUTE),
+            // `execution.read` floors at `read` on the credential axis (§7.6), so an execute-role
             // issuer's `read` key still sees the runs it may not start.
-            canReadExecutions = context.permits(Permission.EXECUTE) && principal.scopeReaches(Scope.READ),
+            canReadExecutions = context.permits(Permission.EXECUTION_READ) && principal.scopeReaches(Scope.READ),
             canAuthor = canAuthor,
             canReadPromotion = context.permits(Permission.PROMOTION_READ) && principal.scopeReaches(Scope.AUTHOR),
             canPromote = canPromote,

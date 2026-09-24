@@ -38,7 +38,7 @@ class ServerKeyConfinementTest {
     private val auditLogger = mockk<AuditLogger>(relaxed = true)
     private val interceptor = ScopeInterceptor(AuthErrorWriter(mapper), auditLogger)
 
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     class AnnotatedProbe {
         fun anything() = Unit
     }

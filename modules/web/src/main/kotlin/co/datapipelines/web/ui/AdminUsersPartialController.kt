@@ -8,9 +8,9 @@ import co.datapipelines.auth.MailKind
 import co.datapipelines.auth.MailProperties
 import co.datapipelines.auth.MailSend
 import co.datapipelines.auth.MailSendRepository
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.SessionRequiredException
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceRole
@@ -54,7 +54,7 @@ class AdminUsersPartialController(
     private val mailSends: MailSendRepository,
 ) {
     @GetMapping("/partials/admin/users")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun search(
         model: Model,
         @RequestParam(required = false) q: String?,
@@ -79,7 +79,7 @@ class AdminUsersPartialController(
      * admin can add it to a workspace afterwards from the workspaces screen.
      */
     @PostMapping("/partials/admin/users")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun createLocalUser(
         model: Model,
         @RequestParam email: String,
@@ -148,7 +148,7 @@ class AdminUsersPartialController(
      * partial here; it reveals whether a mail went, never what it said.
      */
     @GetMapping("/partials/admin/users/{userId}/mail/{kind}")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun mailStatus(
         model: Model,
         @PathVariable userId: UUID,
@@ -251,7 +251,7 @@ class AdminUsersPartialController(
      * [saved] response the family shares.
      */
     @PatchMapping("/partials/admin/users/{userId}/{action}")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun toggle(
         model: Model,
         @PathVariable userId: UUID,
@@ -326,7 +326,7 @@ class AdminUsersPartialController(
      * untouched: a deactivated user stays deactivated (180).
      */
     @PatchMapping("/partials/admin/users/{userId}/identity-reset")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_IDENTITY_RESET)
+    @RequiredScope(Permission.USER_IDENTITY_RESET)
     fun resetIdentity(
         model: Model,
         @PathVariable userId: UUID,

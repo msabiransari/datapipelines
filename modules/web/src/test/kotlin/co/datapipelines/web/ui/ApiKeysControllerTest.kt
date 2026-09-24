@@ -528,13 +528,15 @@ class ApiKeysAdminControllerTest {
         stubPageReads()
         every { apiKeyRepository.findById("dpk_srv456") } returns
             sampleKey("dpk_srv456").copy(kind = ApiKeyKind.SERVER)
-        every { apiKeyService.revokeWorkspaceServerKey("dpk_srv456", workspaceId, userId) } returns true
+        every { apiKeyService.revokeWorkspaceServerKey("dpk_srv456", workspaceId, match { it.userId == userId }) } returns true
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val view = controller.revoke("dpk_srv456", model)
 
         view shouldBe "partials/api-keys-rows"
-        verify { apiKeyService.revokeWorkspaceServerKey("dpk_srv456", workspaceId, userId) }
+        // The PRINCIPAL travels, not just its id: whether a server key may be revoked at all is
+        // the service's super-admin question (#215, `server_key.revoke`).
+        verify { apiKeyService.revokeWorkspaceServerKey("dpk_srv456", workspaceId, match { it.userId == userId }) }
         verify(exactly = 0) { apiKeyService.revokeWorkspaceEndpointKey(any(), any(), any()) }
     }
 

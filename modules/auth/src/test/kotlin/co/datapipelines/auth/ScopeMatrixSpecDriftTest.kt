@@ -3,93 +3,93 @@ package co.datapipelines.auth
 import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
-import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.maps.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
 /**
- * The §7.6 matrix as an enforceable structure, asserted against the doc so a change to
- * auth.md's tables without a code change fails the build (and vice versa). Four tables are
- * parsed — REST roles, REST key scopes, MCP roles, MCP key scopes — each with a row-count
- * guard, so a row added to the doc cannot slip past an over-permissive parser.
+ * **The catalog drift gate** (#215, record §7 gate 1): auth.md §7.6's permission catalog, the
+ * [Permission] enum and the one role table [RolePermissions] agree in BOTH directions, with
+ * counts — so a row added to the doc without code fails the build, and a permission added to
+ * the code (or a role cell flipped in it) without the doc does too.
  *
- * ## Role-first (2026-09-20)
- * The doc's role tables carry FIVE role columns per row, so the expectation for a row is the
- * SET of roles whose cell is not ✗ — compared with [Permission.roles] of the operation's
- * permission, and with the rule that the super-admin column is ✓ everywhere (D7). No token
- * for the permission appears in the doc: the five cells ARE the predicate, which is the whole
- * point of writing the table role-first. Each REST row names its [ScopeMatrix.RestOperation]
- * constant in code font, so no hand-written label map is needed and a renamed label cannot
- * detach a row from its code. Reserved rows (a documented row with NO constant — today the
- * audit log, D12) are listed by name here so a real row cannot hide as one.
+ * Four comparisons, each naming what disagrees:
+ * - the catalog's rows ARE `Permission.entries`, in declaration order, plus the listed reserved
+ *   rows (a real row cannot hide as a reserved one);
+ * - every CELL — role × permission — reads the same in the doc and in [RolePermissions], and a
+ *   `fenced` row is exactly a [RolePermissions.FENCED] permission;
+ * - the A4 shim: the **Permissions — key scopes** table equals [ScopeMatrix.PERMISSION_MIN_SCOPE],
+ *   which must be total — a permission with no scope floor is a build failure;
+ * - the MCP surface: every tool sits on the catalog row of the permission it declares in
+ *   [ScopeMatrix.MCP_TOOL_PERMISSION], and the MCP key-scope table equals the scope the shim
+ *   gives it.
  *
  * Also exercises the key-scope-subset privilege-escalation guard (§7.4).
  */
 class ScopeMatrixSpecDriftTest {
     private val doc = RepoFiles.read(RepoFiles.AUTH_SPEC_PATH)
+    private val rows = RoleMatrixDoc.catalogRows(doc)
 
     @Test
-    fun `the REST role table has exactly one row per RestOperation, plus the reserved rows`() {
-        val rows = RoleMatrixDoc.restRoleRows(doc)
-
-        rows.mapNotNull { it.operation } shouldContainExactly ScopeMatrix.RestOperation.entries.toList()
-        rows.filter { it.operation == null }.map { it.label } shouldContainExactly RESERVED_ROWS
+    fun `the catalog has exactly one row per Permission, in declaration order, plus the reserved rows`() {
+        rows.mapNotNull { it.permission } shouldContainExactly Permission.entries.toList()
+        rows.filter { it.permission == null }.map { it.label } shouldContainExactly RESERVED_ROWS
+        Permission.entries.size shouldBe PERMISSION_COUNT
     }
 
     @Test
-    fun `every REST operation's roles match its documented row`() {
-        RoleMatrixDoc.restRoleRows(doc).filter { it.operation != null }.forEach { row ->
-            val operation = row.operation ?: return@forEach
-            withClue("§7.6 row '${row.label}' (${operation.name})") {
-                row.cells.allowedRoles shouldContainExactlyInAnyOrder operation.permission.roles
-                row.cells.superAdminAllowed.shouldBeTrue()
+    fun `every cell of the catalog matches the role table - role by role, both directions`() {
+        val mismatches = mutableListOf<String>()
+        rows.forEach { row ->
+            val permission = row.permission ?: return@forEach
+            WorkspaceRole.entries.forEach { role ->
+                val inDoc = role in row.cells.allowedRoles
+                val inCode = permission in RolePermissions.of(role)
+                if (inDoc != inCode) mismatches += cellMismatch(permission, role.wire, row.cells.raw[role.wire], inCode)
+            }
+            val superInCode = permission in RolePermissions.SUPER_ADMIN
+            if (row.cells.superAdminAllowed != superInCode) {
+                mismatches += cellMismatch(permission, "super_admin", row.cells.raw["super_admin"], superInCode)
+            }
+            if (row.cells.fenced != (permission in RolePermissions.FENCED)) {
+                mismatches += "`${permission.wire}`: doc fenced=${row.cells.fenced}, code fenced=${permission in RolePermissions.FENCED}"
+            }
+        }
+        withClue(mismatches.joinToString("\n")) { mismatches.shouldBeEmpty() }
+    }
+
+    @Test
+    fun `the reserved row names no permission and admits no surface`() {
+        rows.filter { it.permission == null }.forEach { row ->
+            withClue(row.label) {
+                row.routes.shouldBeEmpty()
+                row.tools.shouldBeEmpty()
             }
         }
     }
 
     @Test
-    fun `every REST operation's key scope matches the key-scope table`() {
-        val fromDoc = RoleMatrixDoc.restKeyScopes(doc)
-
-        fromDoc.keys shouldContainExactlyInAnyOrder ScopeMatrix.RestOperation.entries.map { it.name }
-        ScopeMatrix.RestOperation.entries.forEach { operation ->
-            withClue("key scope of ${operation.name}") { fromDoc[operation.name] shouldBe operation.minScope }
-        }
+    fun `the A4 shim is total and every permission's key scope matches the doc`() {
+        ScopeMatrix.PERMISSION_MIN_SCOPE.keys shouldBe Permission.entries.toSet()
+        RoleMatrixDoc.permissionKeyScopes(doc) shouldContainExactly ScopeMatrix.PERMISSION_MIN_SCOPE
     }
 
     @Test
-    fun `every MCP tool's roles match auth-md §7-6`() {
-        val fromDoc = RoleMatrixDoc.mcpRoleRows(doc)
+    fun `every MCP tool sits on the catalog row of the permission it declares`() {
+        val fromDoc = RoleMatrixDoc.toolPermissions(doc)
 
-        // All 41 tools present (auth.md §7.6 / mcp-server §6.2) — 18 → 20 with 037's
-        // data-visibility pair, 20 → 21 with 040's `templates_used_by`, 21 → 22 with 068's
-        // `datasources_create`, 22 → 24 with 072's `calculators_list` / `calculators_get`,
-        // 24 → 28 with 074's four `endpoints_*` tools, 28 → 31 with 089's three
-        // `lake_tables_*` tools, 31 → 30 with 094 REMOVING `datasources_create`
-        // (no credential travels through an agent), 30 → 34 with 107's
-        // `datasources_get_table_stats`, `sql_probe`, `executions_cancel` and
-        // `templates_purge_draft`, 34 → 35 with 117's `templates_update`; 35 → 38 with 118's
-        // `semantics_record` / `semantics_list` / `semantics_retire`; 38 → 40 with 120's
-        // `docs_list` / `docs_get`; 40 → 41 with 140's `pipelines_run_checks`.
         fromDoc.size shouldBe TOOL_COUNT
-        fromDoc.keys shouldContainExactlyInAnyOrder ScopeMatrix.MCP_TOOL_MIN_PERMISSION.keys
-        fromDoc.forEach { (tool, cells) ->
-            val permission = ScopeMatrix.MCP_TOOL_MIN_PERMISSION.getValue(tool)
-            withClue("§7.6 MCP row for `$tool`") {
-                cells.allowedRoles shouldContainExactlyInAnyOrder permission.roles
-                cells.superAdminAllowed.shouldBeTrue()
-            }
-        }
+        fromDoc shouldContainExactly ScopeMatrix.MCP_TOOL_PERMISSION
     }
 
     @Test
-    fun `every MCP tool minimum scope matches auth-md §7-6`() {
+    fun `every MCP tool's minimum key scope matches the doc - through the shim`() {
         val fromDoc = RoleMatrixDoc.mcpKeyScopes(doc)
 
         fromDoc.size shouldBe TOOL_COUNT
-        ScopeMatrix.MCP_TOOL_MIN_SCOPE shouldContainExactly fromDoc
+        fromDoc shouldContainExactly ScopeMatrix.MCP_TOOL_PERMISSION.keys.associateWith { ScopeMatrix.requiredScopeForTool(it) }
     }
 
     @Test
@@ -103,7 +103,21 @@ class ScopeMatrixSpecDriftTest {
         ScopeMatrix.keyScopesWithinCreator(setOf(Scope.ADMIN), setOf(Scope.ADMIN)).shouldBeTrue()
     }
 
+    private fun cellMismatch(
+        permission: Permission,
+        column: String,
+        docCell: String?,
+        codeHolds: Boolean,
+    ): String = "`${permission.wire}` × $column: doc '$docCell', code ${if (codeHolds) "holds" else "lacks"}"
+
     private companion object {
+        /** The record's 64 + `template.evaluate` (7b), re-derived on the lane's base (A7). */
+        const val PERMISSION_COUNT = 65
+
+        /**
+         * 42 since 7b's `templates_evaluate` — the full history is in auth.md's change log
+         * (18 → … → 41 with 140's `pipelines_run_checks`, 42 with 7b).
+         */
         const val TOOL_COUNT = 42
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */

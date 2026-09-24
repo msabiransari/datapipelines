@@ -4,6 +4,7 @@ import co.datapipelines.application.lens.LensedView
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.ApiKeyMissingException
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.executor.ExecutionRecord
 import org.springframework.security.core.context.SecurityContextHolder
 
@@ -47,8 +48,16 @@ fun ExecutionRecord.visibleTo(principal: AuthenticatedPrincipal): Boolean =
         principal.isEndpointKey -> false
 
         // D11: "own" is `ExecutionRecord.isOwnRunOf` — executed by this user AND not through an
-        // endpoint key (an endpoint's run belongs to the endpoint, and lists for admins only). A
-        // WORKSPACE ADMIN sees every run in their workspace, a super admin any. The promoter is
-        // refused the execution reads by the matrix before this is asked.
-        else -> isOwnRunOf(principal.userId) || principal.isWorkspaceAdmin
+        // endpoint key (an endpoint's run belongs to the endpoint, and lists for admins only).
+        // `execution.read_all` (#215 — the workspace admin's, the super admin's) sees every run
+        // in the workspace. The promoter is refused `execution.read` by the matrix before this.
+        else -> isOwnRunOf(principal.userId) || principal.holds(Permission.EXECUTION_READ_ALL)
     }
+
+/**
+ * [visibleTo]'s twin for CANCEL (#215): the caller's own run, or any run with
+ * `execution.cancel_all`. An endpoint key cancels nothing — it is confined to the serve surface
+ * and its own results. A run the caller may not cancel answers not-found, like a read.
+ */
+fun ExecutionRecord.cancellableBy(principal: AuthenticatedPrincipal): Boolean =
+    !principal.isEndpointKey && (isOwnRunOf(principal.userId) || principal.holds(Permission.EXECUTION_CANCEL_ALL))

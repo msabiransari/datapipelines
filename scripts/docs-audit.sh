@@ -218,6 +218,24 @@ obs_txt = texts.get("docs/observability.md", "")
 sec34 = re.search(r"^#### 3\.4A\b.*?(?=^### )", obs_txt, re.M | re.S)
 if sec34:
     events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
+# PERMISSIONS (#215). The auth.md §7.6 catalog's FIRST column defines every
+# `<functionality>.<permission>` name (`pipeline.read`, `workspace.members.manage`). They share
+# the error codes' domain words but are neither codes nor events, and the catalog is their one
+# authority — so, like an event, a permission has to be DEFINED there before any doc may cite it,
+# and a misspelt one still fails here. Extracted from that table's first cells only.
+permissions = set()
+auth_txt = texts.get("docs/auth.md", "")
+cat_at = auth_txt.find("**The catalog — permissions and roles:**")
+if cat_at >= 0:
+    seen_row = False
+    for cat_line in auth_txt[cat_at:].splitlines()[1:]:
+        cat_s = cat_line.strip()
+        if cat_s.startswith("|"):
+            seen_row = True
+            permissions |= set(re.findall(r"`([a-z_]+(?:\.[a-z_]+)+)`", cat_s.strip("|").split("|")[0]))
+        elif seen_row and cat_s:
+            break
+events |= permissions
 # lines stating a removal/rename may cite old spellings
 NEGATION = re.compile(r"removed|renamed|deleted|replaced|superseded|folded|"
                       r"does not exist|no longer|instead of|there is no|no `|"

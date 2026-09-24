@@ -4,6 +4,8 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -123,8 +125,9 @@ class McpToolDispatcherTest {
     @Test
     fun `every tool refuses the next-lower scope`() {
         assertAll(
-            ScopeMatrix.MCP_TOOL_MIN_SCOPE.map { (tool, required) ->
+            ScopeMatrix.MCP_TOOL_PERMISSION.keys.map { tool ->
                 {
+                    val required = requireNotNull(ScopeMatrix.requiredScopeForTool(tool))
                     val spy = SpyTool(tool)
                     val held = Scope.entries.filter { it.ordinal < required.ordinal }.toTypedArray()
                     val result = dispatcher(spy).call(McpFixtures.request(tool), McpFixtures.ctx(*held))
@@ -139,7 +142,7 @@ class McpToolDispatcherTest {
     @Test
     fun `the top of BOTH axes satisfies every tool - author scope, workspace admin role`() {
         assertAll(
-            ScopeMatrix.MCP_TOOL_MIN_SCOPE.keys.map { tool ->
+            ScopeMatrix.MCP_TOOL_PERMISSION.keys.map { tool ->
                 {
                     val spy = SpyTool(tool)
                     // `author` is the top KEY scope (O-2 removed `admin` from that axis) and
@@ -153,6 +156,29 @@ class McpToolDispatcherTest {
                     spy.calls shouldBe 1
                 }
             },
+        )
+    }
+
+    /**
+     * #215 A.6, the MCP surface: a key whose issuer's ROLE lacks the tool's catalog permission is
+     * refused on the role axis (the demoted-issuer code, D-R12), and the details name the
+     * PERMISSION the tool declares and the ROLE it was judged as. The REST and partial twins are
+     * `ScopeInterceptorTest`'s.
+     */
+    @Test
+    fun `a role refusal names the tool's catalog permission and the issuer's role`() {
+        val tool = SpyTool("pipelines_create")
+        val viewer = WorkspaceContext(McpFixtures.WORKSPACE_ID, "acme", WorkspaceRole.VIEWER)
+        val result = dispatcher(tool).call(McpFixtures.request("pipelines_create"), McpFixtures.ctx(Scope.AUTHOR, workspace = viewer))
+
+        val error = McpFixtures.payloadOf(result)["error"]
+        assertAll(
+            { result.isError() shouldBe true },
+            { error["code"].asText() shouldBe PipelineErrorCodes.Auth.KEY_ISSUER_ROLE_LOST },
+            { error["details"]["required"].asText() shouldBe "pipeline.create" },
+            { error["details"]["held"].asText() shouldBe "viewer" },
+            { error["details"]["tool"].asText() shouldBe "pipelines_create" },
+            { tool.calls shouldBe 0 },
         )
     }
 

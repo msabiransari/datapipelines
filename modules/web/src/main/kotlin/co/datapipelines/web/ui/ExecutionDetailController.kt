@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
@@ -32,7 +31,7 @@ class ExecutionDetailController(
     private val events: ExecutionEventRepository,
 ) {
     @GetMapping("/executions/{id}")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
+    @RequiredScope(Permission.EXECUTION_READ)
     fun detail(
         @PathVariable id: UUID,
         model: Model,
@@ -61,12 +60,12 @@ class ExecutionDetailController(
         model.addAttribute("correlationId", record.correlationId?.toString() ?: CorrelationId.current())
         // RBAC (112 merge review): a session holds capability, never scopes — the scope form
         // rendered no Cancel button for any human.
-        val canExecute = principal.holds(Permission.EXECUTE)
+        val canExecute = principal.holds(Permission.EXECUTION_CANCEL)
         RoleModel.stamp(model, principal)
         // State AND role: the verb needs a RUNNING execution as well as the capability, and
         // `canExecute` on the model is the role half alone (§B's Execution detail row).
         model.addAttribute("canCancel", record.status == ExecutionStatus.RUNNING && canExecute)
-        model.addAttribute("isAdmin", principal.isWorkspaceAdmin)
+        model.addAttribute("isAdmin", principal.holds(Permission.EXECUTION_READ_ALL))
 
         val nodeStats = record.nodeStatsJson?.let { ExecutorJson.mapper.readTree(it) }
         model.addAttribute("nodeStats", nodeStats)

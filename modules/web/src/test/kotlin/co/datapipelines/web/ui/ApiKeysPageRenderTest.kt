@@ -151,6 +151,28 @@ class ApiKeysPageRenderTest {
         html shouldNotContain "Edit associations"
     }
 
+    /**
+     * #215 (owner ruling 2026-09-24, `server_key.revoke`): a server key's Delete is a super
+     * admin's. A workspace admin still sees the row — it is the workspace's key — but not a
+     * verb the service would refuse (114: render only what the server accepts), while their
+     * endpoint keys keep theirs.
+     */
+    @Test
+    fun `a server key's Delete is drawn for a super admin only - an endpoint key's for the workspace admin too`() {
+        fun deletes(superAdmin: Boolean): Map<String, Boolean> =
+            listOf("endpoint", "server").associateWith { kind ->
+                val html =
+                    render {
+                        withRoles(canAdminWorkspace = true, isSuperAdmin = superAdmin, roleLabel = "workspace admin")
+                        setVariable("keys", listOf(row(kind = kind)))
+                    }
+                html.contains("data-verb=\"key-revoke\"")
+            }
+
+        deletes(superAdmin = false) shouldBe mapOf("endpoint" to true, "server" to false)
+        deletes(superAdmin = true) shouldBe mapOf("endpoint" to true, "server" to true)
+    }
+
     @Test
     fun `no user kind is offered or rendered - the MCP key is minted at login, never here`() {
         val html = render { setVariable("keys", listOf(row())) }

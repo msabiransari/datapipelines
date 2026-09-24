@@ -5,6 +5,7 @@ import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeMatrix
@@ -90,7 +91,7 @@ class AuthController(
 ) {
     /** §16.1 — the caller's own keys, revoked included (`is_revoked` must be able to vary); never secrets. */
     @GetMapping("/api-keys")
-    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
+    @RequiredScope(Permission.MCP_KEY_OWN)
     fun listKeys(): ApiResponse<List<Map<String, Any?>>> =
         ApiResponse.of(apiKeyRepository.findByUser(currentPrincipal().userId).map { it.toResponse() })
 
@@ -101,7 +102,7 @@ class AuthController(
      * `data: null` and the caller renders the sign-in hint.
      */
     @GetMapping("/api-keys/mine")
-    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
+    @RequiredScope(Permission.MCP_KEY_OWN)
     fun myMcpKey(): ApiResponse<Map<String, Any?>?> {
         val principal = currentPrincipal()
         val key =
@@ -126,7 +127,7 @@ class AuthController(
      */
     @PostMapping("/api-keys")
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_API_KEYS)
+    @RequiredScope(Permission.API_KEY_CREATE)
     fun createKey(
         @RequestBody body: CreateApiKeyRequest,
     ): ApiResponse<Map<String, Any?>> {
@@ -174,7 +175,7 @@ class AuthController(
     /** §16.1 — revoke. Idempotent `204`: no existence disclosure (see the class KDoc). */
     @DeleteMapping("/api-keys/{keyId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
+    @RequiredScope(Permission.MCP_KEY_OWN)
     fun revokeKey(
         @PathVariable keyId: String,
     ) {
@@ -183,7 +184,7 @@ class AuthController(
 
     /** §16.2 — the current principal, for agents and the UI to discover their scope set. */
     @GetMapping("/me")
-    @RequiredScope(ScopeMatrix.RestOperation.CURRENT_PRINCIPAL)
+    @RequiredScope(Permission.PROFILE_READ)
     fun me(): ApiResponse<Map<String, Any?>> {
         val principal = currentPrincipal()
         return ApiResponse.of(
@@ -200,7 +201,7 @@ class AuthController(
 
     /** §16.3 — user listing (admin). */
     @GetMapping("/users")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun listUsers(
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
@@ -215,7 +216,7 @@ class AuthController(
 
     /** §16.3 — user detail (admin). */
     @GetMapping("/users/{userId}")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun getUser(
         @PathVariable userId: UUID,
     ): ResponseEntity<Any> {
@@ -225,28 +226,28 @@ class AuthController(
 
     /** §16.3 — deactivate; effective within one cache TTL, immediately on this instance. */
     @PostMapping("/users/{userId}/deactivate")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun deactivate(
         @PathVariable userId: UUID,
     ): ResponseEntity<Any> = flip(userId) { users.deactivate(it, currentPrincipal().userId) }
 
     /** §16.3 — activate. */
     @PostMapping("/users/{userId}/activate")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun activate(
         @PathVariable userId: UUID,
     ): ResponseEntity<Any> = flip(userId) { users.activate(it, currentPrincipal().userId) }
 
     /** §16.3 — grant admin. */
     @PostMapping("/users/{userId}/grant-admin")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun grantAdmin(
         @PathVariable userId: UUID,
     ): ResponseEntity<Any> = flip(userId) { users.grantAdmin(it, currentPrincipal().userId) }
 
     /** §16.3 — revoke admin. */
     @PostMapping("/users/{userId}/revoke-admin")
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     fun revokeAdmin(
         @PathVariable userId: UUID,
     ): ResponseEntity<Any> = flip(userId) { users.revokeAdmin(it, currentPrincipal().userId) }

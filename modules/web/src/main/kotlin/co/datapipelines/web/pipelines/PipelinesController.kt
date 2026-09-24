@@ -2,8 +2,8 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.CheckRunVia
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
@@ -79,7 +79,7 @@ class PipelinesController(
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_CREATE)
     fun create(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
@@ -98,7 +98,7 @@ class PipelinesController(
      * whenever one exists.
      */
     @GetMapping("/{id}")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun get(
         @PathVariable id: UUID,
     ): ApiResponse<JsonNode> {
@@ -117,7 +117,7 @@ class PipelinesController(
      * run's own record; `observed` exists only because the server's run produced it.
      */
     @PostMapping("/{id}/versions/{version}/checks/run")
-    @RequiredScope(ScopeMatrix.RestOperation.EXECUTE_PIPELINE)
+    @RequiredScope(Permission.PIPELINE_RUN_CHECKS)
     fun runChecks(
         @PathVariable id: UUID,
         @PathVariable version: Int,
@@ -151,7 +151,7 @@ class PipelinesController(
      * when never run. The release dialog and the version page read exactly this.
      */
     @GetMapping("/{id}/versions/{version}/checks")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun checks(
         @PathVariable id: UUID,
         @PathVariable version: Int,
@@ -169,7 +169,7 @@ class PipelinesController(
 
     /** §5.3 — a specific version. */
     @GetMapping("/{id}/versions/{version}")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun getVersion(
         @PathVariable id: UUID,
         @PathVariable version: Int,
@@ -186,7 +186,7 @@ class PipelinesController(
 
     /** §5.4 — version metadata, newest first; no bodies. */
     @GetMapping("/{id}/versions")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun versions(
         @PathVariable id: UUID,
     ): ApiResponse<List<Map<String, Any?>>> {
@@ -206,7 +206,7 @@ class PipelinesController(
      * reports the current state — `status: "RELEASED"`, no draft pointer.
      */
     @PutMapping("/{id}")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_UPDATE)
     fun update(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
@@ -243,7 +243,7 @@ class PipelinesController(
      * UI-driven in practice (D4: agents never release); no MCP tool is exposed.
      */
     @PostMapping("/{id}/release")
-    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
+    @RequiredScope(Permission.PIPELINE_RELEASE)
     fun release(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
@@ -273,7 +273,7 @@ class PipelinesController(
      */
     @PostMapping("/{id}/draft/discard")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun discard(
         @PathVariable id: UUID,
         @RequestHeader(value = IfMatchHeader.NAME, required = false) ifMatch: String?,
@@ -299,7 +299,7 @@ class PipelinesController(
      * pointer per D60. Session-only, audited.
      */
     @PostMapping("/{id}/versions/{version}/discard")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun discardVersion(
         @PathVariable id: UUID,
         @PathVariable version: Int,
@@ -324,7 +324,7 @@ class PipelinesController(
 
     /** §7 (101) — restore DISCARDED version v to RELEASED; pointer moves only above-current-or-NULL. */
     @PostMapping("/{id}/versions/{version}/restore")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun restoreVersion(
         @PathVariable id: UUID,
         @PathVariable version: Int,
@@ -352,7 +352,7 @@ class PipelinesController(
      */
     @DeleteMapping("/{id}/versions/{version}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_VERSION_MANAGE)
     fun purgeVersion(
         @PathVariable id: UUID,
         @PathVariable version: Int,
@@ -381,7 +381,7 @@ class PipelinesController(
      * set either way, so 102's dialog can show it. Session-only, audited.
      */
     @DeleteMapping("/{id}")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.PIPELINE_DELETE)
     fun delete(
         @PathVariable id: UUID,
         @RequestParam("include_exclusive_draft_templates", required = false, defaultValue = "false")
@@ -418,7 +418,7 @@ class PipelinesController(
      * audited.
      */
     @PostMapping("/{id}/current")
-    @RequiredScope(ScopeMatrix.RestOperation.SWITCH_SERVED_VERSION)
+    @RequiredScope(Permission.PIPELINE_SWITCH_VERSION)
     fun switchCurrent(
         @PathVariable id: UUID,
         @RequestBody body: JsonNode,
@@ -465,7 +465,7 @@ class PipelinesController(
      * here is the offset/limit pagination contract, which the two surfaces genuinely differ on.
      */
     @GetMapping(params = ["!prefix"])
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun list(
         @RequestParam(required = false) owner: UUID?,
         @RequestParam(required = false) datasource: String?,
@@ -505,7 +505,7 @@ class PipelinesController(
      * presentations (template-hierarchy-design §9.2).
      */
     @GetMapping(params = ["prefix"])
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun browse(
         @RequestParam prefix: String,
         @RequestParam(required = false) offset: Int?,

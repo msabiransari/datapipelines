@@ -2,8 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.visibleDialectProperties
@@ -40,7 +40,7 @@ class DatasourceDetailUiController(
 ) {
     /** The page: the LAKE registry for a LAKE datasource, the schema tree for every other dialect. */
     @GetMapping("/datasources/{name}")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun detail(
         model: Model,
         request: HttpServletRequest,
@@ -83,7 +83,7 @@ class DatasourceDetailUiController(
      * read scope the listing itself sits on.
      */
     @GetMapping("/partials/datasources/{name}/lake-tables")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun level(
         model: Model,
         @PathVariable name: String,
@@ -101,7 +101,7 @@ class DatasourceDetailUiController(
      * folder's own link carries; absent/blank is the flat root (no schema tier).
      */
     @GetMapping("/partials/datasources/{name}/tables")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun tables(
         model: Model,
         @PathVariable name: String,
@@ -114,7 +114,7 @@ class DatasourceDetailUiController(
 
     /** One table's columns — the tree's terminal level, unpaged (162, #156). */
     @GetMapping("/partials/datasources/{name}/tables/{table}/columns")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.DATASOURCE_READ)
     fun columns(
         model: Model,
         @PathVariable name: String,

@@ -139,12 +139,12 @@ class SemanticsService(
     ): Map<String, Any?> {
         val workspaceId = principal.requireWorkspace().id
         val fact = visibleOrNotFound(id, workspaceId, field = "id", datasource = null)
-        if (fact.scope == LearnedFactScope.DATASOURCE && fact.recordedIn != workspaceId && !principal.isWorkspaceAdmin) {
-            throw RoleRequiredException(
-                Permission.WS_ADMIN,
-                principal.workspace?.held() ?: emptySet(),
-                principal.workspace?.name,
-            )
+        // #215 (owner ruling 2026-09-24): another workspace's DATASOURCE fact is retired by whoever
+        // holds `datasource.manage` here — the workspace admin, as before — not by `semantic.retire`
+        // alone, which every author holds.
+        val foreignDatasourceFact = fact.scope == LearnedFactScope.DATASOURCE && fact.recordedIn != workspaceId
+        if (foreignDatasourceFact && !principal.holds(Permission.DATASOURCE_MANAGE)) {
+            throw RoleRequiredException(Permission.DATASOURCE_MANAGE, principal.heldRole, principal.workspace?.name)
         }
         repository.retire(fact.id, reason.trim())
         audit.log(

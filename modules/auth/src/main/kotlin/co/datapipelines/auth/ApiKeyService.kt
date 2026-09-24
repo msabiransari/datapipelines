@@ -82,12 +82,12 @@ class ApiKeyService(
         }
         // §7.7 — a SERVER key is the promotion receiver's whole credential: whoever holds it can
         // write pipelines, templates and datasource references into this deployment. Minting one
-        // is therefore an ADMIN act, and the check is here rather than at a surface so that every
-        // caller — REST, the partial, a future CLI — inherits it. It is not a scope subset check
-        // (a server key HAS no scopes, so the guard above is vacuous for it) but a floor on the
-        // CREATOR, which is a different question and needs its own answer.
-        if (kind == ApiKeyKind.SERVER && !issuer.isSuperAdmin) {
-            throw RoleRequiredException(Permission.SUPER_ADMIN, emptySet())
+        // is therefore `server_key.create` — a super admin's instance permission (#215) — and the
+        // check is here rather than at a surface so that every caller — REST, the partial, a
+        // future CLI — inherits it. It is not a scope subset check (a server key HAS no scopes,
+        // so the guard above is vacuous for it) but a floor on the CREATOR.
+        if (kind == ApiKeyKind.SERVER && !issuer.holds(Permission.SERVER_KEY_CREATE)) {
+            throw RoleRequiredException(Permission.SERVER_KEY_CREATE, issuer.heldRole)
         }
         // O-2: viewers never mint keys. The issuance gate is the ISSUER's permission in the
         // pinned workspace — `author` — and the workspace must be one they can reach at all
@@ -331,23 +331,31 @@ class ApiKeyService(
 
     /**
      * Revokes a `server` key of [workspaceId] — the `/api-keys` page's delete extended to the
-     * whole table it renders (#191 functional note, D17/D18): the page administers the
-     * workspace's keys, whoever created them, and a row it lists with a delete button that
-     * silently did nothing was worse than not listing it. The same rails as the endpoint twin:
-     * the kind and workspace predicates in SQL keep this off a user's MCP key and off every
-     * other workspace's server key.
+     * whole table it renders (#191 functional note, D17/D18). The same rails as the endpoint
+     * twin: the kind and workspace predicates in SQL keep this off a user's MCP key and off
+     * every other workspace's server key.
+     *
+     * **`server_key.revoke`, a super admin's** (#215, owner ruling 2026-09-24 — the permissions
+     * record's row): a server key is the promotion receiver's whole credential and
+     * only a super admin mints one (D18), so only a super admin ends one. #191 had let the
+     * page's workspace admin revoke it; the ruling narrowed that. The check is HERE, not at the
+     * surface, for the reason [issue]'s mint floor is: every caller inherits it. The page
+     * draws the row's Delete only for a principal who passes it.
      */
     fun revokeWorkspaceServerKey(
         keyId: String,
         workspaceId: UUID,
-        actorId: UUID,
+        actor: AuthenticatedPrincipal,
     ): Boolean {
+        if (!actor.holds(Permission.SERVER_KEY_REVOKE)) {
+            throw RoleRequiredException(Permission.SERVER_KEY_REVOKE, actor.heldRole, actor.workspace?.name)
+        }
         val revoked = apiKeyRepository.revokeInWorkspace(keyId, workspaceId, ApiKeyKind.SERVER)
         if (revoked) {
             authCache.invalidateKey(keyId)
             auditLogger.log(
                 event = "auth.api_key.revoked",
-                userId = actorId,
+                userId = actor.userId,
                 keyId = keyId,
                 details = mapOf("workspace_id" to workspaceId.toString(), "kind" to ApiKeyKind.SERVER.wire),
             )
@@ -404,10 +412,14 @@ class ApiKeyService(
         // authority is D7's instance-wide one: `user.isAdmin` is what validation will
         // re-read on every request, so it is what the mint reads too. A super admin's key
         // carrying `read` would be capped BELOW its issuer forever.
+        //
+        // #215 slice (a) re-keys the two role questions to the author row's and the execute row's
+        // representative permissions — the same roles as the retired AUTHOR and EXECUTE — and
+        // changes nothing else; slice (b) replaces this mint's scopes.
         val scopes =
             when {
-                user.isAdmin || context.permits(Permission.AUTHOR) -> Scope.AUTHOR.expand()
-                context.permits(Permission.EXECUTE) -> Scope.EXECUTE.expand()
+                user.isAdmin || context.permits(Permission.TEMPLATE_UPDATE) -> Scope.AUTHOR.expand()
+                context.permits(Permission.PIPELINE_EXECUTE) -> Scope.EXECUTE.expand()
                 else -> setOf(Scope.READ)
             }
         val sealed =

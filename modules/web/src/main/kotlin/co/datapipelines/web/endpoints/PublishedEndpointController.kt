@@ -2,8 +2,8 @@ package co.datapipelines.web.endpoints
 
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointRequestValidator
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.appPath
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiErrorResponse
@@ -54,7 +54,7 @@ class PublishedEndpointController(
 ) {
     /** Every method on the subtree; `GET` serves, everything else is a `405` carrying `Allow: GET`. */
     @RequestMapping(CATCH_ALL)
-    @RequiredScope(ScopeMatrix.RestOperation.SERVE_PUBLISHED_ENDPOINT)
+    @RequiredScope(Permission.ENDPOINT_SERVE)
     fun serve(request: HttpServletRequest): ResponseEntity<Any> {
         if (request.method != HTTP_GET) {
             return ResponseEntity

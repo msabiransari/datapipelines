@@ -1,7 +1,7 @@
 package co.datapipelines.web.api
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import org.springframework.beans.factory.config.BeanDefinition
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider
 import org.springframework.core.type.filter.AnnotationTypeFilter
@@ -28,13 +28,21 @@ import java.lang.reflect.Method
 object HandlerInventory {
     const val BASE_PACKAGE = "co.datapipelines"
 
-    /** One mapped handler method: verb, full path pattern, `Class#method`, and the operation it declares (null = none). */
+    /** One mapped handler method: verb, full path pattern, `Class#method`, and the catalog permission it declares (null = none). */
     data class Handler(
         val verb: String,
         val path: String,
         val name: String,
-        val operation: ScopeMatrix.RestOperation?,
-    )
+        val permission: Permission?,
+    ) {
+        /** `VERB /path` as auth.md §7.6's Surfaces cell writes it: a path variable's regex dropped (`{category}`). */
+        val route: String get() = "$verb ${canonical(path)}"
+    }
+
+    /** `{name:regex}` → `{name}` — the doc spells a route without the constraint a handler maps it with. */
+    fun canonical(path: String): String = PATH_VARIABLE_CONSTRAINT.replace(path) { "{${it.groupValues[1]}}" }
+
+    private val PATH_VARIABLE_CONSTRAINT = Regex("\\{([A-Za-z0-9_]+):[^}]*}")
 
     /** Every handler, as Spring would map it: class prefix joined to the method path, one row per verb and path. */
     fun handlers(): List<Handler> =
@@ -46,14 +54,14 @@ object HandlerInventory {
                     ?.firstOrNull()
                     .orEmpty()
                     .removeSuffix("/")
-            val classOperation = type.getAnnotation(RequiredScope::class.java)?.value
+            val classPermission = type.getAnnotation(RequiredScope::class.java)?.value
             type.declaredMethods.flatMap { method ->
                 val (verbs, paths) = mappingOf(method) ?: return@flatMap emptyList()
-                val operation = method.getAnnotation(RequiredScope::class.java)?.value ?: classOperation
+                val permission = method.getAnnotation(RequiredScope::class.java)?.value ?: classPermission
                 paths.flatMap { path ->
                     val suffix = if (path.isEmpty() || path.startsWith("/")) path else "/$path"
                     val full = (classPrefix + suffix).ifEmpty { "/" }
-                    verbs.map { verb -> Handler(verb, full, "${type.simpleName}#${method.name}", operation) }
+                    verbs.map { verb -> Handler(verb, full, "${type.simpleName}#${method.name}", permission) }
                 }
             }
         }

@@ -7,8 +7,8 @@ import co.datapipelines.auth.ApiKeyCredential
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.AuthProperties
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.mcp.McpToolCatalog
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.config.EndpointsProperties
@@ -61,7 +61,7 @@ class ApiConsoleController(
     private val themeResolver: ThemeResolver,
 ) {
     @GetMapping("/api-console")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.ENDPOINT_READ)
     fun console(
         model: Model,
         request: HttpServletRequest,

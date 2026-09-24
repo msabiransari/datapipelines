@@ -28,17 +28,17 @@ class ScopeInterceptorTest {
 
     /** Method-level annotations, including a deliberately unannotated handler. */
     class ProbeController {
-        @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+        @RequiredScope(Permission.PIPELINE_READ)
         fun read() = Unit
 
-        @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
+        @RequiredScope(Permission.DATASOURCE_GRANT)
         fun adminOnly() = Unit
 
         fun unannotated() = Unit
     }
 
     /** Class-level annotation — the documented fallback for every handler in a controller. */
-    @RequiredScope(ScopeMatrix.RestOperation.USER_ADMINISTRATION)
+    @RequiredScope(Permission.USER_MANAGE)
     class AdminController {
         fun anything() = Unit
     }
@@ -120,6 +120,37 @@ class ScopeInterceptorTest {
         proceed.shouldBeFalse()
         response.status shouldBe 403
         (body(response)["details"] as Map<*, *>)["required"] shouldBe "admin"
+    }
+
+    /**
+     * #215 A.6 — the ROLE refusal's details, on the REST surface and on a partial (one
+     * interceptor, two paths): `required` names the catalog permission, `held` the role the
+     * principal was judged as. The MCP surface's twin is `McpToolDispatcherTest`'s.
+     */
+    @Test
+    fun `a role refusal names the catalog permission and the role - on the API and on a partial`() {
+        listOf("/api/v1/probe", "/partials/probe").forEach { path ->
+            val viewer =
+                AuthenticatedPrincipal(
+                    UUID.randomUUID(),
+                    "v@b.com",
+                    "V",
+                    emptySet(),
+                    AuthMethod.OIDC,
+                    workspace = WorkspaceContext(UUID.randomUUID(), "acme", WorkspaceRole.VIEWER),
+                )
+            SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(viewer, null, emptyList())
+
+            val (proceed, response) = invoke(ProbeController(), "adminOnly", path)
+
+            proceed.shouldBeFalse()
+            response.status shouldBe 403
+            body(response)["code"] shouldBe AuthErrorCodes.ROLE_REQUIRED
+            val details = body(response)["details"] as Map<*, *>
+            details["required"] shouldBe "datasource.grant"
+            details["held"] shouldBe "viewer"
+            details["operation"] shouldBe "datasource.grant"
+        }
     }
 
     @Test

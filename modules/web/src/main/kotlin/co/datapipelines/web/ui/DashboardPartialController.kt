@@ -4,7 +4,6 @@ import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineService
@@ -26,21 +25,21 @@ class DashboardPartialController(
     private val lens: PromoterLens,
 ) {
     @GetMapping("/dashboard-stats")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_RESOURCES)
+    @RequiredScope(Permission.PIPELINE_READ)
     fun stats(model: Model): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val isAdmin = principal.isWorkspaceAdmin
+        val isAdmin = principal.holds(Permission.EXECUTION_READ_ALL)
 
         val totalPipelines = pipelines.count(workspaceId, lens.viewFor(principal).pipelines)
         val todayStart = LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC)
 
-        // D11 (2026-09-20): the execution figures follow the READ_EXECUTIONS row — own runs
-        // unless workspace admin, and NONE for a role the row refuses (the promoter), whose
+        // D11 (2026-09-20): the execution figures follow the `execution.read` row — own runs
+        // unless `execution.read_all`, and NONE for a role the row refuses (the promoter), whose
         // tiles then honestly read zero rather than counting runs it may not see.
         val recentBatch =
             when {
-                !principal.holds(Permission.EXECUTE) -> emptyList()
+                !principal.holds(Permission.EXECUTION_READ) -> emptyList()
                 isAdmin -> executions.findAll(workspaceId, limit = STATS_SAMPLE_SIZE, offset = 0)
                 else -> executions.findByUser(workspaceId, principal.userId, limit = STATS_SAMPLE_SIZE, offset = 0)
             }
@@ -56,11 +55,11 @@ class DashboardPartialController(
     }
 
     @GetMapping("/recent-executions")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
+    @RequiredScope(Permission.EXECUTION_READ)
     fun recentExecutions(model: Model): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val isAdmin = principal.isWorkspaceAdmin
+        val isAdmin = principal.holds(Permission.EXECUTION_READ_ALL)
 
         val executions =
             if (isAdmin) {

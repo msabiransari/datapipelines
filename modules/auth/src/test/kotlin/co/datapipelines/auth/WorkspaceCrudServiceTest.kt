@@ -141,7 +141,7 @@ class WorkspaceCrudServiceTest {
         every { repository.findByName("acme") } returns ws
 
         val refusal = shouldThrow<RoleRequiredException> { service.updateDisplayName(author(), "acme", "New") }
-        refusal.details["required"] shouldBe Permission.WS_ADMIN.wire
+        refusal.details["required"] shouldBe Permission.WORKSPACE_UPDATE.wire
     }
 
     @Test

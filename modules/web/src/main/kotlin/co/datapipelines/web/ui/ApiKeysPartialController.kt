@@ -3,8 +3,8 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -61,7 +61,7 @@ class ApiKeysPartialController(
      * browser and cannot carry the user's session cookie from someone else's page.
      */
     @GetMapping("/partials/mcp-key/secret", produces = [MediaType.TEXT_PLAIN_VALUE])
-    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
+    @RequiredScope(Permission.MCP_KEY_OWN)
     @ResponseBody
     fun secret(
         @RequestHeader(name = SEC_FETCH_SITE, required = false) fetchSite: String? = null,
@@ -87,7 +87,7 @@ class ApiKeysPartialController(
      * delete-to-rotate swaps.
      */
     @GetMapping("/partials/mcp-key/chip")
-    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
+    @RequiredScope(Permission.MCP_KEY_OWN)
     fun chip(model: Model): String {
         val principal = requirePrincipal()
         val key = principal.workspace?.let { apiKeyRepository.findLiveUserKey(principal.userId, it.id) }
@@ -102,7 +102,7 @@ class ApiKeysPartialController(
      * which now shows the "no key — sign in again" state.
      */
     @DeleteMapping("/partials/mcp-key")
-    @RequiredScope(ScopeMatrix.RestOperation.VIEW_OWN_MCP_KEY)
+    @RequiredScope(Permission.MCP_KEY_OWN)
     fun rotate(model: Model): String {
         val principal = requirePrincipal()
         principal.workspace?.let { workspace ->

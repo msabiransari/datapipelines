@@ -2,6 +2,7 @@ package co.datapipelines.web.datasources
 
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.auth.WorkspaceService
@@ -50,7 +51,7 @@ class DatasourceGrantsController(
 ) {
     /** Every workspace [name] is granted to. Super admin. */
     @GetMapping
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
+    @RequiredScope(Permission.DATASOURCE_GRANT)
     fun list(
         @PathVariable name: String,
     ): ApiResponse<List<Map<String, Any?>>> {
@@ -63,7 +64,7 @@ class DatasourceGrantsController(
      * actor, because the first grant is the decision and a no-op is not a new one.
      */
     @PostMapping("/{workspace}")
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
+    @RequiredScope(Permission.DATASOURCE_GRANT)
     fun grant(
         @PathVariable name: String,
         @PathVariable workspace: String,
@@ -84,7 +85,7 @@ class DatasourceGrantsController(
      */
     @DeleteMapping("/{workspace}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.MANAGE_DATASOURCE_GRANTS)
+    @RequiredScope(Permission.DATASOURCE_GRANT)
     fun revoke(
         @PathVariable name: String,
         @PathVariable workspace: String,

@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.Scope
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -55,7 +56,7 @@ class ExecutionHistoryBrowseModel(
         offset: Int,
     ): String {
         val workspaceId = principal.requireWorkspace().id
-        val isAdmin = principal.isWorkspaceAdmin
+        val isAdmin = principal.holds(Permission.EXECUTION_READ_ALL)
         val wanted = status?.let { runCatching { ExecutionStatus.valueOf(it.trim().uppercase()) }.getOrNull() }
         val page = maxOf(0, offset)
         val raw =

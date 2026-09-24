@@ -2,8 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.typesystem.DatapipelinesException
@@ -41,7 +41,7 @@ class TemplateLifecycleDialogController(
     // ------------------------------------------------------------------ release
 
     @GetMapping("/partials/templates/lifecycle/release")
-    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
+    @RequiredScope(Permission.TEMPLATE_RELEASE)
     fun releaseDialog(
         model: Model,
         @RequestParam name: String,
@@ -57,7 +57,7 @@ class TemplateLifecycleDialogController(
     }
 
     @PostMapping("/partials/templates/lifecycle/release")
-    @RequiredScope(ScopeMatrix.RestOperation.RELEASE_VERSION)
+    @RequiredScope(Permission.TEMPLATE_RELEASE)
     fun release(
         model: Model,
         response: HttpServletResponse,
@@ -100,7 +100,7 @@ class TemplateLifecycleDialogController(
     // ------------------------------------------------------------------ purge draft (the versioned verb)
 
     @GetMapping("/partials/templates/lifecycle/purge")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun purgeDialog(
         model: Model,
         @RequestParam name: String,
@@ -117,7 +117,7 @@ class TemplateLifecycleDialogController(
     }
 
     @PostMapping("/partials/templates/lifecycle/purge")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun purge(
         model: Model,
         response: HttpServletResponse,
@@ -165,7 +165,7 @@ class TemplateLifecycleDialogController(
     // ------------------------------------------------------------------ discard release
 
     @GetMapping("/partials/templates/lifecycle/discard")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun discardDialog(
         model: Model,
         @RequestParam name: String,
@@ -181,7 +181,7 @@ class TemplateLifecycleDialogController(
     }
 
     @PostMapping("/partials/templates/lifecycle/discard")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun discard(
         model: Model,
         response: HttpServletResponse,
@@ -212,7 +212,7 @@ class TemplateLifecycleDialogController(
     // ------------------------------------------------------------------ restore
 
     @GetMapping("/partials/templates/lifecycle/restore")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun restoreDialog(
         model: Model,
         @RequestParam name: String,
@@ -228,7 +228,7 @@ class TemplateLifecycleDialogController(
     }
 
     @PostMapping("/partials/templates/lifecycle/restore")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_VERSION_MANAGE)
     fun restore(
         model: Model,
         response: HttpServletResponse,
@@ -263,7 +263,7 @@ class TemplateLifecycleDialogController(
     // ------------------------------------------------------------------ purge entity
 
     @GetMapping("/partials/templates/lifecycle/purge-entity")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_DELETE)
     fun purgeEntityDialog(
         model: Model,
         @RequestParam name: String,
@@ -278,7 +278,7 @@ class TemplateLifecycleDialogController(
     }
 
     @PostMapping("/partials/templates/lifecycle/purge-entity")
-    @RequiredScope(ScopeMatrix.RestOperation.MUTATE_PIPELINES_TEMPLATES)
+    @RequiredScope(Permission.TEMPLATE_DELETE)
     fun purgeEntity(
         @RequestParam name: String,
         @RequestParam confirm: String?,

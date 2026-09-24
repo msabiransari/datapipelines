@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.15 (living document — updated as enums evolve)
+**Status:** v1.17 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -191,7 +191,7 @@ Fixed at template **create** and identical on every version of a template (`temp
 ## 8. `Scope` — API key authorization scope
 
 **Source:** [Auth §7.5](auth.md#75-scopes)
-**Used by:** auth, every endpoint and MCP tool (scope enforcement — see the scope↔operation matrix in auth.md).
+**Used by:** auth, every endpoint and MCP tool (scope enforcement — each catalog permission's key floor, auth.md §7.6's permission key-scope table; removed with scopes in #215 slice (b)).
 
 Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope has all lower scopes too.
 
@@ -208,31 +208,21 @@ Hierarchical: `admin ⊃ author ⊃ execute ⊃ read`. A key with a higher scope
 
 ## 8B. `Permission` — an action a role may perform (was `Capability`)
 
-**Source:** [Auth §11A](auth.md#11a-roles) (the roles), [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) (the role-first matrix — the per-operation row)
-**Used by:** auth (`ScopeMatrix.allowed`), every REST handler and MCP tool.
+**Source:** [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative) — **the catalog table is the single authority** (the value set, the roles each value admits, the surfaces placed on it); the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §2 (#215, ratified 2026-09-23) is its design.
+**Used by:** auth (`Permission`, `RolePermissions`, `ScopeMatrix.allowed`, `AuthenticatedPrincipal.holds`), every REST handler (`@RequiredScope(Permission.X)`), every MCP tool (`ScopeMatrix.MCP_TOOL_PERMISSION`), and the service checks that ask for one (`execution.read_all`, `server_key.create`, …).
 
-The ROLE axis of the matrix. A permission is a ROW of §7.6 — the set of workspace roles admitted to an action — never a free string (roles design D21, 2026-09-20). It travels with a **membership**, not with a credential: the same person is a viewer in one workspace and an author in another. Renamed from `Capability` on 2026-09-20 with the vocabulary ruling (role = what a member holds, permission = what a role may do).
+Since #215 slice (a) a permission is a **`<functionality>.<permission>` catalog value** — `pipeline.read`, `template.release`, `workspace.members.manage` — one per piece of functionality a person can take separately (PK1); 65 on this version. The wire form is the dotted token; the Kotlin constant is its upper-snake spelling (`PIPELINE_READ`). The seven coarse values of v1.16 (`view`, `execute`, `author`, `promotion_read`, `promote`, `ws_admin`, `super_admin`) are retired: every one maps onto the catalog values whose surfaces it covered, with each surface's roles unchanged. The values are not restated here — a second list is a second thing to keep true; read them in auth §7.6.
 
-**Deliberately NOT a hierarchy**, unlike [`Scope`](#8-scope--api-key-authorization-scope). The roles are not a chain — the promoter promotes but does not execute, the author releases but does not promote — so each value lists the roles it admits outright. A super admin (`users.is_admin`) holds every value in every workspace (D7).
+It is the ROLE axis. It travels with a **membership**, not with a credential: the same person is a viewer in one workspace and an author in another. **Not a hierarchy**, unlike [`Scope`](#8-scope--api-key-authorization-scope): the roles are not a chain, so the ONE role table (`RolePermissions`) lists each role's permissions outright. A super admin (`users.is_admin`) holds every value in every workspace (D7) except the two **fenced** promotion-receiving values, which no role holds — they are reached only through the promotion server-key route family. Code asks whether a principal holds a permission; it never compares role names (PK1).
 
-| Value | Admits | Description |
-|---|---|---|
-| `view` | viewer, author, promoter, workspace_admin | Read the workspace's objects, introspect a datasource's schema, the self verbs (own keys, own password, theme), the switcher |
-| `execute` | viewer, author, workspace_admin | Execute pipelines, cancel runs, read executions and results (own unless workspace admin — D11), test a datasource connection. The promoter has none of it (D5) |
-| `author` | author, workspace_admin | Create/edit drafts, discard, restore, purge, **release**, switch the served version, publish endpoints, register lake tables, record/retire learned facts (D4, D8, D9) |
-| `promotion_read` | author, promoter, workspace_admin | Read the promotion page (owner rule 13): the author who released sees what is promotable |
-| `promote` | promoter, workspace_admin | Promote to the higher environment (D5, D8) |
-| `ws_admin` | workspace_admin | Members, roles and invitations, workspace-bound datasources, the workspaces page, the workspace audit trail |
-| `super_admin` | — (super admin only) | Instance verbs: create/deactivate workspaces, users, global datasources and grants. Implicitly a member of every workspace, audited as `auth.super_admin_acting` |
-
-**Where the two axes disagree, and neither is redundant:** `execute` is the second SCOPE but a viewer-level PERMISSION — a `read` key may not execute, a viewer's session may. The datasource probes run the other way: `author` scope (a `read` key must not reach row data) but `view` permission (every role, the promoter included — "introspection is reading", ratified 2026-09-20).
+**Where the two axes disagree until slice (b) removes scopes:** `pipeline.execute` floors at the `execute` SCOPE but is viewer-level — a `read` key may not execute, a viewer's session may. Schema introspection (`datasource.introspect`) runs the other way: `author` scope but every role.
 
 ---
 
 ## 8C. `WorkspaceRole` — the ONE role a membership holds
 
 **Source:** [Auth §11A](auth.md#11a-roles); [metadata-db §4.12](metadata-db.md#412-workspace_members) (`workspace_members.role`, V29) and §4.17 (`workspace_invitations.role`)
-**Used by:** auth (`WorkspaceRole`, `Permission.satisfiedBy(role, superAdmin)`), the REST `role` field of the workspace surface (rest-api §17), the members dropdown (ui-screens §4.13).
+**Used by:** auth (`WorkspaceRole`, the role table `RolePermissions`), the REST `role` field of the workspace surface (rest-api §17), the members dropdown (ui-screens §4.13).
 
 Exactly one per membership (roles design D1, 2026-09-20). Super admin is NOT a value: it is `users.is_admin`, a property of the user, held in every workspace. The wire and database token is the lowercase name; the UI prints it with a space (`workspace admin`).
 
@@ -668,6 +658,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v1.17 | 215a (#215) the permission catalog | **§8B `Permission` is the catalog**: the seven coarse values (`view` … `super_admin`) are replaced by the 65 `<functionality>.<permission>` values of auth §7.6, which is now their single authority — this section points there instead of restating them. §8 and §8C name the new code homes (`RolePermissions`, the permission key-scope table). Status caught up with the change log (it read v1.15 while the rows had reached v1.16). |
 | 2026-09-21 | v1.14 | 179 (#179) keys | §8A `user`: minted ONLY by the login/switch hook, one per user per workspace (D16) — the "default for any key minted without an explicit kind" sentence is gone with on-demand minting. No value added, removed or renamed; the wire set is unchanged |
 | 2026-09-20 | v1.16 | 177 (#177) roles R1 | §8B `Capability` → **`Permission`** (D21), redefined as the role SETS of the ratified matrix: `switch` gone (release and switch are the author's, D8), **`promotion_read`** new (owner rule 13), `execute` no longer admits the promoter (D5), `ws_admin` gains the workspaces page (D13). New **§8C `WorkspaceRole`** — the ONE role a membership holds (V29; `viewer` \| `author` \| `promoter` \| `workspace_admin`). New **§18A `ExecutedByKeyKind`** (`user` \| `endpoint` \| `server`, V30) beside the `executed_by` rename in §18. §15: `workspace.member_flags_changed` → `workspace.member_role_changed`; the member-added / invited / materialised rows carry `role`, not `flags`. |
 | 2026-09-19 | v1.15 | 172 (#172) | §18's `ENDPOINT` row reworded for the re-rooted published-endpoint URL shape (R-EP5); the enum and its wire value are unchanged. |

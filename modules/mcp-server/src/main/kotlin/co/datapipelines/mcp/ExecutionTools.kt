@@ -1,6 +1,7 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.mcp.McpCallAudit
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.Scope
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
@@ -36,15 +37,21 @@ internal fun requireReadScope(ctx: McpToolContext) {
 }
 
 /**
- * Execution **ownership** (mcp-server.md §13 security checklist): a valid `read` key cannot read
- * another user's executions; `admin` may read any.
+ * Execution **ownership** (mcp-server.md §13 security checklist; D11): a key reads its issuer's
+ * OWN runs, and another user's only when the issuer holds `execution.read_all` (#215 — the
+ * workspace admin's and the super admin's).
  *
  * A non-owned execution is reported as *not found* rather than *forbidden*: telling a caller that
  * an execution it may not read exists is an information disclosure, and §13.10 catalogues no
  * "not yours" code. The distinction is invisible to a legitimate caller and mirrors the
  * `result.execution_not_found` row of §6.2.15's error table.
  */
-internal fun ExecutionRecord.visibleTo(ctx: McpToolContext): Boolean = isOwnRunOf(ctx.principal.userId) || ctx.principal.isWorkspaceAdmin
+internal fun ExecutionRecord.visibleTo(ctx: McpToolContext): Boolean =
+    isOwnRunOf(ctx.principal.userId) || ctx.principal.holds(Permission.EXECUTION_READ_ALL)
+
+/** [visibleTo]'s twin for the cancel verb: own runs, or any with `execution.cancel_all` (#215). */
+internal fun ExecutionRecord.cancellableBy(ctx: McpToolContext): Boolean =
+    isOwnRunOf(ctx.principal.userId) || ctx.principal.holds(Permission.EXECUTION_CANCEL_ALL)
 
 /** The §6.2.14 execution projection — metadata only, never rows. */
 internal fun ExecutionRecord.toMcpMetadata(): Map<String, Any?> =
@@ -119,7 +126,7 @@ class ExecutionsListTool(
         // workspace's runs (endpoint-key runs included), everyone else exactly their own.
         val wanted = status?.let { ExecutionStatus.valueOf(it) }
         val candidates =
-            if (ctx.principal.isWorkspaceAdmin) {
+            if (ctx.principal.holds(Permission.EXECUTION_READ_ALL)) {
                 executions.findAll(workspaceId, pipelineId, wanted, limit = limit)
             } else {
                 executions.findByUser(workspaceId, ctx.principal.userId, pipelineId, wanted, limit = limit)
@@ -228,7 +235,7 @@ class ExecutionsCancelTool(
         val id = args.requiredUuid("execution_id")
         // Ownership was checked before anything else, exactly as the REST verb's guard order:
         // a non-owned execution is not-found, never a disclosure (§10.2/§10.4).
-        val record = executions.findById(workspaceId, id)?.takeIf { it.visibleTo(ctx) } ?: throw McpNotFound.execution(id)
+        val record = executions.findById(workspaceId, id)?.takeIf { it.cancellableBy(ctx) } ?: throw McpNotFound.execution(id)
         if (record.status != ExecutionStatus.RUNNING) {
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Execution.NOT_RUNNING,

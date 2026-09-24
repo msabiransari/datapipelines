@@ -1,8 +1,8 @@
 package co.datapipelines.web.executions
 
+import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionRecord
@@ -15,6 +15,7 @@ import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
+import co.datapipelines.web.api.cancellableBy
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.visibleTo
 import co.datapipelines.web.sse.SseLogStreamer
@@ -65,7 +66,7 @@ class ExecutionsController(
      * can reach the page. The promoter never reaches this handler (`READ_EXECUTIONS`).
      */
     @GetMapping
-    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
+    @RequiredScope(Permission.EXECUTION_READ)
     fun list(
         @RequestParam(name = "pipeline_id", required = false) pipelineId: UUID?,
         @RequestParam(required = false) status: String?,
@@ -80,7 +81,7 @@ class ExecutionsController(
         val size = Pagination.clampLimit(limit)
         val wanted = status?.let { parseStatus(it) }
         val raw =
-            if (principal.isWorkspaceAdmin) {
+            if (principal.holds(Permission.EXECUTION_READ_ALL)) {
                 executions.findAll(workspaceId, pipelineId, wanted, startedAfter, startedBefore, limit = size + 1, offset = page)
             } else {
                 executions.findByUser(
@@ -105,7 +106,7 @@ class ExecutionsController(
 
     /** §10.2 — one execution's metadata; `result_url` only while the result is unexpired. */
     @GetMapping("/{id}")
-    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
+    @RequiredScope(Permission.EXECUTION_READ)
     fun get(
         @PathVariable id: UUID,
     ): ApiResponse<Map<String, Any?>> {
@@ -126,13 +127,13 @@ class ExecutionsController(
      */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(ScopeMatrix.RestOperation.CANCEL_EXECUTION)
+    @RequiredScope(Permission.EXECUTION_CANCEL)
     fun cancel(
         @PathVariable id: UUID,
     ) {
         val workspaceId = currentPrincipal().requireWorkspace().id
         val record =
-            executions.findById(workspaceId, id)?.takeIf { it.visibleTo(currentPrincipal()) }
+            executions.findById(workspaceId, id)?.takeIf { it.cancellableBy(currentPrincipal()) }
                 ?: throw ApiErrors.executionNotFound(id.toString())
         if (record.status != ExecutionStatus.RUNNING) {
             throw ApiErrors.executionNotRunning(id.toString(), record.status.name)
@@ -152,7 +153,7 @@ class ExecutionsController(
         // only accepts text/event-stream — see PipelineExecuteController.
         produces = [MediaType.TEXT_EVENT_STREAM_VALUE, MediaType.APPLICATION_JSON_VALUE],
     )
-    @RequiredScope(ScopeMatrix.RestOperation.READ_EXECUTIONS)
+    @RequiredScope(Permission.EXECUTION_READ)
     fun events(
         @PathVariable id: UUID,
     ): SseEmitter {
@@ -168,7 +169,7 @@ class ExecutionsController(
 
     /** §7.2 — the result cursor. `format=json` pages through the envelope; `csv` streams. */
     @GetMapping("/{id}/result")
-    @RequiredScope(ScopeMatrix.RestOperation.RETRIEVE_RESULT)
+    @RequiredScope(Permission.EXECUTION_RESULT_READ)
     fun result(
         @PathVariable id: UUID,
         @RequestParam(required = false) offset: Long?,
