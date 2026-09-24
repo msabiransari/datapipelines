@@ -95,7 +95,8 @@ class ApiKeysAdminController(
             endpointKeys.issue(
                 principal = principal,
                 name = name.trim(),
-                scopes = emptySet(),
+                // The role follows the kind until slice (c)'s dialog offers the choice (record §3.1).
+                role = null,
                 kind = requestedKind,
                 bindingPaths = bindingPaths,
                 expiresAt = expiresAt,
@@ -105,12 +106,7 @@ class ApiKeysAdminController(
         model.addAttribute("keyId", issued.record.id)
         model.addAttribute("keyName", issued.record.name)
         model.addAttribute("keyKind", issued.record.kind.wire)
-        model.addAttribute(
-            "keyScopes",
-            issued.record.scopes
-                .map { it.wire }
-                .sorted(),
-        )
+        model.addAttribute("keyRole", issued.record.role?.label)
         model.addAttribute("keyBindings", bindingPaths)
         model.addAttribute("keyExpires", expiresAt?.let { RelativeTime.absolute(it) })
         model.addAttribute("keys", rows(principal))
@@ -218,19 +214,24 @@ class ApiKeysAdminController(
                 .filter { it != ApiKeyKind.USER }
                 .flatMap { apiKeyRepository.findByWorkspaceAndKind(principal.requireWorkspace().id, it) },
             Instant.now(),
-            ownerLabels = ownerLabels(principal.requireWorkspace().id),
+            userLabels = userLabels(principal.requireWorkspace().id),
         )
 
-    /** owner id → display label, one lookup per distinct owner — the "Created by" column. */
-    private fun ownerLabels(workspaceId: UUID): Map<UUID, String> =
+    /**
+     * user id → display label, one lookup per distinct user — the "Created by" column (the key's
+     * creator, a person) and the "Acts as" column (its own identity, "<key name> (API key)",
+     * #215 record §3.3 — the same words its history shows).
+     */
+    private fun userLabels(workspaceId: UUID): Map<UUID, String> =
         ApiKeyKind.entries
             .filter { it != ApiKeyKind.USER }
             .flatMap { apiKeyRepository.findByWorkspaceAndKind(workspaceId, it) }
-            .map { it.userId }
+            .flatMap { listOf(it.createdBy, it.userId) }
             .distinct()
             .associateWith { userId ->
-                userRepository.findById(userId)?.let { it.displayName.ifBlank { null } ?: it.email }
-                    ?: ApiKeyRows.UNKNOWN_OWNER
+                userRepository.findById(userId)?.let { user ->
+                    ActorNames.displayed(user.displayName.ifBlank { null } ?: user.email, user.kind.wire)
+                } ?: ApiKeyRows.UNKNOWN_OWNER
             }
 
     /**

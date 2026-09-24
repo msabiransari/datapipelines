@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.LocalPasswordService
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.auth.WorkspaceContext
@@ -47,7 +46,6 @@ class UserSettingsControllerTest {
             userId = userId,
             email = "test@example.com",
             displayName = "Test User",
-            scopes = setOf(Scope.READ, Scope.EXECUTE),
             authMethod = AuthMethod.OIDC,
             workspace = WorkspaceContext(workspaceId, "acme"),
         )

@@ -26,7 +26,7 @@ class ExecutionsCancelToolTest {
     private val cancellation = mockk<ExecutionCancellationService>()
     private val mcpCalls = mockk<McpCallAudit>()
     private val tool = ExecutionsCancelTool(executions, cancellation, mcpCalls)
-    private val ctx = McpFixtures.ctx(co.datapipelines.auth.Scope.EXECUTE)
+    private val ctx = McpFixtures.ctx()
 
     private fun running(
         executedBy: java.util.UUID = McpFixtures.USER,
@@ -77,12 +77,12 @@ class ExecutionsCancelToolTest {
             shouldThrow<DatapipelinesException> {
                 tool.call(
                     McpArguments(mapOf("execution_id" to McpFixtures.EXECUTION_ID.toString())),
-                    McpFixtures.ctx(co.datapipelines.auth.Scope.EXECUTE, keyId = McpFixtures.OTHER_KEY_ID),
+                    McpFixtures.ctx(keyId = McpFixtures.OTHER_KEY_ID),
                 )
             }
 
         assertAll(
-            { thrown.code shouldBe PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT },
+            { thrown.code shouldBe PipelineErrorCodes.Auth.ROLE_REQUIRED },
             { thrown.details["reason"] shouldBe "different_credential" },
         )
         verify(exactly = 0) { cancellation.cancel(any(), any()) }
@@ -116,7 +116,7 @@ class ExecutionsCancelToolTest {
             }
 
         assertAll(
-            { thrown.code shouldBe PipelineErrorCodes.Auth.SCOPE_INSUFFICIENT },
+            { thrown.code shouldBe PipelineErrorCodes.Auth.ROLE_REQUIRED },
             { thrown.details["reason"] shouldBe "started_outside_mcp" },
         )
         verify(exactly = 0) { mcpCalls.calledByKey(any(), any()) }

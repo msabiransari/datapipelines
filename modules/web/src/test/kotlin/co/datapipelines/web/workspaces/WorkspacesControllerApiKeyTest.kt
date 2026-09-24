@@ -1,16 +1,20 @@
 package co.datapipelines.web.workspaces
 
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.ScopeInterceptor
+import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceService
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.kotest.assertions.withClue
 import io.kotest.matchers.booleans.shouldBeFalse
 import io.kotest.matchers.booleans.shouldBeTrue
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
@@ -19,30 +23,29 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
+import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.method.HandlerMethod
 import java.util.UUID
 
 /**
- * The 025 review's blocking finding, pinned at the interceptor: an API key authenticates
- * on EVERY path and is CSRF-exempt, so before the floor raise a `read`-scoped key drove
- * all five `/api/v1/workspaces` mutations (create, rename, soft-delete, add/remove
- * member) — the in-handler `requireOwnerOrAdmin` checks the USER's role, never the
- * credential's scope. `WORKSPACE_CREATE` and `MANAGE_WORKSPACE` are now floored at
- * `author` (auth.md §7.6), and this suite runs the REAL [ScopeInterceptor] against the
- * REAL [WorkspacesController] handler methods with `DP-API-Key` principals, so a floor
- * regression on any of the five turns red here.
+ * The 025 review's blocking finding, pinned at the interceptor — and, since #215 B2, its
+ * strongest form. The finding: an API key authenticates on every path and is CSRF-exempt, so a
+ * key once drove all five `/api/v1/workspaces` mutations. Round 1 raised the floors; slice (b)
+ * removes the question: **the MCP (`user`) key is confined to `/mcp`** (owner ruling 2026-09-24:
+ * "MCP key should be only MCP"), so no key reaches ANY workspace route — a read, a membership
+ * mutation or an instance verb — whatever its member's role. This suite runs the REAL
+ * [ScopeInterceptor] (the second line; `ApiKeyFilter` refuses first, `ApiKeyFilterTest`) against
+ * the REAL [WorkspacesController] handler methods.
  *
- * **RBAC round 1 raised the floors again, and this suite raised with them.** Creating and
- * deactivating a workspace are `super_admin` on the role axis and `admin` on the scope axis —
- * and `admin` is no longer a scope a key may hold (O-2) — so a key CANNOT reach them at all,
- * by either axis. Membership management is `ws_admin`. The suite therefore now asserts the
- * stronger property: the credential axis alone stops a key on the two instance verbs, and the
- * ROLE axis is what admits or refuses it on the rest.
- *
- * The handler-annotation layer is what this class proves; the pinned-workspace rule for
- * key principals (the same finding's second half) is proven where the rule lives, in
- * auth's `WorkspaceKeyPinTest`. `WorkspacesControllerTest` covers the payloads; this
- * class covers who may reach them.
+ * Until slice (b) the key of a workspace ADMIN passed the three membership mutations here (the
+ * role axis admitted it, the `author` scope floor was met). That expectation was run against this
+ * slice's code once and went red (the lane's falsification log); the refusal below replaced it.
+ * The same admin's SESSION still passes them — the refusal is the credential kind's, not the role's.
  */
 class WorkspacesControllerApiKeyTest {
     private val mapper = ObjectMapper()
@@ -52,36 +55,32 @@ class WorkspacesControllerApiKeyTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticateKey(scope: Scope) {
+    /** A workspace ADMIN's MCP key — the highest member role, uncapped, so nothing but its kind can refuse it. */
+    private fun authenticateMcpKey() = authenticate(AuthMethod.API_KEY, keyKind = ApiKeyKind.USER, keyId = "dpk_TESTKEY")
+
+    private fun authenticateSession() = authenticate(AuthMethod.OIDC, keyKind = null, keyId = null)
+
+    private fun authenticate(
+        method: AuthMethod,
+        keyKind: ApiKeyKind?,
+        keyId: String?,
+    ) {
         val principal =
             AuthenticatedPrincipal(
                 UUID.randomUUID(),
                 "agent@company.com",
                 "Agent",
-                scope.expand().filterTo(mutableSetOf()) { it in co.datapipelines.auth.KEY_SCOPES },
-                AuthMethod.API_KEY,
-                keyId = "dpk_TESTKEY",
+                method,
+                keyId = keyId,
                 workspaceName = "acme",
-                // Both axes are judged now, so the key needs a resolved workspace or every
-                // call is `workspace.not_found` before any floor is read. Its ISSUER is a
-                // workspace admin here — the highest role a key's issuer can be short of super
-                // admin — so what refuses below is a floor, never a missing membership.
-                workspace =
-                    co.datapipelines.auth.WorkspaceContext(
-                        UUID.randomUUID(),
-                        "acme",
-                        co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN,
-                    ),
+                workspace = WorkspaceContext(UUID.randomUUID(), "acme", WorkspaceRole.WORKSPACE_ADMIN),
+                keyKind = keyKind,
             )
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
 
-    /**
-     * The verbs a workspace admin's key may drive: `ws_admin` on the role axis, `author` on the
-     * scope one. Three of the finding's original five; the other two became instance verbs no
-     * key can reach ([instanceVerbs]).
-     */
+    /** The membership verbs a workspace admin's SESSION drives. */
     private fun mutations(): List<Triple<String, HandlerMethod, String>> =
         listOf(
             Triple("PUT", handler("update", String::class.java, JsonNode::class.java), "/api/v1/workspaces/acme"),
@@ -89,16 +88,21 @@ class WorkspacesControllerApiKeyTest {
             Triple("DELETE", handler("removeMember", String::class.java, UUID::class.java), "/api/v1/workspaces/acme/members/$USER_ID"),
         )
 
-    /**
-     * The INSTANCE verbs (D-R11/D-R10): `super_admin` on the role axis and `admin` on the scope
-     * axis — and no key holds `admin` any more (O-2), so a key is stopped twice over.
-     */
+    /** The INSTANCE verbs (D-R11/D-R10) — a super admin's, never a key's (B1). */
     private fun instanceVerbs(): List<Triple<String, HandlerMethod, String>> =
         listOf(
             Triple("POST", handler("create", JsonNode::class.java), "/api/v1/workspaces"),
             Triple("DELETE", handler("delete", String::class.java), "/api/v1/workspaces/acme"),
             Triple("POST", handler("deactivate", String::class.java), "/api/v1/workspaces/acme/deactivate"),
             Triple("POST", handler("reactivate", String::class.java), "/api/v1/workspaces/acme/reactivate"),
+        )
+
+    /** The reads — once reachable by any key holding `read`. */
+    private fun reads(): List<Triple<String, HandlerMethod, String>> =
+        listOf(
+            Triple("GET", handler("list"), "/api/v1/workspaces"),
+            Triple("GET", handler("get", String::class.java), "/api/v1/workspaces/acme"),
+            Triple("GET", handler("members", String::class.java), "/api/v1/workspaces/acme/members"),
         )
 
     private fun handler(
@@ -117,50 +121,64 @@ class WorkspacesControllerApiKeyTest {
     }
 
     @Test
-    fun `a read-scoped api key is 403 on every workspace mutation - the full MANAGE_WORKSPACE_MEMBERS floor`() {
-        authenticateKey(Scope.READ)
+    fun `a workspace admin's MCP key is refused on every workspace route with the confinement code (B2)`() {
+        authenticateMcpKey()
+        val routes = everyMappedRoute()
 
-        mutations().forEach { (method, handler, path) ->
+        routes.forEach { (method, handler, path) ->
             val (proceed, response) = invoke(method, handler, path)
+            withClue("$method $path") {
+                proceed.shouldBeFalse()
+                response.status shouldBe 403
+                val error = mapper.readValue(response.contentAsString, Map::class.java)["error"] as Map<*, *>
+                error["code"] shouldBe ScopeInterceptor.ENDPOINT_KEY_KIND_REFUSED
+                (error["details"] as Map<*, *>)["reason"] shouldBe "user_key_off_surface"
+            }
+        }
+        // Non-vacuity: the walk found the controller's routes — the reads, the membership verbs
+        // and the instance verbs above among them — rather than an empty reflection result.
+        routes.size shouldBeGreaterThanOrEqual MINIMUM_ROUTES
+        routes
+            .map { it.second.method }
+            .toSet()
+            .containsAll(
+                (reads() + mutations() + instanceVerbs()).map { it.second.method },
+            ).shouldBeTrue()
+    }
 
-            proceed.shouldBeFalse()
-            response.status shouldBe 403
-            val body = mapper.readValue(response.contentAsString, Map::class.java)["error"] as Map<*, *>
-            body["code"] shouldBe "auth.scope.insufficient"
+    /**
+     * Every handler [WorkspacesController] maps, as (verb, handler, concrete path) — read off its own
+     * mapping annotations, so a route added later is walked without an edit here.
+     */
+    private fun everyMappedRoute(): List<Triple<String, HandlerMethod, String>> {
+        val prefix =
+            WorkspacesController::class.java
+                .getAnnotation(RequestMapping::class.java)
+                ?.value
+                ?.firstOrNull()
+                .orEmpty()
+        return WorkspacesController::class.java.methods.mapNotNull { method ->
+            val (verb, own) =
+                method.getAnnotation(GetMapping::class.java)?.let { "GET" to it.value.firstOrNull().orEmpty() }
+                    ?: method.getAnnotation(PostMapping::class.java)?.let { "POST" to it.value.firstOrNull().orEmpty() }
+                    ?: method.getAnnotation(PutMapping::class.java)?.let { "PUT" to it.value.firstOrNull().orEmpty() }
+                    ?: method.getAnnotation(PatchMapping::class.java)?.let { "PATCH" to it.value.firstOrNull().orEmpty() }
+                    ?: method.getAnnotation(DeleteMapping::class.java)?.let { "DELETE" to it.value.firstOrNull().orEmpty() }
+                    ?: return@mapNotNull null
+            Triple(verb, HandlerMethod(controller, method), (prefix + own).replace(Regex("\\{[^}]+}"), "x"))
         }
     }
 
     @Test
-    fun `an author-scoped key whose issuer is a workspace admin passes the membership floors`() {
-        // The floors are the interceptor's whole say: the key's workspace pin is the service's
-        // gate (WorkspaceKeyPinTest), reached only past this point.
-        authenticateKey(Scope.AUTHOR)
+    fun `the same workspace admin's SESSION passes the membership floors - the refusal is the kind's, not the role's`() {
+        authenticateSession()
 
         mutations().forEach { (method, handler, path) ->
             invoke(method, handler, path).first.shouldBeTrue()
         }
-    }
-
-    @Test
-    fun `NO key reaches the instance verbs - the scope axis alone stops it (O-2)`() {
-        // The strongest form of the 025 finding's fix: it is not that a key needs a higher
-        // scope, it is that the scope it would need cannot be issued to a key at all. Even a
-        // key whose issuer is a super admin is refused, because the refusal is the CREDENTIAL's.
-        authenticateKey(Scope.AUTHOR)
-
-        instanceVerbs().forEach { (method, handler, path) ->
-            invoke(method, handler, path).first.shouldBeFalse()
+        reads().forEach { (method, handler, path) ->
+            invoke(method, handler, path).first.shouldBeTrue()
         }
-    }
-
-    @Test
-    fun `a read-scoped api key still reads the workspace surface`() {
-        // WORKSPACES_READ (one workspace, its members) and WORKSPACE_SWITCH (list-own) both floor at `read` (§7.6).
-        authenticateKey(Scope.READ)
-
-        invoke("GET", handler("list"), "/api/v1/workspaces").first.shouldBeTrue()
-        invoke("GET", handler("get", String::class.java), "/api/v1/workspaces/acme").first.shouldBeTrue()
-        invoke("GET", handler("members", String::class.java), "/api/v1/workspaces/acme/members").first.shouldBeTrue()
     }
 
     /**
@@ -177,7 +195,6 @@ class WorkspacesControllerApiKeyTest {
                     UUID.randomUUID(),
                     "nobody@company.com",
                     "Nobody",
-                    emptySet(),
                     AuthMethod.OIDC,
                     workspace = null,
                 ),
@@ -194,5 +211,8 @@ class WorkspacesControllerApiKeyTest {
 
     private companion object {
         val USER_ID: UUID = UUID.randomUUID()
+
+        /** The 2026-09-24 count is 13; the floor catches an empty or truncated reflection walk. */
+        const val MINIMUM_ROUTES = 12
     }
 }

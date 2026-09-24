@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.NewPipeline
 import co.datapipelines.pipeline.Pipeline
@@ -27,7 +26,7 @@ import java.util.UUID
 class PipelineAuthoringToolsTest {
     private val pipelines = mockk<PipelineRepository>()
     private val validator = mockk<PipelineValidator>()
-    private val ctx = McpFixtures.ctx(Scope.AUTHOR)
+    private val ctx = McpFixtures.ctx()
 
     private val args =
         McpArguments(

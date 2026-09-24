@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.ScopeMatrix
 import com.fasterxml.jackson.databind.JsonNode
 import io.modelcontextprotocol.json.McpJsonDefaults
 
@@ -17,7 +16,7 @@ import io.modelcontextprotocol.json.McpJsonDefaults
  *
  * So the skill does not TYPE the tool list any more. This renderer reads the real
  * `mcpTools` bean's output ([realShippedTools]) — name, description, input schema — joins it
- * with the auth §7.6 minimum scope ([ScopeMatrix.requiredScopeForTool]) and the catalog's
+ * with the catalog's declared permission ([McpToolCatalog.Entry.permission], auth §7.6) and its
  * `mutating` declaration, and writes the file. `SkillToolsDocDriftTest` fails when the
  * committed file is not what this produces, and `./gradlew :modules:mcp-server:skillToolsDoc`
  * rewrites it. Adding a tool then costs the skill nothing.
@@ -70,8 +69,8 @@ object SkillToolsDoc {
         val out = StringBuilder()
         out.append("\n### `").append(entry.name).append("`\n\n")
         out
-            .append("Scope `")
-            .append(ScopeMatrix.requiredScopeForTool(entry.name)?.wire ?: "—")
+            .append("Permission `")
+            .append(entry.permission.wire)
             .append("` · ")
             .append(if (entry.mutating) "**writes**" else "read-only")
             .append("\n\n")
@@ -141,14 +140,14 @@ object SkillToolsDoc {
         """
         # The MCP tools
 
-        Open when you need a tool's exact arguments, its scope, or whether calling it writes.
+        Open when you need a tool's exact arguments, its permission, or whether calling it writes.
 
         Part of the `datapipelines` skill — the operating core is `SKILL.md` beside this file.
 
         **This file is GENERATED** from the server's own tool catalog
         (`./gradlew :modules:mcp-server:skillToolsDoc`), so it cannot describe a surface the
-        server does not ship. Do not edit it by hand; a drift test fails if you do. Scope is the
-        auth §7.6 minimum: scopes are hierarchical (`admin ⊃ author ⊃ execute ⊃ read`), so a key
-        with a higher scope satisfies a lower requirement.
+        server does not ship. Do not edit it by hand; a drift test fails if you do. Permission is
+        the auth §7.6 catalog permission the tool declares: your MCP key may call it when your
+        role in the key's workspace holds it (a workspace admin's key acts as an author).
         """
 }

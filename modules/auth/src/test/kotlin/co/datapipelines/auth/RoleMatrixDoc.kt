@@ -1,18 +1,21 @@
 package co.datapipelines.auth
 
 /**
- * The auth.md §7.6 tables, parsed (#215 slice (a): the permission CATALOG). ONE walker for
- * every table, keyed by the bold marker that opens each, because a second hand-written parser
- * is a second place for two tables to disagree about where a table ends.
+ * The auth.md §7.6 catalog, parsed (#215: the permission CATALOG — slice (a) the five role
+ * columns, slice (b) the two KEY-ROLE columns and no scope tables). ONE walker, keyed by the bold
+ * marker that opens the table, because a second hand-written parser is a second place for two
+ * tables to disagree about where a table ends.
  *
  * A table ends at the first non-blank line after its rows that is not a table row — never at
  * a prose sentence about the CONTENT, which is the guard that broke whenever the content was
  * right (the 068 lesson, kept from the previous parser).
  *
- * The catalog row carries, besides its permission and its five role cells, the PLACEMENT: every
+ * The catalog row carries, besides its permission and its seven role cells, the PLACEMENT: every
  * route in code font as the handler maps it (`VERB /path`, a path variable's regex dropped) and,
- * after the cell's `MCP:` label, every MCP tool by wire name. `ScopeMatrixSpecDriftTest` reads the tools from here, and the web
- * module's reachability gate reads the routes with its sibling parser.
+ * after the cell's `MCP:` label, every MCP tool by wire name. The web module's reachability gate
+ * reads the routes AND the tools with its sibling parser — it is the module that sees both the
+ * handlers and `McpToolCatalog`, which this one cannot (#215: the tool permission lives on the
+ * catalog entry now).
  *
  * `tests/integration-tests` carries a sibling of this object (`RoleMatrixDocE2e`): test
  * fixtures do not cross module boundaries (module-structure §4.2), and the walk over the REAL
@@ -20,8 +23,6 @@ package co.datapipelines.auth
  */
 object RoleMatrixDoc {
     const val CATALOG_MARKER = "**The catalog — permissions and roles:**"
-    const val PERMISSION_SCOPES_MARKER = "**Permissions — key scopes**"
-    const val MCP_SCOPES_MARKER = "**MCP tools — key scopes**"
 
     /** The five role cells of one row, decoded: which workspace roles hold it, whether super admin does, whether it is fenced. */
     data class RoleCells(
@@ -44,6 +45,10 @@ object RoleMatrixDoc {
         val label: String,
         val permission: Permission?,
         val cells: RoleCells,
+        /** The KEY roles whose column admits this row (#215 record §3.2) — `api_caller`, `promotion_receiver`. */
+        val keyRoles: Set<KeyRole>,
+        /** The raw key-role cell per column, for failure messages. */
+        val keyRoleRaw: Map<KeyRole, String>,
         /** `VERB /path` tokens, as the handlers map them. */
         val routes: List<String>,
         /** MCP tool wire names. */
@@ -63,10 +68,18 @@ object RoleMatrixDoc {
                         ?.groupValues
                         ?.get(1)
                         ?.let(Permission::fromWire)
+                val keyCells = cells.drop(2 + ROLE_COLUMNS).map { it.trim().trim('*').trim() }
                 CatalogRow(
                     label = label,
                     permission = permission,
-                    cells = roleCells(cells.drop(2)),
+                    cells = roleCells(cells.drop(2).take(ROLE_COLUMNS)),
+                    keyRoles =
+                        KEY_ROLE_COLUMNS
+                            .zip(keyCells)
+                            .filter { (_, cell) -> allowsKeyCell(cell) }
+                            .map { it.first }
+                            .toSet(),
+                    keyRoleRaw = KEY_ROLE_COLUMNS.zip(keyCells).toMap(),
                     routes =
                         CODE
                             .findAll(cells[1])
@@ -93,33 +106,6 @@ object RoleMatrixDoc {
                 require(result.put(tool, permission) == null) { "tool `$tool` appears on two §7.6 catalog rows" }
             }
         }
-        return result
-    }
-
-    /** `permission -> min key scope`, from the permissions' key-scope table (the A4 shim's doc). */
-    fun permissionKeyScopes(doc: String): Map<Permission, Scope> =
-        scopeTable(doc, PERMISSION_SCOPES_MARKER, PERMISSION) { Permission.fromWire(it) }
-
-    /** `tool -> min key scope`, from the MCP key-scope table. */
-    fun mcpKeyScopes(doc: String): Map<String, Scope> = scopeTable(doc, MCP_SCOPES_MARKER, CODE) { it.takeIf(TOOL_NAME::matches) }
-
-    private fun <K : Any> scopeTable(
-        doc: String,
-        marker: String,
-        token: Regex,
-        keyOf: (String) -> K?,
-    ): Map<K, Scope> {
-        val result = linkedMapOf<K, Scope>()
-        tableRows(doc, marker)
-            .filter { it.size == SCOPE_COLUMNS }
-            .filterNot { it[0] == "Min scope" || it[0].startsWith("---") }
-            .forEach { cells ->
-                val scope = Scope.fromWire(requireNotNull(CODE.find(cells[0])?.groupValues?.get(1)) { "no scope token in '${cells[0]}'" })
-                token
-                    .findAll(cells[1])
-                    .mapNotNull { keyOf(it.groupValues[1]) }
-                    .forEach { key -> result[key] = scope }
-            }
         return result
     }
 
@@ -150,6 +136,18 @@ object RoleMatrixDoc {
             "✗", FENCED -> false
             "✓", "own", "all", "lens" -> true
             else -> throw IllegalArgumentException("Unknown §7.6 role cell '$token' — the alphabet is ✓ ✗ own all lens fenced")
+        }
+
+    /**
+     * The key-role cell alphabet (#215): ✗ refuses; ✓ admits; `own` admits the key's OWN runs only
+     * (the executions it started, record §3.2); `bound` admits the published paths bound to the key
+     * (§7.7). Anything else fails loudly, for the reason [allowsCell] does.
+     */
+    private fun allowsKeyCell(token: String): Boolean =
+        when (token) {
+            "✗" -> false
+            "✓", "own", "bound" -> true
+            else -> throw IllegalArgumentException("Unknown §7.6 key-role cell '$token' — the alphabet is ✓ ✗ own bound")
         }
 
     /** The rows of the table that follows [marker], split into trimmed cells. */
@@ -184,11 +182,11 @@ object RoleMatrixDoc {
     private const val MCP_LABEL = "MCP:"
     private const val ROLE_COLUMNS = 5
 
-    /** Permission | Surfaces | five roles. */
-    private const val CATALOG_COLUMNS = 2 + ROLE_COLUMNS
+    /** The key-role columns, in doc order, after the five member-role columns (#215 slice (b)). */
+    private val KEY_ROLE_COLUMNS = listOf(KeyRole.API_CALLER, KeyRole.PROMOTION_RECEIVER)
 
-    /** Min scope | permissions-or-tools. */
-    private const val SCOPE_COLUMNS = 2
+    /** Permission | Surfaces | five roles | two key roles. */
+    private val CATALOG_COLUMNS = 2 + ROLE_COLUMNS + KEY_ROLE_COLUMNS.size
 
     /** A dotted catalog name in code font: `pipeline.read`, `workspace.members.manage`. */
     private val PERMISSION = Regex("`([a-z_]+\\.[a-z_.]+)`")

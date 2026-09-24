@@ -1,5 +1,6 @@
 package co.datapipelines.integration
 
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -89,6 +90,7 @@ class TemplatesUpdateGoldenPathE2eTest {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/mcp"))
+                // The MCP key: /mcp takes a key and refuses a session (§8.5); REST below takes the session (#215 B2).
                 .header("DP-API-Key", ADMIN_KEY.plaintext)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json, text/event-stream")
@@ -230,7 +232,7 @@ class TemplatesUpdateGoldenPathE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header(IF_MATCH, hashV2)
             .body("""{"name": "$TEMPLATE_ID"}""")
             .`when`()
@@ -396,7 +398,7 @@ class TemplatesUpdateGoldenPathE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$H2_DATASOURCE", "display_name": "Draft cache H2", "dialect": "H2", "global": true,
@@ -449,7 +451,13 @@ class TemplatesUpdateGoldenPathE2eTest {
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-tpl-update-key", arrayOf("read", "execute", "author"))
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the session (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+
+        /** The admin's MCP key for the `/mcp` legs — pinned to `default`, acting as the admin (#215 PK4). */
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-tpl-update-key")
+        private const val MCP_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-tpl-update@datapipelines.test")
 
         private var hashV1: String = ""
         private var hashV2: String = ""
@@ -479,9 +487,7 @@ class TemplatesUpdateGoldenPathE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") {
-                Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
-            }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") {
                 Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
             }
@@ -508,17 +514,24 @@ class TemplatesUpdateGoldenPathE2eTest {
                                 'test', 'e2e-tpl-update-sub', TRUE, TRUE)
                         """.trimIndent(),
                     )
+                    // #215 PK4: a super admin's MCP key with NO membership is a viewer, and the suite
+                    // authors over MCP — so the admin is a workspace admin of `default` (an author there).
+                    statement.execute(
+                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
+                            " VALUES ('$MCP_WORKSPACE', '$ADMIN_USER_ID', 'workspace_admin') ON CONFLICT DO NOTHING",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                            " VALUES (?, ?, ?, ?, ?, '$WORKSPACE_ID')",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id)" +
+                            " VALUES (?, ?::uuid, ?::uuid, ?, ?, ?::uuid)",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
-                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                        ps.setString(3, ADMIN_KEY.name)
-                        ps.setString(4, ADMIN_KEY.hash)
-                        ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
+                        ps.setString(2, ADMIN_USER_ID)
+                        ps.setString(3, ADMIN_USER_ID)
+                        ps.setString(4, ADMIN_KEY.name)
+                        ps.setString(5, ADMIN_KEY.hash)
+                        ps.setString(6, MCP_WORKSPACE)
                         ps.executeUpdate()
                     }
             }

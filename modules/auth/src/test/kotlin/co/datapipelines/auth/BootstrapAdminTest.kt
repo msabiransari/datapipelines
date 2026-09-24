@@ -33,8 +33,8 @@ class BootstrapAdminTest {
         val id = UUID.randomUUID()
         val isAdmin = slot<Boolean>()
         every { repo.findByEmail("admin@company.com") } returns null
-        every { repo.insert(any(), any(), any(), any(), any(), capture(isAdmin)) } answers {
-            user(id, "admin@company.com", admin = lastArg())
+        every { repo.insert(any(), any(), any(), any(), any(), capture(isAdmin), any()) } answers {
+            user(id, "admin@company.com", admin = arg(5))
         }
 
         val result = service.findOrCreateByEmail("admin@company.com", "Admin", null, "kc", "sub")
@@ -51,8 +51,8 @@ class BootstrapAdminTest {
         val isAdmin = slot<Boolean>()
         // The configured value is "Admin@Company.com"; the provider sends yet another casing.
         every { repo.findByEmail("admin@company.com") } returns null
-        every { repo.insert(any(), any(), any(), any(), any(), capture(isAdmin)) } answers {
-            user(id, "admin@company.com", admin = lastArg())
+        every { repo.insert(any(), any(), any(), any(), any(), capture(isAdmin), any()) } answers {
+            user(id, "admin@company.com", admin = arg(5))
         }
 
         service.findOrCreateByEmail("ADMIN@COMPANY.COM", "Admin", null, "kc", "sub")
@@ -60,7 +60,7 @@ class BootstrapAdminTest {
         // The lookup used the normalized address (so no second row is created) …
         verify { repo.findByEmail("admin@company.com") }
         // … and the normalized address is what was stored.
-        verify { repo.insert("admin@company.com", any(), any(), any(), any(), any()) }
+        verify { repo.insert("admin@company.com", any(), any(), any(), any(), any(), any()) }
         isAdmin.captured.shouldBeTrue()
     }
 
@@ -72,7 +72,7 @@ class BootstrapAdminTest {
 
         service.findOrCreateByEmail("Admin@Company.com", "Admin", null, "kc", "sub")
 
-        verify(exactly = 0) { repo.insert(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { repo.insert(any(), any(), any(), any(), any(), any(), any()) }
         verify(exactly = 0) { auditLogger.log("auth.user.admin_granted", any(), any(), any(), any(), any()) }
     }
 
@@ -97,8 +97,8 @@ class BootstrapAdminTest {
         val id = UUID.randomUUID()
         val isAdmin = slot<Boolean>()
         every { repo.findByEmail("bob@company.com") } returns null
-        every { repo.insert(any(), any(), any(), any(), any(), capture(isAdmin)) } answers {
-            user(id, "bob@company.com", admin = lastArg())
+        every { repo.insert(any(), any(), any(), any(), any(), capture(isAdmin), any()) } answers {
+            user(id, "bob@company.com", admin = arg(5))
         }
 
         service.findOrCreateByEmail("Bob@Company.com", "Bob", null, "kc", "sub")
@@ -113,8 +113,8 @@ class BootstrapAdminTest {
         val isAdmin = slot<Boolean>()
         val plain = UserService(repo, cache, AuthProperties(), auditLogger)
         every { repo.findByEmail("admin@company.com") } returns null
-        every { repo.insert(any(), any(), any(), any(), any(), capture(isAdmin)) } answers {
-            user(id, "admin@company.com", admin = lastArg())
+        every { repo.insert(any(), any(), any(), any(), any(), capture(isAdmin), any()) } answers {
+            user(id, "admin@company.com", admin = arg(5))
         }
 
         plain.findOrCreateByEmail("admin@company.com", "Admin", null, "kc", "sub")

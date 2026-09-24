@@ -7,7 +7,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
-import co.datapipelines.auth.Scope
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -35,8 +35,8 @@ import java.util.UUID
  *    neither use nor re-read. `a malformed binding path is refused before anything is minted` is
  *    what makes that ordering checkable.
  * 2. **Contradictions are refused out loud, not quietly normalised.** A caller who writes
- *    `{"kind": "endpoint", "scopes": ["admin"]}` holds a mental model this surface has to
- *    correct; silently dropping the scopes would leave them believing the key carries admin.
+ *    `{"kind": "endpoint", "role": "promotion_receiver"}` holds a mental model this surface has to
+ *    correct; silently substituting the kind's own role would leave them believing otherwise.
  */
 class EndpointKeyServiceTest {
     private val apiKeys = mockk<ApiKeyService>()
@@ -51,7 +51,7 @@ class EndpointKeyServiceTest {
         val written = mutableListOf<EndpointKeyBinding>()
         every { bindings.insert(capture(written)) } returns true
 
-        service.issue(principal(), "nyc", emptySet(), ApiKeyKind.ENDPOINT, listOf("/nyc", "/trade"), null)
+        service.issue(principal(), "nyc", null, ApiKeyKind.ENDPOINT, listOf("/nyc", "/trade"), null)
 
         assertAll(
             { written.map { it.pathPrefix } shouldBe listOf("/nyc", "/trade") },
@@ -65,26 +65,28 @@ class EndpointKeyServiceTest {
         // The ordering that keeps an operator from holding an unusable secret.
         val refused =
             shouldThrow<DatapipelinesException> {
-                service.issue(principal(), "bad", emptySet(), ApiKeyKind.ENDPOINT, listOf("/Bad Path"), null)
+                service.issue(principal(), "bad", null, ApiKeyKind.ENDPOINT, listOf("/Bad Path"), null)
             }
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID },
-            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any(), any(), any()) } },
+            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any()) } },
             { verify(exactly = 0) { bindings.insert(any()) } },
         )
     }
 
     @Test
-    fun `asking for scopes on an endpoint key is refused rather than quietly dropped`() {
+    fun `asking for a role the kind cannot hold is refused rather than quietly corrected`() {
         val refused =
             shouldThrow<DatapipelinesException> {
-                service.issue(principal(), "x", setOf(Scope.ADMIN), ApiKeyKind.ENDPOINT, emptyList(), null)
+                service.issue(principal(), "x", KeyRole.PROMOTION_RECEIVER, ApiKeyKind.ENDPOINT, emptyList(), null)
             }
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED },
-            { refused.message.orEmpty() shouldContain "no scopes" },
+            // The message names the role the kind DOES carry — what the caller should have asked for.
+            { refused.message.orEmpty() shouldContain "api_caller" },
+            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any()) } },
         )
     }
 
@@ -97,7 +99,7 @@ class EndpointKeyServiceTest {
         listOf(emptyList(), listOf("/nyc")).forEach { paths ->
             val refused =
                 shouldThrow<DatapipelinesException> {
-                    service.issue(principal(), "x", setOf(Scope.EXECUTE), ApiKeyKind.USER, paths, null)
+                    service.issue(principal(), "x", null, ApiKeyKind.USER, paths, null)
                 }
             refused.code shouldBe "auth.key_kind_not_mintable"
         }
@@ -112,17 +114,19 @@ class EndpointKeyServiceTest {
 
         assertAll(
             // user: never mintable on demand (D16)
-            { notMintable { service.issue(principal(), "u", setOf(Scope.READ), ApiKeyKind.USER, emptyList(), null) } },
-            { notMintable { service.issue(principal(), "u", emptySet(), ApiKeyKind.USER, listOf("/nyc"), null) } },
-            // scopes: refused on both scopeless kinds
-            { refusalFor { service.issue(principal(), "e", setOf(Scope.READ), ApiKeyKind.ENDPOINT, emptyList(), null) } },
-            { refusalFor { service.issue(principal(), "s", setOf(Scope.READ), ApiKeyKind.SERVER, emptyList(), null) } },
+            { notMintable { service.issue(principal(), "u", null, ApiKeyKind.USER, emptyList(), null) } },
+            { notMintable { service.issue(principal(), "u", null, ApiKeyKind.USER, listOf("/nyc"), null) } },
+            // role (#215): each kind carries exactly its own — named or omitted, never the other's
+            { service.issue(principal(), "e", KeyRole.API_CALLER, ApiKeyKind.ENDPOINT, emptyList(), null) },
+            { service.issue(principal(), "s", KeyRole.PROMOTION_RECEIVER, ApiKeyKind.SERVER, emptyList(), null) },
+            { refusalFor { service.issue(principal(), "e", KeyRole.PROMOTION_RECEIVER, ApiKeyKind.ENDPOINT, emptyList(), null) } },
+            { refusalFor { service.issue(principal(), "s", KeyRole.API_CALLER, ApiKeyKind.SERVER, emptyList(), null) } },
             // bindings: only an ENDPOINT key
-            { service.issue(principal(), "e", emptySet(), ApiKeyKind.ENDPOINT, listOf("/nyc"), null) },
-            { refusalFor { service.issue(principal(), "s", emptySet(), ApiKeyKind.SERVER, listOf("/nyc"), null) } },
+            { service.issue(principal(), "e", null, ApiKeyKind.ENDPOINT, listOf("/nyc"), null) },
+            { refusalFor { service.issue(principal(), "s", null, ApiKeyKind.SERVER, listOf("/nyc"), null) } },
             // expiry: every kind takes one — a promotion credential that never expires is the
             // whole problem 091 set out to fix.
-            { service.issue(principal(), "s", emptySet(), ApiKeyKind.SERVER, emptyList(), Instant.parse("2027-01-01T00:00:00Z")) },
+            { service.issue(principal(), "s", null, ApiKeyKind.SERVER, emptyList(), Instant.parse("2027-01-01T00:00:00Z")) },
         )
     }
 
@@ -135,7 +139,7 @@ class EndpointKeyServiceTest {
 
         val refused =
             shouldThrow<DatapipelinesException> {
-                service.issue(principal(), "s", emptySet(), ApiKeyKind.SERVER, listOf("/nyc"), null)
+                service.issue(principal(), "s", null, ApiKeyKind.SERVER, listOf("/nyc"), null)
             }
 
         assertAll(
@@ -150,7 +154,7 @@ class EndpointKeyServiceTest {
         // authorises nothing. Refusing it here would be a second, contradictory rule.
         stubIssue()
 
-        service.issue(principal(), "later", emptySet(), ApiKeyKind.ENDPOINT, emptyList(), null)
+        service.issue(principal(), "later", null, ApiKeyKind.ENDPOINT, emptyList(), null)
 
         verify(exactly = 0) { bindings.insert(any()) }
     }
@@ -161,7 +165,7 @@ class EndpointKeyServiceTest {
         val written = slot<EndpointKeyBinding>()
         every { bindings.insert(capture(written)) } returns true
 
-        service.issue(principal(), "n", emptySet(), ApiKeyKind.ENDPOINT, listOf("nyc/v1/revenue/"), null)
+        service.issue(principal(), "n", null, ApiKeyKind.ENDPOINT, listOf("nyc/v1/revenue/"), null)
 
         written.captured.pathPrefix shouldBe "/nyc/v1/revenue"
     }
@@ -174,7 +178,7 @@ class EndpointKeyServiceTest {
         val written = slot<EndpointKeyBinding>()
         every { bindings.insert(capture(written)) } returns true
 
-        service.issue(principal(), "root", emptySet(), ApiKeyKind.ENDPOINT, listOf("/"), null)
+        service.issue(principal(), "root", null, ApiKeyKind.ENDPOINT, listOf("/"), null)
 
         assertAll(
             { written.captured.pathPrefix shouldBe "/" },
@@ -233,12 +237,12 @@ class EndpointKeyServiceTest {
         // foreign prefix any more than it can be bound there later.
         val refused =
             shouldThrow<DatapipelinesException> {
-                service.issue(principal(), "x", emptySet(), ApiKeyKind.ENDPOINT, listOf("/lending"), null)
+                service.issue(principal(), "x", null, ApiKeyKind.ENDPOINT, listOf("/lending"), null)
             }
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID },
-            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any(), any(), any()) } },
+            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any()) } },
         )
     }
 
@@ -275,7 +279,7 @@ class EndpointKeyServiceTest {
         )
 
     private fun stubIssue() {
-        every { apiKeys.issue(any(), any(), any(), any(), any(), any(), any()) } returns
+        every { apiKeys.issue(any(), any(), any(), any(), any()) } returns
             IssuedApiKey(
                 record =
                     ApiKey(
@@ -283,7 +287,6 @@ class EndpointKeyServiceTest {
                         userId = ACTOR,
                         name = "k",
                         keyHash = "hash",
-                        scopes = emptySet(),
                         isRevoked = false,
                         createdAt = Instant.EPOCH,
                         lastUsedAt = null,
@@ -311,7 +314,6 @@ class EndpointKeyServiceTest {
             userId = ACTOR,
             email = "a@b.c",
             displayName = "A",
-            scopes = setOf(Scope.AUTHOR),
             authMethod = AuthMethod.API_KEY,
             keyId = "dpk_CREATORAAAAA",
             workspaceName = "default",

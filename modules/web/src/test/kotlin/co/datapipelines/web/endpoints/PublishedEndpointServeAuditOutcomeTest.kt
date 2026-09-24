@@ -1,16 +1,18 @@
 package co.datapipelines.web.endpoints
 
 import co.datapipelines.application.endpoints.EndpointAuthorizer
+import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointMatcher
 import co.datapipelines.application.endpoints.EndpointRegistry
 import co.datapipelines.application.endpoints.EndpointRequestValidator
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.auth.WorkspaceRole
@@ -121,7 +123,9 @@ class PublishedEndpointServeAuditOutcomeTest {
         every { pipelines.findCurrentVersion(workspaceId, any(), endpoint.pipelineId) } returns versionDetail()
         every { pipelines.findExecutable(workspaceId, any(), any(), 3) } returns executable()
         val bindings = mockk<EndpointKeyBindingRepository>()
-        every { bindings.findByPrefixes(any(), any()) } returns emptyList()
+        // #215 B3: an unbound path serves no one, so the key is bound at the endpoint's root node.
+        every { bindings.findByPrefixes(any(), any()) } returns
+            listOf(EndpointKeyBinding("/x", KEY_ID, workspaceId, UUID.randomUUID(), Instant.now()))
         every { readOnlyRule.check(any(), any()) } returns ValidationResult(emptyList())
         return PublishedEndpointServeService(
             registry = registry,
@@ -264,17 +268,21 @@ class PublishedEndpointServeAuditOutcomeTest {
         return PipelineService.ExecutablePipeline(record(), 3, body, PipelineDeserializer().readOrThrow(body))
     }
 
+    /** An `api_caller` key acting as its own identity (#215), bound at `/x` — the principal that reaches the run. */
     private fun endpointUserKey() =
         AuthenticatedPrincipal(
             userId = UUID.randomUUID(),
-            email = "key@datapipelines.test",
-            displayName = "Key",
-            // The unbound rule admits a USER key of the endpoint's workspace carrying execute —
-            // the simplest principal that reaches the run.
-            scopes = setOf(Scope.EXECUTE),
+            email = "dpk_serveaudit01@keys.invalid",
+            displayName = "serve-audit",
             authMethod = AuthMethod.API_KEY,
-            keyId = "dpk_SERVEAUDIT01",
+            keyId = KEY_ID,
             workspaceName = "w",
             workspace = WorkspaceContext(workspaceId, "w", WorkspaceRole.VIEWER),
+            keyKind = ApiKeyKind.ENDPOINT,
+            keyRole = KeyRole.API_CALLER,
         )
+
+    private companion object {
+        const val KEY_ID = "dpk_SERVEAUDIT01"
+    }
 }

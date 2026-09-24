@@ -4,8 +4,7 @@ import co.datapipelines.application.datasources.LakeTable
 import co.datapipelines.application.datasources.LakeTableFormat
 import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.auth.AuditEventSink
-import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
+import co.datapipelines.auth.Permission
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -67,7 +66,7 @@ class LakeTableToolsTest {
             assertAll(
                 { McpToolCatalog.NAMES shouldContain name },
                 { McpToolCatalog.isMutating(name) shouldBe true },
-                { ScopeMatrix.requiredScopeForTool(name) shouldBe Scope.AUTHOR },
+                { McpToolCatalog.permissionOf(name) shouldBe Permission.LAKE_TABLE_MANAGE },
             )
         }
     }
@@ -88,7 +87,7 @@ class LakeTableToolsTest {
                         "location" to "s3://datapipelines-co/sample-data/lake/v1/hvfhv_zone_day/part-0.parquet",
                     ),
                 ),
-                McpFixtures.ctx(Scope.AUTHOR),
+                McpFixtures.ctx(),
             )
 
         assertAll(
@@ -117,7 +116,7 @@ class LakeTableToolsTest {
                     "namespace" to listOf("nyc", "mobility"),
                 ),
             ),
-            McpFixtures.ctx(Scope.AUTHOR),
+            McpFixtures.ctx(),
         )
 
         assertAll(
@@ -135,7 +134,7 @@ class LakeTableToolsTest {
         val result =
             LakeTablesUnregisterTool(registry, service).call(
                 McpArguments(mapOf("name" to "sample-lake", "namespace" to "nyc.mobility", "table" to "hvfhv_zone_day")),
-                McpFixtures.ctx(Scope.AUTHOR),
+                McpFixtures.ctx(),
             )
 
         @Suppress("UNCHECKED_CAST")
@@ -162,7 +161,7 @@ class LakeTableToolsTest {
                         "location" to "s3://b/x",
                     ),
                 ),
-                McpFixtures.ctx(Scope.AUTHOR),
+                McpFixtures.ctx(),
             )
         }.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND
     }
@@ -184,7 +183,7 @@ class LakeTableToolsTest {
                     "location" to "s3://b/x",
                 ),
             ),
-            McpFixtures.ctx(Scope.AUTHOR),
+            McpFixtures.ctx(),
         )
 
         val events = sink.rows.map { it.first }

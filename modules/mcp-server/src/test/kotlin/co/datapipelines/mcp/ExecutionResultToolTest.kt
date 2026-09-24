@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ResultConfig
@@ -26,7 +25,7 @@ class ExecutionResultToolTest {
     private val executions = mockk<ExecutionRepository>()
     private val resultStore = mockk<ResultStore>()
     private val resultUrls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
-    private val ctx = McpFixtures.ctx(Scope.READ)
+    private val ctx = McpFixtures.ctx()
 
     private val tool = ExecutionsGetResultTool(executions, resultStore, resultUrls, ResultConfig())
 

@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
@@ -50,7 +51,7 @@ class DatasourceOutOfBandRowE2eTest {
         val getBody =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/datasources/$DS")
                 .then()
@@ -82,7 +83,7 @@ class DatasourceOutOfBandRowE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(mapper.writeValueAsString(putBody))
             .`when`()
             .put("/api/v1/datasources/$DS")
@@ -149,27 +150,15 @@ class DatasourceOutOfBandRowE2eTest {
                     """.trimIndent(),
                 )
             }
-            val insertSql =
-                "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                    " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001') ON CONFLICT (id) DO NOTHING"
-            connection.prepareStatement(insertSql).use { ps ->
-                ps.setString(1, ADMIN_KEY.id)
-                ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                ps.setString(3, ADMIN_KEY.name)
-                ps.setString(4, ADMIN_KEY.hash)
-                ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                ps.executeUpdate()
-            }
         }
     }
 
     companion object {
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val DS = "oob_e2e_ds"
 
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000003"
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-oob-key", arrayOf("read", "execute", "author"))
+        private val ADMIN_SESSION get() = E2eSession.jwt(SECRET, ADMIN_USER_ID, "e2e-oob@datapipelines.test")
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedE2e.postgres

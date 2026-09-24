@@ -38,7 +38,7 @@ class SqlProbeToolTest {
     private val datasources = mockk<DatasourceRegistry>()
     private val probe = mockk<SqlProbe>()
     private val tool = SqlProbeTool(datasources, probe)
-    private val ctx = McpFixtures.ctx(co.datapipelines.auth.Scope.AUTHOR)
+    private val ctx = McpFixtures.ctx()
 
     private val gated = McpFixtures.datasource("pg-prod")
 

@@ -100,20 +100,11 @@ class ApiKeyFormTest {
         val byWire = ApiKeyForm.kindChoices(isAdmin = true).associateBy { it.wire }
 
         assertAll(
-            { byWire.getValue(ApiKeyKind.ENDPOINT.wire).takesScope shouldBe false },
             { byWire.getValue(ApiKeyKind.ENDPOINT.wire).takesBindings shouldBe true },
-            { byWire.getValue(ApiKeyKind.SERVER.wire).takesScope shouldBe false },
             { byWire.getValue(ApiKeyKind.SERVER.wire).takesBindings shouldBe false },
             // The same statement the issuance service makes, from the other side: every kind
-            // the form offers is a SCOPELESS kind (the user kind, which took scopes, is gone).
-            {
-                val scopeless =
-                    byWire.values
-                        .filterNot { it.takesScope }
-                        .map { it.wire }
-                        .toSet()
-                scopeless shouldBe ApiKeyKind.SCOPELESS.map { it.wire }.toSet()
-            },
+            // the form offers acts as its own identity (#215) — the MCP (`user`) kind is gone.
+            { byWire.keys shouldBe ApiKeyKind.IDENTITY_KINDS.map { it.wire }.toSet() },
         )
     }
 

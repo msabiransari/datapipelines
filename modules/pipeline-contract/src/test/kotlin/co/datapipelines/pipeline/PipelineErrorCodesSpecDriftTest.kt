@@ -163,7 +163,6 @@ class PipelineErrorCodesSpecDriftTest {
                 // caller's membership, not of a thing they named (RBAC design §2).
                 PipelineErrorCodes.Auth.ROLE_REQUIRED,
                 PipelineErrorCodes.Auth.KEY_ISSUER_ROLE_LOST,
-                PipelineErrorCodes.Auth.KEY_SCOPE_UNAVAILABLE,
                 // 179 — a user key is minted at login only; "kind" is a property of the
                 // credential requested, not of a named entity, so the code is two-segment
                 // like its key_* siblings above.

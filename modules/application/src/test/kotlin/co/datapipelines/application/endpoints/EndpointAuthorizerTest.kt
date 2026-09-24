@@ -3,7 +3,6 @@ package co.datapipelines.application.endpoints
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import io.kotest.assertions.withClue
@@ -67,23 +66,19 @@ class EndpointAuthorizerTest {
                     expected = PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
                 ),
                 Case(
-                    "a user key with execute is allowed where nothing is bound",
+                    // #215 B3: until slice (b) a `user` key of the endpoint's own workspace holding
+                    // `execute` was ADMITTED here. That branch went with the scopes: an unbound
+                    // published path serves no one until a key is bound to it.
+                    "an unbound path serves no one - a user key of the endpoint's own workspace is refused",
                     path = "/lending/home",
-                    principal = userKey(Scope.EXECUTE),
-                    bindings = emptyList(),
-                    expected = null,
-                ),
-                Case(
-                    "a user key with only read is refused on an unbound path",
-                    path = "/lending/home",
-                    principal = userKey(Scope.READ),
+                    principal = userKey(),
                     bindings = emptyList(),
                     expected = PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
                 ),
                 Case(
                     "a user key of ANOTHER workspace is refused",
                     path = "/lending/home",
-                    principal = userKey(Scope.EXECUTE, workspace = OTHER_WORKSPACE),
+                    principal = userKey(workspace = OTHER_WORKSPACE),
                     bindings = emptyList(),
                     expected = PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
                 ),
@@ -145,10 +140,10 @@ class EndpointAuthorizerTest {
         // path would tighten it for machines and leave it open to every operator key.
         assertAll(
             {
-                codeOf(decide("/lending/home", userKey(Scope.ADMIN), binding("/lending", "dpk_A"))) shouldBe
+                codeOf(decide("/lending/home", userKey(), binding("/lending", "dpk_A"))) shouldBe
                     PipelineErrorCodes.Endpoint.KEY_NOT_BOUND
             },
-            { codeOf(decide("/lending/home", userKey(Scope.EXECUTE, keyId = "dpk_A"), binding("/lending", "dpk_A"))) shouldBe null },
+            { codeOf(decide("/lending/home", userKey(keyId = "dpk_A"), binding("/lending", "dpk_A"))) shouldBe null },
         )
     }
 
@@ -184,10 +179,11 @@ class EndpointAuthorizerTest {
                 codeOf(authorizer.authorize("/lending/home", endpointKey("dpk_A"), WORKSPACE, listOf(foreign))) shouldBe
                     PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
             },
+            // ...and, since #215 B3, an unbound path (for THIS workspace) serves no key at all.
             {
                 codeOf(
-                    authorizer.authorize("/lending/home", userKey(Scope.EXECUTE), WORKSPACE, listOf(foreign)),
-                ) shouldBe null
+                    authorizer.authorize("/lending/home", userKey(), WORKSPACE, listOf(foreign)),
+                ) shouldBe PipelineErrorCodes.Endpoint.KEY_NOT_BOUND
             },
         )
     }
@@ -207,24 +203,21 @@ class EndpointAuthorizerTest {
     private fun endpointKey(
         keyId: String,
         workspace: UUID = WORKSPACE,
-    ) = principal(keyId, ApiKeyKind.ENDPOINT, emptySet(), workspace)
+    ) = principal(keyId, ApiKeyKind.ENDPOINT, workspace)
 
     private fun userKey(
-        scope: Scope,
         workspace: UUID = WORKSPACE,
         keyId: String = "dpk_USER",
-    ) = principal(keyId, ApiKeyKind.USER, setOf(scope), workspace)
+    ) = principal(keyId, ApiKeyKind.USER, workspace)
 
     private fun principal(
         keyId: String,
         kind: ApiKeyKind,
-        scopes: Set<Scope>,
         workspace: UUID,
     ) = AuthenticatedPrincipal(
         userId = USER,
         email = "e2e@datapipelines.test",
         displayName = "E2E",
-        scopes = scopes,
         authMethod = AuthMethod.API_KEY,
         keyId = keyId,
         workspaceName = "w",

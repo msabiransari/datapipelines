@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import io.kotest.matchers.shouldBe
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -27,9 +28,12 @@ import java.util.UUID
  *   workspace publishes there is exactly what it must not reveal.
  * - **Serve time** — a binding row of another workspace (here: written directly, the way a row
  *   from an older release could have been left behind) is INERT: serving workspace B's
- *   endpoint with A's key answers the byte-for-byte body an unbound key gets, and B's own key
- *   still serves. This is the composition — SQL predicate and in-memory backstop together —
- *   that neither unit suite can prove.
+ *   endpoint with A's endpoint key answers the byte-for-byte body it got before the row
+ *   existed, and B's own key still serves. This is the composition — SQL predicate and in-memory
+ *   backstop together — that neither unit suite can prove.
+ *
+ * The admins bind and publish as signed-in SESSIONS (REST is a session's surface since #215 B2);
+ * A's key is an `api_caller` key acting as its own identity (record §3.3).
  *
  * Non-vacuity is carried by the assertions themselves: one served 200 (B's own key) and one
  * refused body (A's key) per arm.
@@ -64,7 +68,7 @@ class PublishedEndpointBindingConfinementE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, FOREIGN_KEY.plaintext)
+            .asSession(FOREIGN_ADMIN_SESSION)
             .body("""{"name": "cross-ws", "kind": "endpoint", "bindings": ["/conf"]}""")
             .`when`()
             .post("/api/v1/auth/api-keys")
@@ -80,7 +84,7 @@ class PublishedEndpointBindingConfinementE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, FOREIGN_KEY.plaintext)
+            .asSession(FOREIGN_ADMIN_SESSION)
             .body("""{"api_key_name": "ep-foreign-key", "path_prefix": "/conf"}""")
             .`when`()
             .post("/api/v1/endpoints/bindings")
@@ -98,8 +102,8 @@ class PublishedEndpointBindingConfinementE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body("""{"api_key_name": "conf-admin-key", "path_prefix": "/conf/v1"}""")
+            .asSession(ADMIN_SESSION)
+            .body("""{"api_key_name": "conf-serving", "path_prefix": "/conf/v1"}""")
             .`when`()
             .post("/api/v1/endpoints/bindings")
             .then()
@@ -135,8 +139,8 @@ class PublishedEndpointBindingConfinementE2eTest {
                 .get("/api/conf/v1/p")
                 .then()
                 .statusCode(403)
-                // A USER key of another workspace on a path nobody of ITS workspace bound is
-                // the unbound rule's other-workspace arm.
+                // An endpoint key of another workspace, on a path whose nearest binding is B's
+                // own: not among the keys bound there (the foreign row is filtered out by workspace).
                 .body("error.code", equalTo("endpoint.key_not_bound"))
                 .extract()
                 .jsonPath()
@@ -203,7 +207,7 @@ class PublishedEndpointBindingConfinementE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(body)
                 .`when`()
                 .post("/api/v1/pipelines")
@@ -214,7 +218,7 @@ class PublishedEndpointBindingConfinementE2eTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", created.jsonPath().getString("data.body_hash"))
             .`when`()
             .post("/api/v1/pipelines/${created.jsonPath().getString("data.id")}/release")
@@ -244,7 +248,7 @@ class PublishedEndpointBindingConfinementE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body("""{"name": "conf-serving", "kind": "endpoint", "bindings": ["/conf"]}""")
             .`when`()
             .post("/api/v1/auth/api-keys")
@@ -265,7 +269,7 @@ class PublishedEndpointBindingConfinementE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body("""{"path": "$path", "pipeline": "$pipeline", "timeout_seconds": 60}""")
             .`when`()
             .post("/api/v1/endpoints")
@@ -277,7 +281,7 @@ class PublishedEndpointBindingConfinementE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "conf-source", "display_name": "Confinement source", "dialect": "POSTGRES",
@@ -293,7 +297,7 @@ class PublishedEndpointBindingConfinementE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "conf/x_summary.sql", "dialect": "POSTGRES", "display_name": "conf/x_summary.sql",
@@ -309,7 +313,7 @@ class PublishedEndpointBindingConfinementE2eTest {
             val hash =
                 given()
                     .port(port)
-                    .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                    .asSession(ADMIN_SESSION)
                     .queryParam("name", id)
                     .`when`()
                     .get("/api/v1/templates")
@@ -320,7 +324,7 @@ class PublishedEndpointBindingConfinementE2eTest {
                     .getString("data.body_hash")
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .header("If-Match", hash)
                 .body("""{"name": "$id"}""")
                 .`when`()
@@ -365,29 +369,32 @@ class PublishedEndpointBindingConfinementE2eTest {
                         """.trimIndent(),
                     )
                 }
+                // Workspace A's API key: an `api_caller` acting as its own identity (record §3.3).
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +
+                            "VALUES ('$FOREIGN_IDENTITY', '${FOREIGN_KEY.id}@keys.invalid', '${FOREIGN_KEY.name}', 'key', " +
+                            "'${FOREIGN_KEY.id}', TRUE, FALSE, 'service')",
+                    )
+                }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id, kind)" +
-                            " VALUES (?, ?, ?, ?, ?, ?::uuid, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?::uuid, ?::uuid, ?, ?, ?::uuid, 'endpoint', 'api_caller')",
                     ).use { ps ->
-                        listOf(ADMIN_KEY to DEFAULT_WORKSPACE, FOREIGN_KEY to OTHER_WORKSPACE).forEach { (key, workspace) ->
-                            ps.setString(1, key.id)
-                            ps.setObject(2, UUID.fromString(ADMIN_USER))
-                            ps.setString(3, key.name)
-                            ps.setString(4, key.hash)
-                            ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                            ps.setString(6, workspace)
-                            ps.setString(7, "user")
-                            ps.addBatch()
-                        }
-                        ps.executeBatch()
+                        ps.setString(1, FOREIGN_KEY.id)
+                        ps.setString(2, FOREIGN_IDENTITY)
+                        ps.setString(3, ADMIN_USER)
+                        ps.setString(4, FOREIGN_KEY.name)
+                        ps.setString(5, FOREIGN_KEY.hash)
+                        ps.setString(6, OTHER_WORKSPACE)
+                        ps.executeUpdate()
                     }
             }
     }
 
     companion object {
         private const val API_KEY_HEADER = "DP-API-Key"
-        private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
         private const val OTHER_WORKSPACE = "defa0000-0000-0000-0000-0000000000ed"
         private val ADMIN_USER: String = UUID.randomUUID().toString()
 
@@ -400,8 +407,14 @@ class PublishedEndpointBindingConfinementE2eTest {
             "No published path of your workspace lies at or under '/conf'. " +
                 "Bind the key at a node of your own published tree, or at the root."
 
-        private val ADMIN_KEY = E2eAuth.generateKey("conf-admin-key", arrayOf("read", "execute", "author"))
-        private val FOREIGN_KEY = E2eAuth.generateKey("ep-foreign-key", arrayOf("read", "execute", "author"))
+        private val FOREIGN_IDENTITY: String = UUID.randomUUID().toString()
+        private val FOREIGN_KEY = E2eAuth.generateKey("ep-foreign-key")
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret`; both admins work as sessions (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER, "conf-admin@datapipelines.test")
+        private val FOREIGN_ADMIN_SESSION get() =
+            E2eSession.jwt(JWT_SECRET, ADMIN_USER, "conf-admin@datapipelines.test", "conf-other")
 
         private val postgres get() = SharedE2e.postgres
         private val source = SharedE2e.scratchDatabase("conf_source")
@@ -421,7 +434,7 @@ class PublishedEndpointBindingConfinementE2eTest {
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { SharedE2e.redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
             registry.add("datapipelines.auth.local.enabled") { "true" }
         }

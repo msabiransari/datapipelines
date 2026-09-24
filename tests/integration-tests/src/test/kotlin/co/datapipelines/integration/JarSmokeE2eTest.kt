@@ -33,13 +33,12 @@ import javax.crypto.spec.SecretKeySpec
  * 500 `Error resolving fragment`, /error itself failing) were all invisible to the entire
  * suite precisely because nothing ever rendered a screen from inside a jar.
  *
- * Authentication is the deployment's own: a session JWT minted locally over the
- * configured HS256 secret; since 179 (D16) a `user` key is minted by the login hook, so the
- * screen-fetch keys are seeded by SQL (E2eAuth) and the real mint endpoint is exercised once —
- * its answer for an on-demand `user` key is the catalogued refusal. The screens are fetched
- * with `DP-API-Key` — a credential that
- * authenticates on every path (`ApiKeyFilter` has no path test), which is exactly the
- * honest first-visitor shape.
+ * Authentication is the deployment's own: session JWTs minted locally over the configured
+ * HS256 secret, one per seeded person — the way a browser fetches every screen. Since #215 B2
+ * an MCP (`user`) key reaches `/mcp` and nothing else, so no screen is fetched with a key; the
+ * one seeded MCP key is here to prove the PACKAGED filter chain refuses it on a page. The real
+ * mint endpoint is exercised once — its answer for an on-demand `user` key is the catalogued
+ * refusal (179, D16).
  *
  * ## What this does and does not cover
  *
@@ -60,29 +59,32 @@ class JarSmokeE2eTest {
     private var oidcStub: HttpServer? = null
     private var app: Process? = null
     private var appLog: File? = null
-    private var apiKey: String = ""
 
     /**
-     * The two editor screens' floors: the PIPELINE editor's is `EXECUTE_PIPELINE` (122 — the
-     * operation the screen exists to perform for its lowest role, D-R3: viewers execute), so
-     * the read key every other screen is fetched with is refused there (read < execute,
-     * §7.5); the TEMPLATE editor's is `READ_RESOURCES` since 143 (T315, owner ruling — the
-     * explorer's Open links render for every reader, and the page renders read state; its
-     * writes are their own MUTATE routes). The smoke test's question is "does this screen
-     * render out of the jar", not "who may see it", so the renders use the author key; the
-     * boundary pair below is what says who may.
+     * The sessions the screens are fetched with. Every screen but the editors is fetched as
+     * the workspace admin who owns the seeded rows. The two editor screens have floors: the
+     * PIPELINE editor's is `pipeline.execute` (122 — viewers execute, D-R3; a promoter does
+     * not), the TEMPLATE editor's is `template.read` since 143 (T315 — the page renders read
+     * state for a reader, and its writes are their own routes). The smoke test's question is
+     * "does this screen render out of the jar", not "who may see it", so the renders use the
+     * author's session; the boundary test below is what says who may.
      */
-    private var authorKey: String = ""
-    private var executeKey: String = ""
+    private var adminSession: String = ""
+    private var authorSession: String = ""
+    private var viewerSession: String = ""
+    private var promoterSession: String = ""
+    private var mcpKey: String = ""
 
     @BeforeAll
     fun boot() {
         startOidcStub()
         startApp()
         seed()
-        apiKey = seedKey("smoke-key", "read", READER_USER).plaintext
-        authorKey = seedKey("smoke-author-key", "author", AUTHOR_USER).plaintext
-        executeKey = seedKey("smoke-execute-key", "execute", EXECUTOR_USER).plaintext
+        adminSession = sessionJwt(USER, "smoke@test")
+        authorSession = sessionJwt(AUTHOR_USER, "smoke-author@test")
+        viewerSession = sessionJwt(VIEWER_USER, "smoke-viewer@test")
+        promoterSession = sessionJwt(PROMOTER_USER, "smoke-promoter@test")
+        mcpKey = seedMcpKey("mcp/smoke", USER).plaintext
         // 179 (D16): the mint endpoint itself is still exercised on the packaged jar — and
         // its answer for a `user` key is the refusal, because the login hook mints those.
         mintApiKeyRefused()
@@ -129,7 +131,7 @@ class JarSmokeE2eTest {
      */
     @Test
     fun `the agent skill is served from the jar, anonymously, references included`() {
-        val (skill, status) = request("/skill.md", apiKey = null, accept = "text/markdown")
+        val (skill, status) = request("/skill.md", session = null, accept = "text/markdown")
         status shouldBe 200
         skill shouldContain "name: datapipelines"
 
@@ -139,7 +141,7 @@ class JarSmokeE2eTest {
         val references = Regex("""references/([a-z0-9-]+)\.md""").findAll(skill).map { it.groupValues[1] }.toSet()
         check(references.size >= MIN_SKILL_REFERENCES) { "the packaged skill advertised only ${references.size} references" }
         references.forEach { name ->
-            val (body, refStatus) = request("/skill/$name.md", apiKey = null, accept = "text/markdown")
+            val (body, refStatus) = request("/skill/$name.md", session = null, accept = "text/markdown")
             check(refStatus == 200) { "/skill/$name.md answered $refStatus from the jar" }
             check(body.isNotBlank()) { "/skill/$name.md was empty from the jar" }
         }
@@ -185,42 +187,55 @@ class JarSmokeE2eTest {
 
     @Test
     fun `the pipeline editor renders from the jar - the asset-heaviest screen`() {
-        val (body, status) = request("/pipelines/$PIPELINE/editor", authorKey)
+        val (body, status) = request("/pipelines/$PIPELINE/editor", authorSession)
         status shouldBe 200
         // The seeded pipeline's JSON is embedded for the client-side graph — real content,
         // not an editor shell over a missing record.
         body shouldContain "smoke_pipe"
         body shouldContain "pipeline-editor"
-        noneCarriesErrorMarkersAs(authorKey, "/pipelines/$PIPELINE/editor")
+        noneCarriesErrorMarkersAs(authorSession, "/pipelines/$PIPELINE/editor")
     }
 
     @Test
     fun `the template editor renders from the jar`() {
-        val (body, status) = request("/templates/editor?name=$SEEDED_TEMPLATE", authorKey)
+        val (body, status) = request("/templates/editor?name=$SEEDED_TEMPLATE", authorSession)
         status shouldBe 200
         body shouldContain "Smoke Template"
-        noneCarriesErrorMarkersAs(authorKey, "/templates/editor?name=$SEEDED_TEMPLATE")
+        noneCarriesErrorMarkersAs(authorSession, "/templates/editor?name=$SEEDED_TEMPLATE")
     }
 
     /**
-     * The editors' boundary, live against the jar: an `execute` key renders the pipeline
-     * editor (its floor is EXECUTE_PIPELINE — 122) and a `read` key is refused there; the
-     * read key RENDERS the template editor (READ-floored since 143 — the page a reader's Open
-     * link leads to, read-only). Asserted here rather than only at the auth boundary, because
-     * this is the deployment artifact people actually run.
+     * The editors' boundary, live against the jar: a viewer renders the pipeline editor (its
+     * floor is `pipeline.execute` — 122, viewers execute) and a promoter is refused there; the
+     * viewer RENDERS the template editor read-only (`template.read`-floored since 143 — the page
+     * a reader's Open link leads to). Asserted here rather than only at the auth boundary,
+     * because this is the deployment artifact people actually run.
      */
     @Test
-    fun `a read key is refused at the pipeline editor, renders the template editor and the list screens`() {
-        // the boundary: execute reaches the pipeline editor, read does not.
-        request("/pipelines/$PIPELINE/editor", executeKey).second shouldBe 200
-        get("/pipelines/$PIPELINE/editor").second shouldBe 403
-        val (templateEditor, templateEditorStatus) = get("/templates/editor?name=$SEEDED_TEMPLATE")
+    fun `a promoter is refused at the pipeline editor, a viewer renders it, the template editor read-only and the lists`() {
+        // the boundary: the viewer reaches the pipeline editor, the promoter does not.
+        request("/pipelines/$PIPELINE/editor", viewerSession).second shouldBe 200
+        request("/pipelines/$PIPELINE/editor", promoterSession).second shouldBe 403
+        val (templateEditor, templateEditorStatus) = request("/templates/editor?name=$SEEDED_TEMPLATE", viewerSession)
         templateEditorStatus shouldBe 200
-        // ...and what a read key gets is the READER's page: the read-only pane, no textarea.
+        // ...and what a viewer gets is the READER's page: the read-only pane, no textarea.
         templateEditor shouldContain "id=\"versionBody\""
         templateEditor shouldNotContain "id=\"templateBody\""
-        get("/pipelines").second shouldBe 200
-        get("/templates").second shouldBe 200
+        request("/pipelines", viewerSession).second shouldBe 200
+        request("/templates", viewerSession).second shouldBe 200
+    }
+
+    /** #215 B2 on the packaged filter chain: a live MCP key renders no screen — refused as a key kind. */
+    @Test
+    fun `an MCP key is refused on a screen - the key reaches mcp only`() {
+        val builder =
+            HttpRequest
+                .newBuilder(URI.create("$base/dashboard"))
+                .header("Accept", "text/html")
+                .header("DP-API-Key", mcpKey)
+        val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+        response.statusCode() shouldBe 403
+        response.body() shouldContain "user_key_off_surface"
     }
 
     @Test
@@ -276,7 +291,7 @@ class JarSmokeE2eTest {
             // A refused connection is "not up yet", not a failure — java.net.http throws.
             val health =
                 runCatching {
-                    request("/health", apiKey = null, accept = "application/json").second
+                    request("/health", session = null, accept = "application/json").second
                 }.getOrNull()
             if (health == 200) return
             Thread.sleep(500)
@@ -347,19 +362,21 @@ class JarSmokeE2eTest {
                     "INSERT INTO workspace_members (workspace_id, user_id, role) " +
                         "VALUES ('$WORKSPACE', '$USER', 'workspace_admin')",
                 )
-                // 179 (V31): one live `user` key per (user, workspace) — the three
-                // scope-graded keys get three owners, each a member of the smoke workspace.
-                listOf(READER_USER to "smoke-read@test", AUTHOR_USER to "smoke-author@test", EXECUTOR_USER to "smoke-execute@test")
-                    .forEach { (id, email) ->
-                        s.execute(
-                            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) " +
-                                "VALUES ('$id', '$email', 'Smoke', 'google', '$email-sub', TRUE, FALSE)",
-                        )
-                        s.execute(
-                            "INSERT INTO workspace_members (workspace_id, user_id, role) " +
-                                "VALUES ('$WORKSPACE', '$id', 'workspace_admin')",
-                        )
-                    }
+                // One person per editor boundary role (#215: the role is the whole answer).
+                listOf(
+                    Triple(AUTHOR_USER, "smoke-author@test", "author"),
+                    Triple(VIEWER_USER, "smoke-viewer@test", "viewer"),
+                    Triple(PROMOTER_USER, "smoke-promoter@test", "promoter"),
+                ).forEach { (id, email, role) ->
+                    s.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) " +
+                            "VALUES ('$id', '$email', 'Smoke', 'google', '$email-sub', TRUE, FALSE)",
+                    )
+                    s.execute(
+                        "INSERT INTO workspace_members (workspace_id, user_id, role) " +
+                            "VALUES ('$WORKSPACE', '$id', '$role')",
+                    )
+                }
                 s.execute(
                     "INSERT INTO datasources (name, display_name, dialect, jdbc_url, username, " +
                         "credential_encrypted, created_by, is_readonly) VALUES ('$SEEDED_DATASOURCE', " +
@@ -407,13 +424,15 @@ class JarSmokeE2eTest {
     }
 
     /** A session JWT exactly as `JwtService.issue` does, over the secret this test configured. */
-    private fun sessionJwt(): String {
+    private fun sessionJwt(
+        userId: String = USER,
+        email: String = "smoke@test",
+    ): String {
         val now = Instant.now()
         val header = b64("""{"alg":"HS256","typ":"JWT"}""")
         val payload =
             b64(
-                """{"sub":"$USER","email":"smoke@test","name":"Smoke",""" +
-                    """"scopes":["read","execute","author","admin"],""" +
+                """{"sub":"$userId","email":"$email","name":"Smoke",""" +
                     """"iss":"datapipelines","iat":${now.epochSecond},""" +
                     """"exp":${now.plusSeconds(3600).epochSecond},"active_workspace":"smoke"}""",
             )
@@ -426,27 +445,26 @@ class JarSmokeE2eTest {
     }
 
     /**
-     * Seeds the key by SQL (179, D16: a `user` key is minted by the login hook, never by a
+     * Seeds an MCP key by SQL (179, D16: a `user` key is minted by the login hook, never by a
      * request) — the same shape every other suite's fixture takes (E2eAuth hashes; the row
-     * is the suite's to write).
+     * is the suite's to write). It acts as its member: created_by = user_id, no role (#215 PK4).
      */
-    private fun seedKey(
+    private fun seedMcpKey(
         name: String,
-        scope: String,
         ownerId: String,
     ): E2eAuth.SeededKey {
-        val key = E2eAuth.generateKey(name, arrayOf(scope), ownerId = ownerId)
+        val key = E2eAuth.generateKey(name, ownerId = ownerId)
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { c ->
             c
                 .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id)" +
                         " VALUES (?, ?, ?, ?, ?, '$WORKSPACE')",
                 ).use { ps ->
                     ps.setString(1, key.id)
                     ps.setObject(2, UUID.fromString(ownerId))
-                    ps.setString(3, key.name)
-                    ps.setString(4, key.hash)
-                    ps.setArray(5, c.createArrayOf("text", key.scopes))
+                    ps.setObject(3, UUID.fromString(ownerId))
+                    ps.setString(4, key.name)
+                    ps.setString(5, key.hash)
                     ps.executeUpdate()
                 }
         }
@@ -488,32 +506,32 @@ class JarSmokeE2eTest {
 
     // ------------------------------------------------------------------ http helpers
 
-    private fun get(path: String): Pair<String, Int> = request(path, apiKey)
+    private fun get(path: String): Pair<String, Int> = request(path, adminSession)
 
     private fun request(
         path: String,
-        apiKey: String?,
+        session: String?,
         accept: String = "text/html",
     ): Pair<String, Int> {
         val builder =
             HttpRequest
                 .newBuilder(URI.create("$base$path"))
                 .header("Accept", accept)
-        apiKey?.let { builder.header("DP-API-Key", it) }
+        session?.let { builder.header("Cookie", "dp_session=$it") }
         val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         return response.body() to response.statusCode()
     }
 
     /** The T34 error markers — none of the screens may carry any of them. */
-    private fun noneCarriesErrorMarkers(vararg paths: String) = noneCarriesErrorMarkersAs(apiKey, *paths)
+    private fun noneCarriesErrorMarkers(vararg paths: String) = noneCarriesErrorMarkersAs(adminSession, *paths)
 
     /** The same sweep with an explicit credential — 096 §C put the two editors above the read floor. */
     private fun noneCarriesErrorMarkersAs(
-        key: String,
+        session: String,
         vararg paths: String,
     ) {
         paths.forEach { path ->
-            val (body, _) = request(path, key)
+            val (body, _) = request(path, session)
             body shouldNotContain "Error resolving fragment"
             body shouldNotContain "Whitelabel"
             body shouldNotContain "URI is not hierarchical"
@@ -524,9 +542,9 @@ class JarSmokeE2eTest {
 
     private companion object {
         val USER = UUID.randomUUID().toString()
-        val READER_USER = UUID.randomUUID().toString()
         val AUTHOR_USER = UUID.randomUUID().toString()
-        val EXECUTOR_USER = UUID.randomUUID().toString()
+        val VIEWER_USER = UUID.randomUUID().toString()
+        val PROMOTER_USER = UUID.randomUUID().toString()
         val WORKSPACE = UUID.randomUUID().toString()
         val PIPELINE = UUID.randomUUID().toString()
         val TEMPLATE = UUID.randomUUID().toString()

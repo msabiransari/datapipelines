@@ -29,7 +29,6 @@ class AuthPropertiesSpecDriftTest {
         val props = AuthProperties()
         documented.getValue("datapipelines.auth.jwt.ttl-hours") shouldBe props.jwt.ttlHours.toString()
         documented.getValue("datapipelines.auth.api-keys.cache-ttl-seconds") shouldBe props.apiKeys.cacheTtlSeconds.toString()
-        documented.getValue("datapipelines.auth.api-keys.default-scopes") shouldBe props.apiKeys.defaultScopes.single()
         documented.getValue("datapipelines.auth.rate-limit.login-per-minute") shouldBe props.rateLimit.loginPerMinute.toString()
     }
 

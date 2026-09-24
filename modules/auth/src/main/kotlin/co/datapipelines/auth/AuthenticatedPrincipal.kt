@@ -35,9 +35,10 @@ enum class LoginMethod(
 /**
  * The internal principal both auth paths resolve to (auth.md §3).
  *
- * [scopes] is the set of *granted* scopes; hierarchy expansion for enforcement is
- * done at the check site ([Scope.satisfies], [ScopeMatrix]). [keyId] is present
- * only when [authMethod] is [AuthMethod.API_KEY].
+ * What it may do is a question of ROLE only since #215 slice (b) (scopes are gone, PK8): a
+ * session's and an MCP key's role is the membership's in [workspace] (the MCP key's capped at
+ * author, PK4), and a key that acts as its own identity carries a [keyRole]. [keyId] is present
+ * only when [authMethod] is [AuthMethod.API_KEY] or a stored server key opened the promotion route.
  *
  * ## Workspace (design §5)
  * [workspaceName] is the *unresolved* value the credential carries — the JWT's
@@ -52,7 +53,6 @@ data class AuthenticatedPrincipal(
     val userId: UUID,
     val email: String,
     val displayName: String,
-    val scopes: Set<Scope>,
     val authMethod: AuthMethod,
     val keyId: String? = null,
     val workspaceName: String? = null,
@@ -86,13 +86,18 @@ data class AuthenticatedPrincipal(
      * unprivileged answer.
      */
     val superAdmin: Boolean = false,
+    /**
+     * The KEY's role (#215, record §3.2) when the credential acts as its own identity — an
+     * `endpoint` key's [KeyRole.API_CALLER], a server key's [KeyRole.PROMOTION_RECEIVER]. Null for
+     * a session and for the MCP key, whose role is its member's ([workspace]). When set, it is the
+     * WHOLE answer to [holds]: a key role reaches no member permission and no instance permission.
+     */
+    val keyRole: KeyRole? = null,
 ) {
     /**
-     * True when this principal's authority is endpoint bindings rather than scopes (§7.7).
-     *
-     * Such a principal is refused everywhere the published-endpoint surface does not reach —
-     * including surfaces its scope set would otherwise open — and holds NO authority on an
-     * endpoint with no binding on any ancestor.
+     * True when this principal is an `endpoint` key (§7.7): its authority is [KeyRole.API_CALLER]
+     * on the paths bound to it. Refused everywhere the published-endpoint surface does not reach,
+     * and it holds NO authority on an endpoint with no binding on any ancestor.
      */
     val isEndpointKey: Boolean get() = keyKind == ApiKeyKind.ENDPOINT
 
@@ -111,10 +116,10 @@ data class AuthenticatedPrincipal(
      * capability, and every action taken outside an explicit membership is audited with
      * `acting_via=super_admin`.
      *
-     * Reads [superAdmin] rather than the scope set. Before round 1 this was
-     * `Scope.satisfies(scopes, ADMIN)`, which was the same question only because
-     * `JwtService.scopesFor` derived the scope set FROM `is_admin`; with session scopes gone
-     * (D-R1) the derivation would answer false for every session, so the flag is carried.
+     * A SESSION's property only: every key principal carries `superAdmin = false` (#215 B1 —
+     * PK3/PK4 made mechanical), so no key resolves an instance permission, ever, whoever minted
+     * it. A super admin's MCP key acts as their membership role capped at author, or as a viewer
+     * where they hold no membership (PK4).
      */
     val isSuperAdmin: Boolean get() = superAdmin
 
@@ -127,8 +132,8 @@ data class AuthenticatedPrincipal(
      * A CHECK asks for the permission it is about instead (#215 A.3): the own-only execution
      * filters ask `execution.read_all`, the cross-workspace fact retire `datasource.manage` —
      * so a later ruling that splits one of those from membership administration moves only
-     * that check. The successor, before that, to `Scope.satisfies(scopes, ADMIN)`, which round
-     * 1 made permanently FALSE (a session carries no scopes, D-R1; no key holds `admin`, O-2).
+     * that check. The successor, before that, to the `admin`-scope question, which round 1 made
+     * permanently FALSE (a session carried no scopes, D-R1; no key held `admin`, O-2).
      */
     val isWorkspaceAdmin: Boolean
         get() = superAdmin || holds(Permission.WORKSPACE_MEMBERS_MANAGE)
@@ -137,21 +142,13 @@ data class AuthenticatedPrincipal(
      * "May this principal AUTHOR here" — asked through the author row's representative
      * permission, `template.update` (#215: every authoring permission is held by exactly the
      * author and workspace-admin columns). The same defect [isWorkspaceAdmin] had, for the same
-     * reason: the UI once asked it as `Scope.satisfies(scopes, AUTHOR)`, and a SESSION carries no
-     * scopes at all since D-R1, so two screens' action columns were invisible to every
-     * signed-in human. Found by the browser suite.
-     *
-     * A KEY still answers on the scope axis, which is why the scope is consulted when there is
-     * one: a `read` key must not see an author's affordances just because its owner is an
-     * author in the workspace it is pinned to.
+     * reason: the UI once asked it as a scope question, and a SESSION carried no scopes at all
+     * since D-R1, so two screens' action columns were invisible to every signed-in human. Found
+     * by the browser suite. Since #215 slice (b) there is no credential axis left: the role is
+     * the whole answer, for a session and for the MCP key alike (its role capped at author, PK4).
      */
     val isAuthor: Boolean
-        get() =
-            superAdmin ||
-                (
-                    holds(Permission.TEMPLATE_UPDATE) &&
-                        (authMethod != AuthMethod.API_KEY || Scope.satisfies(scopes, Scope.AUTHOR))
-                )
+        get() = superAdmin || holds(Permission.TEMPLATE_UPDATE)
 
     /**
      * "May this principal PROMOTE here" — [Permission.PROMOTION_PROMOTE], the third rung of the same
@@ -163,18 +160,9 @@ data class AuthenticatedPrincipal(
      * Deliberately NOT implied by [isAuthor] and not implying it: since the 2026-09-20 rulings
      * an author RELEASES and a promoter PROMOTES (D5, D8) — the two roles hold different rows,
      * which is the whole reason [RolePermissions] writes each role's column out rather than a chain.
-     *
-     * The API-key conjunct is [isAuthor]'s, and for the same reason: the credential axis has no
-     * promoter, so `author` is the scope the promote row carries in §7.6 and a `read` key must
-     * not acquire that reach because its issuer holds the role.
      */
     val isPromoter: Boolean
-        get() =
-            superAdmin ||
-                (
-                    holds(Permission.PROMOTION_PROMOTE) &&
-                        (authMethod != AuthMethod.API_KEY || Scope.satisfies(scopes, Scope.AUTHOR))
-                )
+        get() = superAdmin || holds(Permission.PROMOTION_PROMOTE)
 
     /**
      * The workspace role this principal holds in the ACTIVE workspace, or null with no
@@ -213,7 +201,11 @@ data class AuthenticatedPrincipal(
      * asks them at the route.
      */
     fun holds(permission: Permission): Boolean =
-        if (permission in RolePermissions.INSTANCE) superAdmin else workspace?.permits(permission) ?: false
+        when {
+            keyRole != null -> permission in RolePermissions.of(keyRole)
+            permission in RolePermissions.INSTANCE -> superAdmin
+            else -> workspace?.permits(permission) ?: false
+        }
 
     /**
      * The role this principal would be judged as — a refusal's informative `held` detail (#215
@@ -221,7 +213,12 @@ data class AuthenticatedPrincipal(
      * null with no reachable workspace.
      */
     val heldRole: String?
-        get() = if (superAdmin) WorkspaceContext.SUPER_ADMIN_WIRE else workspace?.heldRole
+        get() =
+            when {
+                keyRole != null -> keyRole.wire
+                superAdmin -> WorkspaceContext.SUPER_ADMIN_WIRE
+                else -> workspace?.heldRole
+            }
 
     /**
      * The resolved active workspace, or [WorkspaceMembershipRequiredException] (403)

@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
@@ -37,12 +38,9 @@ import java.util.UUID
  * - Redis: result store, idempotency, event log,
  * - Postgres #2: the source datasource, with a small seeded `users` table.
  *
- * The bootstrap admin and its API keys are seeded DIRECTLY via SQL (no OIDC login is
- * involved in a programmatic walkthrough); key hashes are Argon2id, computed in setup
- * with the same pinned `argon2-jvm` library and parameters auth's `Argon2SecretHasher`
- * uses — see this module's build.gradle.kts for why the auth class itself is not
- * referenced (the §4.2 dependency table is mechanically enforced). auth's bounded
- * `SecretHasher` bean stays the only hasher bean; nothing here registers one (auth.md §12).
+ * The bootstrap admin and a promoter are seeded DIRECTLY via SQL (no OIDC login is involved
+ * in a programmatic walkthrough) and walk REST as signed SESSIONS ([E2eSession]): since #215 B2
+ * the MCP key reaches `/mcp` and nothing else, so REST is a person's surface.
  *
  * The assertions that make this a tracer bullet rather than a CRUD sweep: the SSE
  * stream carries the documented event ordering with the request's correlation id on
@@ -81,7 +79,7 @@ class TracerBulletE2eTest {
         val correlationId = UUID.randomUUID().toString()
         val events =
             assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-                consumeExecutionStream(pipelineId, ADMIN_KEY.plaintext, correlationId)
+                consumeExecutionStream(pipelineId, ADMIN_SESSION, correlationId)
             }
         val executionId = assertStreamContract(events, correlationId)
 
@@ -99,7 +97,7 @@ class TracerBulletE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "pg-local", "display_name": "Source Postgres", "dialect": "POSTGRES",
@@ -112,7 +110,7 @@ class TracerBulletE2eTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .post("/api/v1/datasources/pg-local/test")
             .then()
@@ -129,7 +127,7 @@ class TracerBulletE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "test/active_users.sql", "dialect": "POSTGRES", "display_name": "Active Users",
@@ -148,7 +146,7 @@ class TracerBulletE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(
                     """
                     {"schema_version": 1, "name": "test/active_users", "display_name": "Active Users",
@@ -190,7 +188,7 @@ class TracerBulletE2eTest {
         val resultResponse =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
                 .then()
@@ -208,7 +206,7 @@ class TracerBulletE2eTest {
     ) {
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/executions/$executionId")
             .then()
@@ -261,35 +259,35 @@ class TracerBulletE2eTest {
 
     @Test
     @Order(3)
-    fun `a read-scope-only key is 403 on execute`() {
-        // The auth chain is live: the key authenticates (scope `read`), and the §7.6
-        // matrix requires `execute` for POST /pipelines/{id}/execute.
+    fun `a role that does not execute is 403 on execute`() {
+        // The auth chain is live: the session authenticates, and the §7.6 catalog gives
+        // `pipeline.execute` to every role but the promoter (D5) — so a promoter is refused.
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, READ_ONLY_KEY.plaintext)
+            .asSession(PROMOTER_SESSION)
             .body("""{"parameters": {}}""")
             .`when`()
             .post("/api/v1/pipelines/$createdPipelineId/execute")
             .then()
             .statusCode(403)
-            .body("error.code", org.hamcrest.Matchers.equalTo("auth.scope.insufficient"))
+            .body("error.code", org.hamcrest.Matchers.equalTo("auth.role_required"))
     }
 
     /**
      * The §9.7 introspection endpoints over HTTP against the live source Postgres: the happy
      * path (real JDBC metadata through the whole stack), the catalogued not-found envelope,
-     * and the §7.6 scope gate on the new INTROSPECT_DATASOURCE operation.
+     * and — since #215 C1 ("introspection is reading") — every role, the promoter included.
      */
     @Test
     @Order(4)
-    fun `schema introspection endpoints serve metadata, not-found, and scope denial`() {
+    fun `schema introspection endpoints serve metadata, not-found, and every role (C1)`() {
         // Happy path — schemas: the flow's entry point; user schemas listed, system schemas out.
         // The payload is a page (v1.9): {"schemas": [...], "truncated": false}.
         val schemasJson =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/datasources/pg-local/schemas")
                 .then()
@@ -304,7 +302,7 @@ class TracerBulletE2eTest {
         val tables =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/datasources/pg-local/tables")
                 .then()
@@ -322,7 +320,7 @@ class TracerBulletE2eTest {
         // Happy path — columns for the table tables() returned.
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/datasources/pg-local/tables/users/columns")
             .then()
@@ -333,22 +331,22 @@ class TracerBulletE2eTest {
         // Unknown datasource — the catalogued §13.8 not-found envelope, not a 500.
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/datasources/no-such-datasource/tables")
             .then()
             .statusCode(404)
             .body("error.code", org.hamcrest.Matchers.equalTo("datasource.not_found"))
 
-        // Scope denial — introspection is `author` (§7.6); a read-scope key is refused.
+        // C1 (record §5, ruled O1): introspection is reading — the promoter's role holds it, so
+        // the promoter session that the execute test refuses reads the tables.
         given()
             .port(port)
-            .header(API_KEY_HEADER, READ_ONLY_KEY.plaintext)
+            .asSession(PROMOTER_SESSION)
             .`when`()
             .get("/api/v1/datasources/pg-local/tables")
             .then()
-            .statusCode(403)
-            .body("error.code", org.hamcrest.Matchers.equalTo("auth.scope.insufficient"))
+            .statusCode(200)
     }
 
     /**
@@ -367,13 +365,14 @@ class TracerBulletE2eTest {
      */
     private fun consumeExecutionStream(
         pipelineId: String,
-        apiKey: String,
+        session: String,
         correlationId: String,
     ): List<Pair<String, JsonNode>> {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                .header(API_KEY_HEADER, apiKey)
+                .header("Cookie", E2eSession.cookieHeader(session))
+                .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                 .header("DP-Correlation-Id", correlationId)
                 .header("DP-Result-TTL-Seconds", REQUESTED_TTL_SECONDS.toString())
                 .header("Content-Type", "application/json")
@@ -429,24 +428,15 @@ class TracerBulletE2eTest {
                     """.trimIndent(),
                 )
             }
-            connection
-                .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
-                ).use { ps ->
-                    for (key in listOf(ADMIN_KEY, READ_ONLY_KEY)) {
-                        ps.setString(1, key.id)
-                        // 179 (V31): one live `user` key per (user, workspace) — the
-                        // read-only key gets its own owner (the viewer fallback is what its
-                        // 403 assertions exercise either way).
-                        ps.setObject(2, UUID.fromString(if (key === READ_ONLY_KEY) READER_USER_ID else ADMIN_USER_ID))
-                        ps.setString(3, key.name)
-                        ps.setString(4, key.hash)
-                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                        ps.addBatch()
-                    }
-                    ps.executeBatch()
-                }
+            // #215 B2: REST is walked as SESSIONS (the MCP key reaches `/mcp` only). The admin is
+            // the instance super admin; the reader is a PROMOTER of `default` — the one role that
+            // does not execute (D5), which is what the 403 test needs.
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO workspace_members (workspace_id, user_id, role) " +
+                        "VALUES ('defa0000-0000-0000-0000-000000000001', '$READER_USER_ID', 'promoter')",
+                )
+            }
         }
     }
 
@@ -454,7 +444,6 @@ class TracerBulletE2eTest {
         private const val SECRET_BYTES = 32
         private const val REQUESTED_TTL_SECONDS = 120L
         private const val SSE_BUDGET_MINUTES = 2L
-        private const val API_KEY_HEADER = "DP-API-Key"
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val READER_USER_ID: String = UUID.randomUUID().toString()
@@ -467,8 +456,10 @@ class TracerBulletE2eTest {
 
         private val random = SecureRandom()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-admin-key", arrayOf("read", "execute", "author"))
-        private val READ_ONLY_KEY = E2eAuth.generateKey("e2e-read-key", arrayOf("read"))
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the sessions. */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "tracer-e2e-admin@datapipelines.test")
+        private val PROMOTER_SESSION get() = E2eSession.jwt(JWT_SECRET, READER_USER_ID, "tracer-e2e-reader@datapipelines.test")
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedE2e.postgres
@@ -505,7 +496,7 @@ class TracerBulletE2eTest {
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
             // Generated per run — no literal secret in any test fixture (HIGH-2).
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
             listOf("google", "microsoft").forEachIndexed { index, name ->

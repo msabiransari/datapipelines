@@ -38,7 +38,8 @@ class UserSettingsController(
         model.addAttribute("authMethod", principal.authMethod.name)
         model.addAttribute("themes", listAvailableThemes())
         model.addAttribute("activeTheme", themeResolver.resolve(request))
-        model.addAttribute("sessionScopes", principal.scopes.map { it.wire }.sorted())
+        // #215: what this session may do is its ROLE in the active workspace (scopes are gone).
+        model.addAttribute("sessionRole", RoleModel.roles(principal).roleLabel)
         return "settings/index"
     }
 

@@ -16,10 +16,12 @@ import org.springframework.web.method.HandlerMethod
 import java.util.UUID
 
 /**
- * AUTH-SEC-9 / AU-TEST-1: `@RequiredScope` is keyed on the §7.6 matrix, the hierarchy
- * is honored, denials are audited as `auth.scope.denied`, an unauthenticated hit on a
- * scoped handler is `auth.api_key.missing` (401), and an **unannotated** handler on a
- * matrix-governed surface is denied by default rather than served.
+ * AUTH-SEC-9 / AU-TEST-1: `@RequiredScope` declares the handler's §7.6 catalog permission and
+ * the principal's ROLE decides (#215 — scopes are gone), denials are audited as
+ * `auth.scope.denied`, an unauthenticated hit on a governed handler is `auth.api_key.missing`
+ * (401), an **unannotated** handler on a governed surface is denied by default with
+ * `auth.permission.undeclared`, and a key off its kind's surface is refused before its
+ * permission is judged (B2's second line, behind `ApiKeyFilter`).
  */
 class ScopeInterceptorTest {
     private val mapper = ObjectMapper()
@@ -47,24 +49,20 @@ class ScopeInterceptorTest {
     fun clear() = SecurityContextHolder.clearContext()
 
     /**
-     * The workspace context every request carries since RBAC round 1: `ScopeMatrix.allowed`
-     * judges BOTH axes, so a principal with no resolved workspace is refused with
-     * `workspace.not_found` before any scope is examined (D-R5). A key's context carries its
-     * ISSUER's flags, and these suites are about the CREDENTIAL axis — so the issuer is a
-     * workspace admin here, which satisfies every capability and leaves the scope check as
-     * the only thing that can refuse.
+     * The workspace context every request carries since RBAC round 1: a principal with no
+     * resolved workspace is refused with `workspace.not_found` before any role is examined
+     * (D-R5). A workspace ADMIN's session — the highest member role, and since B2 the only kind
+     * of principal that reaches REST and the partials besides a key on its own surface.
      */
     private fun adminContext() = WorkspaceContext(UUID.randomUUID(), "acme", WorkspaceRole.WORKSPACE_ADMIN)
 
-    private fun authenticate(vararg scopes: Scope) {
+    private fun authenticate() {
         val principal =
             AuthenticatedPrincipal(
                 UUID.randomUUID(),
                 "a@b.com",
                 "A",
-                scopes.toSet(),
-                AuthMethod.API_KEY,
-                "dpk_ABCDEFGHIJKL",
+                AuthMethod.OIDC,
                 workspaceName = "acme",
                 workspace = adminContext(),
             )
@@ -87,39 +85,66 @@ class ScopeInterceptorTest {
         (mapper.readValue(response.contentAsString, Map::class.java)["error"] as Map<*, *>)
 
     @Test
-    fun `a principal holding exactly the required scope proceeds`() {
-        authenticate(Scope.READ)
+    fun `a principal whose role holds the declared permission proceeds`() {
+        authenticate()
         invoke(ProbeController(), "read").first.shouldBeTrue()
     }
 
+    /**
+     * B2's second line: the MCP key is confined to `/mcp`. `ApiKeyFilter` refuses it first on the
+     * wire (`AuthHttpBoundaryTest`); the interceptor states the same confinement for every MVC
+     * handler, so a principal that reached one anyway is refused with the confinement code before
+     * its role is asked — even a workspace admin's key on a read.
+     */
     @Test
-    fun `the hierarchy applies - admin satisfies a read-minimum operation`() {
-        authenticate(Scope.ADMIN)
-        invoke(ProbeController(), "read").first.shouldBeTrue()
+    fun `an MCP key off mcp is refused with the confinement code before its role is judged (B2)`() {
+        val key =
+            AuthenticatedPrincipal(
+                UUID.randomUUID(),
+                "a@b.com",
+                "A",
+                AuthMethod.API_KEY,
+                "dpk_ABCDEFGHIJKL",
+                workspaceName = "acme",
+                workspace = adminContext(),
+                keyKind = ApiKeyKind.USER,
+            )
+        SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(key, null, emptyList())
+
+        listOf("/api/v1/probe", "/partials/probe", "/pipelines").forEach { path ->
+            val (proceed, response) = invoke(ProbeController(), "read", path)
+
+            proceed.shouldBeFalse()
+            response.status shouldBe 403
+            body(response)["code"] shouldBe ScopeInterceptor.ENDPOINT_KEY_KIND_REFUSED
+            (body(response)["details"] as Map<*, *>)["reason"] shouldBe "user_key_off_surface"
+        }
+        invoke(ProbeController(), "read", "/mcp").first.shouldBeTrue()
     }
 
     @Test
-    fun `an insufficient scope is 403 auth-scope-insufficient and audited as auth-scope-denied`() {
-        authenticate(Scope.READ)
+    fun `a permission the role lacks is 403 auth-role_required and audited as auth-scope-denied`() {
+        authenticate()
 
         val (proceed, response) = invoke(ProbeController(), "adminOnly")
 
         proceed.shouldBeFalse()
         response.status shouldBe 403
-        body(response)["code"] shouldBe "auth.scope.insufficient"
-        (body(response)["details"] as Map<*, *>)["required"] shouldBe "admin"
+        body(response)["code"] shouldBe AuthErrorCodes.ROLE_REQUIRED
+        (body(response)["details"] as Map<*, *>)["required"] shouldBe "datasource.grant"
+        (body(response)["details"] as Map<*, *>)["held"] shouldBe "workspace_admin"
         verify { auditLogger.log("auth.scope.denied", any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `the class-level annotation is the fallback when the method carries none`() {
-        authenticate(Scope.AUTHOR)
+        authenticate()
 
         val (proceed, response) = invoke(AdminController(), "anything")
 
         proceed.shouldBeFalse()
         response.status shouldBe 403
-        (body(response)["details"] as Map<*, *>)["required"] shouldBe "admin"
+        (body(response)["details"] as Map<*, *>)["required"] shouldBe "user.manage"
     }
 
     /**
@@ -135,7 +160,6 @@ class ScopeInterceptorTest {
                     UUID.randomUUID(),
                     "v@b.com",
                     "V",
-                    emptySet(),
                     AuthMethod.OIDC,
                     workspace = WorkspaceContext(UUID.randomUUID(), "acme", WorkspaceRole.VIEWER),
                 )
@@ -164,19 +188,20 @@ class ScopeInterceptorTest {
 
     @Test
     fun `an unannotated handler under the api prefix is denied by default`() {
-        authenticate(Scope.ADMIN)
+        authenticate()
 
         val (proceed, response) = invoke(ProbeController(), "unannotated", path = "/api/v1/forgotten")
 
         proceed.shouldBeFalse()
         response.status shouldBe 403
-        body(response)["code"] shouldBe "auth.scope.insufficient"
+        body(response)["code"] shouldBe AuthErrorCodes.PERMISSION_UNDECLARED
+        (body(response)["details"] as Map<*, *>)["route"] shouldBe "GET /api/v1/forgotten"
         (body(response)["details"] as Map<*, *>)["reason"] shouldBe "handler_not_annotated"
     }
 
     @Test
     fun `an unannotated handler on the mcp endpoint is denied by default`() {
-        authenticate(Scope.ADMIN)
+        authenticate()
 
         val (proceed, response) = invoke(ProbeController(), "unannotated", path = "/mcp")
 
@@ -188,27 +213,27 @@ class ScopeInterceptorTest {
     fun `an unannotated handler under the partials prefix is denied by default`() {
         // 022 review F6: the htmx partials are reachable with an API key like any route —
         // they joined the governed prefixes so a forgotten annotation cannot fail open.
-        authenticate(Scope.ADMIN)
+        authenticate()
 
         val (proceed, response) = invoke(ProbeController(), "unannotated", path = "/partials/datasources")
 
         proceed.shouldBeFalse()
         response.status shouldBe 403
-        body(response)["code"] shouldBe "auth.scope.insufficient"
+        body(response)["code"] shouldBe AuthErrorCodes.PERMISSION_UNDECLARED
         (body(response)["details"] as Map<*, *>)["reason"] shouldBe "handler_not_annotated"
     }
 
     @Test
-    fun `an annotated partial handler enforces its floor - a read key cannot mutate`() {
-        // The F6 pin at the unit level: `adminOnly` carries the admin floor; a read-held
-        // principal on a /partials path is denied exactly like its REST twin.
-        authenticate(Scope.READ)
+    fun `an annotated partial handler enforces its permission - a role that lacks it cannot mutate`() {
+        // The F6 pin at the unit level: `adminOnly` declares the super admin's `datasource.grant`;
+        // a workspace admin on a /partials path is denied exactly like its REST twin.
+        authenticate()
 
         val (proceed, response) = invoke(ProbeController(), "adminOnly", path = "/partials/probe")
 
         proceed.shouldBeFalse()
         response.status shouldBe 403
-        body(response)["code"] shouldBe "auth.scope.insufficient"
+        body(response)["code"] shouldBe AuthErrorCodes.ROLE_REQUIRED
     }
 
     @Test
@@ -235,7 +260,6 @@ class ScopeInterceptorTest {
                 UUID.randomUUID(),
                 "nobody@b.com",
                 "Nobody",
-                emptySet(),
                 AuthMethod.OIDC,
                 workspace = null,
             )
@@ -295,7 +319,6 @@ class ScopeInterceptorTest {
                 UUID.randomUUID(),
                 "agent@b.com",
                 "Agent",
-                setOf(Scope.READ),
                 AuthMethod.API_KEY,
                 "dpk_ABCDEFGHIJKL",
                 workspaceName = "acme",

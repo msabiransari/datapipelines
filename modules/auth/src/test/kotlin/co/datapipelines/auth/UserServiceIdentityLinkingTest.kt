@@ -33,6 +33,8 @@ class UserServiceIdentityLinkingTest {
     init {
         // The re-read after updateIdentity; a fresh row every time keeps the stubs order-free.
         every { userRepository.findById(userId) } answers { stored(provider = "keycloak", subject = subject) }
+        // #215 A.6: the reset looks the row up (through the cache) BEFORE it mutates — a person here.
+        every { authCache.user(userId, any()) } answers { stored(provider = "keycloak", subject = subject) }
     }
 
     private val email = "alice@company.com"
@@ -149,6 +151,42 @@ class UserServiceIdentityLinkingTest {
         service.resetIdentity(userId, actorId = UUID.randomUUID())
 
         verify(exactly = 0) { auditLogger.log(any(), any(), any(), any(), any(), any()) }
+    }
+
+    // ------------------------------------------------------------- non-human rows (#215 A.6)
+
+    /**
+     * A key's identity and the System actor are never claimable by a sign-in — the KIND is judged
+     * before the provider, so even a row that somehow sits on the bootstrap placeholder stays
+     * unclaimable, and nothing is updated.
+     */
+    @Test
+    fun `a key identity or the System row is never claimed by a sign-in - even on the bootstrap placeholder`() {
+        listOf(UserKind.SERVICE, UserKind.SYSTEM).forEach { kind ->
+            every { userRepository.findByEmail(email) } returns
+                stored(provider = UserService.BOOTSTRAP_PROVIDER, subject = email).copy(kind = kind)
+
+            shouldThrow<IdentityMismatchException> { service.findOrCreateByEmail(email, "Alice", null, "keycloak", subject) }
+        }
+        verify(exactly = 0) { userRepository.updateIdentity(any(), any(), any(), any(), any()) }
+    }
+
+    /**
+     * The pre-existing hole #215 A.6 closes: the identity reset used to flip ANY row to the
+     * bootstrap placeholder — the System row included — which is exactly the state the link-once
+     * rule lets the next sign-in claim. The reset now refuses a non-human row before it mutates.
+     */
+    @Test
+    fun `the System row cannot be reset then claimed - the reset refuses a non-human row before it mutates`() {
+        val system = stored(provider = UserService.SYSTEM_PROVIDER, subject = UserService.SYSTEM_ACTOR_SUBJECT).copy(kind = UserKind.SYSTEM)
+        every { authCache.user(userId, any()) } returns system
+
+        service.resetIdentity(userId, actorId = UUID.randomUUID()) shouldBe false
+
+        verify(exactly = 0) { userRepository.resetIdentityToBootstrap(any()) }
+        verify(exactly = 0) { auditLogger.log(any(), any(), any(), any(), any(), any()) }
+        every { userRepository.findByEmail(email) } returns system
+        shouldThrow<IdentityMismatchException> { service.findOrCreateByEmail(email, "Mallory", null, "keycloak", "sub-evil") }
     }
 
     // ------------------------------------------------------------------------ fixture

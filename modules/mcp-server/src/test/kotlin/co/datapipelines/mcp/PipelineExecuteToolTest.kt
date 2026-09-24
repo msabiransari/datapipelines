@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionAbortedException
@@ -38,7 +37,7 @@ class PipelineExecuteToolTest {
     private val executor = mockk<PipelineExecutor>()
     private val resultStore = mockk<ResultStore>()
     private val resultUrls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
-    private val ctx = McpFixtures.ctx(Scope.EXECUTE)
+    private val ctx = McpFixtures.ctx()
 
     private val executions = mockk<co.datapipelines.executor.ExecutionRepository>(relaxed = true)
     private val service = McpFixtures.pipelineService(pipelines)

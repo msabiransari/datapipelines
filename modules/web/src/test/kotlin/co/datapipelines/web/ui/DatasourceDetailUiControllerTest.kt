@@ -4,7 +4,6 @@ import co.datapipelines.application.datasources.LakeTableRegistryService
 import co.datapipelines.application.semantics.SemanticsService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
@@ -53,7 +52,6 @@ class DatasourceDetailUiControllerTest {
                     UUID.randomUUID(),
                     "a@b.c",
                     "A",
-                    setOf(Scope.ADMIN),
                     AuthMethod.OIDC,
                     workspace = WorkspaceContext(workspaceId, "acme"),
                 ),

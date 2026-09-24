@@ -30,10 +30,10 @@ data class McpResourcePage(
  *   page, and an agent that lists resources at all sees the manual before it sees content.
  *   Entities created mid-run may be missed: the listing is a discovery aid, not a snapshot.
  *
- * **Scope filtering** (§7.3, §13 checklist): the listing shows only what the calling key may read.
- * Every scope in the §7.5 hierarchy implies `read`, so pipelines, templates and datasources are
- * visible to any authenticated key; executions additionally apply the ownership rule
- * ([visibleTo]), so two agents see different resource sets on the same server.
+ * **Role filtering** (§7.3, §13 checklist): the listing shows only what the calling key may read —
+ * each kind under its role read permission ([McpResourcePermissions], #215), so a promoter's key
+ * lists no executions; executions additionally apply the ownership rule ([visibleTo]), so two
+ * agents see different resource sets on the same server.
  *
  * **Executions are windowed to the last 24 hours.** Older ones stay readable by direct URI
  * ([McpResourceReader]) — they are simply not enumerated, because an unbounded execution history
@@ -63,7 +63,6 @@ class McpResourceCatalog(
         ctx: McpToolContext,
         cursor: String?,
     ): McpResourcePage {
-        requireReadScope(ctx)
         val workspaceId = ctx.principal.requireWorkspace().id
         val start = cursor?.let { McpResourceCursor.decode(it, KINDS) } ?: McpResourceCursor.first(KINDS)
         val scan = RequestScan(workspaceId, lens.viewFor(ctx.principal))
@@ -108,6 +107,18 @@ class McpResourceCatalog(
     ): Boolean = slice(kind, offset, 1, ctx, scan).isNotEmpty()
 
     private fun slice(
+        kind: String,
+        offset: Int,
+        limit: Int,
+        ctx: McpToolContext,
+        scan: RequestScan,
+    ): List<McpSchema.Resource> =
+        when {
+            !McpResourcePermissions.mayList(ctx, kind) -> emptyList()
+            else -> sliceOf(kind, offset, limit, ctx, scan)
+        }
+
+    private fun sliceOf(
         kind: String,
         offset: Int,
         limit: Int,

@@ -5,7 +5,6 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.datasources.Datasource
@@ -181,7 +180,6 @@ class DatasourceFactsPartialControllerTest {
                     userId = UUID.randomUUID(),
                     email = "a@b.c",
                     displayName = "A",
-                    scopes = emptySet(),
                     authMethod = AuthMethod.OIDC,
                     workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.VIEWER),
                 ),

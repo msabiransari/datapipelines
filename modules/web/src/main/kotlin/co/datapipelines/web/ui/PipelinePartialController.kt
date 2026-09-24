@@ -1,12 +1,9 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.PromoterLens
-import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.Scope
 import co.datapipelines.web.api.currentPrincipal
-import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.GetMapping
@@ -54,7 +51,6 @@ class PipelinePartialController(
         val workspaceId = principal.requireWorkspace().id
         val view = lens.viewFor(principal)
         model.addAttribute("q", q ?: "")
-        model.addAttribute("scopes", scopes())
         return if (prefix != null) {
             browse.fillLevel(model, workspaceId, view, prefix, offset ?: 0)
         } else {
@@ -133,10 +129,5 @@ class PipelinePartialController(
     ): String {
         val principal = currentPrincipal()
         return browse.fillUsage(model, principal.requireWorkspace().id, lens.viewFor(principal), id)
-    }
-
-    private fun scopes(): Set<String> {
-        val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
-        return principal?.scopes?.map { it.name }?.toSet() ?: emptySet()
     }
 }

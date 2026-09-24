@@ -12,7 +12,6 @@ import org.springframework.mock.web.MockFilterChain
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
-import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
 import java.util.UUID
 
@@ -41,22 +40,16 @@ class WorkspaceResolutionFilterTest {
 
     private fun authenticate(principal: AuthenticatedPrincipal) {
         SecurityContextHolder.getContext().authentication =
-            UsernamePasswordAuthenticationToken(
-                principal,
-                null,
-                principal.scopes.map { SimpleGrantedAuthority("SCOPE_${it.wire}") },
-            )
+            UsernamePasswordAuthenticationToken(principal, null, emptyList())
     }
 
-    private fun oidcPrincipal() =
-        AuthenticatedPrincipal(userId, "a@c.com", "A", Scope.AUTHOR.expand(), AuthMethod.OIDC, workspaceName = "acme")
+    private fun oidcPrincipal() = AuthenticatedPrincipal(userId, "a@c.com", "A", AuthMethod.OIDC, workspaceName = "acme")
 
     private fun keyPrincipal() =
         AuthenticatedPrincipal(
             userId,
             "a@c.com",
             "A",
-            setOf(Scope.READ),
             AuthMethod.API_KEY,
             keyId = "dpk_1",
             workspaceName = acme.name,

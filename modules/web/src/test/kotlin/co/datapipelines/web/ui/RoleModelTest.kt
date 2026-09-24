@@ -1,8 +1,8 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import io.kotest.matchers.shouldBe
@@ -116,32 +116,30 @@ class RoleModelTest {
     // ---------------------------------------------------------------- the credential axis
 
     /**
-     * §7.6's other axis. A key's SCOPE is a ceiling on its issuer's role: a `read` key must not
-     * be shown an author's affordances just because the person who minted it is an author, or
-     * O-2: no key may hold `admin` scope at all, so an INSTANCE verb is session-only. The
-     * screen says the same thing the matrix says on the scope arm, rather than rendering a
-     * Create/Deactivate button the interceptor will refuse.
+     * #215 slice (b): there is no credential axis left for the screen to narrow by — a key's
+     * authority is a ROLE, the same the screen reads for a session. (No key renders a screen at
+     * all since B2; these pin that `RoleModel` would render one honestly if it did.) A super
+     * admin's MCP key is resolved by `ApiKeyService.validate` as the member it acts as — with no
+     * membership, an implicit VIEWER, never the super admin (B1).
      */
     @Test
-    fun `a key never renders the instance verbs, even for a super admin owner`() {
-        val roles = RoleModel.roles(superAdminKey(Scope.AUTHOR))
+    fun `a super admin's MCP key renders as the viewer it acts as - never the super admin (B1)`() {
+        val roles = RoleModel.roles(superAdminKey())
 
         roles.isSuperAdmin shouldBe false
-        roles.canAdminWorkspace shouldBe true
-        roles.roleLabel shouldBe "super admin"
+        roles.canAdminWorkspace shouldBe false
+        roles.canAuthor shouldBe false
+        roles.roleLabel shouldBe "viewer"
+        RoleModel.shell(superAdminKey()).adminUsers shouldBe false
     }
 
     @Test
-    fun `an author's read key renders as a viewer - badge included`() {
-        val roles = RoleModel.roles(key(WorkspaceRole.AUTHOR, Scope.READ))
+    fun `an author's MCP key renders as the author it acts as - nothing narrows it`() {
+        val roles = RoleModel.roles(key(WorkspaceRole.AUTHOR))
 
-        roles.canRead shouldBe true
-        // READ_EXECUTIONS floors at `read`: the runs the issuer may see, the key sees.
-        roles.canReadExecutions shouldBe true
-        roles.canExecute shouldBe false
-        roles.canAuthor shouldBe false
-        roles.canReadPromotion shouldBe false
-        roles.roleLabel shouldBe "viewer"
+        roles.canAuthor shouldBe true
+        roles.canExecute shouldBe true
+        roles.roleLabel shouldBe "author"
     }
 
     // ---------------------------------------------------------------- no workspace at all
@@ -158,30 +156,6 @@ class RoleModelTest {
     @Test
     fun `a null principal renders nothing`() {
         RoleModel.roles(null) shouldBe RoleModel.NONE
-    }
-
-    /**
-     * 143 — found by JarSmokeE2eTest the moment the template editor opened to readers: the
-     * auth predicates `isAuthor`/`isPromoter` short-circuit on `superAdmin` BEFORE their key
-     * conjunct, so a super admin's `read` key rendered as an author (a textarea, Preview) on
-     * a page whose writes the interceptor refuses on the scope axis. This class promises
-     * every boolean narrows by the key's scope; the promise is kept here for those two rungs.
-     */
-    @Test
-    fun `a super admin's read key renders as a reader on every rung`() {
-        val roles = RoleModel.roles(superAdminKey(Scope.READ))
-
-        roles.canRead shouldBe true
-        roles.canExecute shouldBe false
-        roles.canAuthor shouldBe false
-        roles.canPromote shouldBe false
-        roles.canReadPromotion shouldBe false
-        roles.canAdminWorkspace shouldBe false
-        roles.isSuperAdmin shouldBe false
-        // The badge stays the owner's authority (documented at the branch), not the key's reach.
-        roles.roleLabel shouldBe "super admin"
-        RoleModel.shell(superAdminKey(Scope.READ)) shouldBe
-            shell(executions = true, workspaces = true)
     }
 
     // ---------------------------------------------------------------- the shell (143, D11, D13, rule 13)
@@ -217,17 +191,6 @@ class RoleModelTest {
         // and the Workspaces item stays (the no-workspace page is the one screen that explains).
         RoleModel.roles(session(role = null, superAdmin = true)) shouldBe RoleModel.NONE
         RoleModel.shell(session(role = null, superAdmin = true)) shouldBe shell(adminUsers = true, workspaces = true)
-    }
-
-    @Test
-    fun `a key narrows the shell entry like every other boolean`() {
-        // O-2: no key holds `admin`, so a super admin's key never shows instance users.
-        RoleModel.shell(superAdminKey(Scope.AUTHOR)) shouldBe
-            shell(adminMembers = true, executions = true, promotion = true, workspaces = true, apiKeys = true)
-        // A read key of a workspace admin shows neither Admin item (the member verbs floor at
-        // `author`); Executions stays (it floors at `read`), and so does the Workspaces page
-        // link — WORKSPACES_READ floors at `read`, the issuer administers the workspace.
-        RoleModel.shell(key(WorkspaceRole.WORKSPACE_ADMIN, Scope.READ)) shouldBe shell(executions = true)
     }
 
     @Test
@@ -293,7 +256,6 @@ class RoleModelTest {
             userId = UUID.randomUUID(),
             email = "u@acme.test",
             displayName = "U",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspaceName = "acme",
             workspace = role?.let { WorkspaceContext(workspaceId, "acme", it) },
@@ -305,38 +267,33 @@ class RoleModelTest {
             userId = UUID.randomUUID(),
             email = "root@acme.test",
             displayName = "Root",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspaceName = "acme",
             workspace = WorkspaceContext.superAdminOver(workspaceId, "acme", explicitRole),
             superAdmin = true,
         )
 
-    private fun key(
-        role: WorkspaceRole,
-        scope: Scope,
-    ): AuthenticatedPrincipal =
+    private fun key(role: WorkspaceRole): AuthenticatedPrincipal =
         AuthenticatedPrincipal(
             userId = UUID.randomUUID(),
             email = "u@acme.test",
             displayName = "U",
-            scopes = setOf(scope),
             authMethod = AuthMethod.API_KEY,
             keyId = "dp_key",
             workspaceName = "acme",
             workspace = WorkspaceContext(workspaceId, "acme", role),
         )
 
-    private fun superAdminKey(scope: Scope): AuthenticatedPrincipal =
+    /** A super admin's MCP key as `ApiKeyService.validate` resolves it with no membership: an implicit viewer, never super admin (B1). */
+    private fun superAdminKey(): AuthenticatedPrincipal =
         AuthenticatedPrincipal(
             userId = UUID.randomUUID(),
             email = "root@acme.test",
             displayName = "Root",
-            scopes = setOf(scope),
             authMethod = AuthMethod.API_KEY,
             keyId = "dp_key",
             workspaceName = "acme",
-            workspace = WorkspaceContext.superAdminOver(workspaceId, "acme", explicitRole = null),
-            superAdmin = true,
+            workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.VIEWER, implicit = true),
+            keyKind = ApiKeyKind.USER,
         )
 }

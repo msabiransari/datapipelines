@@ -31,7 +31,7 @@ class UserServiceRaceTest {
         // link would now be a mismatch refusal, not a race outcome).
         val winner = user(email = EMAIL, providerSubject = "sub-1")
         every { users.findByEmail(EMAIL) } returnsMany listOf(null, winner)
-        every { users.insert(any(), any(), any(), any(), any(), any()) } throws DuplicateKeyException("users_email_key")
+        every { users.insert(any(), any(), any(), any(), any(), any(), any()) } throws DuplicateKeyException("users_email_key")
         every { users.updateIdentity(any(), any(), any(), any(), any()) } just runs
         every { users.findById(winner.id) } returns winner
 
@@ -47,7 +47,7 @@ class UserServiceRaceTest {
     fun `provisionBootstrapActor - the first-boot race returns the winner's row instead of crashing startup`() {
         val winner = user(email = ADMIN_EMAIL, provider = UserService.BOOTSTRAP_PROVIDER)
         every { users.findByEmail(ADMIN_EMAIL) } returnsMany listOf(null, winner)
-        every { users.insert(any(), any(), any(), any(), any(), any()) } throws DuplicateKeyException("users_email_key")
+        every { users.insert(any(), any(), any(), any(), any(), any(), any()) } throws DuplicateKeyException("users_email_key")
 
         val result = service.provisionBootstrapActor()
 

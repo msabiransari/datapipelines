@@ -43,7 +43,6 @@ class DatasourceSchemaControllerTest {
                     userId = java.util.UUID.randomUUID(),
                     email = "a@b.c",
                     displayName = "A",
-                    scopes = setOf(co.datapipelines.auth.Scope.READ),
                     authMethod = co.datapipelines.auth.AuthMethod.OIDC,
                     workspace = co.datapipelines.auth.WorkspaceContext(workspaceId, "team"),
                 ),

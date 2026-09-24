@@ -52,9 +52,8 @@ class DatasourceBrowseModel(
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", all.size > page + PAGE_SIZE)
         model.addAttribute("total", all.size)
-        model.addAttribute("scopes", principal?.scopes?.map { it.name }?.toSet() ?: emptySet<String>())
-        // The row's action column. NOT `scopes`: a session carries none since D-R1, so the
-        // scope test hid Test/Edit/Delete from every signed-in human — see
+        // The row's action column. Once a `scopes` test, which hid Test/Edit/Delete from every
+        // signed-in human (a session carried none since D-R1) — see
         // `AuthenticatedPrincipal.isAuthor`. Since 114 the whole role vocabulary comes from
         // ONE place ([RoleModel]) — Register/Edit/Delete/Test are `canAdminWorkspace` verbs
         // (§7.6's `MUTATE_WORKSPACE_DATASOURCES` / `TEST_DATASOURCE` rows), not `canAuthor`,

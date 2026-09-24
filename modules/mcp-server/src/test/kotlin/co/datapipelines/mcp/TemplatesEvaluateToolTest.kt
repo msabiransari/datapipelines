@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.templates.TemplateEvaluateService
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.ContractColumn
 import co.datapipelines.templates.Template
@@ -93,7 +92,7 @@ class TemplatesEvaluateToolTest {
         every { templates.findWorking(any(), "test/xform.jsonata") } returns transformTemplate
         val sink = EvaluateRecordingAuditSink()
         val dispatcher = McpToolDispatcher(listOf(tool()), sink)
-        val ctx = McpFixtures.ctx(Scope.AUTHOR)
+        val ctx = McpFixtures.ctx()
 
         // The direct return maps the service result verbatim; the dispatcher ride proves the
         // wiring and writes the audit row.
@@ -139,7 +138,7 @@ class TemplatesEvaluateToolTest {
             io.kotest.assertions.throwables.shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
                 render.call(
                     McpArguments(mapOf("id" to "test/xform.jsonata", "version" to 1, "context" to emptyMap<String, Any>())),
-                    McpFixtures.ctx(Scope.AUTHOR),
+                    McpFixtures.ctx(),
                 )
             }
         thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE

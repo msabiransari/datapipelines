@@ -1,7 +1,6 @@
 package co.datapipelines.application.endpoints
 
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.PipelineErrorCodes
 import java.util.UUID
 
@@ -23,14 +22,14 @@ import java.util.UUID
  *
  * ## The unbound case is where the security lives
  *
- * An endpoint with no binding on any ancestor is NOT public and NOT open to any key. It accepts
- * `user` keys of the endpoint's own workspace holding `execute` — so operators and agents keep
- * working on endpoints nobody has bound yet — and refuses `endpoint` keys outright.
- *
- * That asymmetry is deliberate. An endpoint key's entire authority is its bindings; if an unbound
- * path fell through to "any endpoint key may call it", then publishing a new endpoint would
- * silently widen every existing endpoint key's reach at the moment of publication. **An unbound
- * endpoint key authorises nothing.**
+ * An endpoint with no binding on any ancestor is NOT public and NOT open to any key: it is
+ * unservable until it is bound (#215 B3). Serving takes a key (sessions are refused before this
+ * runs), and since B2 the MCP key never reaches a published path, so the only credential that
+ * can arrive here is an `api_caller` key — whose entire authority is its bindings. If an unbound
+ * path fell through to "any endpoint key may call it", publishing a new endpoint would silently
+ * widen every existing key's reach at the moment of publication. **An unbound path authorises
+ * nothing.** (Until #215 a `user` key holding `execute` could call an unbound path of its own
+ * workspace; that branch went with the scopes.)
  *
  * ## Pure
  *
@@ -52,9 +51,8 @@ class EndpointAuthorizer {
      * Applies §5.2 to one request.
      *
      * @param requestPath the published path — the part after `/api`, with its leading `/`.
-     * @param endpointWorkspaceId the workspace of the endpoint being called — the one a `user`
-     *   key must be pinned to on an unbound path, and (#191) the ONLY workspace whose bindings
-     *   are visible here.
+     * @param endpointWorkspaceId the workspace of the endpoint being called — (#191) the ONLY
+     *   workspace whose bindings are visible here.
      * @param bindings every binding on any ancestor of [requestPath]; extra rows are harmless,
      *   because the walk selects by prefix rather than trusting the query. Rows of ANOTHER
      *   workspace are invisible (#191): a foreign binding at a nearer node neither decides nor
@@ -76,7 +74,7 @@ class EndpointAuthorizer {
         val deciding = EndpointPath.ancestors(requestPath).firstOrNull { byPrefix[it]?.isNotEmpty() == true }
 
         return if (deciding == null) {
-            unbound(principal, endpointWorkspaceId)
+            unbound(principal)
         } else {
             bound(principal, deciding, byPrefix.getValue(deciding))
         }
@@ -100,36 +98,19 @@ class EndpointAuthorizer {
         }
     }
 
-    /** The unbound case: `user` keys of this workspace with `execute`, and nothing else. */
-    private fun unbound(
-        principal: AuthenticatedPrincipal,
-        endpointWorkspaceId: UUID,
-    ): Decision =
-        when {
-            principal.isEndpointKey -> {
-                Decision.Refused(
-                    PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
-                    "No key is bound to any ancestor of this path, and an endpoint key authorises only the endpoints " +
-                        "it is bound to. Bind this key to the path, or call it with a user key.",
-                )
-            }
-
-            principal.workspace?.id != endpointWorkspaceId -> {
-                Decision.Refused(
-                    PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
-                    "This credential is pinned to a different workspace than the endpoint's.",
-                )
-            }
-
-            !Scope.satisfies(principal.scopes, Scope.EXECUTE) -> {
-                Decision.Refused(
-                    PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
-                    "Calling an unbound endpoint takes a user key with the 'execute' scope.",
-                )
-            }
-
-            else -> {
-                Decision.Allowed
-            }
+    /** The unbound case (#215 B3): nothing is admitted — the refusal only says what to do instead. */
+    private fun unbound(principal: AuthenticatedPrincipal): Decision =
+        if (principal.isEndpointKey) {
+            Decision.Refused(
+                PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
+                "No key is bound to any ancestor of this path, and an endpoint key authorises only the endpoints " +
+                    "it is bound to. Bind this key to the path.",
+            )
+        } else {
+            Decision.Refused(
+                PipelineErrorCodes.Endpoint.KEY_NOT_BOUND,
+                "No key is bound to any ancestor of this path; an unbound published path is served to no one " +
+                    "until a key is bound to it.",
+            )
         }
 }

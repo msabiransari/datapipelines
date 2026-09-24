@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
@@ -76,7 +75,6 @@ class DatasourceUiControllerTest {
                     userId,
                     "a@b.c",
                     "A",
-                    setOf(Scope.ADMIN),
                     AuthMethod.OIDC,
                     workspace = WorkspaceContext(workspaceId, "acme"),
                 ),
@@ -324,7 +322,7 @@ class DatasourceUiControllerTest {
     }
 
     @Test
-    fun `scopes are populated from principal`() {
+    fun `the page carries no scopes attribute - the role is the whole answer (#215)`() {
         authenticate()
 
         every { themeResolver.resolve(any()) } returns "saas"
@@ -333,8 +331,8 @@ class DatasourceUiControllerTest {
         val model: ExtendedModelMap = ExtendedModelMap()
         controller.list(model, mockk(), null, null, null)
 
-        @Suppress("UNCHECKED_CAST")
-        val scopes = model["scopes"] as Set<String>
-        scopes shouldBe setOf("ADMIN")
+        // The dead `scopes` attribute went with the scopes (#215 PK8); `RoleModel`'s booleans
+        // are what the templates read.
+        model.containsAttribute("scopes") shouldBe false
     }
 }

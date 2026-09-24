@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineFolder
 import co.datapipelines.pipeline.PipelineFolderLevel
@@ -29,7 +28,7 @@ class PipelineReadToolsTest {
     // 040: the upgrade-signal service. Relaxed so the existing get-tests see an empty signal
     // (no upgrade_available key) without each stubbing it; the signal's own tests stub it.
     private val usage = mockk<co.datapipelines.templates.TemplateUsageService>(relaxed = true)
-    private val ctx = McpFixtures.ctx(Scope.READ)
+    private val ctx = McpFixtures.ctx()
 
     private val revenue = McpFixtures.pipelineRecord(name = "monthly_revenue", displayName = "Monthly Revenue")
     private val churn =

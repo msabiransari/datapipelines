@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceMembership
@@ -182,7 +181,6 @@ class DatasourceGrantsPartialControllerTest {
                 userId = userId,
                 email = "root@acme.test",
                 displayName = "Root",
-                scopes = setOf(Scope.ADMIN),
                 authMethod = AuthMethod.OIDC,
                 workspaceName = "acme",
                 workspace = WorkspaceContext.superAdminOver(acmeId, "acme", explicitRole = null),

@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.WriteSurface
@@ -33,8 +32,8 @@ class TemplateToolsTest {
     private val validator = mockk<TemplateValidator>()
     private val engine = mockk<TemplateEngine>()
     private val engines = mockk<WorkspaceTemplateEngines> { every { engineFor(any()) } returns engine }
-    private val readCtx = McpFixtures.ctx(Scope.READ)
-    private val authorCtx = McpFixtures.ctx(Scope.AUTHOR)
+    private val readCtx = McpFixtures.ctx()
+    private val authorCtx = McpFixtures.ctx()
 
     @Test
     fun `list projects the documented metadata and filters libraries`() {

@@ -37,7 +37,6 @@ class ApiKeyShapeGateTest {
             cache,
             auditLogger,
             hasher,
-            AuthProperties(),
             workspaceService,
             PrincipalLiveness(userService, workspaceService),
         )

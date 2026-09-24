@@ -2,7 +2,6 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
@@ -51,7 +50,6 @@ class PipelineExecuteControllerTest {
                 userId,
                 "a@b.c",
                 "A",
-                setOf(Scope.EXECUTE),
                 AuthMethod.API_KEY,
                 "dpk_x",
                 workspace = WorkspaceContext(workspaceId, "acme"),

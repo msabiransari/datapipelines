@@ -1,5 +1,6 @@
 package co.datapipelines.integration
 
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -102,7 +103,7 @@ class McpEntryPointChecksE2eTest {
             connection.createStatement().execute("INSERT INTO trips VALUES (1, 'manhattan')")
         }
 
-        registerDatasource(ADMIN_KEY.plaintext, DATASOURCE, H2_JDBC_URL, "Entry-point checks (139)")
+        registerDatasource(ADMIN_SESSION, DATASOURCE, H2_JDBC_URL, "Entry-point checks (139)")
 
         val (created, createError) =
             callTool(
@@ -247,7 +248,7 @@ class McpEntryPointChecksE2eTest {
     // ---------------------------------------------------------------------------------
 
     private fun registerDatasource(
-        key: String,
+        session: String,
         name: String,
         jdbcUrl: String,
         displayName: String,
@@ -256,7 +257,7 @@ class McpEntryPointChecksE2eTest {
             .given()
             .port(port)
             .contentType(io.restassured.http.ContentType.JSON)
-            .header("DP-API-Key", key)
+            .asSession(session)
             .body(
                 """
                 {"name": "$name", "display_name": "$displayName", "dialect": "H2",
@@ -316,7 +317,11 @@ class McpEntryPointChecksE2eTest {
         private const val H2_JDBC_URL = "jdbc:h2:mem:entry139;DB_CLOSE_DELAY=-1"
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-139-entry-key", arrayOf("read", "execute", "author"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-139-entry-key")
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret`; REST is a session's surface (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-139-entry@datapipelines.test")
 
         private var mcpPipelineId: String = ""
         private var templateHash: String = ""
@@ -345,9 +350,7 @@ class McpEntryPointChecksE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") {
-                Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
-            }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") {
                 Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
             }
@@ -374,16 +377,22 @@ class McpEntryPointChecksE2eTest {
                              'e2e-139-entry-sub', TRUE, TRUE)
                         """.trimIndent(),
                     )
+                    // #215 PK4: a super admin's MCP key with NO membership is a viewer; this suite
+                    // authors over MCP, so the member is a workspace admin (capped at author there).
+                    statement.execute(
+                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
+                            " VALUES ('$WORKSPACE_ID', '$ADMIN_USER_ID', 'workspace_admin')",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
                         ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                        ps.setString(3, ADMIN_KEY.name)
-                        ps.setString(4, ADMIN_KEY.hash)
-                        ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
+                        ps.setObject(3, UUID.fromString(ADMIN_USER_ID))
+                        ps.setString(4, ADMIN_KEY.name)
+                        ps.setString(5, ADMIN_KEY.hash)
                         ps.setObject(6, UUID.fromString(WORKSPACE_ID))
                         ps.executeUpdate()
                     }

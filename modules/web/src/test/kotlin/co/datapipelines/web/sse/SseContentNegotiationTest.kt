@@ -70,7 +70,6 @@ class SseContentNegotiationTest {
                 UUID.randomUUID(),
                 "a@b.c",
                 "A",
-                setOf(co.datapipelines.auth.Scope.EXECUTE),
                 co.datapipelines.auth.AuthMethod.API_KEY,
                 "dpk_x",
                 workspace =

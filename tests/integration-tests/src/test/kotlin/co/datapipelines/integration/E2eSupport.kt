@@ -3,7 +3,12 @@ package co.datapipelines.integration
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import de.mkammerer.argon2.Argon2Factory
+import io.restassured.specification.RequestSpecification
 import java.security.SecureRandom
+import java.time.Instant
+import java.util.Base64
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * The E2E suites' shared auth-seeding vocabulary (020 F8, extracted at the fourth near-verbatim
@@ -36,7 +41,6 @@ object E2eAuth {
     /** A generated `dpk_<id>.<secret>` key and its stored Argon2id hash (auth.md §7.1/§7.2). */
     class SeededKey(
         val name: String,
-        val scopes: Array<out String>,
         val id: String,
         val plaintext: String,
         val hash: String,
@@ -51,12 +55,11 @@ object E2eAuth {
      */
     fun generateKey(
         name: String,
-        scopes: Array<String>,
         ownerId: String? = null,
     ): SeededKey {
         val id = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
         val plaintext = id + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-        return SeededKey(name = name, scopes = scopes, id = id, plaintext = plaintext, hash = argon2Hash(plaintext), ownerId = ownerId)
+        return SeededKey(name = name, id = id, plaintext = plaintext, hash = argon2Hash(plaintext), ownerId = ownerId)
     }
 
     /** Argon2id, auth's parameters (2 / 19 456 / 1), char[] wiped after hashing. */
@@ -68,6 +71,68 @@ object E2eAuth {
             argon2.wipeArray(chars)
         }
     }
+}
+
+/**
+ * A signed SESSION for a seeded person — how an E2E suite drives REST and the UI since #215 B2
+ * (owner ruling 2026-09-24, "MCP key should be only MCP"): the MCP (`user`) key reaches `/mcp` and
+ * nothing else, so a suite that walks the `/api/v1` routes or a page walks it the way a person does — a
+ * `dp_session` JWT signed with the suite's own per-run secret, plus the CSRF double-submit every
+ * cookie-authenticated state change needs (auth.md §8.4). An agent's path stays `/mcp` with a key.
+ *
+ * Extracted here, like [E2eAuth], because it is the same vocabulary in every suite: the claim
+ * shape [co.datapipelines.auth.JwtService] validates (HS256, issuer `datapipelines`, the Base64
+ * secret decoded to the HMAC key) and the three cookie/header names. A suite registers
+ * [newSecret]'s value as `datapipelines.jwt.secret` and signs with the same value.
+ */
+object E2eSession {
+    const val COOKIE = "dp_session"
+    const val CSRF_COOKIE = "dp_csrf"
+    const val CSRF_HEADER = "DP-CSRF-Token"
+
+    /** The double-submit value: any token works as long as the cookie and the header carry the same one. */
+    const val CSRF_TOKEN = "e2e-session-csrf"
+
+    private const val SECRET_BYTES = 32
+    private const val TOKEN_TTL_SECONDS = 3600L
+    private val random = SecureRandom()
+
+    /** A per-run JWT signing secret, Base64 of 32 random bytes — no literal secret in any fixture (HIGH-2). */
+    fun newSecret(): String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
+
+    /** A session JWT for [userId] with [workspace] as its active workspace, signed with [secret]. */
+    fun jwt(
+        secret: String,
+        userId: String,
+        email: String,
+        workspace: String? = "default",
+    ): String {
+        val now = Instant.now()
+        val header = b64("""{"alg":"HS256","typ":"JWT"}""")
+        val active = workspace?.let { ""","active_workspace":"$it"""" }.orEmpty()
+        val payload =
+            b64(
+                """{"sub":"$userId","email":"$email","name":"E2E User","iss":"datapipelines",""" +
+                    """"iat":${now.epochSecond},"exp":${now.plusSeconds(TOKEN_TTL_SECONDS).epochSecond}$active}""",
+            )
+        val signature =
+            Mac.getInstance("HmacSHA256").run {
+                init(SecretKeySpec(Base64.getDecoder().decode(secret), "HmacSHA256"))
+                b64(doFinal("$header.$payload".toByteArray(Charsets.UTF_8)))
+            }
+        return "$header.$payload.$signature"
+    }
+
+    /** The session cookie and the CSRF double-submit on a RestAssured request. */
+    fun RequestSpecification.asSession(jwt: String): RequestSpecification =
+        cookie(COOKIE, jwt).cookie(CSRF_COOKIE, CSRF_TOKEN).header(CSRF_HEADER, CSRF_TOKEN)
+
+    /** The `Cookie` header value for a hand-built (java.net.http) request; pair it with [CSRF_HEADER] = [CSRF_TOKEN]. */
+    fun cookieHeader(jwt: String): String = "$COOKIE=$jwt; $CSRF_COOKIE=$CSRF_TOKEN"
+
+    private fun b64(value: String): String = b64(value.toByteArray(Charsets.UTF_8))
+
+    private fun b64(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 }
 
 object E2eSse {

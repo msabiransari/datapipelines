@@ -5,16 +5,15 @@ import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.slf4j.LoggerFactory
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
-import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.filter.OncePerRequestFilter
 
 /**
  * The promotion peer's credential gate (versioning §10.6, auth.md §8.6).
  *
- * Promotion is one deployment writing to another. §10.6 ratifies the credential as a
- * **server key, not a principal**: no `users` row for the credential itself and no scope-matrix
- * entry. This filter is the receiver's whole enforcement of that.
+ * Promotion is one deployment writing to another. This filter is the receiver's whole
+ * enforcement of who may do it; what the accepted peer may then do is the `promotion_receiver`
+ * key role's two permissions (#215, record §3.2) — nothing else.
  *
  * ## Two credentials, one header, one release (091, auth.md §7.7)
  *
@@ -50,17 +49,21 @@ import org.springframework.web.filter.OncePerRequestFilter
  * "nothing configured here" all answer the SAME `auth.promotion.key_invalid` 401, so a caller
  * cannot tell a wrong key from a receiver with promotion disabled.
  *
- * ## The actor the request acts as
- * A validated peer is authenticated as R7's system service account
- * ([UserService.systemActor]) with [Scope.AUTHOR] — the least scope that satisfies the §7.6
- * operations the promotion handlers declare. That row is the FK target every promoted version
- * is stamped with; it holds no credential of its own and nothing can log in as it (auth.md
- * §4.5). [AuthMethod.PROMOTION] keeps its provenance visible everywhere a principal is read:
- * it is not a session, and it is not an API key. The actor is the system account for BOTH
- * credential forms — a `server` key names the deployment that pushed, never the admin who
- * minted it, so a promoted version is not stamped with a person who did not perform it. The
- * key's id rides on the principal ([AuthenticatedPrincipal.keyId]) so the audit trail can say
- * WHICH key opened the route across a rotation.
+ * ## The actor the request acts as (#215 record C4, B6)
+ * - A **stored `server` key** acts as its OWN `service` identity ([ValidatedServerKey.identity],
+ *   record §3.3): received versions and the audit row name that identity — a promotion is not
+ *   stamped with the System account, and not with the person who minted the key.
+ * - The **deprecated config value** is a credential with no row to attach an identity to, so it
+ *   stays R7's System service account ([UserService.systemActor]), which holds no credential of
+ *   its own and which nothing can log in as (auth.md §4.5).
+ *
+ * Both carry [KeyRole.PROMOTION_RECEIVER] — `promotion.inventory.read` and `promotion.push`, and
+ * nothing else — and NO workspace: promotion intake is instance-wide (B6). A batch names its own
+ * target workspace and the receiver resolves it there by name; the key's pinned workspace is where
+ * the key is LISTED, not what it may receive into. [AuthMethod.PROMOTION] keeps the provenance
+ * visible everywhere a principal is read: it is not a session, and it is not an API key. The key's
+ * id rides on the principal ([AuthenticatedPrincipal.keyId]) so the audit trail can say WHICH key
+ * opened the route across a rotation.
  *
  * ## What never appears
  * The key does not reach a log line, an error message, an audit `details` map, or the
@@ -98,12 +101,8 @@ class PromotionServerKeyFilter(
         }
 
         SecurityContextHolder.getContext().authentication =
-            UsernamePasswordAuthenticationToken(
-                peerPrincipal(accepted.keyId),
-                null,
-                PEER_SCOPES.map { SimpleGrantedAuthority("SCOPE_${it.wire}") },
-            )
-        accepted.keyId?.let { touchUsage(it, request) }
+            UsernamePasswordAuthenticationToken(peerPrincipal(accepted), null, emptyList())
+        accepted.key?.let { touchUsage(it.key.id, request) }
         filterChain.doFilter(request, response)
     }
 
@@ -113,15 +112,15 @@ class PromotionServerKeyFilter(
      *
      * Returns how the request was accepted, or `null` for every refusal — the caller turns that
      * one null into the one answer. [ApiKeyService.validateServerKey] throws the ordinary
-     * [AuthException] family for a malformed, unknown, revoked, expired, wrong-kind key or a
-     * deactivated owner; all of them are the same refusal here, and none of them reaches a log
+     * [AuthException] family for a malformed, unknown, revoked, expired, wrong-kind key, a
+     * deactivated identity or pinned workspace; all of them are the same refusal here, and none of them reaches a log
      * line that would distinguish them.
      */
     private fun accept(presented: String?): Accepted? {
-        if (PromotionServerKeys.matches(promotionProperties.serverKey, presented)) return Accepted(keyId = null)
+        if (PromotionServerKeys.matches(promotionProperties.serverKey, presented)) return Accepted(key = null)
         if (presented.isNullOrBlank()) return null
         return runCatching { apiKeyService.validateServerKey(presented) }
-            .map { Accepted(keyId = it.id) }
+            .map { Accepted(key = it) }
             .getOrElse { cause ->
                 if (cause !is AuthException) throw cause
                 null
@@ -142,9 +141,9 @@ class PromotionServerKeyFilter(
         }.onFailure { log.warn("api_keys usage stamp failed key_id={} cause={}", keyId, it.javaClass.simpleName) }
     }
 
-    /** How a promotion request was accepted: by a stored key ([keyId] set) or the config value. */
+    /** How a promotion request was accepted: by a stored key ([key] set) or the config value. */
     private data class Accepted(
-        val keyId: String?,
+        val key: ValidatedServerKey?,
     )
 
     /**
@@ -183,26 +182,26 @@ class PromotionServerKeyFilter(
     }
 
     /**
-     * The system actor, read per request. Promotion is a rare, human-triggered operation, so
-     * one indexed lookup per push is the right trade against caching a row that a restart
-     * would have to invalidate. `workspace` is deliberately left null: a promotion payload
-     * names its own target workspace, and the receiver resolves it there — the credential
-     * pins no workspace.
+     * The peer's principal: a stored key's identity, or — for the config value — the System actor,
+     * read per request (promotion is rare and human-triggered, so one indexed lookup per push beats
+     * caching a row a restart would have to invalidate). `workspace` is deliberately null: intake
+     * is instance-wide (B6), and the batch names its own target workspace.
      */
-    private fun peerPrincipal(keyId: String?): AuthenticatedPrincipal {
-        val actor = userService.systemActor()
+    private fun peerPrincipal(accepted: Accepted): AuthenticatedPrincipal {
+        val actor = accepted.key?.identity ?: userService.systemActor()
         return AuthenticatedPrincipal(
             userId = actor.id,
             email = actor.email,
             displayName = actor.displayName,
-            scopes = PEER_SCOPES,
             authMethod = AuthMethod.PROMOTION,
-            keyId = keyId,
+            keyId = accepted.key?.key?.id,
             // §7.7 — what the credential IS, when it was one. `ScopeInterceptor` allows a
             // SERVER kind on this route family and refuses it on every other, so the
             // confinement is stated in the same place for all three kinds rather than resting
             // on "this filter would have stopped it anyway".
-            keyKind = keyId?.let { ApiKeyKind.SERVER },
+            keyKind = accepted.key?.let { ApiKeyKind.SERVER },
+            // Both credential shapes: the receiver's two permissions and nothing else (record §3.2).
+            keyRole = KeyRole.PROMOTION_RECEIVER,
         )
     }
 
@@ -220,13 +219,5 @@ class PromotionServerKeyFilter(
 
         /** auth.md §10.1 — a refused promotion attempt. The credential is never in the row. */
         const val AUDIT_REJECTED = "auth.promotion.rejected"
-
-        /**
-         * The peer's granted scope: `author` satisfies both §7.6 operations the promotion
-         * handlers declare (READ_RESOURCES for the inventory, MUTATE_PIPELINES_TEMPLATES for
-         * the push) and nothing more. Not `admin` — the receiver resolves the target workspace
-         * by name from the payload, so no membership bypass is needed.
-         */
-        val PEER_SCOPES: Set<Scope> = setOf(Scope.AUTHOR)
     }
 }

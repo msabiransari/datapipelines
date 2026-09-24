@@ -2,7 +2,6 @@ package co.datapipelines.web.pipelines
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
@@ -122,7 +121,6 @@ class PipelinesControllerTest {
                 userId,
                 "a@b.c",
                 "A",
-                setOf(Scope.AUTHOR),
                 AuthMethod.OIDC,
                 workspace = WorkspaceContext(workspaceId, "acme"),
             )

@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.22 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.25 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-09-11
+**Last updated:** 2026-09-24
 
 ---
 
@@ -92,7 +92,8 @@ CREATE TABLE users (
     display_name        TEXT        NOT NULL,
     profile_picture_url TEXT,
     provider            TEXT        NOT NULL,              -- OIDC registration name (free text: 'google', 'okta', 'company-sso', etc.),
-                                                           -- or a placeholder with meaning: 'bootstrap' (pre-provisioned, auth.md §4.4), 'local' (admin-created, §5A)
+                                                           -- or a placeholder with meaning: 'bootstrap' (pre-provisioned, auth.md §4.4), 'local' (admin-created, §5A),
+                                                           -- 'system' (the System actor, §4.5), 'key' (a key's own identity, §4.7)
     provider_subject    TEXT        NOT NULL,              -- OIDC 'sub' claim
     is_active           BOOLEAN     NOT NULL DEFAULT TRUE,
     is_admin            BOOLEAN     NOT NULL DEFAULT FALSE,
@@ -104,7 +105,9 @@ CREATE TABLE users (
     locked_until        TIMESTAMPTZ,                          -- per-account lockout horizon (V5, auth.md §5A.3)
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_login_at       TIMESTAMPTZ
+    last_login_at       TIMESTAMPTZ,
+    kind                TEXT        NOT NULL DEFAULT 'human',  -- V34 (#215): 'human' | 'service' (a key's own identity) | 'system'
+    CONSTRAINT chk_users_kind CHECK (kind IN ('human', 'service', 'system'))
 );
 
 CREATE UNIQUE INDEX uq_users_provider_subject ON users(provider, provider_subject);
@@ -119,22 +122,23 @@ CREATE UNIQUE INDEX uq_users_provider_subject ON users(provider, provider_subjec
   - **`NULL` is meaningful:** it means "no explicit choice — use the deployment default [`datapipelines.ui.theme`](configuration.md#310-ui)". It is not the same as storing the default's current value: a NULL row *follows* the deployment default when an operator changes it, whereas a materialized copy would silently pin the user to yesterday's default. This is why the column is nullable with no DEFAULT.
   - **No CHECK constraint.** Valid values are the theme list in [Configuration §3.10](configuration.md#310-ui), validated by the application on write. A CHECK here would mean a migration every time a theme is added, and would reject rows that were valid when written if a theme were ever retired — the wrong failure mode for a cosmetic preference.
 - `updated_at` is set by the application in every UPDATE (§2) — including deactivation, login (`last_login_at`), and the theme PATCH.
+- `kind` (V34, #215, [Auth §4.7](auth.md#47-key-identities), [Enums §8](enums.md#8-userkind--what-a-users-row-is)): `human` for a person, `service` for an `endpoint` or `server` key's own identity (provider `key`, `provider_subject` = the key id, email `<key id>@keys.invalid`, no password, `is_admin` FALSE), `system` for the System actor. V34 set `system` on the System row, `human` on every other, and created one `service` row per existing endpoint/server key (inactive for a revoked key). ONE predicate, `kind = 'human'`, guards every login, linking and user-administration path; the admin users page, members lists and invitations read people only.
 - `password_hash` (V5) holds the Argon2id encoded hash of a local account's password ([Auth §5A](auth.md#5a-local-password-accounts-optional), same `SecretHasher` as API keys, §7.2). **`NULL` means OIDC-only** — such an account can never authenticate locally, and every pre-V5 row backfilled NULL. The plaintext password is never stored, never logged, and (except the one-time bootstrap seed, auth.md §5A.2) never in config.
 - `must_change_password` (V5) is set TRUE by every seed/admin-reset and cleared only by the self-service change; while TRUE the forced-change gate redirects every authenticated route to the change-password screen (auth.md §5A.4).
 - `failed_login_count` / `locked_until` (V5) back the per-account lockout (auth.md §5A.3): consecutive failures increment the count, the count reaching the configured maximum sets `locked_until`, and a successful login or an admin reset clears both. No CHECK constraint — the bounds are applied by the repository's atomic UPDATE, the same application-maintained discipline as `updated_at` (§2).
 
 ### 4.2 `api_keys`
 
-API keys issued per-user-per-agent. See [Auth spec §7](auth.md#7-api-keys).
+API keys: the MCP key (one per member per workspace) and the two identity-acting kinds. See [Auth spec §7](auth.md#7-api-keys).
 
 ```sql
 CREATE TABLE api_keys (
     id                    TEXT        PRIMARY KEY,          -- 'dpk_ABCDEFGHIJKL'
-    user_id               UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id               UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- who the key ACTS AS: the member (user kind), the key's own identity (endpoint/server, V34)
+    created_by            UUID        NOT NULL REFERENCES users(id),  -- V34 (#215 B4): who created the key
     workspace_id          UUID        NOT NULL REFERENCES workspaces(id),   -- pinned at issuance (V4, D3)
     name                  TEXT        NOT NULL,             -- 'Claude Desktop key'
     key_hash              TEXT        NOT NULL,             -- Argon2id hash of full key
-    scopes                TEXT[]      NOT NULL DEFAULT '{read}',
     is_revoked            BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_used_at          TIMESTAMPTZ,
@@ -144,7 +148,12 @@ CREATE TABLE api_keys (
     kind                  TEXT        NOT NULL DEFAULT 'user',   -- 'user' | 'endpoint' (V11) | 'server' (V17)
     secret_sealed         BYTEA,                       -- V31: the full key, sealed (D16); NULL pre-R3, and NULL again from the first Copy on (#213 show-once; V32 cleared every pre-amendment copy)
     minted_at_login       BOOLEAN     NOT NULL DEFAULT FALSE,    -- V31: the login hook minted this (D16)
-    CONSTRAINT chk_api_keys_kind CHECK (kind IN ('user', 'endpoint', 'server'))
+    role                  TEXT,                        -- V34 (#215): the key's role — NULL on the MCP key (its member's, PK4)
+    CONSTRAINT chk_api_keys_kind CHECK (kind IN ('user', 'endpoint', 'server')),
+    CONSTRAINT chk_api_keys_role CHECK (
+        (kind = 'user' AND role IS NULL)
+        OR (kind = 'endpoint' AND role IS NOT NULL AND role = 'api_caller')
+        OR (kind = 'server' AND role IS NOT NULL AND role = 'promotion_receiver'))
 );
 
 CREATE INDEX idx_api_keys_user ON api_keys(user_id) WHERE is_revoked = FALSE;
@@ -156,16 +165,17 @@ CREATE INDEX idx_api_keys_endpoint_kind ON api_keys(workspace_id)
 -- check is a read; this index is the arbiter of the race.
 CREATE UNIQUE INDEX api_keys_one_live_user_key ON api_keys(user_id, workspace_id)
     WHERE kind = 'user' AND is_revoked = FALSE;
+CREATE INDEX idx_api_keys_created_by ON api_keys(created_by);   -- V34: the creator's own-keys list
 ```
 
 **Notes:**
 - `id` is the public key prefix (`dpk_...`), not a UUID — it is the lookup handle presented in the `DP-API-Key` header (D10). `key_hash` is the Argon2id hash of the *full* key; the secret itself is returned exactly once at creation and never stored.
 - `workspace_id` (V4) pins the key to exactly one workspace at issuance (workspaces design D3): an agent key is a workspace-scoped credential, and the pinned workspace — not a request header — is the key's context. V4 backfills existing keys to `default`; slice 1 issues every new key into `default` from repository code (no column DEFAULT — slice 2 must find every pin by grepping the constant, [§4.11](#411-workspaces)).
-- `scopes` is a `TEXT[]`; a key's scopes must be a subset of its creator's scopes at creation time (enforced by the application, not the schema — the creator's scopes are derived per D14, not stored).
+- `user_id` / `created_by` / `role` (V34, #215 — [Auth §4.7](auth.md#47-key-identities), [§7.5](auth.md#75-key-roles-scopes-removed)): `user_id` is who the key ACTS AS — the member for the MCP key, the key's own `service` identity for an `endpoint` or `server` key (created with it in one transaction; revoking the key deactivates it). `created_by` is the person who created the key (the Keys page's "Created by"; own-key listing and revocation are creator-scoped); V34 backfilled it from `user_id` before moving `user_id` to each existing endpoint/server key's new identity. `role` is fixed by the kind — the CHECK spells each non-null arm with `role IS NOT NULL`, since a bare comparison is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN. `scopes` was dropped (PK8); V34 refuses to run unless identities created = keys repointed = endpoint + server keys.
 - `is_revoked` and `expires_at` are both re-checked on every request through the 60s cache in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13), so revocation takes effect within ~1 minute.
 - Revocation is a soft flag, not a DELETE: `audit_log.key_id` must keep resolving to something meaningful.
 - `secret_sealed` / `minted_at_login` (V31, [Auth §7.4](auth.md#74-issuance), D16): a `user` key is minted by the login/switch hook, never on demand, and its plaintext is sealed with the deployment's credential-encryption key (AAD = the key id) so the top bar's copy endpoint can open it — ONCE (#213, D16 amended 2026-09-23): the open and the clear are one owner-scoped statement, the key is hash-only from its first read on, and V32 nulled every pre-amendment copy fleet-wide (rotation is the way back to a copyable key). `minted_at_login` marks the hook's rows; the Argon2id `key_hash` stays the authentication half. The partial unique index `api_keys_one_live_user_key` enforces one live `user` key per (user, workspace); `endpoint` and `server` keys are excluded, and revoked rows do not block the rotation re-mint. The migration revokes all but the newest live `user` key per pair (a NOTICE reports the count) before creating the index.
-- `kind` (V11) is the key's KIND ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): `user` is every key that existed before it — scopes, a workspace, the whole API surface its scopes allow — and `endpoint` is a credential for published endpoints only. An `endpoint` key's scopes are never consulted; its authority is its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings), and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'user'` is the correct backfill for the whole pre-V11 table, so the migration needs no `UPDATE`.
+- `kind` (V11) is the key's KIND ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): `user` is the MCP key (every key that existed before V11, and since 179 minted at login only), and `endpoint` is a credential for published endpoints only. An `endpoint` key serves exactly the paths its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings) cover, and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'user'` is the correct backfill for the whole pre-V11 table, so the migration needs no `UPDATE`.
 - No `updated_at` — the only mutations are `last_used_*` (written on use), `is_revoked` (written once) and `kind` (written once, at issuance), and all are self-timestamping or immutable.
 
 ### 4.3 `audit_log`
@@ -289,7 +299,7 @@ CREATE TABLE pipeline_executions (
     pipeline_version    INTEGER     NOT NULL,        -- snapshot of version at execution time
     status              TEXT        NOT NULL,        -- 'RUNNING' | 'SUCCESS' | 'FAILED' | 'ABORTED'
     parameters_json     JSONB       NOT NULL DEFAULT '{}', -- the FULLY RESOLVED Context (see below)
-    executed_by         UUID        NOT NULL REFERENCES users(id), -- the run's user: the session's, or a key's OWNER (was triggered_by; renamed by V30, D11)
+    executed_by         UUID        NOT NULL REFERENCES users(id), -- the run's user: the session's, or who the key ACTS AS — the member for an MCP key, the key's own identity for an endpoint/server key since V34 (was triggered_by; renamed by V30, D11)
     executed_by_key_kind TEXT,                       -- 'user' | 'endpoint' | 'server' when a key started it; NULL = a signed-in session (V30)
     triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP' | 'PIPELINE' | 'ENDPOINT'
     correlation_id      UUID,
@@ -862,6 +872,7 @@ CREATE INDEX idx_pipeline_check_runs_latest
 | `api_keys` | `idx_api_keys_expires` | explicit (partial) | Find expiring/expired keys for cleanup |
 | `api_keys` | `idx_api_keys_endpoint_kind` | explicit (partial) | The endpoint keys of a workspace — the endpoints screen and binding resolution; partial because user keys are the overwhelming majority (V11) |
 | `api_keys` | `api_keys_one_live_user_key` | explicit (partial, unique) | V31 (D16): ONE live `user` key per `(user_id, workspace_id)` — the login mint's race arbiter |
+| `api_keys` | `idx_api_keys_created_by` | explicit | V34 (#215): the keys a person CREATED — own-key listing and creator-scoped revocation, now that `user_id` names an endpoint/server key's own identity |
 | `audit_log` | `audit_log_pkey` | via PK | Surrogate `BIGSERIAL` id |
 | `audit_log` | `idx_audit_timestamp` | explicit | Recent events (DESC) |
 | `audit_log` | `idx_audit_user` | explicit (partial) | Per-user audit trail |
@@ -1223,6 +1234,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v1.25 | V34 (215b, #215) | Key identities and key roles ([Auth §4.7](auth.md#47-key-identities), [§7.5](auth.md#75-key-roles-scopes-removed)). §4.1 `users` gains `kind` (`human` \| `service` \| `system`, CHECK'd; the System row is set to `system`). §4.2 `api_keys` gains `created_by` (backfilled from `user_id`, NOT NULL, FK to `users`) and `role` with `chk_api_keys_role` — `api_caller` on every endpoint key, `promotion_receiver` on every server key, NULL on the MCP key; each non-null arm is spelled `role IS NOT NULL AND role = …`, because the record's `role = …` alone is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN. V34 creates one `service` identity per existing endpoint/server key (inactive for a revoked key), repoints the key's `user_id` to it, and refuses to run unless the three counts agree; `scopes` is DROPPED (PK8). New `idx_api_keys_created_by`. `pipeline_executions.executed_by`'s comment names the identity for endpoint/server-key runs; past rows are not rewritten. Down path is in the migration header (lossy by design). |
 | 2026-09-23 | v1.24 | V32 (213, #213) | Data-only, no DDL: `UPDATE api_keys SET secret_sealed = NULL WHERE secret_sealed IS NOT NULL` — show-once (D16 amended 2026-09-23) makes the fleet hash-only immediately; the column stays for keys minted since, cleared on their first read. §4.2's column note updated. No down path (a cleared copy cannot be restored — that is the point). |
 | 2026-09-21 | v1.23 | V31 (179, roles R3) | §4.2 `api_keys` gains `secret_sealed BYTEA` (the login-minted key's plaintext sealed under the credential-encryption key, AAD = the key id) and `minted_at_login BOOLEAN`, plus the partial UNIQUE `api_keys_one_live_user_key` (`(user_id, workspace_id)` where `kind = 'user' AND NOT is_revoked`) — the migration revokes all but the newest live user key per pair first, with the count in a NOTICE. §5's table gains the index. |
 | 2026-09-20 | v1.22 | V29 + V30 (177, roles R1) | **§4.12 `workspace_members` and §4.17 `workspace_invitations` carry ONE `role`** (`viewer` \| `author` \| `promoter` \| `workspace_admin`, CHECK'd) — V23's three booleans folded back by V29 with the precedence admin → workspace_admin, else promoter, else author, else viewer; `idx_workspace_members_admins` keeps its name over the new predicate; the down path is in the migration and proven up-and-down by `WorkspaceRolesMigrationTest`. **§4.6 `pipeline_executions.triggered_by` → `executed_by`** (V30, D11 — the same NOT NULL FK, every actor kept) plus **`executed_by_key_kind`** (`user` \| `endpoint` \| `server` \| NULL, CHECK'd; backfilled from `triggered_via`: ENDPOINT → endpoint, MCP → user); the ERD edge follows. §4.6 also records `ENDPOINT` in `chk_triggered_via`, which V11 had widened without this document noticing. |

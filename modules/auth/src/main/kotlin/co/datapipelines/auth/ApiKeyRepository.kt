@@ -7,9 +7,13 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * `api_keys` persistence (metadata-db §4.2) via `NamedParameterJdbcTemplate`.
- * `scopes` is a Postgres `TEXT[]`; revocation is a soft flag (never a DELETE) so
- * `audit_log.key_id` keeps resolving (metadata-db §4.2 note).
+ * `api_keys` persistence (metadata-db §4.2) via `NamedParameterJdbcTemplate`. Revocation is a
+ * soft flag (never a DELETE) so `audit_log.key_id` keeps resolving (metadata-db §4.2 note).
+ *
+ * Since V34 (#215) `user_id` is who the key ACTS AS — the member for the MCP key, the key's own
+ * identity for an `endpoint`/`server` key — and `created_by` is who created it. The reads that
+ * mean "the caller's keys" ([findByUser], [revoke]) are keyed on `created_by`, so they keep
+ * returning exactly the keys a person created.
  *
  * Workspace pinning (D3, slice 2): every key is pinned to exactly one workspace at
  * issuance — [insert] takes the id explicitly (no default anywhere; the creator's
@@ -27,22 +31,14 @@ class ApiKeyRepository(
                 ::map,
             ).firstOrNull()
 
-    fun findActiveByUser(userId: UUID): List<ApiKey> =
-        jdbc.query(
-            "$SELECT_COLUMNS WHERE k.user_id = :uid AND k.is_revoked = FALSE ORDER BY k.created_at DESC",
-            MapSqlParameterSource("uid", userId),
-            ::map,
-        )
-
     /**
-     * Every key the user owns, revoked included — the `GET /api/v1/auth/api-keys` listing
+     * Every key the user CREATED, revoked included — the `GET /api/v1/auth/api-keys` listing
      * (rest-api §16.1), whose `is_revoked` field is only meaningful when both values can appear
-     * (gate C, F12c). Owner-scoped in SQL, like everything else here.
+     * (gate C, F12c). Creator-scoped in SQL: the member's MCP key and every key they minted.
      */
-
     fun findByUser(userId: UUID): List<ApiKey> =
         jdbc.query(
-            "$SELECT_COLUMNS WHERE k.user_id = :uid ORDER BY k.created_at DESC",
+            "$SELECT_COLUMNS WHERE k.created_by = :uid ORDER BY k.created_at DESC",
             MapSqlParameterSource("uid", userId),
             ::map,
         )
@@ -67,15 +63,17 @@ class ApiKeyRepository(
     /**
      * Pins the new key to [workspaceId] — the workspace the creator resolved as active
      * (their membership in it is the caller's check, auth.md §7.4). No default: a key
-     * without an explicit workspace decision must not compile.
+     * without an explicit workspace decision must not compile. [userId] is who the key acts as
+     * (the member, or the key's identity), [createdBy] who created it; the role is the kind's
+     * ([KeyRole.forKind]) — the `chk_api_keys_role` CHECK states the same rule in the database.
      */
     @Suppress("LongParameterList") // one row, spelled out; the alternative is a builder for one call site
     fun insert(
         id: String,
         userId: UUID,
+        createdBy: UUID,
         name: String,
         keyHash: String,
-        scopes: Set<Scope>,
         expiresAt: Instant?,
         workspaceId: UUID,
         kind: ApiKeyKind = ApiKeyKind.DEFAULT,
@@ -84,15 +82,18 @@ class ApiKeyRepository(
     ): ApiKey {
         jdbc.update(
             """
-            INSERT INTO api_keys (id, user_id, name, key_hash, scopes, expires_at, workspace_id, kind, secret_sealed, minted_at_login)
-            VALUES (:id, :user_id, :name, :key_hash, :scopes, :expires_at, :workspace_id, :kind, :secret_sealed, :minted_at_login)
+            INSERT INTO api_keys (id, user_id, created_by, name, key_hash, role, expires_at, workspace_id, kind, secret_sealed,
+                                  minted_at_login)
+            VALUES (:id, :user_id, :created_by, :name, :key_hash, :role, :expires_at, :workspace_id, :kind, :secret_sealed,
+                    :minted_at_login)
             """.trimIndent(),
             MapSqlParameterSource()
                 .addValue("id", id)
                 .addValue("user_id", userId)
+                .addValue("created_by", createdBy)
                 .addValue("name", name)
                 .addValue("key_hash", keyHash)
-                .addValue("scopes", scopes.map { it.wire }.toTypedArray())
+                .addValue("role", KeyRole.forKind(kind)?.wire)
                 .addValue("expires_at", expiresAt?.let { java.sql.Timestamp.from(it) })
                 .addValue("workspace_id", workspaceId)
                 .addValue("kind", kind.wire)
@@ -222,16 +223,21 @@ class ApiKeyRepository(
             .toSet()
 
     /**
-     * Soft revoke. Returns true if a live key was flipped. Owner check enforced by caller.
+     * Soft revoke of a key [userId] CREATED (the "your own keys" delete). Returns the revoked key,
+     * or null when no live key of theirs had that id — the caller deactivates an identity-acting
+     * key's identity in the same transaction.
      */
     fun revoke(
         id: String,
         userId: UUID,
-    ): Boolean =
-        jdbc.update(
-            "UPDATE api_keys SET is_revoked = TRUE WHERE id = :id AND user_id = :uid AND is_revoked = FALSE",
-            MapSqlParameterSource().addValue("id", id).addValue("uid", userId),
-        ) > 0
+    ): ApiKey? {
+        val flipped =
+            jdbc.update(
+                "UPDATE api_keys SET is_revoked = TRUE WHERE id = :id AND created_by = :uid AND is_revoked = FALSE",
+                MapSqlParameterSource().addValue("id", id).addValue("uid", userId),
+            ) > 0
+        return if (flipped) findById(id) else null
+    }
 
     /** Best-effort usage stamp (auth.md §7.3 step 9) — fire-and-forget by the caller. */
     fun touchUsage(
@@ -264,7 +270,7 @@ class ApiKeyRepository(
          */
         val SELECT_COLUMNS =
             """
-            SELECT k.id, k.user_id, k.name, k.key_hash, k.scopes, k.is_revoked, k.created_at,
+            SELECT k.id, k.user_id, k.created_by, k.name, k.key_hash, k.role, k.is_revoked, k.created_at,
                    k.last_used_at, k.last_used_ip, k.last_used_user_agent, k.expires_at,
                    k.workspace_id, k.kind, k.minted_at_login,
                    (k.secret_sealed IS NOT NULL) AS has_sealed_secret,
@@ -277,15 +283,12 @@ class ApiKeyRepository(
     private fun map(
         rs: ResultSet,
         @Suppress("UNUSED_PARAMETER") rowNum: Int,
-    ): ApiKey {
-        @Suppress("UNCHECKED_CAST")
-        val rawScopes = (rs.getArray("scopes").array as Array<Any?>).mapNotNull { it as String? }
-        return ApiKey(
+    ): ApiKey =
+        ApiKey(
             id = rs.getString("id"),
             userId = rs.getObject("user_id", UUID::class.java),
             name = rs.getString("name"),
             keyHash = rs.getString("key_hash"),
-            scopes = rawScopes.map { Scope.fromWire(it) }.toSet(),
             isRevoked = rs.getBoolean("is_revoked"),
             createdAt = rs.getTimestamp("created_at").toInstant(),
             lastUsedAt = rs.getTimestamp("last_used_at")?.toInstant(),
@@ -298,6 +301,8 @@ class ApiKeyRepository(
             kind = ApiKeyKind.fromWire(rs.getString("kind")),
             hasSealedSecret = rs.getBoolean("has_sealed_secret"),
             mintedAtLogin = rs.getBoolean("minted_at_login"),
+            // V34. A role that cannot be read must fail loudly rather than authenticate.
+            role = KeyRole.fromWireOrNull(rs.getString("role")),
+            createdBy = rs.getObject("created_by", UUID::class.java),
         )
-    }
 }

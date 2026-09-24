@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.LocalPasswordService
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.SessionRequiredException
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserRepository
@@ -81,10 +80,9 @@ class CredentialMintingSessionOnlyTest {
             email = "admin@example.com",
             displayName = "Admin",
             // RBAC round 1: the authority these routes require is `users.is_admin` — the super
-            // admin (auth.md §11A.2), not a scope. A key OWNED by a super admin still reaches
-            // the role gate, which is what keeps this suite's subject — the SESSION gate that
-            // fires AFTER it — the thing under test rather than an accident of the role check.
-            scopes = emptySet(),
+            // admin (auth.md §11A.2). The principal is built directly with the flag set, so the
+            // SESSION gate that fires after the role gate stays the thing under test. (Since #215
+            // B1 no real key carries it — this suite's key is a hand-built worst case.)
             authMethod = method,
             workspace = WorkspaceContext(workspaceId, "acme"),
             superAdmin = true,
@@ -225,7 +223,7 @@ class CredentialMintingSessionOnlyTest {
             UsernamePasswordAuthenticationToken(
                 // Not a super admin — the role gate, which RBAC round 1 moved off the scope
                 // axis onto `users.is_admin`.
-                principal(AuthMethod.OIDC).copy(scopes = setOf(Scope.READ), superAdmin = false),
+                principal(AuthMethod.OIDC).copy(superAdmin = false),
                 null,
                 emptyList(),
             )

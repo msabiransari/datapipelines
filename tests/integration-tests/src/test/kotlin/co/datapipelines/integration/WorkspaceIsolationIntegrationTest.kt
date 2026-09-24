@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
@@ -58,20 +59,20 @@ class WorkspaceIsolationIntegrationTest {
     @Test
     fun `each principal sees only its own workspace's pipelines - same name, two worlds`() {
         ensureSeeded()
-        pipelines(ALICE_KEY.plaintext).map { it["id"] } shouldContain PIPE_ACME
-        pipelines(ALICE_KEY.plaintext).map { it["id"] } shouldNotContain PIPE_GLOBEX
-        pipelines(BOB_KEY.plaintext).map { it["id"] } shouldContain PIPE_GLOBEX
-        pipelines(BOB_KEY.plaintext).map { it["id"] } shouldNotContain PIPE_ACME
+        pipelines(ALICE_SESSION).map { it["id"] } shouldContain PIPE_ACME
+        pipelines(ALICE_SESSION).map { it["id"] } shouldNotContain PIPE_GLOBEX
+        pipelines(BOB_SESSION).map { it["id"] } shouldContain PIPE_GLOBEX
+        pipelines(BOB_SESSION).map { it["id"] } shouldNotContain PIPE_ACME
     }
 
     @Test
     fun `each principal sees only its own workspace's templates`() {
         ensureSeeded()
-        templates(ALICE_KEY.plaintext).map { it["id"] } shouldContain "sales_tpl"
-        templates(ALICE_KEY.plaintext).map { it["display_name"] } shouldContain "Acme Template"
-        templates(ALICE_KEY.plaintext).map { it["display_name"] } shouldNotContain "Globex Template"
-        templates(BOB_KEY.plaintext).map { it["display_name"] } shouldContain "Globex Template"
-        templates(BOB_KEY.plaintext).map { it["display_name"] } shouldNotContain "Acme Template"
+        templates(ALICE_SESSION).map { it["id"] } shouldContain "sales_tpl"
+        templates(ALICE_SESSION).map { it["display_name"] } shouldContain "Acme Template"
+        templates(ALICE_SESSION).map { it["display_name"] } shouldNotContain "Globex Template"
+        templates(BOB_SESSION).map { it["display_name"] } shouldContain "Globex Template"
+        templates(BOB_SESSION).map { it["display_name"] } shouldNotContain "Acme Template"
     }
 
     @Test
@@ -79,7 +80,7 @@ class WorkspaceIsolationIntegrationTest {
         ensureSeeded()
         given()
             .port(port)
-            .header(API_KEY_HEADER, ALICE_KEY.plaintext)
+            .asSession(ALICE_SESSION)
             .`when`()
             .get("/api/v1/pipelines/$PIPE_GLOBEX")
             .then()
@@ -87,7 +88,7 @@ class WorkspaceIsolationIntegrationTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, BOB_KEY.plaintext)
+            .asSession(BOB_SESSION)
             .`when`()
             .get("/api/v1/pipelines/$PIPE_GLOBEX")
             .then()
@@ -99,12 +100,12 @@ class WorkspaceIsolationIntegrationTest {
     @Test
     fun `executions are visible only within their pipeline's workspace`() {
         ensureSeeded()
-        executions(ALICE_KEY.plaintext).map { it["execution_id"] } shouldContain EXEC_ACME
-        executions(ALICE_KEY.plaintext).map { it["execution_id"] } shouldNotContain EXEC_GLOBEX
+        executions(ALICE_SESSION).map { it["execution_id"] } shouldContain EXEC_ACME
+        executions(ALICE_SESSION).map { it["execution_id"] } shouldNotContain EXEC_GLOBEX
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, ALICE_KEY.plaintext)
+            .asSession(ALICE_SESSION)
             .`when`()
             .get("/api/v1/executions/$EXEC_GLOBEX")
             .then()
@@ -112,7 +113,7 @@ class WorkspaceIsolationIntegrationTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, BOB_KEY.plaintext)
+            .asSession(BOB_SESSION)
             .`when`()
             .get("/api/v1/executions/$EXEC_GLOBEX")
             .then()
@@ -123,7 +124,21 @@ class WorkspaceIsolationIntegrationTest {
 
     @Test
     fun `DP-Workspace on an API-key request is refused 400 header_forbidden`() {
+        // A key's workspace is its pin; no header re-targets it. Since #215 B2 the MCP key
+        // never reaches a REST route (it is refused by kind first), so the header rule is shown
+        // with the key kind that DOES reach one: an api_caller reading its own execution.
         ensureSeeded()
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, ACME_CALLER_KEY.plaintext)
+            .header(WORKSPACE_HEADER, "globex")
+            .`when`()
+            .get("/api/v1/executions/$EXEC_ACME")
+            .then()
+            .statusCode(400)
+            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.header_forbidden"))
+
+        // …and the MCP key is refused as a kind before the header is ever read.
         given()
             .port(port)
             .header(API_KEY_HEADER, ALICE_KEY.plaintext)
@@ -131,8 +146,8 @@ class WorkspaceIsolationIntegrationTest {
             .`when`()
             .get("/api/v1/pipelines")
             .then()
-            .statusCode(400)
-            .body("error.code", org.hamcrest.Matchers.equalTo("workspace.header_forbidden"))
+            .statusCode(403)
+            .body("error.details.reason", org.hamcrest.Matchers.equalTo("user_key_off_surface"))
     }
 
     // ---------------------------------------------------------------- session switching
@@ -192,7 +207,7 @@ class WorkspaceIsolationIntegrationTest {
         // invited into globex never appears in acme's arrays, mixed or separate.
         given()
             .port(port)
-            .header(API_KEY_HEADER, ALICE_KEY.plaintext)
+            .asSession(ALICE_SESSION)
             .`when`()
             .get("/api/v1/workspaces/acme/members")
             .then()
@@ -205,7 +220,7 @@ class WorkspaceIsolationIntegrationTest {
         val foreign =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ALICE_KEY.plaintext)
+                .asSession(ALICE_SESSION)
                 .`when`()
                 .delete("/api/v1/workspaces/globex/invitations/$GLOBEX_INVITATION_EMAIL")
                 .then()
@@ -213,7 +228,7 @@ class WorkspaceIsolationIntegrationTest {
         val absent =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ALICE_KEY.plaintext)
+                .asSession(ALICE_SESSION)
                 .`when`()
                 .delete("/api/v1/workspaces/globex/invitations/nobody@nowhere.test")
                 .then()
@@ -261,7 +276,7 @@ class WorkspaceIsolationIntegrationTest {
             .cookie(CSRF_COOKIE, csrf)
             .header(CSRF_HEADER, csrf)
             .contentType(ContentType.JSON)
-            .body("""{"name": "carol-key", "scopes": ["read"]}""")
+            .body("""{"name": "carol-key", "kind": "endpoint"}""")
             .`when`()
             .post("/api/v1/auth/api-keys")
             .then()
@@ -318,16 +333,26 @@ class WorkspaceIsolationIntegrationTest {
         }
 
         // (iii) D-R10's "deactivate, never delete" — the KDoc's promise is that
-        // reactivation restores the very same key.
-        pipelines(GLOBEX_INACTIVE_KEY.plaintext).map { it["id"] } shouldContain PIPE_GLOBEX
+        // reactivation restores the very same key, on its surface (/mcp — #215 B2).
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, GLOBEX_INACTIVE_KEY.plaintext)
+            .contentType(ContentType.JSON)
+            .accept("application/json, text/event-stream")
+            .body("""{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pipelines_list","arguments":{}}}""")
+            .`when`()
+            .post("/mcp")
+            .then()
+            .statusCode(200)
+            .body(org.hamcrest.Matchers.containsString(PIPE_GLOBEX))
     }
 
     // ---------------------------------------------------------------- helpers
 
-    private fun pipelines(key: String): List<Map<String, String>> =
+    private fun pipelines(session: String): List<Map<String, String>> =
         given()
             .port(port)
-            .header(API_KEY_HEADER, key)
+            .asSession(session)
             .`when`()
             .get("/api/v1/pipelines")
             .then()
@@ -336,10 +361,10 @@ class WorkspaceIsolationIntegrationTest {
             .jsonPath()
             .getList("data.items")
 
-    private fun templates(key: String): List<Map<String, String>> =
+    private fun templates(session: String): List<Map<String, String>> =
         given()
             .port(port)
-            .header(API_KEY_HEADER, key)
+            .asSession(session)
             .`when`()
             .get("/api/v1/templates")
             .then()
@@ -348,10 +373,10 @@ class WorkspaceIsolationIntegrationTest {
             .jsonPath()
             .getList("data.items")
 
-    private fun executions(key: String): List<Map<String, String>> =
+    private fun executions(session: String): List<Map<String, String>> =
         given()
             .port(port)
-            .header(API_KEY_HEADER, key)
+            .asSession(session)
             .`when`()
             .get("/api/v1/executions")
             .then()
@@ -403,15 +428,22 @@ class WorkspaceIsolationIntegrationTest {
         // value: the session JWTs below are signed with the same secret the app validates.
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
 
-        private val ALICE_KEY = E2eAuth.generateKey("alice-key", arrayOf("read", "execute", "author"), ownerId = ALICE)
-        private val BOB_KEY = E2eAuth.generateKey("bob-key", arrayOf("read", "execute", "author"), ownerId = BOB)
+        private val ALICE_KEY = E2eAuth.generateKey("alice-key", ownerId = ALICE)
+
+        /** #215 B2: REST is a session's surface — the two members' sessions, pinned by their ACTIVE workspace. */
+        private val ALICE_SESSION get() = sessionJwt(ALICE, "alice@acme.test", "acme")
+        private val BOB_SESSION get() = sessionJwt(BOB, "bob@globex.test", "globex")
+
+        /** acme's API key: an `api_caller` acting as its own identity (record §3.3), created by Alice. */
+        private const val ACME_CALLER_IDENTITY = "5e000000-0000-0000-0000-00000000acbe"
+        private val ACME_CALLER_KEY = E2eAuth.generateKey("acme-caller", ownerId = ACME_CALLER_IDENTITY)
 
         /**
          * Pinned to globex but seeded only by the deactivation test — a key no other test
          * validates. Owned by DAVE since 179: V31's one-live-user-key-per-(user, workspace)
          * index makes a second live `user` key for BOB in globex uninsertable.
          */
-        private val GLOBEX_INACTIVE_KEY = E2eAuth.generateKey("globex-inactive-key", arrayOf("read", "execute", "author"), ownerId = DAVE)
+        private val GLOBEX_INACTIVE_KEY = E2eAuth.generateKey("globex-inactive-key", ownerId = DAVE)
 
         /**
          * Mints the session JWT exactly as `JwtService.issue` does (HS256, `iss`, iat/exp,
@@ -427,7 +459,7 @@ class WorkspaceIsolationIntegrationTest {
             val workspaceClaim = activeWorkspace?.let { ""","active_workspace":"$it"""" } ?: ""
             val payload =
                 b64(
-                    """{"sub":"$userId","email":"$email","name":"Test User","scopes":["read","execute","author"],""" +
+                    """{"sub":"$userId","email":"$email","name":"Test User",""" +
                         """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(3600).epochSecond}$workspaceClaim}""",
                 )
             val signature =
@@ -601,19 +633,38 @@ class WorkspaceIsolationIntegrationTest {
         }
 
         private fun seedKeys(connection: java.sql.Connection) {
+            // Alice's MCP key (the sweep's `/mcp` principal) acts as Alice, who created it.
             connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
+                .prepareStatement("INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
                 .use { ps ->
-                    for ((key, workspace) in listOf(ALICE_KEY to WS_ACME, BOB_KEY to WS_GLOBEX)) {
-                        ps.setString(1, key.id)
-                        ps.setObject(2, UUID.fromString(key.ownerId))
-                        ps.setString(3, key.name)
-                        ps.setString(4, key.hash)
-                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                        ps.setObject(6, UUID.fromString(workspace))
-                        ps.addBatch()
-                    }
-                    ps.executeBatch()
+                    ps.setString(1, ALICE_KEY.id)
+                    ps.setObject(2, UUID.fromString(ALICE))
+                    ps.setObject(3, UUID.fromString(ALICE))
+                    ps.setString(4, ALICE_KEY.name)
+                    ps.setString(5, ALICE_KEY.hash)
+                    ps.setObject(6, UUID.fromString(WS_ACME))
+                    ps.executeUpdate()
+                }
+            // acme's api_caller key acts as its own `service` identity (record §3.3), created by Alice.
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +
+                        "VALUES ('$ACME_CALLER_IDENTITY', '${ACME_CALLER_KEY.id}@keys.invalid', '${ACME_CALLER_KEY.name}', 'key', " +
+                        "'${ACME_CALLER_KEY.id}', TRUE, FALSE, 'service')",
+                )
+            }
+            connection
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, 'endpoint', 'api_caller')",
+                ).use { ps ->
+                    ps.setString(1, ACME_CALLER_KEY.id)
+                    ps.setObject(2, UUID.fromString(ACME_CALLER_IDENTITY))
+                    ps.setObject(3, UUID.fromString(ALICE))
+                    ps.setString(4, ACME_CALLER_KEY.name)
+                    ps.setString(5, ACME_CALLER_KEY.hash)
+                    ps.setObject(6, UUID.fromString(WS_ACME))
+                    ps.executeUpdate()
                 }
         }
 
@@ -624,13 +675,14 @@ class WorkspaceIsolationIntegrationTest {
         ) {
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
                 connection
-                    .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                    .use { ps ->
+                    .prepareStatement(
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                    ).use { ps ->
                         ps.setString(1, key.id)
                         ps.setObject(2, UUID.fromString(key.ownerId))
-                        ps.setString(3, key.name)
-                        ps.setString(4, key.hash)
-                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
+                        ps.setObject(3, UUID.fromString(key.ownerId))
+                        ps.setString(4, key.name)
+                        ps.setString(5, key.hash)
                         ps.setObject(6, UUID.fromString(workspaceId))
                         ps.executeUpdate()
                     }

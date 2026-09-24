@@ -34,11 +34,20 @@ import javax.crypto.spec.SecretKeySpec
  *
  * For each of the five roles, EVERY REST route the running application registers (read off
  * Spring's own `RequestMappingHandlerMapping`, so a route added tomorrow is walked without
- * anybody remembering to add it) and EVERY MCP tool in auth.md §7.6 is called with a principal
- * of that role, and the answer is asserted allowed or refused **exactly as the §7.6 permission
- * catalog says** for the permission the route or tool declares (#215) — the catalog is parsed
- * ([RoleMatrixDocE2e]), so the doc IS the expectation and a cell flipped in the doc fails here
- * against the live server.
+ * anybody remembering to add it) is called with that role's SESSION, and EVERY MCP tool in
+ * auth.md §7.6 with that role's MCP KEY, and the answer is asserted allowed or refused **exactly
+ * as the §7.6 permission catalog says** for the permission the route or tool declares (#215) —
+ * the catalog is parsed ([RoleMatrixDocE2e]), so the doc IS the expectation and a cell flipped in
+ * the doc fails here against the live server. An MCP key is judged by its member's role CAPPED
+ * AT AUTHOR, and a super admin with no membership as a viewer (record PK4) — the walk scores
+ * each key against the column that cap names.
+ *
+ * ## The keys over REST (#215 B2, record §3.1)
+ * Every key kind is walked over every REST route too: the MCP key is refused on ALL of them
+ * (`endpoint.key_kind_refused`, `user_key_off_surface`); an `api_caller` key reaches only the
+ * published-endpoint surface and the two reads of its own executions; a `promotion_receiver` key
+ * presented as `DP-API-Key` reaches none (its surface is the promotion family, walked by
+ * `PromotionTwoDeploymentE2eTest`).
  *
  * ## What "allowed" and "refused" mean here
  * The subject is the INTERCEPTOR's decision, not the handler's: a refused role gets 403
@@ -127,15 +136,66 @@ class RoleWalkE2eTest {
 
         mcpRows.size shouldBeGreaterThanOrEqual MINIMUM_TOOLS
         // #215 — the five cells the catalog moved (record §2.3: the row-data tools are author and
-        // above). Asserted by name, with the CODE: every walked key carries `author` scope, so the
-        // refusal must come from the role axis (the demoted-issuer code), never the scope axis.
+        // above). Asserted by name, with the CODE: a key's refusal is the member-role code.
         val moved = MOVED_MCP_CELLS.map { (role, tool) -> "$role $tool -> ${tallies.getValue(role).codes[tool]}" }
         moved shouldBe MOVED_MCP_CELLS.map { (role, tool) -> "$role $tool -> $KEY_ISSUER_ROLE_LOST" }
         counts.getValue("viewer").second shouldBeGreaterThanOrEqual MCP_VIEWER_REFUSED_FLOOR
         counts.getValue("promoter").second shouldBeGreaterThanOrEqual MCP_PROMOTER_REFUSED_FLOOR
-        counts.getValue("super_admin").second shouldBe 0
+        // PK4: the workspace admin's key works as an author (every tool), the membership-less
+        // super admin's as a viewer — refused exactly what the viewer is refused.
         counts.getValue("workspace_admin").second shouldBe 0
+        counts.getValue("super_admin").second shouldBe counts.getValue("viewer").second
     }
+
+    @Test
+    fun `every REST route refuses each key kind off its surface - the MCP key on all of them`() {
+        ensureSeeded()
+        ensureKeysLive()
+        val routes = walkableRoutes()
+        val mismatches = mutableListOf<String>()
+        val refusedByKind = mutableMapOf<String, Int>()
+        val walked =
+            ROLES.associate { "mcp:$it" to (keyFor(it) to USER_KEY_OFF_SURFACE) } +
+                mapOf(
+                    "api_caller" to (API_CALLER_KEY.plaintext to ENDPOINT_KEY_OFF_SURFACE),
+                    "promotion_receiver" to (RECEIVER_KEY.plaintext to SERVER_KEY_OFF_SURFACE),
+                )
+        walked.forEach { (name, keyAndReason) ->
+            refusedByKind[name] = walkKeyOverRest(name, keyAndReason.first, keyAndReason.second, routes, mismatches)
+        }
+        println("event=rolewalk.keys routes=${routes.size} refused=$refusedByKind")
+        mismatches.joinToString("\n") shouldBe ""
+        // Non-vacuity: every MCP key refused on EVERY route; the api_caller reached its three.
+        ROLES.forEach { refusedByKind.getValue("mcp:$it") shouldBe routes.size }
+        refusedByKind.getValue("promotion_receiver") shouldBe routes.size
+        (routes.size - refusedByKind.getValue("api_caller")) shouldBeGreaterThanOrEqual API_CALLER_REACHED_FLOOR
+    }
+
+    /** One key over every route: how many refused it by KIND; an answer that disagrees with the key's surface is a mismatch. */
+    private fun walkKeyOverRest(
+        name: String,
+        key: String,
+        reason: String,
+        routes: List<Route>,
+        mismatches: MutableList<String>,
+    ): Int =
+        routes.count { route ->
+            // `*/*`: a route that PRODUCES only text/plain (`/partials/mcp-key/secret`) refuses an
+            // `application/json` request during handler MAPPING — before any interceptor runs —
+            // which would measure content negotiation, not the key's kind.
+            val answer = call(route, accept = "*/*") { spec -> spec.header(API_KEY_HEADER, key) }
+            val kindRefused = answer.status == HTTP_FORBIDDEN && answer.code == KEY_KIND_REFUSED && answer.reason == reason
+            val onSurface = name == "api_caller" && apiCallerSurface(route)
+            if (kindRefused == onSurface) {
+                mismatches += "$name ${route.method} ${route.pattern} -> ${answer.status} ${answer.code ?: ""} " +
+                    "but the key is ${if (onSurface) "ON" else "OFF"} its surface"
+            }
+            kindRefused
+        }
+
+    /** auth.md §7.7's `endpoint` row, restated: the published tree, and GET/DELETE on its own executions' two reads. */
+    private fun apiCallerSurface(route: Route): Boolean =
+        route.handler.startsWith("PublishedEndpointController#") || OWN_EXECUTION_READ.matches(route.path)
 
     /** One role's walk: how many answers were allowed / refused, and every answer the doc did not predict. */
     private class Tally {
@@ -160,7 +220,7 @@ class RoleWalkE2eTest {
         val tally = Tally()
         routes.forEach { route ->
             val expectAllowed = permissionRows.getValue(route.permission).allows(role)
-            val answer = call(route, sessionFor(role))
+            val answer = call(route, authenticate = sessionFor(role))
             tally.record(answer.roleRefused)
             if (answer.roleRefused == expectAllowed) {
                 tally.mismatches +=
@@ -189,11 +249,13 @@ class RoleWalkE2eTest {
                 return@forEach
             }
             val wasRefused = MCP_ROLE_REFUSALS.any { body.contains(it) }
-            tally.codes[tool] = (MCP_ROLE_REFUSALS + SCOPE_INSUFFICIENT).firstOrNull { body.contains(it) }
+            tally.codes[tool] = MCP_ROLE_REFUSALS.firstOrNull { body.contains(it) }
             tally.record(wasRefused)
-            if (wasRefused == cells.allows(role)) {
+            val column = MCP_KEY_COLUMN.getValue(role)
+            if (wasRefused == cells.allows(column)) {
                 tally.mismatches +=
-                    "$role $tool -> ${body.take(LEAK_EXCERPT)} but §7.6 says ${if (cells.allows(role)) "allowed" else "refused"}"
+                    "$role $tool -> ${body.take(LEAK_EXCERPT)} but §7.6 says ${if (cells.allows(column)) "allowed" else "refused"} " +
+                    "for the $column column (PK4)"
             }
         }
         return tally
@@ -265,6 +327,7 @@ class RoleWalkE2eTest {
     private data class Answer(
         val status: Int,
         val code: String?,
+        val reason: String? = null,
     ) {
         val roleRefused: Boolean get() = status == HTTP_FORBIDDEN && code == ROLE_REQUIRED
     }
@@ -353,6 +416,7 @@ class RoleWalkE2eTest {
 
     private fun call(
         route: Route,
+        accept: String = "application/json",
         authenticate: (RequestSpecification) -> RequestSpecification,
     ): Answer {
         val spec =
@@ -361,7 +425,7 @@ class RoleWalkE2eTest {
                 .follow(false)
                 .cookie(CSRF_COOKIE, CSRF)
                 .header(CSRF_HEADER, CSRF)
-                .accept("application/json")
+                .accept(accept)
                 .contentType(ContentType.JSON)
                 .body("{}")
         val request = spec.`when`()
@@ -376,7 +440,7 @@ class RoleWalkE2eTest {
             }.then().extract()
         val body = response.asString()
         val code = CODE.find(body)?.groupValues?.get(1)
-        return Answer(response.statusCode(), code)
+        return Answer(response.statusCode(), code, REASON.find(body)?.groupValues?.get(1))
     }
 
     private fun callTool(
@@ -396,12 +460,15 @@ class RoleWalkE2eTest {
             .extract()
             .asString()
 
-    /** `tool name -> inputSchema`, from the server's own `tools/list` (the super admin's key, which every tool admits). */
+    /**
+     * `tool name -> inputSchema`, from the server's own `tools/list` — read with the workspace
+     * admin's key, an author's (PK4), which every tool admits.
+     */
     private fun toolSchemas(): Map<String, JsonNode> {
         val body =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, keyFor("super_admin"))
+                .header(API_KEY_HEADER, keyFor("workspace_admin"))
                 .contentType(ContentType.JSON)
                 .accept("application/json, text/event-stream")
                 .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
@@ -480,16 +547,29 @@ class RoleWalkE2eTest {
         private val MAPPER = ObjectMapper()
 
         private const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
-        private const val SCOPE_INSUFFICIENT = "auth.scope.insufficient"
+        private const val KEY_KIND_REFUSED = "endpoint.key_kind_refused"
+        private const val USER_KEY_OFF_SURFACE = "user_key_off_surface"
+        private const val ENDPOINT_KEY_OFF_SURFACE = "endpoint_key_off_surface"
+        private const val SERVER_KEY_OFF_SURFACE = "server_key_off_surface"
+        private val OWN_EXECUTION_READ = Regex("^/api/v1/executions/[^/]+(/result)?$")
+
+        /** PK4: the §7.6 column each role's MCP KEY is judged by — the member role capped at author; no membership = viewer. */
+        private val MCP_KEY_COLUMN: Map<String, String> =
+            mapOf(
+                "viewer" to "viewer",
+                "author" to "author",
+                "promoter" to "promoter",
+                "workspace_admin" to "author",
+                "super_admin" to "viewer",
+            )
 
         /** A key's refusal on the role axis is the issuer-demotion code (D-R12); a session's is `auth.role_required`. */
         private val MCP_ROLE_REFUSALS = listOf(KEY_ISSUER_ROLE_LOST, ROLE_REQUIRED)
 
         /**
          * #215 — the five MCP cells the catalog moves from ✓ to ✗ (record §2.3): the row-data
-         * tools are author-and-above. Keys a LOGIN mints never reached them (a viewer's key is
-         * `execute`, a promoter's `read`, and these need `author`); the walk's author-scoped keys
-         * show the role axis now refusing what it used to admit.
+         * tools are author-and-above. The role is the whole answer since slice (b) — no scope
+         * exists to widen — so the viewer's and the promoter's keys are refused by role.
          */
         private val MOVED_MCP_CELLS =
             listOf(
@@ -510,6 +590,11 @@ class RoleWalkE2eTest {
          * 75 / 110, author 128 / 57, promoter 60 / 125, workspace admin 159 / 26, super admin
          * 185 / 0, IDENTICAL before and after; 42 tools — viewer 28 / 14 → 25 / 17, promoter
          * 20 / 22 → 18 / 24 (the five cells named in [MOVED_MCP_CELLS]), author and admins 42 / 0.
+         * Slice (b) (2026-09-24): REST identical (185 routes, the same five pairs); MCP — the keys are
+         * scored against the PK4-capped column, so the workspace admin stays 42 / 0 (an author) and
+         * the membership-less super admin moves 42 / 0 → 25 / 17 (a viewer, B1); keys over REST —
+         * every member's MCP key refused on 185 / 185, `promotion_receiver` 185 / 185, `api_caller`
+         * 181 (it reaches the published catch-all and its runs' three execution routes).
          * A walk well under these numbers is a broken scan, not a leaner app.
          */
         private const val MINIMUM_ROUTES = 60
@@ -523,8 +608,12 @@ class RoleWalkE2eTest {
         private const val MCP_VIEWER_REFUSED_FLOOR = 15
         private const val MCP_PROMOTER_REFUSED_FLOOR = 22
 
+        /** The api_caller's surface among the walked routes: the published catch-all and its runs' two reads (GET, DELETE). */
+        private const val API_CALLER_REACHED_FLOOR = 3
+
         private val VARIABLE_PATTERN = Regex("\\{([^}]+)\\}")
         private val CODE = Regex("\"code\"\\s*:\\s*\"([a-z_.]+)\"")
+        private val REASON = Regex("\"reason\"\\s*:\\s*\"([a-z_]+)\"")
 
         /** Identifiers by the variable NAME a route uses — the same table the isolation sweep keys on. */
         private val ABSENT_VALUES: Map<String, String> =
@@ -561,7 +650,13 @@ class RoleWalkE2eTest {
                 "super_admin" to "0e000000-0000-0000-0000-000000000177",
             )
         private val KEYS: Map<String, E2eAuth.SeededKey> =
-            USERS.mapValues { (role, id) -> E2eAuth.generateKey("$role-key", arrayOf("read", "execute", "author"), ownerId = id) }
+            USERS.mapValues { (role, id) -> E2eAuth.generateKey("$role-key", ownerId = id) }
+
+        /** The two key roles (record §3.2), each acting as its own `service` identity, created by the workspace admin. */
+        private const val API_CALLER_IDENTITY = "5e000000-0000-0000-0000-000000000177"
+        private const val RECEIVER_IDENTITY = "5e000000-0000-0000-0000-000000000178"
+        private val API_CALLER_KEY = E2eAuth.generateKey("rolewalk-caller", ownerId = API_CALLER_IDENTITY)
+        private val RECEIVER_KEY = E2eAuth.generateKey("rolewalk-receiver", ownerId = RECEIVER_IDENTITY)
 
         private val random = SecureRandom()
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
@@ -574,7 +669,7 @@ class RoleWalkE2eTest {
             val header = b64("""{"alg":"HS256","typ":"JWT"}""")
             val payload =
                 b64(
-                    """{"sub":"$userId","email":"$email","name":"Role Walk","scopes":[],""" +
+                    """{"sub":"$userId","email":"$email","name":"Role Walk",""" +
                         """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(3600).epochSecond},""" +
                         """"active_workspace":"$WS_NAME"}""",
                 )
@@ -627,17 +722,36 @@ class RoleWalkE2eTest {
                     USERS.filterKeys { it != "super_admin" }.forEach { (role, id) ->
                         statement.execute("INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$WS_ID', '$id', '$role')")
                     }
+                    // The two key identities, built as V34 and ApiKeyService build one (record §3.3).
+                    listOf(API_CALLER_KEY, RECEIVER_KEY).forEach { key ->
+                        statement.execute(
+                            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                                "('${key.ownerId}', '${key.id}@keys.invalid', '${key.name}', 'key', '${key.id}', TRUE, FALSE, 'service')",
+                        )
+                    }
                 }
                 connection
-                    .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                    .use { ps ->
-                        KEYS.values.forEach { key ->
+                    .prepareStatement(
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ).use { ps ->
+                        val creator = USERS.getValue("workspace_admin")
+                        val rows =
+                            KEYS.values.map { Triple(it, "user", null) } +
+                                listOf(
+                                    Triple(API_CALLER_KEY, "endpoint", "api_caller"),
+                                    Triple(RECEIVER_KEY, "server", "promotion_receiver"),
+                                )
+                        rows.forEach { (key, kind, role) ->
                             ps.setString(1, key.id)
                             ps.setObject(2, UUID.fromString(key.ownerId))
-                            ps.setString(3, key.name)
-                            ps.setString(4, key.hash)
-                            ps.setArray(5, connection.createArrayOf("text", key.scopes))
+                            // The MCP keys act as their members, who created them; the key roles were created by the admin.
+                            ps.setObject(3, UUID.fromString(if (kind == "user") key.ownerId else creator))
+                            ps.setString(4, key.name)
+                            ps.setString(5, key.hash)
                             ps.setObject(6, UUID.fromString(WS_ID))
+                            ps.setString(7, kind)
+                            ps.setString(8, role)
                             ps.addBatch()
                         }
                         ps.executeBatch()

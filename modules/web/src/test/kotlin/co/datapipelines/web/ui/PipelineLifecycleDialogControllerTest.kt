@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.DatasourceRegistry
@@ -75,7 +74,6 @@ class PipelineLifecycleDialogControllerTest {
                     userId = USER,
                     email = "probe@test",
                     displayName = "Probe",
-                    scopes = setOf(Scope.AUTHOR),
                     authMethod = AuthMethod.OIDC,
                     workspace = WorkspaceContext(WORKSPACE, "probe"),
                 ),

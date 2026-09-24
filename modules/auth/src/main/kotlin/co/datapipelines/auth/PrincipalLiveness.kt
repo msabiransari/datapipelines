@@ -3,9 +3,13 @@ package co.datapipelines.auth
 import java.util.UUID
 
 /**
- * The ONE liveness predicate (D15, roles design §3.5): a principal is live when its user is
- * `is_active` AND, when the credential pins a workspace, that workspace is active. Judged where
- * each credential becomes a principal — `JwtAuthenticationFilter` for a session,
+ * The ONE liveness predicate (D15, roles design §3.5; #215 A2): a principal is live when the user
+ * it ACTS AS is `is_active` — the person for a session and an MCP key, the key's own `service`
+ * identity for an `endpoint` or `server` key, never the key's creator — AND, when the credential
+ * pins a workspace, that workspace is active. The key's own liveness (revoked, expired) is judged
+ * with its record just before. Nothing is cascaded (A2): deactivating a workspace revokes no key
+ * and deactivates no identity, so reactivating it restores exactly what was live before. Judged
+ * where each credential becomes a principal — `JwtAuthenticationFilter` for a session,
  * `ApiKeyService.validate` for `user`/`endpoint` keys, `ApiKeyService.validateServerKey` for
  * the promotion peer — which is the earliest point a refusal can happen and the one every
  * surface passes through (the security chain is global), so no boundary downstream has to

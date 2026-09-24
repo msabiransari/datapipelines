@@ -353,11 +353,14 @@ You should see the login page with the email/password form (local login from §4
 ### 8.1 Register a datasource (after first login)
 
 ```bash
-# After logging in, mint an API key from the UI (or POST /api/v1/auth/api-keys — the
-# secret is returned exactly once). All custom headers use the DP- prefix.
+# The REST API is a SIGNED-IN SESSION's surface (#215 B2 — your MCP key reaches /mcp only).
+# After logging in, copy the `dp_session` and `dp_csrf` cookie values from the browser's
+# dev tools; a state-changing call sends both cookies plus the CSRF value again as
+# DP-CSRF-Token (the double-submit, auth.md §8.4). All custom headers use the DP- prefix.
+export DP_SESSION='<dp_session value>' DP_CSRF='<dp_csrf value>'
 curl -X POST http://localhost:8080/api/v1/datasources \
   -H "Content-Type: application/json" \
-  -H "DP-API-Key: dpk_..." \
+  -b "dp_session=$DP_SESSION; dp_csrf=$DP_CSRF" -H "DP-CSRF-Token: $DP_CSRF" \
   -d '{
     "name": "pg-local",
     "display_name": "Local Postgres",
@@ -373,7 +376,7 @@ curl -X POST http://localhost:8080/api/v1/datasources \
 ```bash
 curl -X POST http://localhost:8080/api/v1/templates \
   -H "Content-Type: application/json" \
-  -H "DP-API-Key: dpk_..." \
+  -b "dp_session=$DP_SESSION; dp_csrf=$DP_CSRF" -H "DP-CSRF-Token: $DP_CSRF" \
   -d '{
     "id": "active_users.sql",
     "dialect": "POSTGRES",
@@ -391,7 +394,7 @@ Templates declare no parameter schema — the variables a body may reference are
 ```bash
 curl -X POST http://localhost:8080/api/v1/pipelines \
   -H "Content-Type: application/json" \
-  -H "DP-API-Key: dpk_..." \
+  -b "dp_session=$DP_SESSION; dp_csrf=$DP_CSRF" -H "DP-CSRF-Token: $DP_CSRF" \
   -d '{
     "schema_version": 1,
     "name": "active_users",
@@ -419,7 +422,7 @@ Click **Execute**. Watch the graph node turn blue → green. Result appears in t
 
 ### 8.5 Connect an Agent (MCP)
 
-Agents (Claude, CoPilot, OpenCode, Kimi, Cursor, …) talk to the running app through its MCP server — a Streamable HTTP endpoint at `POST /mcp` ([MCP spec §3](docs/mcp-server.md#3-transport--protocol)). The transport is **API-key-only**: no browser cookies, no OIDC session. Mint an API key first (Settings → API Keys in the UI, or `POST /api/v1/auth/api-keys`; the secret is returned exactly once) and grant it the scope your agent needs — `admin` covers everything (`admin ⊃ author ⊃ execute ⊃ read`, [Auth §7.5](docs/auth.md#75-scopes)).
+Agents (Claude, CoPilot, OpenCode, Kimi, Cursor, …) talk to the running app through its MCP server — a Streamable HTTP endpoint at `POST /mcp` ([MCP spec §3](docs/mcp-server.md#3-transport--protocol)). The transport is **API-key-only**: no browser cookies, no OIDC session. Use your MCP key: it is minted for you when you sign in (one per workspace; copy it once from the top bar, delete it there and sign in again to rotate) — it acts as you, with your role in that workspace capped at author ([Auth §7.5](docs/auth.md#75-key-roles-scopes-removed)); it connects an MCP client to `/mcp` and nothing else.
 
 Example client configuration (OpenCode — `~/.config/opencode/opencode.jsonc`, or a project-level `opencode.json`):
 

@@ -10,7 +10,6 @@ import co.datapipelines.auth.MailSend
 import co.datapipelines.auth.MailSendRepository
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.SessionRequiredException
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceRole
@@ -159,7 +158,7 @@ class AdminUsersPartialController(
         val mailKind =
             MailKind.entries.firstOrNull { it.wire == kind }
                 ?: return refusedToast(HttpStatus.BAD_REQUEST, "Unknown notice", "Unknown mail kind: $kind")
-        val user = userService.snapshot(userId) ?: return ResponseEntity.notFound().build<String>()
+        val user = userService.administrableUser(userId) ?: return ResponseEntity.notFound().build<String>()
         model.addAttribute("mailNotice", mailNotice(user, mailKind, mailSends.find(userId, mailKind, act)))
         return "partials/admin-user-mail :: notice"
     }
@@ -252,6 +251,7 @@ class AdminUsersPartialController(
      */
     @PatchMapping("/partials/admin/users/{userId}/{action}")
     @RequiredScope(Permission.USER_MANAGE)
+    @Suppress("ReturnCount") // each guard is an early answer BEFORE any mutation; the order is the contract (A.6)
     fun toggle(
         model: Model,
         @PathVariable userId: UUID,
@@ -259,6 +259,10 @@ class AdminUsersPartialController(
     ): Any {
         requireAdmin()
         val actor = currentPrincipal().userId
+        // #215 A.6/A3 — the lookup comes BEFORE any mutation: an unknown row, the System account
+        // and a key's identity are all "no such user" here. An identity is managed only through
+        // its key; granting one admin would have made its key a super admin.
+        if (userService.administrableUser(userId) == null) return ResponseEntity.notFound().build<String>()
 
         // reset-password has its own response shape (the row PLUS the one-time
         // password notice) — handled outside the row-swap when below.
@@ -300,7 +304,7 @@ class AdminUsersPartialController(
                 return refusedToast(HttpStatus.BAD_REQUEST, "Action refused", "Unknown action: $action")
             }
         }
-        val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build<String>()
+        val updated = userService.administrableUser(userId) ?: return ResponseEntity.notFound().build<String>()
         // Shape A: the row keeps its #user-row outerHTML swap; the toast names the
         // action and the user it happened to.
         val (title, outcome) = actionOutcome(action)
@@ -333,8 +337,11 @@ class AdminUsersPartialController(
     ): Any {
         requireAdmin()
         val actor = currentPrincipal().userId
+        // #215 A.6 — looked up BEFORE the reset: a non-person row is not found here, so the
+        // `bootstrap` flip can never make the System account or a key's identity claimable.
+        if (userService.administrableUser(userId) == null) return ResponseEntity.notFound().build<String>()
         userService.resetIdentity(userId, actor)
-        val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build<String>()
+        val updated = userService.administrableUser(userId) ?: return ResponseEntity.notFound().build<String>()
         return saved(
             model,
             updated,
@@ -389,7 +396,7 @@ class AdminUsersPartialController(
         actor: UUID,
     ): Any {
         val oneTime = localPasswordService.resetPassword(userId, actor) ?: return ResponseEntity.notFound().build<String>()
-        val updated = userService.snapshot(userId) ?: return ResponseEntity.notFound().build<String>()
+        val updated = userService.administrableUser(userId) ?: return ResponseEntity.notFound().build<String>()
         if (mailProperties.enabled) {
             // 137: the reset's claim is the LATEST password_reset row — claimed on this very
             // request thread, so it is the one the reset above minted.

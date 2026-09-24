@@ -14,11 +14,11 @@ import org.slf4j.LoggerFactory
  *
  * Three things happen here and nowhere else:
  *
- * 1. **The per-tool authorization gate.** Each tool declares ONE catalog permission
- *    ([ScopeMatrix.MCP_TOOL_PERMISSION], #215) — the auth module's projection of the
+ * 1. **The per-tool authorization gate.** Each tool declares ONE catalog permission on its
+ *    catalog entry ([McpToolCatalog.Entry.permission], #215) — held to the
  *    [auth.md §7.6 catalog](../../../../../../../docs/auth.md), which is authoritative on any
- *    conflict with §6.2's restated values — judged on the key issuer's role and, through the A4
- *    shim, the key's scope. A tool that declares no permission is **refused**, never executed:
+ *    conflict with §6.2's restated values — and judged on the MCP key's member role, capped at
+ *    author (PK4). A tool that declares no permission is **refused**, never executed:
  *    fail-closed is the only safe reading of "no tool runs without its documented minimum".
  * 2. **The §6.3 result envelope**, including the `_meta.correlation_id` echo.
  * 3. **Error mapping** (§9.2): every catalogued domain failure becomes a tool result with
@@ -27,7 +27,7 @@ import org.slf4j.LoggerFactory
  * Every call is written to the audit log — tool name, caller, target entity, outcome, correlation
  * id (§13 security checklist) — as `mcp.tool.called`. On top of that (052, ruling R4): every call
  * to a tool the catalog declares [mutating][McpToolCatalog.isMutating] writes ONE
- * `mcp.tool.write` event, node runs included — the trace that an `author`-scoped key altered
+ * `mcp.tool.write` event, node runs included — the trace that an author's key altered
  * stored definitions or customer data, which a node run otherwise leaves nowhere (§6.2.20's
  * no-history ratification covered executions, not traces). The write event is emitted HERE, at
  * the single dispatch choke point, after the tool returns on success and failure alike — a tool
@@ -49,7 +49,7 @@ class McpToolDispatcher(
     /** The registered tools' definitions, in `tools/list` order (§6.1). */
     fun definitions(): List<McpSchema.Tool> = byName.values.map { it.definition }
 
-    /** The registered tool names — the surface `ScopeMatrix.MCP_TOOL_PERMISSION` must cover exactly. */
+    /** The registered tool names — the surface [McpToolCatalog] must cover exactly. */
     fun toolNames(): Set<String> = byName.keys
 
     /**
@@ -65,7 +65,7 @@ class McpToolDispatcher(
         val startedAt = System.nanoTime()
         val refusal = scopeRefusal(tool.name, ctx)
         if (refusal != null) {
-            audit(tool.name, request, ctx, outcome = "scope_refused", code = refusal.code, startedAt = startedAt, invoked = false)
+            audit(tool.name, request, ctx, outcome = "permission_refused", code = refusal.code, startedAt = startedAt, invoked = false)
             return McpToolResults.error(refusal, ctx.correlationId)
         }
         return runTool(tool, request, ctx, startedAt)
@@ -133,19 +133,23 @@ class McpToolDispatcher(
     }
 
     /**
-     * The §7.6 gate — BOTH axes (RBAC design §2). Returns the refusal payload when the
-     * principal may not call [toolName], or null when it may.
+     * The §7.6 gate. Returns the refusal payload when the principal may not call [toolName], or
+     * null when it may.
      *
-     * Delegates entirely to [ScopeMatrix.allowedTool]: the scope minimum, the key issuer's
-     * current capability in the pinned workspace, the unreachable-workspace 404 and the
-     * fail-closed "this tool declares no permission" branch are all decided there, so this surface
-     * and the REST interceptor cannot answer the same question two ways.
+     * The tool's permission is its catalog entry's ([McpToolCatalog.permissionOf]); the judgement
+     * is [ScopeMatrix.allowedTool]'s alone — the member's current role in the pinned workspace
+     * (capped at author for the MCP key), the unreachable-workspace 404 and the fail-closed "this
+     * tool declares no permission" branch are all decided there, so this surface and the REST
+     * interceptor cannot answer the same question two ways.
      */
     private fun scopeRefusal(
         toolName: String,
         ctx: McpToolContext,
     ): McpErrorPayload? =
-        when (val decision = ScopeMatrix.allowedTool(ctx.principal, toolName, ctx.principal.workspace)) {
+        when (
+            val decision =
+                ScopeMatrix.allowedTool(ctx.principal, toolName, McpToolCatalog.permissionOf(toolName), ctx.principal.workspace)
+        ) {
             is ScopeMatrix.Decision.Allowed -> {
                 null
             }

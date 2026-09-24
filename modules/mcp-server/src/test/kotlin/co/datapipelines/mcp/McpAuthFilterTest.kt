@@ -6,7 +6,6 @@ import co.datapipelines.auth.AuthErrorCodes
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -38,7 +37,7 @@ class McpAuthFilterTest {
 
     @Test
     fun `an api-key principal passes and lands in the request attributes`() {
-        authenticate(McpFixtures.principal(Scope.READ))
+        authenticate(McpFixtures.principal())
         val request = request()
         val response = MockHttpServletResponse()
 
@@ -46,7 +45,7 @@ class McpAuthFilterTest {
 
         assertAll(
             { response.status shouldBe 200 },
-            { request.getAttribute(McpTransportKeys.PRINCIPAL) shouldBe McpFixtures.principal(Scope.READ) },
+            { request.getAttribute(McpTransportKeys.PRINCIPAL) shouldBe McpFixtures.principal() },
             { (request.getAttribute(McpTransportKeys.CORRELATION_ID) is UUID) shouldBe true },
         )
         verify(exactly = 1) { chain.doFilter(request, response) }
@@ -69,7 +68,7 @@ class McpAuthFilterTest {
 
     @Test
     fun `a valid browser session cannot call a tool`() {
-        authenticate(McpFixtures.principal(Scope.ADMIN, method = AuthMethod.OIDC))
+        authenticate(McpFixtures.principal(method = AuthMethod.OIDC))
         val request = request()
         val response = MockHttpServletResponse()
 
@@ -99,7 +98,7 @@ class McpAuthFilterTest {
 
     @Test
     fun `an inbound correlation id is honoured and echoed`() {
-        authenticate(McpFixtures.principal(Scope.READ))
+        authenticate(McpFixtures.principal())
         val request = request()
         val inbound = UUID.randomUUID()
         request.addHeader(AuthErrorWriter.CORRELATION_HEADER, inbound.toString())
@@ -115,7 +114,7 @@ class McpAuthFilterTest {
 
     @Test
     fun `a malformed correlation id is replaced, never propagated`() {
-        authenticate(McpFixtures.principal(Scope.READ))
+        authenticate(McpFixtures.principal())
         val request = request()
         request.addHeader(AuthErrorWriter.CORRELATION_HEADER, "<script>alert(1)</script>")
         val response = MockHttpServletResponse()

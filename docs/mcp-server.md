@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.45 (frozen contract — additive-only changes after this point)
+**Status:** v1.47 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-24
@@ -85,28 +85,28 @@ Server response: JSON for single-message exchanges, `text/event-stream` for stre
 - `DP-API-Key: dpk_<id>.<secret>` — the REST convention; the primary case.
 - `Authorization: Bearer dpk_<id>.<secret>` — for MCP clients that can only set the standard Authorization header (Claude Desktop and several others). The filter recognizes the `dpk_` prefix and routes the token through the identical validation path.
 
-Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, same Argon2id verification, same 60s-TTL revocation/liveness re-check ([Auth §11.4](auth.md#114-api-key-validation-cache)). A revoked key or a deactivated owner stops working within ~1 minute.
+Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, same Argon2id verification, same 60s-TTL revocation/liveness re-check ([Auth §11.4](auth.md#114-api-key-validation-cache)). A revoked key, a deactivated member or a role change takes effect within the auth cache TTL (60 s by default, #215 B5).
 
 **Session JWTs are not accepted on `/mcp`.** There is no cookie auth and no non-`dpk_` Bearer token path — a browser-embedded MCP client must use an API key like any other agent.
 
 API keys (the `user` kind — "your MCP key") are:
 - **Minted by the login/switch hook, one per user per workspace** (179, D16) — never on demand (`auth.key_kind_not_mintable` answers any attempt); shown in the top bar with a copy button; rotation is delete there and sign in again.
 - Never expiring, owner-scoped to delete; HTTP reads in [REST API §16.1](rest-api.md#161-api-keys-own-keys-creation-is-a-workspace-admins--179).
-- Scoped by the ROLE the user holds in the pinned workspace (hierarchical `read` / `execute` / `author`, [Auth §7.5](auth.md#75-scopes)) — since 179 nobody chooses scopes at issuance. **`admin` is no longer issuable to a key** — it was the only scope that ever bought a key an INSTANCE verb, and instance verbs are human. The key's effective reach is additionally capped by what its issuer can do in the pinned workspace RIGHT NOW, re-read per request.
+- Acting as their MEMBER, with the member's CURRENT role in the pinned workspace capped at **author** ([Auth §7.5](auth.md#75-key-roles-scopes-removed), PK4): a workspace admin's key acts as an author, a super admin's key as their membership's role capped the same way — or as a viewer where they hold no membership — and **no key is ever a super admin** (B1), so no key reaches an instance verb. Scopes were removed (#215); the role is re-read per request.
 
-**An agent's key is a `user` key — the same kind a program uses over REST:** one credential kind, two surfaces. (The form label "Agent / API key" left with on-demand minting in 179 — the kind needs no label where it is never chosen.) The other two kinds ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) do not reach `/mcp` at all — an `endpoint` key authorises published endpoints and a `server` key the promotion routes, and each is refused here with `403 endpoint.key_kind_refused` by `McpAuthFilter` (the scope interceptor never sees `/mcp`, which is a servlet, so the refusal is made again at the transport). A scopeless key could otherwise read the whole tool catalogue through `tools/list` without being able to call any of it.
+**The MCP key connects an MCP client to `/mcp` and nothing else** (#215 B2, owner ruling 2026-09-24: "MCP key should be only MCP"): presented on any REST route, page or partial it is refused with `403 endpoint.key_kind_refused`, `details.reason = "user_key_off_surface"` — a program that calls REST uses a person's session, and a program that calls published endpoints uses an `endpoint` key. The other two kinds ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) do not reach `/mcp` at all — an `endpoint` key authorises published endpoints and a `server` key the promotion routes, and each is refused here with `403 endpoint.key_kind_refused` by `McpAuthFilter` (the interceptor never sees `/mcp`, which is a servlet, so the refusal is made again at the transport). Such a key could otherwise read the whole tool catalogue through `tools/list` without being able to call any of it.
 
-**Enforcement is TWO axes, and a key must satisfy both** ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative), [§11A](auth.md#11a-roles)). The minimum SCOPE and the minimum ROLE for every MCP tool are defined once in that matrix — this spec restates each tool's requirement in §6.2 for readability, but the matrix is authoritative on any conflict, and one function (`ScopeMatrix.allowedTool`) answers both here and at the REST interceptor.
+**Enforcement is the ROLE** ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative), [§11A](auth.md#11a-roles)). Each tool declares ONE catalog permission on its catalog entry (`McpToolCatalog.Entry.permission`) — this spec restates it in §6.2 for readability, but the catalog is authoritative on any conflict, and one function (`ScopeMatrix.allowedTool`) answers here and at the REST interceptor. A tool that declares none is refused (`auth.permission.undeclared`).
 
-**A key can do at most what its ISSUER can do NOW.** On every request the key's own scope is checked against the tool's minimum, AND the issuer's CURRENT membership in the pinned workspace is checked against the tool's minimum role — re-read inside the same 60s validation-cache TTL as revocation. So a key whose issuer was demoted or removed from the workspace stops working within about a minute, and the refusal is `auth.key_issuer_role_lost` rather than `auth.role_required`: retrying with that key will never work, and a new key from someone who still holds the role is the fix.
+**A key does what its MEMBER can do NOW, capped at author.** On every request the member's CURRENT role in the pinned workspace is checked against the tool's permission — re-read inside the same 60 s validation-cache TTL as revocation. So a member's role change reaches their key within about a minute (a promotion widens it, a demotion narrows it — C2), and a refusal is `auth.key_issuer_role_lost`: the key is fine, the member's role does not reach this tool, and the fix is a role, not a retry.
 
 **A promoter's key sees through the promoter LENS (178, [Auth §11A.1](auth.md#11a1-the-404-rule)).** The role narrows what a READ returns, never who may read: `pipelines_list/get`, `templates_list/get/used_by`, `endpoints_list/get`, the resource catalogue and the pipeline/template resources answer a promoter with RELEASED objects newer than the promotion target's inventory entry ([Versioning §10.2](versioning.md#102-the-listing-rule-what-the-ui-shows)) and nothing else — a draft, an already-promoted object, or a pipeline behind the target is ABSENT for that key and resolves as not-found, exactly as another workspace's would; a visible object's pending DRAFT is invisible too — `pipelines_get` / `templates_get` default to the RELEASE for that key, carry no `draft` pointer, and an explicit draft `version` is not-found. The inventory is read through a per-workspace cache (`datapipelines.deployment.promotion.inventory-cache-ttl-seconds`); when the target cannot be read the lens fails CLOSED — lists are empty, gets are not-found, never a 502 to a read — and the server logs `pipeline.promotion.lens_unavailable` once per window. Every other role's key is unaffected and triggers no target call.
 
-No MCP tool's minimum role is `promote` or `super_admin`, and none is `ws_admin` except `datasources_test` (it opens a live connection and writes the datasource's health down — an operational act). Release, promote, workspace creation and membership have no MCP tool at all: they are human verbs, which is the same reason no key holds `admin` scope. Registering, editing and deleting datasources remain UI/REST-only.
+No MCP tool needs more than author (record §3.4), so the PK4 cap withholds nothing an agent can call. Release, promote, workspace creation and membership have no MCP tool at all: they are human verbs, which is the same reason no key is ever a super admin. Registering, editing and deleting datasources remain UI/REST-only.
 
 **Datasource visibility is a GRANT** ([Auth §11A](auth.md#11a-roles)). A datasource not granted to the key's pinned workspace does not exist for it: `datasources_list` is the truth, and guessing a name gets the not-found envelope, never a "forbidden".
 
-**Security chain.** `/mcp` (both `POST` and `GET`) is an explicit matcher in the Spring Security filter chain: CSRF-exempt (no cookie auth to forge against), no session cookies accepted, same scope enforcement as REST, same per-user rate limits ([REST API §12](rest-api.md#12-rate-limiting)). See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
+**Security chain.** `/mcp` (both `POST` and `GET`) is an explicit matcher in the Spring Security filter chain: CSRF-exempt (no cookie auth to forge against), no session cookies accepted, the same permission enforcement as REST, same per-user rate limits ([REST API §12](rest-api.md#12-rate-limiting)). See [Auth §8.5](auth.md#85-mcp-endpoint-mcp).
 
 **The principal travels WITH the call, never on the thread (134).** `McpAuthFilter` resolves the key on the servlet thread and hands the principal to the MCP layer through the transport context (`McpToolContext`); the SDK then runs every tool handler on its own scheduler thread (`boundedElastic`), where Spring Security's thread-local context is **empty**. So a tool — and anything a tool calls — must take *who is asking* and *which workspace* as arguments from `McpToolContext`; a domain port or `@Bean` adapter that reads `SecurityContextHolder` answers correctly over REST and as "no principal" over MCP, with no error anywhere. The save-time datasource lookup was exactly that: a workspace-owned datasource validated as `pipeline.validation.unknown_datasource` over MCP while the same body was `201` over REST (measured 2026-09-14; the demo datasources are owner-less + granted, which is why the acceptance run never saw it). Since 134 the validator's datasource port takes the workspace explicitly, as the executor always did; `McpSaveWorkspaceDatasourceE2eTest` holds the line.
 
@@ -122,12 +122,12 @@ Missing credential (no `DP-API-Key` header and no Bearer `dpk_` token):
 Invalid, revoked or expired key:
 - HTTP `401 Unauthorized` with `auth.api_key.invalid` (or `auth.api_key.expired`).
 
-Deactivated owner or deactivated pinned workspace (180, [Auth §11A.3](auth.md#11a3-deactivation)) — judged at validation, so no MCP session is established and even `tools/list` is refused:
-- HTTP `401 Unauthorized` with `auth.principal_deactivated` (the OWNER is deactivated; reactivation restores the key);
+Deactivated member or deactivated pinned workspace (180, [Auth §11A.3](auth.md#11a3-deactivation)) — judged at validation, so no MCP session is established and even `tools/list` is refused:
+- HTTP `401 Unauthorized` with `auth.principal_deactivated` (the MEMBER is deactivated; reactivation restores the key);
 - HTTP `404 Not Found` with `auth.key_workspace_inactive` (the WORKSPACE the key is pinned to is deactivated).
 
-Insufficient scope (e.g., a `read` key calling `pipelines_create`):
-- The transport-level answer is HTTP `403 Forbidden` with `auth.scope.insufficient` when the credential is rejected before dispatch. Once a session is established and a tool is dispatched, a scope failure is returned as a tool result with `isError: true` carrying the same `auth.scope.insufficient` code (§9.2) — agents must handle both.
+A role that does not hold the tool's permission (e.g., a viewer's key calling `pipelines_create`):
+- A tool result with `isError: true` carrying `auth.key_issuer_role_lost` (§9.2), `details.required` naming the permission and `details.held` the role — the call was dispatched and refused; nothing ran. The MCP ownership rules (`templates_purge_draft` on another person's draft, `executions_cancel` on a run another credential started) answer `auth.role_required` with `details.reason`.
 
 Codes follow the `{domain}.{entity}.{failure}` convention; the registry of record is [Pipeline Contract §13.7](pipeline-contract.md#137-authentication--authorization).
 
@@ -228,7 +228,7 @@ A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_
 
 ### 6.2 Tool definitions
 
-Every tool definition below carries a **Scope** row: the minimum scope the calling API key must hold. Those values are sourced from the [Auth §7.6 operation matrix](auth.md#76-operation-matrix--two-axes-authoritative), which is authoritative — if this doc and the matrix ever disagree, the matrix wins. Scopes are hierarchical (`author` ⊃ `execute` ⊃ `read`; `admin` ⊃ all), so a listed scope is a floor, not an exact match. No v1 MCP tool requires `admin` (§4.1).
+Every tool definition below carries a **Permission** row: the catalog permission the tool declares (`McpToolCatalog.Entry.permission`), which the calling key's role must hold — its member's role in the pinned workspace, capped at author (PK4). Those values are sourced from the [Auth §7.6 permission catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative), which is authoritative — if this doc and the catalog ever disagree, the catalog wins. Scopes were removed (#215). No MCP tool needs more than author, so the cap costs an agent nothing.
 
 Every tool's result envelope, including its error shape, is §6.3.
 
@@ -276,7 +276,7 @@ Returns: array of pipeline metadata objects. Datasource references are per-node 
 
 **When to use which:** `prefix` to discover structure ("what roots exist? what is under `finance`?"), `q` to find something by name across full paths. Start a naming decision with `prefix: ""`.
 
-**Scope:** `read`.
+**Permission:** `pipeline.read`.
 
 #### 6.2.2 `pipelines_get`
 
@@ -303,7 +303,7 @@ Since 078, the body's `parameters` also lists the pipeline's **derived execute i
 
 Since 040, the response also carries `upgrade_available` **whenever a node's pinned template has a newer RELEASED version** (040 D5): one `{node, template_id, pinned, latest_released}` row per outdating pin, computed from the very body being returned. Absent when no pin is outdated (omit-when-empty, the envelope convention). Surfaced, never applied — moving a pin is a pipeline edit (`pipelines_update`) and stays the caller's decision; a pin of a template DRAFT version is not an upgrade (the author is ahead of release, which is information, not a prompt). See [Templates §5.4](templates.md#54-used-by-the-reverse-arrow-v19-040).
 
-**Scope:** `read`.
+**Permission:** `pipeline.read`.
 
 #### 6.2.3 `pipelines_execute`
 
@@ -349,7 +349,7 @@ MCP **progress notifications** for in-flight nodes are deliberately not implemen
 
 **Render before you run (139).** Executing a DRAFT version whose pinned template version is itself a DRAFT written after this key's last successful `templates_render` of it is refused — `pipeline.execution.template_unrendered`, with `details.templates` carrying each `{id, version, updated_at, last_render}`. RELEASED pins are exempt (they rendered before release and cannot change), and so is any execute of a RELEASED version: the check reads the caller's own audit rows, so it is an AGENT-surface rule — REST, the UI and a human's key keep their freedom. A `templates_update` therefore makes the next execute refuse again until a fresh render: the render-then-run loop the SKILL's steps 3 and 5 describe, enforced at the entry point instead of asked of the model a third time. `pipelines_execute_node` (§6.2.20) runs the same check on the one node it resolves.
 
-**Scope:** `execute`.
+**Permission:** `pipeline.execute`.
 
 #### 6.2.4 `pipelines_create`
 
@@ -396,7 +396,7 @@ Returns: created pipeline — `id`, `version: 1`, **`status: "DRAFT"`**, `body_h
 
 The whole pipeline is validated before it is stored — no invalid pipeline ever reaches the database ([Pipeline Contract §2](pipeline-contract.md#2-design-principles)). Validation failures come back as a tool result with `isError: true` carrying the pipeline validation code (§9.2); the agent should fix and retry rather than assume partial creation.
 
-**Scope:** `author`.
+**Permission:** `pipeline.create`.
 
 #### 6.2.5 `pipelines_update`
 
@@ -406,7 +406,7 @@ Same input as `pipelines_create` plus required `id` and required `expected_hash`
 
 Returns: the draft version — `version`, `status: "DRAFT"`, `body_hash` (carry this into the next write), `current_version` (the unmoved released pointer), and the `draft` pointer. **The update does NOT release**: an agent leaves the draft for a human to review and release from the UI (versioning D4). On `pipeline.version.conflict` someone else modified it after you loaded it — re-read, rebase, retry; never retry blindly.
 
-**Scope:** `author`.
+**Permission:** `pipeline.update`.
 
 #### 6.2.6 `templates_list`
 
@@ -451,7 +451,7 @@ Returns: array of template metadata (`id`, `version`, `type`, `dialect`, `displa
 
 **When to use which:** `prefix` to browse, `q` to search. A pipeline and the templates it uses should share a prefix — see [Template Hierarchy §15](template-hierarchy-design.md).
 
-**Scope:** `read`.
+**Permission:** `template.read`.
 
 #### 6.2.7 `templates_get`
 
@@ -472,7 +472,7 @@ Fetch a template body.
 }
 ```
 
-**Scope:** `read`. The returned projection states its `version` and `status` — since 039 the default is the **working version** (versioning §7: the DRAFT when one exists, else the latest released), the template mirror of `pipelines_get`.
+**Permission:** `template.read`. The returned projection states its `version` and `status` — since 039 the default is the **working version** (versioning §7: the DRAFT when one exists, else the latest released), the template mirror of `pipelines_get`.
 
 #### 6.2.8 `templates_create`
 
@@ -522,7 +522,7 @@ Create a new template.
 
 Save-time validation is **parse-only** — syntax, forbidden constructs, import resolution, and the type/dialect consistency rules (`sql` requires `dialect`, `html` forbids it; a payload trying to change an existing template's `type` is refused — [Templates §7.1](templates.md#71-save-time-validation-is-parse-only)). A template is never rendered against a sample context at save time, because it does not know its callers' parameters; the dry-render check happens when a *pipeline* referencing it is saved ([Templates §7.2](templates.md#72-the-dry-render-rule-owned-by-pipeline-validation)). An agent authoring a template should therefore call `templates_render` (§6.2.9) with a representative context to confirm the output it produces.
 
-**Scope:** `author`.
+**Permission:** `template.create`.
 
 #### 6.2.9 `templates_render`
 
@@ -551,7 +551,7 @@ Render a template against a supplied context (preview SQL).
 
 Returns: rendered SQL string. This is a preview only — nothing is executed and nothing is stored.
 
-**Scope:** `author` (it is the authoring loop's preview step; see the Auth §7.6 matrix).
+**Permission:** `template.render` (it is the authoring loop's preview step; see the Auth §7.6 matrix).
 
 #### 6.2.10 `datasources_list`
 
@@ -570,7 +570,7 @@ List registered datasources (without credentials).
 }
 ```
 
-**Scope:** `read`. (Registering, editing and deleting a datasource are UI/REST-only — [§6.2.22](#6222-removed--no-datasource-writes-on-this-surface): no credential travels through an agent.) The listing is scoped to the key's pinned workspace exactly like REST §9.2.
+**Permission:** `datasource.read`. (Registering, editing and deleting a datasource are UI/REST-only — [§6.2.22](#6222-removed--no-datasource-writes-on-this-surface): no credential travels through an agent.) The listing is scoped to the key's pinned workspace exactly like REST §9.2.
 
 **Returns:** one entry per granted datasource in the §6.2.11 per-datasource shape, `facts` **included** (126): the datasource-wide LEARNED FACTS (kinds `window` and `sampling`, the [learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §7.2) in the §7A.5 fact shape — `[]` when none are recorded, an empty array never an absent key, so "nothing recorded" reads differently from "not served". Served as stored: the listing opens no connection, so there is nothing to recompute drift against (the 118 rule), and one enrichment read runs per listed datasource. **`definitions` included** (136 §A / T287): every WORKSPACE-scope fact (`definition`, `exclusion`, `preference`) visible to the reader that names this datasource — with refs on its tables or columns, or with none (§6.2.37, a rule that spans datasources) — in the same §7A.5 fact shape, newest last, `[]` when none; **a definition is a rule an earlier pipeline chose; read it before you choose yours**. `facts` keeps its datasource-wide meaning (`window`, `sampling`) — a rule is never in both. Both blocks come from the one enrichment read. The `dialect` filter behaves as before.
 
@@ -592,7 +592,7 @@ Fetch a single datasource (without password).
 }
 ```
 
-**Scope:** `read`.
+**Permission:** `datasource.read`.
 
 **Returns:** `name`, `display_name`, `description`, `dialect`, `jdbc_url`, `username`, `query_timeout_seconds`, `pool` (the hikari map), `readonly` (boolean — the §5.7 flag, machine-readable so an agent can see BEFORE authoring that DML/DDL/output-datasource uses will be refused), `granted` (always `true` — you are seeing this row because your workspace holds a grant on it, D-R7), `workspace` (the name of the workspace that REGISTERED it, **omitted** when a super admin registered it at the instance level — it is never `null`, because the retired `null = global` reading would be the wrong answer to "who can see this?"; visibility is `granted`) — plus `introspection_include_schemas` ([Datasources §3.3](datasources.md#33-field-reference)) **when the allowlist is non-empty** (omitted when empty, the same envelope convention as REST §3.2), so an agent debugging why a schema is or isn't visible in the §6.2.16–18 introspection tools can see that an allowlist is active. Credentials are never returned. `datasources_list` (§6.2.10) emits the same per-datasource shape, `facts` included (126 — the listing is the learn-first read, so the facts ride the call every agent already makes): the datasource-wide LEARNED FACTS (kinds `window` and `sampling`, the [learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §7.2), an array in the §7A.5 fact shape below, `[]` when none; served as stored, because this read opens no connection and has nothing to recompute drift against — and `definitions` (136 §A), the same block §6.2.10 describes: this workspace's rules (`definition`, `exclusion`, `preference`) on this datasource, newest last, `[]` when none; a definition is a rule an earlier pipeline chose; read it before you choose yours.
 
@@ -616,7 +616,7 @@ Test that a datasource connection can be established.
 
 Returns: `{connected: bool, server_version: string?, error: string?}`.
 
-**Scope:** `author` — testing a connection opens a real pool against a production database, so it sits above plain `read` even though it mutates nothing.
+**Permission:** `datasource.test` — testing a connection opens a real pool against a production database; the test follows execute (ratified 2026-09-20), so every role that executes holds it (C1) and the promoter does not.
 
 #### 6.2.13 `executions_list`
 
@@ -637,7 +637,7 @@ List recent executions.
 }
 ```
 
-**Scope:** `read`.
+**Permission:** `execution.read`.
 
 #### 6.2.14 `executions_get`
 
@@ -657,7 +657,7 @@ Fetch metadata for a specific execution (no rows).
 }
 ```
 
-**Scope:** `read`.
+**Permission:** `execution.read`.
 
 **Response (057, on a `FAILED` execution):** `error` is the full failure record — the same object the SSE stream carried and `error_json` stores. (Plain fence: an example, not a tool definition — §6.2's `json` fences are exactly the input schemas `McpToolSurfaceSpecDriftTest` pins.)
 
@@ -714,7 +714,7 @@ This tool is a thin adapter over the REST cursor, [REST API §7](rest-api.md#7-r
 - `offset` / `limit` / `format` map one-to-one onto the cursor's query parameters. `offset` + `limit` paging over a result fully materialized in Redis before the cursor exists, so ordering is stable across pages.
 - Availability is uniform: every completed execution with a caller node has its result stored, regardless of size. There is no inline-vs-claim-check distinction to reason about (that split was removed in REST API v1.3).
 - TTL is fixed at result-write time (`datapipelines.result.ttl-default-seconds`, clamped between the min/max keys; a client may request one on the *execute* call via `DP-Result-TTL-Seconds`). Page reads never extend it.
-- Auth: `read` scope **plus ownership** of the execution — `admin` may read any. Same rule as the REST cursor; the `result_url` is not a capability URL.
+- Auth: `execution.result.read` **plus ownership** of the execution — `execution.read_all` (a workspace admin) may read any. Same rule as the REST cursor; the `result_url` is not a capability URL.
 
 **JSON format** returns `{schema, rows, row_count, offset, limit, total_rows, has_more, expires_at}` — same body as [REST §7.3](rest-api.md#73-response-json-format-default).
 
@@ -730,7 +730,7 @@ This tool is a thin adapter over the REST cursor, [REST API §7](rest-api.md#7-r
 | `result.expired` | TTL elapsed. Re-run the pipeline — the result is unrecoverable. |
 | `result.format_unsupported` | Unknown `format` value. |
 
-**Scope:** `read` (+ ownership).
+**Permission:** `execution.result.read` (+ ownership).
 
 #### 6.2.16 `datasources_get_schemas`
 
@@ -752,7 +752,7 @@ List a datasource's schemas — the entry point of the introspection flow.
 
 Returns: `{"schemas": ["label", ...], "entries": [{"namespace": [...], "label": "..."}], "truncated": bool}` — the namespaces exactly as the driver reported them, as a page. **Read `entries`**: `namespace` is the ordered path (outermost first) to pass back to `datasources_get_tables`/`_get_columns`, and `label` is its last segment. On a two-level engine (`catalog.schema`, `project.dataset`) two entries can share a label and differ only by their outer segment, which is what the array form exists for; `schemas` repeats the labels for pre-087 clients and is kept for one release. `truncated: true` means the 2000-entry cap dropped some (on MySQL catalog routing the walk would otherwise span every database the server grants). On MySQL the databases arrive as JDBC catalogs (Connector/J defaults), so the listing reads them from `getCatalogs()` — the same vocabulary `datasources_get_tables` routes through; system schemas/databases (`information_schema`, `mysql`, `performance_schema`, `sys` on MySQL) are excluded on every dialect. **An empty list is a valid result** — a datasource with no namespace dimension (SQLite) has none to list. See [Datasources §7A](datasources.md#7a-schema-introspection). A connection failure against the datasource is the catalogued `pipeline.execution.datasource_unreachable` `isError` envelope — the same rule applies to §6.2.17/§6.2.18.
 
-**Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
+**Permission:** `datasource.introspect` — introspection is reading (ratified 2026-09-20): every role holds it, the promoter included (C1). It opens a live connection against the datasource but returns metadata, never rows.
 
 #### 6.2.17 `datasources_get_tables`
 
@@ -780,7 +780,7 @@ List a datasource's tables and views.
 
 Returns: `{"tables": [{"namespace": [...], "schema", "name", "type", "remarks"?}], "truncated": bool}` — `namespace` is the containing path outermost-first and `schema` its last segment (kept for one release so a pre-087 client reads what it always read); `type` is the driver's raw JDBC table type (`TABLE`, `VIEW`, `BASE TABLE`, ...); `remarks` is the engine-stored table comment, omitted when the driver/database has none; `facts` (118) is the table's TABLE-GRAIN learned facts — refs with no column: `grain`, `window`, `sampling`, a table-level `caveat` — in the §7A.5 shape, omitted when there are none. For a LAKE datasource each table entry also carries `partition_column` (126): the registered partition column's name, or `null` when none is registered — the same registry value §6.2.33's stats payload reports, so the listing and the stats read cannot disagree; a compatible predicate on a partition key can skip files. Missing registration does not establish physical layout or file count; Parquet row-group skipping and column projection may still reduce reads. A pushed filter alone does not prove skipped files or bytes. Non-lake dialects carry no such key. Only a COMPLETE listing (no `namespace`/`schema` filter, not truncated) runs the §7A.5 drift mark for a fact whose table is no longer listed; a filtered listing proves nothing about what it did not list. The listing is capped at **2000 tables**; `truncated: true` means the cap dropped some. The `namespace` and `schema` filters are exact-match, not LIKE patterns, and a namespace deeper than the dialect's own matches nothing. Without a filter the listing **spans namespaces** — pass each table's reported `namespace` to `datasources_get_columns` (there, no namespace argument means the connection's current one only, and a datasource reporting **none** fails with the catalogued `pipeline.execution.parameter_required` rather than merging same-named tables' columns — the merge hazard lives in `datasources_get_columns` alone; a tables listing carries each row's own namespace and cannot merge, so it deliberately has no such guard and works unfiltered on those datasources too).
 
-**Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
+**Permission:** `datasource.introspect` — introspection is reading (ratified 2026-09-20): every role holds it, the promoter included (C1). It opens a live connection against the datasource but returns metadata, never rows.
 
 #### 6.2.18 `datasources_get_columns`
 
@@ -809,7 +809,7 @@ List one table's columns with canonical types.
 
 Returns: array of `{"name", "type", "precision", "scale", "nullable", "source_type", "warnings", "remarks"}` — `type` is the canonical Type System type, `source_type` the driver's own type name, `warnings` the ingress mapper's warning messages (empty when the mapping was clean), `remarks` the engine-stored column comment (omitted when there is none); `precision`/`scale`/`nullable`/`remarks` are omitted when the metadata does not report them; `facts` (118) is the column's learned facts in the §7A.5 shape — every fact with a ref on this column, a two-column `join` fact on both — omitted when there are none. This is the read that runs the §7A.5 drift check: each fact's fingerprint is recomputed from the columns just listed, and a demotion (`needs_review`, `stale`) is written back to the row before it is served. An unknown table is refused as **`datasource.table_not_found`** (123 §A): the message asserts "does not exist" on complete-catalog dialects and "does not exist, or the datasource's credentials cannot see it" on privilege-filtered ones, and names the nearest listed table when one is close — an existing table with zero readable columns still returns an empty list. `table` and `schema` are exact-match identifiers — JDBC metadata name matching is case-sensitive, `_`/`%` are not wildcards; pass the name `datasources_get_tables` returned. System-schema rows are excluded; without a `schema` argument the read defaults to the connection's current schema (routed per dialect, [Datasources §7A](datasources.md#7a-schema-introspection)) so same-named tables in different schemas cannot merge their columns — and a datasource that reports **no current schema** makes that default impossible, so the call fails with the catalogued `pipeline.execution.parameter_required` instead of silently merging (`datasources_get_schemas` lists the schemas to pass; schemaless datasources such as SQLite are the exception — there is nothing to merge).
 
-**Scope:** `author` — introspection opens a live connection against the datasource, matching the `datasources_test` precedent.
+**Permission:** `datasource.introspect` — introspection is reading (ratified 2026-09-20): every role holds it, the promoter included (C1). It opens a live connection against the datasource but returns metadata, never rows.
 
 #### 6.2.18a The learned-fact block on introspection responses (118)
 
@@ -869,7 +869,7 @@ Preview up to `limit` rows of one table's data — the counterpart to `datasourc
 
 Returns: `{"datasource", "table", "schema"?, "columns": [{"name", "type"}], "rows": [{column: value, ...}], "row_count", "truncated"}` — values wire-encoded per the result-cursor rules (`BIGINTEGER`/`BIGDECIMAL` as strings, temporal fixed-width ISO, `BINARY` base64). The server builds the ENTIRE statement and quotes every identifier with the dialect's quote character (backtick on MySQL, `[...]` on MSSQL, doubled `"` elsewhere) — the agent supplies identifiers only, and a blank identifier is `-32602`. `order_by` entries are `{column, direction}` objects; a free `"col DESC"` string is refused, not parsed. Without `order_by` the top-N is engine-arbitrary. The cap is applied in the dialect's own syntax (`LIMIT`, Oracle `FETCH FIRST n ROWS ONLY`, MSSQL `TOP (n)`) AND as JDBC `maxRows`/`fetchSize`. Readonly datasources are valid targets — the readonly refusal covers write-shaped node uses, and this is a SELECT. `tempdb` can never be a target: a datasource of that name cannot be registered (contract §4.8). The table is resolved before any statement runs (123 §A): an unknown table is **`datasource.table_not_found`**, naming the nearest listed table when one is close; a table the datasource's credentials cannot read — the SELECT refused with a permission SQLSTATE — is **`403 datasource.table_forbidden`**. A connection failure is the catalogued `pipeline.execution.datasource_unreachable`; any other refused statement is the catalogued `pipeline.node.query_execution_failed` carrying the bounded driver message.
 
-**Scope:** `author` — this returns arbitrary customer ROW DATA, not metadata; a read-scoped key does not acquire that reach (037 F).
+**Permission:** `datasource.preview_rows` — this returns arbitrary customer ROW DATA, not metadata; a role without it — viewer, promoter — does not acquire that reach (037 F).
 
 #### 6.2.20 `pipelines_execute_node`
 
@@ -900,7 +900,7 @@ Returns: `{"node_id", "node_type", "datasource", "version", "status", "sql", "sa
 
 Refusals, all before anything runs: an unknown node id → `pipeline.node.not_found` (404 semantics); a node whose `source` is `tempdb` → `pipeline.node.standalone_execution_refused` with `details.reason = tempdb_source` (the staging database exists only inside a full execution — use `pipelines_execute`); a PIPELINE node → the same code with `details.reason = pipeline_node` (it runs a child pipeline, not SQL); a missing pinned template → `pipeline.node.template_not_found`; a render failure → `pipeline.node.template_render_failed`; a supplied parameter failing §6.3 coercion → `pipeline.execution.invalid_parameter_type` naming every failure; a rendered `:name` the pipeline does not declare → `pipeline.node.sql_parameter_missing` (042). A DML/DDL node against a readonly datasource is refused with `pipeline.node.datasource_readonly`; a datasource invisible to the key's workspace resolves as `datasource.not_found`, and an unreachable datasource as `pipeline.execution.datasource_unreachable`; a refused statement is `pipeline.node.query_execution_failed`.
 
-**Scope:** `author` — this runs real SQL and returns arbitrary customer row data; the same 037 F reasoning as `datasources_preview_rows`.
+**Permission:** `pipeline.execute_node` — this runs real SQL and returns arbitrary customer row data; the same 037 F reasoning as `datasources_preview_rows`.
 
 #### 6.2.21 `templates_used_by`
 
@@ -924,7 +924,7 @@ Which pipelines pin a given template version — the reverse arrow of a node's `
 
 Returns: `{"template": {"id", "version"}, "scan": "working_version", "pipeline_count", "references": [{"pipeline", "pipeline_id", "node_id", "pipeline_version", "pipeline_version_status"}]}` — one row per pinning NODE, so a pipeline with two nodes on the same version appears twice and `pipeline_count` stays the honest distinct count. The scan reads each pipeline's **working version** (draft-if-exists, versioning §7), so a draft that just adopted the pin is already counted — the "who do I notify" answer an author needs before editing a template ([Templates §5.4](templates.md#54-used-by-the-reverse-arrow-v19-040)). `version` is required and never clamped (the [D2 rule](templates.md#54-used-by-the-reverse-arrow-v19-040): the question is per version). The delete-safety question — who pins ANY version, in ANY pipeline version ever — is a different scan and surfaces as the `template.in_use` delete refusal on the REST surface, not here.
 
-An unknown template id is the catalogued `template.not_found`; a known id with no such version is the same code with a `version` detail. **Scope:** `read` (040 D7) — reference structure a workspace reader may already see by reading the pipelines themselves; no customer row data.
+An unknown template id is the catalogued `template.not_found`; a known id with no such version is the same code with a `version` detail. **Permission:** `template.read` (040 D7) — reference structure a workspace reader may already see by reading the pipelines themselves; no customer row data.
 
 #### 6.2.22 (removed) — no datasource writes on this surface
 
@@ -1044,13 +1044,7 @@ Unpublish an endpoint. The pipeline is untouched; key bindings on that node are 
 
 Returns `{path, deleted: true}`, or `endpoint.not_found`.
 
-**Scope:** `author` — the same floor `datasources_test` sits on: registering a connection opens a real pool against a production database at save time. `global: true` additionally requires admin and is refused with `datasource.validation.workspace_forbidden`, exactly as REST refuses it; admin-ness is a D8 rule, not a scope ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)).
-
-**Mutating.** Declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3). The audit row carries the datasource NAME and never the credential.
-
-**The password caveat — a documented trade-off, not a bug.** A password sent to this tool transits the agent's context window, the client's transcript, and whatever logging that client does. No server-side change can undo that; refusing the tool would not undo it either, it would only push operators to paste credentials somewhere worse. So the tool states it, in the description an agent reads before calling. Register a real production credential in the UI or over REST; use this tool with a credential the user is willing to have in that transcript — a read-only role, or a short-lived password they will rotate afterwards.
-
-**Suggested next call:** `datasources_test` on the new name. Creation validates and builds a test pool, but the tool does not probe on your behalf.
+**Permission:** `endpoint.unpublish`. **Mutating** — declared `mutating` in the tool catalog, so every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 
 #### 6.2.23 `calculators_list`
 
@@ -1068,7 +1062,7 @@ The catalog of calculator kinds a `CALCULATOR` node can evaluate ([Calculators �
 }
 ```
 
-**Scope:** `read` — and read in the strongest sense the surface has: the answer is a property of the BUILD, identical for every caller, every key and every workspace. No workspace scoping applies because there is no workspace data in it.
+**Permission:** `calculator.read` — and read in the strongest sense the surface has: the answer is a property of the BUILD, identical for every caller, every key and every workspace. No workspace scoping applies because there is no workspace data in it.
 
 **Response:** `kinds` (each with `kind`, `display_name`, `description`, `phrases`, `inputs`, `output`, `example`), `count`, `context_keys` (`org` names and `platform` name/type pairs), and `docs` pointing at the catalog page. A **single-output** kind carries `output` (the wire type, or `"ANY"`) and no `outputs` key at all; a **multi-output** kind (121) carries `"output": null` and `outputs` — the named set `[{name, type, description}]` a node maps through `context_keys` ([Pipeline Contract §4.10](pipeline-contract.md#410-json-structure-calculator-node)), every name mapped or the save is refused. `phrases` lists the everyday phrases the kind answers — match the question's words against them before picking a kind (the same lookup the skill's calculator rule teaches). An input carries `list: true` only when it takes a JSON array, and `default` only when it is optional — the absent keys carry the same information as `false`/`null` would, without spending an agent's context window on eighty of them.
 
@@ -1091,7 +1085,7 @@ One kind's full definition — the same entry `calculators_list` returns, for a 
 }
 ```
 
-**Scope:** `read`.
+**Permission:** `calculator.read`.
 
 **Errors:** an unknown kind is `pipeline.validation.calculator_unknown` with `known_kinds` in the detail — deliberately the SAME code a rejected `pipelines_create` returns for a bad `kind`, so an agent sees one fact about the world rather than two unrelated failures.
 
@@ -1156,7 +1150,7 @@ Register one table in a LAKE datasource's catalog — the dp-lake registry ([met
 }
 ```
 
-**Scope:** `author` — the datasource-mutation floor ([Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Mutating a GLOBAL datasource's registry additionally requires admin, a workspaces D8 rule inside the shared service rather than a scope.
+**Permission:** `lake_table.manage` — the datasource-mutation floor ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). Mutating a GLOBAL datasource's registry additionally requires admin, a workspaces D8 rule inside the shared service rather than a scope.
 
 **Mutating.** Declared `mutating` in the tool catalog: every call writes `mcp.tool.called` **and** `mcp.tool.write` at the dispatcher's single audit choke point (§6.3).
 
@@ -1217,7 +1211,7 @@ Bulk-register from a `manifest.json` `tables[]` block (the manifest shape docume
 }
 ```
 
-**Scope:** `author`. **Mutating** — same audit pair as `lake_tables_register`.
+**Permission:** `lake_table.manage`. **Mutating** — same audit pair as `lake_tables_register`.
 
 **Errors:** the register set, plus `datasource.validation.lake_manifest_url_forbidden` (a URL outside the datasource's own roots) and `pipeline.execution.datasource_unreachable` (502 — the manifest could not be fetched from the datasource's own storage).
 
@@ -1267,7 +1261,7 @@ Unregister one table. The objects in the bucket are untouched — the table stop
 }
 ```
 
-**Scope:** `author`. **Mutating** — same audit pair as `lake_tables_register`.
+**Permission:** `lake_table.manage`. **Mutating** — same audit pair as `lake_tables_register`.
 
 **Errors:** `datasource.not_found`, `datasource.validation.lake_dialect_required`, the grammar codes for a malformed `namespace`/`table`, and `datasource.lake_table_not_found` (404 — an absent triple, never a silent no-op).
 
@@ -1294,9 +1288,9 @@ Hard-delete a template that has NEVER been released — the one lifecycle verb a
 
 Returns: `{"id", "purged": true}`.
 
-Admission is exact: the ONLY version is a DRAFT, created by THIS key's user (templates record a creator user, never a key — "this key created it" degrades to "this key's user"), and NOTHING pins any version of it in ANY pipeline version ever — the delete guard's every-version-ever scan, not the working-version scan `templates_used_by` (§6.2.21) answers. A pinned draft is refused with `template.in_use` and `details.pinned_by` naming the pipelines to change first; a template holding any RELEASED or discarded version is `template.version.last_release`; another user's draft is `auth.scope.insufficient` with `details.reason: "not_creator"`; an unknown id is `template.not_found`. The sole-draft purge takes the entity row with it, and a concurrent edit between the guard reads and the delete is `template.version.conflict` — never a silent delete of someone else's save.
+Admission is exact: the ONLY version is a DRAFT, created by THIS key's user (templates record a creator user, never a key — "this key created it" degrades to "this key's user"), and NOTHING pins any version of it in ANY pipeline version ever — the delete guard's every-version-ever scan, not the working-version scan `templates_used_by` (§6.2.21) answers. A pinned draft is refused with `template.in_use` and `details.pinned_by` naming the pipelines to change first; a template holding any RELEASED or discarded version is `template.version.last_release`; another user's draft is `auth.role_required` with `details.reason: "not_creator"` (the one authorization refusal since #215, owner ruling 2026-09-24); an unknown id is `template.not_found`. The sole-draft purge takes the entity row with it, and a concurrent edit between the guard reads and the delete is `template.version.conflict` — never a silent delete of someone else's save.
 
-**Scope:** `author`.
+**Permission:** `template.version.manage`.
 
 **Mutating.** Declared `mutating` in the tool catalog, so every call writes the §14 audit pair (`mcp.tool.called` and `mcp.tool.write`).
 
@@ -1326,7 +1320,7 @@ One table's catalog statistics — row estimate, indexes, per-column bounds — 
 
 Returns: `{row_estimate?, stats_as_of?, stats_source, indexes: [{name, columns, unique, primary, kind}], columns: [{name, n_distinct?, distinct_is_ratio, null_fraction?, min?, max?}]}` — the stat fields are omitted-when-null per the envelope convention (a missing `row_estimate` means "the catalog does not hold this", not zero), and `stats_source` names the catalog the numbers came from (`pg_class`, `information_schema.tables`, `sys.partitions`, `parquet_metadata`, …) or `"none"` when the dialect holds no catalog stats for the table. A LAKE table's registered partition column reports as the `{kind: "partition"}` pseudo-index — this describes the registered partition key, not an ordinary table index. The payload also carries `partition_column`, explicitly null when no key is registered. Neither a missing key nor a missing pseudo-index rules out Parquet data skipping or column projection. An unknown TABLE is **`datasource.table_not_found`** (the §7A resolution, 123 §A — naming the nearest listed table when one is close), so empty stats now mean exactly one thing: the table EXISTS and the catalog holds nothing for it. An unknown datasource is `datasource.not_found`, and a connection failure is `pipeline.execution.datasource_unreachable` — the same translations as §6.2.16–18.
 
-**Scope:** `read` — the engine's own stored ESTIMATES about shape, never customer row data (the §6.2.21 reasoning), which is why it sits below the sibling introspection tools' `author` floor.
+**Permission:** `datasource.read` — the engine's own stored ESTIMATES about shape, never customer row data (the §6.2.21 reasoning), which is why it is `datasource.read`, not the introspection permission.
 
 #### 6.2.34 `sql_probe`
 
@@ -1368,7 +1362,7 @@ Refusals split into two families. **Argument faults** (JSON-RPC `-32602`, nothin
 
 **The `tempdb` scratch check (2026-09-11; contract corrected 2026-09-16, #119; scratch de-privileged 2026-09-21, #186).** `name: "tempdb"` no longer refuses. The statement is PREPARED against a FRESH, EMPTY in-memory H2 opened in the staging engine's own `MODE` and lower-folding (the URL shape `StagingFactory` builds, minus the execution) — no registry, no lease, no visibility gate, nothing to read. The scratch session is a grantless NON-admin user (staging §9.5's two-phase open, shared as `H2RestrictedSession`): the classifier admits only SELECT/WITH, but a SELECT can still call host-reaching functions, and those (`FILE_READ`, `CSVREAD`, …) are refused by the engine with SQLState `90040` — mapped like any permission-denied refusal to `datasource.table_forbidden`, never a 500, and the file's content is never in the answer. The payload always carries `check: "syntax_and_names"` (the check attempted), `engine`, and **`validation_status`**, which says how far the engine got. **`"incomplete"`** — H2 reported a missing table (`42102`/`42103`/`42104`): `{"check", "engine", "validation_status": "incomplete", "parsed": null, "missing_table": "<the first staged table H2 could not find>", "wall_ms", "note"}`. H2 stops preparing at the first table it cannot resolve, so nothing after it has been checked — measured on the pinned 2.3.232: `SELECT a.id FROM absent_a a FULL OUTER JOIN absent_b b ON a.id = b.id` reports `absent_a` on the empty scratch and is a `42000` syntax error at `OUTER` once both tables exist (`SqlProbeH2Test`); an acceptance run had matched the SQL hash of a "passing" probe to its subsequently failing execution. `parsed` is deliberately `null`, not omitted: the key keeps its place and the value withdraws the affirmative the pre-#119 payload made (`parsed: true`, "the SQL is sound"). The note names the two ways to finish the check — restate the suspect construct over typed, aliased `VALUES` inputs so it executes on the scratch (validates the construct, not the real column types or data), or use `pipelines_execute` to run the DAG with its real staged inputs, which validates against the real schema at the cost of a run (`pipelines_execute_node` cannot read tempdb or reuse staged tables from an earlier execution); `templates_render` checks what the template emits, not whether it runs. **`"executed"`** — the statement was self-contained (a `VALUES` spine, a constant): `parsed: true` plus the ordinary probe payload above and a note that this validates the statement as written, not other parameter values or the real staged inputs. **Anything else** → the catalogued `pipeline.node.query_execution_failed` with H2's message — never disguised as incomplete. The case that motivated the check: an agent's caller node died on `Column "column1" not found` (H2 names `VALUES` columns `C1…`) after five source nodes ran green — a full DAG run to learn one H2 spelling. Parameters bind exactly as in a real probe; the classifier still admits only one SELECT/WITH; the scratch never creates a missing table from a guessed shape and never reads another execution's tempdb. Compatibility: no tool name, argument or count changed; `parsed` became nullable on the incomplete branch and `validation_status` was added — no typed consumer of the payload exists in this repository (the field is read by agents, not code), and this paragraph is the contract.
 
-**Scope:** `author` — this returns arbitrary customer ROW DATA; the same 037 F reasoning as `datasources_preview_rows`.
+**Permission:** `datasource.sql_probe` — this returns arbitrary customer ROW DATA; the same 037 F reasoning as `datasources_preview_rows`.
 
 #### 6.2.35 `executions_cancel`
 
@@ -1391,9 +1385,9 @@ Request cancellation of a RUNNING execution — the MCP twin of `DELETE /api/v1/
 
 Returns: `{execution_id, status: "cancellation_requested"}`. Cancellation is REQUESTED, not awaited — the flag reaches the executing instance within about one poll interval (immediately when same-instance); poll `executions_get` (§6.2.14) for the terminal `ABORTED`.
 
-The same-credential rule, in order: an execution the caller may not see is the same not-found every read path answers (ownership before anything else); a non-RUNNING execution is `pipeline.execution.not_running` with its current status in `details`; an execution started outside MCP (REST, the UI, a PIPELINE node, a published endpoint) is `auth.scope.insufficient` with `details.reason: "started_outside_mcp"`; and one started by a DIFFERENT credential — another key of the same user included — is the same code with `details.reason: "different_credential"`. The join that proves "this key started it" is an audit row pairing this key id with the execution's correlation id, because `pipeline_executions` records the owner USER, never the key. `pipelines_execute` writes that row (`mcp.execution.launched`) BEFORE the blocking run begins — the dispatcher's end-of-call `mcp.tool.called` row cannot exist while the call is still blocking, and in-flight is exactly when a cancel matters.
+The same-credential rule, in order: an execution the caller may not see is the same not-found every read path answers (ownership before anything else); a non-RUNNING execution is `pipeline.execution.not_running` with its current status in `details`; an execution started outside MCP (REST, the UI, a PIPELINE node, a published endpoint) is `auth.role_required` with `details.reason: "started_outside_mcp"`; and one started by a DIFFERENT credential — another key of the same user included — is the same code with `details.reason: "different_credential"`. The join that proves "this key started it" is an audit row pairing this key id with the execution's correlation id, because `pipeline_executions` records the owner USER, never the key. `pipelines_execute` writes that row (`mcp.execution.launched`) BEFORE the blocking run begins — the dispatcher's end-of-call `mcp.tool.called` row cannot exist while the call is still blocking, and in-flight is exactly when a cancel matters.
 
-**Scope:** `execute` — the REST twin's floor (the same-credential rule is a handler gate, not expressible as a scope).
+**Permission:** `execution.cancel` — the REST twin's permission (the same-credential rule is a handler gate, not expressible as a permission; its refusals are `auth.role_required` with `details.reason`).
 
 **Mutating.** Declared `mutating` in the tool catalog — cancellation IS a write (it ends a running execution), and the `mcp.tool.write` row is the trace of WHOSE key stopped it (§14).
 
@@ -1445,7 +1439,7 @@ The save-time validation is the SAME parse-only set `templates_create` runs ([Te
 
 Returns: the stored version's projection — `id`, `version`, `status`, `body_hash` (carry this into the next write), `dialect`, `type`, `body`, and the `draft` pointer (`version`, `body_hash`, `updated_by`, `updated_at`) when the write produced a draft. **The update does NOT release** (versioning D4): a human releases from the UI, and `templates_render` (§6.2.9) is the preview step before you hand the draft over. A write whose CONTENT equals the released content is the §5.1 no-op: `status: "RELEASED"`, no draft opened, no version number burned. An unknown id is `template.not_found`; a stale `expected_hash` is `template.version.conflict` with the current state in `details`; an update naming a different `type` than the template's established one is `template.validation.type_immutable` (046 §5.3). **`type` is optional on update too (136 §D, T289b):** omitted, the working version's type is inherited — it used to default to `sql`, so an html template updated without `type` was refused `type_immutable` for a field it never changed; stated, it must equal the established one (`template.validation.type_immutable`, the draft service's own refusal). **`dialect` is optional on update (135 §C, T276):** omitted, the working version's dialect is inherited before validation — the draft already carries it, and an agent resending the value it read is the round trip this saves; present, it must equal the established one, and a different dialect is `template.validation.dialect_invalid` with `details.dialect` / `details.established_dialect` / `details.template_id`, refused before validation or any write (a template's pipeline nodes pin it against a source of that dialect; another engine is a new template). The REST `PUT /templates` (§8.4) is unchanged — it still requires the field and does not compare it; the inheritance is the MCP surface's, resolved before the shared write. There is deliberately no `confirm_new_root` argument: the update names a template that already exists and cannot mint a folder.
 
-**Scope:** `author`. **Mutating.**
+**Permission:** `template.update`. **Mutating.**
 
 #### 6.2.37 `semantics_record`
 
@@ -1558,7 +1552,7 @@ Returns: the stored fact in the FULL shape — the §6.2.18a block plus `datasou
 
 **`refs` is optional for a WORKSPACE rule (136 §B / T278).** A `definition`, `exclusion` or `preference` that spans datasources ("busiest day = A + B combined") is recorded ONCE, against the datasource the question is mostly about, with `refs` omitted (or `[]`): it stays bound to that datasource — for visibility, and for the `definitions` block §6.2.10/§6.2.11 carry — but names no table, so nothing resolves it and nothing marks it stale. The text/refs check still runs against that datasource's catalog (an exact table name in the text is added as a ref, a near-miss is `semantics.ref_mismatch`); a table of ANOTHER datasource in the text is prose. A DATASOURCE kind keeps requiring at least one ref — a `unit` without a column is meaningless — refused as `semantics.fact_invalid` (`details.field: "refs"`).
 
-**Scope:** `author` — recording is an authoring act (D-S8), the same bar as writing a pipeline that reads the datasource. **Mutating.**
+**Permission:** `semantic.record` — recording is an authoring act (D-S8), the same bar as writing a pipeline that reads the datasource. **Mutating.**
 
 #### 6.2.38 `semantics_list`
 
@@ -1606,7 +1600,7 @@ The facts on a datasource this workspace can see, with trust, drift, refs, evide
 
 Returns: `{datasource, facts: [FULL fact shape, oldest first], count}`. Visibility is the store's one predicate: every DATASOURCE fact on the datasource (whoever recorded it, `from_this_workspace` says which) and this workspace's own WORKSPACE facts. `since` answers the §9 acceptance question "what was recorded since <time>". Served AS STORED — this read opens no connection, so no drift is recomputed; `drift` carries the message a previous introspection read left. `retired` facts appear only with `include_retired: true`.
 
-**Scope:** `read` — facts ABOUT the data, never row data (the `templates_used_by` reasoning).
+**Permission:** `semantic.read` — facts ABOUT the data, never row data (the `templates_used_by` reasoning).
 
 #### 6.2.39 `semantics_retire`
 
@@ -1642,7 +1636,7 @@ Retire one fact with a reason — the D-S11 verb: a state, never a delete.
 
 Returns: the retired fact in the full shape (`trust: "retired"`, `retired_at`, `retired_reason`). A fact this workspace cannot see is `semantics.not_found` (D-R5, identical for an id that exists nowhere); a DATASOURCE fact recorded from ANOTHER workspace needs `ws_admin` — `auth.role_required` otherwise (you do not silently retire what someone else established). Audited as `semantics.retired`. Prefer `semantics_record` with `supersedes` when the correct fact is known: one call retires the old and records the new.
 
-**Scope:** `author`. **Mutating.**
+**Permission:** `semantic.retire`. **Mutating.**
 
 #### 6.2.40 `docs_list`
 
@@ -1660,7 +1654,7 @@ The skill's document catalog, as a tool (120, ruling R3). The skill has been ser
 }
 ```
 
-**Scope:** `read` — the §6.2.23 reasoning: the manual this deployment ships is a property of the BUILD, identical for every caller, every key and every workspace.
+**Permission:** `docs.read` — the §6.2.23 reasoning: the manual this deployment ships is a property of the BUILD, identical for every caller, every key and every workspace.
 
 **Response:** `[{name, title, purpose}]` — `skill` first (the operating core, `SKILL.md`), then every reference in the order the skill's own map lists them; `title` is the document's own H1, `purpose` the map's one-line "open this when…". A reference on disk with no map line, or a map line with no file, is a build failure (`SkillDistributionTest`), not a warning.
 
@@ -1683,7 +1677,7 @@ One skill document's full markdown — the same bytes the `datapipelines://docs/
 }
 ```
 
-**Scope:** `read`.
+**Permission:** `docs.read`.
 
 **Returns:** `{name, title, markdown}`. `name` is `skill` for the operating core or a reference name from `docs_list`; the `.md`-suffixed form is accepted like the resource's own tolerance.
 
@@ -1713,7 +1707,7 @@ Run a pipeline version's release checks (`checks[]`, pipeline-contract §3.3) NO
 }
 ```
 
-**Scope:** `execute` — the REST twin's floor (`EXECUTE_PIPELINE`, auth.md §7.6): a viewer runs what they can read, and a check run returns no row data beyond the one observed cell per check. The catalog declares the tool **mutating** (it writes the run rows), so the dispatcher's `mcp.tool.write` row is the trace of who commissioned them.
+**Permission:** `pipeline.run_checks` — the REST twin's permission (auth.md §7.6): a viewer runs what they can read, and a check run returns no row data beyond the one observed cell per check. The catalog declares the tool **mutating** (it writes the run rows), so the dispatcher's `mcp.tool.write` row is the trace of who commissioned them.
 
 **Returns:** `{version, runs: [{check_id, name, expected, observed, verdict, message, ran_at}]}` — the REST `checkRuns` shape exactly: `expected` serialized from the `CheckExpectation` model (its non-null members only), `verdict` one of `pass` | `fail` | `error`, and `observed`/`message`/`ran_at` null exactly when the run has none. An `error` verdict means no verdict could be formed — the datasource was unresolvable or unreachable, the statement was refused, it returned a shape the expectation cannot compare (two columns for a `value` check), or the parameters did not bind; the reason is in `message`. It is the truth recorded, never silently a `fail`. A version with no `checks[]` returns an empty `runs` array.
 
@@ -1741,7 +1735,7 @@ Evaluate a transform template over a caller-supplied input object (7b, transform
 }
 ```
 
-**Scope:** `author` — the `templates_render` row (R6: evaluating untrusted code on the server is the same authoring act as rendering). The catalog declares the tool **not mutating**.
+**Permission:** `template.evaluate` — the `templates_render` row (R6: evaluating untrusted code on the server is the same authoring act as rendering). The catalog declares the tool **not mutating**.
 
 **Returns:** `{ output, rejects, invariants: [ { name, passed, message } ] }`. `output` is the function's return after the type gate (the rows array, `{ rows, rejects }` when the contract declares rejects, or the one value/object in value mode); `rejects` is the rejected half with its reasons; each invariant verdict is `{ name, passed, message }`.
 
@@ -1857,7 +1851,7 @@ Returns a page of resource descriptors (URI, name, description, MIME type) plus 
 - The response omits `nextCursor` on the last page. Presence of `nextCursor` is the only "there is more" signal.
 - Enumeration order is stable within a paging run (docs, then pipelines, then templates, then datasources, then executions; each by id).  The `docs` rows lead because they are the only constant-size kind — the skill plus one row per reference, identical on every server — so they cannot push an entity off a page, and an agent that lists resources at all meets the manual before it meets content. Entities created mid-run may be missed — `resources/list` is a discovery aid, not a consistent snapshot.
 
-**Scope filtering:** the listing is filtered to what the calling key may read (`read` scope; ownership rules apply to executions) **and to the key's pinned workspace** (workspaces design §5.2/§5.3: its pipelines/templates/executions, its bound datasources plus global ones), so two agents see different resource sets on the same server.
+**Role filtering:** the listing is filtered to what the calling key's role may read — each family under its read permission (`pipeline.read`, `template.read`, `datasource.read`, `execution.read`, `docs.read`; a promoter's key lists no executions), and ownership rules apply to executions — **and to the key's pinned workspace** (workspaces design §5.2/§5.3: its pipelines/templates/executions, its bound datasources plus global ones), so two agents see different resource sets on the same server.
 
 **Execution resources are windowed:** only executions from the **last 24 hours** are enumerated. Older executions remain readable by direct URI (`datapipelines://executions/{id}`) as long as their metadata exists in the Metadata DB — they are simply not listed, because an unbounded execution history would make `resources/list` useless (and enormous) on any busy instance. Result rows are governed by the much shorter result TTL regardless (§6.2.15).
 
@@ -1979,8 +1973,8 @@ The error payload inside the tool result matches the [REST API `error` object](r
 ### 9.3 Transport errors
 
 - HTTP 401 (`auth.api_key.missing` / `.invalid` / `.expired`) → the key is absent, revoked or expired. Retrying does not help; the user must supply a new key.
-- HTTP 401 (`auth.principal_deactivated`) → the key's owner was deactivated; HTTP 404 (`auth.key_workspace_inactive`) → the workspace the key is pinned to was deactivated. Neither is a key problem: an administrator reactivating the user or the workspace restores the same key.
-- HTTP 403 (`auth.scope.insufficient`) → the key lacks the tool's minimum scope (§6.2, [Auth §7.6](auth.md#76-operation-matrix--two-axes-authoritative)). Retrying does not help: since 179 a user key's scope IS the owner's role, so the fix is a higher role in that workspace, not a new key.
+- HTTP 401 (`auth.principal_deactivated`) → the key's member was deactivated; HTTP 404 (`auth.key_workspace_inactive`) → the workspace the key is pinned to was deactivated. Neither is a key problem: an administrator reactivating the user or the workspace restores the same key.
+- `isError` with `auth.key_issuer_role_lost` → your role in the key's workspace does not hold the tool's permission (§6.2, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). Retrying does not help: the key acts as you, so the fix is a role in that workspace, not a new key.
 - HTTP 429 (`rate_limit.exceeded`) → rate limited. Limits are **per-user**, shared across REST and MCP ([REST API §12](rest-api.md#12-rate-limiting)); honor `Retry-After` and back off.
 - HTTP 429 (`rate_limit.unavailable`) → the limiter could not decide and refused the call (fail closed, [REST API §12.3](rest-api.md#123-when-the-limiter-itself-is-unavailable)). Not your budget: honor `Retry-After` and retry, and do not treat it as a signal to reduce your request rate permanently.
 - HTTP 5xx → server error; agent should retry with backoff.
@@ -2057,10 +2051,10 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 - [ ] Every MCP endpoint requires auth (no unauthenticated access).
 - [ ] API key validated on every request, not just session establishment — via `DP-API-Key` **and** `Authorization: Bearer dpk_...`, both through the single [Auth §7.3](auth.md#73-validation-flow) path. No second, laxer code path for the Bearer form.
 - [ ] Session JWTs (`dp_session` cookie, non-`dpk_` Bearer tokens) are **rejected** on `/mcp` — verify with a test that a valid browser session cannot call a tool.
-- [ ] Key revocation and owner deactivation take effect within the cache TTL (~60s) on `/mcp`, not just on REST.
-- [ ] Scope enforced per tool against the [Auth §7.6 matrix](auth.md#76-operation-matrix--two-axes-authoritative) — one test per tool asserting the next-lower scope is refused with `auth.scope.insufficient`.
-- [ ] Execution ownership enforced on `executions_get`, `executions_get_result`, and execution resources — a valid `read` key cannot read another user's results.
-- [ ] `resources/list` filtered by the caller's scope and ownership (§7.3), not just paginated.
+- [ ] Key revocation, member deactivation and a role change take effect within the cache TTL (~60s) on `/mcp`, not just on REST.
+- [ ] The permission enforced per tool against the [Auth §7.6 catalog](auth.md#76-operation-matrix--the-permission-catalog-authoritative) — every tool walked with every role an MCP key can act with (viewer, promoter, author), admitted exactly where the role's column holds the tool's permission.
+- [ ] Execution ownership enforced on `executions_get`, `executions_get_result`, and execution resources — a key of a member without `execution.read_all` cannot read another user's results.
+- [ ] `resources/list` filtered by the caller's role (each family's read permission) and ownership (§7.3), not just paginated.
 - [ ] Datasource passwords never included in tool results or resources; `datasources_test` failures do not echo credentials or JDBC URLs.
 - [ ] Error messages do not leak credentials or internal network topology.
 - [ ] Rate limiting enforced at the MCP layer — the same **per-user** limits as REST, shared across both surfaces (a user cannot double their budget by splitting traffic).
@@ -2079,12 +2073,12 @@ Out of scope for v1, tracked for future ([ROADMAP](ROADMAP.md) is the authoritat
 
 | Event | When | 
 |---|---|
-| `mcp.tool.called` | Every tool call, every outcome (success, domain error, invalid params, internal error, scope refusal) |
-| `mcp.tool.write` | Exactly one per call to a tool the catalog declares **mutating**, emitted after the tool returns — on success and on failure alike. A §7.6 scope refusal never invoked the tool, so it writes no write event: the refusal is recorded by `mcp.tool.called` alone |
+| `mcp.tool.called` | Every tool call, every outcome (success, domain error, invalid params, internal error, `permission_refused`) |
+| `mcp.tool.write` | Exactly one per call to a tool the catalog declares **mutating**, emitted after the tool returns — on success and on failure alike. A §7.6 permission refusal never invoked the tool, so it writes no write event: the refusal is recorded by `mcp.tool.called` alone |
 | `mcp.execution.launched` | One per `pipelines_execute` launch (107), emitted BEFORE the blocking run begins: key id + correlation id + pipeline/execution id. It exists so §6.2.35's same-credential rule can authorize cancelling an IN-FLIGHT execution — the end-of-call `mcp.tool.called` row only exists once the blocking call returns, which for this tool is after the execution is terminal |
 | `mcp.resource.read` | Every `resources/read`, success or failure (120). Until this event the read side of the MCP surface left no trace at all — the audit of an agent's session could show 35 tool calls and silence about which documents it opened |
 
-**Fields** (the two tool events identical; the resource event mirrors them): actor — `user_id` (the key's owner) and `key_id`; `tool`; `target` — the identifier-shaped argument only (execution/pipeline/template id or name); for version-aware tools the `version` the call named; for node runs the `node_id`; for the table-addressed schema tools (`datasources_get_columns` / `_get_tables` / `_get_table_stats`) the `table` (and the `namespace` segments when the caller passed one) beside the `target` datasource; for `templates_render` / `templates_evaluate` the `template` id beside the `target`; `outcome` (`success` \| `error` + `code` \| `invalid_params` \| `internal_error` \| `scope_refused`); `elapsed_ms`; `correlation_id`. A resource read records `uri` instead of `tool`/`target`, and its `code` names the failure (`resource_not_found`, `forbidden`, `internal_error`) — a name, never the JSON-RPC number. Since 139 the table/template identifiers are what the entry-point checks learn from (`pipeline.validation.table_not_learned` §6.2.4, `pipeline.execution.template_unrendered` §6.2.3); rows written before 139 carry neither key, and those simply do not count.
+**Fields** (the two tool events identical; the resource event mirrors them): actor — `user_id` (the key's owner) and `key_id`; `tool`; `target` — the identifier-shaped argument only (execution/pipeline/template id or name); for version-aware tools the `version` the call named; for node runs the `node_id`; for the table-addressed schema tools (`datasources_get_columns` / `_get_tables` / `_get_table_stats`) the `table` (and the `namespace` segments when the caller passed one) beside the `target` datasource; for `templates_render` / `templates_evaluate` the `template` id beside the `target`; `outcome` (`success` \| `error` + `code` \| `invalid_params` \| `internal_error` \| `permission_refused`); `elapsed_ms`; `correlation_id`. A resource read records `uri` instead of `tool`/`target`, and its `code` names the failure (`resource_not_found`, `forbidden`, `internal_error`) — a name, never the JSON-RPC number. Since 139 the table/template identifiers are what the entry-point checks learn from (`pipeline.validation.table_not_learned` §6.2.4, `pipeline.execution.template_unrendered` §6.2.3); rows written before 139 carry neither key, and those simply do not count.
 
 **Which tools are mutating is a declared property of the catalog entry** (`McpToolCatalog.Entry.mutating`), never a name pattern — `McpToolCatalogBindingTest` fails if a catalogued tool lacks the declaration or a known writer (`pipelines_create`, `pipelines_update`, `pipelines_execute`, `pipelines_execute_node`, `templates_create`, and since 140 `pipelines_run_checks` — it writes the `pipeline_check_runs` rows) is flagged read. The failure direction is asymmetric: a read tool declared mutating is a harmless over-audit; a mutating tool declared read is the hole.
 
@@ -2126,7 +2120,7 @@ client injects it into every session, so a line that does not change what an age
 first five calls belongs in the skill instead.
 
 **Delivery 2 — the resource (pull, MCP).** `datapipelines://docs/skill` and
-`datapipelines://docs/skill/{reference}` (§7.1, §7.2.4), `read` scope, listed by
+`datapipelines://docs/skill/{reference}` (§7.1, §7.2.4), `docs.read`, listed by
 `resources/list` ahead of the entity kinds. Since 120 the same bytes also answer as TOOLS —
 `docs_list` / `docs_get` (§6.2.40–41), from the same `SkillDocs` loader — because resources
 are a weak surface: several clients fetch them reluctantly or never, and every client calls
@@ -2163,7 +2157,7 @@ init. `SkillDocs` is the single reader of those bytes, so the resource and the U
 answer differently.
 
 **The generated reference.** `references/tools.md` is rendered from `McpToolCatalog` plus each
-tool's `definition` — name, description, arguments with their descriptions, §7.6 scope,
+tool's `definition` — name, description, arguments with their descriptions, §7.6 permission,
 mutating flag — by `./gradlew :modules:mcp-server:skillArtifacts`, and a drift test fails when
 the committed file is not what the catalog renders. The handwritten sections may NAME tools;
 they may not list them. This is not a hypothetical: three hand-typed tool counts were stale
@@ -2181,6 +2175,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v1.47 | 215b (#215) key identities, key roles | **Scopes removed** ([Auth §7.5](auth.md#75-key-roles-scopes-removed)): every §6.2 tool's `**Scope:**` row is now its **`**Permission:**`** — the catalog permission the tool declares on `McpToolCatalog.Entry.permission` (moved there from the auth matrix); the MCP key acts as its member's current role capped at author (PK4) and is never a super admin (B1); a role refusal is `auth.key_issuer_role_lost`, an undeclared tool `auth.permission.undeclared`, the two ownership rules `auth.role_required` with `details.reason`. §4.1: **the MCP key connects an MCP client to `/mcp` and nothing else** (B2). Resources are filtered by each family's read permission (a promoter's key lists no executions). §14's refusal outcome is `permission_refused`. Drift fixed on the way: three `datasources_create` paragraphs (removed in 094) had been stranded under §6.2.26 `endpoints_delete` — gone. |
 | 2026-09-24 | v1.46 clarification | #219 | Correct §6.2.17 and §6.2.33 partition/pruning guidance and matching tool descriptions. Null means no registered key, not one file or a mandatory full scan. No tool, schema, permission or execution behavior changes. |
 | 2026-09-23 | v1.46 | 7b (#7) | **`templates_evaluate` lands (41 → 42 tools, §6.2.43)** — the transform evaluator: a caller-supplied input object through the bounded evaluation pool with the contract's input check, the type gate and the invariants; the working-version resolution is `templates_render`'s, and `templates_render` now refuses a transform type with `template.render_not_applicable` pointing at it (§6.2.9). The `type`/`engine` enums in the create/update/list schemas are derived from the enums and admit `jsonata`/`javascript`/`none` (§6.2.6, §6.2.8, §6.2.36). §14's identifier list: the evaluate row carries `template` like the render row. Every count (§3's capability note, §6.1, §8, the two ScopeMatrix rows, tools.md) moved in the same commit. |
 | 2026-09-21 | v1.45 | 180 (#180) | No tool, no schema, no permission change. §4.2 and §9.3: a deactivated OWNER is `401 auth.principal_deactivated` (new §13.7 code; was folded into `auth.api_key.invalid`), a deactivated PIN `404 auth.key_workspace_inactive`; both refused at validation, so `tools/list` is refused too ([Auth §11A.3](auth.md#11a3-deactivation)). |

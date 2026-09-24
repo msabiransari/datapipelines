@@ -54,7 +54,6 @@ class PromoterLensPredicateTest {
             userId = UUID.randomUUID(),
             email = "p@example.com",
             displayName = "P",
-            scopes = if (method == AuthMethod.API_KEY) setOf(Scope.READ, Scope.EXECUTE, Scope.AUTHOR) else emptySet(),
             authMethod = method,
             workspace = role?.let { WorkspaceContext(UUID.randomUUID(), "ws", role = it, superAdmin = superAdmin) },
             superAdmin = superAdmin,

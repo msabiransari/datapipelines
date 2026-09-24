@@ -9,7 +9,6 @@ import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.auth.WorkspaceRole
@@ -85,7 +84,6 @@ class PublishedEndpointDeactivatedWorkspaceTest {
             userId = UUID.randomUUID(),
             email = "agent@other.com",
             displayName = "Agent",
-            scopes = setOf(Scope.EXECUTE),
             authMethod = AuthMethod.API_KEY,
             keyId = "dpk_FOREIGNKEY01",
             workspaceName = "other",

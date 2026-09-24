@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -16,7 +15,7 @@ import java.util.UUID
 
 class ExecutionToolsTest {
     private val executions = mockk<ExecutionRepository>()
-    private val ctx = McpFixtures.ctx(Scope.READ)
+    private val ctx = McpFixtures.ctx()
 
     @Test
     fun `list returns the caller's own executions`() {
@@ -70,7 +69,7 @@ class ExecutionToolsTest {
         val all =
             ExecutionsListTool(executions).call(
                 McpArguments(mapOf("pipeline_id" to McpFixtures.PIPELINE_ID.toString())),
-                McpFixtures.ctx(Scope.AUTHOR, workspace = McpFixtures.WORKSPACE_ADMIN),
+                McpFixtures.ctx(workspace = McpFixtures.WORKSPACE_ADMIN),
             ) as List<*>
 
         all.size shouldBe 2
@@ -160,7 +159,7 @@ class ExecutionToolsTest {
         val payload =
             ExecutionsGetTool(executions).call(
                 McpArguments(mapOf("execution_id" to McpFixtures.EXECUTION_ID.toString())),
-                McpFixtures.ctx(Scope.AUTHOR, workspace = McpFixtures.WORKSPACE_ADMIN),
+                McpFixtures.ctx(workspace = McpFixtures.WORKSPACE_ADMIN),
             ) as Map<String, Any?>
 
         payload["executed_by"] shouldBe McpFixtures.OTHER_USER.toString()

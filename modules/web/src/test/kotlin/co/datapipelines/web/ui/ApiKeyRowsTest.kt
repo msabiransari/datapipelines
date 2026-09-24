@@ -4,7 +4,6 @@ import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
-import co.datapipelines.auth.Scope
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -30,27 +29,33 @@ class ApiKeyRowsTest {
     private val workspaceId = UUID.randomUUID()
 
     @Test
-    fun `a user key renders its scopes, a prefix, and relative-plus-absolute timestamps`() {
+    fun `a key renders its role, who it acts as, who created it, a prefix, and relative-plus-absolute timestamps`() {
+        every { bindings.findByKey("dpk_RGAXQ7T2MKLP") } returns emptyList()
+        val identity = UUID.randomUUID()
         val row =
             rows
                 .of(
                     listOf(
                         key(
                             id = "dpk_RGAXQ7T2MKLP",
-                            scopes = setOf(Scope.EXECUTE, Scope.READ),
+                            kind = ApiKeyKind.ENDPOINT,
                             createdAt = Instant.parse("2026-09-05T09:00:00Z"),
                             lastUsedAt = Instant.parse("2026-09-08T10:00:00Z"),
                             expiresAt = Instant.parse("2026-12-01T00:00:00Z"),
-                        ),
+                        ).copy(userId = identity, createdBy = userId),
                     ),
                     now,
+                    userLabels = mapOf(identity to "ci (API key)", userId to "Alice"),
                 ).single()
 
         assertAll(
             // `dpk_` plus eight characters (12 total, D16's top-bar length) — enough to
             // recognise a key, useless to anyone else.
             { row.prefix shouldBe "dpk_RGAXQ7T2…" },
-            { row.scopes shouldBe listOf("execute", "read") },
+            // #215: the key role's label, its own identity, and its creator — three different facts.
+            { row.role shouldBe "api caller" },
+            { row.actsAs shouldBe "ci (API key)" },
+            { row.createdBy shouldBe "Alice" },
             { row.createdRelative shouldBe "3 days ago" },
             { row.createdAbsolute shouldBe "2026-09-05 09:00 UTC" },
             { row.lastUsedRelative shouldBe "2 hours ago" },
@@ -135,7 +140,6 @@ class ApiKeyRowsTest {
     private fun key(
         id: String = "dpk_RGAXQ7T2MKLP",
         kind: ApiKeyKind = ApiKeyKind.USER,
-        scopes: Set<Scope> = setOf(Scope.READ),
         createdAt: Instant = Instant.parse("2026-09-05T09:00:00Z"),
         lastUsedAt: Instant? = null,
         expiresAt: Instant? = null,
@@ -145,7 +149,6 @@ class ApiKeyRowsTest {
         userId = userId,
         name = "key",
         keyHash = "hash",
-        scopes = scopes,
         isRevoked = isRevoked,
         createdAt = createdAt,
         lastUsedAt = lastUsedAt,

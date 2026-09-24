@@ -1,5 +1,6 @@
 package co.datapipelines.integration
 
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.comparables.shouldBeGreaterThanOrEqualTo
@@ -65,9 +66,9 @@ class DatasourceInProcessRegistrationE2eTest {
 
         val matrix = StringBuilder("registration matrix (186):\n")
         for (case in cases(underRoot)) {
-            for ((role, key) in listOf("ws_admin" to WSADMIN_KEY.plaintext, "super_admin" to ADMIN_KEY.plaintext)) {
+            for ((role, session) in listOf("ws_admin" to WSADMIN_SESSION, "super_admin" to ADMIN_SESSION)) {
                 val expected = if (role == "ws_admin") case.wsAdmin else case.superAdmin
-                val response = register(key, "${case.label}-$role", case.dialect, case.jdbcUrl)
+                val response = register(session, "${case.label}-$role", case.dialect, case.jdbcUrl)
                 val (status, body) = response
                 val outcome =
                     when {
@@ -117,9 +118,9 @@ class DatasourceInProcessRegistrationE2eTest {
     fun `the update leg - re-pointing a server H2 at an in-process URL is refused for a workspace admin`() {
         // A server-form H2 registered by a workspace admin (member gate ON) is legal; moving its
         // URL in-process is a registration, and the workspace admin may not do it.
-        register(WSADMIN_KEY.plaintext, "sweep186-update-target", "H2", "jdbc:h2:tcp://127.0.0.1:9/sweep186u").first shouldBe 201
+        register(WSADMIN_SESSION, "sweep186-update-target", "H2", "jdbc:h2:tcp://127.0.0.1:9/sweep186u").first shouldBe 201
 
-        val refused = update(WSADMIN_KEY.plaintext, "sweep186-update-target", "jdbc:h2:mem:sweep186moved")
+        val refused = update(WSADMIN_SESSION, "sweep186-update-target", "jdbc:h2:mem:sweep186moved")
         withClue("ws_admin re-point to mem: must refuse: $refused") {
             refused.first shouldBe 400
             refused.second.contains("datasource.validation.workspace_forbidden") shouldBe true
@@ -127,12 +128,12 @@ class DatasourceInProcessRegistrationE2eTest {
         refusals++
 
         // The super admin may — and the row then reads back with the new URL.
-        update(ADMIN_KEY.plaintext, "sweep186-update-target", "jdbc:h2:mem:sweep186moved").first shouldBe 200
+        update(ADMIN_SESSION, "sweep186-update-target", "jdbc:h2:mem:sweep186moved").first shouldBe 200
         acceptances++
         val readBack =
             given()
                 .port(port)
-                .header("DP-API-Key", ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/datasources/sweep186-update-target")
                 .then()
@@ -144,7 +145,7 @@ class DatasourceInProcessRegistrationE2eTest {
 
     /** POST /api/v1/datasources → (status, body). */
     private fun register(
-        key: String,
+        session: String,
         name: String,
         dialect: String,
         jdbcUrl: String,
@@ -153,7 +154,7 @@ class DatasourceInProcessRegistrationE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header("DP-API-Key", key)
+                .asSession(session)
                 .body(
                     mapper.writeValueAsString(
                         mapOf(
@@ -173,7 +174,7 @@ class DatasourceInProcessRegistrationE2eTest {
 
     /** PUT /api/v1/datasources/{name} with a new jdbc_url → (status, body). */
     private fun update(
-        key: String,
+        session: String,
         name: String,
         jdbcUrl: String,
     ): Pair<Int, String> {
@@ -181,7 +182,7 @@ class DatasourceInProcessRegistrationE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header("DP-API-Key", key)
+                .asSession(session)
                 .body(
                     mapper.writeValueAsString(
                         mapOf("name" to name, "dialect" to "H2", "jdbc_url" to jdbcUrl, "username" to "sa"),
@@ -250,8 +251,16 @@ class DatasourceInProcessRegistrationE2eTest {
         private val WSADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val WORKSPACE_ID: String = UUID.randomUUID().toString()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-186-admin", arrayOf("read", "execute", "author"))
-        private val WSADMIN_KEY = E2eAuth.generateKey("e2e-186-wsadmin", arrayOf("read", "execute", "author"))
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign both sessions (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-186-admin@datapipelines.test", "lane186-sweep")
+        private val WSADMIN_SESSION get() =
+            E2eSession.jwt(
+                JWT_SECRET,
+                WSADMIN_USER_ID,
+                "e2e-186-wsadmin@datapipelines.test",
+                "lane186-sweep",
+            )
 
         private val postgres get() = SharedE2e.postgres
         private val redis get() = SharedE2e.redis
@@ -273,9 +282,7 @@ class DatasourceInProcessRegistrationE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") {
-                Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
-            }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") {
                 Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
             }
@@ -319,21 +326,6 @@ class DatasourceInProcessRegistrationE2eTest {
                             " ('$WORKSPACE_ID', '$WSADMIN_USER_ID', 'workspace_admin')",
                     )
                 }
-                connection
-                    .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
-                    ).use { ps ->
-                        for ((key, owner) in listOf(ADMIN_KEY to ADMIN_USER_ID, WSADMIN_KEY to WSADMIN_USER_ID)) {
-                            ps.setString(1, key.id)
-                            ps.setObject(2, UUID.fromString(owner))
-                            ps.setString(3, key.name)
-                            ps.setString(4, key.hash)
-                            ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                            ps.setObject(6, UUID.fromString(WORKSPACE_ID))
-                            ps.addBatch()
-                        }
-                        ps.executeBatch()
-                    }
             }
         }
 

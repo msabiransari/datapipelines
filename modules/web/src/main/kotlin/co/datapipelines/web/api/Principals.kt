@@ -41,11 +41,11 @@ fun PromoterLens.current(): LensedView = viewFor(currentPrincipal())
  */
 fun ExecutionRecord.visibleTo(principal: AuthenticatedPrincipal): Boolean =
     when {
-        // §7.7 — an endpoint key is NOT its owner. `executedBy` is a user id, so owner-equality
-        // would let a key bound to /lending read a /payroll key's results merely by sharing an
-        // owner. An endpoint key's visibility is decided by [visibleToEndpointKey] instead, which
-        // needs a repository and therefore cannot live in this pure extension.
-        principal.isEndpointKey -> false
+        // §7.7 / #215 A.5 — an endpoint key acts as its OWN identity, so the runs it started carry
+        // that identity in `executed_by` and are its own — no other key and no person shares it.
+        // Runs a key served BEFORE V34 carry its creator instead; `ExecutionVisibility` reads the
+        // serve audit for those, which needs a repository and cannot live in this pure extension.
+        principal.isEndpointKey -> isOwnRunOf(principal.userId, byKeyIdentity = true)
 
         // D11: "own" is `ExecutionRecord.isOwnRunOf` — executed by this user AND not through an
         // endpoint key (an endpoint's run belongs to the endpoint, and lists for admins only).

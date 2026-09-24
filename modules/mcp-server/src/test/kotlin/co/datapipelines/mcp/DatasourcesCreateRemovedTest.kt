@@ -1,8 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuditLogger
-import co.datapipelines.auth.Scope
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
@@ -50,13 +48,13 @@ class DatasourcesCreateRemovedTest {
         assertAll(
             { McpToolCatalog.NAMES shouldNotContain TOOL },
             { McpToolCatalog.MUTATING shouldNotContain TOOL },
-            { ScopeMatrix.MCP_TOOL_PERMISSION.keys shouldNotContain TOOL },
+            { McpToolCatalog.permissionOf(TOOL) shouldBe null },
             // 31 → 30 (089's three lake_tables_* tools landed first), 30 → 34 (107's four
             // probe/cancel/purge tools), 34 → 35 (117's `templates_update`), 35 → 38 (118's three semantics_* tools),
             // 38 → 40 (120's two docs_* tools), 40 → 41 (140's `pipelines_run_checks`), 41 → 42 (7b's `templates_evaluate`). The site
             // renders NAMES.size, so this is also what the marketing page says.
             { McpToolCatalog.NAMES.size shouldBe 42 },
-            { ScopeMatrix.MCP_TOOL_PERMISSION.size shouldBe 42 },
+            { McpToolCatalog.ENTRIES.map { it.permission }.size shouldBe 42 },
         )
     }
 
@@ -106,7 +104,7 @@ class DatasourcesCreateRemovedTest {
                 .handleRequest(
                     McpTransportContext.create(
                         mapOf(
-                            McpTransportKeys.PRINCIPAL to McpFixtures.principal(Scope.ADMIN),
+                            McpTransportKeys.PRINCIPAL to McpFixtures.principal(),
                             McpTransportKeys.CORRELATION_ID to McpFixtures.CORRELATION_ID,
                         ),
                     ),
@@ -171,7 +169,7 @@ class DatasourcesCreateRemovedTest {
                 .handleRequest(
                     McpTransportContext.create(
                         mapOf(
-                            McpTransportKeys.PRINCIPAL to McpFixtures.principal(Scope.ADMIN),
+                            McpTransportKeys.PRINCIPAL to McpFixtures.principal(),
                             McpTransportKeys.CORRELATION_ID to McpFixtures.CORRELATION_ID,
                         ),
                     ),

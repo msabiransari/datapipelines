@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
@@ -133,7 +134,7 @@ class CalculatorSurfaceE2eTest {
     fun `the pipeline get lists the calculator key as a derived optional parameter`() {
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/pipelines/${pipelineId()}")
             .then()
@@ -226,7 +227,7 @@ class CalculatorSurfaceE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(mapper.writeValueAsString(mapOf("parameters" to mapOf("window_end" to WINDOW_END))))
                 .`when`()
                 .post("/api/v1/pipelines/${windowPipelineId()}/execute")
@@ -243,7 +244,7 @@ class CalculatorSurfaceE2eTest {
         val body =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId")
                 .then()
@@ -259,7 +260,7 @@ class CalculatorSurfaceE2eTest {
         val resultResponse =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
                 .then()
@@ -280,7 +281,7 @@ class CalculatorSurfaceE2eTest {
         val body =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId")
                 .then()
@@ -299,7 +300,7 @@ class CalculatorSurfaceE2eTest {
         val resultResponse =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
                 .then()
@@ -320,7 +321,8 @@ class CalculatorSurfaceE2eTest {
             val request =
                 HttpRequest
                     .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                    .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                    .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                    .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                     .header("DP-Correlation-Id", UUID.randomUUID().toString())
                     .header("Content-Type", "application/json")
                     .header("Accept", "text/event-stream")
@@ -335,7 +337,7 @@ class CalculatorSurfaceE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$H2_DATASOURCE", "display_name": "Calculator H2", "dialect": "H2",
@@ -356,7 +358,7 @@ class CalculatorSurfaceE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "$id", "dialect": "$dialect", "display_name": "$displayName",
@@ -389,7 +391,7 @@ class CalculatorSurfaceE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(bodyJson)
                 .`when`()
                 .post("/api/v1/pipelines")
@@ -437,25 +439,12 @@ class CalculatorSurfaceE2eTest {
                     """.trimIndent(),
                 )
             }
-            connection
-                .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
-                ).use { ps ->
-                    ps.setString(1, ADMIN_KEY.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, ADMIN_KEY.name)
-                    ps.setString(4, ADMIN_KEY.hash)
-                    ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                    ps.executeUpdate()
-                }
         }
     }
 
     companion object {
         private const val SECRET_BYTES = 32
         private const val SSE_BUDGET_MINUTES = 2L
-        private const val API_KEY_HEADER = "DP-API-Key"
 
         private const val H2_DATASOURCE = "h2-calc"
         private const val H2_JDBC_URL = "jdbc:h2:mem:calcdb;DB_CLOSE_DELAY=-1"
@@ -494,7 +483,9 @@ class CalculatorSurfaceE2eTest {
 
         private val random = SecureRandom()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-calc-surface-key", arrayOf("read", "execute", "author"))
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the session (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-calc-surface@datapipelines.test")
 
         /** Set by Order(1), read by the later legs — the composition suite's pattern. */
         private var pipelineId: String? = null
@@ -526,7 +517,7 @@ class CalculatorSurfaceE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
             listOf("google", "microsoft").forEachIndexed { index, name ->

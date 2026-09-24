@@ -85,8 +85,6 @@ class WorkspaceMembershipIntegrationTest {
         userId = user.id,
         email = user.email,
         displayName = user.displayName,
-        // D-R1: a session carries no scopes at all.
-        scopes = emptySet(),
         authMethod = AuthMethod.OIDC,
         superAdmin = superAdmin,
     )
@@ -160,9 +158,9 @@ class WorkspaceMembershipIntegrationTest {
         apiKeys.insert(
             id = "dpk_MEMBERKEY01",
             userId = alice.id,
+            createdBy = alice.id,
             name = "mcp/acme",
             keyHash = "\$argon2id\$fixture",
-            scopes = setOf(Scope.READ, Scope.EXECUTE),
             expiresAt = null,
             workspaceId = workspaceId,
             kind = ApiKeyKind.USER,
@@ -253,9 +251,9 @@ class WorkspaceMembershipIntegrationTest {
             apiKeys.insert(
                 id = "dpk_GLOBEXKEY01",
                 userId = bob.id,
+                createdBy = bob.id,
                 name = "mcp/globex",
                 keyHash = "\$argon2id\$fixture",
-                scopes = setOf(Scope.READ, Scope.EXECUTE),
                 expiresAt = null,
                 workspaceId = globex.id,
                 kind = ApiKeyKind.USER,
@@ -314,9 +312,9 @@ class WorkspaceMembershipIntegrationTest {
             apiKeys.insert(
                 id = "dpk_ENDPOINTK01",
                 userId = alice.id,
+                createdBy = alice.id,
                 name = "ci",
                 keyHash = "\$argon2id\$fixture",
-                scopes = emptySet(),
                 expiresAt = null,
                 workspaceId = ws.id,
                 kind = ApiKeyKind.ENDPOINT,

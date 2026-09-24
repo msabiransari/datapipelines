@@ -2,7 +2,6 @@ package co.datapipelines.web.templates
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -112,7 +111,6 @@ class TemplatesControllerTest {
                 userId,
                 "a@b.c",
                 "A",
-                setOf(Scope.AUTHOR),
                 AuthMethod.OIDC,
                 workspace = WorkspaceContext(workspaceId, "acme"),
             )

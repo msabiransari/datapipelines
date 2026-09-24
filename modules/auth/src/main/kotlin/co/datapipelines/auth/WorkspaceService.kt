@@ -213,6 +213,10 @@ open class WorkspaceService(
         email: String,
         loginMethod: LoginMethod,
     ): WorkspaceContext? {
+        // #215 A.6: only a person logs in. Every login path refuses a non-human row before it
+        // gets here; this is the second line, so no invitation is ever materialised onto — and
+        // no MCP key ever minted for — the System row or a key's identity.
+        if (!user.isHuman) return null
         val normalized = email.trim().lowercase()
         val materialised = invitationRepository.materialiseFor(normalized, user.id)
         if (materialised.isNotEmpty()) {
@@ -530,6 +534,7 @@ open class WorkspaceService(
      * their role to the request's — changing an existing member's role is [setMemberRole],
      * which the last-admin rule guards.
      */
+    @Suppress("ThrowsCount") // each refusal is its own catalogued answer: no permission, no person, a non-human row
     open fun addMember(
         principal: AuthenticatedPrincipal,
         name: String,
@@ -544,6 +549,11 @@ open class WorkspaceService(
         // being told the same thing the members-verbs would tell any other role.
         if (!workspace.isActive) throw WorkspaceInactiveException(name)
         val user = userRepository.findByEmail(normalized)
+        // #215 A.6: only a PERSON is a member. The System row and a key's identity have no
+        // membership by design (record §3.3 — an identity's authority is its key's role), and
+        // they have an email, so without this they were addable. Refused as "no such person",
+        // before anything is written — and never turned into an invitation nobody can accept.
+        if (user != null && !user.isHuman) throw UnknownMemberEmailException(normalized)
         if (user != null) {
             val row =
                 workspaceRepository.addMember(workspace.id, user.id, role)
@@ -759,12 +769,12 @@ open class WorkspaceService(
     }
 
     /**
-     * KEPT for the UI's add-member form ([co.datapipelines.web.ui.WorkspacesUiController],
-     * which catches it for the `user_not_found` banner) — but the REST surface no longer
-     * raises it: since 113, an unknown email at [addMember] creates an INVITATION
-     * ([AddMemberOutcome.Invited]) instead of failing. The UI form therefore invites
-     * silently today; rendering the invited outcome on the workspaces screen (and retiring
-     * this class) is 114's/post-merge work. No production path throws it.
+     * The email names no PERSON (#215 A.6): [addMember] raises it for the System row and a key's
+     * identity, which have an email and no membership by design. An email with no row at all is
+     * not this — since 113 it becomes an INVITATION ([AddMemberOutcome.Invited]). The UI form
+     * ([co.datapipelines.web.ui.WorkspacesUiController]) answers it with the `user_not_found`
+     * banner; REST (`WorkspacesController`) with the 404 `user_not_found` stand-in `AuthController`
+     * documents for an unknown user.
      */
     class UnknownMemberEmailException(
         val email: String,
@@ -803,44 +813,38 @@ open class WorkspaceService(
     }
 
     /**
-     * The membership guard API-key issuance extends (auth.md §7.4): a key may only be pinned to
-     * a workspace its creator can reach, and — since D-R12/O-2 — only by an AUTHOR there, asked
-     * through the author row's representative permission `template.update` (#215 slice (a)
-     * re-keys the check and keeps the rule; slice (b) replaces it with the record's O3, "a key's
-     * role never exceeds its creator's permissions"). Throws [WorkspaceNotFoundException] for the
-     * unreachable case (D-R5) and [RoleRequiredException] for the viewer.
+     * The guard API-key issuance extends (auth.md §7.4): a key may only be pinned to a workspace its
+     * creator can reach (D-R5's [WorkspaceNotFoundException] otherwise), and only by a creator who
+     * holds the KIND's create permission (#215, record §3.1): `api_key.create` in that workspace for
+     * an `endpoint` key (workspace admin and super admin), `server_key.create` for a `server` key (a
+     * super admin's instance permission). Both answers come from ONE resolution, so "can they see
+     * it" and "may they act in it" cannot disagree. Returns the creator's context there.
      */
     @Suppress("ThrowsCount") // three distinct refusals: unknown workspace, unreachable, wrong role
     open fun requireIssuancePermission(
         principal: AuthenticatedPrincipal,
         workspaceId: UUID,
+        kind: ApiKeyKind,
     ): WorkspaceContext {
         val workspace = workspaceRepository.findById(workspaceId) ?: throw WorkspaceNotFoundException(workspaceId.toString())
         val context = contextFor(principal, workspace.name) ?: throw WorkspaceNotFoundException(workspace.name)
-        if (!context.permits(Permission.TEMPLATE_UPDATE)) {
-            throw RoleRequiredException(Permission.TEMPLATE_UPDATE, context.heldRole, workspace.name)
+        when (kind) {
+            ApiKeyKind.ENDPOINT -> requirePermission(principal, workspace, Permission.API_KEY_CREATE)
+            ApiKeyKind.SERVER -> requirePermission(principal, workspace, Permission.SERVER_KEY_CREATE)
+            ApiKeyKind.USER -> throw KeyKindNotMintableException(kind)
         }
         return context
     }
 
     /**
-     * The context a KEY's issuer currently holds in the key's pinned workspace, or null when
-     * the workspace is unreachable for them now (D-R12: removed issuer, deactivated workspace).
-     * Read per request through the cache, which is what bounds the demotion window at one TTL.
+     * The member's role in [workspaceId] right now — null when they hold no membership there or the
+     * workspace is deactivated. The MCP key's authority is read from this on every request through
+     * the cache (PK4, B5), which is what bounds a role change's reach at one TTL.
      */
-    open fun issuerContext(
-        issuerId: UUID,
-        issuerIsSuperAdmin: Boolean,
+    open fun activeRoleIn(
+        userId: UUID,
         workspaceId: UUID,
-        workspaceName: String,
-    ): WorkspaceContext? {
-        val explicit = memberships(issuerId).firstOrNull { it.workspaceId == workspaceId && it.workspaceActive }
-        return when {
-            issuerIsSuperAdmin -> WorkspaceContext.superAdminOver(workspaceId, workspaceName, explicit?.role)
-            explicit != null -> WorkspaceContext(workspaceId, workspaceName, explicit.role)
-            else -> null
-        }
-    }
+    ): WorkspaceRole? = memberships(userId).firstOrNull { it.workspaceId == workspaceId && it.workspaceActive }?.role
 
     /** True when [principal] may operate in [workspaceId] — member or super admin (D-R8). */
     open fun canAccess(

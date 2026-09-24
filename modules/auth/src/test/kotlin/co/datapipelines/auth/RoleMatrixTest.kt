@@ -4,6 +4,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -116,68 +117,105 @@ class RoleMatrixTest {
     }
 
     /**
-     * #215 (record §2.3): the row-data tools are author-and-above. The five MCP cells the record
-     * moved (viewer × three, promoter × two) — for the keys a login mints, the SCOPE already
-     * refused them (a viewer's key carries `execute`, a promoter's `read`, and these tools need
-     * `author`), and it still does, first, with the same code. What the role axis adds is a
-     * refusal for an `author`-scoped key whose member has been demoted to viewer or promoter
-     * (the scope is fixed at mint, C2): v2 admitted that key to these three tools; the catalog
-     * refuses it, with the demoted-issuer code.
+     * #215 (record §2.3): the row-data tools are author-and-above. Since slice (b) the MCP key
+     * carries no scope — it acts with its member's role, capped at author (PK4) — so the one
+     * question is the role: a viewer's or promoter's key is refused with the member-role code, an
+     * author's key is admitted. (Before slice (b) a login-minted viewer key was refused here on
+     * its SCOPE first; the answer is the same, the axis is one.)
      */
     @Test
-    fun `the row-data tools are author-and-above - a login key is refused on scope, a demoted member's author key on role`() {
-        val rowData = mapOf("datasources_preview_rows" to 2, "sql_probe" to 2, "pipelines_execute_node" to 1)
-        rowData.keys.forEach { tool ->
-            ScopeMatrix.requiredScopeForTool(tool) shouldBe Scope.AUTHOR
-            val loginViewer = key(Scope.EXECUTE.expand(), WorkspaceRole.VIEWER)
-            val loginPromoter = key(setOf(Scope.READ), WorkspaceRole.PROMOTER)
-            val demotedViewer = key(Scope.AUTHOR.expand(), WorkspaceRole.VIEWER)
-            val demotedPromoter = key(Scope.AUTHOR.expand(), WorkspaceRole.PROMOTER)
-
-            toolRefusal(loginViewer, tool).code shouldBe AuthErrorCodes.SCOPE_INSUFFICIENT
-            toolRefusal(loginPromoter, tool).code shouldBe AuthErrorCodes.SCOPE_INSUFFICIENT
-            toolRefusal(demotedViewer, tool).code shouldBe AuthErrorCodes.KEY_ISSUER_ROLE_LOST
-            val promoterCell = rowData.getValue(tool) == 2
-            if (promoterCell) toolRefusal(demotedPromoter, tool).code shouldBe AuthErrorCodes.KEY_ISSUER_ROLE_LOST
-            ScopeMatrix.allowedTool(key(Scope.AUTHOR.expand(), WorkspaceRole.AUTHOR), tool, context(WorkspaceRole.AUTHOR)) shouldBe
-                ScopeMatrix.Decision.Allowed
+    fun `the row-data tools are author-and-above - an MCP key of a viewer or promoter is refused on its member's role`() {
+        val rowData =
+            mapOf(
+                "datasources_preview_rows" to Permission.DATASOURCE_PREVIEW_ROWS,
+                "sql_probe" to Permission.DATASOURCE_SQL_PROBE,
+                "pipelines_execute_node" to Permission.PIPELINE_EXECUTE_NODE,
+            )
+        rowData.forEach { (tool, permission) ->
+            withClue(tool) {
+                toolRefusal(key(WorkspaceRole.VIEWER), tool, permission).code shouldBe AuthErrorCodes.KEY_ISSUER_ROLE_LOST
+                toolRefusal(key(WorkspaceRole.PROMOTER), tool, permission).code shouldBe AuthErrorCodes.KEY_ISSUER_ROLE_LOST
+                ScopeMatrix.allowedTool(key(WorkspaceRole.AUTHOR), tool, permission, context(WorkspaceRole.AUTHOR)) shouldBe
+                    ScopeMatrix.Decision.Allowed
+            }
         }
     }
 
-    // ------------------------------------------------------------------ the two axes
+    // ------------------------------------------------------------------ keys (#215 slice (b))
 
+    /**
+     * Record §3.2: a key that acts as its own identity is judged by its KEY ROLE's column and
+     * nothing else — the same column-by-column walk the member roles get above, the expectation
+     * READ from the doc's key-role column (not from `RolePermissions`, for the reason the class
+     * KDoc gives).
+     */
     @Test
-    fun `a key's SCOPE refuses what its issuer's role would allow - the credential axis`() {
-        // An author's `read`-scoped key: the role says yes to authoring, the scope says no.
-        val key = key(scopes = setOf(Scope.READ), role = WorkspaceRole.AUTHOR)
+    fun `each key role is admitted exactly its column of the catalog - and refused everything else with its role named`() {
+        KeyRole.entries.forEach { role ->
+            val principal = keyRole(role)
+            val column = catalog.filter { role in it.keyRoles }.mapNotNull { it.permission }.toSet()
+            withClue(role.wire) {
+                column.isEmpty() shouldBe false
+                admitted(principal, context(WorkspaceRole.VIEWER)) shouldBe column
+                (Permission.entries - column).forEach { permission ->
+                    val refusal = ScopeMatrix.allowed(principal, permission, context(WorkspaceRole.VIEWER)) as ScopeMatrix.Decision.Refused
+                    refusal.code shouldBe AuthErrorCodes.ROLE_REQUIRED
+                    refusal.details["held"] shouldBe role.wire
+                }
+            }
+        }
+    }
 
-        refusalFor(key, Permission.PIPELINE_UPDATE).code shouldBe AuthErrorCodes.SCOPE_INSUFFICIENT
+    /** B6: promotion intake is instance-wide — the receiver's role needs no workspace to be judged. */
+    @Test
+    fun `the promotion receiver is admitted with no workspace at all - intake is instance-wide (B6)`() {
+        val receiver = keyRole(KeyRole.PROMOTION_RECEIVER).copy(authMethod = AuthMethod.PROMOTION, workspace = null)
+
+        ScopeMatrix.allowed(receiver, Permission.PROMOTION_PUSH, context = null) shouldBe ScopeMatrix.Decision.Allowed
+        ScopeMatrix.allowed(receiver, Permission.PROMOTION_INVENTORY_READ, context = null) shouldBe ScopeMatrix.Decision.Allowed
+        (ScopeMatrix.allowed(receiver, Permission.PIPELINE_READ, context = null) as ScopeMatrix.Decision.Refused).code shouldBe
+            AuthErrorCodes.ROLE_REQUIRED
+    }
+
+    /** A promotion principal that carries no key role is a wiring defect — refused, never admitted by default. */
+    @Test
+    fun `a promotion principal without the receiver role fails closed`() {
+        val unwired = keyRole(KeyRole.PROMOTION_RECEIVER).copy(authMethod = AuthMethod.PROMOTION, keyRole = null, workspace = null)
+
+        ScopeMatrix.allowed(unwired, Permission.PROMOTION_PUSH, context = null).shouldBeInstanceOf<ScopeMatrix.Decision.Refused>()
     }
 
     @Test
-    fun `a key's ISSUER's role refuses what its scope would allow - the role axis`() {
-        // The mirror image: an `author`-scoped key whose issuer has been demoted to viewer. The
-        // code is the DEMOTION one, because retrying with this key can never work.
-        val key = key(scopes = setOf(Scope.AUTHOR), role = WorkspaceRole.VIEWER)
-
-        refusalFor(key, Permission.PIPELINE_UPDATE).code shouldBe AuthErrorCodes.KEY_ISSUER_ROLE_LOST
+    fun `an MCP key's member role refuses what the member lacks - the demotion code`() {
+        // Retrying with this key can never work: the fix is a role, so the code says so (D-R12).
+        refusalFor(key(role = WorkspaceRole.VIEWER), Permission.PIPELINE_UPDATE).code shouldBe AuthErrorCodes.KEY_ISSUER_ROLE_LOST
     }
 
+    /** C1 (record §5, ruled O1): with scopes gone the key follows the role — a viewer's key executes and introspects. */
     @Test
-    fun `the two axes disagree about execution, and both answers are right`() {
-        // `pipeline.execute` floors at the `execute` SCOPE but is a viewer-level PERMISSION (D3).
-        val readKeyOfAViewer = key(scopes = setOf(Scope.READ), role = WorkspaceRole.VIEWER)
-
-        refusalFor(readKeyOfAViewer, Permission.PIPELINE_EXECUTE).code shouldBe AuthErrorCodes.SCOPE_INSUFFICIENT
-        allowed(session(WorkspaceRole.VIEWER), Permission.PIPELINE_EXECUTE) shouldBe ScopeMatrix.Decision.Allowed
+    fun `a viewer's MCP key executes and introspects, a promoter's introspects - the key follows the role (C1)`() {
+        allowed(key(WorkspaceRole.VIEWER), Permission.PIPELINE_EXECUTE) shouldBe ScopeMatrix.Decision.Allowed
+        allowed(key(WorkspaceRole.VIEWER), Permission.DATASOURCE_INTROSPECT) shouldBe ScopeMatrix.Decision.Allowed
+        allowed(key(WorkspaceRole.VIEWER), Permission.DATASOURCE_TEST) shouldBe ScopeMatrix.Decision.Allowed
+        allowed(key(WorkspaceRole.PROMOTER), Permission.DATASOURCE_INTROSPECT) shouldBe ScopeMatrix.Decision.Allowed
     }
 
+    /**
+     * B1: no key resolves an instance permission. `ApiKeyService.validate` never sets the flag on a
+     * key and resolves a super admin's non-member MCP key as an implicit VIEWER — this pins that the
+     * matrix refuses every instance permission to exactly that principal, in context and without.
+     */
     @Test
-    fun `a session carries no scopes, and is judged on the role axis alone (D-R1)`() {
-        val authorSession = session(WorkspaceRole.AUTHOR)
-        authorSession.scopes shouldBe emptySet()
+    fun `a super admin's MCP key holds no instance permission (B1)`() {
+        val superAdminsKey =
+            key(WorkspaceRole.VIEWER).copy(workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.VIEWER, implicit = true))
 
-        allowed(authorSession, Permission.PIPELINE_UPDATE) shouldBe ScopeMatrix.Decision.Allowed
+        RolePermissions.INSTANCE.forEach { permission ->
+            withClue(permission.wire) {
+                ScopeMatrix.allowed(superAdminsKey, permission, superAdminsKey.workspace).shouldBeInstanceOf<ScopeMatrix.Decision.Refused>()
+                superAdminsKey.holds(permission) shouldBe false
+            }
+        }
     }
 
     @Test
@@ -211,7 +249,7 @@ class RoleMatrixTest {
         LIST_OWN_WORKSPACES.forEach { permission ->
             ScopeMatrix.allowed(session(WorkspaceRole.VIEWER), permission, context = null) shouldBe ScopeMatrix.Decision.Allowed
 
-            val decision = ScopeMatrix.allowed(key(setOf(Scope.READ), WorkspaceRole.VIEWER), permission, context = null)
+            val decision = ScopeMatrix.allowed(key(WorkspaceRole.VIEWER), permission, context = null)
             (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
         }
     }
@@ -235,7 +273,7 @@ class RoleMatrixTest {
             superAdmin.holds(permission) shouldBe false
         }
 
-        val keyPrincipal = key(setOf(Scope.ADMIN), WorkspaceRole.VIEWER).copy(workspace = null, superAdmin = true)
+        val keyPrincipal = key(WorkspaceRole.VIEWER).copy(workspace = null, superAdmin = true)
         RolePermissions.INSTANCE.forEach { permission ->
             val decision = ScopeMatrix.allowed(keyPrincipal, permission, context = null)
             (decision as ScopeMatrix.Decision.Refused).code shouldBe WorkspaceErrorCodes.NOT_FOUND
@@ -261,10 +299,11 @@ class RoleMatrixTest {
     }
 
     @Test
-    fun `a tool the matrix does not know is refused, never defaulted`() {
-        val decision = ScopeMatrix.allowedTool(superAdminSession(), "pipelines_delete", context(WorkspaceRole.WORKSPACE_ADMIN))
+    fun `a tool that declares no permission is refused, never defaulted`() {
+        val decision = ScopeMatrix.allowedTool(superAdminSession(), "pipelines_delete", null, context(WorkspaceRole.WORKSPACE_ADMIN))
 
-        (decision as ScopeMatrix.Decision.Refused).code shouldBe AuthErrorCodes.SCOPE_INSUFFICIENT
+        (decision as ScopeMatrix.Decision.Refused).code shouldBe AuthErrorCodes.PERMISSION_UNDECLARED
+        decision.details["tool"] shouldBe "pipelines_delete"
     }
 
     // ------------------------------------------------------------------ helpers
@@ -287,7 +326,23 @@ class RoleMatrixTest {
     private fun toolRefusal(
         principal: AuthenticatedPrincipal,
         tool: String,
-    ): ScopeMatrix.Decision.Refused = ScopeMatrix.allowedTool(principal, tool, principal.workspace) as ScopeMatrix.Decision.Refused
+        permission: Permission,
+    ): ScopeMatrix.Decision.Refused =
+        ScopeMatrix.allowedTool(principal, tool, permission, principal.workspace) as ScopeMatrix.Decision.Refused
+
+    /** A key acting as its own identity with [role] (record §3.2) — an `endpoint` or `server` key. */
+    private fun keyRole(role: KeyRole) =
+        AuthenticatedPrincipal(
+            userId = UUID.randomUUID(),
+            email = "dpk_key@keys.invalid",
+            displayName = "key",
+            authMethod = AuthMethod.API_KEY,
+            keyId = "dpk_KEYROLE",
+            workspaceName = "acme",
+            workspace = context(WorkspaceRole.VIEWER),
+            keyKind = if (role == KeyRole.API_CALLER) ApiKeyKind.ENDPOINT else ApiKeyKind.SERVER,
+            keyRole = role,
+        )
 
     private fun context(role: WorkspaceRole) = WorkspaceContext(workspaceId, "acme", role)
 
@@ -296,7 +351,6 @@ class RoleMatrixTest {
             userId = UUID.randomUUID(),
             email = "root@company.com",
             displayName = "Root",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspace = WorkspaceContext.superAdminOver(workspaceId, "acme", explicitRole = null),
             superAdmin = true,
@@ -307,24 +361,20 @@ class RoleMatrixTest {
             userId = UUID.randomUUID(),
             email = "member@company.com",
             displayName = "Member",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspace = context(role),
         )
 
-    private fun key(
-        scopes: Set<Scope>,
-        role: WorkspaceRole,
-    ) = AuthenticatedPrincipal(
-        userId = UUID.randomUUID(),
-        email = "agent@company.com",
-        displayName = "Agent",
-        scopes = scopes,
-        authMethod = AuthMethod.API_KEY,
-        keyId = "dpk_TEST",
-        workspaceName = "acme",
-        workspace = context(role),
-    )
+    private fun key(role: WorkspaceRole) =
+        AuthenticatedPrincipal(
+            userId = UUID.randomUUID(),
+            email = "agent@company.com",
+            displayName = "Agent",
+            authMethod = AuthMethod.API_KEY,
+            keyId = "dpk_TEST",
+            workspaceName = "acme",
+            workspace = context(role),
+        )
 
     private companion object {
         /** The two permissions a session may hold with NO workspace context: the page and the REST list-own. */

@@ -252,7 +252,6 @@ class WebPersistenceIntegrationTest {
             user,
             "a@b.c",
             "A",
-            setOf(co.datapipelines.auth.Scope.READ),
             co.datapipelines.auth.AuthMethod.API_KEY,
             "dpk_x",
             workspace =
@@ -286,7 +285,6 @@ class WebPersistenceIntegrationTest {
                 userId,
                 "a@b.c",
                 "A",
-                setOf(co.datapipelines.auth.Scope.READ),
                 co.datapipelines.auth.AuthMethod.API_KEY,
                 "dpk_x",
                 workspace =

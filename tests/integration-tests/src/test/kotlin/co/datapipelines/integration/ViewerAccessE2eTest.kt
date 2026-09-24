@@ -210,7 +210,7 @@ class ViewerAccessE2eTest {
             val header = b64("""{"alg":"HS256","typ":"JWT"}""")
             val payload =
                 b64(
-                    """{"sub":"$userId","email":"$email","name":"Test User","scopes":["read","execute","author"],""" +
+                    """{"sub":"$userId","email":"$email","name":"Test User",""" +
                         """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(
                             3600,
                         ).epochSecond},"active_workspace":"acme"}""",

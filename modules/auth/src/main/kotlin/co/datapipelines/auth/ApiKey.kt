@@ -9,13 +9,16 @@ import java.util.UUID
  *
  * [workspaceId]/[workspaceName] are the key's pinned workspace (D3): since slice 2 the
  * pin IS the key's request context — no `DP-Workspace` override exists for keys.
+ *
+ * [userId] is WHO THE KEY ACTS AS (#215, PK5): the member for the MCP (`user`) key, the key's
+ * own `service` identity for an `endpoint` or `server` key. [createdBy] is who created it — the
+ * Keys page's "Created by" — and, for the MCP key, the same member (B4).
  */
 data class ApiKey(
     val id: String,
     val userId: UUID,
     val name: String,
     val keyHash: String,
-    val scopes: Set<Scope>,
     val isRevoked: Boolean,
     val createdAt: Instant,
     val lastUsedAt: Instant?,
@@ -37,11 +40,15 @@ data class ApiKey(
     val hasSealedSecret: Boolean = false,
     /** True when the login/switch hook minted this key rather than a person on demand (D16). */
     val mintedAtLogin: Boolean = false,
+    /** `api_keys.role` (V34): the key role of an identity-acting kind; null for the MCP key (PK4). */
+    val role: KeyRole? = KeyRole.forKind(kind),
+    /** `api_keys.created_by` (V34, B4): the person who created the key. */
+    val createdBy: UUID = userId,
 ) {
-    /** True when this key's authority is its endpoint bindings rather than its scopes (§7.7). */
+    /** True when this key's authority is [KeyRole.API_CALLER] on its bound paths (§7.7). */
     val isEndpointKey: Boolean get() = kind == ApiKeyKind.ENDPOINT
 
-    /** True when this key's authority is the promotion route family rather than scopes (§7.7). */
+    /** True when this key's authority is [KeyRole.PROMOTION_RECEIVER] on the promotion route family (§7.7). */
     val isServerKey: Boolean get() = kind == ApiKeyKind.SERVER
 }
 
@@ -52,4 +59,14 @@ data class ApiKey(
 data class IssuedApiKey(
     val record: ApiKey,
     val plaintext: String,
+)
+
+/**
+ * A presented server key that passed every check the promotion route asks (§7.7): the [key] and the
+ * `service` identity it acts as (#215 record C4) — received versions and the audit row name
+ * [identity], not the System actor.
+ */
+data class ValidatedServerKey(
+    val key: ApiKey,
+    val identity: User,
 )

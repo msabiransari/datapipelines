@@ -13,7 +13,6 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
 import co.datapipelines.auth.KeyKindNotMintableException
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -140,7 +139,6 @@ class ApiKeysPartialControllerTest {
             userId = userId,
             email = "a@b.c",
             displayName = "A",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspace = WorkspaceContext(workspaceId, "acme"),
         )
@@ -151,7 +149,6 @@ class ApiKeysPartialControllerTest {
             userId = userId,
             name = "mcp/acme",
             keyHash = "hash",
-            scopes = setOf(Scope.READ),
             isRevoked = false,
             createdAt = Instant.parse("2026-08-01T00:00:00Z"),
             lastUsedAt = null,
@@ -321,7 +318,6 @@ class ApiKeysAdminControllerTest {
             userId = userId,
             email = "a@b.c",
             displayName = "A",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
             workspace = WorkspaceContext(workspaceId, "acme", co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN),
         )
@@ -340,7 +336,6 @@ class ApiKeysAdminControllerTest {
             userId = userId,
             name = "ci",
             keyHash = "hash",
-            scopes = emptySet(),
             isRevoked = false,
             createdAt = Instant.parse("2026-08-01T00:00:00Z"),
             lastUsedAt = null,
@@ -387,7 +382,7 @@ class ApiKeysAdminControllerTest {
     fun `create mints through the shared service and returns the once-shown panel`() {
         authenticate()
         stubPageReads()
-        every { apiKeyService.issue(any(), any(), any(), any(), any(), any(), ApiKeyKind.ENDPOINT) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), ApiKeyKind.ENDPOINT) } returns sampleIssued()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val viewName = controller.create("endpoint", "ci", null, null, null, model)
@@ -396,6 +391,8 @@ class ApiKeysAdminControllerTest {
         model["key"] shouldBe "dpk_abc123.supersecret"
         model["keyId"] shouldBe "dpk_abc123"
         model["keyKind"] shouldBe "endpoint"
+        // #215: the panel names the key's role — its kind's, since the dialog offers no choice yet (slice (c)).
+        model["keyRole"] shouldBe "api caller"
     }
 
     @Test
@@ -433,7 +430,7 @@ class ApiKeysAdminControllerTest {
         stubPageReads()
         val expires = slot<Instant>()
         every {
-            apiKeyService.issue(any(), any(), any(), any(), any(), capture(expires), any())
+            apiKeyService.issue(any(), any(), any(), capture(expires), any())
         } returns sampleIssued()
 
         controller.create("endpoint", "k", "30", null, null, ExtendedModelMap())
@@ -455,7 +452,7 @@ class ApiKeysAdminControllerTest {
     fun `associations arrive as repeated checkboxes and reach issuance as paths`() {
         authenticate()
         stubPageReads()
-        every { apiKeyService.issue(any(), any(), any(), any(), any(), any(), ApiKeyKind.ENDPOINT) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), ApiKeyKind.ENDPOINT) } returns sampleIssued()
 
         controller.create("endpoint", "serve", null, null, listOf("/nyc", "/lending"), ExtendedModelMap())
 
@@ -467,7 +464,7 @@ class ApiKeysAdminControllerTest {
     fun `create renders the secret once, refreshes the table out-of-band, and toasts a pointer`() {
         authenticate()
         stubPageReads()
-        every { apiKeyService.issue(any(), any(), any(), any(), any(), any(), any()) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), any()) } returns sampleIssued()
 
         val model: ExtendedModelMap = ExtendedModelMap()
         val view = controller.create("endpoint", "ci", null, null, null, model)

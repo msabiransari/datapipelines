@@ -25,7 +25,7 @@ class DatasourceTableStatsToolTest {
     private val datasources = mockk<DatasourceRegistry>()
     private val introspector = mockk<SchemaIntrospector>()
     private val tool = DatasourcesGetTableStatsTool(introspector, datasources)
-    private val ctx = McpFixtures.ctx(co.datapipelines.auth.Scope.READ)
+    private val ctx = McpFixtures.ctx()
 
     private val gated = McpFixtures.datasource("sample-trips")
 

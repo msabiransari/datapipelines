@@ -6,7 +6,7 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
 import co.datapipelines.auth.KeyKindNotMintableException
-import co.datapipelines.auth.Scope
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import java.time.Instant
@@ -26,12 +26,13 @@ import java.util.UUID
  * validated BEFORE the key is minted: a bad path costs nothing, where a bad path after the mint
  * costs a wasted credential.
  *
- * ## Scopes on a scopeless kind
+ * ## A key's role follows its kind
  *
- * An `endpoint` key — and, since 091, a `server` key — is issued with NO scopes, and asking for
- * some is refused rather than quietly dropped. A caller who writes
- * `{"kind": "endpoint", "scopes": ["admin"]}` has a mental model this surface must correct out
- * loud — silently ignoring it would leave them believing the key carries admin. The mirror rule
+ * Since #215 slice (b) a key carries a ROLE, never scopes (record PK8): an `endpoint` key is an
+ * `api_caller`, a `server` key a `promotion_receiver`, and nothing else is offered (A1, the
+ * database CHECK). A request may name the role; one that names a role its kind cannot hold is
+ * refused rather than quietly corrected — a caller who writes `{"kind": "endpoint", "role":
+ * "promotion_receiver"}` has a mental model this surface must correct out loud. The mirror rule
  * holds for bindings: every kind but `endpoint` refuses them, so a kind added later cannot fall
  * through and write binding rows nothing will ever read.
  */
@@ -54,7 +55,7 @@ class EndpointKeyService(
     fun issue(
         principal: AuthenticatedPrincipal,
         name: String,
-        scopes: Set<Scope>,
+        role: KeyRole?,
         kind: ApiKeyKind,
         bindingPaths: List<String>,
         expiresAt: Instant?,
@@ -81,10 +82,10 @@ class EndpointKeyService(
                     "${authorityOf(kind)}. Mint it with \"kind\": \"endpoint\", or drop the bindings.",
             )
         }
-        if (kind in ApiKeyKind.SCOPELESS && scopes.isNotEmpty()) {
+        if (role != null && role != KeyRole.forKind(kind)) {
             throw refused(
-                "A ${kind.wire} key carries no scopes — its authority is ${authorityOf(kind)}. " +
-                    "Remove \"scopes\" from the request.",
+                "A ${kind.wire} key's role is ${KeyRole.forKind(kind)?.wire}; '${role.wire}' is not offered for it. " +
+                    "Drop \"role\", or name the kind that role belongs to.",
             )
         }
         // Not a refusal: an endpoint key with no bindings is legal and authorises nothing, which
@@ -99,9 +100,7 @@ class EndpointKeyService(
         val issued =
             apiKeys.issue(
                 issuer = principal,
-                ownerId = principal.userId,
                 name = name,
-                scopes = scopes,
                 workspaceId = workspaceId,
                 expiresAt = expiresAt,
                 kind = kind,
@@ -233,7 +232,7 @@ class EndpointKeyService(
     /** What decides a kind's authority, for a refusal that tells the caller what to do instead. */
     private fun authorityOf(kind: ApiKeyKind): String =
         when (kind) {
-            ApiKeyKind.USER -> "its scopes"
+            ApiKeyKind.USER -> "its member's role"
             ApiKeyKind.ENDPOINT -> "its bindings"
             ApiKeyKind.SERVER -> "the promotion route family it opens"
         }

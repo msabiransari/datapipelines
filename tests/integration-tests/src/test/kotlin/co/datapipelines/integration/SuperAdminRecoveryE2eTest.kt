@@ -115,7 +115,8 @@ class SuperAdminRecoveryE2eTest {
 
         // A key gets no exception at all: one pinned to the deactivated workspace is the
         // catalogued `auth.key_workspace_inactive`, and the matrix's null-context allowance is
-        // session-only by construction.
+        // session-only by construction. (The key is validated before its KIND is judged, so the
+        // liveness code answers here even though a live MCP key is refused on REST — #215 B2.)
         given()
             .port(port)
             .header(API_KEY_HEADER, ROOT_KEY.plaintext)
@@ -297,7 +298,7 @@ class SuperAdminRecoveryE2eTest {
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
 
         /** Pinned to `default` — the proof that a key gets no null-context exception. */
-        private val ROOT_KEY = E2eAuth.generateKey("root-key", arrayOf("read", "execute", "author"), ownerId = ROOT)
+        private val ROOT_KEY = E2eAuth.generateKey("root-key", ownerId = ROOT)
 
         private fun sessionJwt(
             userId: String,
@@ -309,7 +310,7 @@ class SuperAdminRecoveryE2eTest {
             val workspaceClaim = activeWorkspace?.let { ""","active_workspace":"$it"""" } ?: ""
             val payload =
                 b64(
-                    """{"sub":"$userId","email":"$email","name":"Test User","scopes":["read","execute","author"],""" +
+                    """{"sub":"$userId","email":"$email","name":"Test User",""" +
                         """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(3600).epochSecond}$workspaceClaim}""",
                 )
             val signature =
@@ -349,13 +350,14 @@ class SuperAdminRecoveryE2eTest {
                     )
                 }
                 connection
-                    .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                    .use { ps ->
+                    .prepareStatement(
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                    ).use { ps ->
                         ps.setString(1, ROOT_KEY.id)
                         ps.setObject(2, UUID.fromString(ROOT))
-                        ps.setString(3, ROOT_KEY.name)
-                        ps.setString(4, ROOT_KEY.hash)
-                        ps.setArray(5, connection.createArrayOf("text", ROOT_KEY.scopes))
+                        ps.setObject(3, UUID.fromString(ROOT))
+                        ps.setString(4, ROOT_KEY.name)
+                        ps.setString(5, ROOT_KEY.hash)
                         ps.setObject(6, UUID.fromString(WS_DEFAULT))
                         ps.executeUpdate()
                     }

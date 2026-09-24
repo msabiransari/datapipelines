@@ -3,7 +3,6 @@ package co.datapipelines.web.ui
 import co.datapipelines.application.datasources.DatasourceUpdateService
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceProperties
@@ -74,7 +73,6 @@ class DatasourcePartialControllerTest {
                     userId,
                     "a@b.c",
                     "A",
-                    setOf(Scope.AUTHOR),
                     AuthMethod.OIDC,
                     workspace = WorkspaceContext(workspaceId, "acme"),
                 ),

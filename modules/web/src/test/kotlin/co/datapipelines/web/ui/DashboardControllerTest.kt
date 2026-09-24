@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionRecord
@@ -45,7 +44,6 @@ class DashboardControllerTest {
 
     private fun authenticate(
         id: UUID,
-        scopes: Set<Scope>,
         workspaceAdmin: Boolean = false,
     ) {
         val principal =
@@ -53,7 +51,6 @@ class DashboardControllerTest {
                 id,
                 "u@d.p",
                 "User",
-                scopes,
                 AuthMethod.OIDC,
                 workspace =
                     WorkspaceContext(
@@ -81,7 +78,7 @@ class DashboardControllerTest {
 
     @Test
     fun `stats returns pipeline count executions today and success rate`() {
-        authenticate(userId, setOf(Scope.READ))
+        authenticate(userId)
         every { pipelines.countAll(any()) } returns 2
         val records = listOf(record(), record(ExecutionStatus.FAILED), record())
         every { executions.findByUser(any(), userId, null, null, null, null, limit = 100, offset = 0) } returns records
@@ -97,7 +94,7 @@ class DashboardControllerTest {
 
     @Test
     fun `recent executions returns last 10 for user`() {
-        authenticate(userId, setOf(Scope.READ))
+        authenticate(userId)
         val records = (1..10).map { record() }
         every { executions.findByUser(any(), userId, limit = 10, offset = 0) } returns records
 
@@ -112,7 +109,7 @@ class DashboardControllerTest {
 
     @Test
     fun `recent executions empty state when no executions`() {
-        authenticate(userId, setOf(Scope.READ))
+        authenticate(userId)
         every { executions.findByUser(any(), userId, limit = 10, offset = 0) } returns emptyList()
 
         val model = ExtendedModelMap()
@@ -125,7 +122,7 @@ class DashboardControllerTest {
 
     @Test
     fun `admin sees all pipelines and executions`() {
-        authenticate(adminId, emptySet(), workspaceAdmin = true)
+        authenticate(adminId, workspaceAdmin = true)
         every { pipelines.countAll(any()) } returns 1
         every { executions.findAll(any(), limit = 100, offset = 0) } returns listOf(record())
 

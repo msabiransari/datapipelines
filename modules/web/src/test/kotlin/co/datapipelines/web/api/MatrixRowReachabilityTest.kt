@@ -2,12 +2,11 @@ package co.datapipelines.web.api
 
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.PublicPaths
-import co.datapipelines.auth.ScopeMatrix
 import co.datapipelines.mcp.McpToolCatalog
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
-import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.springframework.http.server.PathContainer
 import org.springframework.web.util.pattern.PathPatternParser
@@ -43,7 +42,7 @@ class MatrixRowReachabilityTest {
     @Test
     fun `every catalog permission is claimed by a handler, a tool or a service check`() {
         val byHandler = governed.mapNotNull { it.permission }.toSet()
-        val byTool = ScopeMatrix.MCP_TOOL_PERMISSION.values.toSet()
+        val byTool = McpToolCatalog.ENTRIES.map { it.permission }.toSet()
         val byCheck = serviceChecks().keys
 
         val unclaimed = Permission.entries.filter { it !in byHandler && it !in byTool && it !in byCheck }
@@ -78,9 +77,27 @@ class MatrixRowReachabilityTest {
         withClue(problems.joinToString("\n")) { problems.shouldBeEmpty() }
     }
 
+    /**
+     * #215 slice (b): a tool's permission is declared on its catalog entry
+     * ([McpToolCatalog.Entry.permission]); this holds that declaration to the §7.6 row whose
+     * Surfaces cell names the tool after `MCP:` — both directions, with the count, so a tool the
+     * table does not place, places twice, or places on another row fails the build.
+     */
     @Test
-    fun `every MCP tool in the matrix is a catalogued tool, and every catalogued tool is in the matrix`() {
-        ScopeMatrix.MCP_TOOL_PERMISSION.keys shouldContainExactlyInAnyOrder McpToolCatalog.NAMES
+    fun `every MCP tool sits on the catalog row of the permission its catalog entry declares`() {
+        val placed = mutableMapOf<String, MutableList<Permission>>()
+        catalogRows().forEach { (permission, surfaces) ->
+            CODE
+                .findAll(surfaces.substringAfter(MCP_LABEL, ""))
+                .map { it.groupValues[1] }
+                .filter(TOOL::matches)
+                .forEach { tool -> placed.getOrPut(tool) { mutableListOf() } += permission }
+        }
+        val declared = McpToolCatalog.ENTRIES.associate { it.name to it.permission }
+
+        placed.filterValues { it.size > 1 }.keys.shouldBeEmpty()
+        placed.mapValues { it.value.single() } shouldBe declared
+        declared.size shouldBe TOOL_COUNT
     }
 
     /** Non-vacuity: a scan that found nothing would claim nothing and the first test would name every row. */
@@ -160,6 +177,11 @@ class MatrixRowReachabilityTest {
         const val MINIMUM_HANDLERS = 120
         const val MINIMUM_PERMISSIONS = 40
         const val MINIMUM_CHECKED = 8
+
+        /** 42 since 7b's `templates_evaluate` (auth.md's change log keeps the history). */
+        const val TOOL_COUNT = 42
+        const val MCP_LABEL = "MCP:"
+        val TOOL = Regex("[a-z][a-z_]+")
 
         val PERMISSION = Regex("`([a-z_]+\\.[a-z_.]+)`")
         val CODE = Regex("`([^`]+)`")

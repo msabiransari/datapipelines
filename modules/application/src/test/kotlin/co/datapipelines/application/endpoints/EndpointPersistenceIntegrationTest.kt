@@ -103,8 +103,8 @@ class EndpointPersistenceIntegrationTest {
         )
         jdbc.update(
             """
-            INSERT INTO api_keys (id, user_id, name, key_hash, workspace_id, kind)
-            VALUES (:id, :owner, 'endpoint key', 'x', :ws, 'endpoint')
+            INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)
+            VALUES (:id, :owner, :owner, 'endpoint key', 'x', :ws, 'endpoint', 'api_caller')
             """.trimIndent(),
             mapOf("id" to keyId, "owner" to userId, "ws" to workspaceId),
         )
@@ -232,8 +232,8 @@ class EndpointPersistenceIntegrationTest {
         val foreignKey = "dpk_${UUID.randomUUID().toString().replace("-", "").take(12)}"
         jdbc.update(
             """
-            INSERT INTO api_keys (id, user_id, name, key_hash, workspace_id, kind)
-            VALUES (:id, :owner, 'foreign key', 'x', :ws, 'endpoint')
+            INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)
+            VALUES (:id, :owner, :owner, 'foreign key', 'x', :ws, 'endpoint', 'api_caller')
             """.trimIndent(),
             mapOf("id" to foreignKey, "owner" to userId, "ws" to workspaceId),
         )
@@ -274,8 +274,8 @@ class EndpointPersistenceIntegrationTest {
         val otherKeyId = "dpk_${UUID.randomUUID().toString().replace("-", "").take(12)}"
         jdbc.update(
             """
-            INSERT INTO api_keys (id, user_id, name, key_hash, workspace_id, kind)
-            VALUES (:id, :owner, 'other key', 'x', :ws, 'endpoint')
+            INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)
+            VALUES (:id, :owner, :owner, 'other key', 'x', :ws, 'endpoint', 'api_caller')
             """.trimIndent(),
             mapOf("id" to otherKeyId, "owner" to userId, "ws" to workspaceId),
         )

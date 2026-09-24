@@ -78,9 +78,8 @@ class WorkspaceServiceTest {
             userId = userId,
             email = "alice@company.com",
             displayName = "Alice",
-            // D-R1: a session carries NO scopes. Anything this principal may do comes from the
-            // membership the context resolves, which is the whole point of the round.
-            scopes = emptySet(),
+            // D-R1: anything this principal may do comes from the membership the context
+            // resolves, which is the whole point of the round.
             authMethod = AuthMethod.OIDC,
             superAdmin = superAdmin,
         )
@@ -463,5 +462,107 @@ class WorkspaceServiceTest {
 
         listing.members.single().email shouldBe "a@x.test"
         listing.invitations.single().email shouldBe "b@x.test"
+    }
+
+    // ------------------------------------------------------------ key issuance per kind (#215 §3.1)
+
+    /** An issuer of [role] in `alpha` (none when null), reached through the ONE resolution issuance uses. */
+    private fun issuer(
+        role: WorkspaceRole?,
+        superAdmin: Boolean = false,
+    ): AuthenticatedPrincipal {
+        every { repository.findById(wsA.id) } returns wsA
+        every { repository.findByName("alpha") } returns wsA
+        // Each issuer is a fresh membership answer: the shared cache would otherwise serve the last one.
+        cache.invalidateMemberships(userId)
+        return principal(superAdmin = superAdmin, memberships = listOfNotNull(role?.let { membership(wsA, it) }))
+    }
+
+    @Test
+    fun `an API key is a workspace admin's to create - an author is refused api_key_create by role`() {
+        val refused =
+            shouldThrow<RoleRequiredException> {
+                service().requireIssuancePermission(issuer(WorkspaceRole.AUTHOR), wsA.id, ApiKeyKind.ENDPOINT)
+            }
+        refused.details["required"] shouldBe "api_key.create"
+        refused.details["held"] shouldBe "author"
+
+        service().requireIssuancePermission(issuer(WorkspaceRole.WORKSPACE_ADMIN), wsA.id, ApiKeyKind.ENDPOINT).id shouldBe wsA.id
+    }
+
+    @Test
+    fun `a server key is a super admin's alone - a workspace admin is refused server_key_create`() {
+        val refused =
+            shouldThrow<RoleRequiredException> {
+                service().requireIssuancePermission(issuer(WorkspaceRole.WORKSPACE_ADMIN), wsA.id, ApiKeyKind.SERVER)
+            }
+        refused.details["required"] shouldBe "server_key.create"
+    }
+
+    @Test
+    fun `a super admin creates both kinds, member or not`() {
+        listOf(null, WorkspaceRole.VIEWER).forEach { membershipRole ->
+            listOf(ApiKeyKind.ENDPOINT, ApiKeyKind.SERVER).forEach { kind ->
+                service().requireIssuancePermission(issuer(membershipRole, superAdmin = true), wsA.id, kind).id shouldBe wsA.id
+            }
+        }
+    }
+
+    @Test
+    fun `no role mints an MCP key on request - the login hook does (D16)`() {
+        shouldThrow<KeyKindNotMintableException> {
+            service().requireIssuancePermission(issuer(null, superAdmin = true), wsA.id, ApiKeyKind.USER)
+        }
+    }
+
+    @Test
+    fun `issuance into a workspace the creator cannot reach is the 404, before any role is asked`() {
+        every { repository.findById(wsB.id) } returns wsB
+        every { repository.findByName("beta") } returns wsB
+        shouldThrow<WorkspaceNotFoundException> {
+            service().requireIssuancePermission(issuer(WorkspaceRole.WORKSPACE_ADMIN), wsB.id, ApiKeyKind.ENDPOINT)
+        }
+    }
+
+    // ------------------------------------------------------------ non-human rows (#215 A.6, gate 5)
+
+    /** A key's identity or the System row, as `users` stores it. */
+    private fun nonHuman(kind: UserKind): User =
+        User(
+            UUID.randomUUID(),
+            if (kind == UserKind.SYSTEM) "system@system.invalid" else "dpk_identitykey1@keys.invalid",
+            "row",
+            null,
+            if (kind == UserKind.SYSTEM) UserService.SYSTEM_PROVIDER else UserService.KEY_PROVIDER,
+            "subject",
+            true,
+            false,
+            Instant.now(),
+            Instant.now(),
+            null,
+            kind = kind,
+        )
+
+    @Test
+    fun `a non-human row is never a member - addMember answers no such person and writes nothing`() {
+        every { repository.findByName("alpha") } returns wsA
+        val admin = principal(memberships = listOf(membership(wsA)))
+        listOf(UserKind.SERVICE, UserKind.SYSTEM).forEach { kind ->
+            val row = nonHuman(kind)
+            every { userRepository.findByEmail(row.email) } returns row
+
+            shouldThrow<WorkspaceService.UnknownMemberEmailException> { service().addMember(admin, "alpha", row.email) }
+        }
+        verify(exactly = 0) { repository.addMember(any(), any(), any()) }
+        verify(exactly = 0) { invitationRepository.upsert(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a non-human row never reaches the login hook - no invitation materialised, no workspace stamped`() {
+        listOf(UserKind.SERVICE, UserKind.SYSTEM).forEach { kind ->
+            val row = nonHuman(kind)
+            service().workspaceForLogin(row, row.email, LoginMethod.PWD).shouldBeNull()
+        }
+        verify(exactly = 0) { invitationRepository.materialiseFor(any(), any()) }
     }
 }

@@ -152,7 +152,6 @@ class UiControllerTest {
             userId = UUID.randomUUID(),
             email = "signed-in@example.test",
             displayName = "Signed In",
-            scopes = emptySet(),
             authMethod = AuthMethod.OIDC,
         )
 }

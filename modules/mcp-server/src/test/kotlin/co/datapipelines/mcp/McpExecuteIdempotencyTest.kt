@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.ExecutionLauncher
-import co.datapipelines.auth.Scope
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
@@ -95,7 +94,7 @@ class McpExecuteIdempotencyTest {
     @Test
     fun `a repeated idempotency key returns the first execution instead of running a second`() {
         storedPipeline()
-        val ctx = McpFixtures.ctx(Scope.EXECUTE, idempotencyKey = "retry-1")
+        val ctx = McpFixtures.ctx(idempotencyKey = "retry-1")
 
         @Suppress("UNCHECKED_CAST")
         val first = tool(launcher()).call(args, ctx) as Map<String, Any?>
@@ -119,7 +118,7 @@ class McpExecuteIdempotencyTest {
         // The falsification. This is not a hypothetical: it is the tool as it shipped before 056,
         // reconstructed by passing no launcher, and it is why the test above is meaningful.
         storedPipeline()
-        val ctx = McpFixtures.ctx(Scope.EXECUTE, idempotencyKey = "retry-1")
+        val ctx = McpFixtures.ctx(idempotencyKey = "retry-1")
 
         @Suppress("UNCHECKED_CAST")
         val first = tool(launcher = null).call(args, ctx) as Map<String, Any?>
@@ -136,7 +135,7 @@ class McpExecuteIdempotencyTest {
     @Test
     fun `the same key with different parameters is refused, not silently re-run`() {
         storedPipeline()
-        val ctx = McpFixtures.ctx(Scope.EXECUTE, idempotencyKey = "retry-1")
+        val ctx = McpFixtures.ctx(idempotencyKey = "retry-1")
         tool(launcher()).call(args, ctx)
 
         val different =
@@ -158,7 +157,7 @@ class McpExecuteIdempotencyTest {
     fun `a call with no idempotency key runs and reserves nothing`() {
         storedPipeline()
 
-        tool(launcher()).call(args, McpFixtures.ctx(Scope.EXECUTE))
+        tool(launcher()).call(args, McpFixtures.ctx())
 
         assertAll(
             { executed.size shouldBe 1 },
@@ -174,7 +173,7 @@ class McpExecuteIdempotencyTest {
         // mcp-server.md §6.2.3 and this round changes nothing on that wire.
         val request =
             MockHttpServletRequest().apply {
-                setAttribute(McpTransportKeys.PRINCIPAL, McpFixtures.principal(Scope.EXECUTE))
+                setAttribute(McpTransportKeys.PRINCIPAL, McpFixtures.principal())
                 setAttribute(McpTransportKeys.CORRELATION_ID, McpFixtures.CORRELATION_ID)
                 addHeader(McpServerFactory.IDEMPOTENCY_KEY_HEADER, "  retry-1  ")
             }
@@ -195,7 +194,7 @@ class McpExecuteIdempotencyTest {
     fun `a blank Idempotency-Key header is treated as absent`() {
         val request =
             MockHttpServletRequest().apply {
-                setAttribute(McpTransportKeys.PRINCIPAL, McpFixtures.principal(Scope.EXECUTE))
+                setAttribute(McpTransportKeys.PRINCIPAL, McpFixtures.principal())
                 setAttribute(McpTransportKeys.CORRELATION_ID, McpFixtures.CORRELATION_ID)
                 addHeader(McpServerFactory.IDEMPOTENCY_KEY_HEADER, "   ")
             }

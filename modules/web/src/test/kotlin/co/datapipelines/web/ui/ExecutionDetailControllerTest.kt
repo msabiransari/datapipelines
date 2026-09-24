@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRecord
@@ -54,13 +53,10 @@ class ExecutionDetailControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(
-        scopes: Set<Scope>,
-        asUser: UUID = userId,
-    ) {
+    private fun authenticate(asUser: UUID = userId) {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
-                AuthenticatedPrincipal(asUser, "a@b.c", "A", scopes, AuthMethod.OIDC, workspace = WorkspaceContext(workspaceId, "acme")),
+                AuthenticatedPrincipal(asUser, "a@b.c", "A", AuthMethod.OIDC, workspace = WorkspaceContext(workspaceId, "acme")),
                 null,
                 emptyList(),
             )
@@ -103,7 +99,7 @@ class ExecutionDetailControllerTest {
 
     @Test
     fun `the page model carries the node operations derived from the durable events (149)`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         val record = record(ExecutionStatus.SUCCESS)
         every { executions.findById(workspaceId, executionId) } returns record
         stubReads(record, view())
@@ -130,7 +126,7 @@ class ExecutionDetailControllerTest {
 
     @Test
     fun `another user's execution is a 404 - never a hint it exists`() {
-        authenticate(setOf(Scope.READ), asUser = UUID.randomUUID())
+        authenticate(asUser = UUID.randomUUID())
         every { executions.findById(workspaceId, executionId) } returns record(ExecutionStatus.SUCCESS)
 
         val error = shouldThrow<ResponseStatusException> { controller.detail(executionId, ExtendedModelMap()) }
@@ -139,7 +135,7 @@ class ExecutionDetailControllerTest {
 
     @Test
     fun `a successful run with a live result is available`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         val record = record(ExecutionStatus.SUCCESS)
         every { executions.findById(workspaceId, executionId) } returns record
         stubReads(record, view())
@@ -153,7 +149,7 @@ class ExecutionDetailControllerTest {
 
     @Test
     fun `a successful run whose result expired is expired`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         val record = record(ExecutionStatus.SUCCESS)
         every { executions.findById(workspaceId, executionId) } returns record
         stubReads(record, null)
@@ -165,7 +161,7 @@ class ExecutionDetailControllerTest {
 
     @Test
     fun `a success with zero rows is no-caller-result, not expired`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         val record = record(ExecutionStatus.SUCCESS, rowCount = 0)
         every { executions.findById(workspaceId, executionId) } returns record
         stubReads(record, null)
@@ -177,7 +173,7 @@ class ExecutionDetailControllerTest {
 
     @Test
     fun `a failed run is not-applicable - there is no result to page`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         val record = record(ExecutionStatus.FAILED)
         every { executions.findById(workspaceId, executionId) } returns record
         stubReads(record, null)
@@ -192,7 +188,7 @@ class ExecutionDetailControllerTest {
         // 112 (merge review): a session carries no scopes; EXECUTE is viewer-level capability
         // (D-R3), so the affordance turns on the row's status alone for every member. The
         // scope-based form rendered no Cancel button for ANY human — the defect this pins.
-        authenticate(emptySet())
+        authenticate()
         val running = record(ExecutionStatus.RUNNING)
         every { executions.findById(workspaceId, executionId) } returns running
         stubReads(running, null)
@@ -202,7 +198,7 @@ class ExecutionDetailControllerTest {
         model["canCancel"] shouldBe true
 
         SecurityContextHolder.clearContext()
-        authenticate(emptySet())
+        authenticate()
         val done = record(ExecutionStatus.SUCCESS)
         every { executions.findById(workspaceId, executionId) } returns done
         stubReads(done, view())
@@ -214,7 +210,7 @@ class ExecutionDetailControllerTest {
 
     @Test
     fun `a running row with execute scope offers cancel`() {
-        authenticate(setOf(Scope.EXECUTE))
+        authenticate()
         val running = record(ExecutionStatus.RUNNING)
         every { executions.findById(workspaceId, executionId) } returns running
         stubReads(running, null)
@@ -226,7 +222,7 @@ class ExecutionDetailControllerTest {
 
     @Test
     fun `the lineage family rides the root's index`() {
-        authenticate(setOf(Scope.READ))
+        authenticate()
         val record = record(ExecutionStatus.SUCCESS, rowCount = null)
         every { executions.findById(workspaceId, executionId) } returns record
         every { resultStore.keyFor(executionId) } returns "k"

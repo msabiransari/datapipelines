@@ -1,6 +1,5 @@
 package co.datapipelines.mcp
 
-import co.datapipelines.auth.Scope
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.PipelineRepository
@@ -32,7 +31,7 @@ class McpResourceCatalogTest {
     private val executions = mockk<ExecutionRepository>()
     private val now: Instant = Instant.parse("2026-08-09T12:00:00Z")
     private val clock: Clock = Clock.fixed(now, ZoneOffset.UTC)
-    private val ctx = McpFixtures.ctx(Scope.READ)
+    private val ctx = McpFixtures.ctx()
 
     private val catalog =
         McpResourceCatalog(
@@ -140,7 +139,7 @@ class McpResourceCatalogTest {
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
         every { executions.findByUser(any(), McpFixtures.OTHER_USER, any(), any(), any(), any(), any(), any()) } returns emptyList()
 
-        val page = catalog.list(McpFixtures.ctx(Scope.READ, userId = McpFixtures.OTHER_USER), null)
+        val page = catalog.list(McpFixtures.ctx(userId = McpFixtures.OTHER_USER), null)
 
         page.resources.none { it.uri().startsWith("datapipelines://executions/") } shouldBe true
     }
@@ -194,18 +193,33 @@ class McpResourceCatalogTest {
     }
 
     /**
-     * F3: the `read` floor is asserted, not inherited from `Scope.READ` happening to be ordinal 0.
-     * A key with no scopes must not read every pipeline body through the resource surface.
+     * F3, re-keyed by #215: each kind is listed under its ROLE's read permission
+     * (`McpResourcePermissions`) — asserted, not assumed. A promoter reads no executions (D5), so
+     * its key's listing carries none even when the repository would return one, and the
+     * execution source is never asked.
      */
     @Test
-    fun `a key holding no scope cannot list resources`() {
-        emptyWorld()
+    fun `a promoter's key lists no executions - each kind is filtered by the role's read permission`() {
+        every { pipelines.findAll(any(), null) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
+        every { executions.findByUser(any(), McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
+            listOf(McpFixtures.executionRecord(startedAt = now.minusSeconds(60)))
+        val promoter =
+            McpFixtures.ctx(
+                workspace =
+                    co.datapipelines.auth.WorkspaceContext(
+                        McpFixtures.WORKSPACE_ID,
+                        "acme",
+                        co.datapipelines.auth.WorkspaceRole.PROMOTER,
+                    ),
+            )
 
-        val error = shouldThrow<McpError> { catalog.list(McpToolContext(McpFixtures.principal(), McpFixtures.CORRELATION_ID), null) }
+        val page = catalog.list(promoter, null)
 
         assertAll(
-            { error.jsonRpcError.code() shouldBe McpArguments.FORBIDDEN },
-            { error.jsonRpcError.message() shouldContain "auth.scope.insufficient" },
+            { page.resources.map { it.uri() } shouldContainExactly skillUris + listOf("datapipelines://datasources") },
+            { verify(exactly = 0) { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } },
         )
     }
 

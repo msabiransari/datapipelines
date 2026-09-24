@@ -68,7 +68,7 @@ class UiExceptionHandler(
             return toast(
                 HttpStatus.FORBIDDEN,
                 "You do not have permission to perform this action.",
-                AuthErrorCodes.SCOPE_INSUFFICIENT,
+                AuthErrorCodes.PERMISSION_UNDECLARED,
             )
         }
         return errorModel("error/403", HttpStatus.FORBIDDEN)

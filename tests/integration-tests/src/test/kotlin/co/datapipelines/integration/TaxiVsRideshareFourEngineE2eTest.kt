@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContainExactly
@@ -120,7 +121,7 @@ class TaxiVsRideshareFourEngineE2eTest {
         val tables =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .queryParam("namespace", "nyc.mobility")
                 .`when`()
                 .get("/api/v1/datasources/sample-lake/tables")
@@ -184,7 +185,7 @@ class TaxiVsRideshareFourEngineE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"namespace": ["nyc", "mobility"], "name": "hvfhv_zone_day", "format": "parquet",
@@ -223,6 +224,7 @@ class TaxiVsRideshareFourEngineE2eTest {
         val pair = firstLogin(email)
         val (userId, workspaceId) = pair
         provisioned = pair
+        provisionedEmail = email
 
         metadataRow("SELECT name FROM workspaces WHERE id = '$workspaceId'")["name"] shouldBe "demo"
 
@@ -252,8 +254,7 @@ class TaxiVsRideshareFourEngineE2eTest {
     @Test
     @Order(3)
     fun `taxi_vs_rideshare runs across postgres, the lake, sqlite and mysql into the h2 answer`() {
-        val (userId, workspaceId) = provisioned
-        seedExecutionKey(userId, workspaceId)
+        val (_, workspaceId) = provisioned
         val pipelineId =
             metadataScalar<Any>(
                 "SELECT id FROM pipelines WHERE workspace_id = '$workspaceId' AND name = 'nyc/mobility/taxi_vs_rideshare'",
@@ -288,7 +289,7 @@ class TaxiVsRideshareFourEngineE2eTest {
         val result =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, RUN_KEY.plaintext)
+                .asSession(runSession())
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
                 .then()
@@ -414,7 +415,7 @@ class TaxiVsRideshareFourEngineE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(body)
                 .`when`()
                 .post("/api/v1/datasources")
@@ -432,7 +433,8 @@ class TaxiVsRideshareFourEngineE2eTest {
             val request =
                 HttpRequest
                     .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                    .header(API_KEY_HEADER, RUN_KEY.plaintext)
+                    .header("Cookie", E2eSession.cookieHeader(runSession()))
+                    .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                     .header("DP-Correlation-Id", UUID.randomUUID().toString())
                     .header("Content-Type", "application/json")
                     .header("Accept", "text/event-stream")
@@ -448,7 +450,7 @@ class TaxiVsRideshareFourEngineE2eTest {
         val body =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, RUN_KEY.plaintext)
+                .asSession(runSession())
                 .`when`()
                 .get("/api/v1/executions/$executionId")
                 .then()
@@ -564,59 +566,17 @@ class TaxiVsRideshareFourEngineE2eTest {
                     """.trimIndent(),
                 )
             }
-            insertApiKey(connection, ADMIN_KEY, UUID.fromString(ADMIN_USER_ID), DEFAULT_WORKSPACE_ID)
         }
     }
 
-    /** The executing key: the provisioned user, in the provisioned personal workspace. */
-    private fun seedExecutionKey(
-        userId: UUID,
-        workspaceId: UUID,
-    ) {
-        val pg = metadata
-        DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
-            // 179 (D16/V31): `firstLogin` minted the user's login key in this workspace
-            // already, and one live `user` key per (user, workspace) is a UNIQUE INDEX now.
-            // The fixture's known-plaintext key replaces it (revoke, never delete:
-            // audit_log.key_id keeps resolving).
-            connection
-                .prepareStatement(
-                    "UPDATE api_keys SET is_revoked = TRUE WHERE user_id = ? AND workspace_id = ? AND kind = 'user' AND is_revoked = FALSE",
-                ).use { ps ->
-                    ps.setObject(1, userId)
-                    ps.setObject(2, workspaceId)
-                    ps.executeUpdate()
-                }
-            // D-R12: this key can do at most what its ISSUER can do in the pinned workspace.
-            // The issuer is the freshly joined VIEWER of `demo` (D-R11), and a viewer executes
-            // (D-R3) — which is the whole capability this suite needs from it.
-            insertApiKey(connection, RUN_KEY, userId, workspaceId)
-        }
-    }
-
-    private fun insertApiKey(
-        connection: java.sql.Connection,
-        key: E2eAuth.SeededKey,
-        userId: UUID,
-        workspaceId: UUID,
-    ) {
-        connection
-            .prepareStatement(
-                "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                    " VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
-            ).use { ps ->
-                ps.setString(1, key.id)
-                ps.setObject(2, userId)
-                ps.setString(3, key.name)
-                ps.setString(4, key.hash)
-                ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                ps.setObject(6, workspaceId)
-                ps.executeUpdate()
-            }
-    }
+    /**
+     * The executing SESSION: the provisioned user — the freshly joined VIEWER of `demo` (D-R11), and
+     * a viewer executes (D-R3), which is the whole capability this suite needs. A session, not a
+     * key: REST is a session's surface since #215 B2 (the MCP key reaches `/mcp` only).
+     */
+    private fun runSession(): String = E2eSession.jwt(SECRET, provisioned.first.toString(), provisionedEmail, "demo")
 
     companion object {
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val BUCKET = "dp-lake-e2e"
 
         /** The compose stack's exact MySQL pin (deploy/compose.yml). */
@@ -634,9 +594,8 @@ class TaxiVsRideshareFourEngineE2eTest {
         private val EXECUTION_BUDGET: Duration = Duration.ofSeconds(180)
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-lake-4eng-key", arrayOf("read", "execute", "author"))
-        private val RUN_KEY = E2eAuth.generateKey("e2e-lake-4eng-run", arrayOf("read", "execute", "author"))
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
+        private val ADMIN_SESSION get() = E2eSession.jwt(SECRET, ADMIN_USER_ID, "e2e-lake-4eng@datapipelines.test")
 
         @Container
         @JvmStatic
@@ -664,6 +623,7 @@ class TaxiVsRideshareFourEngineE2eTest {
 
         /** Set by Order(2), read by Order(3) — the composition suite's pattern. */
         private lateinit var provisioned: Pair<UUID, UUID>
+        private var provisionedEmail: String = ""
 
         /**
          * Builds the local fixtures: the day-partitioned Parquet set (uploaded key-for-key —

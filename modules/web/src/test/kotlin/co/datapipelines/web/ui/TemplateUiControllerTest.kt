@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineRepository
@@ -72,7 +71,6 @@ class TemplateUiControllerTest {
                 userId,
                 "a@b.c",
                 "A",
-                setOf(Scope.READ),
                 AuthMethod.OIDC,
                 workspace = WorkspaceContext(workspaceId, "acme"),
             )
@@ -302,7 +300,7 @@ class TemplateUiControllerTest {
     }
 
     @Test
-    fun `scopes are populated from the authenticated principal`() {
+    fun `the page carries no scopes attribute - the role is the whole answer (#215)`() {
         authenticate()
         every { themeResolver.resolve(any()) } returns "saas"
         stubRootLevel(folders = emptyList(), leaves = emptyList(), total = 0)
@@ -310,9 +308,9 @@ class TemplateUiControllerTest {
         val model = ExtendedModelMap()
         controller.list(model, mockk(), null, null, null, null)
 
-        @Suppress("UNCHECKED_CAST")
-        val scopes = model["scopes"] as Set<String>
-        scopes shouldBe setOf("READ")
+        // The dead `scopes` attribute went with the scopes (#215 PK8); `RoleModel`'s booleans
+        // are what the templates read.
+        model.containsAttribute("scopes") shouldBe false
     }
 
     @Test

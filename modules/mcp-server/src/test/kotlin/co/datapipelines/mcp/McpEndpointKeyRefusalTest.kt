@@ -4,7 +4,6 @@ import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
@@ -90,7 +89,6 @@ class McpEndpointKeyRefusalTest {
                 userId = UUID.randomUUID(),
                 email = "a@b.c",
                 displayName = "A",
-                scopes = if (kind in ApiKeyKind.SCOPELESS) emptySet() else setOf(Scope.AUTHOR),
                 authMethod = AuthMethod.API_KEY,
                 keyId = "dpk_ABCDEFGHIJKL",
                 workspaceName = "default",

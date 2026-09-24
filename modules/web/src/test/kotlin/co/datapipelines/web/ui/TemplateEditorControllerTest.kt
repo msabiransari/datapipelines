@@ -4,7 +4,6 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -73,7 +72,6 @@ class TemplateEditorControllerTest {
                 userId,
                 "a@b.c",
                 "A",
-                setOf(Scope.AUTHOR),
                 AuthMethod.OIDC,
                 workspace = WorkspaceContext(workspaceId, "acme", role),
             )

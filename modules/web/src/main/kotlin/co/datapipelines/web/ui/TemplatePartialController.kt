@@ -5,7 +5,6 @@ import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.TemplateType
@@ -74,7 +73,6 @@ class TemplatePartialController(
         val typeFilter = TemplateFilters.type(type)
         TemplateFilters.fill(model, dialect, type)
         model.addAttribute("q", q ?: "")
-        model.addAttribute("scopes", scopes())
         RoleModel.stamp(model)
         return if (prefix != null) {
             browse.fillLevel(model, workspaceId, view, prefix, dialectFilter, typeFilter, offset ?: 0)
@@ -196,7 +194,6 @@ class TemplatePartialController(
             // HX-Redirect: a navigation would discard the toast.
             TemplateFilters.fill(model, dialect = null, type = null)
             model.addAttribute("q", "")
-            model.addAttribute("scopes", scopes())
             RoleModel.stamp(model)
             // An author's re-render after a create (MUTATE row): the view is theirs — Everything.
             browse.fillWrapper(model, workspaceId, LensedView.EVERYTHING, q = null, dialect = null, type = null, offset = 0)
@@ -222,6 +219,4 @@ class TemplatePartialController(
 
     private fun principal(): AuthenticatedPrincipal? =
         SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
-
-    private fun scopes(): Set<String> = principal()?.scopes?.map { it.name }?.toSet() ?: emptySet()
 }

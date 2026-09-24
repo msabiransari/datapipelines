@@ -1,5 +1,6 @@
 package co.datapipelines.integration
 
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
@@ -28,11 +29,12 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * The write-surface stamps, proven END TO END over the three surfaces the ruling names
- * (V20, owner ruling 2026-09-09; versioning §3.7): a REST write with an API key stamps
- * `api_key`, the SAME key writing through MCP's real `/mcp` endpoint stamps `mcp` (only the
- * tool knows the call is MCP — the credential cannot), and a session write stamps `session` —
- * while `created_by` names the PERSON on every path (the key's owner on the keyed ones).
+ * The write-surface stamps, proven END TO END over the surfaces the ruling names (V20, owner
+ * ruling 2026-09-09; versioning §3.7): the MCP key writing through MCP's real `/mcp` endpoint
+ * stamps `mcp` (only the tool knows the call is MCP — the credential cannot), and a session
+ * write stamps `session` — while `created_by` names the PERSON on every path. Since #215 B2 the
+ * MCP key is refused on REST before anything is written, so no REST write stamps `api_key` any
+ * more: the first case pins the refusal and the absence of the row.
  *
  * Every value is read back from the ROW, never echoed from the request. The MCP leg is the
  * load-bearing one: MCP is API-key-authenticated, so nothing about the credential
@@ -83,6 +85,19 @@ class WriteSurfaceStampingE2eTest {
         )
 
     /** The version-1 row of [pipelineName], read straight from the table — the ruling's test shape. */
+    private fun rowCount(pipelineName: String): Int =
+        DriverManager
+            .getConnection(postgres.jdbcUrl, postgres.username, postgres.password)
+            .use { connection ->
+                connection.prepareStatement("SELECT COUNT(*) FROM pipelines WHERE name = ?").use { ps ->
+                    ps.setString(1, pipelineName)
+                    ps.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+                }
+            }
+
     private fun row(pipelineName: String): Map<String, String> =
         DriverManager
             .getConnection(postgres.jdbcUrl, postgres.username, postgres.password)
@@ -109,26 +124,19 @@ class WriteSurfaceStampingE2eTest {
 
     @Test
     @Order(1)
-    fun `a REST write with an API key stamps api_key and the key owner's id`() {
-        val response =
-            given()
-                .port(port)
-                .contentType(ContentType.JSON)
-                .header("DP-API-Key", ADMIN_KEY.plaintext)
-                .body(bodyJson("test/via_rest_key"))
-                .`when`()
-                .post("/api/v1/pipelines")
-                .thenReturn()
-        if (response.statusCode != 201) {
-            throw AssertionError("keyed REST create failed (${response.statusCode}): ${response.body().asString()}")
-        }
+    fun `a REST write with the MCP key is refused as a kind - nothing is written, nothing stamped`() {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .body(bodyJson("test/via_rest_key"))
+            .`when`()
+            .post("/api/v1/pipelines")
+            .then()
+            .statusCode(403)
+            .body("error.details.reason", org.hamcrest.Matchers.equalTo("user_key_off_surface"))
 
-        val row = row("test/via_rest_key")
-        row["created_via"] shouldBe "api_key"
-        row["updated_via"] shouldBe "api_key"
-        // The person, always: a key's writes are its OWNER's (the ruling), and the id is the
-        // row's own created_by, not the request's.
-        row["created_by"] shouldBe ADMIN_USER_ID
+        rowCount("test/via_rest_key") shouldBe 0
     }
 
     @Test
@@ -228,7 +236,7 @@ class WriteSurfaceStampingE2eTest {
         val created =
             given()
                 .port(port)
-                .header("DP-API-Key", ADMIN_KEY.plaintext)
+                .asSession(sessionJwt())
                 .`when`()
                 .get("/api/v1/pipelines/$id")
                 .thenReturn()
@@ -237,7 +245,7 @@ class WriteSurfaceStampingE2eTest {
 
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(sessionJwt())
             .header("If-Match", draftHash)
             .`when`()
             .post("/api/v1/pipelines/$id/release")
@@ -273,7 +281,6 @@ class WriteSurfaceStampingE2eTest {
         val payload =
             b64(
                 """{"sub":"$ADMIN_USER_ID","email":"e2e-via@datapipelines.test","name":"Via Probe",""" +
-                    """"scopes":["read","execute","author","admin"],""" +
                     """"iss":"datapipelines","iat":${now.epochSecond},""" +
                     """"exp":${now.plusSeconds(3600).epochSecond},"active_workspace":"default"}""",
             )
@@ -292,7 +299,7 @@ class WriteSurfaceStampingE2eTest {
     companion object {
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-via-stamping-key", arrayOf("read", "execute", "author"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-via-stamping-key")
 
         /** FIXED, not random: the session leg mints its own JWT against this secret. */
         private const val JWT_SECRET = "dGVzdC1qd3Qtc2VjcmV0LWZvci12aWEtc3RhbXBpbmctMzI="
@@ -358,14 +365,14 @@ class WriteSurfaceStampingE2eTest {
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id)" +
                             " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
                         ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                        ps.setString(3, ADMIN_KEY.name)
-                        ps.setString(4, ADMIN_KEY.hash)
-                        ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
+                        ps.setObject(3, UUID.fromString(ADMIN_USER_ID))
+                        ps.setString(4, ADMIN_KEY.name)
+                        ps.setString(5, ADMIN_KEY.hash)
                         ps.executeUpdate()
                     }
             }

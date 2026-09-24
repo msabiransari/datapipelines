@@ -1,6 +1,6 @@
 ---
 name: datapipelines
-description: "Author, maintain, and execute declarative SQL data pipelines on the datapipelines.co server. Use when the user asks to create, update, run, debug, or inspect pipelines, templates, datasources, or executions — or when MCP tools like pipelines_create, pipelines_execute, templates_render, templates_create, datasources_test, datasources_get_schemas, datasources_get_tables, datasources_get_columns, executions_get_result, or prompts like analyze_pipeline / create_pipeline_for_question / debug_failed_execution are available. Covers the pipeline JSON schema, Freemarker SQL templates, node types, execution semantics, error handling, and scopes."
+description: "Author, maintain, and execute declarative SQL data pipelines on the datapipelines.co server. Use when the user asks to create, update, run, debug, or inspect pipelines, templates, datasources, or executions — or when MCP tools like pipelines_create, pipelines_execute, templates_render, templates_create, datasources_test, datasources_get_schemas, datasources_get_tables, datasources_get_columns, executions_get_result, or prompts like analyze_pipeline / create_pipeline_for_question / debug_failed_execution are available. Covers the pipeline JSON schema, Freemarker SQL templates, node types, execution semantics, error handling, and roles."
 ---
 
 # datapipelines
@@ -230,7 +230,7 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
   pairing THIS key with the execution's correlation id (an execution started over REST,
   the UI, or another key of the same user is refused, and the refusal says which rule
   fired). Cancellation is requested, not awaited: poll `executions_get` for the terminal
-  `ABORTED`. For anything the rule refuses, the out-of-band REST `DELETE /api/v1/executions/{id}` remains.
+  `ABORTED`. For anything the rule refuses, ask the person to cancel it in the UI — your key has no REST road.
 - **Abandoned calls** run to completion — `/mcp` has no disconnect callback; cancel with `executions_cancel` or let the timeout handle it.
 - **Idempotency:** REST execute accepts `Idempotency-Key`; the MCP tool has none — unsure a call landed? Check `executions_list` before refiring.
 - **Zero-caller pipelines** return stats with no rows — that is a valid design, not a
@@ -393,7 +393,7 @@ draft. Its Do/Don't table is one screen; each row is a mistake an agent made her
 - **`references/templates.md`** — writing SQL: templates, library imports, CALCULATOR nodes.
 - **`references/transforms.md`** — a transform template (JSONata), its contract/invariants/tests, `templates_evaluate`.
 - **`references/naming.md`** — choosing where a new pipeline or template lives.
-- **`references/connecting.md`** — a first call, a scope or credential refusal, no MCP transport.
+- **`references/connecting.md`** — a first call, a role or credential refusal, no MCP transport.
 - **`references/dp-lake.md`** — the data is Parquet or Iceberg on S3, not in a database.
 - **`references/endpoints.md`** — a released read-only pipeline answering a plain HTTP GET.
 - **`references/error-codes.md`** — a tool answered `isError: true`; the code's meaning and response.

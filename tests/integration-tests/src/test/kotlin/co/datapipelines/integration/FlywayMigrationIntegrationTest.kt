@@ -125,6 +125,9 @@ class FlywayMigrationIntegrationTest {
                 // 7b (#7) — the transform blocks: three jsonb columns, chk_template_type's
                 // four values, chk_type_dialect required-iff-sql, chk_transform_blocks.
                 "33|transform template blocks|true",
+                // 215b (#215) — users.kind, api_keys.created_by + role + chk_api_keys_role, one
+                // service identity per endpoint/server key, api_keys.scopes dropped.
+                "34|key identities and roles|true",
             )
     }
 
@@ -496,6 +499,82 @@ class FlywayMigrationIntegrationTest {
             )
     }
 
+    private fun roleFor(kind: String): String =
+        when (kind) {
+            "endpoint" -> "'api_caller'"
+            "server" -> "'promotion_receiver'"
+            else -> "NULL"
+        }
+
+    @Test
+    fun `V34 gives keys a creator and a role, users a kind, and drops scopes`() {
+        // Record §3.2/§3.3 (PK5, PK6, PK8), read from the SHIPPED database.
+        assertAll(
+            { columnsOf("api_keys").contains("scopes") shouldBe false },
+            { columnsOf("api_keys").containsAll(listOf("created_by", "role")) shouldBe true },
+            { columnsOf("users").contains("kind") shouldBe true },
+        )
+        // The CHECK is asserted by INSERTING (the V17 rule). The first three rows are the
+        // contract; the NULL-role rows are the arm the record's spelling admitted — a bare
+        // `role = 'api_caller'` is UNKNOWN for NULL, and a CHECK passes on UNKNOWN.
+        assertAll(
+            { roleAccepted("user", null) shouldBe true },
+            { roleAccepted("endpoint", "api_caller") shouldBe true },
+            { roleAccepted("server", "promotion_receiver") shouldBe true },
+            { roleAccepted("endpoint", null) shouldBe false },
+            { roleAccepted("server", null) shouldBe false },
+            { roleAccepted("user", "api_caller") shouldBe false },
+            { roleAccepted("endpoint", "promotion_receiver") shouldBe false },
+        )
+        // users.kind is closed: a fourth kind is refused.
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                val refused =
+                    runCatching {
+                        connection.createStatement().use {
+                            it.execute(
+                                "INSERT INTO users (id, email, display_name, provider, provider_subject, kind)" +
+                                    " VALUES (gen_random_uuid(), 'v34-kind@datapipelines.test', 'x', 'test', 'v34-kind', 'robot')",
+                            )
+                        }
+                    }.exceptionOrNull()
+                (refused?.message.orEmpty().contains("chk_users_kind")) shouldBe true
+            } finally {
+                connection.rollback()
+            }
+        }
+    }
+
+    /** True when `api_keys` accepts ([kind], [role]); the probe row is always rolled back. */
+    private fun roleAccepted(
+        kind: String,
+        role: String?,
+    ): Boolean =
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active)" +
+                            " VALUES (\'$KIND_PROBE_USER\', \'v17-probe@datapipelines.test\', \'V17 probe\'," +
+                            " \'test\', \'v17-probe\', TRUE) ON CONFLICT (id) DO NOTHING",
+                    )
+                    statement.execute(
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (\'dpk_V34PROBE01\', \'$KIND_PROBE_USER\', \'$KIND_PROBE_USER\', \'probe\', \'h\'," +
+                            " (SELECT id FROM workspaces LIMIT 1), \'$kind\', ${role?.let { "'$it'" } ?: "NULL"})",
+                    )
+                }
+                true
+            } catch (e: java.sql.SQLException) {
+                check(e.message.orEmpty().contains("chk_api_keys_role")) { "unexpected SQL failure: ${e.message}" }
+                false
+            } finally {
+                connection.rollback()
+            }
+        }
+
     /** True when `api_keys.kind` accepts [kind]; the probe row is always rolled back. */
     private fun kindAccepted(kind: String): Boolean =
         dataSource.connection.use { connection ->
@@ -508,9 +587,12 @@ class FlywayMigrationIntegrationTest {
                             " \'test\', \'v17-probe\', TRUE) ON CONFLICT (id) DO NOTHING",
                     )
                     statement.execute(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id, kind)" +
-                            " VALUES (\'dpk_V17PROBE01\', \'$KIND_PROBE_USER\', \'probe\', \'h\', \'{}\'::text[]," +
-                            " (SELECT id FROM workspaces LIMIT 1), \'$kind\')",
+                        // V34: the role follows the kind (chk_api_keys_role), so the probe states
+                        // the matching one; an unknown kind reaches chk_api_keys_kind first —
+                        // Postgres checks CHECK constraints in name order.
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (\'dpk_V17PROBE01\', \'$KIND_PROBE_USER\', \'$KIND_PROBE_USER\', \'probe\', \'h\'," +
+                            " (SELECT id FROM workspaces LIMIT 1), \'$kind\', ${roleFor(kind)})",
                     )
                 }
                 true
@@ -680,6 +762,8 @@ class FlywayMigrationIntegrationTest {
                 // 179 (V31): one live `user` key per (user, workspace) — the login mint's
                 // race arbiter.
                 "api_keys.api_keys_one_live_user_key",
+                // 215b (V34): the keys a person CREATED, now that user_id names a key's identity.
+                "api_keys.idx_api_keys_created_by",
                 "api_keys.idx_api_keys_endpoint_kind",
                 "api_keys.idx_api_keys_expires",
                 "api_keys.idx_api_keys_user",
@@ -774,6 +858,9 @@ class FlywayMigrationIntegrationTest {
                 // 074 (V11) — the api_keys.kind enum column. Sorted first, like every other row:
                 // the query is ORDER BY'd and the assertion is order-sensitive.
                 "chk_api_keys_kind",
+                // 215b (V34) — a key's role follows its kind (api_caller | promotion_receiver | NULL),
+                // each non-null arm spelled `role IS NOT NULL AND …` (a NULL role would pass otherwise).
+                "chk_api_keys_role",
                 // 087 §A (V13) — the three credential CHECKs of metadata-db §4.10: the kind is
                 // in the enums.md §5A set, `kind = 'none'` iff no ciphertext (which is what makes
                 // `password_set` derivable), and `username` is present exactly when the kind
@@ -825,6 +912,8 @@ class FlywayMigrationIntegrationTest {
                 "chk_transform_blocks",
                 "chk_triggered_via",
                 "chk_type_dialect",
+                // 215b (V34) — users.kind is human | service (a key's identity) | system.
+                "chk_users_kind",
                 // V24 (113) — the invitation row stores the email in the one canonical form §4.2
                 // mandates; V29 (177) gave it the same ONE-role CHECK the membership carries (D20).
                 // Sorted BEFORE the members' CHECK: pg_constraint's ORDER BY conname puts

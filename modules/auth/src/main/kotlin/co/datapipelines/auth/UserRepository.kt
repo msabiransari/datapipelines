@@ -81,6 +81,12 @@ class UserRepository(
             ) { rs, _ -> rs.getBoolean("is_active") }
             .firstOrNull()
 
+    /**
+     * The one INSERT into `users` ([UserService]'s create path). [kind] is what the row IS (V34):
+     * a person, a key's identity, or the System actor — decided by the caller, never defaulted
+     * past a person, so a service or system row cannot be created by forgetting to say so.
+     */
+    @Suppress("LongParameterList") // one row, spelled out
     fun insert(
         email: String,
         displayName: String,
@@ -88,6 +94,7 @@ class UserRepository(
         provider: String,
         providerSubject: String,
         isAdmin: Boolean,
+        kind: UserKind = UserKind.HUMAN,
     ): User {
         val params =
             MapSqlParameterSource()
@@ -97,11 +104,12 @@ class UserRepository(
                 .addValue("provider", provider)
                 .addValue("provider_subject", providerSubject)
                 .addValue("is_admin", isAdmin)
+                .addValue("kind", kind.wire)
         return jdbc
             .query(
                 """
-                INSERT INTO users (email, display_name, profile_picture_url, provider, provider_subject, is_admin)
-                VALUES (:email, :display_name, :profile_picture_url, :provider, :provider_subject, :is_admin)
+                INSERT INTO users (email, display_name, profile_picture_url, provider, provider_subject, is_admin, kind)
+                VALUES (:email, :display_name, :profile_picture_url, :provider, :provider_subject, :is_admin, :kind)
                 RETURNING *
                 """.trimIndent(),
                 params,
@@ -143,10 +151,14 @@ class UserRepository(
         )
     }
 
-    /** Idempotently grants admin (§4.4 / §10.1). Returns true if it flipped. */
+    /**
+     * Idempotently grants admin (§4.4 / §10.1). Returns true if it flipped. A `human` row only —
+     * in SQL as well as in the service (#215 A3): an identity made super admin would make its key
+     * one, and a key is never a super admin (B1).
+     */
     fun grantAdmin(id: UUID): Boolean =
         jdbc.update(
-            "UPDATE users SET is_admin = TRUE, updated_at = NOW() WHERE id = :id AND is_admin = FALSE",
+            "UPDATE users SET is_admin = TRUE, updated_at = NOW() WHERE id = :id AND is_admin = FALSE AND kind = 'human'",
             MapSqlParameterSource("id", id),
         ) > 0
 
@@ -177,6 +189,7 @@ class UserRepository(
                    provider_subject = email,
                    updated_at = NOW()
              WHERE id = :id
+               AND kind = 'human'
                AND (provider <> :provider OR provider_subject <> email)
             """.trimIndent(),
             MapSqlParameterSource().addValue("id", id).addValue("provider", UserService.BOOTSTRAP_PROVIDER),
@@ -196,9 +209,10 @@ class UserRepository(
         ) > 0
 
     /**
-     * User-administration search (§7.6 `USER_ADMINISTRATION`). Case-insensitive
-     * substring match over email and display name; a blank [query] lists everyone.
-     * Paged by [offset]/[limit] with a stable ordering so pages do not overlap.
+     * User-administration search (§7.6 `user.manage`). Case-insensitive substring match over
+     * email and display name; a blank [query] lists every PERSON — `human` rows only (#215 A3: a
+     * key identity and the System actor are managed through their key, or not at all). Paged by
+     * [offset]/[limit] with a stable ordering so pages do not overlap.
      */
     fun search(
         query: String,
@@ -209,9 +223,10 @@ class UserRepository(
         return jdbc.query(
             """
             SELECT * FROM users
-             WHERE :term = ''
-                OR LOWER(email) LIKE '%' || :term || '%'
-                OR LOWER(display_name) LIKE '%' || :term || '%'
+             WHERE kind = 'human'
+               AND (:term = ''
+                    OR LOWER(email) LIKE '%' || :term || '%'
+                    OR LOWER(display_name) LIKE '%' || :term || '%')
              ORDER BY email
              OFFSET :offset LIMIT :limit
             """.trimIndent(),
@@ -237,7 +252,7 @@ class UserRepository(
                 """
                 SELECT id, password_hash, failed_login_count, locked_until
                   FROM users
-                 WHERE email = :email AND password_hash IS NOT NULL
+                 WHERE email = :email AND password_hash IS NOT NULL AND kind = 'human'
                 """.trimIndent(),
                 MapSqlParameterSource("email", email.trim().lowercase()),
             ) { rs, _ ->
@@ -409,5 +424,6 @@ class UserRepository(
             mustChangePassword = rs.getBoolean("must_change_password"),
             hasLocalPassword = rs.getString("password_hash") != null,
             lockedUntil = rs.getTimestamp("locked_until")?.toInstant(),
+            kind = UserKind.fromWire(rs.getString("kind")),
         )
 }

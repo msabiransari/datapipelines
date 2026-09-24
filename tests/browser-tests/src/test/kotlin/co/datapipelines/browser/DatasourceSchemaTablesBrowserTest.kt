@@ -1,7 +1,6 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
-import de.mkammerer.argon2.Argon2Factory
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -16,7 +15,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.sql.DriverManager
-import java.util.UUID
 import kotlin.io.path.absolutePathString
 
 /**
@@ -34,18 +32,16 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
     fun `a viewer opens a discovered-schema datasource's tables and columns, and the LAKE registry`() {
         startTrace()
         val admin = seedLocalUser(uniqueEmail("dst-admin-" + suffix()), generatedPassword("pw"), mustChange = false)
-        // 179 (V31): the fixture key exists BEFORE the login — the login's own mint then
-        // loses the unique-index race by design and this key stays the suite's credential.
-        val key = seedApiKey(admin.email)
         login(admin.email, admin.oneTimePassword)
         page.waitForURL("**/dashboard")
+        val auth = sessionAuth("default")
 
         val sqliteName = "sqlite-" + suffix()
-        registerSqliteDatasource(key, sqliteName, sqliteFile)
+        registerSqliteDatasource(auth, sqliteName, sqliteFile)
         val lakeName = "lake-" + suffix()
-        registerLakeDatasource(key, lakeName)
+        registerLakeDatasource(auth, lakeName)
         registerLakeTable(
-            key,
+            auth,
             lakeName,
             """{"namespace": ["nyc"], "name": "trips", "format": "parquet",
                "location": "file://${fixtureDir.absolutePathString()}/trips/part-0.parquet"}""",
@@ -153,57 +149,32 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
 
     // ------------------------------------------------------------------ REST seeding
 
-    /** An admin-scoped key for [email]'s membership of the shared `default` workspace. */
-    private fun seedApiKey(email: String): String {
-        val keyId = "dpk_" + (1..12).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-        val plaintext = keyId + "." + (1..48).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
-        val argon2 = Argon2Factory.create(Argon2Factory.Argon2Types.ARGON2id)
-        val hash = argon2.hash(2, 19_456, 1, plaintext.toCharArray())
-        DriverManager
-            .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
-            .use { connection ->
-                val userId =
-                    connection.createStatement().use { statement ->
-                        statement.executeQuery("SELECT id FROM users WHERE email = '$email'").use { rs ->
-                            rs.next()
-                            rs.getObject(1, UUID::class.java)
-                        }
-                    }
-                // 179 (V31): the sign-in minted the user's login key in this workspace
-                // already (one live `user` key per pair is a UNIQUE INDEX now) — the
-                // fixture's key replaces it. Revoke, never delete: audit_log.key_id keeps
-                // resolving.
-                connection
-                    .prepareStatement(
-                        "UPDATE api_keys SET is_revoked = TRUE WHERE user_id = ? AND kind = 'user' AND is_revoked = FALSE" +
-                            " AND workspace_id = 'defa0000-0000-0000-0000-000000000001'",
-                    ).use { ps ->
-                        ps.setObject(1, userId)
-                        ps.executeUpdate()
-                    }
-                connection
-                    .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                            " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
-                    ).use { ps ->
-                        ps.setString(1, keyId)
-                        ps.setObject(2, userId)
-                        ps.setString(3, "browser-schema-tables-key")
-                        ps.setString(4, hash)
-                        ps.setArray(5, connection.createArrayOf("text", arrayOf("read", "execute", "author")))
-                        ps.executeUpdate()
-                    }
-            }
-        return plaintext
+    /**
+     * The signed-in page's OWN session, for the REST fixture calls: REST is a session's surface
+     * since #215 B2 (the MCP key reaches `/mcp` only), and registering an in-process engine is a
+     * super admin's act — which no key is (B1). [workspace] is named explicitly on each call.
+     */
+    private fun sessionAuth(workspace: String): RestAuth {
+        val cookies = page.context().cookies().associate { it.name to it.value }
+        val session = checkNotNull(cookies["dp_session"]) { "no dp_session cookie in the browser context" }
+        val csrf = checkNotNull(cookies["dp_csrf"]) { "no dp_csrf cookie in the browser context" }
+        return RestAuth("dp_session=$session; dp_csrf=$csrf", csrf, workspace)
     }
 
+    /** A session's REST credentials: the cookie pair, the CSRF double-submit value, the workspace. */
+    private class RestAuth(
+        val cookie: String,
+        val csrf: String,
+        val workspace: String,
+    )
+
     private fun registerSqliteDatasource(
-        key: String,
+        auth: RestAuth,
         name: String,
         file: Path,
     ) {
         post(
-            key,
+            auth,
             "/api/v1/datasources",
             // `open_mode: "1"` (xerial SQLiteOpenMode.READONLY) is required alongside
             // `readonly: true` (datasources.md §8A.4) — without it the pool fails to
@@ -217,11 +188,11 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
     }
 
     private fun registerLakeDatasource(
-        key: String,
+        auth: RestAuth,
         name: String,
     ) {
         post(
-            key,
+            auth,
             "/api/v1/datasources",
             """{"name": "$name", "display_name": "Browser Lake", "dialect": "LAKE",
                "jdbc_url": "jdbc:duckdb::memory:", "readonly": true,
@@ -231,13 +202,13 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
     }
 
     private fun registerLakeTable(
-        key: String,
+        auth: RestAuth,
         datasource: String,
         body: String,
-    ) = post(key, "/api/v1/datasources/$datasource/tables", body, expected = 201)
+    ) = post(auth, "/api/v1/datasources/$datasource/tables", body, expected = 201)
 
     private fun post(
-        key: String,
+        auth: RestAuth,
         path: String,
         body: String,
         expected: Int,
@@ -245,7 +216,9 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
         val request =
             HttpRequest
                 .newBuilder(URI.create("$baseUrl$path"))
-                .header("DP-API-Key", key)
+                .header("Cookie", auth.cookie)
+                .header("DP-CSRF-Token", auth.csrf)
+                .header("DP-Workspace", auth.workspace)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build()
@@ -258,9 +231,6 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
     private fun suffix(): String = generatedPassword("s").take(8).lowercase()
 
     private companion object {
-        private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-        private val random = java.security.SecureRandom()
-
         private lateinit var sqliteFile: Path
         private lateinit var fixtureDir: Path
 

@@ -1,5 +1,6 @@
 package co.datapipelines.integration
 
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
@@ -44,8 +45,9 @@ import java.util.UUID
  * Both halves of the measurement, over the REAL wire (a `tools/call` JSON-RPC request per leg,
  * the [WriteSurfaceStampingE2eTest] harness):
  *
- * 1. a workspace-OWNED datasource — registered over REST with no `global` and no `workspace`,
- *    so it binds to the key's active workspace; the read-back proves the fixture's premise;
+ * 1. a workspace-OWNED datasource — registered over REST (a signed-in session since #215 B2 —
+ *    the key is MCP-only) with no `global` and no `workspace`, so it binds to the caller's
+ *    active workspace, the one the key pins; the read-back proves the fixture's premise;
  * 2. the body saved over REST is `201` (the half that always worked);
  * 3. the same body saved over MCP succeeds with the `draft` pointer (the half 132 saw refused);
  * 4. `pipelines_execute` over MCP runs what MCP saved — the executor is told the workspace
@@ -117,15 +119,15 @@ class McpSaveWorkspaceDatasourceE2eTest {
         DriverManager.getConnection(FOREIGN_JDBC_URL, H2_USER, H2_PASSWORD).use { it.createStatement().execute("SELECT 1") }
 
         // No `global`, no `workspace`: D8 binds the datasource to the caller's ACTIVE workspace.
-        registerDatasource(ADMIN_KEY.plaintext, OWNED_DATASOURCE, OWNED_JDBC_URL, "Owned by default (134)")
-        registerDatasource(FOREIGN_KEY.plaintext, FOREIGN_DATASOURCE, FOREIGN_JDBC_URL, "Owned by the other workspace (134)")
+        registerDatasource(ADMIN_SESSION, OWNED_DATASOURCE, OWNED_JDBC_URL, "Owned by default (134)")
+        registerDatasource(FOREIGN_SESSION, FOREIGN_DATASOURCE, FOREIGN_JDBC_URL, "Owned by the other workspace (134)")
 
         // The premise, read back: OWNED, not global — the shape the demo datasources do not have.
         datasourceWorkspace(OWNED_DATASOURCE) shouldBe "default"
         withClue("the other workspace's datasource is invisible to the key's workspace (design §3)") {
             given()
                 .port(port)
-                .header("DP-API-Key", ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/datasources/$FOREIGN_DATASOURCE")
                 .then()
@@ -154,7 +156,7 @@ class McpSaveWorkspaceDatasourceE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(restBody(REST_PIPELINE, OWNED_DATASOURCE))
             .`when`()
             .post("/api/v1/pipelines")
@@ -201,7 +203,7 @@ class McpSaveWorkspaceDatasourceE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(restBody("${REST_PIPELINE}_foreign", FOREIGN_DATASOURCE))
             .`when`()
             .post("/api/v1/pipelines")
@@ -215,7 +217,7 @@ class McpSaveWorkspaceDatasourceE2eTest {
     }
 
     private fun registerDatasource(
-        key: String,
+        session: String,
         name: String,
         jdbcUrl: String,
         displayName: String,
@@ -223,7 +225,7 @@ class McpSaveWorkspaceDatasourceE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header("DP-API-Key", key)
+            .asSession(session)
             .body(
                 """
                 {"name": "$name", "display_name": "$displayName", "dialect": "H2",
@@ -239,7 +241,7 @@ class McpSaveWorkspaceDatasourceE2eTest {
     private fun datasourceWorkspace(name: String): String? =
         given()
             .port(port)
-            .header("DP-API-Key", ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/datasources/$name")
             .then()
@@ -299,12 +301,17 @@ class McpSaveWorkspaceDatasourceE2eTest {
         private const val TEMPLATE_BODY = "SELECT $ANSWER AS answer"
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-134-default-key", arrayOf("read", "execute", "author"))
+        private val ADMIN_KEY = E2eAuth.generateKey("e2e-134-default-key")
 
-        /** The OTHER workspace, its member and its key — the negative's owner. */
+        /** The OTHER workspace and its member — the negative's owner, who registers over REST as a session. */
         private val FOREIGN_WORKSPACE_ID: String = UUID.randomUUID().toString()
         private val FOREIGN_USER_ID: String = UUID.randomUUID().toString()
-        private val FOREIGN_KEY = E2eAuth.generateKey("e2e-134-foreign-key", arrayOf("read", "author"))
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret`, signing both REST sessions (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-134-default@datapipelines.test")
+        private val FOREIGN_SESSION get() =
+            E2eSession.jwt(JWT_SECRET, FOREIGN_USER_ID, "e2e-134-foreign@datapipelines.test", "lane134-other")
 
         private var mcpPipelineId: String = ""
 
@@ -332,9 +339,7 @@ class McpSaveWorkspaceDatasourceE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") {
-                Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
-            }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") {
                 Base64.getEncoder().encodeToString(ByteArray(32).also { random.nextBytes(it) })
             }
@@ -375,25 +380,26 @@ class McpSaveWorkspaceDatasourceE2eTest {
                         "INSERT INTO workspace_members (workspace_id, user_id, role)" +
                             " VALUES ('$FOREIGN_WORKSPACE_ID', '$FOREIGN_USER_ID', 'workspace_admin')",
                     )
+                    // #215 PK4: a super admin's MCP key with NO membership is a viewer, and this
+                    // suite authors over MCP — so the key's member is a workspace admin of the
+                    // default workspace (capped at author over MCP, which is what authoring needs).
+                    statement.execute(
+                        "INSERT INTO workspace_members (workspace_id, user_id, role)" +
+                            " VALUES ('$WORKSPACE_ID', '$ADMIN_USER_ID', 'workspace_admin')",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
                     ).use { ps ->
-                        val keys =
-                            listOf(
-                                Triple(ADMIN_KEY, ADMIN_USER_ID, WORKSPACE_ID),
-                                Triple(FOREIGN_KEY, FOREIGN_USER_ID, FOREIGN_WORKSPACE_ID),
-                            )
-                        for ((key, owner, workspace) in keys) {
-                            ps.setString(1, key.id)
-                            ps.setObject(2, UUID.fromString(owner))
-                            ps.setString(3, key.name)
-                            ps.setString(4, key.hash)
-                            ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                            ps.setObject(6, UUID.fromString(workspace))
-                            ps.executeUpdate()
-                        }
+                        // The MCP key: acts as its member, who created it (no role — PK4).
+                        ps.setString(1, ADMIN_KEY.id)
+                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
+                        ps.setObject(3, UUID.fromString(ADMIN_USER_ID))
+                        ps.setString(4, ADMIN_KEY.name)
+                        ps.setString(5, ADMIN_KEY.hash)
+                        ps.setObject(6, UUID.fromString(WORKSPACE_ID))
+                        ps.executeUpdate()
                     }
             }
         }

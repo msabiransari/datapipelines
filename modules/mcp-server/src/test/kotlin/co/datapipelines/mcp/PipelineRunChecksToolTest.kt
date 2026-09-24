@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.checks.PipelineCheckRunner
-import co.datapipelines.auth.Scope
 import co.datapipelines.pipeline.CheckExpectation
 import co.datapipelines.pipeline.CheckRunOutcome
 import co.datapipelines.pipeline.CheckRunVerdict
@@ -27,7 +26,7 @@ class PipelineRunChecksToolTest {
     private val pipelines = mockk<PipelineRepository>()
     private val runner = mockk<PipelineCheckRunner>()
     private val service = McpFixtures.pipelineService(pipelines)
-    private val ctx = McpFixtures.ctx(Scope.EXECUTE)
+    private val ctx = McpFixtures.ctx()
 
     private val tool = PipelineRunChecksTool(service, runner)
 

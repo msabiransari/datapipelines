@@ -83,9 +83,10 @@ class ApiKeyMintingTest {
         rows.single()["minted_at_login"] shouldBe true
         rows.single()["name"] shouldBe "mcp/demo"
         rows.single()["secret_sealed"] shouldBe true
-        // A super admin's key carries the full key ladder (§7.5) — `admin` itself keys
-        // may never hold (O-2).
-        rows.single()["scopes"] shouldBe "{read,execute,author}"
+        // #215 PK4: the MCP key carries no role and no scopes of its own — it acts as its
+        // member (created_by = user_id), whose role is read per request and capped at author.
+        rows.single()["role_is_null"] shouldBe true
+        rows.single()["self_created"] shouldBe true
     }
 
     @Test
@@ -115,7 +116,8 @@ class ApiKeyMintingTest {
         val acme = rows.single { it["workspace"] == WS_ACME }
         acme["name"] shouldBe "mcp/$WS_ACME"
         acme["minted_at_login"] shouldBe true
-        acme["scopes"] shouldBe "{read,execute,author}"
+        acme["role_is_null"] shouldBe true
+        acme["self_created"] shouldBe true
         // …and the re-stamped session's active workspace is the switched one.
         mine(switched)["name"] shouldBe "mcp/$WS_ACME"
     }
@@ -172,16 +174,19 @@ class ApiKeyMintingTest {
                 .extract()
                 .asString()
 
-        // The opened secret IS the live key: the id the chip shows, and it validates.
+        // The opened secret IS the live key: the id the chip shows, and it serves /mcp …
         secret shouldMatch Regex("^${Regex.escape(keyId)}\\.[A-Z2-7]{48}$")
+        mcpList(secret).then().statusCode(200).body("result.isError", Matchers.not(Matchers.equalTo(true)))
+        // … and only /mcp (#215 B2): REST refuses it as a key kind, not as a bad credential.
         given()
             .port(port)
             .header("DP-API-Key", secret)
             .`when`()
             .get("/api/v1/auth/me")
             .then()
-            .statusCode(200)
-            .body("data.key_id", Matchers.equalTo(keyId))
+            .statusCode(403)
+            .body("error.code", Matchers.equalTo("endpoint.key_kind_refused"))
+            .body("error.details.reason", Matchers.equalTo("user_key_off_surface"))
 
         // #213 show-once: that one GET destroyed the copyable copy in the same act that
         // served it — a second GET is 404 (the chip's Copy is gone with it) …
@@ -194,14 +199,19 @@ class ApiKeyMintingTest {
             .statusCode(404)
 
         // … and the key itself is untouched: the Argon2id hash still serves a real read.
+        mcpList(secret).then().statusCode(200).body("result.isError", Matchers.not(Matchers.equalTo(true)))
+    }
+
+    /** `pipelines_list` over `/mcp` — the MCP key's one surface (#215 B2). */
+    private fun mcpList(key: String): Response =
         given()
             .port(port)
-            .header("DP-API-Key", secret)
+            .header("DP-API-Key", key)
+            .contentType(ContentType.JSON)
+            .accept("application/json, text/event-stream")
+            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pipelines_list","arguments":{}}}""")
             .`when`()
-            .get("/api/v1/pipelines")
-            .then()
-            .statusCode(200)
-    }
+            .post("/mcp")
 
     @Test
     @Order(6)
@@ -368,11 +378,12 @@ class ApiKeyMintingTest {
         return body ?: emptyMap()
     }
 
-    /** This suite's LIVE `user` key rows: workspace name, name, scopes, the two V31 columns. */
+    /** This suite's LIVE `user` key rows: workspace name, name, the V34 role/creator facts, the two V31 columns. */
     private fun keyRows(email: String): List<Map<String, Any>> =
         query(
             """
-            SELECT w.name AS workspace, k.name, k.scopes::text AS scopes,
+            SELECT w.name AS workspace, k.name, (k.role IS NULL) AS role_is_null,
+                   (k.created_by = k.user_id) AS self_created,
                    k.minted_at_login, (k.secret_sealed IS NOT NULL) AS secret_sealed
               FROM api_keys k
               JOIN users u ON u.id = k.user_id
@@ -383,7 +394,8 @@ class ApiKeyMintingTest {
             mapOf(
                 "workspace" to rs.getString("workspace"),
                 "name" to rs.getString("name"),
-                "scopes" to rs.getString("scopes"),
+                "role_is_null" to rs.getBoolean("role_is_null"),
+                "self_created" to rs.getBoolean("self_created"),
                 "minted_at_login" to rs.getBoolean("minted_at_login"),
                 "secret_sealed" to rs.getBoolean("secret_sealed"),
             )

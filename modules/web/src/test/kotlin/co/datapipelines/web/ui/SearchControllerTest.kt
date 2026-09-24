@@ -64,7 +64,6 @@ class SearchControllerTest {
                     userId,
                     "a@b.c",
                     "A",
-                    emptySet(),
                     AuthMethod.OIDC,
                     workspace =
                         WorkspaceContext(

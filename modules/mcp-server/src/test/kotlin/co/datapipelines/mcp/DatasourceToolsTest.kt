@@ -1,7 +1,6 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.semantics.FactEnrichment
-import co.datapipelines.auth.Scope
 import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
@@ -24,13 +23,13 @@ import java.util.UUID
 
 class DatasourceToolsTest {
     private val registry = mockk<DatasourceRegistry>()
-    private val readCtx = McpFixtures.ctx(Scope.READ)
+    private val readCtx = McpFixtures.ctx()
 
     /**
      * `datasources_test` is TEST_DATASOURCE — `ws_admin` on the role axis (design §1): a probe
      * opens a real connection with the stored credential, which is not an authoring act.
      */
-    private val adminCtx = McpFixtures.ctx(Scope.AUTHOR, workspace = McpFixtures.WORKSPACE_ADMIN)
+    private val adminCtx = McpFixtures.ctx(workspace = McpFixtures.WORKSPACE_ADMIN)
 
     @Test
     fun `list never returns a password`() {

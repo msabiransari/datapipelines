@@ -39,7 +39,15 @@ object AuthErrorCodes {
     const val API_KEY_EXPIRED = "auth.api_key.expired"
     const val SESSION_INVALID = "auth.session.invalid"
     const val SESSION_EXPIRED = "auth.session.expired"
-    const val SCOPE_INSUFFICIENT = "auth.scope.insufficient"
+
+    /**
+     * 403 — the surface declares NO catalog permission (#215 slice (b)): an unannotated governed
+     * handler (`details.route`), a tool whose catalog entry has none (`details.tool`), or a denial
+     * from the authorization layer that never reached a declared surface. A build defect the
+     * coverage guards already fail — kept as the runtime defence, so an undeclared surface is
+     * refused rather than served. Replaces `auth.scope.insufficient`, which retired with scopes.
+     */
+    const val PERMISSION_UNDECLARED = "auth.permission.undeclared"
     const val CSRF_INVALID = "auth.csrf.invalid"
     const val LOGIN_DOMAIN_NOT_ALLOWED = "auth.login.domain_not_allowed"
     const val LOGIN_USER_INACTIVE = "auth.login.user_inactive"
@@ -54,9 +62,9 @@ object AuthErrorCodes {
      * what the membership carries, because "ask a workspace admin for the author flag" is
      * the only useful next step and it needs both halves to be stated.
      *
-     * Distinct from [SCOPE_INSUFFICIENT], which is the credential axis: a `read` key on an
-     * authoring route gets that one, an author-scoped key held by a demoted issuer gets
-     * [KEY_ISSUER_ROLE_LOST], and a viewer's session gets this.
+     * THE permission refusal since scopes left (#215): a session, a key role (`api_caller`,
+     * `promotion_receiver`) — every principal but the MCP key, whose refusal is
+     * [KEY_ISSUER_ROLE_LOST] because its role is its member's.
      */
     const val ROLE_REQUIRED = "auth.role_required"
 
@@ -68,14 +76,6 @@ object AuthErrorCodes {
      * `AuthCache` TTL (60 s by default), so a key can start refusing mid-session.
      */
     const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
-
-    /**
-     * 400 — issuance asked for a scope this surface no longer grants to keys. Round 1 removed
-     * `admin` from the key wire entirely (D-R12/O-2: release, promote and membership are human
-     * verbs), so a key can hold at most `author`. A 400 and not a 403: the credential issuing
-     * the request is fine, the requested scope is not a scope keys have.
-     */
-    const val KEY_SCOPE_UNAVAILABLE = "auth.key_scope_unavailable"
 
     /**
      * 400 — on-demand issuance asked for a `user` key (roles design 2026-09-20, D16/§3.3).
@@ -138,7 +138,7 @@ object AuthErrorCodes {
             API_KEY_EXPIRED,
             SESSION_INVALID,
             SESSION_EXPIRED,
-            SCOPE_INSUFFICIENT,
+            PERMISSION_UNDECLARED,
             CSRF_INVALID,
             LOGIN_DOMAIN_NOT_ALLOWED,
             LOGIN_USER_INACTIVE,
@@ -150,7 +150,6 @@ object AuthErrorCodes {
             PROMOTION_KEY_INVALID,
             ROLE_REQUIRED,
             KEY_ISSUER_ROLE_LOST,
-            KEY_SCOPE_UNAVAILABLE,
             KEY_KIND_NOT_MINTABLE,
             KEY_WORKSPACE_INACTIVE,
             PRINCIPAL_DEACTIVATED,
@@ -309,30 +308,18 @@ class ApiKeyExpiryInvalidException(
 /** The longest slice of a rejected expiry value that is echoed back. */
 private const val MAX_ECHOED_EXPIRY_CHARS = 32
 
-class ScopeInsufficientException(
-    required: Scope,
-    held: Set<Scope>,
-) : AuthException(
-        AuthErrorCodes.SCOPE_INSUFFICIENT,
-        HTTP_FORBIDDEN,
-        "Principal lacks required scope for this operation",
-        "You do not have permission to perform this action.",
-        details = mapOf("required" to required.wire, "held" to held.map { it.wire }),
-    )
-
 /**
  * A 403 from Spring Security's authorization layer on a request that never reached a
- * [RequiredScope]-annotated handler, so no documented §7.6 minimum applies.
+ * [RequiredScope]-annotated handler, so no catalog permission was declared for it.
  *
- * Carries the §13.7 `auth.scope.insufficient` code with **empty** details on purpose
- * (security NEW-7): the previous fallback reported `required: "admin", held: []` for
- * *any* such denial, which is a fabricated value in an error payload — a caller
- * debugging against it would chase a scope the server never actually required. When
- * the handler does not know what was needed, saying nothing is the honest answer.
+ * Carries `auth.permission.undeclared` with **empty** details on purpose (security NEW-7): a
+ * fallback that named a requirement would be a fabricated value in an error payload — a caller
+ * debugging against it would chase a permission the server never actually required. When the
+ * handler does not know what was needed, saying nothing is the honest answer.
  */
-class AccessDeniedWithoutScopeException :
+class AccessDeniedUndeclaredException :
     AuthException(
-        AuthErrorCodes.SCOPE_INSUFFICIENT,
+        AuthErrorCodes.PERMISSION_UNDECLARED,
         HTTP_FORBIDDEN,
         "Access denied by the authorization layer",
         "You do not have permission to perform this action.",
@@ -369,9 +356,9 @@ class PasswordChangeRequiredException :
  * credential: admin local-account creation, admin password reset, `disable-local`,
  * `unlock`, and the self-service password change.
  *
- * Why scope is not enough here. `AuthenticatedPrincipal.isAdmin` is *defined as*
- * holding [Scope.ADMIN], so a scope test cannot distinguish a browser session from a
- * `dpk_` key — and a key that can mint a local account reads that account's one-time
+ * Why a permission is not enough here: a role check cannot distinguish a browser session
+ * from a `dpk_` key holding the same role — and a key that can mint a local account reads that
+ * account's one-time
  * password straight out of the response body, then signs in with it. That trades a
  * revocable, workspace-pinned, non-interactive credential for a permanent `dp_session`
  * which is NOT pinned and which outlives revocation of the key that created it,
@@ -450,20 +437,6 @@ class RoleRequiredException(
     )
 
 /**
- * Issuance asked for a scope keys may no longer hold (D-R12/O-2). Today that is exactly
- * `admin`: release, promote and membership are human verbs, so no key expresses them.
- */
-class KeyScopeUnavailableException(
-    requested: Scope,
-) : AuthException(
-        AuthErrorCodes.KEY_SCOPE_UNAVAILABLE,
-        HTTP_BAD_REQUEST,
-        "Scope '${requested.wire}' is not available to API keys",
-        "API keys can be granted read, execute or author. Administrative actions need a signed-in person.",
-        details = mapOf("requested" to requested.wire, "available" to KEY_SCOPES.map { it.wire }),
-    )
-
-/**
  * On-demand issuance asked for a `user` key (D16 — roles design 2026-09-20 §3.3). A user
  * key is minted by the login/switch hook and nowhere else: exactly one per user per
  * workspace, rotated by deleting it and signing in again. No request surface — REST, htmx
@@ -495,11 +468,3 @@ class KeyWorkspaceInactiveException(
         "This API key's workspace has been deactivated. Contact an administrator.",
         details = mapOf("workspace" to workspace),
     )
-
-/**
- * The scopes an API key may hold since RBAC round 1 (D-R12, O-2). `admin` is deliberately
- * absent: it is the only scope that ever bought a key an INSTANCE verb, and instance verbs
- * are human. Read at issuance ([KeyScopeUnavailableException]) and again at validation, where
- * a key minted before this rule is capped rather than trusted.
- */
-val KEY_SCOPES: Set<Scope> = setOf(Scope.READ, Scope.EXECUTE, Scope.AUTHOR)

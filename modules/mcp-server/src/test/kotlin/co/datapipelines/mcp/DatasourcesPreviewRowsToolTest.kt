@@ -30,7 +30,7 @@ class DatasourcesPreviewRowsToolTest {
     private val runner = mockk<SqlRunner>()
     private val introspector = mockk<co.datapipelines.datasources.SchemaIntrospector>()
     private val tool = DatasourcesPreviewRowsTool(datasources, runner, introspector)
-    private val ctx = McpFixtures.ctx(co.datapipelines.auth.Scope.AUTHOR)
+    private val ctx = McpFixtures.ctx()
 
     /** The module's table resolution (123 §A) — present, by default, in every happy-path test. */
     @org.junit.jupiter.api.BeforeEach

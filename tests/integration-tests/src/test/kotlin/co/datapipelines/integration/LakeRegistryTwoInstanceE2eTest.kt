@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldContain
@@ -106,7 +107,8 @@ class LakeRegistryTwoInstanceE2eTest {
             val request =
                 HttpRequest
                     .newBuilder(URI.create("http://localhost:$portB/api/v1/pipelines/$pipelineId/execute"))
-                    .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                    .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                    .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                     .header("DP-Correlation-Id", UUID.randomUUID().toString())
                     .header("Content-Type", "application/json")
                     .header("Accept", "text/event-stream")
@@ -125,7 +127,7 @@ class LakeRegistryTwoInstanceE2eTest {
         val rows: List<List<Any?>> =
             given()
                 .port(portB)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
                 .then()
@@ -140,7 +142,7 @@ class LakeRegistryTwoInstanceE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$DS", "display_name": "MI2 lake", "dialect": "LAKE",
@@ -156,7 +158,7 @@ class LakeRegistryTwoInstanceE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "$TEMPLATE_ID", "dialect": "LAKE", "display_name": "MI2 lake marker read",
@@ -173,7 +175,7 @@ class LakeRegistryTwoInstanceE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "test/mi2_lake_marker_read", "nodes": [{
@@ -194,7 +196,7 @@ class LakeRegistryTwoInstanceE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"namespace": ["mi2"], "name": "marker_t", "format": "parquet",
@@ -208,7 +210,6 @@ class LakeRegistryTwoInstanceE2eTest {
 
     companion object {
         private const val REDIS_PORT = 6379
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val DS = "mi2_lake_it"
         private const val TEMPLATE_ID = "test/mi2_lake_read_marker.sql"
         private const val MARKER_VALUE = "registered-on-a-read-on-b"
@@ -218,7 +219,7 @@ class LakeRegistryTwoInstanceE2eTest {
 
         private val SECRET = Base64.getEncoder().encodeToString(ByteArray(32))
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000090"
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-mi2-lake-key", arrayOf("read", "execute", "author"))
+        private val ADMIN_SESSION get() = E2eSession.jwt(SECRET, ADMIN_USER_ID, "e2e-mi2-lake@datapipelines.test")
 
         /** Instance B — the second application context this suite boots beside its own. */
         private var instanceB: ConfigurableApplicationContext? = null
@@ -304,17 +305,6 @@ class LakeRegistryTwoInstanceE2eTest {
                         ON CONFLICT (id) DO NOTHING
                         """.trimIndent(),
                     )
-                }
-                val insertSql =
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001') ON CONFLICT (id) DO NOTHING"
-                connection.prepareStatement(insertSql).use { ps ->
-                    ps.setString(1, ADMIN_KEY.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, ADMIN_KEY.name)
-                    ps.setString(4, ADMIN_KEY.hash)
-                    ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                    ps.executeUpdate()
                 }
             }
         }

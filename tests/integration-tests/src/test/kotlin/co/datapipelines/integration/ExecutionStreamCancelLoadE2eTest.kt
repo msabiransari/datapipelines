@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.shouldBe
@@ -195,7 +196,7 @@ class ExecutionStreamCancelLoadE2eTest {
             cancelStatus =
                 given()
                     .port(port)
-                    .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                    .asSession(ADMIN_SESSION)
                     .`when`()
                     .delete("/api/v1/executions/$executionId")
                     .then()
@@ -211,7 +212,7 @@ class ExecutionStreamCancelLoadE2eTest {
     private fun executionStatus(executionId: String): String =
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/executions/$executionId")
             .then()
@@ -224,7 +225,8 @@ class ExecutionStreamCancelLoadE2eTest {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/api/v1/executions/$executionId/events"))
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                 .header("Accept", "text/event-stream")
                 .GET()
                 .build()
@@ -256,7 +258,8 @@ class ExecutionStreamCancelLoadE2eTest {
             val request =
                 HttpRequest
                     .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/${checkNotNull(branchPipelineId)}/execute"))
-                    .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                    .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                    .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                     .header("DP-Correlation-Id", UUID.randomUUID().toString())
                     .header("Content-Type", "application/json")
                     .header("Accept", "text/event-stream")
@@ -336,7 +339,8 @@ class ExecutionStreamCancelLoadE2eTest {
                                         URI.create(
                                             "http://localhost:$port/api/v1/pipelines/${checkNotNull(fastPipelineId)}/execute",
                                         ),
-                                    ).header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                                    ).header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                                    .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                                     .header("DP-Correlation-Id", UUID.randomUUID().toString())
                                     .header("Content-Type", "application/json")
                                     .header("Accept", "text/event-stream")
@@ -385,18 +389,6 @@ class ExecutionStreamCancelLoadE2eTest {
                     ON CONFLICT (id) DO NOTHING
                     """.trimIndent(),
                 )
-            connection
-                .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, '$DEFAULT_WORKSPACE') ON CONFLICT (id) DO NOTHING",
-                ).use { ps ->
-                    ps.setString(1, ADMIN_KEY.id)
-                    ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
-                    ps.setString(3, ADMIN_KEY.name)
-                    ps.setString(4, ADMIN_KEY.hash)
-                    ps.setArray(5, connection.createArrayOf("text", ADMIN_KEY.scopes))
-                    ps.execute()
-                }
         }
         registerDatasource()
         createTemplate("test/sse157_fast.sql", "POSTGRES", "SELECT g AS n FROM generate_series(1, $FAST_ROWS) g")
@@ -415,7 +407,7 @@ class ExecutionStreamCancelLoadE2eTest {
         val existing =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/datasources/$DATASOURCE")
                 .then()
@@ -424,7 +416,7 @@ class ExecutionStreamCancelLoadE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "$DATASOURCE", "display_name": "SSE157 source", "dialect": "POSTGRES",
@@ -447,7 +439,7 @@ class ExecutionStreamCancelLoadE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(
                     """
                     {"id": "$id", "dialect": "$dialect", "display_name": "$id",
@@ -497,7 +489,7 @@ class ExecutionStreamCancelLoadE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body("""{"name": "$name", "nodes": $nodes}""")
                 .`when`()
                 .post("/api/v1/pipelines")
@@ -509,7 +501,7 @@ class ExecutionStreamCancelLoadE2eTest {
         val listed =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .queryParam("limit", 100)
                 .`when`()
                 .get("/api/v1/pipelines")
@@ -538,7 +530,6 @@ class ExecutionStreamCancelLoadE2eTest {
     )
 
     companion object {
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val DEFAULT_TRIALS = 20
         private const val BRANCH_PIPELINE = "test/sse157_branch"
         private const val FAST_PIPELINE = "test/sse157_fast"
@@ -577,9 +568,7 @@ class ExecutionStreamCancelLoadE2eTest {
 
         private const val ADMIN_USER_ID = "a1570000-0000-0000-0000-000000000003"
         private const val ADMIN_EMAIL = "sse157-harness@datapipelines.test"
-        private val ADMIN_KEY = E2eAuth.generateKey("sse157-harness", arrayOf("read", "execute", "author"))
-
-        private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
+        private val ADMIN_SESSION get() = E2eSession.jwt(SECRET, ADMIN_USER_ID, ADMIN_EMAIL)
 
         private val postgres get() = SharedE2e.postgres
         private val redis get() = SharedE2e.redis

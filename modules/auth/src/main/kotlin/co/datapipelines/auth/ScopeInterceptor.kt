@@ -12,8 +12,8 @@ import org.springframework.web.util.pattern.PathPatternParser
 
 /**
  * Enforces the §7.6 matrix on controller handlers (auth.md §8.1, filter step 7) via
- * [RequiredScope]: the declared catalog [Permission] is judged by [ScopeMatrix.allowed] — the
- * caller's role for every principal, and for an API key also the permission's scope floor.
+ * [RequiredScope]: the declared catalog [Permission] is judged by [ScopeMatrix.allowed] against
+ * the caller's role — a session's or MCP key's member role, or a key's [KeyRole] (#215).
  *
  * ## Default deny (AUTH-SEC-9)
  * A handler the §8.3 allowlist does **not** make public and that carries **no**
@@ -54,14 +54,16 @@ class ScopeInterceptor(
         val principal = SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
 
         // §7.7 — the KIND confinement is decided FIRST, before the annotation is even read.
-        // A scopeless kind's reach is a route family, not an operation, so the question "may
-        // this credential be here at all?" is not the annotation's to answer — and asking it
-        // second would leave every UNannotated handler outside the governed prefixes (which is
-        // every UI page: `/dashboard`, `/settings/api-keys`, `/api-console` before it declared
-        // one) as a way around the confinement for a credential that authorises none of them.
-        val confined = principal?.keyKind?.takeIf { it in ApiKeyKind.SCOPELESS }
-        if (principal != null && confined != null && !reachableBy(confined, request.appPath())) {
-            return denyKind(request, response, principal, confined)
+        // A key's reach is a route family before it is an operation, so the question "may this
+        // credential be here at all?" is not the annotation's to answer — and asking it second
+        // would leave every UNannotated handler outside the governed prefixes (every UI page) as
+        // a way around the confinement for a credential that authorises none of them. Every kind
+        // is confined since #215 B2: the MCP (`user`) key reaches no MVC route at all — its one
+        // surface is the `/mcp` servlet — and `ApiKeyFilter` has already refused it;
+        // this is the second line, so a handler reached some other way still refuses it.
+        val kind = principal?.keyKind
+        if (principal != null && kind != null && !reachableBy(kind, request.appPath())) {
+            return denyKind(request, response, principal, kind)
         }
 
         val permission = declaredPermission(handler)
@@ -79,14 +81,9 @@ class ScopeInterceptor(
                 false
             }
 
-            // §7.7 — a scopeless key carries NO scopes by design, so the matrix cannot judge it,
-            // and a floor would refuse it everywhere. Its real authorization on the routes it
-            // DOES reach is the path bindings (`EndpointAuthorizer`), the execution's own audit
-            // trail, or — for a server key — `PromotionServerKeyFilter`, which has already run.
-            confined != null -> {
-                true
-            }
-
+            // Every principal is judged — an `endpoint` key and the promotion peer by their key
+            // role (#215 slice (b)); the path bindings (`EndpointAuthorizer`) and the promotion
+            // filter stay as the second gate on the routes those keys reach.
             else -> {
                 when (val decision = ScopeMatrix.allowed(principal, permission, principal.workspace)) {
                     is ScopeMatrix.Decision.Allowed -> {
@@ -171,9 +168,9 @@ class ScopeInterceptor(
      * Audits `auth.scope.denied` (§10.1) and writes the refusal the matrix decided — its
      * catalogued code, its status and its details, unmodified.
      *
-     * The interceptor does not re-derive WHY: [ScopeMatrix.allowed] already distinguished the
-     * credential axis (`auth.scope.insufficient`), the role axis (`auth.role_required`), a
-     * key whose issuer was demoted (`auth.key_issuer_role_lost`) and an unreachable workspace
+     * The interceptor does not re-derive WHY: [ScopeMatrix.allowed] already distinguished a
+     * role that does not hold the permission (`auth.role_required`), a key whose member's role
+     * does not reach it (`auth.key_issuer_role_lost`) and an unreachable workspace
      * (`workspace.not_found`), and a second judgement here is a second place for them to drift.
      */
     private fun deny(
@@ -278,10 +275,10 @@ class ScopeInterceptor(
             request = request,
             response = response,
             status = HTTP_FORBIDDEN,
-            code = AuthErrorCodes.SCOPE_INSUFFICIENT,
+            code = AuthErrorCodes.PERMISSION_UNDECLARED,
             message = "Handler declares no §7.6 permission; denied by default",
             userMessage = "You do not have permission to perform this action.",
-            details = mapOf("reason" to "handler_not_annotated"),
+            details = mapOf("reason" to "handler_not_annotated", "route" to "${request.method} ${request.appPath()}"),
         )
         return false
     }
@@ -337,10 +334,11 @@ class ScopeInterceptor(
         const val ENDPOINT_KEY_KIND_REFUSED = "endpoint.key_kind_refused"
 
         /**
-         * The whole reach of each scopeless kind (§7.7), in ONE expression: an `endpoint` key
-         * gets the published-endpoint surface plus the two execution reads that let it collect
-         * a result it started; a `server` key gets the promotion receiver's route family and
-         * nothing else. A `user` key is not confined by kind at all — the §7.6 matrix judges it.
+         * The whole reach of each key kind over MVC routes (§7.7), in ONE expression: an
+         * `endpoint` key gets the published-endpoint surface plus the two execution reads that let
+         * it collect a run it started; a `server` key gets the promotion receiver's route family;
+         * the MCP (`user`) key gets NO MVC route (#215 B2, owner ruling 2026-09-24 — "MCP key should
+         * be only MCP"): its surface is the `/mcp` servlet, which never reaches this interceptor.
          *
          * A server key normally reaches the promotion routes through `DP-Promotion-Key`, whose
          * filter runs upstream and refuses the whole prefix without a valid one; the prefix is
@@ -352,23 +350,26 @@ class ScopeInterceptor(
             uri: String,
         ): Boolean =
             when (kind) {
-                ApiKeyKind.USER -> true
+                ApiKeyKind.USER -> uri == MCP_PREFIX || uri.startsWith("$MCP_PREFIX/")
                 ApiKeyKind.ENDPOINT -> isPublishedEndpointPath(uri) || EXECUTION_READ.matches(uri)
                 ApiKeyKind.SERVER -> uri.startsWith(PromotionServerKeyFilter.PROMOTION_PREFIX)
             }
 
-        /** The audit `reason` for each confined kind, off its surface. */
-        private val OFF_SURFACE_REASON: Map<ApiKeyKind, String> =
+        /** The audit `reason` for each kind, off its surface. */
+        val OFF_SURFACE_REASON: Map<ApiKeyKind, String> =
             mapOf(
+                ApiKeyKind.USER to "user_key_off_surface",
                 ApiKeyKind.ENDPOINT to "endpoint_key_off_surface",
                 ApiKeyKind.SERVER to "server_key_off_surface",
             )
 
         /** What the refusal tells the caller — the operator-actionable half. */
-        private val OFF_SURFACE_MESSAGE: Map<ApiKeyKind, String> =
+        val OFF_SURFACE_MESSAGE: Map<ApiKeyKind, String> =
             mapOf(
+                ApiKeyKind.USER to
+                    "An MCP key connects an MCP client to /mcp and nothing else; REST and the UI take a signed-in session.",
                 ApiKeyKind.ENDPOINT to
-                    "An endpoint key may only call published endpoints and read the results of executions it started.",
+                    "An endpoint key may only call published endpoints and read the executions it started.",
                 ApiKeyKind.SERVER to
                     "A server key may only be presented as DP-Promotion-Key on the promotion routes of a receiving deployment.",
             )

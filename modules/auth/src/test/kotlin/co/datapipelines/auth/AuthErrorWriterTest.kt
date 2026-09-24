@@ -50,15 +50,16 @@ class AuthErrorWriterTest {
 
     @Test
     fun `a 403 carries every documented envelope field including code-specific details`() {
-        val (response, body) = write(ScopeInsufficientException(Scope.ADMIN, setOf(Scope.READ)))
+        val (response, body) = write(RoleRequiredException(Permission.PIPELINE_UPDATE, "viewer", "acme"))
 
         response.status shouldBe 403
         val error = body["error"] as Map<*, *>
-        error["code"] shouldBe "auth.scope.insufficient"
-        error["user_message"] shouldBe "You do not have permission to perform this action."
+        error["code"] shouldBe "auth.role_required"
+        error["user_message"] shouldBe "You do not have the role needed for this action in this workspace."
         error["doc_url"] shouldBe "https://datapipelines.co/docs/pipeline-contract#137-authentication--authorization"
-        (error["details"] as Map<*, *>)["required"] shouldBe "admin"
-        (error["details"] as Map<*, *>)["held"] shouldBe listOf("read")
+        (error["details"] as Map<*, *>)["required"] shouldBe "pipeline.update"
+        (error["details"] as Map<*, *>)["held"] shouldBe "viewer"
+        (error["details"] as Map<*, *>)["workspace"] shouldBe "acme"
     }
 
     @Test

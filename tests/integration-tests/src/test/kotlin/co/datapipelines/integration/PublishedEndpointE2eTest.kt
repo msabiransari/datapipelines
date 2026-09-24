@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.hamcrest.Matchers.equalTo
@@ -20,8 +21,9 @@ import java.util.UUID
  * Published endpoints, end to end over HTTP (074, rest-api §19).
  *
  * Everything here is driven through the product's own surfaces — publish over
- * `POST /api/v1/endpoints`, mint-and-bind over `POST /api/v1/auth/api-keys`, call over
- * `GET /api/nyc/v1/…` — because that is the only way to prove the pieces agree. The unit suites
+ * `POST /api/v1/endpoints` and mint-and-bind over `POST /api/v1/auth/api-keys` as a signed-in
+ * admin (REST is a session's surface since #215 B2), call over `GET /api/nyc/v1/…` with the
+ * `api_caller` key — because that is the only way to prove the pieces agree. The unit suites
  * already prove each rule in isolation; what they cannot prove is that the matcher, the
  * authorizer, the validator, the executor and the result store are wired to each other.
  *
@@ -41,6 +43,7 @@ import java.util.UUID
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 )
+@Suppress("LargeClass") // one published tree, one seed; the cases share it rather than re-seeding
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PublishedEndpointE2eTest {
     @LocalServerPort
@@ -222,14 +225,43 @@ class PublishedEndpointE2eTest {
     // -------------------------------------------------------------------------------------
 
     @Test
-    fun `a user key of another workspace is refused`() {
+    fun `an MCP key is refused on a published endpoint - its own workspace's or another's`() {
+        // #215 B2: the MCP key reaches /mcp and nothing else — refused as a KIND before any
+        // binding is consulted, the same answer for the admin's own workspace and another one.
+        listOf(ADMIN_KEY.plaintext, foreignKey).forEach { key ->
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, key)
+                .`when`()
+                .get("/api/nyc/v1/revenue/Manhattan")
+                .then()
+                .statusCode(403)
+                .body("error.code", equalTo("endpoint.key_kind_refused"))
+                .body("error.details.reason", equalTo("user_key_off_surface"))
+        }
+    }
+
+    @Test
+    fun `an unbound published path is served to no one - no key, no session`() {
+        // #215 B3: /trade/v1/summary IS published and nothing is bound on its ancestors. Before
+        // #215 a same-workspace user key holding `execute` could call it; that branch is gone.
+        // The endpoint key bound elsewhere is refused by the authorizer (next test), the admin's
+        // MCP key by its kind, and a signed-in session because this is a machine surface.
         given()
             .port(port)
-            .header(API_KEY_HEADER, foreignKey)
+            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
             .`when`()
-            .get("/api/nyc/v1/revenue/Manhattan")
+            .get("/api/trade/v1/summary")
             .then()
             .statusCode(403)
+            .body("error.details.reason", equalTo("user_key_off_surface"))
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .`when`()
+            .get("/api/trade/v1/summary")
+            .then()
+            .statusCode(401)
     }
 
     @Test
@@ -277,7 +309,7 @@ class PublishedEndpointE2eTest {
         // the boundary cannot tell the endpoint surface answers at all.
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/definitely-not-a-route")
             .then()
@@ -308,7 +340,7 @@ class PublishedEndpointE2eTest {
     fun `an unpublished path is 404`() {
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .header(API_KEY_HEADER, endpointKey)
             .`when`()
             .get("/api/nothing/v1/here")
             .then()
@@ -327,7 +359,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body("""{"path": "/api/echo/v1/normalised", "pipeline": "test/trade_summary"}""")
             .`when`()
             .post("/api/v1/endpoints")
@@ -345,7 +377,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body("""{"path": "/v1/revenue/today", "pipeline": "test/trade_summary"}""")
             .`when`()
             .post("/api/v1/endpoints")
@@ -361,7 +393,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body("""{"path": "/writes/v1/things", "pipeline": "test/writes_things"}""")
             .`when`()
             .post("/api/v1/endpoints")
@@ -376,7 +408,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             // A LITERAL third segment, not another variable: §4.2's checks run cheapest-first, so
             // `/nyc/revenue/{anything}` would be refused as an undeclared path variable (400)
             // before it ever reached the conflict check. This one is a legal path that happens to
@@ -395,7 +427,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body("""{"path": "/nyc/v1/by/{ghost}", "pipeline": "test/revenue_by_borough"}""")
             .`when`()
             .post("/api/v1/endpoints")
@@ -416,7 +448,7 @@ class PublishedEndpointE2eTest {
         val accepted =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .header(API_KEY_HEADER, endpointKey)
                 .`when`()
                 .get("/api/slow/v1/thing")
                 .then()
@@ -440,7 +472,7 @@ class PublishedEndpointE2eTest {
             status =
                 given()
                     .port(port)
-                    .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                    .header(API_KEY_HEADER, endpointKey)
                     .`when`()
                     .get("/api/v1/executions/$accepted/result")
                     .then()
@@ -448,9 +480,10 @@ class PublishedEndpointE2eTest {
                     .statusCode()
         }
 
+        // The key that started the run reads its result (#215 A12 — api_caller's own runs).
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .header(API_KEY_HEADER, endpointKey)
             .`when`()
             .get("/api/v1/executions/$accepted/result")
             .then()
@@ -466,15 +499,16 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
-            .body("""{"name": "nyc-serving", "kind": "endpoint", "bindings": ["/nyc"]}""")
+            .asSession(ADMIN_SESSION)
+            // /slow too: an unbound published path serves no one (#215 B3).
+            .body("""{"name": "nyc-serving", "kind": "endpoint", "bindings": ["/nyc", "/slow"]}""")
             .`when`()
             .post("/api/v1/auth/api-keys")
             .then()
             .statusCode(201)
             .body("data.kind", equalTo("endpoint"))
-            // An endpoint key carries NO scopes; its authority is the binding.
-            .body("data.scopes", hasSize<Any>(0))
+            // #215: an endpoint key carries the api_caller role; its reach is the binding.
+            .body("data.role", equalTo("api_caller"))
             .extract()
             .jsonPath()
             .getString("data.key")
@@ -495,7 +529,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body("""{"path": "$path", "pipeline": "$pipeline", "timeout_seconds": 60}""")
             .`when`()
             .post("/api/v1/endpoints")
@@ -511,7 +545,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body("""{"path": "$path", "pipeline": "$pipeline", "timeout_seconds": $timeoutSeconds}""")
             .`when`()
             .post("/api/v1/endpoints")
@@ -523,7 +557,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "ep-source", "display_name": "Endpoint source", "dialect": "POSTGRES",
@@ -562,7 +596,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "$id", "dialect": "$dialect", "display_name": "$id",
@@ -579,7 +613,7 @@ class PublishedEndpointE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", releasedHashOfTemplate(id))
             .body("""{"name": "$id"}""")
             .`when`()
@@ -592,7 +626,7 @@ class PublishedEndpointE2eTest {
     private fun releasedHashOfTemplate(id: String): String =
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .queryParam("name", id)
             .`when`()
             .get("/api/v1/templates")
@@ -673,7 +707,7 @@ class PublishedEndpointE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(body)
                 .`when`()
                 .post("/api/v1/pipelines")
@@ -685,7 +719,7 @@ class PublishedEndpointE2eTest {
         val id = created.jsonPath().getString("data.id")
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .header("If-Match", created.jsonPath().getString("data.body_hash"))
             .`when`()
             .post("/api/v1/pipelines/$id/release")
@@ -742,15 +776,15 @@ class PublishedEndpointE2eTest {
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id, kind)" +
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind)" +
                             " VALUES (?, ?, ?, ?, ?, ?::uuid, ?)",
                     ).use { ps ->
                         listOf(ADMIN_KEY to DEFAULT_WORKSPACE, FOREIGN_KEY to OTHER_WORKSPACE).forEach { (key, workspace) ->
                             ps.setString(1, key.id)
                             ps.setObject(2, UUID.fromString(ADMIN_USER))
-                            ps.setString(3, key.name)
-                            ps.setString(4, key.hash)
-                            ps.setArray(5, connection.createArrayOf("text", key.scopes))
+                            ps.setObject(3, UUID.fromString(ADMIN_USER))
+                            ps.setString(4, key.name)
+                            ps.setString(5, key.hash)
                             ps.setString(6, workspace)
                             ps.setString(7, "user")
                             ps.addBatch()
@@ -766,8 +800,12 @@ class PublishedEndpointE2eTest {
         private const val OTHER_WORKSPACE = "defa0000-0000-0000-0000-0000000000ee"
         private val ADMIN_USER: String = UUID.randomUUID().toString()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("ep-admin-key", arrayOf("read", "execute", "author"))
-        private val FOREIGN_KEY = E2eAuth.generateKey("ep-foreign-key", arrayOf("execute"))
+        private val ADMIN_KEY = E2eAuth.generateKey("ep-admin-key")
+        private val FOREIGN_KEY = E2eAuth.generateKey("ep-foreign-key")
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret`; the admin's REST work is a session's (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER, "ep-admin@datapipelines.test")
 
         private val postgres get() = SharedE2e.postgres
         private val source = SharedE2e.scratchDatabase("endpoints_source")
@@ -794,7 +832,7 @@ class PublishedEndpointE2eTest {
             registry.add("spring.data.redis.password") { "" }
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
             // Local accounts rather than an OIDC stub: §7 needs SOME auth method configured, and
             // every request here presents an API key.

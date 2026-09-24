@@ -2,7 +2,6 @@ package co.datapipelines.web.config
 
 import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.PromotionProperties
-import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.pipeline.AuthoringGuard
@@ -76,7 +75,6 @@ class PromotionConfiguration {
         inventory: PromotionInventoryService,
         pipelineImportService: PipelineImportService,
         templateImportService: TemplateImportService,
-        userService: UserService,
         auditLogger: AuditLogger,
         transactionManager: PlatformTransactionManager,
         // 074 — endpoints ride the batch, through the same publish path REST and MCP use.
@@ -88,7 +86,6 @@ class PromotionConfiguration {
             inventory,
             pipelineImportService,
             templateImportService,
-            userService,
             auditLogger,
             TransactionTemplate(transactionManager),
             authoringEnabled(environment),

@@ -102,7 +102,13 @@ class PromoterLensSweepTest {
         println("event=lens.sweep.inventory routes=${walk.size}")
         walk.size shouldBeGreaterThanOrEqual MINIMUM_ROUTES
 
-        listOf("session" to sessionFor(PROMOTER), "key" to keyHeaderFor(PROMOTER)).forEach { (credential, auth) ->
+        // #215 B2: REST is the session's surface alone — the promoter's MCP key is refused on every
+        // route by KIND before the lens is ever asked (pinned here, so the walk below is not the
+        // key's), and the key's lens is walked over /mcp in test 2.
+        val keyOnRest = call("/api/v1/pipelines", keyHeaderFor(PROMOTER))
+        keyOnRest.status shouldBe HTTP_FORBIDDEN
+        keyOnRest.body.contains("user_key_off_surface") shouldBe true
+        listOf("session" to sessionFor(PROMOTER)).forEach { (credential, auth) ->
             val findings = Findings()
             walk.forEach { route -> sweep(route, credential, auth, findings) }
             println("event=lens.sweep.differential credential=$credential pairs=${findings.pairs}")
@@ -684,7 +690,7 @@ class PromoterLensSweepTest {
                 PROMOTER to "0c000000-0000-0000-0000-000000000178",
             )
         private val KEYS: Map<String, E2eAuth.SeededKey> =
-            USERS.mapValues { (role, id) -> E2eAuth.generateKey("$role-lens-key", arrayOf("read", "execute", "author"), ownerId = id) }
+            USERS.mapValues { (role, id) -> E2eAuth.generateKey("$role-lens-key", ownerId = id) }
 
         private val random = SecureRandom()
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
@@ -745,7 +751,7 @@ class PromoterLensSweepTest {
             val header = b64("""{"alg":"HS256","typ":"JWT"}""")
             val payload =
                 b64(
-                    """{"sub":"$userId","email":"$email","name":"Lens Walk","scopes":[],""" +
+                    """{"sub":"$userId","email":"$email","name":"Lens Walk",""" +
                         """"iss":"datapipelines","iat":${now.epochSecond},"exp":${now.plusSeconds(3600).epochSecond},""" +
                         """"active_workspace":"$WS_NAME"}""",
                 )
@@ -885,14 +891,14 @@ class PromoterLensSweepTest {
 
         private fun seedKeys(connection: java.sql.Connection) {
             connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
+                .prepareStatement("INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
                 .use { ps ->
                     KEYS.values.forEach { key ->
                         ps.setString(1, key.id)
                         ps.setObject(2, UUID.fromString(key.ownerId))
-                        ps.setString(3, key.name)
-                        ps.setString(4, key.hash)
-                        ps.setArray(5, connection.createArrayOf("text", key.scopes))
+                        ps.setObject(3, UUID.fromString(key.ownerId))
+                        ps.setString(4, key.name)
+                        ps.setString(5, key.hash)
                         ps.setObject(6, UUID.fromString(WS_ID))
                         ps.addBatch()
                     }

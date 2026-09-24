@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Scope
 import co.datapipelines.auth.WorkspaceService
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -44,7 +43,6 @@ class UiLayoutChromeAdviceTest {
                 UUID.randomUUID(),
                 "a@b.c",
                 "A",
-                setOf(Scope.AUTHOR),
                 AuthMethod.OIDC,
                 workspace = null,
             )
@@ -109,7 +107,6 @@ class UiLayoutChromeAdviceTest {
                 UUID.randomUUID(),
                 "a@b.c",
                 "A",
-                emptySet(),
                 AuthMethod.OIDC,
                 workspace = role?.let { co.datapipelines.auth.WorkspaceContext(UUID.randomUUID(), "acme", it) },
                 superAdmin = superAdmin,

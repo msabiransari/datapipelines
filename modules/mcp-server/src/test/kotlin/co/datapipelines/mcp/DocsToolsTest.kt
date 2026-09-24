@@ -1,7 +1,7 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.auth.AuditEventSink
-import co.datapipelines.auth.Scope
+import co.datapipelines.auth.Permission
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
@@ -30,7 +30,7 @@ import java.util.UUID
 class DocsToolsTest {
     private val list = DocsListTool()
     private val get = DocsGetTool()
-    private val ctx = McpFixtures.ctx(Scope.READ)
+    private val ctx = McpFixtures.ctx()
 
     private val pipelines = mockk<PipelineRepository>()
     private val templates = mockk<TemplateRepository>(relaxed = true)
@@ -116,13 +116,11 @@ class DocsToolsTest {
     }
 
     @Test
-    fun `both tools are read-only in the catalog and require only the read scope`() {
+    fun `both tools are read-only in the catalog and declare only docs-read`() {
         McpToolCatalog.isMutating("docs_list") shouldBe false
         McpToolCatalog.isMutating("docs_get") shouldBe false
-        co.datapipelines.auth.ScopeMatrix
-            .requiredScopeForTool("docs_list") shouldBe Scope.READ
-        co.datapipelines.auth.ScopeMatrix
-            .requiredScopeForTool("docs_get") shouldBe Scope.READ
+        McpToolCatalog.permissionOf("docs_list") shouldBe Permission.DOCS_READ
+        McpToolCatalog.permissionOf("docs_get") shouldBe Permission.DOCS_READ
     }
 
     @Test

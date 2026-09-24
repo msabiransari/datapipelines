@@ -13,7 +13,6 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceLiveness
 import co.datapipelines.executor.ExecuteRequest
-import co.datapipelines.executor.ExecutedByKeyKind
 import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
@@ -27,6 +26,7 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.web.config.EndpointsProperties
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
+import co.datapipelines.web.pipelines.executedByKeyKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -217,9 +217,10 @@ class PublishedEndpointServeService(
                 parameters = validated.parameters,
                 resultTtlSeconds = validated.ttlSeconds,
                 triggeredVia = ExecutionTrigger.ENDPOINT,
-                // D11: an endpoint-key run is the ENDPOINT's, not the key owner's — the own-runs
-                // filter excludes it and workspace admins (and the key, via the serve audit) see it.
-                executedByKeyKind = ExecutedByKeyKind.ENDPOINT,
+                // D11 / #215 A.5: attributed to the key's own identity (`userId` above) and to the
+                // credential's kind — derived, never hard-coded. The run is the KEY's: the key reads
+                // it as its own, workspace admins see it, the key's creator does not.
+                executedByKeyKind = principal.executedByKeyKind(),
                 executionId = executionId,
                 // rootExecutionId stays null on purpose: a root request takes a concurrency slot,
                 // and an endpoint serve must be governed by the same limits every other run is.

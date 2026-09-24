@@ -23,17 +23,13 @@ if present, is stripped — never stored).
 
 Then an **admin creates an API key for it and associates it** — you never mint keys (there is
 no key-minting MCP tool, on purpose: a minted key is a live credential and a tool result travels
-through your context and transcript; and since 179 key creation is the workspace admin's
-`MANAGE_API_KEYS` verb, not yours). The admin does it on the `/api-keys` page — create, then
-"Edit associations" — or over REST, with the key by id:
+through your context and transcript; and key creation is the workspace admin's
+`api_key.create`, not yours). The admin does it on the `/api-keys` page — create, then
+"Edit associations". The key's role is `api_caller`: it serves the paths bound to it, reads the
+runs it started, and acts as its OWN identity, so its runs are attributed to the key rather than
+to the admin who created it. The plaintext is shown once. The program that holds it then calls:
 
 ```bash
-# an admin, on the /api-keys page or over REST:
-curl -s http://localhost:8080/api/v1/auth/api-keys -X POST \
-  -H "Content-Type: application/json" -H "DP-API-Key: dpk_..." \
-  -d '{"name": "finance-serving", "kind": "endpoint", "bindings": ["/finance"]}'
-# the plaintext key is in this response ONCE
-
 curl -s http://localhost:8080/api/finance/v1/revenue/EMEA -H "DP-API-Key: dpk_..."
 ```
 
@@ -68,10 +64,11 @@ retry it as a new run: the answer is already coming, and retrying starts a secon
 
 **Keys are bound to tree NODES, and a deeper binding replaces a shallower one.** A key bound at
 `/finance` authorises everything beneath it — until some node deeper down carries its own binding,
-which then decides for that subtree alone. An endpoint with no binding on any ancestor accepts
-`user` keys of its workspace holding `execute`; an `endpoint` key with no binding authorises
-nothing at all. An endpoint key reaches published endpoints and the cursor of executions it
-started, and nothing else — not `/mcp`, not `/api/v1`.
+which then decides for that subtree alone. **An endpoint with no binding on any ancestor
+cannot be called**: serving is by key only, and no key reaches an unbound path, so ask an admin
+to bind one. An `endpoint` key with no binding authorises nothing at all. An endpoint key reaches
+published endpoints and the status and cursor of executions it started, and nothing else: not
+`/mcp`, and no other `/api/v1` route.
 
 `endpoints_list`, `endpoints_get` and `endpoints_delete` complete the surface. Deleting an
 endpoint stops the URL answering and leaves the pipeline untouched.

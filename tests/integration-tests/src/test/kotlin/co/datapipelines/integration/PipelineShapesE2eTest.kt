@@ -1,6 +1,7 @@
 package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
+import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import de.mkammerer.argon2.Argon2Factory
@@ -52,7 +53,7 @@ class PipelineShapesE2eTest {
 
         val pipelineId = createDagPipeline()
         val correlationId = UUID.randomUUID().toString()
-        val events = consumeExecutionStream(pipelineId, ADMIN_KEY.plaintext, correlationId)
+        val events = consumeExecutionStream(pipelineId, ADMIN_SESSION, correlationId)
 
         assertDagEventOrder(events)
         val dataReady = events.last().second
@@ -169,7 +170,7 @@ class PipelineShapesE2eTest {
             )
 
         val correlationId = UUID.randomUUID().toString()
-        val events = consumeExecutionStream(pipelineId, ADMIN_KEY.plaintext, correlationId)
+        val events = consumeExecutionStream(pipelineId, ADMIN_SESSION, correlationId)
 
         events.lifecycleNames() shouldContainExactly
             listOf("execution_started", "node_started", "node_completed", "pipeline_completed")
@@ -181,7 +182,7 @@ class PipelineShapesE2eTest {
         val resultResponse =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions/$executionId/result")
                 .then()
@@ -242,7 +243,7 @@ class PipelineShapesE2eTest {
 
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .get("/api/v1/executions/$executionId")
             .then()
@@ -261,10 +262,10 @@ class PipelineShapesE2eTest {
         }
     }
 
-    // ---------------------------------------------------------------- Test 4: scope denial
+    // ---------------------------------------------------------------- Test 4: execution visibility by role
 
     @Test
-    fun `admin scope sees other users executions, read scope does not`() {
+    fun `a workspace admin sees other users executions, a viewer does not`() {
         ensureAuthSeeded()
         val sourceJdbcUrl = source.jdbcUrl
         registerDatasource(sourceJdbcUrl)
@@ -295,13 +296,13 @@ class PipelineShapesE2eTest {
             )
 
         val correlationId = UUID.randomUUID().toString()
-        val executorEvents = consumeExecutionStream(pipelineId, EXECUTOR_KEY.plaintext, correlationId)
+        val executorEvents = consumeExecutionStream(pipelineId, EXECUTOR_SESSION, correlationId)
         executorEvents.last().first shouldBe "data_ready"
 
         val adminListing =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/executions")
                 .then()
@@ -313,7 +314,7 @@ class PipelineShapesE2eTest {
         val readerListing =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, READER_ONLY_KEY.plaintext)
+                .asSession(READER_SESSION)
                 .`when`()
                 .get("/api/v1/executions")
                 .then()
@@ -346,25 +347,19 @@ class PipelineShapesE2eTest {
                     )
                 }
             }
-            val insertSql =
-                "INSERT INTO api_keys (id, user_id, name, key_hash, scopes, workspace_id)" +
-                    " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001') ON CONFLICT (id) DO NOTHING"
-            connection.prepareStatement(insertSql).use { ps ->
-                val keyUsers =
-                    listOf(
-                        ADMIN_KEY to ADMIN_USER_ID,
-                        EXECUTOR_KEY to EXECUTOR_USER_ID,
-                        READER_ONLY_KEY to READER_USER_ID,
-                    )
-                for ((key, userId) in keyUsers) {
-                    ps.setString(1, key.id)
-                    ps.setObject(2, UUID.fromString(userId))
-                    ps.setString(3, key.name)
-                    ps.setString(4, key.hash)
-                    ps.setArray(5, connection.createArrayOf("text", key.scopes))
-                    ps.addBatch()
-                }
-                ps.executeBatch()
+            // #215 B2: REST is a session's surface, so each person signs in; their roles in the
+            // default workspace decide what they see — the executor authors and runs, the reader
+            // is a viewer (own runs only), the admin is a workspace admin (every run).
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    """
+                    INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+                        ('$DEFAULT_WORKSPACE', '$ADMIN_USER_ID', 'workspace_admin'),
+                        ('$DEFAULT_WORKSPACE', '$EXECUTOR_USER_ID', 'author'),
+                        ('$DEFAULT_WORKSPACE', '$READER_USER_ID', 'viewer')
+                    ON CONFLICT DO NOTHING
+                    """.trimIndent(),
+                )
             }
         }
     }
@@ -373,7 +368,7 @@ class PipelineShapesE2eTest {
         val existing =
             given()
                 .port(port)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .`when`()
                 .get("/api/v1/datasources/pg-local")
                 .then()
@@ -382,7 +377,7 @@ class PipelineShapesE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"name": "pg-local", "display_name": "Source Postgres", "dialect": "POSTGRES",
@@ -439,7 +434,7 @@ class PipelineShapesE2eTest {
         given()
             .port(port)
             .contentType(ContentType.JSON)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .body(
                 """
                 {"id": "$id", "dialect": "$dialect", "display_name": "$displayName",
@@ -472,7 +467,7 @@ class PipelineShapesE2eTest {
             given()
                 .port(port)
                 .contentType(ContentType.JSON)
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .asSession(ADMIN_SESSION)
                 .body(bodyJson)
                 .`when`()
                 .post("/api/v1/pipelines")
@@ -495,22 +490,23 @@ class PipelineShapesE2eTest {
      */
     private fun consumeExecutionStream(
         pipelineId: String,
-        apiKey: String,
+        session: String,
         correlationId: String,
     ): List<Pair<String, JsonNode>> =
         assertTimeoutPreemptively(Duration.ofMinutes(SSE_BUDGET_MINUTES)) {
-            readExecutionStream(pipelineId, apiKey, correlationId)
+            readExecutionStream(pipelineId, session, correlationId)
         }
 
     private fun readExecutionStream(
         pipelineId: String,
-        apiKey: String,
+        session: String,
         correlationId: String,
     ): List<Pair<String, JsonNode>> {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                .header(API_KEY_HEADER, apiKey)
+                .header("Cookie", E2eSession.cookieHeader(session))
+                .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                 .header("DP-Correlation-Id", correlationId)
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
@@ -542,7 +538,8 @@ class PipelineShapesE2eTest {
         val request =
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/api/v1/pipelines/$pipelineId/execute"))
-                .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+                .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                 .header("DP-Correlation-Id", correlationId)
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
@@ -596,7 +593,7 @@ class PipelineShapesE2eTest {
     private fun cancelExecution(executionId: String) {
         given()
             .port(port)
-            .header(API_KEY_HEADER, ADMIN_KEY.plaintext)
+            .asSession(ADMIN_SESSION)
             .`when`()
             .delete("/api/v1/executions/$executionId")
             .then()
@@ -607,7 +604,6 @@ class PipelineShapesE2eTest {
 
     companion object {
         private const val SECRET_BYTES = 32
-        private const val API_KEY_HEADER = "DP-API-Key"
         private const val CANCEL_SLEEP_SECONDS = 15
 
         /**
@@ -625,9 +621,13 @@ class PipelineShapesE2eTest {
 
         private val random = SecureRandom()
 
-        private val ADMIN_KEY = E2eAuth.generateKey("e2e-admin-key", arrayOf("read", "execute", "author"))
-        private val EXECUTOR_KEY = E2eAuth.generateKey("e2e-executor-key", arrayOf("execute"))
-        private val READER_ONLY_KEY = E2eAuth.generateKey("e2e-reader-key", arrayOf("read"))
+        private const val DEFAULT_WORKSPACE = "defa0000-0000-0000-0000-000000000001"
+
+        /** The per-run JWT secret — registered as `datapipelines.jwt.secret`, signing the three sessions (#215 B2). */
+        private val JWT_SECRET = E2eSession.newSecret()
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-admin@datapipelines.test")
+        private val EXECUTOR_SESSION get() = E2eSession.jwt(JWT_SECRET, EXECUTOR_USER_ID, "e2e-executor@datapipelines.test")
+        private val READER_SESSION get() = E2eSession.jwt(JWT_SECRET, READER_USER_ID, "e2e-reader@datapipelines.test")
 
         private var authSeeded = false
         private val authLock = Any()
@@ -666,7 +666,7 @@ class PipelineShapesE2eTest {
             registry.add("datapipelines.redis.host") { redis.host }
             registry.add("datapipelines.redis.port") { SharedE2e.redisPort }
 
-            registry.add("datapipelines.jwt.secret") { randomSecret() }
+            registry.add("datapipelines.jwt.secret") { JWT_SECRET }
             registry.add("datapipelines.db.encryption-key") { randomSecret() }
 
             listOf("google", "microsoft").forEachIndexed { index, name ->
