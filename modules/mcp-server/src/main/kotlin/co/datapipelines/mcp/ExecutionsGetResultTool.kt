@@ -14,7 +14,7 @@ import io.modelcontextprotocol.spec.McpSchema
 import java.util.UUID
 
 /**
- * `executions_get_result` (mcp-server.md §6.2.15). Scope: `read` + ownership.
+ * `executions_get_result` (mcp-server.md §6.2.15). Permission: `execution.result.read` + ownership.
  *
  * A **thin adapter over the REST cursor** ([REST API §7](../../../../../../../docs/rest-api.md))
  * with identical semantics and identical guarantees: `offset`/`limit`/`format` map one-to-one onto

@@ -48,7 +48,7 @@ private const val TYPE_FILTER_DESC =
         "('jsonata', 'javascript' — a pure function over its input, never rendered)."
 
 /**
- * `templates_list` (mcp-server.md §6.2.6). Scope: `read`.
+ * `templates_list` (mcp-server.md §6.2.6). Permission: `template.read`.
  *
  * ## Two presentations, chosen by `prefix` (067)
  *
@@ -188,7 +188,7 @@ class TemplatesListTool(
         )
 }
 
-/** `templates_get` (mcp-server.md §6.2.7). Scope: `read`.
+/** `templates_get` (mcp-server.md §6.2.7). Permission: `template.read`.
  *
  * Since 039 the DEFAULT is the **working version** (versioning §7): the DRAFT when one
  * exists, else the latest released version — an agent that read released while a draft was

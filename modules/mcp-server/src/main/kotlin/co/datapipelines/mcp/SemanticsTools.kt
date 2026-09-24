@@ -29,7 +29,10 @@ internal val KIND_ENUM_JSON: String = LearnedFactKind.entries.joinToString(prefi
 /** The two scopes, as the argument binder accepts them. */
 private val SCOPES: Set<String> = LearnedFactScope.entries.map { it.name }.toSet()
 
-/** `semantics_record` — record one learned fact with the probe that showed it. Scope: `author` / `AUTHOR`. Mutating. */
+/**
+ * `semantics_record` — record one learned fact with the probe that showed it.
+ * Permission: `semantic.record`. Mutating.
+ */
 class SemanticsRecordTool(
     private val datasources: DatasourceRegistry,
     private val service: SemanticsService,
@@ -209,7 +212,10 @@ class SemanticsRecordTool(
         }
 }
 
-/** `semantics_list` — the facts on a datasource, with trust, drift and provenance. Scope: `read` / `VIEW`. */
+/**
+ * `semantics_list` — the facts on a datasource, with trust, drift and provenance.
+ * Permission: `semantic.read`.
+ */
 class SemanticsListTool(
     private val datasources: DatasourceRegistry,
     private val service: SemanticsService,
@@ -266,7 +272,7 @@ class SemanticsListTool(
         }
 }
 
-/** `semantics_retire` — retire one fact with a reason. Scope: `author` / `AUTHOR`. Mutating. */
+/** `semantics_retire` — retire one fact with a reason. Permission: `semantic.retire`. Mutating. */
 class SemanticsRetireTool(
     private val service: SemanticsService,
 ) : McpTool {

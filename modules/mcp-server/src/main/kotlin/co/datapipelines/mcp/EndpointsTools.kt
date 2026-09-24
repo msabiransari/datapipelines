@@ -59,6 +59,7 @@ object EndpointsTools {
             "url" to "/api$pathPattern",
         )
 
+    /** `endpoints_create` (mcp-server.md §6.2.23). Permission: `endpoint.publish`. Mutating. */
     class CreateTool(
         private val publishing: EndpointPublishService,
         private val pipelines: PipelineRepository,
@@ -123,6 +124,7 @@ object EndpointsTools {
         }
     }
 
+    /** `endpoints_list` (mcp-server.md §6.2.24). Permission: `endpoint.read`. */
     class ListTool(
         private val publishing: EndpointPublishService,
         private val pipelines: PipelineRepository,
@@ -145,6 +147,7 @@ object EndpointsTools {
         ): Any = mapOf("endpoints" to publishing.list(ctx.principal).map { it.toResponse(pipelines) })
     }
 
+    /** `endpoints_get` (mcp-server.md §6.2.25). Permission: `endpoint.read`. */
     class GetTool(
         private val publishing: EndpointPublishService,
         private val pipelines: PipelineRepository,
@@ -174,6 +177,7 @@ object EndpointsTools {
         }
     }
 
+    /** `endpoints_delete` (mcp-server.md §6.2.26). Permission: `endpoint.unpublish`. Mutating. */
     class DeleteTool(
         private val publishing: EndpointPublishService,
     ) : McpTool {

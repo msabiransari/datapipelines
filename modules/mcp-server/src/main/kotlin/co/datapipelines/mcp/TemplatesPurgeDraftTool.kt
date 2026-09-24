@@ -10,8 +10,8 @@ import co.datapipelines.typesystem.DatapipelinesException
 import io.modelcontextprotocol.spec.McpSchema
 
 /**
- * `templates_purge_draft` (107 — the bounded D61/D62 self-service verb). Scope: `author`.
- * Mutating.
+ * `templates_purge_draft` (107 — the bounded D61/D62 self-service verb).
+ * Permission: `template.version.manage`. Mutating.
  *
  * The agent-reachable fraction of the 101 lifecycle: hard-delete a template that has NEVER been
  * released. `web`'s `TemplateReleaseService` is unreachable from this module (mcp-server is a

@@ -20,8 +20,9 @@ private const val EVALUATE_NOW_DESC =
         "reads the clock refuses (a transform is a pure function of its inputs — the clock is an input)."
 
 /**
- * `templates_evaluate` (mcp-server.md §6.2.43). Scope: `author` — the `templates_render` row
- * (R6: evaluating untrusted code on the server is the same authoring act as rendering).
+ * `templates_evaluate` (mcp-server.md §6.2.43). Permission: `template.evaluate`, held by the
+ * roles that hold `template.render` (R6: evaluating untrusted code on the server is the same
+ * authoring act as rendering).
  * Not mutating: nothing is staged and nothing is stored.
  *
  * `sql_probe`'s twin for transform templates: resolves the version exactly like

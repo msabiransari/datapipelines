@@ -14,18 +14,18 @@ import io.modelcontextprotocol.spec.McpSchema
  * of the boundary is each tool's schema, its argument-to-body assembly (the
  * [DatasourcesCreateTool] precedent) and its result shape.
  *
- * Scope: `author` on all three (auth.md §7.6) — the datasource-mutation floor. Mutating a
- * GLOBAL datasource's registry additionally requires admin, a D8 rule the service's injected
- * gate enforces rather than a scope. Every tool first passes the §5.3 visibility gate
- * ([DatasourceRegistry.requireVisible]): a datasource bound to another workspace resolves as
- * not-found BEFORE anything is validated or written, uniformly with the other datasource
- * tools. All three are declared `mutating` in [McpToolCatalog], so every call writes
+ * The three share one catalog permission, named on each class (auth.md §7.6), the
+ * datasource-mutation floor. Mutating a GLOBAL datasource's registry additionally requires admin,
+ * a D8 rule the service's injected gate enforces rather than the catalog. Every tool first passes
+ * the §5.3 visibility gate ([DatasourceRegistry.requireVisible]): a datasource bound to another
+ * workspace resolves as not-found BEFORE anything is validated or written, uniformly with the
+ * other datasource tools. All three are declared `mutating` in [McpToolCatalog], so every call writes
  * `mcp.tool.called` AND `mcp.tool.write` at the dispatcher's single audit choke point.
  */
 
 /**
  * `lake_tables_register` (mcp-server.md §6.2.29) — register one table on a LAKE datasource.
- * Scope: `author`. Mutating.
+ * Permission: `lake_table.manage`. Mutating.
  */
 class LakeTablesRegisterTool(
     private val datasources: DatasourceRegistry,
@@ -102,8 +102,8 @@ class LakeTablesRegisterTool(
 
 /**
  * `lake_tables_import` (mcp-server.md §6.2.30) — bulk-register from a 088-style manifest
- * `tables[]` block, inline or fetched from the datasource's own endpoint/bucket. Scope:
- * `author`. Mutating.
+ * `tables[]` block, inline or fetched from the datasource's own endpoint/bucket.
+ * Permission: `lake_table.manage`. Mutating.
  */
 class LakeTablesImportTool(
     private val datasources: DatasourceRegistry,
@@ -171,7 +171,7 @@ class LakeTablesImportTool(
 /**
  * `lake_tables_unregister` (mcp-server.md §6.2.31) — remove one table from the catalog. The
  * objects in the bucket are untouched; the table stops being queryable through the datasource.
- * Scope: `author`. Mutating.
+ * Permission: `lake_table.manage`. Mutating.
  */
 class LakeTablesUnregisterTool(
     private val datasources: DatasourceRegistry,

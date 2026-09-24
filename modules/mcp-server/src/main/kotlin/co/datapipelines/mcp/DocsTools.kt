@@ -6,7 +6,7 @@ import io.modelcontextprotocol.spec.McpSchema
 
 /**
  * `docs_list` (mcp-server.md §6.2.40) — the skill's document catalog, as a TOOL (120, owner
- * ruling R3). Scope: `read`.
+ * ruling R3). Permission: `docs.read`.
  *
  * The skill has been served as MCP resources since 095, but resources are a weak surface:
  * several MCP clients fetch them reluctantly or never, while every client calls tools. This
@@ -48,7 +48,7 @@ class DocsListTool : McpTool {
 /**
  * `docs_get` (mcp-server.md §6.2.41) — one skill document's full markdown: the same bytes the
  * `datapipelines://docs/skill/<name>` resource serves (asserted byte-for-byte in
- * `DocsToolsTest`). Scope: `read`.
+ * `DocsToolsTest`). Permission: `docs.read`.
  *
  * An unknown name is `mcp.doc_not_found` with the catalogued names in the detail — the
  * tool-surface answer to the resource read's RESOURCE_NOT_FOUND, which is a protocol-level
