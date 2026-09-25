@@ -255,69 +255,11 @@ class TransformNodeE2eTest {
     @Test
     @Order(6)
     fun `an object key bound by SQL is refused at save - R4`() {
-        createTransformTemplate(
-            WRAP_TEMPLATE,
-            """{ "total_cents": ${'$'}sum(inputs.orders.amount_cents) }""",
-            mapOf(
-                "mode" to "value",
-                "inputs" to
-                    mapOf(
-                        "orders" to mapOf("kind" to "table", "columns" to orderColumns()),
-                    ),
-                "output" to mapOf("kind" to "object"),
-            ),
-            emptyList(),
-            listOf(
-                mapOf(
-                    "name" to "empty input",
-                    "input" to mapOf("inputs" to mapOf("orders" to emptyList<Any>())),
-                    "expect" to mapOf("output" to emptyMap<String, Any>()),
-                ),
-                mapOf(
-                    "name" to "one row",
-                    "input" to
-                        mapOf(
-                            "inputs" to
-                                mapOf(
-                                    "orders" to listOf(mapOf("order_id" to 1, "amount_cents" to 1250, "customer_id" to "alice")),
-                                ),
-                        ),
-                    "expect" to mapOf("output" to mapOf("total_cents" to 1250)),
-                ),
-            ),
-        )
+        createTransformTemplate(WRAP_TEMPLATE, WRAP_BODY, wrapContract(), emptyList(), wrapTestCases())
 
         createPipeline(
             "test/transform_object_key",
-            mapOf(
-                "schema_version" to 1,
-                "name" to "test/transform_object_key",
-                "display_name" to "Transform Object Key E2E",
-                "description" to "7c E2E",
-                "parameters" to emptyMap<String, Any>(),
-                "nodes" to
-                    listOf(
-                        stageOrdersNode(),
-                        mapOf(
-                            "id" to "wrap",
-                            "description" to "object output",
-                            "type" to "TRANSFORM",
-                            "template" to mapOf("id" to WRAP_TEMPLATE, "version" to 1),
-                            "inputs" to mapOf("orders" to "stg_orders"),
-                            "context_key" to "payload",
-                            "depends_on" to listOf("stage_orders"),
-                        ),
-                        mapOf(
-                            "id" to "report",
-                            "description" to "a SQL node binding the object key — R4 refuses this",
-                            "type" to "DQL",
-                            "source" to "tempdb",
-                            "template" to mapOf("id" to BIND_PAYLOAD_TEMPLATE, "version" to 1),
-                            "output" to mapOf("target" to "caller"),
-                            "depends_on" to listOf("wrap"),
-                        ),
-                    ),
-            ),
+            objectKeyPipelineBody(),
             expectedStatus = 400,
             expectedCode = "pipeline.validation.transform_object_key_bound",
         )
@@ -436,71 +378,6 @@ class TransformNodeE2eTest {
 
     // ------------------------------------------------------------ the graph
 
-    private fun mainNodes(
-        strict: Boolean,
-        shapeTemplate: String = SHAPE_TEMPLATE,
-    ): List<Map<String, Any?>> =
-        listOf(
-            stageOrdersNode(),
-            mapOf(
-                "id" to "stage_trips",
-                "description" to "lake trips to tempdb",
-                "type" to "DQL",
-                "source" to LAKE_DS,
-                "template" to mapOf("id" to STAGE_TRIPS_TEMPLATE, "version" to 1),
-                "output" to mapOf("target" to "tempdb", "table" to "stg_trips"),
-                "depends_on" to emptyList<String>(),
-            ),
-            mapOf(
-                "id" to "shape_orders",
-                "description" to "row mode with rejects",
-                "type" to "TRANSFORM",
-                "template" to mapOf("id" to shapeTemplate, "version" to 1),
-                "inputs" to mapOf("orders" to "stg_orders"),
-                "output" to mapOf("target" to "tempdb", "table" to "order_lines", "rejects" to "order_lines_rejected"),
-                "strict" to strict,
-                "depends_on" to listOf("stage_orders"),
-            ),
-            mapOf(
-                "id" to "threshold",
-                "description" to "value mode writes :threshold",
-                "type" to "TRANSFORM",
-                "template" to mapOf("id" to THRESHOLD_TEMPLATE, "version" to 1),
-                "inputs" to mapOf("lines" to "order_lines"),
-                "context_key" to "threshold",
-                "depends_on" to listOf("shape_orders"),
-            ),
-            mapOf(
-                "id" to "big_trips",
-                "description" to "SQL binds :threshold",
-                "type" to "DQL",
-                "source" to "tempdb",
-                "template" to mapOf("id" to BIG_TRIPS_TEMPLATE, "version" to 1),
-                "output" to mapOf("target" to "tempdb", "table" to "big_trips"),
-                "depends_on" to listOf("stage_trips", "threshold"),
-            ),
-            mapOf(
-                "id" to "summarize",
-                "description" to "table mode as the caller node",
-                "type" to "TRANSFORM",
-                "template" to mapOf("id" to SUMMARIZE_TEMPLATE, "version" to 1),
-                "inputs" to mapOf("trips" to "big_trips"),
-                "output" to mapOf("target" to "caller"),
-                "depends_on" to listOf("big_trips"),
-            ),
-        )
-
-    private fun stageOrdersNode(): Map<String, Any?> =
-        mapOf(
-            "id" to "stage_orders",
-            "description" to "postgres orders to tempdb",
-            "type" to "DQL",
-            "source" to SCRATCH_DS,
-            "template" to mapOf("id" to STAGE_ORDERS_TEMPLATE, "version" to 1),
-            "output" to mapOf("target" to "tempdb", "table" to "stg_orders"),
-            "depends_on" to emptyList<String>(),
-        )
-
     // ------------------------------------------------------------ fixture builders
 
     private fun registerDatasources() {
@@ -615,151 +492,6 @@ class TransformNodeE2eTest {
             .extract()
             .jsonPath()
             .getString("data.body_hash")
-
-    private fun orderColumns() =
-        listOf(
-            mapOf("name" to "order_id", "type" to "INTEGER"),
-            mapOf("name" to "amount_cents", "type" to "INTEGER"),
-            mapOf("name" to "customer_id", "type" to "STRING", "nullable" to true),
-        )
-
-    private fun outColumns() =
-        listOf(
-            mapOf("name" to "order_id", "type" to "INTEGER"),
-            mapOf("name" to "amount", "type" to "DECIMAL", "precision" to 12, "scale" to 2),
-            mapOf("name" to "customer_id", "type" to "STRING"),
-        )
-
-    private fun shapeContract() =
-        mapOf(
-            "mode" to "row",
-            "inputs" to mapOf("orders" to mapOf("kind" to "table", "columns" to orderColumns())),
-            "output" to mapOf("kind" to "table", "columns" to outColumns()),
-            "rejects" to true,
-        )
-
-    private fun shapeInvariants() =
-        listOf(
-            mapOf(
-                "name" to "one_to_one",
-                "expr" to "${'$'}count(rows) + ${'$'}count(rejects) = ${'$'}count(inputs.orders)",
-                "message" to "every input row is accepted or rejected, never lost",
-            ),
-        )
-
-    private fun shapeTests() =
-        listOf(
-            mapOf(
-                "name" to "empty input",
-                "input" to mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>()),
-                "expect" to mapOf("output" to mapOf("rows" to emptyList<Any>(), "rejects" to emptyList<Any>())),
-            ),
-            mapOf(
-                "name" to "missing customer is rejected",
-                "input" to
-                    mapOf(
-                        "rows" to listOf(mapOf("order_id" to 1, "amount_cents" to 1250, "customer_id" to null)),
-                        "inputs" to emptyMap<String, Any>(),
-                    ),
-                "expect" to
-                    mapOf(
-                        "output" to
-                            mapOf(
-                                "rows" to emptyList<Any>(),
-                                "rejects" to
-                                    listOf(
-                                        mapOf(
-                                            "row" to mapOf("order_id" to 1, "amount_cents" to 1250, "customer_id" to null),
-                                            "reason" to "customer_id missing",
-                                        ),
-                                    ),
-                            ),
-                    ),
-            ),
-        )
-
-    private fun thresholdContract() =
-        mapOf(
-            "mode" to "value",
-            "inputs" to mapOf("lines" to mapOf("kind" to "table", "columns" to outColumns())),
-            "output" to mapOf("kind" to "value", "type" to "DECIMAL", "precision" to 12, "scale" to 2),
-        )
-
-    private fun thresholdTests() =
-        listOf(
-            mapOf(
-                "name" to "empty input",
-                "input" to mapOf("inputs" to mapOf("lines" to emptyList<Any>())),
-                "expect" to mapOf("output" to 0),
-            ),
-            mapOf(
-                "name" to "the max",
-                "input" to
-                    mapOf(
-                        "inputs" to
-                            mapOf(
-                                "lines" to
-                                    listOf(
-                                        mapOf("order_id" to 1, "amount" to 12.5, "customer_id" to "alice"),
-                                        mapOf("order_id" to 3, "amount" to 30.0, "customer_id" to "bob"),
-                                    ),
-                            ),
-                    ),
-                "expect" to mapOf("output" to 30.0),
-            ),
-        )
-
-    private fun summarizeContract() =
-        mapOf(
-            "mode" to "table",
-            "inputs" to
-                mapOf(
-                    "trips" to
-                        mapOf(
-                            "kind" to "table",
-                            "columns" to
-                                listOf(
-                                    mapOf("name" to "id", "type" to "BIGINTEGER"),
-                                    mapOf("name" to "fare", "type" to "DECIMAL", "precision" to 15),
-                                    mapOf("name" to "company", "type" to "STRING"),
-                                ),
-                        ),
-                ),
-            "output" to
-                mapOf(
-                    "kind" to "table",
-                    "columns" to
-                        listOf(
-                            mapOf("name" to "id", "type" to "BIGINTEGER"),
-                            mapOf("name" to "fare", "type" to "DECIMAL", "precision" to 15),
-                            mapOf("name" to "company", "type" to "STRING"),
-                            mapOf("name" to "flag", "type" to "STRING"),
-                        ),
-                ),
-        )
-
-    private fun summarizeTests() =
-        listOf(
-            mapOf(
-                "name" to "empty input",
-                "input" to mapOf("inputs" to mapOf("trips" to emptyList<Any>())),
-                "expect" to mapOf("output" to emptyList<Any>()),
-            ),
-            mapOf(
-                "name" to "one trip",
-                "input" to
-                    mapOf(
-                        "inputs" to
-                            mapOf(
-                                "trips" to listOf(mapOf("id" to "7", "fare" to 42.5, "company" to "acme")),
-                            ),
-                    ),
-                "expect" to
-                    mapOf(
-                        "output" to listOf(mapOf("id" to "7", "fare" to 42.5, "company" to "acme", "flag" to "big")),
-                    ),
-            ),
-        )
 
     // ------------------------------------------------------------ HTTP helpers
 
@@ -936,23 +668,14 @@ class TransformNodeE2eTest {
     // ------------------------------------------------------------ seeds
 
     companion object {
-        private const val SCRATCH_DS = "it-transform-scratch"
-        private const val LAKE_DS = "it_transform_lake"
 
         /** The fixture's own bucket: the checked-in Iceberg metadata's absolute `s3://dp-lake-it/…`
          * URIs resolve only there (LakeMinioE2eTest's note). Uploading the same bytes is idempotent. */
         private const val BUCKET = "dp-lake-it"
         private const val ICEBERG_ROWS = 2_000
 
-        private const val STAGE_ORDERS_TEMPLATE = "test/it_stage_orders.sql"
-        private const val STAGE_TRIPS_TEMPLATE = "test/it_stage_trips.sql"
-        private const val BIG_TRIPS_TEMPLATE = "test/it_big_trips.sql"
-        private const val BIND_PAYLOAD_TEMPLATE = "test/it_bind_payload.sql"
-        private const val SHAPE_TEMPLATE = "test/it_shape.jsonata"
-        private const val THRESHOLD_TEMPLATE = "test/it_threshold.jsonata"
-        private const val SUMMARIZE_TEMPLATE = "test/it_summarize.jsonata"
         private const val BAD_INVARIANT_TEMPLATE = "test/it_shape_bad.jsonata"
-        private const val WRAP_TEMPLATE = "test/it_wrap.jsonata"
+
         private const val DRAFT_TEMPLATE = "test/it_shape_draft.jsonata"
 
         private const val SHAPE_BODY =
@@ -1112,3 +835,295 @@ class TransformNodeE2eTest {
         }
     }
 }
+
+
+// ---------------------------------------------------------------- fixtures, file-level
+
+// The pure fixture builders and the template/datasource names they read live outside the
+// spec class: the class sat well over detekt's LargeClass threshold (600 lines of code,
+// companion excluded) and the relocation is byte-identical - no assertion moved. The
+// network-facing helpers stay members; they read the suite's clients and sessions.
+
+private const val SCRATCH_DS = "it-transform-scratch"
+private const val LAKE_DS = "it_transform_lake"
+private const val STAGE_ORDERS_TEMPLATE = "test/it_stage_orders.sql"
+private const val STAGE_TRIPS_TEMPLATE = "test/it_stage_trips.sql"
+private const val THRESHOLD_TEMPLATE = "test/it_threshold.jsonata"
+private const val BIG_TRIPS_TEMPLATE = "test/it_big_trips.sql"
+private const val SUMMARIZE_TEMPLATE = "test/it_summarize.jsonata"
+private const val SHAPE_TEMPLATE = "test/it_shape.jsonata"
+private const val BIND_PAYLOAD_TEMPLATE = "test/it_bind_payload.sql"
+private const val WRAP_TEMPLATE = "test/it_wrap.jsonata"
+
+private val WRAP_BODY = """{ "total_cents": ${'$'}sum(inputs.orders.amount_cents) }"""
+
+private fun mainNodes(
+    strict: Boolean,
+    shapeTemplate: String = SHAPE_TEMPLATE,
+): List<Map<String, Any?>> =
+    listOf(
+        stageOrdersNode(),
+        mapOf(
+            "id" to "stage_trips",
+            "description" to "lake trips to tempdb",
+            "type" to "DQL",
+            "source" to LAKE_DS,
+            "template" to mapOf("id" to STAGE_TRIPS_TEMPLATE, "version" to 1),
+            "output" to mapOf("target" to "tempdb", "table" to "stg_trips"),
+            "depends_on" to emptyList<String>(),
+        ),
+        mapOf(
+            "id" to "shape_orders",
+            "description" to "row mode with rejects",
+            "type" to "TRANSFORM",
+            "template" to mapOf("id" to shapeTemplate, "version" to 1),
+            "inputs" to mapOf("orders" to "stg_orders"),
+            "output" to mapOf("target" to "tempdb", "table" to "order_lines", "rejects" to "order_lines_rejected"),
+            "strict" to strict,
+            "depends_on" to listOf("stage_orders"),
+        ),
+        mapOf(
+            "id" to "threshold",
+            "description" to "value mode writes :threshold",
+            "type" to "TRANSFORM",
+            "template" to mapOf("id" to THRESHOLD_TEMPLATE, "version" to 1),
+            "inputs" to mapOf("lines" to "order_lines"),
+            "context_key" to "threshold",
+            "depends_on" to listOf("shape_orders"),
+        ),
+        mapOf(
+            "id" to "big_trips",
+            "description" to "SQL binds :threshold",
+            "type" to "DQL",
+            "source" to "tempdb",
+            "template" to mapOf("id" to BIG_TRIPS_TEMPLATE, "version" to 1),
+            "output" to mapOf("target" to "tempdb", "table" to "big_trips"),
+            "depends_on" to listOf("stage_trips", "threshold"),
+        ),
+        mapOf(
+            "id" to "summarize",
+            "description" to "table mode as the caller node",
+            "type" to "TRANSFORM",
+            "template" to mapOf("id" to SUMMARIZE_TEMPLATE, "version" to 1),
+            "inputs" to mapOf("trips" to "big_trips"),
+            "output" to mapOf("target" to "caller"),
+            "depends_on" to listOf("big_trips"),
+        ),
+    )
+
+private fun stageOrdersNode(): Map<String, Any?> =
+    mapOf(
+        "id" to "stage_orders",
+        "description" to "postgres orders to tempdb",
+        "type" to "DQL",
+        "source" to SCRATCH_DS,
+        "template" to mapOf("id" to STAGE_ORDERS_TEMPLATE, "version" to 1),
+        "output" to mapOf("target" to "tempdb", "table" to "stg_orders"),
+        "depends_on" to emptyList<String>(),
+    )
+
+private fun orderColumns() =
+    listOf(
+        mapOf("name" to "order_id", "type" to "INTEGER"),
+        mapOf("name" to "amount_cents", "type" to "INTEGER"),
+        mapOf("name" to "customer_id", "type" to "STRING", "nullable" to true),
+    )
+
+private fun outColumns() =
+    listOf(
+        mapOf("name" to "order_id", "type" to "INTEGER"),
+        mapOf("name" to "amount", "type" to "DECIMAL", "precision" to 12, "scale" to 2),
+        mapOf("name" to "customer_id", "type" to "STRING"),
+    )
+
+private fun shapeContract() =
+    mapOf(
+        "mode" to "row",
+        "inputs" to mapOf("orders" to mapOf("kind" to "table", "columns" to orderColumns())),
+        "output" to mapOf("kind" to "table", "columns" to outColumns()),
+        "rejects" to true,
+    )
+
+private fun shapeInvariants() =
+    listOf(
+        mapOf(
+            "name" to "one_to_one",
+            "expr" to "${'$'}count(rows) + ${'$'}count(rejects) = ${'$'}count(inputs.orders)",
+            "message" to "every input row is accepted or rejected, never lost",
+        ),
+    )
+
+private fun shapeTests() =
+    listOf(
+        mapOf(
+            "name" to "empty input",
+            "input" to mapOf("rows" to emptyList<Any>(), "inputs" to emptyMap<String, Any>()),
+            "expect" to mapOf("output" to mapOf("rows" to emptyList<Any>(), "rejects" to emptyList<Any>())),
+        ),
+        mapOf(
+            "name" to "missing customer is rejected",
+            "input" to
+                mapOf(
+                    "rows" to listOf(mapOf("order_id" to 1, "amount_cents" to 1250, "customer_id" to null)),
+                    "inputs" to emptyMap<String, Any>(),
+                ),
+            "expect" to
+                mapOf(
+                    "output" to
+                        mapOf(
+                            "rows" to emptyList<Any>(),
+                            "rejects" to
+                                listOf(
+                                    mapOf(
+                                        "row" to mapOf("order_id" to 1, "amount_cents" to 1250, "customer_id" to null),
+                                        "reason" to "customer_id missing",
+                                    ),
+                                ),
+                        ),
+                ),
+        ),
+    )
+
+private fun thresholdContract() =
+    mapOf(
+        "mode" to "value",
+        "inputs" to mapOf("lines" to mapOf("kind" to "table", "columns" to outColumns())),
+        "output" to mapOf("kind" to "value", "type" to "DECIMAL", "precision" to 12, "scale" to 2),
+    )
+
+private fun thresholdTests() =
+    listOf(
+        mapOf(
+            "name" to "empty input",
+            "input" to mapOf("inputs" to mapOf("lines" to emptyList<Any>())),
+            "expect" to mapOf("output" to 0),
+        ),
+        mapOf(
+            "name" to "the max",
+            "input" to
+                mapOf(
+                    "inputs" to
+                        mapOf(
+                            "lines" to
+                                listOf(
+                                    mapOf("order_id" to 1, "amount" to 12.5, "customer_id" to "alice"),
+                                    mapOf("order_id" to 3, "amount" to 30.0, "customer_id" to "bob"),
+                                ),
+                        ),
+                ),
+            "expect" to mapOf("output" to 30.0),
+        ),
+    )
+
+private fun summarizeContract() =
+    mapOf(
+        "mode" to "table",
+        "inputs" to
+            mapOf(
+                "trips" to
+                    mapOf(
+                        "kind" to "table",
+                        "columns" to
+                            listOf(
+                                mapOf("name" to "id", "type" to "BIGINTEGER"),
+                                mapOf("name" to "fare", "type" to "DECIMAL", "precision" to 15),
+                                mapOf("name" to "company", "type" to "STRING"),
+                            ),
+                    ),
+            ),
+        "output" to
+            mapOf(
+                "kind" to "table",
+                "columns" to
+                    listOf(
+                        mapOf("name" to "id", "type" to "BIGINTEGER"),
+                        mapOf("name" to "fare", "type" to "DECIMAL", "precision" to 15),
+                        mapOf("name" to "company", "type" to "STRING"),
+                        mapOf("name" to "flag", "type" to "STRING"),
+                    ),
+            ),
+    )
+
+private fun summarizeTests() =
+    listOf(
+        mapOf(
+            "name" to "empty input",
+            "input" to mapOf("inputs" to mapOf("trips" to emptyList<Any>())),
+            "expect" to mapOf("output" to emptyList<Any>()),
+        ),
+        mapOf(
+            "name" to "one trip",
+            "input" to
+                mapOf(
+                    "inputs" to
+                        mapOf(
+                            "trips" to listOf(mapOf("id" to "7", "fare" to 42.5, "company" to "acme")),
+                        ),
+                ),
+            "expect" to
+                mapOf(
+                    "output" to listOf(mapOf("id" to "7", "fare" to 42.5, "company" to "acme", "flag" to "big")),
+                ),
+        ),
+    )
+
+private fun wrapContract() =
+    mapOf(
+        "mode" to "value",
+        "inputs" to
+            mapOf(
+                "orders" to mapOf("kind" to "table", "columns" to orderColumns()),
+            ),
+        "output" to mapOf("kind" to "object"),
+    )
+
+private fun wrapTestCases() =
+    listOf(
+        mapOf(
+            "name" to "empty input",
+            "input" to mapOf("inputs" to mapOf("orders" to emptyList<Any>())),
+            "expect" to mapOf("output" to emptyMap<String, Any>()),
+        ),
+        mapOf(
+            "name" to "one row",
+            "input" to
+                mapOf(
+                    "inputs" to
+                        mapOf(
+                            "orders" to listOf(mapOf("order_id" to 1, "amount_cents" to 1250, "customer_id" to "alice")),
+                        ),
+                ),
+            "expect" to mapOf("output" to mapOf("total_cents" to 1250)),
+        ),
+    )
+
+private fun objectKeyPipelineBody() =
+    mapOf(
+        "schema_version" to 1,
+        "name" to "test/transform_object_key",
+        "display_name" to "Transform Object Key E2E",
+        "description" to "7c E2E",
+        "parameters" to emptyMap<String, Any>(),
+        "nodes" to
+            listOf(
+                stageOrdersNode(),
+                mapOf(
+                    "id" to "wrap",
+                    "description" to "object output",
+                    "type" to "TRANSFORM",
+                    "template" to mapOf("id" to WRAP_TEMPLATE, "version" to 1),
+                    "inputs" to mapOf("orders" to "stg_orders"),
+                    "context_key" to "payload",
+                    "depends_on" to listOf("stage_orders"),
+                ),
+                mapOf(
+                    "id" to "report",
+                    "description" to "a SQL node binding the object key — R4 refuses this",
+                    "type" to "DQL",
+                    "source" to "tempdb",
+                    "template" to mapOf("id" to BIND_PAYLOAD_TEMPLATE, "version" to 1),
+                    "output" to mapOf("target" to "caller"),
+                    "depends_on" to listOf("wrap"),
+                ),
+            ),
+    )
