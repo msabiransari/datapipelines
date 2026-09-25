@@ -544,8 +544,15 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
   min-height: 0;
 }
 
+/* #240: the reading column's ONE track is minmax(0, 1fr), never the implicit `auto`. An auto
+   track is as wide as its widest child's min-content, and the Overview card holds the source
+   excerpt — a <pre>, whose longest line IS its min-content — so a 63-character first line sized
+   both cards (the track is shared) 100px under the acting column at 1440. The zero minimum is
+   the column's, not one card's: it holds every child of .tplx-read, the pipeline detail's too,
+   and the excerpt's own overflow-x (below) scrolls the line inside its card. */
 .tplx-read {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--gap-md);
   min-width: 0;
 }

@@ -286,6 +286,133 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         }
     }
 
+    /**
+     * #240 — a long line in the source excerpt scrolls inside its card; it never sizes the
+     * reading column. The excerpt is a `<pre>`, so its longest line is its min-content, and while
+     * `.tplx-read`'s one track was a bare `auto` that line sized BOTH reading cards (the track
+     * is shared) past the column: at 1440 7e's 63-character jsonata line put their right edge at
+     * 1163 against the acting column's left edge at 1088, and an 84-character SQL line put it at
+     * 1310 (222px under the acting card) and, at 1100, stacked, 134px past the column and off the
+     * window (measured on a3e79706). The SQL fixture here is longer still (126 characters), so it
+     * needs more room than the reading column has at every desktop width, 1920 included.
+     *
+     * Asserted at the three desktop widths, for both fixtures: every reading card ends inside the
+     * reading column, and side by side (1440, 1920) left of the acting column. The Source tab's
+     * full body is held to the same rule inside the acting card — it already scrolled there;
+     * this keeps it so. Non-vacuity: the width the Overview card would need to show the whole
+     * line (the `<pre>`'s scroll width plus the card's chrome around it — the same number before
+     * and after the fix) exceeds the reading column for the SQL fixture at every width and for
+     * 7e's at 1440, the width 7e measured; a green run is a line that was contained, never one
+     * that happened to fit. (7e's line fits a 1920 column outright, so it is not asked there.)
+     */
+    @Test
+    fun `a long first excerpt line scrolls inside its card - the reading cards never run under the acting column`() {
+        startTrace()
+        ready()
+        val slug = "longline" + generatedPassword("s").takeLast(6).lowercase()
+        postJson(
+            "/api/v1/templates",
+            """{"id":"test/$slug/orders_sql","type":"sql","dialect":"POSTGRES","display_name":"orders_sql",""" +
+                """"description":"#240 fixture","body":"$LONG_SQL_FIRST_LINE\nORDER BY order_id"}""",
+        )
+        // 7e's fixture, verbatim: the transform whose 63-character first line 7e measured.
+        postJson(
+            "/api/v1/templates",
+            """{"id":"test/$slug/active_orders","type":"jsonata","display_name":"active_orders","description":"#240 fixture",""" +
+                """"body":"[ inputs.orders[customer_id != null].{ \"order_id\": order_id } ]",""" +
+                """"contract":{"mode":"table","inputs":{"orders":{"kind":"table","columns":[{"name":"order_id","type":"INTEGER"},""" +
+                """{"name":"customer_id","type":"STRING","nullable":true}]}},""" +
+                """"output":{"kind":"table","columns":[{"name":"order_id","type":"INTEGER"}]}},""" +
+                """"invariants":[],"tests":[{"name":"empty input","input":{"inputs":{"orders":[]}},"expect":{"output":[]}}]}""",
+        )
+
+        val offenders = mutableListOf<String>()
+        page.navigate("$baseUrl/templates")
+        listOf("light", "dark").forEach { theme ->
+            ensureTheme(theme)
+            listOf("orders_sql", "active_orders").forEach { leaf ->
+                listOf(1100, 1440, 1920).forEach { width -> offenders += longExcerptOffenders(slug, leaf, width, theme) }
+            }
+        }
+        offenders shouldBe emptyList()
+    }
+
+    /**
+     * [leaf]'s detail at [width]: what ends past where it must — a reading card past its column
+     * or (side by side) under the acting column, the Source tab's body past the acting column —
+     * after asserting the fixture is not one that simply fits. Photographs the Overview first.
+     */
+    private fun longExcerptOffenders(
+        slug: String,
+        leaf: String,
+        width: Int,
+        theme: String,
+    ): List<String> {
+        page.setViewportSize(width, 900)
+        openTemplate(slug, leaf)
+        val edges = readingEdges()
+        val where = "$leaf at $width ($theme)"
+        val readRight = edges.d("readRight")
+        val actLeft = edges.d("actLeft")
+        // The measured edges, pass or fail — the before/after table of the handback.
+        println("#240 $where: read ..$readRight, act $actLeft.., cards ..${edges["cards"]}, card needs ${edges["cardNeeds"]}")
+        if (leaf == "orders_sql" || width == SIDE_BY_SIDE) {
+            withClue({ "$where: the card needs ${edges.d("cardNeeds")}px for the line — the fixture must not fit its column" }) {
+                edges.d("cardNeeds") shouldBeGreaterThan readRight - edges.d("readLeft")
+            }
+        }
+        val offenders = mutableListOf<String>()
+        @Suppress("UNCHECKED_CAST")
+        (edges["cards"] as List<Number>).map { it.toDouble() }.forEachIndexed { i, right ->
+            if (right > readRight + EDGE_SLACK) offenders += "$where: reading card $i ends at $right, past the reading column's $readRight"
+            if (width >= SIDE_BY_SIDE && right > actLeft + EDGE_SLACK) {
+                offenders += "$where: reading card $i ends at $right, under the acting column's left edge $actLeft"
+            }
+        }
+        shot("long-excerpt-$leaf-$width-$theme", fullPage = true)
+        page.locator("[data-tab-panel='template-tab-source']").click()
+        page.waitForFunction("() => !document.getElementById('template-tab-source').hidden")
+        val source = readingEdges()
+        val sourceRight = source.d("sourceRight")
+        val actRight = source.d("actRight")
+        if (sourceRight > actRight + EDGE_SLACK) {
+            offenders += "$where: the Source tab's body ends at $sourceRight, past the acting column's $actRight"
+        }
+        return offenders
+    }
+
+    /** The explorer's search for [slug], its [leaf] result selected — the detail pane, reading and acting columns. */
+    private fun openTemplate(
+        slug: String,
+        leaf: String,
+    ) {
+        page.navigate("$baseUrl/templates?q=$slug")
+        page.waitForResponse({ it.url().contains("/partials/templates/versions") }) {
+            page.locator("button.tpl-result", Page.LocatorOptions().setHasText(leaf)).first().click()
+        }
+        page.locator("#template-detail .tplx-read .tplx-excerpt").waitFor()
+    }
+
+    /** The reading column, its cards' right edges, the acting column and the Source tab's body — ONE frame. */
+    @Suppress("UNCHECKED_CAST")
+    private fun readingEdges(): Map<String, Any?> =
+        page.evaluate(
+            """
+            () => {
+              const read = document.querySelector('#template-detail .tplx-read');
+              const act = document.querySelector('#template-detail .tplx-act');
+              const pre = read.querySelector('.tplx-excerpt');
+              const card = pre.closest('.ds-card');
+              const source = document.querySelector('#template-tab-source');
+              const rb = read.getBoundingClientRect(), ab = act.getBoundingClientRect();
+              return { readLeft: rb.left, readRight: rb.right, actLeft: ab.left, actRight: ab.right,
+                       cards: [...read.children].map(c => c.getBoundingClientRect().right),
+                       cardNeeds: pre.scrollWidth + card.getBoundingClientRect().width - pre.clientWidth,
+                       sourceRight: source.hidden ? 0 : source.querySelector('pre').getBoundingClientRect().right };
+            }
+            """.trimIndent(),
+        ) as Map<String, Any?>
+
     @Test
     fun `below 1100 the tree is a drawer - it opens on Browse and closes when a leaf is chosen`() {
         startTrace()
@@ -634,5 +761,15 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
 
         /** ...and it must not need more than a few lines to do it. */
         const val META_MAX_LINES = 4.0
+
+        /** The detail's two columns sit side by side from this width (template-tree.css). */
+        const val SIDE_BY_SIDE = 1440
+
+        /** Sub-pixel rounding between two boxes that touch; anything past it is an overlap. */
+        const val EDGE_SLACK = 0.5
+
+        /** #240's SQL fixture: a 126-character first line, wider than the reading column at every desktop width. */
+        const val LONG_SQL_FIRST_LINE =
+            "SELECT order_id, customer_id, amount_cents, currency, placed_at FROM orders WHERE customer_id IS NOT NULL AND amount_cents > 0"
     }
 }
