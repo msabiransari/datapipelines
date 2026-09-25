@@ -30,6 +30,19 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 @EnableConfigurationProperties(WorkspacesProperties::class, PromotionProperties::class)
 @Suppress("TooManyFunctions") // the wiring class: one function per bean, which is the point
 class AuthConfiguration {
+    /**
+     * The ONE production [PermissionResolver] (security-assurance record §7.1, B4): the role table.
+     * No profile, no property, no condition — `PackagedResolverTest` fails the build on any, and on a
+     * second implementation packaged in the application jar.
+     */
+    @Bean
+    fun permissionResolver(): PermissionResolver = RolePermissionsResolver
+
+    /** Makes every decision point ask the context's resolver; restores the production one on close. */
+    @Bean
+    fun permissionResolverInstallation(resolver: PermissionResolver): PermissionResolverInstallation =
+        PermissionResolverInstallation(resolver)
+
     @Bean
     fun userRepository(jdbc: NamedParameterJdbcTemplate): UserRepository = UserRepository(jdbc)
 
