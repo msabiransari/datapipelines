@@ -338,6 +338,42 @@ class PipelinesControllerTest {
         audited.single().second["via"] shouldBe "session"
     }
 
+    /**
+     * 7e (transform-nodes design §8.2, rest-api §5.10) — the release body ALWAYS carries
+     * `warnings`: `[]` on a clean release, and the service's `template_needs_review` entries
+     * verbatim otherwise; the status stays the release's.
+     */
+    @Test
+    fun `release - 7e - the body carries warnings, empty when clean and verbatim when a pin needs review`() {
+        authenticate()
+        val draftBody = """{"schema_version":1,"name":"monthly_revenue"}"""
+        every { releases.release(any(), pipelineId, "hash-v2", userId) } returns
+            PipelineReleaseService.Released(record.copy(currentVersion = 2), releasedDetail.copy(version = 2), draftBody)
+
+        controller.release(pipelineId, "hash-v2").data.get("warnings").size() shouldBe 0
+
+        val warning =
+            co.datapipelines.pipeline.ReleaseWarning.templateNeedsReview(
+                co.datapipelines.pipeline.TemplateRef("test/rainy.jsonata", 2),
+                listOf(co.datapipelines.pipeline.RetiredFactCitation("fact-old", "superseded", "fact-new")),
+            )
+        every { releases.release(any(), pipelineId, "hash-v2", userId) } returns
+            PipelineReleaseService.Released(
+                record.copy(currentVersion = 2),
+                releasedDetail.copy(version = 2),
+                draftBody,
+                warnings = listOf(warning),
+            )
+
+        val data = controller.release(pipelineId, "hash-v2").data
+        data.get("status").asText() shouldBe "RELEASED"
+        val entry = data.get("warnings").single()
+        entry.get("code").asText() shouldBe "pipeline.release.template_needs_review"
+        entry.get("template").asText() shouldBe "test/rainy.jsonata"
+        entry.get("version").asInt() shouldBe 2
+        entry.get("message").asText() shouldBe warning.message
+    }
+
     @Test
     fun `release - 142 - the query flag reaches the service, and the cascade is audited templates first`() {
         authenticate()

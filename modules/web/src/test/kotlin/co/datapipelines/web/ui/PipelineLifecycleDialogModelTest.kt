@@ -114,6 +114,33 @@ class PipelineLifecycleDialogModelTest {
         dialog.pins.last().otherPinners shouldBe 0
     }
 
+    /**
+     * 7e (transform-nodes design §8.2) — the dialog reads the SAME port the release warning does,
+     * once for every pin: a pin the port marks carries its retired facts and reads needsReview; a
+     * clean pin carries none; neither is a blocking pin (a warning, never a refusal).
+     */
+    @Test
+    fun `release - 7e - the review port's citations land on their pin, which still does not block`() {
+        val marks = mockk<co.datapipelines.pipeline.TemplateReviewMarks>()
+        val withMarks =
+            PipelineLifecycleDialogModel(repository, templates, exclusive, runStats, anonymousActors(), AuthoringGuard(enabled = true), usage, marks)
+        every { repository.findById(any(), any()) } returns recordOf(current = 1)
+        every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
+        every { repository.findVersionBody(any(), any(), any()) } returns twoTemplateBody
+        every { templates.statusOf(any(), any(), any()) } returns RELEASED
+        val retired = co.datapipelines.pipeline.RetiredFactCitation("fact-old", "superseded", "fact-new")
+        every { marks.retiredCitations(WS, any()) } returns
+            mapOf(co.datapipelines.pipeline.TemplateRef("test/t2.sql", 1) to listOf(retired))
+
+        val dialog = withMarks.release(WS, ID)
+
+        dialog.needsReviewPins.map { it.label } shouldBe listOf("test/t2.sql@1")
+        dialog.needsReviewPins.single().retiredFactsLabel shouldBe "fact-old — superseded by fact-new"
+        dialog.pins.first().needsReview shouldBe false
+        dialog.blockingPins shouldBe emptyList()
+        io.mockk.verify(exactly = 1) { marks.retiredCitations(any(), any()) }
+    }
+
     @Test
     fun `release - 142 - a MISSING or DISCARDED pin still blocks and offers no cascade`() {
         every { repository.findById(any(), any()) } returns recordOf(current = 1)

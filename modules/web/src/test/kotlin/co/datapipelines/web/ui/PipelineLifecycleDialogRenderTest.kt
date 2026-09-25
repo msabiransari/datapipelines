@@ -100,6 +100,47 @@ class PipelineLifecycleDialogRenderTest {
         html shouldNotContain "<button type=\"submit\""
     }
 
+    /**
+     * 7e (transform-nodes design §8.2) — a pinned version that cites a RETIRED learned fact is a
+     * WARNING row above the confirm, never a refusal: the row names the pin, the retired fact
+     * and its successor, and the Release button is still rendered and enabled. The falsification
+     * (handback F-3's twin here) moves the pin into the blocking branch and this case goes red at
+     * the button.
+     */
+    @Test
+    fun `release - 7e - a needs_review pin is a warning row above an ENABLED confirm`() {
+        val retired = co.datapipelines.pipeline.RetiredFactCitation("fact-old", "superseded", "fact-new")
+        val html =
+            renderRelease(
+                pins =
+                    listOf(
+                        pin("demo/rainy.jsonata@2", PipelineVersionStatus.RELEASED, retiredFacts = listOf(retired)),
+                        pin("demo/x.sql@3", PipelineVersionStatus.RELEASED),
+                    ),
+            )
+
+        html shouldContain "data-release-needs-review"
+        html shouldContain "data-needs-review-pin=\"demo/rainy.jsonata@2\""
+        html shouldContain "cites a retired fact: fact-old — superseded by fact-new"
+        html shouldContain "Releasing is not blocked."
+        // One row per needs-review pin: the clean pin carries none.
+        html shouldNotContain "data-needs-review-pin=\"demo/x.sql@3\""
+        // The confirm is untouched: rendered, and not disabled.
+        html shouldContain "data-verb=\"pipeline-release-confirm\""
+        html shouldContain ">Release v3</button>"
+        val confirm = Regex("<button[^>]*data-verb=\"pipeline-release-confirm\"[^>]*>").find(html)!!.value
+        // The standalone `disabled` attribute (hx-disabled-elt is htmx's in-flight guard, not a state).
+        Regex("\\sdisabled[\\s>]").containsMatchIn(confirm) shouldBe false
+    }
+
+    @Test
+    fun `release - 7e - a plain retirement names its reason, and a clean draft renders no warning block`() {
+        val plain = co.datapipelines.pipeline.RetiredFactCitation("fact-old", "no longer our policy", null)
+        renderRelease(pins = listOf(pin("demo/rainy.jsonata@2", PipelineVersionStatus.RELEASED, retiredFacts = listOf(plain)))) shouldContain
+            "cites a retired fact: fact-old (retired: no longer our policy)"
+        renderRelease(pins = listOf(pin("demo/x.sql@3", PipelineVersionStatus.RELEASED))) shouldNotContain "data-release-needs-review"
+    }
+
     @Test
     fun `release - a MISSING template pin refuses the same way`() {
         val html = renderRelease(pins = listOf(pin("gone/missing.sql@9", null)))
@@ -325,12 +366,14 @@ class PipelineLifecycleDialogRenderTest {
         label: String,
         status: PipelineVersionStatus?,
         otherPinners: Int = 0,
+        retiredFacts: List<co.datapipelines.pipeline.RetiredFactCitation> = emptyList(),
     ): PipelineLifecycleDialogModel.PinView =
         PipelineLifecycleDialogModel.PinView(
             id = label.substringBefore("@"),
             version = label.substringAfter("@").toInt(),
             status = status,
             otherPinners = otherPinners,
+            retiredFacts = retiredFacts,
         )
 
     private fun releaseDialog(

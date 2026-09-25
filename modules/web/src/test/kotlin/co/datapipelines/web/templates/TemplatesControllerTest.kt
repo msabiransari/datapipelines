@@ -380,6 +380,18 @@ class TemplatesControllerTest {
             .code shouldBe "pipeline.execution.invalid_parameter_type"
     }
 
+    /** 7e (rest-api §8.5) — `implements=<fact id>` reaches the read as a UUID; a malformed id is the filters' 400. */
+    @Test
+    fun `list passes the implements filter as a fact id and refuses a malformed one`() {
+        authenticate()
+        val fact = UUID.randomUUID()
+        every { repository.list(any(), null, null, null, 0, 3, fact) } returns listOf(template())
+        controller.list(dialect = null, type = null, q = null, offset = 0, limit = 2, implements = "$fact").data.items.size shouldBe 1
+
+        shouldThrow<ApiException> { controller.list(dialect = null, type = null, q = null, offset = null, limit = null, implements = "x") }
+            .code shouldBe "pipeline.execution.invalid_parameter_type"
+    }
+
     // The `prefix` browse presentation — the REST mirror of `templates_list {prefix}` (067),
     // whose cases in TemplateToolsTest these mirror.
 
