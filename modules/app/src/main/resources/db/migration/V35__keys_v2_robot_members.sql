@@ -8,8 +8,12 @@
 -- 1. The `user` kind is renamed `mcp` (A19) — kind is the transport and the word says which.
 --    The column's DEFAULT follows; the code's enum (ApiKeyKind.MCP) spells the same wire value.
 --
--- 2. The login-minted keys (D16, V31) are CONVERTED (A15, B4): for every live key with
---    `minted_at_login = TRUE`, its owner's role in the key's workspace decides —
+-- 2. Every live `user`-kind key is CONVERTED (A15, B4) — the login-minted rows AND the
+-- pre-R3 on-demand ones (V31's own KDoc: the pre-existing rows' `minted_at_login` is FALSE,
+-- "which is the truth about them", so the flag cannot decide who converts; every live
+-- `user` row must end identity-backed with a role, because the final CHECK admits a
+-- NULL role only on a revoked row). For every live key, its owner's role in the key's
+-- workspace decides —
 --      author | promoter | workspace_admin → the key keeps living, now IDENTITY-BACKED: a
 --        `service` identity is created for it (exactly as V34 built endpoint/server identities:
 --        provider 'key', subject = the key id, email '<key id>@keys.invalid', no password),
@@ -49,7 +53,8 @@ ALTER TABLE api_keys DROP CONSTRAINT chk_api_keys_kind;
 ALTER TABLE api_keys DROP CONSTRAINT chk_api_keys_role;
 ALTER TABLE api_keys ALTER COLUMN kind SET DEFAULT 'mcp';
 
--- 2. The login-minted keys (B4, one DO block = one statement group inside Flyway's transaction).
+-- 2. Every live `user`-kind key converts or revokes (B4, one DO block = one statement
+--    group inside Flyway's transaction).
 DO $$
 DECLARE
     converted_count integer;
@@ -57,14 +62,15 @@ DECLARE
     identities_created integer;
 BEGIN
     -- 2a. CONVERT: the owner's membership role decides (author | promoter | workspace_admin).
-    --     The identity is built exactly like V34's; created_by keeps the owner.
+    --     The identity is built exactly like V34's; created_by keeps the owner. Every live
+    --     `user`-kind row is in scope — the pre-R3 on-demand keys included (see above).
     WITH convertible AS (
         SELECT k.id AS key_id, k.name, m.role
           FROM api_keys k
           JOIN workspace_members m
             ON m.user_id = k.created_by
            AND m.workspace_id = k.workspace_id
-         WHERE k.minted_at_login = TRUE
+         WHERE k.kind = 'user'
            AND k.is_revoked = FALSE
            AND m.role IN ('author', 'promoter', 'workspace_admin')
     ),
@@ -86,11 +92,11 @@ BEGIN
     --     unexpected state — revoked, never guessed (B4). A NOTICE carries the count.
     UPDATE api_keys k
        SET is_revoked = TRUE
-     WHERE k.minted_at_login = TRUE
+     WHERE k.kind = 'user'
        AND k.is_revoked = FALSE
        AND k.role IS NULL;
     GET DIAGNOSTICS revoked_count = ROW_COUNT;
-    RAISE NOTICE 'V35: % login-minted key(s) converted to identity-backed keys with their owner''s role; % revoked (viewer or no membership)',
+    RAISE NOTICE 'V35: % user-kind key(s) converted to identity-backed keys with their owner''s role; % revoked (viewer or no membership)',
         converted_count, revoked_count;
 END $$;
 
@@ -112,11 +118,14 @@ ALTER TABLE pipeline_executions
 
 -- 4. The CHECK (A13/A14/A19) and the live-name uniqueness (A18). The old CHECK was already
 -- dropped in step 1 (before the conversion moved rows through in-between states).
--- `role IS NOT NULL` on the transport arms is NOT redundant (V34's own lesson): under SQL's
--- three-valued logic `role = 'api_caller'` is UNKNOWN for a NULL role, a CHECK passes on
--- UNKNOWN, and the record's spelling would admit an `endpoint` or `server` key with no role.
+-- `role IS NOT NULL` on EVERY role-bearing arm is NOT redundant (V34's own lesson, which the
+-- first draft of this migration re-tripped on the mcp arm): under SQL's three-valued logic
+-- `role = 'api_caller'` is UNKNOWN for a NULL role, a CHECK passes on UNKNOWN, and without the
+-- explicit `IS NOT NULL` a LIVE `mcp` row with a NULL role evaluated to NULL (arm 1 UNKNOWN,
+-- arm 2 FALSE) and was ADMITTED — measured on 2026-09-25 by
+-- FlywayMigrationIntegrationTest's `roleAccepted("mcp", null) shouldBe false` probe.
 ALTER TABLE api_keys ADD CONSTRAINT chk_api_keys_role CHECK (
-    (kind = 'mcp' AND role IN ('author', 'promoter', 'workspace_admin'))
+    (kind = 'mcp' AND role IS NOT NULL AND role IN ('author', 'promoter', 'workspace_admin'))
     OR (kind = 'mcp' AND role IS NULL AND is_revoked)
     OR (kind = 'endpoint' AND role IS NOT NULL AND role = 'api_caller')
     OR (kind = 'server' AND role IS NOT NULL AND role = 'promotion_receiver')

@@ -835,9 +835,9 @@ class FlywayMigrationIntegrationTest {
         indexes shouldContainExactlyInAnyOrder
             listOf(
                 "api_keys.api_keys_pkey",
-                // 179 (V31): one live `user` key per (user, workspace) — the login mint's
-                // race arbiter.
-                "api_keys.api_keys_one_live_user_key",
+                // Keys v2 (V35, A18): live `(workspace_id, name)` is unique — the mint's V31
+                // index is gone with the login mint.
+                "api_keys.uq_api_keys_live_workspace_name",
                 // 215b (V34): the keys a person CREATED, now that user_id names a key's identity.
                 "api_keys.idx_api_keys_created_by",
                 "api_keys.idx_api_keys_endpoint_kind",
