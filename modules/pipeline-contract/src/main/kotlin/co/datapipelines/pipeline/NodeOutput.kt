@@ -26,9 +26,16 @@ sealed interface NodeOutput {
      *
      * A node whose data downstream nodes consume must declare this explicitly (D1) — there
      * is no implicit staging.
+     *
+     * [rejects] is TRANSFORM-only (§4.12, transform-nodes design §3.1): the tempdb table the
+     * rows the function rejected are written to, required exactly when the pinned contract
+     * declares `rejects` (§12.13). Null on every other node type and absent from the wire form
+     * then — the deserializer binds it to null and the serializer omits it, so an existing
+     * pipeline's canonical JSON (and body hash) is byte-identical.
      */
     data class Tempdb(
         val table: String,
+        val rejects: String? = null,
     ) : NodeOutput {
         override val target: OutputTarget get() = OutputTarget.TEMPDB
     }

@@ -122,15 +122,22 @@ internal object StructuralRules {
     ) {
         val namespaced = mutableMapOf<String, MutableList<String>>()
         pipeline.nodes.forEachIndexed { index, node ->
-            val (namespace, table) =
-                when (val output = node.output) {
-                    is NodeOutput.Tempdb -> NodeSource.TEMPDB_LITERAL to output.table
-                    is NodeOutput.Datasource -> "datasource:${output.datasource.truncateForError()}" to output.table
-                    else -> return@forEachIndexed
+            when (val output = node.output) {
+                is NodeOutput.Tempdb -> {
+                    register(index, NodeSource.TEMPDB_LITERAL, output.table, "output.table", namespaced, into)
+                    // §12.13 (7c): a TRANSFORM's rejects table shares the tempdb namespace —
+                    // one staging database, one uniqueness rule.
+                    output.rejects?.let { register(index, NodeSource.TEMPDB_LITERAL, it, "output.rejects", namespaced, into) }
                 }
-            if (table.isBlank()) return@forEachIndexed
-            checkTableIdentifier(index, table, into)
-            namespaced.getOrPut(namespace) { mutableListOf() } += table
+
+                is NodeOutput.Datasource -> {
+                    register(index, "datasource:${output.datasource.truncateForError()}", output.table, "output.table", namespaced, into)
+                }
+
+                else -> {
+                    // no standalone output table to register for this shape
+                }
+            }
         }
         namespaced.forEach { (namespace, tables) ->
             duplicatesOf(tables).forEach { duplicate ->
@@ -145,15 +152,29 @@ internal object StructuralRules {
         }
     }
 
+    private fun register(
+        index: Int,
+        namespace: String,
+        table: String,
+        field: String,
+        namespaced: MutableMap<String, MutableList<String>>,
+        into: FailureCollector,
+    ) {
+        if (table.isBlank()) return
+        checkTableIdentifier(index, table, field, into)
+        namespaced.getOrPut(namespace) { mutableListOf() } += table
+    }
+
     private fun checkTableIdentifier(
         index: Int,
         table: String,
+        field: String,
         into: FailureCollector,
     ) {
         if (!IDENTIFIER.matches(table)) {
             into.add(
                 Validation.INVALID_IDENTIFIER,
-                "nodes[$index].output.table",
+                "nodes[$index].$field",
                 "Output table '${table.truncateForError()}' must match [a-z0-9_]+, length 1-63.",
                 mapOf("value" to table.truncateForError()),
             )
@@ -161,7 +182,7 @@ internal object StructuralRules {
         if (isReservedIdentifier(table)) {
             into.add(
                 Validation.RESERVED_IDENTIFIER,
-                "nodes[$index].output.table",
+                "nodes[$index].$field",
                 "Output table '${table.truncateForError()}' is reserved: 'tempdb' and the __…__ namespace are not usable.",
                 mapOf("value" to table.truncateForError()),
             )

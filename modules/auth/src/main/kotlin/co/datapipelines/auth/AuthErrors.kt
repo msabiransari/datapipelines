@@ -191,6 +191,8 @@ object AuthErrorCodes {
             "pipeline.release." to "1313-versioning--draft-release-lifecycle--promotion",
             "pipeline.version." to "1313-versioning--draft-release-lifecycle--promotion",
             "pipeline.check." to "1317-release-checks",
+            "pipeline.transform." to "1318-transform",
+            "transform." to "1318-transform",
             "type_mapping." to "136-type-mapping",
             "auth." to "137-authentication--authorization",
             "datasource." to "138-datasource",

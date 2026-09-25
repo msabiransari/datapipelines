@@ -31,6 +31,8 @@ class ExecutorHarness(
     /** The calculator-catalog lookup (121) — wired by tests that exercise a fixture kind. */
     calculatorKinds: (String) -> co.datapipelines.calculators.CalculatorKind? =
         co.datapipelines.calculators.CalculatorRegistry::find,
+    /** The TRANSFORM-node collaborators (7c, #7) — wired by tests that exercise a TRANSFORM node. */
+    transforms: TransformSupport? = null,
 ) : Closeable {
     val emitter = RecordingEmitter()
     val flags = InMemoryCancellationFlags()
@@ -59,6 +61,7 @@ class ExecutorHarness(
             auditSink = auditSink,
             subPipelineRunner = subPipelineRunner,
             calculatorKinds = calculatorKinds,
+            transforms = transforms,
         )
 
     override fun close() {

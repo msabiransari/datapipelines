@@ -716,6 +716,60 @@ conn.createStatement().use { stmt ->
 
 Returns success/failure. No staging, no output block.
 
+#### 6.3.4 `TRANSFORM` — the script over staged data
+
+A TRANSFORM node never enters §6.1's render or §6.2's datasource paths: its template is a script
+(`jsonata` today), not SQL, and its inputs are tempdb tables plus the Context. The runner
+([pipeline-contract §4.12](pipeline-contract.md#412-json-structure-transform-node), the
+transform-nodes design record §5) resolves the pinned version and its contract, then, per the
+contract's **mode**:
+
+- **`row`** — the single table input is read with `result-batch-size` batches off one open
+  `withQuery` cursor; each batch is evaluated once (`{ rows, inputs, meta }`), gated row by row
+  (§5.3 of the record), and the accepted rows feed `stageRows(output.table)` as a lazily-driven
+  sequence. When the contract declares rejects, a **second** pass over the same input feeds
+  `stageRows(output.rejects)`. The input table never exists whole in the JVM (the memory proof
+  is a live-heap sampler over a 200 000-row run: the peak stays under one full copy of the
+  input table, and the suite falsifies red the moment the loop materialises it). Two passes are
+  safe because the function is pure with the clock pinned; one pass would need either an
+  unbounded rejects buffer or cross-coroutine locks on the executor's threads.
+- **`table` / `value`** — every table input is counted **before** loading
+  (`pipeline.transform.input_too_large` past `datapipelines.transform.max-input-rows`), loaded
+  whole, and evaluated once. A `table` output writes `stageRows` or the caller; a `value`
+  output is gated (or, for `kind: object`, accepted as-is under
+  `datapipelines.transform.max-value-bytes`) and written to the Context **only after invariants
+  and strict pass** (record §5.5).
+
+Every evaluation — the function and each invariant — runs on the **script evaluation pool**
+(§5.3's seam), never on a `dag-executor` thread, under a wall clock set to the node's own
+deadline **minus** `cancel-grace-seconds` so the engine reports
+`pipeline.transform.timeout` first and the node deadline stays the outer backstop. The bounds
+and their honesty table (what the JSONata engine does and does not bound) are §5.3's — this
+node is that table's second caller and adds nothing to it. `$now()`/`$millis()` return the
+execution's `current_timestamp` from the platform tier.
+
+After the last batch the declared invariants are evaluated over `{ rows, rejects, inputs }`
+**read back from the written tempdb tables** — never the JVM's memory of them — bounded across
+rows + rejects + table inputs by `max-input-rows` (`pipeline.transform.invariants_too_large`);
+a template that declares none streams without any read-back. Then `strict: true` with a
+non-empty rejects table fails with `pipeline.transform.rejects_strict` (count + first ten
+reasons). Failure after a write began is atomic (record §5.5): staging rolls back the partial
+table it is writing ([Staging §4.3](staging.md)) and the executor drops the **other** completed
+table itself — the sentence staging §4.3 now carries.
+
+**The lease answer.** A `withQuery` read may be open while `stageRows` writes on the same
+staging instance: `stageRows`' drain pulls its sequence holding **no** lease and takes a short
+write lease per batch, so read and writes run on different connections of the execution's pool
+(staging `max-connections`, default 4). That is the contract's "independent operations run on
+other connections meanwhile" case, not its never-nest case; at a configured floor of 1 the
+write lease's admission suspends until the node's wall-clock deadline cancels it — a bounded
+`pipeline.node.timeout`, never an invisible deadlock.
+
+A value-mode key the caller supplied at execute time **skips the node** (the 078 A5 rule,
+exactly as for calculators): the supplied value is gated against the contract's declared
+output — an object output accepts any JSON object under the byte cap — and the stats carry
+`provided_by: "caller"`.
+
 ### 6.4 DQL output dispatch
 
 For DQL nodes, behavior depends on `node.output`:
@@ -842,7 +896,7 @@ Failure modes:
 
 When a downstream node's SQL references upstream tables (e.g., `SELECT * FROM stg_orders`), it runs against the per-execution tempdb instance. The table exists because the upstream DQL node created it in §6.4.1.
 
-**No cross-node data passing via Context.** Upstream data lives in tempdb tables (or, for write-back nodes, in external datasource tables); downstream templates reference those tables by name. Context carries only input parameters and calculator outputs.
+**No cross-node data passing via Context.** Upstream data lives in tempdb tables (or, for write-back nodes, in external datasource tables); downstream templates reference those tables by name. Context carries only input parameters and calculator outputs. A TRANSFORM node reads the same staged tables through the staging read cursor (§6.3.4) rather than through SQL, and a `value`-mode TRANSFORM's Context key joins §7's tiers exactly like a calculator's.
 
 ### 6.6 Pipeline composition: `direct` delivery, slots, and cancellation
 
@@ -954,6 +1008,8 @@ Written from the terminal event (`pipeline_completed` / `pipeline_failed` / `exe
 
 Per-node, a `CALCULATOR` node's `NodeStats` also carries `context_key` and `context_value` (§7.2) — or, on a multi-output kind (121), `context_values` with every key the one evaluation wrote, the single pair staying byte-identical — so the run detail page and `executions_get` show what each calculator produced without reading the whole snapshot.
 
+Per-node, a TRANSFORM node's `NodeStats` also carries (7c, #7 — record §5.5): **`rows_in`** (rows read from the table inputs — no node reported an input count before), **`rows_rejected`** (rows the function rejected into the rejects table) and **`invariants_checked`** (how many invariants ran after the last batch; `0` when the template declares none and the node streams without a read-back). All three are additive and omitted for every other node type, and a value-mode TRANSFORM reports `context_key`/`context_value` — and `provided_by` on the caller-supplied skip — exactly like a calculator.
+
 **A calculator the caller supplied the key for is SKIPPED, not evaluated** (078, owner ruling 2026-09-05 — tier order org < platform < parameters < caller-supplied calculator keys < calculator outputs). Its stats row still carries `context_key` and `context_value` — the SUPPLIED value, read from the live Context — plus `"provided_by": "caller"` (absent otherwise, never null), so a run record distinguishes "the caller said 7" from "the kind computed 7". A calculator that RUNS `put()`s its key and wins over everything below tier 5, exactly as before. 121: for a multi-output node the rule is all-or-nothing — EVERY key supplied and the node is skipped (the supplied values in `context_values`, `provided_by` one field on the node); a proper subset never reaches the executor, refused at the bind with `pipeline.execution.calculator_keys_partial`.
 
 ---
@@ -1050,6 +1106,8 @@ Construction rules (these are the shapes §5.2 actually throws):
 | Executor-internal failure with no more specific code | `pipeline.execution.aborted` |
 
 **The table applies only to raw driver and unknown exceptions.** A collaborator that raises a `DatapipelinesException` has already chosen its catalog code — the template engine's `template_not_found` vs `template_render_failed` split, staging's `value_overflow` / `memory_limit_exceeded` / `invalid_column_name`, the result store's `too_large` / `storage_unavailable`. That code always wins; re-deriving one from the exception's Java type would silently overwrite a precise code with a coarser one. What the mapper adds in that case is only the structured detail (`node_id`, `phase`).
+
+**TRANSFORM failures are carried codes by construction (7c).** The §13.18 family ([Pipeline Contract §13.18](pipeline-contract.md#1318-transform)) — `pipeline.transform.input_contract_violation` / `input_too_large` / `evaluation_failed` / `timeout` (504; the engine's own bound, with `pipeline.node.timeout` the outer backstop) / `resource_limit` / `pool_exhausted` (503) / `row_shape_mismatch` / `value_type_mismatch` / `precision_lost` / `value_too_large` / `invariant_failed` / `invariants_too_large` / `rejects_strict` — is raised by the script pool, the type gate and the transform runner as `DatapipelinesException`s, so each reaches the node failure record with its own code and detail (batch and row number on the gate refusals, the invariant's name and message, the reject count and first ten reasons on `rejects_strict`), and nothing in this table re-maps it.
 
 For anything else, the **phase** the node was in is what disambiguates: a `SQLException` is the same class whether it surfaced acquiring a connection (`datasource_connection_failed`), executing (`query_execution_failed`), staging (`staging_failed`) or writing back (`writeback_failed`), so the phase is carried explicitly rather than guessed from the message. Reflected driver text is bounded at 2000 characters before it is copied into `MappedError` — H2, MSSQL and Oracle append the whole failing statement to `SQLException.message`, and that string otherwise propagates into `node_stats_json`, both SSE payloads, the Postgres `error_json`, and every log line that prints it.
 
@@ -1501,6 +1559,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-24 | v1.17 | 7c the TRANSFORM node (#7) | §6.3.4: the TRANSFORM node's executor — per-mode driving (row streams `result-batch-size` batches off one cursor into `stageRows` sequences; rejects take a second pass; table/value load capped-before-loading and evaluate once), every evaluation on §5.3's pool under the node deadline minus `cancel-grace-seconds`, the §5.1 cover/nullable input checks, the type gate with batch and row numbers, invariants read back from the WRITTEN tempdb tables under `max-input-rows` (and unbounded streaming with none declared), strict, §5.5 atomicity (the sibling table dropped by the executor), the caller-supplied skip, and the lease answer (a `withQuery` read may be open while `stageRows` writes — different connections of the execution's pool, `max-connections` ≥ 2). §6.5: a TRANSFORM reads the same staged tables; §7: `rows_in` / `rows_rejected` / `invariants_checked` on `NodeResult`/`NodeStats`; §8.2: the §13.18 family documented as carried codes. |
 | 2026-09-23 | v1.16 | 7a merge review (#7) | §5.3 "The script engine seam": the evaluation pool is a **bulkhead** — an abandoned evaluation's thread keeps its slot until it ends (the thread, not the caller, returns the permits), so at most `size` evaluation threads are alive, abandoned ones included; a caller waits for a slot at most its own wall clock, then gets the pool-exhausted refusal. The v1.15 wording ("the next evaluation gets a fresh thread immediately") described a pool that released the slot at abandonment, which let every runaway add one more live thread with no ceiling. The pad-bomb row's "bound that held" reads accordingly. |
 | 2026-09-23 | v1.15 | 7a transform engine seam (#7) | §5.3 gains "The script engine seam": the `modules/scripting` library seam (7a) and the evaluation-pool contract the TRANSFORM node (7c) will wire in — every production evaluation on its own bounded, abandoning, thread-replacing pool; the honest-bounds table GENERATED from the breach suite's measured record (2026-09-23, jsonata 0.9.10, 512m JVM), including the measured corrections: lambda recursion is caught by TIME (the library's depth counter skips `isParallelCall` frames), `$join` is refused by the library's own argument cap, and the record's regex bomb is measured resistant on `java.util.regex`. The in-process honesty sentence is the record's own: a heap bound is not enforceable in-process; input and output caps bound a well-formed evaluation; a malicious body can still exhaust the heap. |
 |---|---|---|---|

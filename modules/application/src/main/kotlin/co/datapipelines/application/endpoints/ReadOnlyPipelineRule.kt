@@ -247,9 +247,11 @@ class ReadOnlyPipelineRule(
          *
          * **Adding a type is one line.** `NodeType.CALCULATOR` (round 072) is here because it
          * computes over the execution context in memory and touches no datasource, so it cannot
-         * have a side effect to be safe from.
+         * have a side effect to be safe from. `NodeType.TRANSFORM` (7c, #7) follows it: tempdb-only
+         * by construction (§12.13 refuses a `source`), it reads staged data and writes tempdb,
+         * the Context or the caller — never a datasource.
          */
-        val READ_ONLY_NODE_TYPES: Set<NodeType> = setOf(NodeType.DQL, NodeType.PIPELINE, NodeType.CALCULATOR)
+        val READ_ONLY_NODE_TYPES: Set<NodeType> = setOf(NodeType.DQL, NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.TRANSFORM)
 
         /**
          * Where a `DQL` node's rows may go. `datasource` is absent on purpose: that is

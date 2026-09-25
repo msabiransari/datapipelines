@@ -70,6 +70,9 @@ object ApiErrorCatalog {
             // 140 §13.17 — release refused because a check on the version failed: a state
             // conflict on the release path, same class as the lifecycle rows above.
             "pipeline.check." to HttpStatus.CONFLICT,
+            // 7c §13.18 — the TRANSFORM node's execution-time refusals: node failures in a run,
+            // 500 like the pipeline.node family; the two gateway-class rows are EXCEPTIONS below.
+            "pipeline.transform." to HttpStatus.INTERNAL_SERVER_ERROR,
             // versioning §5.5: the authoring capability refusal — a promotion receiver's
             // write path refuses, naming the reason. §13.13 documents both mirrors 403.
             "pipeline.authoring." to HttpStatus.FORBIDDEN,
@@ -288,6 +291,13 @@ object ApiErrorCatalog {
             // the row is explicit. Emitted over MCP only; the status exists so the envelope's
             // mapping stays total.
             PipelineErrorCodes.Mcp.DOC_NOT_FOUND to HttpStatus.NOT_FOUND,
+            // §13.18 (7c, the TRANSFORM node) — the two rows against the family's 500 default:
+            // the engine's own timeout is 504 like its node/statement-level siblings, and the
+            // pool's exhaustion is a transient 503 (record §4.3). `transform.js.unavailable` is
+            // a save-time refusal (400); through the evaluate surface the rest keep the default.
+            PipelineErrorCodes.Transform.TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
+            PipelineErrorCodes.Transform.POOL_EXHAUSTED to HttpStatus.SERVICE_UNAVAILABLE,
+            PipelineErrorCodes.Transform.JS_UNAVAILABLE to HttpStatus.BAD_REQUEST,
         )
 
     /**
@@ -351,6 +361,10 @@ object ApiErrorCatalog {
             "pipeline.check." to "Some release checks failed. Review the checks on this version and try again.",
             "pipeline.execution." to "The pipeline run couldn't be completed.",
             "pipeline.node." to "A step in the pipeline failed while it was running.",
+            // 7c §13.18 — a TRANSFORM node's refusal: the transform, its inputs or its own
+            // bounds are the place to look, exactly like the node family above.
+            "pipeline.transform." to
+                "A transform step in the pipeline refused its input or its result. Check the named input or row in the error details.",
             "pipeline.staging." to "The pipeline ran out of room, or produced a value the temporary database couldn't hold.",
             "datasource.validation." to "These connection details aren't valid. Check them and try again.",
             "template.validation." to "This SQL template isn't valid. Check the reported problem and try again.",

@@ -34,8 +34,14 @@ internal object ReferenceRules {
         // never mask a legitimate failure. A multi-output node contributes every key it maps
         // (121), so the guarded set and the sample context cover each of them.
         val calculatorKeys = pipeline.calculatorOutputs(calculatorKinds)
+        // 7c (#7): a value-mode TRANSFORM's `context_key` rides the same declared set — a SQL
+        // node binding `:that_key` dry-renders against its sample, and the interpolation scan
+        // refuses it in a conditional exactly like a calculator key.
+        val transformKeys = pipeline.transformOutputKeys()
         val sampleContext =
-            ContextKeys.deploymentValues(orgContext) + ParameterBinder(pipeline.parameters, calculatorKeys).sampleContext()
+            ContextKeys.deploymentValues(orgContext) +
+                ParameterBinder(pipeline.parameters, calculatorKeys, transformKeys = transformKeys).sampleContext()
+        val guarded = calculatorKeys.keys + transformKeys
         pipeline.nodes.forEachIndexed { index, node ->
             if (node.type == NodeType.CALCULATOR) {
                 // 072 §4.10: a CALCULATOR node has no `source`, no `template` and no `output`, so
@@ -51,9 +57,16 @@ internal object ReferenceRules {
                 checkOutputDatasource(index, node, datasources, workspaceId, into)
                 return@forEachIndexed
             }
+            if (node.type == NodeType.TRANSFORM) {
+                // §12.13 (7c, #7): a TRANSFORM has no `source` (TransformRules refuses one) and
+                // its pin is a script, not SQL — no dialect to match, no dry render, no bind
+                // scan. What remains of §12.6 here is the reference itself and the pin's type.
+                checkTransformTemplate(index, node, templates, workspaceId, into)
+                return@forEachIndexed
+            }
             val sourceDialect = checkSource(index, node, datasources, workspaceId, pipeline, into)
             checkOutputDatasource(index, node, datasources, workspaceId, into)
-            checkTemplate(index, node, sourceDialect, templates, workspaceId, sampleContext, calculatorKeys.keys, into)
+            checkTemplate(index, node, sourceDialect, templates, workspaceId, sampleContext, guarded, into)
         }
     }
 
@@ -205,6 +218,56 @@ internal object ReferenceRules {
                 checkDialect(path, node, lookup.dialect, sourceDialect, into)
                 dryRender(path, node, templates, workspaceId, sampleContext, into)
                 checkInterpolatedParameters(path, node, templates, workspaceId, sampleContext, guarded, into)
+            }
+        }
+    }
+
+    /**
+     * §12.6's reference existence for a TRANSFORM pin plus §12.13's `transform_template_type`:
+     * the inverse of the SQL rule above — a TRANSFORM node may pin ONLY `jsonata`/`javascript`
+     * (the existing `template_type_mismatch` keeps refusing a transform pin on a SQL node).
+     */
+    private fun checkTransformTemplate(
+        index: Int,
+        node: Node,
+        templates: TemplateDryRenderer,
+        workspaceId: java.util.UUID,
+        into: FailureCollector,
+    ) {
+        val path = "nodes[$index].template"
+        when (val lookup = templates.lookup(workspaceId, node.template)) {
+            TemplateLookup.TemplateNotFound -> {
+                into.add(
+                    Validation.TEMPLATE_NOT_FOUND,
+                    path,
+                    "Template '${node.template.id.truncateForError()}' is not in the template registry.",
+                    mapOf("template" to node.template.id.truncateForError()),
+                )
+            }
+
+            TemplateLookup.VersionNotFound -> {
+                into.add(
+                    Validation.TEMPLATE_VERSION_NOT_FOUND,
+                    path,
+                    "Template '${node.template.id.truncateForError()}' has no version ${node.template.version}.",
+                    mapOf("template" to node.template.id.truncateForError(), "version" to node.template.version),
+                )
+            }
+
+            is TemplateLookup.Found -> {
+                if (!lookup.type.isTransform) {
+                    into.add(
+                        Validation.TRANSFORM_TEMPLATE_TYPE,
+                        path,
+                        "Template '${node.template.key.truncateForError()}' has type " +
+                            "'${lookup.type.wire}', but node '${node.id.truncateForError()}' is a TRANSFORM node " +
+                            "and may reference only 'jsonata' or 'javascript' templates.",
+                        mapOf(
+                            "template" to node.template.key.truncateForError(),
+                            "template_type" to lookup.type.wire,
+                        ),
+                    )
+                }
             }
         }
     }

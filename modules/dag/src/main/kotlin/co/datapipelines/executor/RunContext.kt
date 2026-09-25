@@ -111,15 +111,17 @@ class RunContext private constructor(
             // carry each node's key set, and a proper subset is refused here, BEFORE any node
             // runs, with the same rejected-bind shape as an ill-typed parameter.
             val calculatorOutputs = pipeline.calculatorOutputs(kinds)
+            val transformKeys = pipeline.transformOutputKeys()
             val bound =
-                ParameterBinder(pipeline.parameters, calculatorOutputs, pipeline.calculatorOutputGroups(kinds))
+                ParameterBinder(pipeline.parameters, calculatorOutputs, pipeline.calculatorOutputGroups(kinds), transformKeys)
                     .bindOrThrow(inputs)
                     .asMap()
             return RunContext(
                 org.values + ContextKeys.platformValues(executionId, startedAt, zone) + bound,
                 // A calculator key is in the bound map only when the caller supplied it (the
                 // binder drops explicit nulls), so the intersection IS the caller-supplied set.
-                callerSupplied = bound.keys.intersect(calculatorOutputs.keys),
+                // 7c: the value-mode TRANSFORM keys ride the same rule.
+                callerSupplied = bound.keys.intersect(calculatorOutputs.keys + transformKeys),
             )
         }
 

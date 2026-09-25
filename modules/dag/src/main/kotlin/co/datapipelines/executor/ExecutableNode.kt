@@ -44,9 +44,12 @@ data class ExecutableNode(
     val parameters: Map<String, JsonNode>?,
     /** CALCULATOR nodes only: the catalog kind (§4.10). */
     val kind: String? = null,
-    /** CALCULATOR nodes only: the kind's inputs — `$references` and literals, still as JSON (§4.10). */
+    /**
+     * CALCULATOR (the kind's inputs) and TRANSFORM (the contract's inputs) nodes: `$references`
+     * and literals, still as JSON (§4.10, §4.12).
+     */
     val inputs: Map<String, JsonNode>? = null,
-    /** CALCULATOR nodes only: the Context key this node writes (§4.10). */
+    /** CALCULATOR and value-mode TRANSFORM nodes: the Context key this node writes (§4.10, §4.12). */
     val contextKey: String? = null,
     /**
      * CALCULATOR nodes on a multi-output kind only (§4.10, 121): the Context key each of the
@@ -66,6 +69,8 @@ data class ExecutableNode(
      * application tiers. Resolved through [ExecutorConfig.queryTimeoutSecondsFor], never read raw.
      */
     val queryTimeoutSeconds: Int? = null,
+    /** TRANSFORM nodes only (§4.12): fail the node when the rejects table is non-empty. */
+    val strict: Boolean? = null,
 ) {
     /** True when this node's ResultSet is the pipeline's result (§4.1). */
     val isCallerNode: Boolean get() = output == NodeOutput.Caller
@@ -89,6 +94,7 @@ data class ExecutableNode(
                 contextKeys = node.contextKeys,
                 timeoutSeconds = node.settings?.timeoutSeconds,
                 queryTimeoutSeconds = node.settings?.queryTimeoutSeconds,
+                strict = node.strict,
             )
     }
 }

@@ -141,7 +141,7 @@ sealed interface TemplateTypeBehaviour {
         ): List<TemplateValidationFailure> =
             listOf(
                 TemplateValidationFailure(
-                    code = TransformCodes.JS_UNAVAILABLE,
+                    code = PipelineErrorCodes.Transform.JS_UNAVAILABLE,
                     message =
                         "A 'javascript' template cannot be saved yet: the GraalJS isolate engine ships in " +
                             "round two (transform-nodes design §4.4). Only 'jsonata' saves today.",

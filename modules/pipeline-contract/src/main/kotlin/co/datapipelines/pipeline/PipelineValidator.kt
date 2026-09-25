@@ -98,6 +98,9 @@ class PipelineValidator(
         SettingsRules.check(pipeline, nodeTimeoutMaxSeconds, nodeTimeoutSeconds, nodeQueryTimeoutMaxSeconds, collector)
         CompositionRules.check(pipeline, pipelines, maxCompositionDepth, workspaceId, orgContext, collector)
         CalculatorRules.check(pipeline, orgContext, templates, workspaceId, collector, calculatorKinds)
+        // §12.13 AFTER §12.10 (7c, #7): the transform rules read the writer map the calculator
+        // rules establish — a value-mode TRANSFORM's `context_key` is a writer of the same kind.
+        TransformRules.check(pipeline, orgContext, templates, workspaceId, collector, calculatorKinds)
         return collector.toResult()
     }
 

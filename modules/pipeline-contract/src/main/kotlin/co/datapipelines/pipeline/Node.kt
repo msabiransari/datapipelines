@@ -102,6 +102,18 @@ data class Node(
      */
     @field:JsonProperty("settings") @get:JsonProperty("settings") @param:JsonProperty("settings")
     val settings: NodeSettings? = null,
+    /**
+     * TRANSFORM nodes only (§4.12, transform-nodes design §3.1): fail the node when the
+     * rejects table is non-empty (`pipeline.transform.rejects_strict`). Default is partition —
+     * the rejects are written and the run continues.
+     *
+     * Nullable, with a null default, under the class's `NON_NULL` inclusion — exactly as
+     * [kind], [inputs] and [contextKey] are, and for the same reason: an existing pipeline's
+     * canonical JSON is byte-identical after this field exists, so no stored version's body
+     * hash moves and no release has to be re-signed (versioning §9.2).
+     */
+    @field:JsonProperty("strict") @get:JsonProperty("strict") @param:JsonProperty("strict")
+    val strict: Boolean? = null,
 ) {
     /** The resolved execution target (§4.8) — a registered datasource, or the tempdb literal. */
     @get:JsonIgnore
@@ -146,6 +158,7 @@ data class Node(
             @JsonProperty("context_key") contextKey: String?,
             @JsonProperty("context_keys") contextKeys: Map<String, String>?,
             @JsonProperty("settings") settings: NodeSettings?,
+            @JsonProperty("strict") strict: Boolean?,
         ): Node =
             Node(
                 id = id.orEmpty(),
@@ -172,6 +185,9 @@ data class Node(
                 // Absent stays absent for the same body-hash reason as the three above: a node
                 // that declared no settings must serialize back with no `settings` key at all.
                 settings = settings,
+                // Absent stays absent, same body-hash rule: a non-strict (or non-TRANSFORM) node
+                // serializes back with no `strict` key at all.
+                strict = strict,
             )
     }
 }

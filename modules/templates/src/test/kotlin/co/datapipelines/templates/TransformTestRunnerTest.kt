@@ -131,7 +131,7 @@ class TransformTestRunnerTest {
                         rows = listOf(mapOf("order_id" to "x")),
                         inputs = mapOf("tz" to "UTC", "min_total" to 0.00),
                     ),
-                expect = TransformTestExpect(refusal = TransformCodes.INPUT_CONTRACT_VIOLATION),
+                expect = TransformTestExpect(refusal = PipelineErrorCodes.Transform.INPUT_CONTRACT_VIOLATION),
             ),
         )
 
@@ -185,7 +185,7 @@ class TransformTestRunnerTest {
         val failures = validatorWith(runner()).validate(exampleDraft(tests = cases), workspaceId).failures
         failures.size shouldBe 1
         failures.single().code shouldBe PipelineErrorCodes.Template.TEST_FAILED
-        failures.single().message shouldContain TransformCodes.INPUT_CONTRACT_VIOLATION
+        failures.single().message shouldContain PipelineErrorCodes.Transform.INPUT_CONTRACT_VIOLATION
     }
 
     @Test

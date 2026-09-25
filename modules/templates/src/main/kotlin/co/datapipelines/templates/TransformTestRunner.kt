@@ -191,7 +191,7 @@ class TransformTestRunner(
                 }
         if (rows.size.toLong() > maxInputRows || tableCounts.values.any { it > maxInputRows }) {
             return RunOutcome.Refused(
-                TransformCodes.INPUT_TOO_LARGE,
+                PipelineErrorCodes.Transform.INPUT_TOO_LARGE,
                 "input exceeds max-input-rows ($maxInputRows): rows=${rows.size}, tables=$tableCounts",
             )
         }
@@ -311,7 +311,7 @@ class TransformTestRunner(
                     val verdict = gate.gateRow(row, index + 1)
                     if (verdict is GateResult.Refuse) {
                         return RunOutcome.Refused(
-                            TransformCodes.INPUT_CONTRACT_VIOLATION,
+                            PipelineErrorCodes.Transform.INPUT_CONTRACT_VIOLATION,
                             "row ${index + 1}: ${describe(verdict.refusal)}",
                         )
                     }
@@ -328,13 +328,13 @@ class TransformTestRunner(
                             val map =
                                 entry as? Map<String, Any?>
                                     ?: return RunOutcome.Refused(
-                                        TransformCodes.INPUT_CONTRACT_VIOLATION,
+                                        PipelineErrorCodes.Transform.INPUT_CONTRACT_VIOLATION,
                                         "input '$name' row ${index + 1}: not an object",
                                     )
                             val verdict = gate.gateRow(map, index + 1)
                             if (verdict is GateResult.Refuse) {
                                 return RunOutcome.Refused(
-                                    TransformCodes.INPUT_CONTRACT_VIOLATION,
+                                    PipelineErrorCodes.Transform.INPUT_CONTRACT_VIOLATION,
                                     "input '$name' row ${index + 1}: ${describe(verdict.refusal)}",
                                 )
                             }
@@ -347,7 +347,7 @@ class TransformTestRunner(
                     val verdict = TypeGate.over(listOf(column), maxStringBytes).gateValue(inputs[name], column)
                     if (verdict is GateResult.Refuse) {
                         return RunOutcome.Refused(
-                            TransformCodes.INPUT_CONTRACT_VIOLATION,
+                            PipelineErrorCodes.Transform.INPUT_CONTRACT_VIOLATION,
                             "input '$name': ${describe(verdict.refusal)}",
                         )
                     }
@@ -390,7 +390,7 @@ class TransformTestRunner(
         val (rawRows, rawRejects) =
             shapeRows(contract, evaluated)
                 ?: return RunOutcome.Refused(
-                    TransformCodes.ROW_SHAPE_MISMATCH,
+                    PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH,
                     "the function's return does not match the declared output shape",
                 )
 
@@ -399,7 +399,7 @@ class TransformTestRunner(
         rawRows.forEachIndexed { index, entry ->
             val map =
                 entry as? Map<String, Any?>
-                    ?: return RunOutcome.Refused(TransformCodes.ROW_SHAPE_MISMATCH, "row ${index + 1}: not an object")
+                    ?: return RunOutcome.Refused(PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH, "row ${index + 1}: not an object")
             when (val verdict = gate.gateRow(map, index + 1)) {
                 is GateResult.Refuse -> return refused(verdict.refusal)
                 is GateResult.Pass -> rowsOut += verdict.value as Map<String, Any?>
@@ -463,18 +463,18 @@ class TransformTestRunner(
         rawRejects.forEachIndexed { index, entry ->
             val map =
                 entry as? Map<String, Any?>
-                    ?: return RunOutcome.Refused(TransformCodes.ROW_SHAPE_MISMATCH, "reject ${index + 1}: not an object")
+                    ?: return RunOutcome.Refused(PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH, "reject ${index + 1}: not an object")
             val reason = map["reason"] as? String
             if (reason.isNullOrBlank()) {
                 return RunOutcome.Refused(
-                    TransformCodes.VALUE_TYPE_MISMATCH,
+                    PipelineErrorCodes.Transform.VALUE_TYPE_MISMATCH,
                     "reject ${index + 1}: 'reason' must be a non-empty string",
                 )
             }
             val row =
                 map["row"] as? Map<String, Any?>
                     ?: return RunOutcome.Refused(
-                        TransformCodes.ROW_SHAPE_MISMATCH,
+                        PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH,
                         "reject ${index + 1}: 'row' is not an object",
                     )
             val verdict = rejectGate.gateRow(row, index + 1)
@@ -509,7 +509,7 @@ class TransformTestRunner(
                 .size
                 .toLong()
         if (bytes > maxValueBytes) {
-            return RunOutcome.Refused(TransformCodes.VALUE_TOO_LARGE, "value output is $bytes bytes (cap $maxValueBytes)")
+            return RunOutcome.Refused(PipelineErrorCodes.Transform.VALUE_TOO_LARGE, "value output is $bytes bytes (cap $maxValueBytes)")
         }
         return Gated(gated, emptyList())
     }
@@ -636,10 +636,10 @@ class TransformTestRunner(
 
     private fun codeOf(refusal: GateRefusal): String =
         when (refusal) {
-            is GateRefusal.RowShapeMismatch -> TransformCodes.ROW_SHAPE_MISMATCH
-            is GateRefusal.ValueTypeMismatch -> TransformCodes.VALUE_TYPE_MISMATCH
-            is GateRefusal.PrecisionLost -> TransformCodes.PRECISION_LOST
-            is GateRefusal.ValueTooLarge -> TransformCodes.VALUE_TOO_LARGE
+            is GateRefusal.RowShapeMismatch -> PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH
+            is GateRefusal.ValueTypeMismatch -> PipelineErrorCodes.Transform.VALUE_TYPE_MISMATCH
+            is GateRefusal.PrecisionLost -> PipelineErrorCodes.Transform.PRECISION_LOST
+            is GateRefusal.ValueTooLarge -> PipelineErrorCodes.Transform.VALUE_TOO_LARGE
         }
 
     private fun describe(refusal: GateRefusal): String =

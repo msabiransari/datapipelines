@@ -233,8 +233,13 @@ class ApiErrorCatalogSpecDriftTest {
          * `auth.permission.undeclared` (403 — a route or tool that declares no permission), landed
          * in the SAME commit as the constants (both mirrors) and the exception class. Re-derived
          * from the document's own parse.
+         *
+         * 188 → 202 with 7c (#7, the TRANSFORM node): the new §13.18's fourteen rows (the
+         * `pipeline.transform.*` execution-time family plus `transform.js.unavailable`), landed in
+         * the SAME commit as the constants, the catalog rows (500 family default, 503/504
+         * exceptions) and the AuthErrors anchor. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 188
+        const val SECTION_13_ROW_COUNT = 202
 
         /**
          * §12's distinct validation codes.
@@ -270,7 +275,11 @@ class ApiErrorCatalogSpecDriftTest {
          * 67 → 69 with 156 (#2): `pipeline.validation.pipeline_query_timeout_invalid` and
          * `pipeline.validation.node_query_timeout_invalid` (§12.8) — both resolve through the
          * `pipeline.validation.` family default (400), no `ApiErrorCatalog` entry needed.
+         *
+         * 69 → 79 with 7c (#7, the TRANSFORM node): §12.13's ten rules
+         * (`pipeline.validation.transform_*`), landed in the SAME commit as their constants. All
+         * 400 like the family default; re-derived from the document's own parse.
          */
-        const val SECTION_12_CODE_COUNT = 69
+        const val SECTION_12_CODE_COUNT = 79
     }
 }

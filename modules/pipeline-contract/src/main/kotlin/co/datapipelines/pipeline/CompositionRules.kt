@@ -230,7 +230,10 @@ internal object CompositionRules {
         into: FailureCollector,
     ) {
         val supplied = node.parameters.orEmpty()
-        val childCalculatorKeys = child.calculatorOutputs()
+        // 7c (#7): a value-mode TRANSFORM's `context_key` is an implicit optional input on the
+        // same rule as a calculator key — suppliable here, typed by the pinned contract the
+        // body does not carry, so null (ANY) in this map exactly like an ANY-output kind.
+        val childCalculatorKeys = child.calculatorOutputs() + child.transformOutputKeys().associateWith { null }
         child.parameters
             .filterValues { it.required && !it.hasDefault }
             .keys
@@ -355,7 +358,15 @@ internal object CompositionRules {
         val path = "nodes[$index].parameters.${key.truncateForError()}"
         if (reference != null) {
             val parentName = reference.groupValues[1]
-            val tier = ParentTier.resolve(parentName, pipeline, pipeline.calculatorOutputs(), org)
+            // 7c (#7): the parent's value-mode TRANSFORM keys resolve as a tier too, untyped
+            // (ANY) like an ANY-output calculator key — the contract types them, not the body.
+            val tier =
+                ParentTier.resolve(
+                    parentName,
+                    pipeline,
+                    pipeline.calculatorOutputs() + pipeline.transformOutputKeys().associateWith { null },
+                    org,
+                )
             if (mismatched(tier, target)) {
                 into.add(
                     Validation.PIPELINE_PARAMETER_TYPE_MISMATCH,

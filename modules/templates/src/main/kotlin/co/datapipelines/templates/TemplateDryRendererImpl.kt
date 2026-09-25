@@ -75,4 +75,59 @@ class TemplateDryRendererImpl(
         val version = engines.registryFor(workspaceId).lookup(ref.id, ref.version) ?: return emptyList()
         return SqlBindScanner.scan(version.body)
     }
+
+    override fun transformContract(
+        workspaceId: java.util.UUID,
+        ref: TemplateRef,
+    ): co.datapipelines.pipeline.TransformContractView? {
+        val version = engines.registryFor(workspaceId).lookup(ref.id, ref.version) ?: return null
+        if (!version.type.isTransform) return null
+        return TransformBlocks.readContract(version.contractJson)?.let(::viewOf)
+    }
 }
+
+/** The one mapping from 7b's contract model to pipeline-contract's §12.13 view — see the view's KDoc. */
+private fun viewOf(contract: TransformContract): co.datapipelines.pipeline.TransformContractView =
+    co.datapipelines.pipeline.TransformContractView(
+        mode =
+            when (contract.mode) {
+                TransformMode.ROW -> co.datapipelines.pipeline.TransformContractView.Mode.ROW
+                TransformMode.TABLE -> co.datapipelines.pipeline.TransformContractView.Mode.TABLE
+                TransformMode.VALUE -> co.datapipelines.pipeline.TransformContractView.Mode.VALUE
+            },
+        inputs =
+            contract.inputs.mapValues { (_, input) ->
+                when (input) {
+                    is TransformInput.Table -> {
+                        co.datapipelines.pipeline.TransformContractView.Input
+                            .Table(input.columns.map(::viewColumn))
+                    }
+
+                    is TransformInput.Value -> {
+                        co.datapipelines.pipeline.TransformContractView.Input
+                            .Value(input.type)
+                    }
+                }
+            },
+        output =
+            when (val output = contract.output) {
+                is TransformOutput.Table -> {
+                    co.datapipelines.pipeline.TransformContractView.Output
+                        .Table(output.columns.map(::viewColumn))
+                }
+
+                is TransformOutput.Value -> {
+                    co.datapipelines.pipeline.TransformContractView.Output
+                        .Value(output.type)
+                }
+
+                is TransformOutput.Obj -> {
+                    co.datapipelines.pipeline.TransformContractView.Output.Obj
+                }
+            },
+        rejects = contract.rejects,
+    )
+
+private fun viewColumn(column: ContractColumn): co.datapipelines.pipeline.TransformContractView.Column =
+    co.datapipelines.pipeline.TransformContractView
+        .Column(column.name, column.type, column.nullable)

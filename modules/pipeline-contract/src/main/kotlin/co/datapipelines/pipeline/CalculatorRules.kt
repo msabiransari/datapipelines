@@ -52,10 +52,13 @@ internal object CalculatorRules {
         into: FailureCollector,
         kinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
     ) {
-        val writers = pipeline.nodes.filter { it.type == NodeType.CALCULATOR }
         // FIRST writer wins the key, so a duplicate is reported once — on the node that came
         // second — and names the one that already owns it. Keeping the last writer instead would
         // report the collision on the FIRST node and name the second, which reads backwards.
+        // 7c: the map includes value-mode TRANSFORM writers, so a calculator (or a SQL node)
+        // binding a transform-written key resolves and orders it exactly like a calculator
+        // key; a transform's own collisions stay §12.13's to report (TransformRules).
+        val writers = pipeline.nodes.filter { it.type == NodeType.CALCULATOR || it.type == NodeType.TRANSFORM }
         val keyToWriter =
             writers
                 .flatMap { node -> writtenKeys(node).map { it to node.id } }
@@ -65,13 +68,47 @@ internal object CalculatorRules {
         val deploymentKeys = orgContext.keys + ContextKeys.PLATFORM
 
         pipeline.nodes.forEachIndexed { index, node ->
-            if (node.type == NodeType.CALCULATOR) {
-                checkCalculatorNode(index, node, pipeline, deploymentKeys, keyToWriter, ancestors, kinds, into)
-            } else {
-                checkForeignFields(index, node, into)
-                checkSqlBindOrdering(index, node, templates, workspaceId, keyToWriter, ancestors, into)
+            when (node.type) {
+                NodeType.CALCULATOR -> {
+                    checkCalculatorNode(index, node, pipeline, deploymentKeys, keyToWriter, ancestors, kinds, into)
+                }
+
+                NodeType.TRANSFORM -> {
+                    // §12.13's exemption (record §3.1): a TRANSFORM legally carries `inputs` and
+                    // `context_key` — TransformRules validates them against the pinned contract —
+                    // while `kind` and `context_keys` stay refused on it. The SQL-bind ordering
+                    // scan does not run either: a transform body is a script, not SQL, so there
+                    // are no `:bind`s to order (TransformRules scans the SQL nodes instead).
+                    checkTransformForeignFields(index, node, into)
+                }
+
+                else -> {
+                    checkForeignFields(index, node, into)
+                    checkSqlBindOrdering(index, node, templates, workspaceId, keyToWriter, ancestors, into)
+                }
             }
         }
+    }
+
+    /** The §12.13 exemption's refusal half: `kind` and `context_keys` on a TRANSFORM. */
+    private fun checkTransformForeignFields(
+        index: Int,
+        node: Node,
+        into: FailureCollector,
+    ) {
+        val present =
+            buildList {
+                if (node.kind != null) add("kind")
+                if (node.contextKeys != null) add("context_keys")
+            }
+        if (present.isEmpty()) return
+        into.add(
+            Validation.CALCULATOR_FIELDS_ON_NON_CALCULATOR,
+            "nodes[$index]",
+            "TRANSFORM node '${node.id.truncateForError()}' declares ${present.joinToString()}, " +
+                "which only a CALCULATOR node carries (a TRANSFORM carries inputs and context_key instead).",
+            mapOf("node" to node.id.truncateForError(), "fields" to present),
+        )
     }
 
     /**

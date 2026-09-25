@@ -9,9 +9,11 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 - `type` — `DQL` (SELECT → rows), `DML` (INSERT/UPDATE/DELETE/MERGE → row count),
   `DDL` (CREATE/ALTER/DROP → success/failure), `PIPELINE` (run a pinned child
   pipeline `{"name": "...", "version": N}` as a sub-execution — declares `pipeline`
-  plus optional parameter bindings instead of `source`/`template`), or `CALCULATOR`
+  plus optional parameter bindings instead of `source`/`template`), `CALCULATOR`
   (compute one typed value — or, on a multi-output kind, a named set of them — into
-  the Context — see `references/templates.md`)
+  the Context — see `references/templates.md`), or `TRANSFORM` (evaluate a pinned
+  `jsonata` template as a pure function over staged data — `inputs`, `output`,
+  `strict`, never `source`; see `references/transforms.md`)
 - `source` — a registered datasource name, or the reserved literal `"tempdb"` for the
   per-execution in-memory H2
 - `template` — `{"id": "...sql", "version": N}` (immutable pin)
