@@ -7,6 +7,7 @@ import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.nio.file.Paths
 
 /**
  * 079 §A/§B/§F — the shell, in a real browser.
@@ -288,6 +289,163 @@ class AppShellBrowserTest : BrowserSuite() {
             page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
             overflow(page) shouldBe 0L
         }
+    }
+
+    /**
+     * #237 — the content column is the window's, not the top bar's. The shell's second track was
+     * a bare `1fr`, which is `minmax(auto, 1fr)`: the column could not be narrower than the top
+     * bar's min-content (crumbs, search, mode toggle, MCP-key chip, avatar). At 1100 that was
+     * 911px in an 868px column on every screen whose crumb has a group ("Build / Templates"), and
+     * `<main>` — the same column — ran 43px past the window (29px on the pipelines screens),
+     * clipped by the shell. Only the dashboard, with the shortest crumb, fit (measured on
+     * a3e79706). The sideways test above cannot see this: the shell clips, so neither the
+     * document nor `<main>` ever reports a scroll width; the fact is `<main>`'s right EDGE.
+     *
+     * Asserted at the three desktop widths on every screen and both editors: `<main>` and the bar
+     * end inside the window, the bar's visible controls end inside the bar without overlapping
+     * each other (a bar that fits by stacking its search on its chip is not a fix), and the
+     * crumb's page name is whole (nor is one that fits by cutting "Templates" to "Te…", which
+     * the first cut of the fix did: the search held its width and the crumb took the squeeze).
+     * Then the track on its own terms ([widenedBarOffenders]): it must hold against a bar wider
+     * than the window, so the guard outlives the MCP-key chip that makes today's bar too wide.
+     * The dashboard, the sql template editor and the pipeline editor are photographed light and
+     * dark at each width; the transform editor is TransformFaceBrowserTest's, which asserts the
+     * same edge.
+     */
+    @Test
+    fun `main and the top bar end inside the window at 1100, 1440 and 1920 - every screen and both editors`() {
+        startTrace()
+        signedIn("edge")
+        val fixture = "edge_" + generatedPassword("f").take(8).lowercase()
+        postJson(
+            "/api/v1/templates",
+            """{"id":"test/$fixture","type":"sql","dialect":"POSTGRES",""" +
+                """"display_name":"$fixture","description":"#237 fixture","body":"SELECT 1"}""",
+        )
+        postJson(
+            "/api/v1/pipelines",
+            """{"name":"test/$fixture","display_name":"$fixture","description":"#237 fixture",""" +
+                """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
+                """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
+        )
+        val photographed =
+            mapOf(
+                "dashboard" to "/dashboard",
+                "template-editor-sql" to "/templates/editor?name=test/$fixture",
+                "pipeline-editor" to "/pipelines/${pipelineId("test/$fixture")}/editor",
+            )
+        val routes = appPages + photographed.values.drop(1)
+
+        val offenders = mutableListOf<String>()
+        page.navigate("$baseUrl/dashboard")
+        listOf("light", "dark").forEach { theme ->
+            ensureTheme(theme)
+            // Every route in the first theme; the photographed three again in the second.
+            val walked = if (theme == "light") routes else photographed.values.toList()
+            DESKTOP_WIDTHS.forEach { width -> offenders += edgeWalk(walked, width, theme, photographed) }
+        }
+        offenders += widenedBarOffenders()
+        offenders shouldBe emptyList()
+    }
+
+    /**
+     * The track itself, whatever the bar holds today. The walk above goes red only while some
+     * screen's bar is wider than its column, and the MCP-key chip — 344px of the 911 — is most
+     * of why one is at 1100 now; 233c (keys v2) removes it, after which reverting the track to a
+     * bare `1fr` would leave the whole walk green. So an unshrinkable control wider than the
+     * window is appended to the bar on the dashboard at 1100 (the one screen the base already
+     * fit): the column must stay the window's, `<main>` ending inside it. The control overflows
+     * the BAR — that is not the question; only `<main>`'s edge is. Set through the CSSOM, not a
+     * style attribute, so the CSP has nothing to refuse.
+     */
+    private fun widenedBarOffenders(): List<String> {
+        val width = DESKTOP_WIDTHS.first()
+        page.setViewportSize(width, 900)
+        page.navigate("$baseUrl/dashboard")
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        val mainRight =
+            (
+                page.evaluate(
+                    """
+                    () => {
+                      const wide = document.createElement('div');
+                      wide.style.flex = 'none';
+                      wide.style.width = '2000px';
+                      document.querySelector('header.app-topbar').append(wide);
+                      return document.getElementById('app-main').getBoundingClientRect().right;
+                    }
+                    """.trimIndent(),
+                ) as Number
+            ).toDouble()
+        println("#237 /dashboard at $width, a 2000px control appended to the bar: main ..$mainRight")
+        return if (mainRight > width + 0.5) listOf("a 2000px control in the top bar pushed main to $mainRight at $width") else emptyList()
+    }
+
+    /** [routes] at [width]: each one's [edgeOffenders], and a shot of the ones in [photographed] (name → route). */
+    private fun edgeWalk(
+        routes: List<String>,
+        width: Int,
+        theme: String,
+        photographed: Map<String, String>,
+    ): List<String> {
+        page.setViewportSize(width, 900)
+        return routes.flatMap { route ->
+            page.navigate("$baseUrl$route")
+            page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+            photographed.entries.firstOrNull { it.value == route }?.let { shot("${it.key}-$width-$theme") }
+            edgeOffenders("$route at $width ($theme)")
+        }
+    }
+
+    /**
+     * What ends past where it must, on the page as it stands: `<main>` and the bar past the
+     * window, a bar control past the bar's content edge, a control past the next one's left edge.
+     * Named with both edges — "main 1143 > 1100" is the report the issue itself was.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun edgeOffenders(where: String): List<String> =
+        (
+            page.evaluate(
+                """
+                () => {
+                  const out = [], edges = [], w = window.innerWidth, slack = 0.5;
+                  const name = e => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '')
+                    + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\s+/)[0] : '');
+                  const main = document.getElementById('app-main').getBoundingClientRect();
+                  if (main.right > w + slack) out.push('main ends at ' + Math.round(main.right) + ' > window ' + w);
+                  const bar = document.querySelector('header.app-topbar');
+                  const b = bar.getBoundingClientRect();
+                  if (b.right > w + slack) out.push('the top bar ends at ' + Math.round(b.right) + ' > window ' + w);
+                  const inner = b.right - parseFloat(getComputedStyle(bar).paddingRight);
+                  const leaf = bar.querySelector('.app-crumb-page');
+                  if (leaf.scrollWidth > leaf.clientWidth + 1) // +1: both are rounded; a cut name is far more
+                    out.push('the crumb "' + leaf.textContent.trim() + '" is cut to ' + leaf.clientWidth + ' of its ' + leaf.scrollWidth + 'px');
+                  const kids = [...bar.children].filter(k => k.getBoundingClientRect().width > 0);
+                  kids.forEach((k, i) => {
+                    const r = k.getBoundingClientRect(), right = Math.round(r.right);
+                    edges.push(name(k) + ' ' + Math.round(r.left) + '..' + right);
+                    if (r.right > inner + slack) out.push(name(k) + ' ends at ' + right + ' past the bar\'s ' + Math.round(inner));
+                    const next = kids[i + 1], nextLeft = next ? next.getBoundingClientRect().left : Infinity;
+                    if (r.right > nextLeft + slack) out.push(name(k) + ' (..' + right + ') overlaps ' + name(next) + ' (' + Math.round(nextLeft) + '..)');
+                  });
+                  return { out, edges: 'main ..' + Math.round(main.right) + ', bar ..' + Math.round(b.right) + ' | ' + edges.join(', ') };
+                }
+                """.trimIndent(),
+            ) as Map<String, Any?>
+        ).let { measured ->
+            // The measured edges, pass or fail: the handback's before/after table (SiteRhythm's precedent).
+            println("#237 $where: ${measured["edges"]}")
+            (measured["out"] as List<String>).map { "$where: $it" }
+        }
+
+    /** A viewport shot (the shell is the viewport — the document never scrolls) under build/reports/240-screenshots. */
+    private fun shot(name: String) {
+        // Any visible toast is dismissed through its own × first (the 7d/7e shot convention), so
+        // the picture shows the screen and not the theme switch that preceded it.
+        page.locator("#toast .ds-toast-close").all().forEach { close -> if (close.isVisible) close.click() }
+        page.waitForFunction("() => document.querySelectorAll('#toast .ds-toast').length === 0")
+        val dir = Paths.get("build", "reports", "240-screenshots").also { it.toFile().mkdirs() }
+        page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("240-$name.png")))
     }
 
     @Test
@@ -676,5 +834,10 @@ class AppShellBrowserTest : BrowserSuite() {
             }""",
             count,
         ) as List<String>
+    }
+
+    private companion object {
+        /** The explorer's desktop widths (#237's acceptance): the stacked breakpoint and two desktops. */
+        val DESKTOP_WIDTHS = listOf(1100, 1440, 1920)
     }
 }

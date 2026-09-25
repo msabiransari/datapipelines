@@ -621,9 +621,17 @@ button.app-busy::after {
   --app-rail-collapsed: 60px;
 }
 
+/* #237: the content track is minmax(0, 1fr), never a bare 1fr — the phone band's rule below,
+   for the same reason. A bare 1fr is minmax(auto, 1fr), so the column could not be narrower
+   than its widest item's min-content; <main> opts out (min-width: 0) but the top bar did not,
+   and its crumbs + search + chip + avatar sized the column 43px past an 1100 window on every
+   screen whose crumb has a group — <main> with it, clipped by the shell. The zero minimum is
+   the column's, so it holds the bar and anything later placed beside it; the bar's controls
+   then share its width (from 1100 up the search yields first — the #237 rule at the top
+   bar's breakpoint; below 1100 the crumb truncates, 110 §A). */
 .app-shell {
   display: grid;
-  grid-template-columns: var(--app-rail-width) 1fr;
+  grid-template-columns: var(--app-rail-width) minmax(0, 1fr);
   grid-template-rows: var(--header-height) minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
@@ -1171,6 +1179,21 @@ button.app-busy::after {
   .app-crumbs .app-crumb-group,
   .app-crumbs .app-crumb-sep {
     display: none;
+  }
+}
+
+/* #237 — the other side of that rule. From 1100 up the whole crumb shows (group / page) and,
+   when the bar is short of width, the SEARCH yields it: the page's name is what the bar is
+   read for, and a search box can lose part of its placeholder. Without this the search held
+   its full width (its content-based minimum is its width) and the crumb took the whole
+   squeeze — "Build / Te…" at 1100 while the MCP-key chip is in the bar. */
+@media (min-width: 1100px) {
+  .app-crumbs {
+    flex-shrink: 0;
+  }
+
+  .app-topbar .app-search {
+    min-width: 0;
   }
 }
 
