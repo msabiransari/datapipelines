@@ -1065,7 +1065,7 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
    that cites a retired learned fact, one row above the confirm. A WARNING, never a refusal —
    nothing here touches the submit. The badge is the design system's warning badge. */
 .plc-needs-review-pins {
-  margin: 0 0 var(--gap-xs, 4px);
+  margin: 0 0 var(--gap-xs);
   padding-left: 0;
   list-style: none;
 }
@@ -1074,5 +1074,5 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--gap-xs, 4px);
+  gap: var(--gap-xs);
 }
