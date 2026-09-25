@@ -138,7 +138,7 @@ class McpArguments(
 
         fun invalidParams(message: String): McpError = McpError.builder(INVALID_PARAMS).message("Invalid params: $message").build()
 
-        /** A scope refusal for a method that cannot answer with a tool result (§7.3 listing, reads). */
+        /** An authorization refusal for a method that cannot answer with a tool result (§7.3 listing, reads). */
         fun forbidden(message: String): McpError = McpError.builder(FORBIDDEN).message(message).build()
     }
 }

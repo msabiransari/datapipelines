@@ -114,7 +114,7 @@ class LearnedSemanticsE2eTest {
         return factId
     }
 
-    /** 2 — the fact and its evidence cross to globex; the pipeline link does not; a viewer cannot record. */
+    /** 2 — the fact and its evidence cross to globex; the pipeline link does not; a promoter-role key cannot record. */
     private fun readFromTheOtherWorkspace(factId: String) {
         val globexColumns = mcp(BOB_KEY.plaintext, "datasources_get_columns", mapOf("name" to DATASOURCE, "table" to "readings"))
         val seenByGlobex = globexColumns.first { it["name"].asText() == "value_c" }["facts"][0]
@@ -137,21 +137,22 @@ class LearnedSemanticsE2eTest {
                 .asString()
         mapper.readTree(restColumns)["data"].first { it["name"].asText() == "value_c" }["facts"][0]["id"].asText() shouldBe factId
 
-        // A viewer's key is refused the record by the real matrix — the member's ROLE does not
-        // hold `semantic.record` (#215: no scopes; a key's refusal names the role) — nothing written.
+        // A promoter-role key is refused the record by the real matrix — the KEY's OWN ROLE does
+        // not hold `semantic.record` (keys v2 A13/A14; a viewer is never a key role, A15, so the
+        // pre-v2 viewer-key arm is a promoter-role key) — nothing written.
         val refused =
             mcpRaw(
-                VIEWER_KEY.plaintext,
+                PROMOTER_KEY.plaintext,
                 "semantics_record",
                 mapOf(
                     "scope" to "DATASOURCE",
                     "datasource" to DATASOURCE,
                     "kind" to "caveat",
-                    "fact" to "a viewer should not be able to write this",
+                    "fact" to "a promoter-role key should not be able to write this",
                     "refs" to listOf(mapOf("table" to "readings")),
                 ),
             )
-        refused shouldContain "auth.key_issuer_role_lost"
+        refused shouldContain "auth.role_required"
     }
 
     /** 3 — the audit row the §9 acceptance counts: kind and id, never the fact text. */
@@ -401,6 +402,7 @@ class LearnedSemanticsE2eTest {
         }
     }
 
+    @Suppress("LongMethod") // the seed IS the fixture: identities, memberships, pipelines in one spelled-out block
     private fun seedAuthRows() {
         metadata { st ->
             st.execute(
@@ -421,7 +423,7 @@ class LearnedSemanticsE2eTest {
                 INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
                     ('$WS_ACME', '$ALICE', 'workspace_admin'),
                     ('$WS_GLOBEX', '$BOB', 'author'),
-                    ('$WS_GLOBEX', '$VERA', 'viewer')
+                    ('$WS_GLOBEX', '$VERA', 'promoter')
                 """.trimIndent(),
             )
             st.execute(
@@ -439,20 +441,46 @@ class LearnedSemanticsE2eTest {
             )
         }
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            // Keys v2 (A13): each key acts as its own `service` identity and holds the role chosen
+            // for it (the creator's own role here — the subset rule allows it).
+            connection.createStatement().use { st ->
+                for ((key, identity) in listOf(
+                    ALICE_KEY to ALICE_KEY_IDENTITY,
+                    BOB_KEY to BOB_KEY_IDENTITY,
+                    PROMOTER_KEY to VERA_KEY_IDENTITY,
+                )) {
+                    st.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject," +
+                            " is_active, is_admin, kind) VALUES " +
+                            "('$identity', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}'," +
+                            " TRUE, FALSE, 'service')",
+                    )
+                }
+            }
             connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                .use { ps ->
-                    for ((key, owner, workspace) in listOf(
-                        Triple(ALICE_KEY, ALICE, WS_ACME),
-                        Triple(BOB_KEY, BOB, WS_GLOBEX),
-                        Triple(VIEWER_KEY, VERA, WS_GLOBEX),
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, 'mcp', ?)",
+                ).use { ps ->
+                    data class KeySeed(
+                        val key: E2eAuth.SeededKey,
+                        val identity: String,
+                        val owner: String,
+                        val workspace: String,
+                        val role: String,
+                    )
+                    for (seed in listOf(
+                        KeySeed(ALICE_KEY, ALICE_KEY_IDENTITY, ALICE, WS_ACME, "workspace_admin"),
+                        KeySeed(BOB_KEY, BOB_KEY_IDENTITY, BOB, WS_GLOBEX, "author"),
+                        KeySeed(PROMOTER_KEY, VERA_KEY_IDENTITY, VERA, WS_GLOBEX, "promoter"),
                     )) {
-                        ps.setString(1, key.id)
-                        ps.setObject(2, UUID.fromString(owner))
-                        ps.setObject(3, UUID.fromString(owner))
-                        ps.setString(4, key.name)
-                        ps.setString(5, key.hash)
-                        ps.setObject(6, UUID.fromString(workspace))
+                        ps.setString(1, seed.key.id)
+                        ps.setObject(2, UUID.fromString(seed.identity))
+                        ps.setObject(3, UUID.fromString(seed.owner))
+                        ps.setString(4, seed.key.name)
+                        ps.setString(5, seed.key.hash)
+                        ps.setObject(6, UUID.fromString(seed.workspace))
+                        ps.setString(7, seed.role)
                         ps.addBatch()
                     }
                     ps.executeBatch()
@@ -503,7 +531,12 @@ class LearnedSemanticsE2eTest {
 
         private val ALICE_KEY = E2eAuth.generateKey("sem-alice-key")
         private val BOB_KEY = E2eAuth.generateKey("sem-bob-key")
-        private val VIEWER_KEY = E2eAuth.generateKey("sem-vera-key")
+        private val PROMOTER_KEY = E2eAuth.generateKey("sem-vera-key")
+
+        /** The keys' own `service` identities (keys v2 A13). */
+        private const val ALICE_KEY_IDENTITY = "5e5a0000-0000-0000-0000-0000000000e5"
+        private const val BOB_KEY_IDENTITY = "5e5a0000-0000-0000-0000-0000000000f6"
+        private const val VERA_KEY_IDENTITY = "5e5a0000-0000-0000-0000-000000000100"
 
         private val random = SecureRandom()
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })

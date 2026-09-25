@@ -35,9 +35,9 @@ import java.util.concurrent.ThreadLocalRandom
  * `auth.api_key.invalid`.
  *
  * ## The MCP key is MCP-only (#215 B2, owner ruling 2026-09-24)
- * A valid `user`-kind key presented anywhere but `/mcp` is REFUSED here, before any permission
+ * A valid `mcp`-kind key presented anywhere but `/mcp` is REFUSED here, before any permission
  * is asked — the mirror image of `McpAuthFilter`, which refuses the other two kinds ON `/mcp`: the
- * same catalogued `endpoint.key_kind_refused` (403), `details.reason = user_key_off_surface`, and
+ * same catalogued `endpoint.key_kind_refused` (403), `details.reason = mcp_key_off_surface`, and
  * the chain stops. An agent's key therefore reaches no REST route and no page; the web UI's own
  * calls carry the session and never meet this branch. `ScopeInterceptor`'s kind table says the
  * same for every MVC route, as the second line.
@@ -59,7 +59,7 @@ class ApiKeyFilter(
         val credential = ApiKeyCredential.extract(request)
         if (credential != null && SecurityContextHolder.getContext().authentication == null) {
             val principal = authenticate(credential, request)
-            if (principal != null && principal.keyKind == ApiKeyKind.USER && !onMcp(request)) {
+            if (principal != null && principal.keyKind == ApiKeyKind.MCP && !onMcp(request)) {
                 refuseOffSurface(request, response, principal)
                 return
             }
@@ -68,10 +68,10 @@ class ApiKeyFilter(
     }
 
     /** `/mcp` — the MCP key's whole surface (B2). */
-    private fun onMcp(request: HttpServletRequest): Boolean = ScopeInterceptor.reachableBy(ApiKeyKind.USER, request.appPath())
+    private fun onMcp(request: HttpServletRequest): Boolean = ScopeInterceptor.reachableBy(ApiKeyKind.MCP, request.appPath())
 
     /**
-     * B2's refusal: 403 `endpoint.key_kind_refused`, reason `user_key_off_surface`, audited as
+     * B2's refusal: 403 `endpoint.key_kind_refused`, reason `mcp_key_off_surface`, audited as
      * every kind refusal is (`auth.scope.denied`, the §10.1 event's historical name). The chain
      * stops — no later filter or handler may answer a request this credential is not allowed to
      * make at all.
@@ -82,7 +82,7 @@ class ApiKeyFilter(
         principal: AuthenticatedPrincipal,
     ) {
         SecurityContextHolder.clearContext()
-        val reason = ScopeInterceptor.OFF_SURFACE_REASON.getValue(ApiKeyKind.USER)
+        val reason = ScopeInterceptor.OFF_SURFACE_REASON.getValue(ApiKeyKind.MCP)
         auditLogger.log(
             event = "auth.scope.denied",
             userId = principal.userId,
@@ -95,7 +95,7 @@ class ApiKeyFilter(
             response = response,
             status = HTTP_FORBIDDEN,
             code = ScopeInterceptor.ENDPOINT_KEY_KIND_REFUSED,
-            message = ScopeInterceptor.OFF_SURFACE_MESSAGE.getValue(ApiKeyKind.USER),
+            message = ScopeInterceptor.OFF_SURFACE_MESSAGE.getValue(ApiKeyKind.MCP),
             userMessage = "This kind of API key can't be used here.",
             details = mapOf("reason" to reason),
         )

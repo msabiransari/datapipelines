@@ -509,9 +509,12 @@ class WorkspaceServiceTest {
     }
 
     @Test
-    fun `no role mints an MCP key on request - the login hook does (D16)`() {
-        shouldThrow<KeyKindNotMintableException> {
-            service().requireIssuancePermission(issuer(null, superAdmin = true), wsA.id, ApiKeyKind.USER)
+    fun `mcp issuance is mcp_key-create's floor - held above viewer, refused for a viewer (keys v2 A14)`() {
+        // An author (and every role above author) passes the floor; a viewer is refused.
+        service().requireIssuancePermission(issuer(WorkspaceRole.AUTHOR), wsA.id, ApiKeyKind.MCP)
+        service().requireIssuancePermission(issuer(WorkspaceRole.PROMOTER), wsA.id, ApiKeyKind.MCP)
+        shouldThrow<RoleRequiredException> {
+            service().requireIssuancePermission(issuer(WorkspaceRole.VIEWER), wsA.id, ApiKeyKind.MCP)
         }
     }
 

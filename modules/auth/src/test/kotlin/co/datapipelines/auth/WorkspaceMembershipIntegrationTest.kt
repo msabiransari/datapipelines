@@ -153,34 +153,44 @@ class WorkspaceMembershipIntegrationTest {
         workspaces.adminCount(ws.id) shouldBe 1
     }
 
-    /** Alice's login-minted key, as V31 holds it: one live `user` row pinned to `acme`. */
-    private fun mintedKey(workspaceId: java.util.UUID): ApiKey =
+    /** A key ALICE created (keys v2 A15 — no login mint): a live `mcp` row pinned to the workspace. */
+    private fun createdKey(
+        workspaceId: java.util.UUID,
+        name: String = "mcp/acme",
+    ): ApiKey =
         apiKeys.insert(
             id = "dpk_MEMBERKEY01",
             userId = alice.id,
             createdBy = alice.id,
-            name = "mcp/acme",
+            name = name,
             keyHash = "\$argon2id\$fixture",
+            role = KeyRole.AUTHOR,
             expiresAt = null,
             workspaceId = workspaceId,
-            kind = ApiKeyKind.USER,
+            kind = ApiKeyKind.MCP,
         )
 
+    /** The creator's live created keys, straight from the table (A17's predicate, read back). */
+    private fun liveCreatedKeys(
+        creatorId: java.util.UUID,
+        workspaceId: java.util.UUID,
+    ): List<String> = apiKeys.findByUser(creatorId).filter { !it.isRevoked && it.workspaceId == workspaceId }.map { it.id }
+
     @Test
-    fun `removing a member revokes their pinned user key in the same act (#200)`() {
+    fun `removing a member revokes the keys they created in the same act (A17, B6)`() {
         val svc = service()
         val actor = principal(admin, superAdmin = true)
         val ws = svc.create(actor, "acme", "Acme")
         svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
-        val key = mintedKey(ws.id)
-        apiKeys.findLiveUserKey(alice.id, ws.id).shouldNotBeNull()
+        val key = createdKey(ws.id)
+        liveCreatedKeys(alice.id, ws.id).shouldNotBeNull()
 
         svc.removeMember(actor, "acme", alice.id)
 
-        // The membership is gone AND the key with it — REVOKED, never deleted, so
+        // The membership is gone AND the created keys with it — REVOKED, never deleted, so
         // `audit_log.key_id` keeps resolving (metadata-db §4.2).
         workspaces.findMemberRow(ws.id, alice.id).shouldBeNull()
-        apiKeys.findLiveUserKey(alice.id, ws.id).shouldBeNull()
+        liveCreatedKeys(alice.id, ws.id).shouldBe(emptyList())
         apiKeys
             .findById(key.id)
             .shouldNotBeNull()
@@ -199,7 +209,7 @@ class WorkspaceMembershipIntegrationTest {
             )
         }
         // A second sweep finds nothing live to revoke — the statement is idempotent.
-        apiKeys.revokeUserKeyForWorkspace(alice.id, ws.id).shouldBeNull()
+        apiKeys.revokeLiveByCreator(alice.id, ws.id).shouldBe(emptyList())
     }
 
     @Test
@@ -209,7 +219,7 @@ class WorkspaceMembershipIntegrationTest {
         val actor = principal(admin, superAdmin = true)
         val ws = svc.create(actor, "acme", "Acme")
         svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
-        val key = mintedKey(ws.id)
+        val key = createdKey(ws.id)
         // The racer: a key validation on ANOTHER connection (a fresh DataSource is never bound
         // to this thread's transaction), exactly what a request in flight does.
         val racer = ApiKeyRepository(NamedParameterJdbcTemplate(dataSource()))
@@ -254,9 +264,10 @@ class WorkspaceMembershipIntegrationTest {
                 createdBy = bob.id,
                 name = "mcp/globex",
                 keyHash = "\$argon2id\$fixture",
+                role = KeyRole.AUTHOR,
                 expiresAt = null,
                 workspaceId = globex.id,
-                kind = ApiKeyKind.USER,
+                kind = ApiKeyKind.MCP,
             )
 
         shouldThrow<WorkspaceNotFoundException> { svc.revokeMemberKey(principal(alice), "globex", bob.id) }
@@ -277,13 +288,13 @@ class WorkspaceMembershipIntegrationTest {
         val actor = principal(admin, superAdmin = true)
         val ws = svc.create(actor, "acme", "Acme")
         svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
-        val key = mintedKey(ws.id)
+        val key = createdKey(ws.id)
 
         svc.revokeMemberKey(actor, "acme", alice.id)
 
         // The member stays; only the credential dies.
         workspaces.findMemberRow(ws.id, alice.id).shouldNotBeNull()
-        apiKeys.findLiveUserKey(alice.id, ws.id).shouldBeNull()
+        liveCreatedKeys(alice.id, ws.id).shouldBe(emptyList())
         io.mockk.verify {
             auditLogger.log(
                 event = "auth.api_key.revoked_by_admin",
@@ -300,14 +311,14 @@ class WorkspaceMembershipIntegrationTest {
     }
 
     @Test
-    fun `a member's key of another kind or another workspace survives both verbs (#200)`() {
+    fun `member removal revokes EVERY kind they created here, and nothing pinned elsewhere (A17)`() {
         val svc = service()
         val actor = principal(admin, superAdmin = true)
         val ws = svc.create(actor, "acme", "Acme")
         svc.addMember(actor, "acme", alice.email, WorkspaceRole.AUTHOR)
         val other = workspaces.create("other", "Other", isPersonal = false, createdBy = admin.id)
-        // An ENDPOINT key pinned to acme and a USER key pinned elsewhere — neither is the
-        // credential a membership mints, so neither may a membership revoke.
+        // An ENDPOINT key created by alice in acme dies with her membership (A17 is
+        // created-by, not kind-scoped); a key of hers pinned ELSEWHERE survives.
         val endpointKey =
             apiKeys.insert(
                 id = "dpk_ENDPOINTK01",
@@ -315,11 +326,12 @@ class WorkspaceMembershipIntegrationTest {
                 createdBy = alice.id,
                 name = "ci",
                 keyHash = "\$argon2id\$fixture",
+                role = KeyRole.API_CALLER,
                 expiresAt = null,
                 workspaceId = ws.id,
                 kind = ApiKeyKind.ENDPOINT,
             )
-        val foreignUserKey = mintedKey(other.id)
+        val foreignKey = createdKey(other.id, name = "mcp/other")
 
         svc.removeMember(actor, "acme", alice.id)
 
@@ -327,9 +339,9 @@ class WorkspaceMembershipIntegrationTest {
             .findById(endpointKey.id)
             .shouldNotBeNull()
             .isRevoked
-            .shouldBeFalse()
+            .shouldBeTrue()
         apiKeys
-            .findById(foreignUserKey.id)
+            .findById(foreignKey.id)
             .shouldNotBeNull()
             .isRevoked
             .shouldBeFalse()
@@ -397,7 +409,7 @@ class WorkspaceMembershipIntegrationTest {
         val root = principal(admin, superAdmin = true)
         val ws = svc.create(root, "acme", "Acme")
         svc.addMember(root, "acme", alice.email, WorkspaceRole.WORKSPACE_ADMIN)
-        val key = mintedKey(ws.id)
+        val key = createdKey(ws.id)
         val self = principal(alice)
 
         shouldThrow<WorkspaceSelfMembershipException> { svc.setMemberRole(self, "acme", alice.id, WorkspaceRole.VIEWER) }

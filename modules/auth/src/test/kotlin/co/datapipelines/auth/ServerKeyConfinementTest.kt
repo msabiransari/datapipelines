@@ -99,7 +99,7 @@ class ServerKeyConfinementTest {
     fun `the MCP key is confined to mcp - the promotion routes and every other route refuse it (B2)`() {
         // Until #215 slice (b) this was the complement — an ordinary key untouched by the server
         // confinement. Since B2 the MCP key is a confined kind itself: `/mcp` is its whole reach.
-        authenticate(ApiKeyKind.USER)
+        authenticate(ApiKeyKind.MCP)
 
         assertAll(
             (REACHABLE + REFUSED).filterNot { it == "/mcp" || it.startsWith("/mcp/") }.map { path ->
@@ -131,11 +131,11 @@ class ServerKeyConfinementTest {
             { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/v1a/revenue") shouldBe true },
             { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/apis/v1/revenue") shouldBe true },
             // B2: the MCP key reaches `/mcp` and nothing else.
-            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/api/v1/promotion/push") shouldBe false },
-            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/api/v1/pipelines") shouldBe false },
-            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/mcp") shouldBe true },
-            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/mcp/") shouldBe true },
-            { ScopeInterceptor.reachableBy(ApiKeyKind.USER, "/mcpx") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.MCP, "/api/v1/promotion/push") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.MCP, "/api/v1/pipelines") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.MCP, "/mcp") shouldBe true },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.MCP, "/mcp/") shouldBe true },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.MCP, "/mcpx") shouldBe false },
         )
     }
 

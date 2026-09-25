@@ -7,6 +7,7 @@ private const val HTTP_UNAUTHORIZED = 401
 private const val HTTP_FORBIDDEN = 403
 private const val HTTP_NOT_FOUND = 404
 private const val HTTP_TOO_MANY_REQUESTS = 429
+private const val HTTP_CONFLICT = 409
 
 /**
  * Request attributes shared between the auth filters and the Spring Security
@@ -78,12 +79,20 @@ object AuthErrorCodes {
     const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
 
     /**
-     * 400 — on-demand issuance asked for a `user` key (roles design 2026-09-20, D16/§3.3).
-     * User keys are minted by the login/switch hook and nowhere else — one per user per
-     * workspace — so no request surface may create one. A 400, not a 403: the caller's
-     * credential and role are fine; the KIND is not mintable on demand.
+     * 400 — on-demand issuance named NO kind at all (keys v2 A15: the retired login mint's
+     * kind was the implicit default, and there is none now). A 400, not a 403: the caller's
+     * credential and role are fine; the request body is not.
      */
     const val KEY_KIND_NOT_MINTABLE = "auth.key_kind_not_mintable"
+
+    /**
+     * 409 — keys v2 A18: the create path named a key that already EXISTS (live) in the
+     * workspace. Its own code rather than a duplicate-name stand-in from another family,
+     * because the recovery is auth's own (revoke the existing key, or rename) and the
+     * conflict is the A18 index speaking through the service's clean check. Revoking the
+     * existing key frees the name.
+     */
+    const val KEY_NAME_TAKEN = "auth.key_name_taken"
 
     /**
      * 404 — the key is pinned to a workspace that has been DEACTIVATED (D-R10, design §6).
@@ -151,6 +160,7 @@ object AuthErrorCodes {
             ROLE_REQUIRED,
             KEY_ISSUER_ROLE_LOST,
             KEY_KIND_NOT_MINTABLE,
+            KEY_NAME_TAKEN,
             KEY_WORKSPACE_INACTIVE,
             PRINCIPAL_DEACTIVATED,
         )
@@ -236,8 +246,7 @@ class ApiKeyInvalidException(
         AuthErrorCodes.API_KEY_INVALID,
         HTTP_UNAUTHORIZED,
         reason,
-        "That key is not valid. Your MCP key rotates by deleting it in the top bar and signing in again; " +
-            "an API key is created on /api-keys by a workspace admin.",
+        "That key is not valid. An MCP key is created on the Keys page; an API key is created there too.",
     )
 
 /**
@@ -263,8 +272,7 @@ class ApiKeyExpiredException :
         AuthErrorCodes.API_KEY_EXPIRED,
         HTTP_UNAUTHORIZED,
         "API key past expiration",
-        "That key has expired. Your MCP key rotates by deleting it in the top bar and signing in again; " +
-            "an API key is created on /api-keys by a workspace admin.",
+        "That key has expired. Create a new one on the Keys page.",
     )
 
 class SessionInvalidException(
@@ -439,19 +447,20 @@ class RoleRequiredException(
     )
 
 /**
- * On-demand issuance asked for a `user` key (D16 — roles design 2026-09-20 §3.3). A user
- * key is minted by the login/switch hook and nowhere else: exactly one per user per
- * workspace, rotated by deleting it and signing in again. No request surface — REST, htmx
- * or MCP — may create one, so the kind is refused for EVERY role rather than gated to one.
+ * A create request named NO kind (keys v2, A15): the login mint is gone, every key is created
+ * on demand by a person who chooses what it is, and guessing a default would mint a credential
+ * the caller did not ask for. A 400, not a 403: the caller's credential and role are fine; the
+ * request body is incomplete. (The code predates keys v2, when the login-minted kind was the
+ * one that could not be minted on demand; with that kind retired the condition it answers is
+ * "no kind at all".)
  */
-class KeyKindNotMintableException(
-    kind: ApiKeyKind,
-) : AuthException(
+class KeyKindNotMintableException :
+    AuthException(
         AuthErrorCodes.KEY_KIND_NOT_MINTABLE,
         HTTP_BAD_REQUEST,
-        "Keys of kind '${kind.wire}' are not mintable on demand",
-        "Your MCP key is created for you when you sign in. To rotate it, delete it from the top bar and sign in again.",
-        details = mapOf("kind" to kind.wire),
+        "Key issuance requires a kind",
+        "Choose what the key is for: an MCP key, an API key, or a server key.",
+        details = mapOf("supported" to ApiKeyKind.WIRE_VALUES),
     )
 
 /**
@@ -469,4 +478,57 @@ class KeyWorkspaceInactiveException(
         "The workspace '$workspace' this key is pinned to is deactivated",
         "This API key's workspace has been deactivated. Contact an administrator.",
         details = mapOf("workspace" to workspace),
+    )
+
+/**
+ * The subset rule refused the requested key role (keys v2 A14, record O3 ruled): a creator may
+ * give a key only a role whose permission set is a subset of the creator's own permissions in
+ * that workspace. No ordinal ladder exists — promoter and author are not comparable and neither
+ * may mint the other; a workspace admin may mint any of the three member roles; a super admin
+ * any role at all.
+ *
+ * The refusal is `auth.role_required` (the same code the matrix writes), and per A14 the
+ * details carry the ROLE that was asked for (`required = <the role>`) and the role the creator
+ * was judged as (`held = <creator role>`) — "ask someone who holds it" is the only useful next
+ * step, and it needs both halves.
+ */
+class KeyRoleNotOfferableException(
+    requested: KeyRole,
+    heldRole: String?,
+    workspace: String?,
+) : AuthException(
+        AuthErrorCodes.ROLE_REQUIRED,
+        HTTP_FORBIDDEN,
+        "A key may only carry a role whose permissions the creator holds; '${requested.wire}' exceeds the creator's",
+        "You can only give a key a role whose permissions you hold yourself in this workspace.",
+        details =
+            buildMap {
+                put("required", requested.wire)
+                heldRole?.let { put("held", it) }
+                workspace?.let { put("workspace", it) }
+            },
+    )
+
+/**
+ * Keys v2 A18 — the create path named a key that already EXISTS (live) in the workspace.
+ * A 409 with its own catalogued code ([AuthErrorCodes.KEY_NAME_TAKEN]) — the conflict is
+ * auth's (the A18 unique index speaks through the service's clean check ahead of it), and
+ * `details.reason = key_name_taken` keeps the stable token the UI matches on.
+ * Revoking the existing key frees the name.
+ */
+class KeyNameTakenException(
+    name: String,
+    workspace: String?,
+) : AuthException(
+        AuthErrorCodes.KEY_NAME_TAKEN,
+        HTTP_CONFLICT,
+        "A live key named '$name' already exists in this workspace (keys v2 A18)",
+        "That key name is already in use here. Revoke the old key first, or pick another name.",
+        details =
+            buildMap {
+                put("reason", "key_name_taken")
+                put("field", "name")
+                put("value", name.take(MAX_ECHOED_EXPIRY_CHARS))
+                workspace?.let { put("workspace", it) }
+            },
     )

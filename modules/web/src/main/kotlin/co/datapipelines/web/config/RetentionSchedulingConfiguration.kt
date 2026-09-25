@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.auth.KeyRetentionPurge
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionEventRetention
 import org.springframework.context.annotation.Bean
@@ -33,17 +34,27 @@ class RetentionSchedulingConfiguration {
     ): ExecutionEventRetention = ExecutionEventRetention(events, Duration.ofDays(properties.eventRetentionDays))
 
     @Bean
-    fun executionEventRetentionScheduler(retention: ExecutionEventRetention): ExecutionEventRetentionScheduler =
-        ExecutionEventRetentionScheduler(retention)
+    fun executionEventRetentionScheduler(
+        retention: ExecutionEventRetention,
+        keyPurge: KeyRetentionPurge,
+    ): ExecutionEventRetentionScheduler = ExecutionEventRetentionScheduler(retention, keyPurge)
 }
 
-/** The `@Scheduled` adapter over [ExecutionEventRetention] — see [RetentionSchedulingConfiguration]. */
+/**
+ * The `@Scheduled` adapter over [ExecutionEventRetention] — see [RetentionSchedulingConfiguration].
+ *
+ * Keys v2 A17/B5: the key/identity purge runs here as the sweep's LAST step — the one delete the
+ * product performs, of revoked keys and their identities once nothing references them. It runs
+ * after the event retention so a purge never competes with it for the sweep's hour.
+ */
 class ExecutionEventRetentionScheduler(
     private val retention: ExecutionEventRetention,
+    private val keyPurge: KeyRetentionPurge,
 ) {
     @Scheduled(fixedDelay = RETENTION_INTERVAL_MILLIS)
     fun retain() {
         retention.retainOnce()
+        keyPurge.purgeOnce()
     }
 
     companion object {

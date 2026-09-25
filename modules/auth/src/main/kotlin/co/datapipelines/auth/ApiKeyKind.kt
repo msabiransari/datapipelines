@@ -2,28 +2,35 @@ package co.datapipelines.auth
 
 /**
  * What an API key IS (auth.md §7.7, published-endpoints design §5.2, ruling R-EP2) — stored in
- * `api_keys.kind`.
+ * `api_keys.kind`. Keys v2 (#233, A19): **kind is the transport and the word says which** — the
+ * word says nothing about WHO the key acts as any more.
  *
- * A kind decides WHO the key acts as and WHERE it may be presented (#215): the MCP key ([USER])
- * acts as its member over `/mcp` and nowhere else (B2); an [ENDPOINT] and a [SERVER] key act as
- * their own `service` identity with a [KeyRole] — `api_caller` on the published paths bound to it,
- * `promotion_receiver` on the promotion route family — and are refused everywhere else, centrally,
- * so a new route cannot become reachable to a key by someone forgetting a check.
+ * WHERE each kind may be presented (#215 B2, A16): the MCP key ([MCP]) reaches `/mcp` and
+ * nothing else; an [ENDPOINT] key reaches the published paths bound to it and their result-paging
+ * routes and nothing else; a [SERVER] key reaches the promotion route family and nothing else —
+ * all refused everywhere else, centrally, so a new route cannot become reachable to a key by
+ * someone forgetting a check.
+ *
+ * WHO each kind acts as (keys v2, A13/B1): every kind acts as its OWN `service` identity (PK5) —
+ * the identity holds the key's [KeyRole] in the key's workspace exactly as a member does. There
+ * is no derivation from a membership and no cap: the role is chosen at creation (A14's subset
+ * rule) and changes only when the key is replaced.
  *
  * The security property worth stating plainly: **an endpoint key with no binding on any ancestor
  * of the path it presents at authorises nothing.** The absence of a binding is never a fall-through.
  */
 enum class ApiKeyKind {
     /**
-     * The MCP key (D16): minted at login, one per member per workspace, acting as that member —
-     * their role capped at author (PK4) — over `/mcp` only (B2).
+     * The MCP key (keys v2 A13): created on the Keys page by anyone holding `mcp_key.create`,
+     * acting as its own identity with a MEMBER role (`author` | `promoter` | `workspace_admin` —
+     * A15: viewer is never a key role; `super_admin` is never a key role, B1) over `/mcp` only.
      */
-    USER,
+    MCP,
 
     /**
      * A credential for published endpoints only (design §5.2): an `api_caller` identity,
-     * workspace-pinned, authorising exactly the endpoints its bindings cover plus the executions
-     * it started.
+     * workspace-pinned, authorising exactly the endpoints its bindings cover plus the result
+     * paging of the executions it started (A16 — under the business path, never the framework's).
      */
     ENDPOINT,
 
@@ -42,11 +49,11 @@ enum class ApiKeyKind {
     val wire: String get() = name.lowercase()
 
     companion object {
-        /** The default for a key minted without a kind — and the V11 backfill for every older row. */
-        val DEFAULT = USER
-
-        /** The kinds that act as their OWN identity (PK5) — every kind but the MCP key. */
-        val IDENTITY_KINDS: Set<ApiKeyKind> = setOf(ENDPOINT, SERVER)
+        /**
+         * The kinds that act as their OWN identity (PK5) — every kind, since keys v2 (A13): the
+         * MCP key's role is its own, held by its identity, never derived from a member.
+         */
+        val IDENTITY_KINDS: Set<ApiKeyKind> = entries.toSet()
 
         /** Parses a wire token, or null when it is not one — the surface turns null into a 400. */
         fun fromWireOrNull(token: String?): ApiKeyKind? = entries.firstOrNull { it.wire == token?.lowercase()?.trim() }

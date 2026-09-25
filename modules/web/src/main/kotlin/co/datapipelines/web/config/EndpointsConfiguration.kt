@@ -12,6 +12,7 @@ import co.datapipelines.application.endpoints.ReadOnlyPipelineRule
 import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.WorkspaceLiveness
+import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
 import co.datapipelines.executor.ResultUrlFactory
@@ -20,7 +21,10 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineResolver
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.web.endpoints.PublishedEndpointServeService
+import co.datapipelines.web.endpoints.PublishedExecutionPagingService
+import co.datapipelines.web.executions.ExecutionMetadataProjection
 import co.datapipelines.web.executions.ExecutionVisibility
+import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
@@ -148,6 +152,28 @@ class EndpointsConfiguration {
     /** §7.2/§7.7 — the one execution-visibility rule both execution reads share. */
     @Bean
     fun executionVisibility(serveAudit: EndpointServeAudit): ExecutionVisibility = ExecutionVisibility(serveAudit)
+
+    /** §10.2 — the ONE metadata projection, shared by the framework route and the paging route (keys v2 A16). */
+    @Bean
+    fun executionMetadataProjection(
+        pipelines: PipelineRepository,
+        resultStore: ResultStore,
+        resultUrls: ResultUrlFactory,
+    ): ExecutionMetadataProjection = ExecutionMetadataProjection(pipelines, resultStore, resultUrls)
+
+    /**
+     * Keys v2 A16/B3 — the business-path paging read, reached THROUGH the serve catch-all; see
+     * [PublishedExecutionPagingService] for why it is not a mapping of its own.
+     */
+    @Bean
+    fun publishedExecutionPagingService(
+        executions: ExecutionRepository,
+        cursor: ResultCursor,
+        visibility: ExecutionVisibility,
+        metadata: ExecutionMetadataProjection,
+        authorizer: EndpointAuthorizer,
+        bindings: EndpointKeyBindingRepository,
+    ): PublishedExecutionPagingService = PublishedExecutionPagingService(executions, cursor, visibility, metadata, authorizer, bindings)
 
     /** The §5.2 hierarchical decision. Pure and stateless — one instance serves every request. */
     @Bean

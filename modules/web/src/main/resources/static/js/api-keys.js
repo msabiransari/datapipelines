@@ -31,6 +31,25 @@
     bindingsField.classList.toggle('u-hidden', !wantsBindings);
     var boxes = bindingsField.querySelectorAll('input[name=bindings]');
     for (var i = 0; i < boxes.length; i++) { boxes[i].disabled = !wantsBindings; }
+    // Keys v2 (A13/A14): the mcp kind carries a ROLE chosen from the card's options — the
+    // subset rule filtered them server-side before this form ever rendered. Disabled inputs
+    // are not submitted, which keeps a stale role off the POST when another kind is chosen.
+    var roleField = document.getElementById('key-role-field');
+    var roleSelect = document.getElementById('key-role');
+    var roles = checked ? (checked.getAttribute('data-roles') || '') : '';
+    roleField.classList.toggle('u-hidden', roles === '');
+    roleSelect.disabled = roles === '';
+    roleSelect.innerHTML = '';
+    if (roles !== '') {
+      roles.split('|').forEach(function (pair) {
+        var wire = pair.split(':')[0];
+        var label = pair.split(':')[1];
+        var option = document.createElement('option');
+        option.value = wire;
+        option.textContent = label;
+        roleSelect.appendChild(option);
+      });
+    }
   }
   function keyExpiryChanged() {
     var custom = document.getElementById('key-expiry').value === 'custom';

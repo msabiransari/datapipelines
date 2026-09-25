@@ -695,6 +695,9 @@ class TransformNodeE2eTest {
         private const val WORKSPACE_ID = "defa0000-0000-0000-0000-000000000001"
         private const val ADMIN_USER_ID = "a11e0000-0000-0000-0000-000000000007"
 
+        /** The key's own `service` identity (keys v2 A13). */
+        private const val KEY_IDENTITY = "a11e0000-0000-0000-0000-000000000008"
+
         private val random = SecureRandom()
         private val SECRET = E2eSession.newSecret()
         private val ADMIN_SESSION get() = E2eSession.jwt(SECRET, ADMIN_USER_ID, "e2e-transform@datapipelines.test")
@@ -742,6 +745,7 @@ class TransformNodeE2eTest {
         }
 
         /** The whole seed — called from Order(1), when a context (and Flyway) exists. */
+        @Suppress("LongMethod") // the seed IS the fixture: identities, keys, datasources, scratch tables in one block
         private fun seedAll() {
             E2eClean.beforeSeeding()
             // The session user (workspace admin), its membership, and the MCP key (#215: the key
@@ -759,13 +763,20 @@ class TransformNodeE2eTest {
                         "INSERT INTO workspace_members (workspace_id, user_id, role)" +
                             " VALUES ('$WORKSPACE_ID', '$ADMIN_USER_ID', 'workspace_admin')",
                     )
+                    // The key's own identity (keys v2 A13).
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                            "('$KEY_IDENTITY', '${ADMIN_KEY.id.lowercase()}@keys.invalid', '${ADMIN_KEY.name}', 'key', " +
+                            "'${ADMIN_KEY.id}', TRUE, FALSE, 'service')",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'workspace_admin')",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
-                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
+                        ps.setObject(2, UUID.fromString(KEY_IDENTITY))
                         ps.setObject(3, UUID.fromString(ADMIN_USER_ID))
                         ps.setString(4, ADMIN_KEY.name)
                         ps.setString(5, ADMIN_KEY.hash)

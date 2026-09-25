@@ -36,6 +36,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
+import org.springframework.http.MediaType
 import java.time.Instant
 import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
@@ -175,11 +176,15 @@ class PublishedEndpointServeService(
         // which pattern won and therefore what `{borough}` was bound to.
         return when (val validated = validator.validate(request.copy(pathVariables = matched.pathVariables))) {
             is EndpointRequestValidator.Outcome.Unacceptable -> {
+                // #227 (keys v2 A.8b) — the #222 shape: `details.produces` names what the route
+                // CAN produce; the request's raw `Accept` value is attacker-controlled and is
+                // never echoed, in the details or in the message. (The validator still READS
+                // the header to decide 406-vs-400; this boundary is what must not repeat it.)
                 Outcome.Refused(
                     HTTP_NOT_ACCEPTABLE,
                     PipelineErrorCodes.Endpoint.NOT_ACCEPTABLE,
                     "This endpoint serves application/json.",
-                    mapOf("accept" to validated.accept),
+                    mapOf("produces" to listOf(MediaType.APPLICATION_JSON_VALUE)),
                 )
             }
 

@@ -107,7 +107,7 @@ class ScopeInterceptorTest {
                 "dpk_ABCDEFGHIJKL",
                 workspaceName = "acme",
                 workspace = adminContext(),
-                keyKind = ApiKeyKind.USER,
+                keyKind = ApiKeyKind.MCP,
             )
         SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(key, null, emptyList())
 
@@ -117,7 +117,7 @@ class ScopeInterceptorTest {
             proceed.shouldBeFalse()
             response.status shouldBe 403
             body(response)["code"] shouldBe ScopeInterceptor.ENDPOINT_KEY_KIND_REFUSED
-            (body(response)["details"] as Map<*, *>)["reason"] shouldBe "user_key_off_surface"
+            (body(response)["details"] as Map<*, *>)["reason"] shouldBe "mcp_key_off_surface"
         }
         invoke(ProbeController(), "read", "/mcp").first.shouldBeTrue()
     }

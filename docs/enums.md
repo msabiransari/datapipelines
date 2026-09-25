@@ -244,11 +244,11 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 
 | Value | Description |
 |---|---|
-| `user` | The MCP key: minted ONLY by the login/switch hook, one per user per workspace (179, D16); acts as its member with the member's role capped at author (PK4); presented on `/mcp` and nowhere else (#215 B2) |
+| `mcp` (V37, renamed from `user` — A19; kind is the transport and the word says which) | The agent's key: CREATED on the Keys page (A15 — the login mint is retired) by someone holding `mcp_key.create`, with the role chosen at creation under the subset rule (A14); acts as its own `service` identity holding that member role (A13); presented on `/mcp` and nowhere else (#215 B2) |
 | `endpoint` | A credential for published endpoints only: acts as its own identity with the `api_caller` role (§8D), workspace-pinned, and serves exactly the endpoints its bindings cover plus the metadata and result cursor of executions it started |
-| `server` | The promotion peer's credential (091): minted by a super admin, presented as `DP-Promotion-Key` by a SENDING deployment, and accepted on the promotion receiver's routes and nowhere else. Acts as its own identity with the `promotion_receiver` role (§8D), for any workspace (B6) |
+| `server` | The promotion peer's credential (091): created by a super admin, presented as `DP-Promotion-Key` by a SENDING deployment, and accepted on the promotion receiver's routes and nowhere else. Acts as its own identity with the `promotion_receiver` role (§8D), for any workspace (B6) |
 
-> A kind answers "where may this credential be presented?"; its ROLE (§8D, or the member's for the MCP key) answers "what may it do there?". Each kind carries exactly one role — the database CHECK (`chk_api_keys_role`) makes it a fact. The wire form is the lowercase name.
+> A kind answers "where may this credential be presented?"; its ROLE (§8D, or the chosen member role for the `mcp` key) answers "what may it do there?". Each kind carries exactly one role — the database CHECK (`chk_api_keys_role`) makes it a fact. The wire form is the lowercase name.
 
 > **A `server` key authenticates nothing outside the promotion routes.** Presented as an ordinary `DP-API-Key` it is refused on every route — REST, htmx partials, `/mcp` and every UI page — with `endpoint.key_kind_refused`. Same rule as the endpoint kind, different family.
 
@@ -258,15 +258,18 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 
 ## 8D. `KeyRole` — the role a key carries
 
-**Source:** [Auth §7.5](auth.md#75-key-roles-scopes-removed) and the two key-role columns of the §7.6 catalog; the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §3.2
+**Source:** [Auth §7.5](auth.md#75-key-roles) and the key-role columns of the §7.6 catalog; the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §3.2
 **Used by:** auth (`KeyRole`, `RolePermissions.of(KeyRole)`, `AuthenticatedPrincipal.keyRole`), persistence (`api_keys.role`, V34, CHECK `chk_api_keys_role`), the REST `role` field of key creation (rest-api §16.1), the Keys page's Role column.
 
 | Value | Carried by | Permissions |
 |---|---|---|
+| `author` | an `mcp` key CHOSEN at creation (A13/A14 — the subset rule decides which member roles a creator may offer) | the §7.6 `mcp:author` column — the author member's permissions, exactly |
+| `promoter` | an `mcp` key CHOSEN at creation | the §7.6 `mcp:promoter` column — the promoter member's permissions, exactly |
+| `workspace_admin` | an `mcp` key CHOSEN at creation | the §7.6 `mcp:workspace_admin` column — the workspace-admin member's permissions, exactly |
 | `api_caller` | every `endpoint` key | `endpoint.serve` (the paths bound to the key), `execution.read` and `execution.result.read` (the executions it started) |
 | `promotion_receiver` | every `server` key (and the deprecated config-value peer) | `promotion.inventory.read`, `promotion.push` — for any workspace (B6) |
 
-Pre-created and fixed: a key role is a function of the key's kind, the MCP (`user`) key carries none (it acts as its member, capped at author — PK4), and no key role holds workspace admin or super admin authority (PK3). `snake_case` everywhere (A5); the UI prints it with a space (`api caller`).
+Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key can carry (A15 — viewer is never a key role; B1 — `super_admin` is neither offerable nor acceptable), and no key role holds workspace admin or super admin AUTHORITY over people (PK3). `snake_case` everywhere (A5); the UI prints it with a space (`api caller`, `workspace admin`).
 
 ---
 
@@ -637,7 +640,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 | `TemplateType` | template-hierarchy-design | templates, pipeline-contract |
 | `StagingEngine` | pipeline-contract | staging, dag-executor |
 | `UserKind` | [auth.md §4.7](auth.md#47-key-identities) | auth, metadata-db (the V34 CHECK) |
-| `KeyRole` | [auth.md §7.5](auth.md#75-key-roles-scopes-removed) | auth, metadata-db (the V34 CHECK), rest-api §16.1 |
+| `KeyRole` | [auth.md §7.5](auth.md#75-key-roles) | auth, metadata-db (the V34 CHECK), rest-api §16.1 |
 | `Permission` | [auth.md §11A](auth.md#11a-roles) / §7.6 | auth, every endpoint and MCP tool |
 | `WorkspaceRole` | [auth.md §11A](auth.md#11a-roles) | auth, metadata-db (the V29 CHECKs), rest-api §17, the members dropdown |
 | `NodeStatus` | dag-executor | rest-api, mcp-server |

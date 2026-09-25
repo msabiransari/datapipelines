@@ -2,6 +2,8 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
+import co.datapipelines.auth.KeyRole
+import co.datapipelines.auth.WorkspaceRole
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -22,15 +24,25 @@ object ApiKeyForm {
      * One kind, as the form's radio cards present it (owner ruling, 091): what it IS, in a
      * sentence, rather than an enum name a reader has to already understand.
      *
-     * Since 179 (D16) there is NO `user` choice: a user key is minted at login, never on
-     * demand, and the endpoint kind is labelled "API key" (D17) — the wire value stays
-     * `endpoint`, but that word no longer names the kind anywhere a person reads.
+     * Since 179 (D16) the form offered no `mcp` choice; keys v2 (A13–A15) brings the kind BACK
+     * as the page's own creation path — the login mint is retired, and the Keys page is the ONE
+     * creation path for every kind. An `mcp` card carries [roles]: the roles the SUBSET RULE
+     * (A14) allows this caller to give, starting at author — empty means the caller cannot
+     * create an `mcp` key at all and gets no card.
      */
     data class KindChoice(
         val wire: String,
         val label: String,
         val summary: String,
         val takesBindings: Boolean,
+        /** The role choices for an `mcp` key; empty for every other kind, whose role is fixed. */
+        val roles: List<RoleChoice> = emptyList(),
+    )
+
+    /** One role option on the `mcp` card — the wire value posts, the label reads (A5). */
+    data class RoleChoice(
+        val wire: String,
+        val label: String,
     )
 
     /** One expiry preset. [days] is null for both "never" and "custom" — see [resolveExpiry]. */
@@ -52,15 +64,30 @@ object ApiKeyForm {
         )
 
     /**
-     * The kinds this caller may mint. `user` is ABSENT since 179 (D16) — it is minted at
-     * login, not on demand, so a form that offered it would be offering a refusal
-     * (`auth.key_kind_not_mintable`). `server` appears only for an admin —
-     * [ApiKeyService.issue] refuses it for anyone else, and rendering an option the server
-     * will refuse is a worse answer than not rendering it (the UI is convenience; the server
-     * check is the guard).
+     * The kinds this caller may mint, and the roles each offers:
+     *
+     * - an `mcp` card when [mcpRoles] is non-empty — exactly [RolePermissions.offerable]'s
+     *   answer for this caller's permissions in this workspace (A14; the service re-checks);
+     * - an `endpoint` card when [mayCreateApiKeys] (`api_key.create`) — the server check is the
+     *   guard, and rendering an option the server will refuse is a worse answer than not
+     *   rendering it;
+     * - a `server` card when [isSuperAdmin] (`server_key.create`).
      */
-    fun kindChoices(isAdmin: Boolean): List<KindChoice> =
+    fun kindChoices(
+        mcpRoles: List<WorkspaceRole>,
+        mayCreateApiKeys: Boolean,
+        isSuperAdmin: Boolean,
+    ): List<KindChoice> =
         listOfNotNull(
+            KindChoice(
+                wire = ApiKeyKind.MCP.wire,
+                label = "MCP key",
+                summary =
+                    "Connects an AI agent to this workspace over the MCP surface. It acts as its own identity with the " +
+                        "role you pick below — the role decides what the agent may do. It reaches /mcp and nothing else.",
+                takesBindings = false,
+                roles = mcpRoles.map { RoleChoice(KeyRole.ofMemberRole(it)!!.wire, it.label) },
+            ).takeIf { mcpRoles.isNotEmpty() },
             KindChoice(
                 wire = ApiKeyKind.ENDPOINT.wire,
                 label = "API key",
@@ -69,7 +96,7 @@ object ApiKeyForm {
                         "nothing else. It acts as its own identity with the api caller role; the paths you bind " +
                         "it to are its whole reach.",
                 takesBindings = true,
-            ),
+            ).takeIf { mayCreateApiKeys },
             KindChoice(
                 wire = ApiKeyKind.SERVER.wire,
                 label = "Server key",
@@ -77,7 +104,7 @@ object ApiKeyForm {
                     "The credential another deployment presents to promote into this one. The promotion " +
                         "receiver role, no bindings — it opens the promotion routes and nothing else.",
                 takesBindings = false,
-            ).takeIf { isAdmin },
+            ).takeIf { isSuperAdmin },
         )
 
     /**

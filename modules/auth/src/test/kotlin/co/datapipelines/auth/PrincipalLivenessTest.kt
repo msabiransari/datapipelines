@@ -207,6 +207,6 @@ class PrincipalLivenessTest {
         io.mockk.verify(exactly = 0) { userRepository.setActive(any(), any()) }
         io.mockk.verify(exactly = 0) { apiKeyRepository.revoke(any(), any()) }
         io.mockk.verify(exactly = 0) { apiKeyRepository.revokeInWorkspace(any(), any(), any()) }
-        io.mockk.verify(exactly = 0) { apiKeyRepository.revokeUserKeyForWorkspace(any(), any()) }
+        io.mockk.verify(exactly = 0) { apiKeyRepository.revokeLiveByCreator(any(), any()) }
     }
 }

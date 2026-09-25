@@ -337,7 +337,7 @@ Run ONE read-only SELECT or WITH statement against a datasource and return up to
 
 Permission `execution.read` · read-only
 
-List recent pipeline executions of the key's pinned workspace, optionally filtered by pipeline or status. Returns the runs YOU started (this key's user); a workspace admin's key returns every run of the workspace, including runs started by published endpoints. Other members' runs are not listed.
+List recent pipeline executions of the key's pinned workspace, optionally filtered by pipeline or status. The key acts as its own role: your own runs are always listed, plus every run of the workspace when the key's role holds execution.read_all (a workspace-admin-role key). Other members' runs are not listed.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -349,7 +349,7 @@ List recent pipeline executions of the key's pinned workspace, optionally filter
 
 Permission `execution.read` · read-only
 
-Get metadata for a specific execution: status, timing, node_stats, parameters used. On a FAILED execution, error carries the full failure record: code, message, correlation_id, node context (datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the exception chain with stack frames — read error.code first, then error.exception.caused_by (root cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result rows, use executions_get_result. Visible for YOUR OWN runs (this key's user), or any run of the workspace when the key's user is a workspace admin; another member's execution is not found.
+Get metadata for a specific execution: status, timing, node_stats, parameters used. On a FAILED execution, error carries the full failure record: code, message, correlation_id, node context (datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the exception chain with stack frames — read error.code first, then error.exception.caused_by (root cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result rows, use executions_get_result. Visible for YOUR OWN runs (this key's own), or any run of the workspace when the key's role holds execution.read_all; another member's execution is not found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -359,7 +359,7 @@ Get metadata for a specific execution: status, timing, node_stats, parameters us
 
 Permission `execution.result.read` · read-only
 
-Fetch result rows for a completed execution, paginated via offset+limit. Returns schema + rows + pagination metadata. Works for ANY completed execution that produced a caller result, of any size, until its TTL expires (default 300s, set at execution time). Order is stable across pages. Reading pages does NOT extend the TTL — after expiry the result is gone and the pipeline must be re-run. Readable for YOUR OWN runs (this key's user), or any run of the workspace when the key's user is a workspace admin; another member's execution is not found.
+Fetch result rows for a completed execution, paginated via offset+limit. Returns schema + rows + pagination metadata. Works for ANY completed execution that produced a caller result, of any size, until its TTL expires (default 300s, set at execution time). Order is stable across pages. Reading pages does NOT extend the TTL — after expiry the result is gone and the pipeline must be re-run. Readable for YOUR OWN runs (this key's own), or any run of the workspace when the key's role holds execution.read_all; another member's execution is not found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -404,7 +404,7 @@ One calculator kind's full definition: display name, description, typed inputs, 
 
 Permission `endpoint.publish` · **writes**
 
-Publish a released pipeline as a GET endpoint at /api/<category>/<version>/<path>. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pipeline must have a RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — mint and bind one over REST or in the UI (auth.md §7.7); an unbound endpoint accepts user keys with the execute scope.
+Publish a released pipeline as a GET endpoint at /api/<category>/<version>/<path>. The category is your namespace (a business domain, a team); categories matching v<number> and the literal 'api' are reserved to the product and refused with endpoint.path_reserved. The version is one free-form segment (v1 by convention); path variables come after it. The pipeline must have a RELEASED version and must be side-effect-free: every node DQL into tempdb or the caller, a DML/DDL node whose source is tempdb, transitively through PIPELINE nodes. A DML/DDL node against a registered datasource, or a DQL node writing back to a datasource, is refused with endpoint.pipeline_not_readonly naming the node and the datasource — that rule is what makes serving over GET safe, since GET is retried, preloaded and crawled. path is 3-10 segments, each a literal [a-z0-9][a-z0-9_.-]{0,63} or a {variable} naming a declared parameter; remaining parameters come from the query string. A leading /api prefix is stripped, not refused. A path that could match the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by precedence. Calling the endpoint needs an API key bound to it — create one with the api_caller role and bind it over REST or in the UI (auth.md §7.7); an endpoint bound to no key is served to no one, and an MCP key never reaches REST at all (it acts over /mcp only).
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -523,7 +523,7 @@ List the learned facts recorded on a datasource this workspace can see — every
 
 Permission `semantic.retire` · **writes**
 
-Retire one learned fact with a reason — it stops being served beside the columns but keeps its row (facts are never deleted; history is the audit). Prefer semantics_record with supersedes when you know the correct fact: that retires the old one and records the new in one step. A fact this workspace cannot see is not-found; a DATASOURCE fact another workspace established can only be retired by a workspace admin. Mutating.
+Retire one learned fact with a reason — it stops being served beside the columns but keeps its row (facts are never deleted; history is the audit). Prefer semantics_record with supersedes when you know the correct fact: that retires the old one and records the new in one step. A fact this workspace cannot see is not-found; a DATASOURCE fact another workspace established needs datasource.manage — the permission decides, not a role. Mutating.
 
 | Argument | Type | | What it is |
 |---|---|---|---|

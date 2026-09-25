@@ -473,9 +473,7 @@ class WorkspacesUiControllerTest {
         every { workspaceService.resolveSwitch(principal, "globex") } returns WorkspaceContext(UUID.randomUUID(), "globex")
         every { userService.snapshot(userId) } returns user
         every { jwtService.issue(user, "globex") } returns "fresh-jwt"
-        // 179 (D16): the switch mints the user's MCP key in the target — the mint itself is
-        // ApiKeyService's, tested there and in ApiKeyMintingTest; here it is stubbed.
-        every { workspaceService.mintMcpKeyOnEntry(any(), any(), any()) } returns Unit
+        // Keys v2 (A15): a switch mints NO key — the Keys page is the one creation path.
 
         val response = MockHttpServletResponse()
         controller.switch(response, "globex") shouldBe "redirect:/dashboard"

@@ -246,6 +246,9 @@ object ApiErrorCatalog {
             // `auth.api_key.expiry_invalid`: the credential is fine, the KIND is not mintable on
             // a request surface.
             co.datapipelines.auth.AuthErrorCodes.KEY_KIND_NOT_MINTABLE to HttpStatus.BAD_REQUEST,
+            // Keys v2 A18 — a bare `auth.` code, wired explicitly (the 025 A2 convention): the
+            // create path named a live key's name. A 409, the one auth code that is a conflict.
+            co.datapipelines.auth.AuthErrorCodes.KEY_NAME_TAKEN to HttpStatus.CONFLICT,
             // D-R7: an ungranted datasource is INVISIBLE, so its refusal is the not-found
             // status, not the datasource family's default.
             co.datapipelines.datasources.DatasourceErrorCodes.GRANT_REQUIRED to HttpStatus.NOT_FOUND,

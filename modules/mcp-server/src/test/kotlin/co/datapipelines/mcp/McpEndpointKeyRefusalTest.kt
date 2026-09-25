@@ -75,7 +75,7 @@ class McpEndpointKeyRefusalTest {
     @Test
     fun `a user key still reaches the transport`() {
         // The complement — the confinement must not close /mcp for ordinary agent keys.
-        authenticate(ApiKeyKind.USER)
+        authenticate(ApiKeyKind.MCP)
         val chain = MockFilterChain()
 
         filter.doFilter(MockHttpServletRequest("POST", "/mcp"), MockHttpServletResponse(), chain)

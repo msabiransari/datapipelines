@@ -54,6 +54,7 @@ class AuthErrorSpecDriftTest {
                 AuthErrorCodes.SESSION_REQUIRED to SessionRequiredException("create-local-user").status,
                 AuthErrorCodes.PROMOTION_KEY_INVALID to PromotionKeyInvalidException().status,
                 AuthErrorCodes.API_KEY_EXPIRY_INVALID to ApiKeyExpiryInvalidException("unknown_preset").status,
+                AuthErrorCodes.KEY_NAME_TAKEN to KeyNameTakenException("probe", null).status,
             )
         exceptionStatus.forEach { (code, status) ->
             (code to status) shouldBe (code to docStatus.getValue(code))

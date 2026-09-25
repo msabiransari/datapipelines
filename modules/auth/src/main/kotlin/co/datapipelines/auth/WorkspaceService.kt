@@ -40,31 +40,6 @@ fun interface WorkspaceLiveness {
 }
 
 /**
- * The login-minted MCP key hook (D16, roles design §3.3): mint the user's one `user` key
- * for the workspace they just entered — or do nothing when they already hold one.
- *
- * A PORT, not a call into `ApiKeyService`: that service already depends on
- * [WorkspaceService] (issuance's membership guard), so a direct call back would be a
- * constructor cycle. The aggregation layer binds this to `ApiKeyService.mintLoginKey`
- * through a lazy provider. The rule lives HERE — on the one path both login handlers and
- * the switcher converge on — for the same reason the invitation materialise does: the
- * owner's rule is about LOGGING IN, not about which provider did it.
- */
-fun interface McpKeyMint {
-    /**
-     * Mints the login key for [user] in [context]'s workspace when none is live; a no-op
-     * otherwise. [loginMethod] is how THIS session got in: the must-change-password rule
-     * gates a PASSWORD session, never an OIDC one (ForcedPasswordChangeInterceptor), and the
-     * mint follows the same line — a Google sign-in with a stale local flag still gets its key.
-     */
-    fun mint(
-        user: User,
-        context: WorkspaceContext,
-        loginMethod: LoginMethod,
-    )
-}
-
-/**
  * Workspace membership resolution and the CRUD / member-management service paths the REST
  * surface calls (RBAC design §5, §6; the role model is §1).
  *
@@ -116,12 +91,12 @@ open class WorkspaceService(
     private val contentCheck: WorkspaceContentCheck = WorkspaceContentCheck.NONE,
     private val demoWorkspaceSeeder: DemoWorkspaceSeeder? = null,
     /**
-     * The D16 login-mint port — nullable so auth-only test slices build the service with
-     * no key machinery; the application always binds it (AuthConfiguration). The mint
-     * itself decides "already holds one" and "owes a password change"; this service only
-     * decides WHERE the hook fires.
+     * Keys v2 (A17/B6): removing a member revokes the keys they CREATED here, and a revoked
+     * key's identity is deactivated with it (record §3.3). The deactivation is a [UserService]
+     * act, injected here for exactly that; there is no cycle (the user service depends on
+     * nothing of this one).
      */
-    private val mcpKeyMint: McpKeyMint? = null,
+    private val userService: UserService? = null,
 ) : WorkspaceLiveness {
     private val log = LoggerFactory.getLogger(WorkspaceService::class.java)
 
@@ -202,11 +177,8 @@ open class WorkspaceService(
      * Null when there is nothing to stamp: no membership and no active `demo` (deactivated, or
      * never seeded). Round 1 returns that state; round 2 draws the "no workspace" page.
      *
-     * **The D16 mint rides the resolution:** every non-null answer mints the user's one MCP
-     * key for that workspace on the way out ([McpKeyMint]) — login is exactly when "entered
-     * a workspace" becomes true, and a key that already exists makes the mint a no-op, so a
-     * second login mints nothing. A user who owes a password change gets nothing until the
-     * first login or switch after it (the mint's own gate).
+     * **No key is minted here any more** (keys v2 A15, #233): the login mint is retired — the
+     * Keys page is the one creation path for every kind, and a first login creates no key.
      */
     open fun workspaceForLogin(
         user: User,
@@ -241,36 +213,12 @@ open class WorkspaceService(
         }
         val memberships = activeMemberships(user.id)
         lastUsedWorkspaceStore?.lastUsed(user.id)?.let { last ->
-            memberships.firstOrNull { it.workspaceName == last }?.let { return minted(user, context(it), loginMethod) }
+            memberships.firstOrNull { it.workspaceName == last }?.let { return context(it) }
         }
-        memberships.firstOrNull()?.let { return minted(user, context(it), loginMethod) }
+        memberships.firstOrNull()?.let { return context(it) }
         return demoWorkspaceSeeder
             ?.joinDemoIfUnaffiliated(user.id)
             ?.also { authCache.invalidateMemberships(user.id) }
-            ?.let { minted(user, it, loginMethod) }
-    }
-
-    /**
-     * The switch half of D16: a successful switch IS an entry into that workspace, so it
-     * mints exactly as login does. Called by the switch handler once the target has
-     * resolved (a refused switch mints nothing — the resolution threw).
-     */
-    open fun mintMcpKeyOnEntry(
-        user: User,
-        context: WorkspaceContext,
-        loginMethod: LoginMethod,
-    ) {
-        mcpKeyMint?.mint(user, context, loginMethod)
-    }
-
-    /** Resolution plus the D16 mint — the one shape every login answer takes. */
-    private fun minted(
-        user: User,
-        context: WorkspaceContext,
-        loginMethod: LoginMethod,
-    ): WorkspaceContext {
-        mintMcpKeyOnEntry(user, context, loginMethod)
-        return context
     }
 
     /**
@@ -645,13 +593,14 @@ open class WorkspaceService(
      * (D-R5): "there is no such member here" and "there is no such workspace for you" must not
      * be distinguishable, or the member list becomes probeable one id at a time.
      *
-     * **The member's login-minted key ends with the membership** (roles record §3.7, ruling 1,
-     * #200): a key is tied to user + workspace, so the membership row's removal revokes the
-     * `user` key pinned here in the SAME act, audited `auth.api_key.revoked_by_admin` with
-     * reason `member_removed`. Before #200 a removed member's key kept authenticating through
-     * `ApiKeyService.pinnedContext`'s viewer fallback — reading, running and reading results
-     * in a workspace they had been removed from. The whole sequence is ONE metadata
-     * transaction: a failure removes nothing and revokes nothing.
+     * **The member's created keys end with the membership** (keys v2 A17/B6, restating the #200
+     * safety for created-by): every live key the removed member CREATED in this workspace — of
+     * every kind, their MCP keys included — is revoked in the SAME act, each key's identity
+     * deactivated with it, each revocation audited `auth.api_key.revoked_by_admin` with reason
+     * `member_removed`. Before #200 a removed member's key kept authenticating; the created-by
+     * predicate is what the login-minted-key rule generalises to now that every key is created
+     * by a person on the Keys page. The whole sequence is ONE metadata transaction: a failure
+     * removes nothing and revokes nothing.
      */
     @Transactional("metadataTransactionManager")
     open fun removeMember(
@@ -665,9 +614,9 @@ open class WorkspaceService(
         requireNotSelf(principal, workspace, userId)
         if (target.role == WorkspaceRole.WORKSPACE_ADMIN) requireAnotherAdmin(workspace, userId)
         workspaceRepository.removeMember(workspace.id, userId)
-        // §3.7 ruling 1 — the key the membership minted dies with it. Null when the member
-        // held no live key (never minted, already rotated): nothing to evict, nothing to audit.
-        val revokedKeyId = apiKeyRepository.revokeUserKeyForWorkspace(userId, workspace.id)
+        // A17/B6 — the keys the membership's person created here die with it. Null when the
+        // member created none (never minted, already revoked): nothing to evict, nothing to audit.
+        val revokedKeyIds = revokeCreatedKeysOf(userId, workspace.id)
         // Evicted now AND again after the commit. This method runs inside one metadata
         // transaction, so a validation racing the removal on another connection reads the
         // still-live row (READ COMMITTED never blocks on the uncommitted UPDATE) and would
@@ -675,7 +624,7 @@ open class WorkspaceService(
         // race, the immediate one keeps the common path short (#200 review M1).
         val evict: () -> Unit = {
             authCache.invalidateMemberships(userId)
-            revokedKeyId?.let { authCache.invalidateKey(it) }
+            revokedKeyIds.forEach { authCache.invalidateKey(it) }
         }
         evict()
         afterCommitOrNow(evict)
@@ -685,7 +634,7 @@ open class WorkspaceService(
             name,
             mapOf("workspace" to name, "member_user_id" to userId.toString()),
         )
-        revokedKeyId?.let {
+        revokedKeyIds.forEach {
             audit(
                 principal,
                 "auth.api_key.revoked_by_admin",
@@ -701,14 +650,30 @@ open class WorkspaceService(
     }
 
     /**
-     * Revokes a member's login-minted key WITHOUT removing them (roles record §3.7, ruling 3,
-     * #200) — the admin's recovery lever beside [removeMember], and the one answer to a lost
-     * or leaked credential that needs no identity event: no password reset fires, no rotation
-     * is scheduled (§3.7 ruling 2), the member's SESSION keeps working, and their next login
-     * or workspace entry mints a fresh key. Workspace admin or super admin
-     * (`MANAGE_WORKSPACE_MEMBERS`, the members row of §7.6); the same 404 rule for a
-     * non-member. Idempotent: a member with no live key is already in the state the verb asks
-     * for, so nothing is revoked and nothing audited.
+     * [removeMember]'s revocation, on its own (keys v2 A17/B6): every live key [creatorId]
+     * created in [workspaceId], revoked with its identity deactivated — the members-row
+     * lever's answer now that keys are created on demand rather than minted at login. Logged
+     * per key by the caller; here the mechanics only.
+     */
+    private fun revokeCreatedKeysOf(
+        creatorId: UUID,
+        workspaceId: UUID,
+    ): List<String> {
+        val revokedIds = apiKeyRepository.revokeLiveByCreator(creatorId, workspaceId)
+        revokedIds.forEach { id ->
+            apiKeyRepository.findById(id)?.let { key -> userService?.deactivateIdentity(key.userId) }
+        }
+        return revokedIds
+    }
+
+    /**
+     * Revokes every live key [userId] CREATED in [name] WITHOUT removing them (keys v2: the
+     * admin's recovery lever beside [removeMember], the created-by restatement of roles record
+     * §3.7 ruling 3) — no password reset fires, no rotation is scheduled (§3.7 ruling 2), the
+     * member's SESSION keeps working, and they create a fresh key on the Keys page when they
+     * need one. Workspace admin or super admin (`workspace.members.manage`, the members row of
+     * §7.6); the same 404 rule for a non-member. Idempotent: a member with no live created key
+     * is already in the state the verb asks for, so nothing is revoked and nothing audited.
      */
     open fun revokeMemberKey(
         principal: AuthenticatedPrincipal,
@@ -719,9 +684,9 @@ open class WorkspaceService(
         requirePermission(principal, workspace, Permission.WORKSPACE_MEMBERS_MANAGE)
         workspaceRepository.findMemberRow(workspace.id, userId) ?: throw WorkspaceNotFoundException(name)
         requireNotSelf(principal, workspace, userId)
-        val revokedKeyId = apiKeyRepository.revokeUserKeyForWorkspace(userId, workspace.id)
-        if (revokedKeyId != null) {
-            authCache.invalidateKey(revokedKeyId)
+        val revokedKeyIds = revokeCreatedKeysOf(userId, workspace.id)
+        revokedKeyIds.forEach {
+            authCache.invalidateKey(it)
             audit(
                 principal,
                 "auth.api_key.revoked_by_admin",
@@ -731,16 +696,17 @@ open class WorkspaceService(
                     "target_user_id" to userId.toString(),
                     "reason" to "admin_revoked",
                 ),
-                keyId = revokedKeyId,
+                keyId = it,
             )
         }
     }
 
     /**
-     * Which members of [name] hold a live login-minted key (#200) — the members row's
-     * "has a key" state. Admin-only here in the service, not only at the callers (#200 review
-     * L1): the answer never leaves the admin's own workspace, and it carries owner ids only —
-     * no key id, no prefix, no plaintext (the members row is not a key listing).
+     * Which members of [name] hold a live key they CREATED (keys v2: the members row's
+     * "has a key" state, restated from the login mint to created-by). Admin-only here in the
+     * service, not only at the callers (#200 review L1): the answer never leaves the admin's
+     * own workspace, and it carries creator ids only — no key id, no prefix, no plaintext (the
+     * members row is not a key listing).
      */
     open fun liveUserKeyOwnerIds(
         principal: AuthenticatedPrincipal,
@@ -748,7 +714,7 @@ open class WorkspaceService(
     ): Set<UUID> {
         val workspace = read(principal, name)
         requirePermission(principal, workspace, Permission.WORKSPACE_MEMBERS_MANAGE)
-        return apiKeyRepository.liveUserKeyOwnerIds(workspace.id)
+        return apiKeyRepository.liveCreatorIds(workspace.id)
     }
 
     /**
@@ -815,9 +781,11 @@ open class WorkspaceService(
     /**
      * The guard API-key issuance extends (auth.md §7.4): a key may only be pinned to a workspace its
      * creator can reach (D-R5's [WorkspaceNotFoundException] otherwise), and only by a creator who
-     * holds the KIND's create permission (#215, record §3.1): `api_key.create` in that workspace for
-     * an `endpoint` key (workspace admin and super admin), `server_key.create` for a `server` key (a
-     * super admin's instance permission). Both answers come from ONE resolution, so "can they see
+     * holds the KIND's create permission (keys v2 A14): `mcp_key.create` in that workspace for an
+     * `mcp` key (author, promoter, workspace admin — the subset rule decides which ROLES they may
+     * then give it, in `ApiKeyService.issue`), `api_key.create` for an `endpoint` key (workspace
+     * admin and super admin), `server_key.create` for a `server` key (a super admin's instance
+     * permission). Both answers come from ONE resolution, so "can they see
      * it" and "may they act in it" cannot disagree. Returns the creator's context there.
      */
     @Suppress("ThrowsCount") // three distinct refusals: unknown workspace, unreachable, wrong role
@@ -829,22 +797,12 @@ open class WorkspaceService(
         val workspace = workspaceRepository.findById(workspaceId) ?: throw WorkspaceNotFoundException(workspaceId.toString())
         val context = contextFor(principal, workspace.name) ?: throw WorkspaceNotFoundException(workspace.name)
         when (kind) {
+            ApiKeyKind.MCP -> requirePermission(principal, workspace, Permission.MCP_KEY_CREATE)
             ApiKeyKind.ENDPOINT -> requirePermission(principal, workspace, Permission.API_KEY_CREATE)
             ApiKeyKind.SERVER -> requirePermission(principal, workspace, Permission.SERVER_KEY_CREATE)
-            ApiKeyKind.USER -> throw KeyKindNotMintableException(kind)
         }
         return context
     }
-
-    /**
-     * The member's role in [workspaceId] right now — null when they hold no membership there or the
-     * workspace is deactivated. The MCP key's authority is read from this on every request through
-     * the cache (PK4, B5), which is what bounds a role change's reach at one TTL.
-     */
-    open fun activeRoleIn(
-        userId: UUID,
-        workspaceId: UUID,
-    ): WorkspaceRole? = memberships(userId).firstOrNull { it.workspaceId == workspaceId && it.workspaceActive }?.role
 
     /** True when [principal] may operate in [workspaceId] — member or super admin (D-R8). */
     open fun canAccess(

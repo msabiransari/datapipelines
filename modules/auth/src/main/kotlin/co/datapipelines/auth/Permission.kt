@@ -81,6 +81,8 @@ enum class Permission(
 
     // §2.6 — keys, workspaces, users, profile
     MCP_KEY_OWN("mcp_key.own"),
+    MCP_KEY_CREATE("mcp_key.create"),
+    MCP_KEY_REVOKE_OWN("mcp_key.revoke_own"),
     API_KEY_READ("api_key.read"),
     API_KEY_CREATE("api_key.create"),
     API_KEY_REVOKE("api_key.revoke"),

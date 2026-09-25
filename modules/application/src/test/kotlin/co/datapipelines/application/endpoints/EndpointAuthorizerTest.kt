@@ -135,7 +135,7 @@ class EndpointAuthorizerTest {
     }
 
     @Test
-    fun `a USER key is subject to the bindings too — a bound path is not a user-key bypass`() {
+    fun `an MCP key is subject to the bindings too — a bound path is not an mcp-key bypass`() {
         // A bound node decides for every credential, not only endpoint ones. Otherwise binding a
         // path would tighten it for machines and leave it open to every operator key.
         assertAll(
@@ -208,7 +208,7 @@ class EndpointAuthorizerTest {
     private fun userKey(
         workspace: UUID = WORKSPACE,
         keyId: String = "dpk_USER",
-    ) = principal(keyId, ApiKeyKind.USER, workspace)
+    ) = principal(keyId, ApiKeyKind.MCP, workspace)
 
     private fun principal(
         keyId: String,

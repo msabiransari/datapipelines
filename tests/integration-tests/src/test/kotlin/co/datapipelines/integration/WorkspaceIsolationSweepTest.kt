@@ -498,7 +498,7 @@ class WorkspaceIsolationSweepTest {
 
         val SUCCESS_RANGE = 200..299
         const val HTTP_FORBIDDEN = 403
-        const val USER_KEY_OFF_SURFACE = "user_key_off_surface"
+        const val USER_KEY_OFF_SURFACE = "mcp_key_off_surface"
         const val HTTP_NOT_FOUND = 404
         const val LEAK_EXCERPT = 300
 

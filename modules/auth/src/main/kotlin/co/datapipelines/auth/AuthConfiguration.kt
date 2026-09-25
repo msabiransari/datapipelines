@@ -101,7 +101,7 @@ class AuthConfiguration {
         authProperties: AuthProperties,
         contentCheck: ObjectProvider<WorkspaceContentCheck>,
         demoWorkspaceSeeder: ObjectProvider<DemoWorkspaceSeeder>,
-        apiKeyService: ObjectProvider<ApiKeyService>,
+        userService: UserService,
     ): WorkspaceService =
         WorkspaceService(
             workspaceRepository,
@@ -117,11 +117,9 @@ class AuthConfiguration {
             // examples file — construct a WorkspaceService without one. In the application it
             // is always present; the D-R11 demo join is not optional there.
             demoWorkspaceSeeder.getIfAvailable(),
-            // D16 — the login mint. ApiKeyService depends on WorkspaceService (the issuance
-            // membership guard), so the port closes over a PROVIDER and resolves the service
-            // on the first login, never at construction: the cycle that would otherwise exist
-            // between these two beans stays unrolled.
-            McpKeyMint { user, context, loginMethod -> apiKeyService.getObject().mintLoginKey(user, context, loginMethod) },
+            // Keys v2 (A17/B6) — member removal deactivates a revoked key's identity; the user
+            // service has no dependency on this one, so the reference is direct.
+            userService,
         )
 
     /**
@@ -180,6 +178,14 @@ class AuthConfiguration {
             // so this module's own test slices construct the service without one.
             secretSealer.getIfAvailable(),
         )
+
+    /**
+     * Keys v2 A17/B5 — the retention sweep's last step: revoked keys and their identities,
+     * deleted once nothing references them. The FK-deriving purge is a bean so the sweep's
+     * scheduler (`RetentionSchedulingConfiguration`) calls it after the event retention.
+     */
+    @Bean
+    fun keyRetentionPurge(jdbc: NamedParameterJdbcTemplate): KeyRetentionPurge = KeyRetentionPurge(jdbc)
 
     @Bean
     fun authErrorWriter(objectMapper: ObjectMapper): AuthErrorWriter = AuthErrorWriter(objectMapper)

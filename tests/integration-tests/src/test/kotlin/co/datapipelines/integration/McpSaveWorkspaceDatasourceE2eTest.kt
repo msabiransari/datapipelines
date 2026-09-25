@@ -303,6 +303,9 @@ class McpSaveWorkspaceDatasourceE2eTest {
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val ADMIN_KEY = E2eAuth.generateKey("e2e-134-default-key")
 
+        /** The key's own `service` identity (keys v2 A13). */
+        private val KEY_IDENTITY: String = UUID.randomUUID().toString()
+
         /** The OTHER workspace and its member — the negative's owner, who registers over REST as a session. */
         private val FOREIGN_WORKSPACE_ID: String = UUID.randomUUID().toString()
         private val FOREIGN_USER_ID: String = UUID.randomUUID().toString()
@@ -380,21 +383,26 @@ class McpSaveWorkspaceDatasourceE2eTest {
                         "INSERT INTO workspace_members (workspace_id, user_id, role)" +
                             " VALUES ('$FOREIGN_WORKSPACE_ID', '$FOREIGN_USER_ID', 'workspace_admin')",
                     )
-                    // #215 PK4: a super admin's MCP key with NO membership is a viewer, and this
-                    // suite authors over MCP — so the key's member is a workspace admin of the
-                    // default workspace (capped at author over MCP, which is what authoring needs).
+                    // Keys v2 (A13): the key acts as its own identity and holds the role chosen at
+                    // creation — its member is a workspace admin of the default workspace, so the
+                    // subset rule allows that role (authoring is what this suite needs).
                     statement.execute(
                         "INSERT INTO workspace_members (workspace_id, user_id, role)" +
                             " VALUES ('$WORKSPACE_ID', '$ADMIN_USER_ID', 'workspace_admin')",
                     )
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                            "('$KEY_IDENTITY', '${ADMIN_KEY.id.lowercase()}@keys.invalid', '${ADMIN_KEY.name}', 'key', " +
+                            "'${ADMIN_KEY.id}', TRUE, FALSE, 'service')",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'workspace_admin')",
                     ).use { ps ->
-                        // The MCP key: acts as its member, who created it (no role — PK4).
                         ps.setString(1, ADMIN_KEY.id)
-                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
+                        ps.setObject(2, UUID.fromString(KEY_IDENTITY))
                         ps.setObject(3, UUID.fromString(ADMIN_USER_ID))
                         ps.setString(4, ADMIN_KEY.name)
                         ps.setString(5, ADMIN_KEY.hash)

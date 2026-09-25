@@ -9,10 +9,11 @@ package co.datapipelines.auth
  *
  * - a SESSION holds its membership's role in the active workspace, or a super admin's D7
  *   authority ([RolePermissions]);
- * - the MCP (`user`) key holds its member's role, capped at author (PK4), resolved per request
- *   into its [WorkspaceContext] — never a super admin's authority (B1);
- * - a key acting as its own identity holds its [KeyRole] — `api_caller` or
- *   `promotion_receiver` — and nothing else (record §3.2): the key role IS the answer.
+ * - a KEY of every kind (keys v2 A13) holds its own [KeyRole] — for an `mcp` key one of the
+ *   MEMBER roles chosen at creation (`author`, `promoter`, `workspace_admin`), for the other
+ *   kinds their transport role (`api_caller`, `promotion_receiver`) — and nothing else
+ *   (record §3.2): the key role IS the answer. There is no derivation from a membership and
+ *   no cap; never a super admin's authority (B1).
  *
  * `ScopeMatrixSpecDriftTest` asserts the catalog and every role column (member and key) against
  * auth.md §7.6 in both directions; `RequiredScopeCoverageTest` that every handler declares a
@@ -54,12 +55,13 @@ object ScopeMatrix {
      * **The** authorization function. `ScopeInterceptor` and `McpToolDispatcher` call this and
      * nothing else.
      *
-     * - A principal with a [KeyRole] (an `endpoint` key, a server key's promotion peer — the
-     *   config-value peer included) is judged by that role's column alone. No workspace is needed
-     *   to answer it: the promotion receiver takes a batch for any workspace (B6), and an `endpoint`
-     *   key's pinned workspace was judged live when its credential became a principal.
+     * - A principal with a [KeyRole] (every key since keys v2 — an `mcp` key of the chosen
+     *   member role, an `endpoint` key, a server key's promotion peer — the config-value peer
+     *   included) is judged by that role's column alone. No workspace is needed
+     *   to answer it: the promotion receiver takes a batch for any workspace (B6), and an
+     *   `endpoint` key's pinned workspace was judged live when its credential became a principal.
      * - Every other principal is judged by its [context]'s role — a session's membership (or a
-     *   super admin's D7 authority), the MCP key's member role capped at author (PK4).
+     *   super admin's D7 authority).
      *
      * A null [context] means the principal resolved no workspace: every workspace permission is
      * refused with `workspace.not_found` (D-R5). Two session-only exceptions: the two "which
@@ -153,9 +155,11 @@ object ScopeMatrix {
 
         if (context.permits(permission)) return Decision.Allowed
 
-        // D-R12's distinct refusal, kept for the MCP key (record §4: "codes that still mean
-        // something"): the KEY is fine, its member's role does not reach this — a caller must be
-        // told to ask for a role rather than to retry with this key.
+        // D-R12's distinct refusal: the KEY is fine, the role it was judged against does not
+        // reach this — a caller must be told to ask for a role rather than to retry with this
+        // key. (Keys v2: every key carries its own role, so this arm answers a context-judged
+        // key principal only — the promotion config-value peer and any legacy path that built
+        // a key principal without a keyRole.)
         val code =
             if (principal.authMethod == AuthMethod.API_KEY) {
                 AuthErrorCodes.KEY_ISSUER_ROLE_LOST

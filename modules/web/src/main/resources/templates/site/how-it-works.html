@@ -26,7 +26,7 @@
       <p class="eyebrow">Run it, then build on it</p>
       <h1 id="hiw-hero-title" class="ds-display">How it works: the MCP server tutorial, end to end on your laptop</h1>
       <!-- claim: docs/deployment.md Appendix B (the demo quickstart), docs/mcp-server.md §3 (the endpoint), docs/rest-api.md §19 (the published endpoint) -->
-      <p class="lede">Eight steps, each executed on a fresh checkout before it was written here. Start the server with sample data. Copy your MCP key from the top bar. Connect Claude Code, Cursor or Copilot over MCP. Let the agent author and run a pipeline, release it, publish it as an API, bind a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
+      <p class="lede">Eight steps, each executed on a fresh checkout before it was written here. Start the server with sample data. Create your key on the Keys page. Connect Claude Code, Cursor or Copilot over MCP. Let the agent author and run a pipeline, release it, publish it as an API, bind a key to that API, and call it. Every command, config block and response below is copied from that run.</p>
       <div class="actions">
         <a class="btn btn-primary" href="#quickstart">Start at step 1 <span aria-hidden="true">&rarr;</span></a>
         <a class="btn btn-secondary" href="#engineering">Skip to the engineering depth</a>
@@ -72,19 +72,19 @@
   <section class="section band" id="step-key" aria-labelledby="step-key-title">
     <div class="container">
       <p class="kicker">Step 2</p>
-      <h2 id="step-key-title" class="ds-headline">Copy your MCP key from the top bar</h2>
-      <!-- claim: docs/ui-screens.md §3.4 (the top bar's MCP-key chip), docs/auth.md §7.4 (login-minted issuance; the forced password change gates that session's mint), §7.5 (the key carries its member's role, capped at author) -->
-      <p class="section-lede"><strong>What you do.</strong> Sign in. That is all it takes to get a key: your MCP key is created for you and waits in the <strong>top bar</strong>, on the right, as the <code>dpk_…</code> chip beside your account menu. <strong>Copy</strong> puts the full key on your clipboard; paste it into the client config in step 3. After the forced password change in step 1, sign out and sign in once more, because the key is created at your first ordinary sign-in.</p>
+      <h2 id="step-key-title" class="ds-headline">Create your key on the Keys page</h2>
+      <!-- claim: docs/ui-screens.md §4.19 (the Keys page, the ONE creation path), docs/auth.md §7.4 (keys v2: the role is chosen at creation under the subset rule; no key is minted at sign-in), §7.5 (the key acts as its own identity holding its chosen role) -->
+      <p class="section-lede"><strong>What you do.</strong> No key exists until someone creates one. Open the <strong>Keys page</strong>, choose <strong>New API key</strong>, pick the kind <code>mcp</code>, and give it a role: the dialog offers exactly the roles whose permissions are a subset of yours. <strong>Create</strong> shows the full key once; copy it into the client config in step 3 and keep the page's row for revoking later.</p>
       <div>
         <figure class="media-frame">
-        <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Top bar</span><span class="tag">Screenshot</span></div>
-        <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The top bar's right side: the MCP-key chip with its prefix, a Copy button and a delete-to-rotate button, beside the account menu.">
-        <figcaption>The MCP-key chip in the top bar: prefix, Copy, and delete-to-rotate.</figcaption>
+        <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Keys page</span><span class="tag">Screenshot</span></div>
+        <img src="/site/img/keys.png" width="1440" height="900" loading="lazy" alt="The Keys page: the new-key dialog with the kind and role choice, and the table of keys with their role, whose key they act as, and who created them.">
+        <figcaption>The Keys page: choose the kind and the role, copy the shown-once key, revoke it there.</figcaption>
         </figure>
       </div>
-      <p><strong>What you see.</strong> You get exactly one key per workspace per person. The key acts as you, with your role in that workspace, capped at author. For the demo admin that is author, which is everything an authoring agent needs. A viewer's key would browse and run. The role decides, never a form.</p>
-      <!-- claim: docs/auth.md §7.4 (minted at login; pinned to the workspace; rotation is delete + sign in), docs/rest-api.md §16.1 (the /mine read) -->
-      <p><strong>What just happened.</strong> The key was created when you signed in and pinned to the workspace you entered, <code>demo</code> here. It is sealed at rest so the top bar can open it for a copy. There is no endpoint that creates one, on purpose: <code>GET /api/v1/auth/api-keys/mine</code> reads it, and rotating it means deleting it with the chip's button and signing in again. Administration stays with signed-in people; no key can hold it.</p>
+      <p><strong>What you see.</strong> The key acts as its own identity holding the role you gave it. An author-role key can create and run; a promoter-role key reads and promotes. For the demo workspace a workspace admin can offer any of the three roles, and an author exactly one: their own. The subset rule decides, never a promise.</p>
+      <!-- claim: docs/auth.md §7.4 (created on the Keys page; pinned to the workspace; revocation is a delete on the same page), docs/enums.md §8A/§8D (the kinds and the key roles) -->
+      <p><strong>What just happened.</strong> The key was created on the Keys page and pinned to the workspace you are in, <code>demo</code> here, with an identity of its own. It is shown exactly once, and the server keeps only the hash, so paste it into the client config now. Deleting the key on the same page revokes it; removing the member who created a key revokes it too. Administration stays with signed-in people; no key can hold it.</p>
     </div>
   </section>
 

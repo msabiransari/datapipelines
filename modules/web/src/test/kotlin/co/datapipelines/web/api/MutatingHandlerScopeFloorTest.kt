@@ -45,7 +45,7 @@ import kotlin.reflect.jvm.javaMethod
  * to the handler that carries it (the "coverage ≠ existence" trap, MISTAKES.md).
  *
  * Born red (025): `PATCH /partials/profile/theme` mutated behind `READ_RESOURCES`. Falsified in
- * slice (b) by widening `reachableBy(USER, …)` to the whole app — every REST and partial mutation
+ * slice (b) by widening `reachableBy(MCP, …)` to the whole app — every REST and partial mutation
  * is then named as reachable by the MCP key.
  */
 class MutatingHandlerScopeFloorTest {
@@ -92,7 +92,7 @@ class MutatingHandlerScopeFloorTest {
     @Test
     fun `the MCP key reaches no mutating handler`() {
         discoveredMutatingHandlers()
-            .filter { it.path != null && ScopeInterceptor.reachableBy(ApiKeyKind.USER, concrete(it.path)) }
+            .filter { it.path != null && ScopeInterceptor.reachableBy(ApiKeyKind.MCP, concrete(it.path)) }
             .map { it.where } shouldBe emptyList()
     }
 
@@ -218,13 +218,9 @@ class MutatingHandlerScopeFloorTest {
                             "the promotion receiver's push (versioning §10.4): the server key's whole purpose, " +
                                 "held by promotion_receiver",
                     ),
-                "endpoint ExecutionsController#cancel" to
-                    SurfaceEntry(
-                        heldByKeyRole = false,
-                        reason =
-                            "the execution-read path pattern an endpoint key reaches (to collect its own run) also maps " +
-                                "DELETE — reached by path, refused by role: api_caller does not hold execution.cancel",
-                    ),
+                // Keys v2 A16: the endpoint key's reach no longer includes the framework's
+                // execution routes at all, so ExecutionsController#cancel is off its surface and
+                // the map carries the one entry left (the promotion receiver's push).
             )
 
         /**

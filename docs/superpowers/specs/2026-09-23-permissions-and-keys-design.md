@@ -1,7 +1,8 @@
 # Permissions and keys: design record
 
 **Status:** RATIFIED 2026-09-23; **amended 2026-09-24** (§10, the owner's rulings A1–A8 on the
-pre-implementation review, and A9–A12 during slice (b)). The owner ruled PK1–PK9 (§1) and agreed O1–O3 (§9) on 2026-09-23.
+pre-implementation review, and A9–A12 during slice (b)) **and 2026-09-25** (§10, A13–A19, the
+keys-v2 lane #233). The owner ruled PK1–PK9 (§1) and agreed O1–O3 (§9) on 2026-09-23.
 **Date:** 2026-09-23.
 **Delivery:** [GitHub issue #215](https://github.com/msabiransari/datapipelines/issues/215).
 **Amends:** the [roles and permissions design](2026-09-20-roles-permissions-design.md) (ratified
@@ -242,11 +243,12 @@ later role cannot slip past it.
 ### 3.4 The MCP key (PK4)
 
 It connects an MCP client and nothing else (A10): over REST the key is refused on every route,
-`endpoint.key_kind_refused` with `details.reason = user_key_off_surface`. Its role is re-read on
-every request (within the auth cache TTL, A9):
-- a member's role, with workspace admin mapped to author
-- a super admin who is a member: that membership's role capped at author
-- a super admin with no membership: viewer
+`endpoint.key_kind_refused` with `details.reason = user_key_off_surface`. Its role was ~~re-read on
+every request~~ — the whole paragraph below is RETIRED by A13 (the role is the key's own, chosen at
+creation; C2's freshness rule is gone with it):
+- ~~a member's role, with workspace admin mapped to author~~
+- ~~a super admin who is a member: that membership's role capped at author~~
+- ~~a super admin with no membership: viewer~~
 
 No MCP tool needs more than author: `MCP_TOOL_MIN_PERMISSION` holds 20 `VIEW`, 8 `EXECUTE` and 13
 `AUTHOR` entries.
@@ -277,9 +279,10 @@ test.**
   above, so no key gains access to table data.
 - Ruled: accepted (O1).
 
-**C2. MCP keys follow role changes at once.** On main the scope is fixed when the key is minted, so
-a viewer promoted to author needed a new key to author. With this change the promotion takes
-effect ~~on the next request~~ **within the auth cache TTL, 60 s by default** (A9).
+**C2. ~~MCP keys follow role changes at once.~~ RETIRED by A13 (2026-09-25, with PK4 and C3): the
+key's role is its OWN, chosen at creation, so a member's later role changes do not flow to it and
+there is no freshness to state. What replaced it is revocation's levers — revoke-own,
+`api_key.revoke`, member removal, the members-row lever (auth spec §7.4/§7.5).**
 
 **C3. Admin MCP keys are capped at author.** A workspace admin's or super admin's MCP key sees only
 its own executions over MCP. Nothing else changes over MCP (§3.4).
@@ -417,4 +420,17 @@ Rulings of 2026-09-24 during slice (b) (the lane brief's §B, and one question t
 | A10 | The MCP key is MCP-only (owner: "I want the agent prevented from making calls to REST endpoints"). The REST key filter refuses a `user` key on every route outside `/mcp`, before any permission check: `endpoint.key_kind_refused`, `details.reason = user_key_off_surface`. It mirrors the refusal of endpoint and server keys on `/mcp`. PK4's cap applies over MCP. The browser's own calls are session-authenticated and unaffected. Consequence: an unbound published path has no caller, because serving is key-only, and it is unservable until it is bound. | §3.1, §3.4 |
 | A11 | Promotion intake is instance-wide. §3.3 said: "Identities hold **no membership**; their authority is the key's role in the key's pinned workspace." For a server key, `workspace_id` is where the key is administered, not a confinement. No workspace comparison is added, and a batch for another workspace is accepted. The config-value server key (no key row) keeps acting as the System actor, the one non-identity credential. A stored server key acts as its identity (C4). | §3.2, §3.3 |
 | A12 | `api_caller` also holds `execution.read` for the executions the key started, so a program can poll the run it launched as well as read its result. The endpoint key could already do this on main. | §3.2 |
+
+Rulings of 2026-09-25 (the keys-v2 lane, #233; the lane's first commit adds these rows):
+
+| # | Ruling | Where |
+|---|---|---|
+| A13 | The MCP key's authority is a role chosen at creation. PK4's cap ("the member's role capped at author") is retired, and with it C2 (freshness on a role change — a key's role is its own; the member's role no longer flows to it) and C3 (admin keys capped at author). B1 of 215b stands: no key is ever a super admin; `super_admin` is not offerable. The MCP key's identity holds its role in the key's workspace exactly as a member does. | PK4, §3.4, C2, C3 |
+| A14 | The subset rule. A creator may give a key any role whose permission set (the one `RolePermissions` table) is a subset of the creator's own permissions in that workspace; a super admin holds every permission, so any role. No ordinal ladder exists; promoter and author are not comparable and neither may mint the other. `mcp_key.create` (new catalog permission) is held by author, promoter and workspace admin; `api_key.create`/`server_key.create` unchanged. A creator may revoke the keys it created (`mcp_key.revoke_own`, new, author and above); `api_key.revoke` (workspace admin) revokes any key in the workspace. | §3.2 creation limit (O3), §3.1, §2.6 |
+| A15 | Viewer is never a key role, and no key is minted at sign-in: the login mint (D16) and the top-bar chip are retired. The Keys page is the one creation path for every kind. The dialog offers, for an `mcp` key, the roles the subset rule allows the signed-in person, starting at author. | §3.1 (the `user` row), §3.4, D16 |
+| A16 | `api` keys reach business routes only. A published endpoint's caller pages a result under the business path (`GET /api/<category>/v1/<path>/executions/{id}` and `…/result`); the two framework reads A12 granted (`GET /api/v1/executions/{id}`, `…/result`) are retired for keys. | §3.2 (`api_caller` row), A12 |
+| A17 | Keys and identities are never hard-deleted by the application: revocation is their end state. A purge in the retention sweep deletes revoked keys and their identities once nothing references them. Removing a member revokes the keys that member created in that workspace (the C1 safety, restated for created-by). | §3.3, §5 |
+| A18 | A key name is unique within its workspace (`(workspace_id, name)` for live keys). `created_by`/`executed_by` keep the identity's id and its foreign key. | §3.3 |
+| A19 | The `user` kind is renamed `mcp` — on the wire, in the CHECK and in the docs: kind is the transport and the word says which. (`endpoint` and `server` stay.) | §3.1, §3.2, §3.4 |
+| A20 | An mcp key's liveness includes its CREATOR's: a deactivated person's mcp keys are refused `auth.principal_deactivated` until reactivation; endpoint and server keys are creator-independent (PK2); revocation remains the irreversible lever (A17, the members-row lever). Derived at the 233b validation (security pass 2026-09-25, finding 1); ruled by the owner 2026-09-25. The V37 conversion CTE stands (it reads the membership, never `users.is_active`). | §3.4, auth.md §7.3/§11A.3 |
 

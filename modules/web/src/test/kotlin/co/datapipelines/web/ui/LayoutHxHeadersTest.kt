@@ -30,7 +30,7 @@ import java.util.UUID
  * sends no headers at all (every mutation 403s `auth.csrf.invalid`).
  */
 class LayoutHxHeadersTest {
-    private val advice = UiWorkspaceAdvice(mockk<WorkspaceService>(), mockk<ThemeResolver>(), mockk())
+    private val advice = UiWorkspaceAdvice(mockk<WorkspaceService>(), mockk<ThemeResolver>())
     private val objectMapper = ObjectMapper()
 
     private val engine =

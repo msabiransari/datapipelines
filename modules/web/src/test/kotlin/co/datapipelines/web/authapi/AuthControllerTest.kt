@@ -76,6 +76,7 @@ class AuthControllerTest {
     private fun key(
         id: String,
         revoked: Boolean,
+        kind: ApiKeyKind = ApiKeyKind.MCP,
     ) = ApiKey(
         id = id,
         userId = userId,
@@ -87,6 +88,8 @@ class AuthControllerTest {
         expiresAt = null,
         workspaceId = workspaceId,
         workspaceName = "acme",
+        kind = kind,
+        role = KeyRole.AUTHOR,
     )
 
     private fun user(
@@ -129,7 +132,7 @@ class AuthControllerTest {
     fun `create returns the plaintext exactly once, with the role, the identity and the creator`() {
         authenticate()
         val identity = UUID.randomUUID()
-        every { apiKeyService.issue(any(), "ci", any(), null, ApiKeyKind.ENDPOINT) } returns
+        every { apiKeyService.issue(any(), "ci", any(), null, ApiKeyKind.ENDPOINT, null) } returns
             IssuedApiKey(
                 key("dpk_new", false).copy(kind = ApiKeyKind.ENDPOINT, role = KeyRole.API_CALLER, userId = identity, createdBy = userId),
                 "dpk_new.secret",
@@ -148,12 +151,11 @@ class AuthControllerTest {
     }
 
     /**
-     * 179 (D16) — the default kind is `user`, and `user` is refused on EVERY request surface:
-     * a pre-179 client posting what it always posted gets the catalogued 400 that says what
-     * changed, never a silently different credential.
+     * Keys v2 (A15/A19) — no default kind exists any more (the login mint is retired), so an
+     * ABSENT kind is the catalogued 400; the pre-v2 `user` wire word is simply unknown now.
      */
     @Test
-    fun `an absent or user kind is the not-mintable refusal, and no key is issued`() {
+    fun `an absent kind is the not-mintable refusal and user is an unknown kind - no key is issued`() {
         authenticate()
 
         val defaulted = shouldThrow<DatapipelinesException> { controller.createKey(CreateApiKeyRequest(name = "claude")) }
@@ -161,8 +163,19 @@ class AuthControllerTest {
 
         val explicit =
             shouldThrow<DatapipelinesException> { controller.createKey(CreateApiKeyRequest(name = "claude", kind = "user")) }
-        explicit.code shouldBe "auth.key_kind_not_mintable"
-        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any()) }
+        explicit.code shouldBe "endpoint.key_kind_refused"
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any()) }
+    }
+
+    /** Keys v2 A13: an `mcp` key's member role is REQUIRED — no role, no mint. */
+    @Test
+    fun `an mcp key without a role is refused by the funnel`() {
+        authenticate()
+
+        val refused =
+            shouldThrow<DatapipelinesException> { controller.createKey(CreateApiKeyRequest(name = "claude", kind = "mcp")) }
+        refused.code shouldBe "endpoint.key_kind_refused"
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any()) }
     }
 
     /** #215 PK8: scopes are gone — a request that still sends them is refused BY NAME, before any mint. */
@@ -176,7 +189,7 @@ class AuthControllerTest {
             }
         error.code shouldBe "pipeline.execution.invalid_parameter_type"
         error.details["field"] shouldBe "scopes"
-        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -194,7 +207,7 @@ class AuthControllerTest {
                 controller.createKey(CreateApiKeyRequest(name = "x", kind = "endpoint", role = "promotion_receiver"))
             }
         mismatched.code shouldBe "endpoint.key_kind_refused"
-        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { apiKeyService.issue(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -210,11 +223,11 @@ class AuthControllerTest {
     }
 
     @Test
-    fun `revoke is creator-scoped and idempotent`() {
+    fun `revoke hands the principal to the one revocation verb - its answer is silent either way (A14)`() {
         authenticate()
-        every { apiKeyService.revoke("dpk_x", userId) } returns false
+        every { apiKeyService.revokeAs(any(), "dpk_x") } returns false
         controller.revokeKey("dpk_x")
-        verify(exactly = 1) { apiKeyService.revoke("dpk_x", userId) }
+        verify(exactly = 1) { apiKeyService.revokeAs(match { it.userId == userId }, "dpk_x") }
     }
 
     @Test

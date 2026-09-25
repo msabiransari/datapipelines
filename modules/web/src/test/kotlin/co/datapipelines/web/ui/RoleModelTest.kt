@@ -172,9 +172,11 @@ class RoleModelTest {
      */
     @Test
     fun `viewer, author and promoter get no Admin entry, and the rail follows their rows`() {
-        RoleModel.shell(session(WorkspaceRole.VIEWER)) shouldBe shell(executions = true)
-        RoleModel.shell(session(WorkspaceRole.AUTHOR)) shouldBe shell(executions = true, promotion = true)
-        RoleModel.shell(session(WorkspaceRole.PROMOTER)) shouldBe shell(promotion = true)
+        // Keys v2 (A15): the Keys page is the ONE creation path for every kind and every
+        // signed-in person's key surface, so the avatar-menu link follows mcp_key.own.
+        RoleModel.shell(session(WorkspaceRole.VIEWER)) shouldBe shell(executions = true, apiKeys = true)
+        RoleModel.shell(session(WorkspaceRole.AUTHOR)) shouldBe shell(executions = true, promotion = true, apiKeys = true)
+        RoleModel.shell(session(WorkspaceRole.PROMOTER)) shouldBe shell(promotion = true, apiKeys = true)
     }
 
     @Test
@@ -294,6 +296,6 @@ class RoleModelTest {
             keyId = "dp_key",
             workspaceName = "acme",
             workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.VIEWER, implicit = true),
-            keyKind = ApiKeyKind.USER,
+            keyKind = ApiKeyKind.MCP,
         )
 }

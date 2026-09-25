@@ -139,15 +139,18 @@ object RoleMatrixDoc {
         }
 
     /**
-     * The key-role cell alphabet (#215): ✗ refuses; ✓ admits; `own` admits the key's OWN runs only
-     * (the executions it started, record §3.2); `bound` admits the published paths bound to the key
-     * (§7.7). Anything else fails loudly, for the reason [allowsCell] does.
+     * The key-role cell alphabet (#215; keys v2 #233): ✗ refuses; ✓ admits; `own` admits the
+     * key's OWN runs only (the executions it started, record §3.2); `bound` admits the published
+     * paths bound to the key (§7.7); `lens` admits through the promoter lens (the `mcp:promoter`
+     * column mirrors the promoter member cell, and an `mcp` promoter key IS lensed — A13);
+     * `fenced` refuses (the promotion receiving rows, §7.7). Anything else fails loudly, for
+     * the reason [allowsCell] does.
      */
     private fun allowsKeyCell(token: String): Boolean =
         when (token) {
-            "✗" -> false
-            "✓", "own", "bound" -> true
-            else -> throw IllegalArgumentException("Unknown §7.6 key-role cell '$token' — the alphabet is ✓ ✗ own bound")
+            "✗", "fenced" -> false
+            "✓", "own", "bound", "lens" -> true
+            else -> throw IllegalArgumentException("Unknown §7.6 key-role cell '$token' — the alphabet is ✓ ✗ own bound lens fenced")
         }
 
     /** The rows of the table that follows [marker], split into trimmed cells. */
@@ -182,8 +185,13 @@ object RoleMatrixDoc {
     private const val MCP_LABEL = "MCP:"
     private const val ROLE_COLUMNS = 5
 
-    /** The key-role columns, in doc order, after the five member-role columns (#215 slice (b)). */
-    private val KEY_ROLE_COLUMNS = listOf(KeyRole.API_CALLER, KeyRole.PROMOTION_RECEIVER)
+    /**
+     * The key-role columns, in doc order, after the five member-role columns: the two transport
+     * roles (#215 slice (b)) and — keys v2 (#233, A13/A14) — the three MEMBER roles an `mcp`
+     * key may carry, each judged by the member column of the same name.
+     */
+    private val KEY_ROLE_COLUMNS =
+        listOf(KeyRole.API_CALLER, KeyRole.PROMOTION_RECEIVER, KeyRole.AUTHOR, KeyRole.PROMOTER, KeyRole.WORKSPACE_ADMIN)
 
     /** Permission | Surfaces | five roles | two key roles. */
     private val CATALOG_COLUMNS = 2 + ROLE_COLUMNS + KEY_ROLE_COLUMNS.size

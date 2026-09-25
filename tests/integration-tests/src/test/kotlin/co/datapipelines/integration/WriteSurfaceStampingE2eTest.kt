@@ -134,7 +134,7 @@ class WriteSurfaceStampingE2eTest {
             .post("/api/v1/pipelines")
             .then()
             .statusCode(403)
-            .body("error.details.reason", org.hamcrest.Matchers.equalTo("user_key_off_surface"))
+            .body("error.details.reason", org.hamcrest.Matchers.equalTo("mcp_key_off_surface"))
 
         rowCount("test/via_rest_key") shouldBe 0
     }
@@ -180,7 +180,9 @@ class WriteSurfaceStampingE2eTest {
         val row = row("test/via_mcp")
         row["created_via"] shouldBe "mcp"
         row["updated_via"] shouldBe "mcp"
-        row["created_by"] shouldBe ADMIN_USER_ID
+        // Keys v2 (A13): the write's actor is the key's own identity — the member is no longer
+        // the mcp key's principal (created_by keeps a PERSON only where a person created it).
+        row["created_by"] shouldBe KEY_IDENTITY
     }
 
     @Test
@@ -299,6 +301,9 @@ class WriteSurfaceStampingE2eTest {
     companion object {
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
 
+        /** The key's own `service` identity (keys v2 A13). */
+        private val KEY_IDENTITY: String = UUID.randomUUID().toString()
+
         private val ADMIN_KEY = E2eAuth.generateKey("e2e-via-stamping-key")
 
         /** FIXED, not random: the session leg mints its own JWT against this secret. */
@@ -362,14 +367,20 @@ class WriteSurfaceStampingE2eTest {
                         "INSERT INTO workspace_members (workspace_id, user_id, role)" +
                             " VALUES ('defa0000-0000-0000-0000-000000000001', '$ADMIN_USER_ID', 'workspace_admin')",
                     )
+                    // The key's own identity (keys v2 A13).
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                            "('$KEY_IDENTITY', '${ADMIN_KEY.id.lowercase()}@keys.invalid', '${ADMIN_KEY.name}', 'key', " +
+                            "'${ADMIN_KEY.id}', TRUE, FALSE, 'service')",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id)" +
-                            " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001')",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?, ?, ?, ?, 'defa0000-0000-0000-0000-000000000001', 'mcp', 'workspace_admin')",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
-                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
+                        ps.setObject(2, UUID.fromString(KEY_IDENTITY))
                         ps.setObject(3, UUID.fromString(ADMIN_USER_ID))
                         ps.setString(4, ADMIN_KEY.name)
                         ps.setString(5, ADMIN_KEY.hash)

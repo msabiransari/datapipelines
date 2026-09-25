@@ -10,9 +10,10 @@ import java.util.UUID
  * [workspaceId]/[workspaceName] are the key's pinned workspace (D3): since slice 2 the
  * pin IS the key's request context — no `DP-Workspace` override exists for keys.
  *
- * [userId] is WHO THE KEY ACTS AS (#215, PK5): the member for the MCP (`user`) key, the key's
- * own `service` identity for an `endpoint` or `server` key. [createdBy] is who created it — the
- * Keys page's "Created by" — and, for the MCP key, the same member (B4).
+ * [userId] is WHO THE KEY ACTS AS (#215 PK5, keys v2 A13): the key's own `service` identity for
+ * EVERY kind — an `mcp` key's identity holds the key's member role in this workspace exactly as a
+ * member does. [createdBy] is who created it — the Keys page's "Created by" — and the subject a
+ * member removal revokes keys by (A17).
  */
 data class ApiKey(
     val id: String,
@@ -26,22 +27,26 @@ data class ApiKey(
     val workspaceId: UUID,
     val workspaceName: String,
     /**
-     * What this key IS (V11, §7.7). Defaults to [ApiKeyKind.DEFAULT] so every construction site
-     * that predates kinds keeps meaning what it meant — the same choice the column's
-     * `DEFAULT 'user'` makes for every stored row.
+     * What this key IS (V11, §7.7; `mcp` since keys v2 V37 — A19). No default on purpose: a kind
+     * is a creation decision (A15 — the Keys page is the one creation path), and a caller that
+     * forgets it must fail to compile rather than mint a surprise.
      */
-    val kind: ApiKeyKind = ApiKeyKind.DEFAULT,
+    val kind: ApiKeyKind,
     /**
-     * Whether `api_keys.secret_sealed` holds the openable plaintext (V31, D16; show-once since
-     * #213 — the flag reads false from the first Copy on). The flag travels on the model — the
-     * top bar renders Copy from it — while the sealed BLOB never does:
+     * Whether `api_keys.secret_sealed` holds the openable plaintext (V31; keys v2: the sealed
+     * copies that remain are the login-minted keys' unread ones, V37-migrated, until their first
+     * read — no new key is ever minted with one). The flag travels on the model — the Keys page
+     * renders Copy from it — while the sealed BLOB never does:
      * [ApiKeyRepository.openAndClearSealedSecret] is the only read that touches the column.
      */
     val hasSealedSecret: Boolean = false,
-    /** True when the login/switch hook minted this key rather than a person on demand (D16). */
-    val mintedAtLogin: Boolean = false,
-    /** `api_keys.role` (V34): the key role of an identity-acting kind; null for the MCP key (PK4). */
-    val role: KeyRole? = KeyRole.forKind(kind),
+    /**
+     * `api_keys.role` (V34; every live kind since keys v2 V37 — A13): the key role whose
+     * [RolePermissions] column is the key's whole authority. Null ONLY on a revoked pre-v2
+     * row the migration left untouched (the CHECK forbids it on a live one) — a live key
+     * without a role never authenticates.
+     */
+    val role: KeyRole? = null,
     /** `api_keys.created_by` (V34, B4): the person who created the key. */
     val createdBy: UUID = userId,
 ) {
@@ -50,6 +55,9 @@ data class ApiKey(
 
     /** True when this key's authority is [KeyRole.PROMOTION_RECEIVER] on the promotion route family (§7.7). */
     val isServerKey: Boolean get() = kind == ApiKeyKind.SERVER
+
+    /** True when this key is an `mcp` key — a member-role credential over `/mcp` only (A13). */
+    val isMcpKey: Boolean get() = kind == ApiKeyKind.MCP
 }
 
 /**

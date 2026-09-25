@@ -185,10 +185,10 @@ class ReadFloorTest {
             },
         ),
 
-        /** 179 (D17): the workspace's API keys page — a workspace admin's read (MANAGE_API_KEYS). */
+        /** Keys v2 (A15): the Keys page is EVERY signed-in person's — the mcp_key.own row. */
         API_KEYS(
             floor = 1,
-            permissions = setOf(Permission.API_KEY_READ),
+            permissions = setOf(Permission.MCP_KEY_OWN),
             matches = { path -> path == "/api-keys" },
         ),
 

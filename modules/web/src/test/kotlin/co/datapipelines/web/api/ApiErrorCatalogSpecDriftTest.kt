@@ -239,13 +239,18 @@ class ApiErrorCatalogSpecDriftTest {
          * the SAME commit as the constants, the catalog rows (500 family default, 503/504
          * exceptions) and the AuthErrors anchor. Re-derived from the document's own parse.
          *
-         * 202 → 204 with 7e (#7, the semantic link): §13.9 gains `template.implements_unresolved`
+         * 202 → 203 with keys v2 (#233): §13.7 gains `auth.key_name_taken` (409 — the A18
+         * name conflict's own code, replacing the borrowed `pipeline.validation.duplicate_name`
+         * stand-in), landed in the SAME commit as the constant, the exception and the catalog
+         * row. Re-derived from the document's own parse.
+         *
+         * 203 → 205 with 7e (#7, the semantic link): §13.9 gains `template.implements_unresolved`
          * (400, an explicit catalog row — the bare `template.` codes have no family default) and
          * §13.13 gains `pipeline.release.template_needs_review` with HTTP `—` (a warning in the
          * release response, listed in NEVER_RETURNED_LIVE like the §13.6 type-mapping warnings),
          * landed in the SAME commit as their constants. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 204
+        const val SECTION_13_ROW_COUNT = 205
 
         /**
          * §12's distinct validation codes.

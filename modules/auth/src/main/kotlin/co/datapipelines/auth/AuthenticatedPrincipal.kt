@@ -36,9 +36,10 @@ enum class LoginMethod(
  * The internal principal both auth paths resolve to (auth.md §3).
  *
  * What it may do is a question of ROLE only since #215 slice (b) (scopes are gone, PK8): a
- * session's and an MCP key's role is the membership's in [workspace] (the MCP key's capped at
- * author, PK4), and a key that acts as its own identity carries a [keyRole]. [keyId] is present
- * only when [authMethod] is [AuthMethod.API_KEY] or a stored server key opened the promotion route.
+ * session's role is the membership's in [workspace], and every key carries a [keyRole] of its
+ * own (keys v2 A13 — an `mcp` key's chosen member role, no derivation, no cap). [keyId] is
+ * present only when [authMethod] is [AuthMethod.API_KEY] or a stored server key opened the
+ * promotion route.
  *
  * ## Workspace (design §5)
  * [workspaceName] is the *unresolved* value the credential carries — the JWT's
@@ -87,10 +88,11 @@ data class AuthenticatedPrincipal(
      */
     val superAdmin: Boolean = false,
     /**
-     * The KEY's role (#215, record §3.2) when the credential acts as its own identity — an
-     * `endpoint` key's [KeyRole.API_CALLER], a server key's [KeyRole.PROMOTION_RECEIVER]. Null for
-     * a session and for the MCP key, whose role is its member's ([workspace]). When set, it is the
-     * WHOLE answer to [holds]: a key role reaches no member permission and no instance permission.
+     * The KEY's role (#215 record §3.2; keys v2 A13 — every kind carries one): the whole answer
+     * to [holds] when set — an `mcp` key's chosen member role (`author`, `promoter`,
+     * `workspace_admin`), an `endpoint` key's [KeyRole.API_CALLER], a server key's
+     * [KeyRole.PROMOTION_RECEIVER]. Null for a session. A key role reaches no member
+     * permission beyond its column and no instance permission.
      */
     val keyRole: KeyRole? = null,
 ) {
@@ -117,9 +119,8 @@ data class AuthenticatedPrincipal(
      * `acting_via=super_admin`.
      *
      * A SESSION's property only: every key principal carries `superAdmin = false` (#215 B1 —
-     * PK3/PK4 made mechanical), so no key resolves an instance permission, ever, whoever minted
-     * it. A super admin's MCP key acts as their membership role capped at author, or as a viewer
-     * where they hold no membership (PK4).
+     * keys v2 keeps it), so no key resolves an instance permission, ever, whoever minted
+     * it, and `super_admin` is never a value `api_keys.role` accepts.
      */
     val isSuperAdmin: Boolean get() = superAdmin
 
@@ -178,15 +179,14 @@ data class AuthenticatedPrincipal(
      * matters is the instance authority: a super admin whose explicit membership is a
      * promoter role reads everything, the way every other super-admin read does.
      *
-     * Deliberately NOT [isPromoter]: that predicate answers "may this principal PROMOTE" and
-     * is true for admins; the lens is about what a principal SEES, and admins see everything.
-     * Nor does it consult the credential axis — a promoter's API key is a promoter's key
-     * (`ApiKeyService.pinnedContext` stamps the role), and the reads it makes are lensed the
-     * same way the session's are. The receiver's promotion principal has no workspace and
-     * never reaches here.
+     * Keys v2 (A13 — the key's identity holds its role EXACTLY as a member does): an `mcp`
+     * key whose key role is the promoter role is lensed like the member it mirrors — an
+     * agent's key is not a way around the lens. Deliberately NOT [isPromoter]: that predicate
+     * answers "may this principal PROMOTE" and is true for admins; the lens is about what a
+     * principal SEES, and admins see everything.
      */
     val isLensed: Boolean
-        get() = workspaceRole == WorkspaceRole.PROMOTER && !superAdmin
+        get() = !superAdmin && (workspaceRole == WorkspaceRole.PROMOTER || keyRole == KeyRole.PROMOTER)
 
     /**
      * Does this principal hold [permission] — the ONE question a service asks (#215 A.3), and

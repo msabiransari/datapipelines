@@ -245,6 +245,102 @@ class McpEntryPointChecksE2eTest {
         }
     }
 
+    /**
+     * A20 (owner ruling 2026-09-25, derived at the 233b security pass) over the REAL filter
+     * chain: an `mcp` key whose CREATOR is deactivated is refused `401
+     * auth.principal_deactivated` on /mcp, and reactivating the creator restores the key —
+     * no revoke, no re-mint (a read, never a write). The creator deliberately holds NO
+     * membership in the key's workspace: the ruling is about liveness, not membership, so this
+     * is also the "creator left the workspace" edge — the key lives while they are active, and
+     * its end state stays revocation (A17). The deactivation goes through the admin's own
+     * route (`POST /api/v1/auth/users/{id}/deactivate`, `user.manage`, super admin), the
+     * production path, so the liveness cache is evicted on this instance and the refusal lands
+     * on the very next request (auth.md §11.4), not at TTL expiry.
+     */
+    @Test
+    @Order(10)
+    fun `an mcp key dies with its creator's deactivation and returns on reactivation (A20)`() {
+        val creatorId = UUID.randomUUID().toString()
+        val identityId = UUID.randomUUID().toString()
+        val key = E2eAuth.generateKey("a20-creator-key")
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
+                        "('$creatorId', 'a20-creator@datapipelines.test', 'A20 Creator', 'test', '$creatorId', TRUE, FALSE)",
+                )
+                // The key's own `service` identity (keys v2 A13) — live for the whole test.
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                        "('$identityId', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}', TRUE, FALSE, 'service')",
+                )
+            }
+            connection
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'author')",
+                ).use { ps ->
+                    ps.setString(1, key.id)
+                    ps.setObject(2, UUID.fromString(identityId))
+                    ps.setObject(3, UUID.fromString(creatorId))
+                    ps.setString(4, key.name)
+                    ps.setString(5, key.hash)
+                    ps.setObject(6, UUID.fromString(WORKSPACE_ID))
+                    ps.executeUpdate()
+                }
+        }
+        val toolsList = """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"""
+
+        fun rawMcp(
+            plaintext: String,
+            method: String,
+        ): HttpResponse<String> {
+            val request =
+                HttpRequest
+                    .newBuilder(URI.create("http://localhost:$port$method"))
+                    .header("DP-API-Key", plaintext)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .POST(HttpRequest.BodyPublishers.ofString(toolsList))
+                    .build()
+            return http.send(request, HttpResponse.BodyHandlers.ofString())
+        }
+
+        fun adminPost(path: String): HttpResponse<String> {
+            val request =
+                HttpRequest
+                    .newBuilder(URI.create("http://localhost:$port$path"))
+                    .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                    .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build()
+            return http.send(request, HttpResponse.BodyHandlers.ofString())
+        }
+
+        // The control: with the creator ACTIVE, the key reaches the transport (tools/list answers).
+        withClue("the key must work while its creator is active") {
+            rawMcp(key.plaintext, "/mcp").statusCode() shouldBe 200
+        }
+
+        // Deactivate the creator through the admin route (the audited production flip).
+        val deactivated = adminPost("/api/v1/auth/users/$creatorId/deactivate")
+        withClue("the admin deactivation must succeed: ${deactivated.body()}") { deactivated.statusCode() shouldBe 200 }
+
+        val refused = rawMcp(key.plaintext, "/mcp")
+        withClue("a deactivated creator's mcp key must be refused: ${refused.body()}") {
+            refused.statusCode() shouldBe 401
+            refused.body().contains("\"code\":\"auth.principal_deactivated\"") shouldBe true
+        }
+
+        // Reactivation restores the key (D-R10's shape): the same plaintext works again.
+        val reactivated = adminPost("/api/v1/auth/users/$creatorId/activate")
+        withClue("the admin reactivation must succeed: ${reactivated.body()}") { reactivated.statusCode() shouldBe 200 }
+        withClue("reactivating the creator must restore the key") {
+            rawMcp(key.plaintext, "/mcp").statusCode() shouldBe 200
+        }
+    }
+
     // ---------------------------------------------------------------------------------
 
     private fun registerDatasource(
@@ -319,6 +415,9 @@ class McpEntryPointChecksE2eTest {
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
         private val ADMIN_KEY = E2eAuth.generateKey("e2e-139-entry-key")
 
+        /** The key's own `service` identity (keys v2 A13). */
+        private val KEY_IDENTITY: String = UUID.randomUUID().toString()
+
         /** The per-run JWT secret — registered as `datapipelines.jwt.secret`; REST is a session's surface (#215 B2). */
         private val JWT_SECRET = E2eSession.newSecret()
         private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-139-entry@datapipelines.test")
@@ -377,19 +476,25 @@ class McpEntryPointChecksE2eTest {
                              'e2e-139-entry-sub', TRUE, TRUE)
                         """.trimIndent(),
                     )
-                    // #215 PK4: a super admin's MCP key with NO membership is a viewer; this suite
-                    // authors over MCP, so the member is a workspace admin (capped at author there).
+                    // Keys v2 (A13): the key acts as its own identity and holds the role chosen at
+                    // creation — its member is a workspace admin, so the subset rule allows that role.
                     statement.execute(
                         "INSERT INTO workspace_members (workspace_id, user_id, role)" +
                             " VALUES ('$WORKSPACE_ID', '$ADMIN_USER_ID', 'workspace_admin')",
                     )
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                            "('$KEY_IDENTITY', '${ADMIN_KEY.id.lowercase()}@keys.invalid', '${ADMIN_KEY.name}', 'key', " +
+                            "'${ADMIN_KEY.id}', TRUE, FALSE, 'service')",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'workspace_admin')",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
-                        ps.setObject(2, UUID.fromString(ADMIN_USER_ID))
+                        ps.setObject(2, UUID.fromString(KEY_IDENTITY))
                         ps.setObject(3, UUID.fromString(ADMIN_USER_ID))
                         ps.setString(4, ADMIN_KEY.name)
                         ps.setString(5, ADMIN_KEY.hash)

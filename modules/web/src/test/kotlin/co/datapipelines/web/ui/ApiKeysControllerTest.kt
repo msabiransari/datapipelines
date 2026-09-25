@@ -13,6 +13,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
 import co.datapipelines.auth.KeyKindNotMintableException
+import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.UserRepository
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -118,18 +119,17 @@ class ApiKeysControllerTest {
 }
 
 /**
- * 179 (D16) — the top bar's two partials: the copy endpoint and delete-to-rotate.
+ * Keys v2 (A15) — the ONE partial left of the top bar's pair: the show-once secret read,
+ * now serving the KEYS PAGE (the chip and delete-to-rotate are gone with the login mint).
  *
  * The properties worth a test here are the ones a screenshot cannot show: the secret is
- * served ONLY by the copy endpoint (never rendered into a page), a pre-V31 key has no copy
- * at all (404, and the chip's copy button is not drawn), and rotate revokes exactly the
- * caller's own key in the ACTIVE workspace — the handler takes no id, because the unique
- * index makes "the key" unambiguous.
+ * served ONLY by the copy endpoint (never rendered into a page), only the key's CREATOR may
+ * open it, and a cross-site or navigating request is refused before the one-shot open —
+ * the copy survives for the real Copy click.
  */
 class ApiKeysPartialControllerTest {
     private val apiKeyService = mockk<ApiKeyService>()
-    private val apiKeyRepository = mockk<ApiKeyRepository>()
-    private val controller = ApiKeysPartialController(apiKeyService, apiKeyRepository)
+    private val controller = ApiKeysPartialController(apiKeyService)
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -143,22 +143,6 @@ class ApiKeysPartialControllerTest {
             workspace = WorkspaceContext(workspaceId, "acme"),
         )
 
-    private val liveKey =
-        ApiKey(
-            id = "dpk_abc123",
-            userId = userId,
-            name = "mcp/acme",
-            keyHash = "hash",
-            isRevoked = false,
-            createdAt = Instant.parse("2026-08-01T00:00:00Z"),
-            lastUsedAt = null,
-            expiresAt = null,
-            workspaceId = workspaceId,
-            workspaceName = "acme",
-            hasSealedSecret = true,
-            mintedAtLogin = true,
-        )
-
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
@@ -170,111 +154,52 @@ class ApiKeysPartialControllerTest {
     @Test
     fun `the secret endpoint serves the opened plaintext, no-store, or 404`() {
         authenticate()
-        every { apiKeyService.openOwnMcpKey(userId, workspaceId) } returns "dpk_abc123.supersecret"
+        every { apiKeyService.openSealedSecret("dpk_abc123", userId) } returns "dpk_abc123.supersecret"
 
-        val response = controller.secret()
+        val response = controller.secret("dpk_abc123")
 
         response.statusCode shouldBe HttpStatus.OK
         response.body shouldBe "dpk_abc123.supersecret"
         response.headers.cacheControl shouldBe "no-store"
 
-        // A key minted before V31 — or after a rotation — has nothing to open.
-        every { apiKeyService.openOwnMcpKey(userId, workspaceId) } returns null
-        controller.secret().statusCode shouldBe HttpStatus.NOT_FOUND
+        // A key minted before V31 — or after its one read — has nothing to open.
+        every { apiKeyService.openSealedSecret("dpk_abc123", userId) } returns null
+        controller.secret("dpk_abc123").statusCode shouldBe HttpStatus.NOT_FOUND
     }
 
     @Test
     fun `the secret endpoint refuses a cross-site or navigating request before it opens anything`() {
         authenticate()
-        every { apiKeyService.openOwnMcpKey(userId, workspaceId) } returns "dpk_abc123.supersecret"
+        every { apiKeyService.openSealedSecret("dpk_abc123", userId) } returns "dpk_abc123.supersecret"
 
         // A hostile page's link or window.open, a sibling subdomain, the address bar: all 403,
         // and the one-shot open never runs — the copy survives for the real Copy click.
-        controller.secret("cross-site", "navigate").statusCode shouldBe HttpStatus.FORBIDDEN
-        controller.secret("cross-site", "no-cors").statusCode shouldBe HttpStatus.FORBIDDEN
-        controller.secret("same-site", "cors").statusCode shouldBe HttpStatus.FORBIDDEN
-        controller.secret("none", "navigate").statusCode shouldBe HttpStatus.FORBIDDEN
-        controller.secret("same-origin", "navigate").statusCode shouldBe HttpStatus.FORBIDDEN
-        verify(exactly = 0) { apiKeyService.openOwnMcpKey(any(), any()) }
+        controller.secret("dpk_abc123", "cross-site", "navigate").statusCode shouldBe HttpStatus.FORBIDDEN
+        controller.secret("dpk_abc123", "cross-site", "no-cors").statusCode shouldBe HttpStatus.FORBIDDEN
+        controller.secret("dpk_abc123", "same-site", "cors").statusCode shouldBe HttpStatus.FORBIDDEN
+        controller.secret("dpk_abc123", "none", "navigate").statusCode shouldBe HttpStatus.FORBIDDEN
+        controller.secret("dpk_abc123", "same-origin", "navigate").statusCode shouldBe HttpStatus.FORBIDDEN
+        verify(exactly = 0) { apiKeyService.openSealedSecret(any(), any()) }
 
-        // The chip's own copy fetch (same-origin, cors) opens it.
-        val response = controller.secret("same-origin", "cors")
+        // The page's own copy fetch (same-origin, cors) opens it.
+        val response = controller.secret("dpk_abc123", "same-origin", "cors")
         response.statusCode shouldBe HttpStatus.OK
         response.body shouldBe "dpk_abc123.supersecret"
-        verify(exactly = 1) { apiKeyService.openOwnMcpKey(userId, workspaceId) }
+        verify(exactly = 1) { apiKeyService.openSealedSecret("dpk_abc123", userId) }
     }
 
     @Test
-    fun `rotate revokes the caller's own key in the active workspace and re-renders the chip`() {
-        authenticate()
-        every { apiKeyRepository.findLiveUserKey(userId, workspaceId) } returns liveKey
-        every { apiKeyService.revoke("dpk_abc123", userId) } returns true
-
-        val model = ExtendedModelMap()
-        val view = controller.rotate(model)
-
-        view shouldBe "partials/mcp-key-chip"
-        // No id arrives from the page: the ONE live key is resolved server-side (V31), and a
-        // posted id would only ever name somebody else's credential.
-        verify { apiKeyService.revoke("dpk_abc123", userId) }
-        model["mcpKey"] shouldBe null
-
-        val html =
-            engine().process(
-                view,
-                WebContext(
-                    JakartaServletWebApplication
-                        .buildApplication(MockServletContext())
-                        .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-                ).apply { model.forEach { (k, v) -> setVariable(k, v) } },
+    fun `a principal with no workspace has nothing to open`() {
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(
+                principal.copy(workspace = null),
+                null,
+                emptyList(),
             )
-        html shouldContain "minted when you next sign in"
-        html shouldNotContain "data-mcp-copy"
+
+        controller.secret("dpk_abc123").statusCode shouldBe HttpStatus.NOT_FOUND
+        verify(exactly = 0) { apiKeyService.openSealedSecret(any(), any()) }
     }
-
-    /** #213: the post-copy re-render reads the server state — a read key comes back with no Copy. */
-    @Test
-    fun `the chip partial re-renders from the server's current state - Copy only while unread`() {
-        authenticate()
-        every { apiKeyRepository.findLiveUserKey(userId, workspaceId) } returns liveKey
-
-        val unreadModel = ExtendedModelMap()
-        val view = controller.chip(unreadModel)
-        view shouldBe "partials/mcp-key-chip"
-        (unreadModel["mcpKey"] as McpKeyChip).copyable shouldBe true
-
-        // The same key after its one copy was read: the sealed copy is gone, so the chip the
-        // copy handler swaps in carries no Copy button and says why.
-        every { apiKeyRepository.findLiveUserKey(userId, workspaceId) } returns liveKey.copy(hasSealedSecret = false)
-        val readModel = ExtendedModelMap()
-        controller.chip(readModel)
-        val chip = readModel["mcpKey"] as McpKeyChip
-        chip.copyable shouldBe false
-        chip.prefix shouldBe "dpk_abc123…"
-
-        val html =
-            engine().process(
-                view,
-                WebContext(
-                    JakartaServletWebApplication
-                        .buildApplication(MockServletContext())
-                        .buildExchange(MockHttpServletRequest(), MockHttpServletResponse()),
-                ).apply { readModel.forEach { (k, v) -> setVariable(k, v) } },
-            )
-        html shouldNotContain "data-mcp-copy"
-        html shouldContain "Copied already — delete it and sign in again"
-    }
-
-    private fun engine(): SpringTemplateEngine =
-        SpringTemplateEngine().apply {
-            setTemplateResolver(
-                ClassLoaderTemplateResolver().apply {
-                    prefix = "templates/"
-                    suffix = ".html"
-                    characterEncoding = "UTF-8"
-                },
-            )
-        }
 }
 
 /**
@@ -343,6 +268,7 @@ class ApiKeysAdminControllerTest {
             workspaceId = workspaceId,
             workspaceName = "acme",
             kind = ApiKeyKind.ENDPOINT,
+            role = KeyRole.API_CALLER,
         )
 
     private fun sampleIssued() =
@@ -353,10 +279,8 @@ class ApiKeysAdminControllerTest {
 
     private fun stubPageReads() {
         every { publishing.list(any()) } returns emptyList()
-        // The page lists the two ADMIN kinds (endpoint + server) — both stubs, or the mock
-        // answers the second kind's read with "no answer found".
-        every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.ENDPOINT) } returns listOf(sampleKey())
-        every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.SERVER) } returns emptyList()
+        // The page reads the workspace's keys of EVERY kind (keys v2) and labels their users.
+        every { apiKeyRepository.findByWorkspace(workspaceId) } returns listOf(sampleKey())
         every { userRepository.findById(userId) } returns null
         // #191: the bind-time check reads the workspace's published tree; these fixtures bind
         // under /nyc and /lending, so both subtrees are published here.
@@ -382,33 +306,66 @@ class ApiKeysAdminControllerTest {
     fun `create mints through the shared service and returns the once-shown panel`() {
         authenticate()
         stubPageReads()
-        every { apiKeyService.issue(any(), any(), any(), any(), ApiKeyKind.ENDPOINT) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), ApiKeyKind.ENDPOINT, null) } returns sampleIssued()
 
         val model: ExtendedModelMap = ExtendedModelMap()
-        val viewName = controller.create("endpoint", "ci", null, null, null, model)
+        val viewName = controller.create("endpoint", null, "ci", null, null, null, model)
 
         viewName shouldBe "partials/api-key-created"
         model["key"] shouldBe "dpk_abc123.supersecret"
         model["keyId"] shouldBe "dpk_abc123"
         model["keyKind"] shouldBe "endpoint"
-        // #215: the panel names the key's role — its kind's, since the dialog offers no choice yet (slice (c)).
+        // #215: the panel names the key's role — its kind's for the transport kinds (keys v2
+        // gives the mcp kind the CHOICE).
         model["keyRole"] shouldBe "api caller"
     }
 
     @Test
-    fun `a user kind is the login hook's - refused on this surface with the catalogued code`() {
+    fun `create carries the requested role for an mcp key - the subset rule is the service's (A14)`() {
+        authenticate()
+        stubPageReads()
+        val requestedRole = slot<KeyRole>()
+        every { apiKeyService.issue(any(), any(), any(), any(), ApiKeyKind.MCP, capture(requestedRole)) } returns
+            IssuedApiKey(
+                record = sampleKey().copy(kind = ApiKeyKind.MCP, role = KeyRole.AUTHOR, name = "agent"),
+                plaintext = "dpk_abc123.supersecret",
+            )
+
+        val model: ExtendedModelMap = ExtendedModelMap()
+        val viewName = controller.create("mcp", "author", "agent", null, null, null, model)
+
+        viewName shouldBe "partials/api-key-created"
+        model["keyKind"] shouldBe "mcp"
+        model["keyRole"] shouldBe "author"
+        requestedRole.captured shouldBe KeyRole.AUTHOR
+    }
+
+    @Test
+    fun `no kind, no mint - the catalogued refusal (keys v2 A15)`() {
         authenticate()
         stubPageReads()
 
         val refused =
             shouldThrow<KeyKindNotMintableException> {
-                controller.create("user", "ci", null, null, null, ExtendedModelMap())
+                controller.create(null, null, "ci", null, null, null, ExtendedModelMap())
             }
 
-        // D16: `user` keys are minted at login, so no request surface mints one — a 400 for
-        // EVERY role, from the funnel, before any other validation.
         refused.code shouldBe "auth.key_kind_not_mintable"
         refused.status shouldBe 400
+    }
+
+    @Test
+    fun `a pre-v2 kind wire word is an unknown kind now - refused, never reinterpreted (A19)`() {
+        authenticate()
+        stubPageReads()
+
+        val refused =
+            shouldThrow<DatapipelinesException> {
+                controller.create("user", null, "ci", null, null, null, ExtendedModelMap())
+            }
+
+        refused.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
+        refused.details["reason"] shouldBe "kind_unknown"
     }
 
     @Test
@@ -417,7 +374,7 @@ class ApiKeysAdminControllerTest {
 
         val refused =
             shouldThrow<DatapipelinesException> {
-                controller.create("wizard", "k", null, null, null, ExtendedModelMap())
+                controller.create("wizard", null, "k", null, null, null, ExtendedModelMap())
             }
 
         refused.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
@@ -430,10 +387,10 @@ class ApiKeysAdminControllerTest {
         stubPageReads()
         val expires = slot<Instant>()
         every {
-            apiKeyService.issue(any(), any(), any(), capture(expires), any())
+            apiKeyService.issue(any(), any(), any(), capture(expires), ApiKeyKind.ENDPOINT, any())
         } returns sampleIssued()
 
-        controller.create("endpoint", "k", "30", null, null, ExtendedModelMap())
+        controller.create("endpoint", null, "k", "30", null, null, ExtendedModelMap())
         val thirtyDays = Duration.between(Instant.now(), expires.captured).toDays()
         withClue("30 days from now, give or take the test's own clock") {
             (thirtyDays in 29..30) shouldBe true
@@ -443,7 +400,7 @@ class ApiKeysAdminControllerTest {
         // silently unexpiring key. Broadening the credential is the wrong way to fail.
         val refused =
             shouldThrow<ApiKeyExpiryInvalidException> {
-                controller.create("endpoint", "k", "3000", null, null, ExtendedModelMap())
+                controller.create("endpoint", null, "k", "3000", null, null, ExtendedModelMap())
             }
         refused.details["reason"] shouldBe "unknown_preset"
     }
@@ -452,9 +409,9 @@ class ApiKeysAdminControllerTest {
     fun `associations arrive as repeated checkboxes and reach issuance as paths`() {
         authenticate()
         stubPageReads()
-        every { apiKeyService.issue(any(), any(), any(), any(), ApiKeyKind.ENDPOINT) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), ApiKeyKind.ENDPOINT, null) } returns sampleIssued()
 
-        controller.create("endpoint", "serve", null, null, listOf("/nyc", "/lending"), ExtendedModelMap())
+        controller.create("endpoint", null, "serve", null, null, listOf("/nyc", "/lending"), ExtendedModelMap())
 
         verify { bindingRepository.insert(match { it.pathPrefix == "/nyc" }) }
         verify { bindingRepository.insert(match { it.pathPrefix == "/lending" }) }
@@ -464,10 +421,10 @@ class ApiKeysAdminControllerTest {
     fun `create renders the secret once, refreshes the table out-of-band, and toasts a pointer`() {
         authenticate()
         stubPageReads()
-        every { apiKeyService.issue(any(), any(), any(), any(), any()) } returns sampleIssued()
+        every { apiKeyService.issue(any(), any(), any(), any(), ApiKeyKind.ENDPOINT, null) } returns sampleIssued()
 
         val model: ExtendedModelMap = ExtendedModelMap()
-        val view = controller.create("endpoint", "ci", null, null, null, model)
+        val view = controller.create("endpoint", null, "ci", null, null, null, model)
         val html =
             engine().process(
                 view,
@@ -491,14 +448,12 @@ class ApiKeysAdminControllerTest {
     }
 
     @Test
-    fun `delete revokes the workspace's key and rebuilds the rows from the page's fragment`() {
+    fun `delete hands the PRINCIPAL to the one revocation verb and rebuilds the rows (A14)`() {
         authenticate()
         every { apiKeyRepository.findById("dpk_abc123") } returns sampleKey()
-        every { apiKeyService.revokeWorkspaceEndpointKey("dpk_abc123", workspaceId, userId) } returns true
+        every { apiKeyService.revokeAs(match { it.userId == userId }, "dpk_abc123") } returns true
         every { publishing.list(any()) } returns emptyList()
-        every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.ENDPOINT) } returns
-            listOf(sampleKey().copy(isRevoked = true))
-        every { apiKeyRepository.findByWorkspaceAndKind(workspaceId, ApiKeyKind.SERVER) } returns emptyList()
+        every { apiKeyRepository.findByWorkspace(workspaceId) } returns listOf(sampleKey().copy(isRevoked = true))
         every { userRepository.findById(userId) } returns null
 
         val model: ExtendedModelMap = ExtendedModelMap()
@@ -510,44 +465,26 @@ class ApiKeysAdminControllerTest {
             )
 
         view shouldBe "partials/api-keys-rows"
-        // D17: the WORKSPACE's key, not the caller's own — the workspace-scoped revoke, which
-        // cannot touch a user's MCP key (the SQL pins kind = endpoint).
-        verify { apiKeyService.revokeWorkspaceEndpointKey("dpk_abc123", workspaceId, userId) }
+        // A14: the created-by / api_key.revoke / server_key.revoke judgement is the SERVICE's —
+        // both delete routes hand it the principal and render its answer.
+        verify { apiKeyService.revokeAs(match { it.userId == userId }, "dpk_abc123") }
         html shouldContain "hx-swap-oob=\"beforeend:#toast\""
         html shouldContain ">deleted<"
     }
 
     @Test
-    fun `delete works for a SERVER key of this workspace too (#191 functional note)`() {
-        // The table lists server keys, so its delete verb has to serve them: before the fix the
-        // button rendered and the service refused the kind — a silent no-op on a live credential.
-        authenticate()
-        stubPageReads()
-        every { apiKeyRepository.findById("dpk_srv456") } returns
-            sampleKey("dpk_srv456").copy(kind = ApiKeyKind.SERVER)
-        every { apiKeyService.revokeWorkspaceServerKey("dpk_srv456", workspaceId, match { it.userId == userId }) } returns true
-
-        val model: ExtendedModelMap = ExtendedModelMap()
-        val view = controller.revoke("dpk_srv456", model)
-
-        view shouldBe "partials/api-keys-rows"
-        // The PRINCIPAL travels, not just its id: whether a server key may be revoked at all is
-        // the service's super-admin question (#215, `server_key.revoke`).
-        verify { apiKeyService.revokeWorkspaceServerKey("dpk_srv456", workspaceId, match { it.userId == userId }) }
-        verify(exactly = 0) { apiKeyService.revokeWorkspaceEndpointKey(any(), any(), any()) }
-    }
-
-    @Test
-    fun `a foreign key id is not-found to the delete verb - no revoke, no disclosure (#191)`() {
+    fun `a silent refusal redraws the table and discloses nothing (A14)`() {
         authenticate()
         stubPageReads()
         every { apiKeyRepository.findById("dpk_other") } returns
             sampleKey("dpk_other").copy(workspaceId = UUID.randomUUID())
+        every { apiKeyService.revokeAs(any(), "dpk_other") } returns false
 
-        controller.revoke("dpk_other", ExtendedModelMap())
+        val model: ExtendedModelMap = ExtendedModelMap()
+        val view = controller.revoke("dpk_other", model)
 
-        verify(exactly = 0) { apiKeyService.revokeWorkspaceEndpointKey(any(), any(), any()) }
-        verify(exactly = 0) { apiKeyService.revokeWorkspaceServerKey(any(), any(), any()) }
+        view shouldBe "partials/api-keys-rows"
+        verify { apiKeyService.revokeAs(any(), "dpk_other") }
     }
 
     @Test
@@ -574,8 +511,8 @@ class ApiKeysAdminControllerTest {
     @Test
     fun `associate refuses a key of another kind or workspace as not found`() {
         authenticate()
-        // A USER key (somebody's MCP credential) must never take a binding from this page.
-        every { apiKeyRepository.findById("dpk_user1") } returns sampleKey("dpk_user1").copy(kind = ApiKeyKind.USER)
+        // An MCP key (somebody's agent credential) must never take a binding from this page.
+        every { apiKeyRepository.findById("dpk_user1") } returns sampleKey("dpk_user1").copy(kind = ApiKeyKind.MCP, role = KeyRole.AUTHOR)
 
         val refused =
             shouldThrow<DatapipelinesException> {

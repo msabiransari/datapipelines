@@ -190,7 +190,11 @@ class AuthHttpBoundaryTest {
         }
     }
 
-    /** A live MCP key row for [owner] with a fixed plaintext — the minimal stand-in for the login mint. */
+    /**
+     * A live MCP key row with a fixed plaintext — keys v2 (A13): the key acts as its own
+     * `service` identity, carrying the member role chosen at creation (`author`: enough for the
+     * `/mcp` probe's `pipeline.read`), seeded the way `ApiKeyService.issue` would write it.
+     */
     private fun seedUserKey(
         id: String,
         owner: UUID,
@@ -198,7 +202,21 @@ class AuthHttpBoundaryTest {
         expiresAt: Instant?,
     ): String {
         val plaintext = "$id.${"A".repeat(SECRET_CHARS)}"
-        ApiKeyRepository(jdbc).insert(id, owner, owner, name, Argon2SecretHasher().hash(plaintext), expiresAt, DEFAULT_WORKSPACE_ID)
+        val identity =
+            UserRepository(
+                jdbc,
+            ).insert("$id@keys.invalid", name, null, UserService.KEY_PROVIDER, id, isAdmin = false, kind = UserKind.SERVICE)
+        ApiKeyRepository(jdbc).insert(
+            id,
+            identity.id,
+            owner,
+            name,
+            Argon2SecretHasher().hash(plaintext),
+            KeyRole.AUTHOR,
+            expiresAt,
+            DEFAULT_WORKSPACE_ID,
+            ApiKeyKind.MCP,
+        )
         return plaintext
     }
 
@@ -210,13 +228,10 @@ class AuthHttpBoundaryTest {
         // (the V4 pin). The fixture makes its own world instead of assuming one (#146).
         DefaultWorkspaceFixture.ensure(jdbc)
         user = UserRepository(jdbc).insert("agent@company.com", "Agent", null, "keycloak", "sub-1", isAdmin = true)
-        // Keys pin the seeded `default` workspace. Their owner is a SUPER ADMIN with no membership
-        // row there, so the MCP key acts as a viewer in it (#215 PK4) — enough for `/mcp`.
-        //
-        // 179 (V31): ONE live `user` key per (user, workspace) — so the dead keys this
-        // fixture needs belong to OTHER users; an expired-but-unrevoked key still counts as
-        // live, and the revoked one is inserted live BEFORE its revoke, so it cannot share
-        // an owner either.
+        // Keys pin the seeded `default` workspace and act as their OWN identities (keys v2
+        // A13) — the owner named in `created_by` is who may revoke them, and is never consulted
+        // at validation. Each key carries its own identity row, so the dead keys this fixture
+        // needs belong to OTHER creators; the revoked one is inserted live BEFORE its revoke.
         val deadKeyOwner = UserRepository(jdbc).insert("agent-dead@company.com", "Agent Dead", null, "keycloak", "sub-2", isAdmin = false)
         val revokedKeyOwner =
             UserRepository(jdbc)
@@ -226,7 +241,7 @@ class AuthHttpBoundaryTest {
         readKey = seedUserKey("dpk_READKEYAAAAA", user.id, "read-key", expiresAt = null)
         expiredKey = seedUserKey("dpk_EXPIREDKEYAA", deadKeyOwner.id, "expired-key", Instant.now().minusSeconds(3600))
         revokedKey = seedUserKey("dpk_REVOKEDKEYAA", revokedKeyOwner.id, "revoked-key", expiresAt = null)
-        apiKeyService.revoke(revokedKey.substringBefore('.'), revokedKeyOwner.id)
+        apiKeyService.revokeOwn(revokedKey.substringBefore('.'), revokedKeyOwner.id)
         session = jwtService.issue(user)
 
         // A user mid forced-change (§5A.4): the gate reads must_change_password
@@ -405,7 +420,7 @@ class AuthHttpBoundaryTest {
             withClue("$method $path") {
                 response.statusCode.value() shouldBe 403
                 code(response) shouldBe "endpoint.key_kind_refused"
-                (error(response)["details"] as Map<*, *>)["reason"] shouldBe "user_key_off_surface"
+                (error(response)["details"] as Map<*, *>)["reason"] shouldBe "mcp_key_off_surface"
             }
         }
         routes.size shouldBe 6

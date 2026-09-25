@@ -2,6 +2,7 @@ package co.datapipelines.integration
 
 import co.datapipelines.DatapipelinesApplication
 import co.datapipelines.integration.E2eSession.asSession
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
@@ -23,6 +24,7 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import java.sql.DriverManager
+import java.sql.SQLException
 import java.util.Base64
 import java.util.UUID
 
@@ -47,9 +49,10 @@ import java.util.UUID
  *    admitted on `/mcp`. The walk over EVERY route, for every role's key, is
  *    `RoleWalkE2eTest`'s (`every REST route refuses each key kind off its surface`), where the
  *    non-vacuity count is the route count.
- * 5. **No key is a super admin (B1)** — the super admin's MCP key in a workspace they are not a
- *    member of is a viewer there (PK4) and is refused an authoring tool, while the same person's
- *    SESSION in that workspace is the implicit super admin and authors.
+ * 5. **No key is a super admin (B1, keys v2 form)** — `super_admin` is NOT OFFERABLE (the subset
+ *    rule refuses it at the creation route — no workspace membership holds it, D7) and NOT
+ *    ACCEPTABLE (V37's CHECK refuses the role on the table itself), while the same person's
+ *    SESSION in a workspace they are not a member of is the implicit super admin and authors.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -275,19 +278,48 @@ class KeyIdentitiesE2eTest {
             .then()
             .statusCode(403)
             .body("error.code", equalTo("endpoint.key_kind_refused"))
-            .body("error.details.reason", equalTo("user_key_off_surface"))
+            .body("error.details.reason", equalTo("mcp_key_off_surface"))
         mcp(ADMIN_MCP_KEY.plaintext, "pipelines_list", "{}").statusCode shouldBe 200
     }
 
     @Test
     @Order(31)
-    fun `no key is a super admin - the super admin's MCP key is a viewer where they hold no membership`() {
-        // The key: pinned to a workspace the super admin is not a member of — PK4 makes it a
-        // viewer there, and an authoring tool is refused by role (B1: never super admin).
-        val refused = mcp(OTHER_MCP_KEY.plaintext, "templates_create", TEMPLATE_ARGUMENTS).asString()
-        refused shouldContain "auth.key_issuer_role_lost"
+    fun `super admin is not offerable - and not acceptable as a key role`() {
+        // NOT OFFERABLE (A14's subset rule + B1): `super_admin` is not even a value the wire
+        // parses as a key role — the request is refused before any permission question, and no
+        // creator could offer it anyway, because no workspace membership holds it (D7).
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .contentType(ContentType.JSON)
+            .body("""{"name": "ki-super-admin-probe", "kind": "mcp", "role": "super_admin"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(400)
+            .body("error.details.role", equalTo("super_admin"))
 
-        // The same person's SESSION in the same workspace IS the implicit super admin (D7).
+        // NOT ACCEPTABLE (B1): even a row forged past the service is refused by the DATABASE —
+        // `super_admin` is not a value `api_keys.role` accepts (V37's chk_api_keys_role).
+        shouldThrow<SQLException> {
+            DriverManager
+                .getConnection(postgres.jdbcUrl, postgres.username, postgres.password)
+                .use { connection ->
+                    connection
+                        .prepareStatement(
+                            "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) " +
+                                "VALUES (?, ?, ?, 'ki-forged-super', 'forged', ?::uuid, 'mcp', 'super_admin')",
+                        ).use { ps ->
+                            ps.setString(1, "dpk_FORGEDSUPER00")
+                            ps.setObject(2, UUID.fromString(ADMIN_USER))
+                            ps.setObject(3, UUID.fromString(ADMIN_USER))
+                            ps.setString(4, DEFAULT_WORKSPACE)
+                            ps.execute()
+                        }
+                }
+        }
+
+        // The same person's SESSION in the other workspace IS the implicit super admin (D7).
         given()
             .port(port)
             .asSession(E2eSession.jwt(JWT_SECRET, ADMIN_USER, ADMIN_EMAIL, OTHER_WORKSPACE_NAME))
@@ -473,9 +505,10 @@ class KeyIdentitiesE2eTest {
     }
 
     /**
-     * The admin (a super admin, and a workspace admin of `default` — so their MCP key there is an
-     * author, PK4), a second workspace they are NOT a member of, and their two MCP keys, one pinned
-     * to each. The API key is created over REST in [seed], never seeded.
+     * The admin (a super admin, and a workspace admin of `default` — so the subset rule offers
+     * them every mcp role there, keys v2 A13/A14), a second workspace they are NOT a member of
+     * (for the session half of B1), and their mcp key. The API key is created over REST in
+     * [seed], never seeded.
      */
     private fun seedRows() {
         metadata { statement ->
@@ -493,21 +526,28 @@ class KeyIdentitiesE2eTest {
             )
         }
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            // Keys v2 (A13): the admin's mcp key acts as its own `service` identity and holds its
+            // chosen role in its pinned workspace (the person is a workspace_admin there; A14).
+            val adminIdentity = "5e5e0000-0000-0000-0000-000000000170"
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                        "('$adminIdentity', '${ADMIN_MCP_KEY.id.lowercase()}@keys.invalid', '${ADMIN_MCP_KEY.name}', 'key', " +
+                        "'${ADMIN_MCP_KEY.id}', TRUE, FALSE, 'service')",
+                )
+            }
             connection
                 .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id)" +
-                        " VALUES (?, ?::uuid, ?::uuid, ?, ?, ?::uuid)",
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?::uuid, ?::uuid, ?, ?, ?::uuid, 'mcp', 'workspace_admin')",
                 ).use { ps ->
-                    listOf(ADMIN_MCP_KEY to DEFAULT_WORKSPACE, OTHER_MCP_KEY to OTHER_WORKSPACE).forEach { (key, workspace) ->
-                        ps.setString(1, key.id)
-                        ps.setString(2, ADMIN_USER)
-                        ps.setString(3, ADMIN_USER)
-                        ps.setString(4, key.name)
-                        ps.setString(5, key.hash)
-                        ps.setString(6, workspace)
-                        ps.addBatch()
-                    }
-                    ps.executeBatch()
+                    ps.setString(1, ADMIN_MCP_KEY.id)
+                    ps.setString(2, adminIdentity)
+                    ps.setString(3, ADMIN_USER)
+                    ps.setString(4, ADMIN_MCP_KEY.name)
+                    ps.setString(5, ADMIN_MCP_KEY.hash)
+                    ps.setString(6, DEFAULT_WORKSPACE)
+                    ps.executeUpdate()
                 }
         }
     }
@@ -567,10 +607,6 @@ class KeyIdentitiesE2eTest {
 
         private val ADMIN_USER: String = UUID.randomUUID().toString()
         private val ADMIN_MCP_KEY = E2eAuth.generateKey("mcp/default")
-        private val OTHER_MCP_KEY = E2eAuth.generateKey("mcp/$OTHER_WORKSPACE_NAME")
-
-        private const val TEMPLATE_ARGUMENTS =
-            """{"id": "ki/refused.sql", "dialect": "POSTGRES", "display_name": "Refused", "description": "B1.", "body": "SELECT 1"}"""
 
         private val CSRF_FIELD = Regex("""name="_csrf" value="([^"]+)"""")
 

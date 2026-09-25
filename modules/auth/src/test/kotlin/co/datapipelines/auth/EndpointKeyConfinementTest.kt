@@ -43,11 +43,11 @@ class EndpointKeyConfinementTest {
     fun clear() = SecurityContextHolder.clearContext()
 
     @Test
-    fun `an endpoint key reaches the published-endpoint surface and its own result cursor`() {
+    fun `an endpoint key reaches the published-endpoint surface - the paging routes ride it (A16)`() {
         authenticate(ApiKeyKind.ENDPOINT)
 
         assertAll(
-            REACHABLE.map { path ->
+            (REACHABLE + PAGING).map { path ->
                 { withClue(path) { invoke(path).first.shouldBeTrue() } }
             },
         )
@@ -77,10 +77,10 @@ class EndpointKeyConfinementTest {
         // endpoint confinement. The owner's B2 ruling ("MCP key should be only MCP") made the
         // MCP key a confined kind too: every MVC route is off its surface, the endpoint key's
         // included, and `/mcp` is its whole reach.
-        authenticate(ApiKeyKind.USER)
+        authenticate(ApiKeyKind.MCP)
 
         assertAll(
-            (REACHABLE + REFUSED).filterNot { it == "/mcp" || it.startsWith("/mcp/") }.map { path ->
+            (REACHABLE + PAGING + REFUSED).filterNot { it == "/mcp" || it.startsWith("/mcp/") }.map { path ->
                 { withClue(path) { invoke(path).first.shouldBeFalse() } }
             },
         )
@@ -88,17 +88,16 @@ class EndpointKeyConfinementTest {
     }
 
     @Test
-    fun `the execution allowlist matches only the two reads, not cancel or events`() {
-        // Cancel and the event stream are writes-or-streams over someone's execution; an endpoint
-        // key has no business on either, and the regex — not a handler — is what says so.
+    fun `the framework execution reads are off the endpoint key's surface (A16) - the business path carries the paging`() {
+        // Keys v2 A16: the two framework reads are retired for keys; the published-path rule
+        // (a non-reserved first category) is what admits the paging routes instead, so a
+        // paging path is reachable exactly where its business path is servable.
         assertAll(
-            { ScopeInterceptor.EXECUTION_READ.matches("/api/v1/executions/abc") shouldBe true },
-            { ScopeInterceptor.EXECUTION_READ.matches("/api/v1/executions/abc/result") shouldBe true },
-            { ScopeInterceptor.EXECUTION_READ.matches("/api/v1/executions/abc/cancel") shouldBe false },
-            { ScopeInterceptor.EXECUTION_READ.matches("/api/v1/executions/abc/events") shouldBe false },
-            { ScopeInterceptor.EXECUTION_READ.matches("/api/v1/executions") shouldBe false },
-            // No path traversal into the allowlist through a nested segment.
-            { ScopeInterceptor.EXECUTION_READ.matches("/api/v1/executions/abc/result/../../pipelines") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/v1/executions/abc") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/v1/executions/abc/result") shouldBe false },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/nyc/v1/revenue/executions/abc") shouldBe true },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/nyc/v1/revenue/executions/abc/result") shouldBe true },
+            { ScopeInterceptor.reachableBy(ApiKeyKind.ENDPOINT, "/api/v1/nyc/revenue/executions/abc") shouldBe false },
         )
     }
 
@@ -143,8 +142,13 @@ class EndpointKeyConfinementTest {
             listOf(
                 "/api/nyc/v1/revenue/Manhattan",
                 "/api/lending",
-                "/api/v1/executions/2f1c9c2e-0000-0000-0000-000000000001",
-                "/api/v1/executions/2f1c9c2e-0000-0000-0000-000000000001/result",
+            )
+
+        /** Keys v2 A16: the paging routes, under the business path the key is bound to. */
+        val PAGING =
+            listOf(
+                "/api/nyc/v1/revenue/executions/2f1c9c2e-0000-0000-0000-000000000001",
+                "/api/nyc/v1/revenue/executions/2f1c9c2e-0000-0000-0000-000000000001/result",
             )
 
         /** Every one of these would be open to an endpoint key without the central allowlist. */
@@ -158,6 +162,9 @@ class EndpointKeyConfinementTest {
                 "/api/v1/workspaces",
                 "/api/v1/endpoints",
                 "/api/v1/executions",
+                // A16 — the framework's own execution reads are off the surface, paging included.
+                "/api/v1/executions/2f1c9c2e-0000-0000-0000-000000000001",
+                "/api/v1/executions/2f1c9c2e-0000-0000-0000-000000000001/result",
                 // R-EP5 — a reserved first segment is the product's tree, whatever follows it.
                 "/api/v1/revenue/Manhattan",
                 "/api/v2/anything",
