@@ -31,10 +31,10 @@ import java.util.UUID
  * audit sink is a REAL in-memory one, because "an event was emitted" is the contract and a
  * strict mock would pass exactly when the emission is missing.
  */
-/** The template lens every pre-7e case reads through — no lens narrows a fact listing it does not test. */
-private val EVERYTHING: co.datapipelines.pipeline.ReadLens = co.datapipelines.pipeline.ReadLens.Everything
-
 class SemanticsServiceTest {
+    /** The template lens every pre-7e case reads through — no lens narrows a fact listing it does not test. */
+    private val everything: co.datapipelines.pipeline.ReadLens = co.datapipelines.pipeline.ReadLens.Everything
+
     private val repository = mockk<LearnedFactRepository>()
     private val recorder = mockk<LearnedFactRecorder>()
     private val pipelines = mockk<PipelineRepository>()
@@ -125,21 +125,21 @@ class SemanticsServiceTest {
                 SemanticsFixtures.principal(),
                 SemanticsFixtures.warehouse,
                 SemanticsService.ListQuery(includeRetired = true),
-                EVERYTHING,
+                everything,
             )
         val orders =
             service.list(
                 SemanticsFixtures.principal(),
                 SemanticsFixtures.warehouse,
                 SemanticsService.ListQuery(table = "orders", includeRetired = true),
-                EVERYTHING,
+                everything,
             )
         val workspace =
             service.list(
                 SemanticsFixtures.principal(),
                 SemanticsFixtures.warehouse,
                 SemanticsService.ListQuery(scope = LearnedFactScope.WORKSPACE, includeRetired = true),
-                EVERYTHING,
+                everything,
             )
 
         assertAll(
@@ -157,7 +157,12 @@ class SemanticsServiceTest {
         every { repository.findVisibleByDatasource("warehouse", SemanticsFixtures.ACME, includeRetired = false, since = since) } returns
             emptyList()
 
-        service.list(SemanticsFixtures.principal(), SemanticsFixtures.warehouse, SemanticsService.ListQuery(since = since), EVERYTHING) shouldBe
+        service.list(
+            SemanticsFixtures.principal(),
+            SemanticsFixtures.warehouse,
+            SemanticsService.ListQuery(since = since),
+            everything,
+        ) shouldBe
             emptyList()
     }
 
@@ -209,14 +214,21 @@ class SemanticsServiceTest {
         every { pipelines.findById(SemanticsFixtures.ACME, SemanticsFixtures.PIPELINE) } returns pipelineRecord()
         every { pipelines.findById(SemanticsFixtures.GLOBEX, SemanticsFixtures.PIPELINE) } returns null
 
-        val acme = service.list(SemanticsFixtures.principal(), SemanticsFixtures.warehouse, SemanticsService.ListQuery(), EVERYTHING).single()
+        val acme =
+            service
+                .list(
+                    SemanticsFixtures.principal(),
+                    SemanticsFixtures.warehouse,
+                    SemanticsService.ListQuery(),
+                    everything,
+                ).single()
         val globex =
             service
                 .list(
                     SemanticsFixtures.principal(workspaceId = SemanticsFixtures.GLOBEX),
                     SemanticsFixtures.warehouse,
                     SemanticsService.ListQuery(),
-                    EVERYTHING,
+                    everything,
                 ).single()
 
         assertAll(

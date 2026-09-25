@@ -1,5 +1,6 @@
 package co.datapipelines.application.semantics
 
+import co.datapipelines.application.templates.FactImplementations
 import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.TableInfo
@@ -9,7 +10,6 @@ import co.datapipelines.datasources.semantics.LearnedFactKind
 import co.datapipelines.datasources.semantics.LearnedFactRepository
 import co.datapipelines.datasources.semantics.LearnedFactScope
 import co.datapipelines.datasources.semantics.LearnedFactTrust
-import co.datapipelines.application.templates.FactImplementations
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.ImplementingVersion

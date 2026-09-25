@@ -64,7 +64,13 @@ class DatasourceToolsTest {
         every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns
             listOf(McpFixtures.datasource().copy(ownerWorkspaceId = McpFixtures.WORKSPACE_ID, workspaceName = "acme"))
 
-        val row = (DatasourcesListTool(registry, lens = McpFixtures.EVERYTHING_LENS).call(McpArguments(emptyMap()), readCtx) as List<*>).first() as Map<*, *>
+        val row =
+            (
+                DatasourcesListTool(
+                    registry,
+                    lens = McpFixtures.EVERYTHING_LENS,
+                ).call(McpArguments(emptyMap()), readCtx) as List<*>
+            ).first() as Map<*, *>
 
         assertAll(
             { row["workspace"] shouldBe "acme" },
@@ -79,7 +85,13 @@ class DatasourceToolsTest {
         every { registry.listVisible(null, McpFixtures.WORKSPACE_ID) } returns
             listOf(McpFixtures.datasource().copy(ownerWorkspaceId = null, workspaceName = null))
 
-        val row = (DatasourcesListTool(registry, lens = McpFixtures.EVERYTHING_LENS).call(McpArguments(emptyMap()), readCtx) as List<*>).first() as Map<*, *>
+        val row =
+            (
+                DatasourcesListTool(
+                    registry,
+                    lens = McpFixtures.EVERYTHING_LENS,
+                ).call(McpArguments(emptyMap()), readCtx) as List<*>
+            ).first() as Map<*, *>
 
         assertAll(
             // ABSENT, not null: a null is the one value the old contract gave a meaning to.
@@ -100,7 +112,11 @@ class DatasourceToolsTest {
     fun `114 - no tool leaks the grant list to a key`() {
         every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
 
-        val row = DatasourcesGetTool(registry, lens = McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("name" to "pg-prod")), adminCtx) as Map<*, *>
+        val row =
+            DatasourcesGetTool(
+                registry,
+                lens = McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("name" to "pg-prod")), adminCtx) as Map<*, *>
 
         row.containsKey("granted_workspaces") shouldBe false
     }
@@ -140,10 +156,20 @@ class DatasourceToolsTest {
         val enrichment = enrichmentReturning(recorded, rules)
 
         @Suppress("UNCHECKED_CAST")
-        val rows = DatasourcesListTool(registry, enrichment, McpFixtures.EVERYTHING_LENS).call(McpArguments(emptyMap()), readCtx) as List<Map<String, Any?>>
+        val rows =
+            DatasourcesListTool(
+                registry,
+                enrichment,
+                McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(emptyMap()), readCtx) as List<Map<String, Any?>>
 
         @Suppress("UNCHECKED_CAST")
-        val one = DatasourcesGetTool(registry, enrichment, McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
+        val one =
+            DatasourcesGetTool(
+                registry,
+                enrichment,
+                McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
 
         assertAll(
             { rows[0]["facts"] shouldBe recorded },
@@ -194,18 +220,33 @@ class DatasourceToolsTest {
     fun `list pushes the dialect filter down to the registry`() {
         every { registry.listVisible(Dialect.MYSQL, McpFixtures.WORKSPACE_ID) } returns emptyList()
 
-        (DatasourcesListTool(registry, lens = McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("dialect" to "MYSQL")), readCtx) as List<*>).size shouldBe 0
+        (
+            DatasourcesListTool(
+                registry,
+                lens = McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("dialect" to "MYSQL")), readCtx) as List<*>
+        ).size shouldBe
+            0
     }
 
     @Test
     fun `an unrecognized dialect filter matches nothing rather than failing`() {
         // §6.2.10 pins `dialect` as a bare string (no enum) — unlike §6.2.6/§6.2.8, deliberately.
-        val hits = DatasourcesListTool(registry, lens = McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("dialect" to "SNOWFLAKE")), readCtx) as List<*>
+        val hits =
+            DatasourcesListTool(
+                registry,
+                lens = McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("dialect" to "SNOWFLAKE")), readCtx) as List<*>
 
         assertAll(
             { hits.size shouldBe 0 },
             { verify(exactly = 0) { registry.listVisible(any(), any()) } },
-            { DatasourcesListTool(registry, lens = McpFixtures.EVERYTHING_LENS).definition.inputSchema().toString() shouldNotContain "enum" },
+            {
+                DatasourcesListTool(
+                    registry,
+                    lens = McpFixtures.EVERYTHING_LENS,
+                ).definition.inputSchema().toString() shouldNotContain "enum"
+            },
         )
     }
 
@@ -214,7 +255,11 @@ class DatasourceToolsTest {
         every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
 
         @Suppress("UNCHECKED_CAST")
-        val payload = DatasourcesGetTool(registry, lens = McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
+        val payload =
+            DatasourcesGetTool(
+                registry,
+                lens = McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
 
         assertAll(
             { payload["jdbc_url"] shouldBe "jdbc:postgresql://db:5432/app" },
@@ -235,7 +280,11 @@ class DatasourceToolsTest {
             listOf(McpFixtures.datasource().copy(introspectionIncludeSchemas = listOf("apex_reporting")))
 
         @Suppress("UNCHECKED_CAST")
-        val single = DatasourcesGetTool(registry, lens = McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
+        val single =
+            DatasourcesGetTool(
+                registry,
+                lens = McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
         val listed = DatasourcesListTool(registry, lens = McpFixtures.EVERYTHING_LENS).call(McpArguments(emptyMap()), readCtx) as List<*>
 
         assertAll(
@@ -249,7 +298,11 @@ class DatasourceToolsTest {
         every { registry.getVisible("pg-prod", McpFixtures.WORKSPACE_ID) } returns McpFixtures.datasource()
 
         @Suppress("UNCHECKED_CAST")
-        val payload = DatasourcesGetTool(registry, lens = McpFixtures.EVERYTHING_LENS).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
+        val payload =
+            DatasourcesGetTool(
+                registry,
+                lens = McpFixtures.EVERYTHING_LENS,
+            ).call(McpArguments(mapOf("name" to "pg-prod")), readCtx) as Map<String, Any?>
 
         payload.containsKey("introspection_include_schemas") shouldBe false
     }

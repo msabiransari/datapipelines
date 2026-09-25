@@ -370,7 +370,7 @@ class FlywayMigrationIntegrationTest {
         columnsOf("template_implements") shouldContainExactly listOf("fact_id", "template_id", "version")
 
         query(
-            "SELECT conname || '|' || confdeltype || '|' || pg_get_constraintdef(oid) FROM pg_constraint" +
+            "SELECT conname || '|' || confdeltype::text || '|' || pg_get_constraintdef(oid) FROM pg_constraint" +
                 " WHERE conrelid = 'template_implements'::regclass AND contype = 'f' ORDER BY conname",
         ) { it.getString(1) } shouldContainExactly
             listOf(

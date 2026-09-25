@@ -509,7 +509,8 @@ class TemplateToolsTest {
             { draft.captured.isLibrary shouldBe true },
             {
                 shouldThrow<McpError> {
-                    McpFixtures.createTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator)
+                    McpFixtures
+                        .createTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator)
                         .call(McpArguments(library + mapOf("engine" to "jinja2")), authorCtx)
                 }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
             },

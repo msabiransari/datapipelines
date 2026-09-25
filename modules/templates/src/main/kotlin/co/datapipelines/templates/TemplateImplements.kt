@@ -70,18 +70,33 @@ object ImplementsIds {
         facts: CitableFacts,
     ): TemplateValidationFailure? {
         val distinct = raw.distinct()
-        if (distinct.size > MAX_CITATIONS) {
-            return failure(
+        return tooMany(distinct) ?: malformed(distinct) ?: uncitable(workspaceId, distinct, facts)
+    }
+
+    private fun tooMany(distinct: List<String>): TemplateValidationFailure? =
+        if (distinct.size <= MAX_CITATIONS) {
+            null
+        } else {
+            failure(
                 "A template version may cite at most $MAX_CITATIONS facts; this one names ${distinct.size}.",
                 mapOf("reason" to "too_many", "max" to MAX_CITATIONS, "count" to distinct.size),
             )
         }
+
+    private fun malformed(distinct: List<String>): TemplateValidationFailure? =
         distinct.firstOrNull { parseOrNull(it) == null }?.let { bad ->
-            return failure(
+            failure(
                 "'${bad.truncateForError()}' is not a learned-fact id.",
                 mapOf("fact_id" to bad.truncateForError(), "reason" to "malformed"),
             )
         }
+
+    /** Every entry well-formed: the first one [facts] does not admit for [workspaceId], as the one not-found answer. */
+    private fun uncitable(
+        workspaceId: UUID,
+        distinct: List<String>,
+        facts: CitableFacts,
+    ): TemplateValidationFailure? {
         val ids = distinct.mapNotNull { parseOrNull(it) }.distinct()
         if (ids.isEmpty()) return null
         val citable = facts.citable(workspaceId, ids.toSet())

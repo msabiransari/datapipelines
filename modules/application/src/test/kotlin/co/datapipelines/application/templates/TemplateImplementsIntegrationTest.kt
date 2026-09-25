@@ -172,7 +172,14 @@ class TemplateImplementsIntegrationTest {
         val hashBefore = templates.findVersionDetail(WORKSPACE, NAME, 1)!!.bodyHash
 
         val written =
-            drafts.write(WORKSPACE, NAME, validated(transform(implements = listOf("$rule", "$exclusion"))), v1.bodyHash, actor, WriteSurface.MCP)
+            drafts.write(
+                WORKSPACE,
+                NAME,
+                validated(transform(implements = listOf("$rule", "$exclusion"))),
+                v1.bodyHash,
+                actor,
+                WriteSurface.MCP,
+            )
 
         // The §5.1 no-op: no draft opened, no version burned — the citation is not content.
         written.status shouldBe PipelineVersionStatus.RELEASED
@@ -197,11 +204,26 @@ class TemplateImplementsIntegrationTest {
         templates.findVersion(WORKSPACE, NAME, 2)!!.implements shouldBe listOf("$rule")
 
         // In place, absent: kept.
-        val inPlace = drafts.write(WORKSPACE, NAME, validated(transform(body = "rows ~> \$count() + 0")), v2.bodyHash, actor, WriteSurface.MCP)
+        val inPlace =
+            drafts.write(
+                WORKSPACE,
+                NAME,
+                validated(transform(body = "rows ~> \$count() + 0")),
+                v2.bodyHash,
+                actor,
+                WriteSurface.MCP,
+            )
         templates.findVersion(WORKSPACE, NAME, 2)!!.implements shouldBe listOf("$rule")
 
         // In place, []: cleared — and the released version is untouched throughout.
-        drafts.write(WORKSPACE, NAME, validated(transform(body = "rows ~> \$count() + 0", implements = emptyList())), inPlace.bodyHash, actor, WriteSurface.MCP)
+        drafts.write(
+            WORKSPACE,
+            NAME,
+            validated(transform(body = "rows ~> \$count() + 0", implements = emptyList())),
+            inPlace.bodyHash,
+            actor,
+            WriteSurface.MCP,
+        )
         templates.findVersion(WORKSPACE, NAME, 2)!!.implements shouldBe emptyList()
         templates.findVersion(WORKSPACE, NAME, 1)!!.implements shouldBe listOf("$rule")
     }
@@ -239,7 +261,14 @@ class TemplateImplementsIntegrationTest {
             mapOf(TemplateRef(NAME, 1) to expected, TemplateRef(NAME, 2) to expected)
 
         // Clearing is a deliberate write: re-cite the successor on the draft.
-        drafts.write(WORKSPACE, NAME, validated(transform(body = "rows ~> \$count()", implements = listOf("$successor"))), v2.bodyHash, actor, WriteSurface.MCP)
+        drafts.write(
+            WORKSPACE,
+            NAME,
+            validated(transform(body = "rows ~> \$count()", implements = listOf("$successor"))),
+            v2.bodyHash,
+            actor,
+            WriteSurface.MCP,
+        )
         templates.findVersion(WORKSPACE, NAME, 2)!!.needsReview shouldBe false
         templates.findVersion(WORKSPACE, NAME, 1)!!.needsReview shouldBe true
         citations.retiredCitations(WORKSPACE, listOf(TemplateRef(NAME, 2))) shouldBe emptyMap()

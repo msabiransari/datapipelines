@@ -1,5 +1,6 @@
 package co.datapipelines.application.semantics
 
+import co.datapipelines.application.templates.FactImplementations
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
@@ -11,7 +12,6 @@ import co.datapipelines.datasources.semantics.LearnedFactRecorder
 import co.datapipelines.datasources.semantics.LearnedFactRepository
 import co.datapipelines.datasources.semantics.LearnedFactScope
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.application.templates.FactImplementations
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.WriteSurface

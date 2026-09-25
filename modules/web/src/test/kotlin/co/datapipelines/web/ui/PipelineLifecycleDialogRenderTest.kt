@@ -136,7 +136,9 @@ class PipelineLifecycleDialogRenderTest {
     @Test
     fun `release - 7e - a plain retirement names its reason, and a clean draft renders no warning block`() {
         val plain = co.datapipelines.pipeline.RetiredFactCitation("fact-old", "no longer our policy", null)
-        renderRelease(pins = listOf(pin("demo/rainy.jsonata@2", PipelineVersionStatus.RELEASED, retiredFacts = listOf(plain)))) shouldContain
+        renderRelease(
+            pins = listOf(pin("demo/rainy.jsonata@2", PipelineVersionStatus.RELEASED, retiredFacts = listOf(plain))),
+        ) shouldContain
             "cites a retired fact: fact-old (retired: no longer our policy)"
         renderRelease(pins = listOf(pin("demo/x.sql@3", PipelineVersionStatus.RELEASED))) shouldNotContain "data-release-needs-review"
     }

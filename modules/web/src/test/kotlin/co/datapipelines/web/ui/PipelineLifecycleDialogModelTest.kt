@@ -123,7 +123,16 @@ class PipelineLifecycleDialogModelTest {
     fun `release - 7e - the review port's citations land on their pin, which still does not block`() {
         val marks = mockk<co.datapipelines.pipeline.TemplateReviewMarks>()
         val withMarks =
-            PipelineLifecycleDialogModel(repository, templates, exclusive, runStats, anonymousActors(), AuthoringGuard(enabled = true), usage, marks)
+            PipelineLifecycleDialogModel(
+                repository,
+                templates,
+                exclusive,
+                runStats,
+                anonymousActors(),
+                AuthoringGuard(enabled = true),
+                usage,
+                marks,
+            )
         every { repository.findById(any(), any()) } returns recordOf(current = 1)
         every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
         every { repository.findVersionBody(any(), any(), any()) } returns twoTemplateBody

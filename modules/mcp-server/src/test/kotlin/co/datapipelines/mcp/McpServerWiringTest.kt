@@ -50,6 +50,8 @@ class McpServerWiringTest {
         val introspector = mockk<SchemaIntrospector>()
         val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
         val service = McpFixtures.pipelineService(pipelines, validator, authoringGuard)
+        val drafts = co.datapipelines.templates.TemplateDraftService(templates, authoringGuard, mockk(relaxed = true))
+        val semantics = mockk<co.datapipelines.application.semantics.SemanticsService>()
         return listOf(
             PipelinesListTool(service, McpFixtures.EVERYTHING_LENS),
             PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS),
@@ -65,7 +67,7 @@ class McpServerWiringTest {
             TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS),
             TemplatesUsedByTool(usage, McpFixtures.EVERYTHING_LENS),
             McpFixtures.createTool(templates, authoringGuard, templateValidator),
-            TemplatesUpdateTool(templates, co.datapipelines.templates.TemplateDraftService(templates, authoringGuard, mockk(relaxed = true)), templateValidator),
+            TemplatesUpdateTool(templates, drafts, templateValidator),
             TemplatesRenderTool(templates, engines),
             // 7b — the transform evaluator, appended the way the shipped bean does.
             TemplatesEvaluateTool(mockk<co.datapipelines.application.templates.TemplateEvaluateService>()),
@@ -97,7 +99,7 @@ class McpServerWiringTest {
                 mockk<co.datapipelines.application.datasources.LakeTableRegistryService>(),
             ) +
             // 118 — the three learned-semantics tools, appended after the lake tools.
-            SemanticsTools.all(datasources, mockk<co.datapipelines.application.semantics.SemanticsService>(), introspector, McpFixtures.EVERYTHING_LENS) +
+            SemanticsTools.all(datasources, semantics, introspector, McpFixtures.EVERYTHING_LENS) +
             // 120 — the two docs tools, appended after the semantics tools.
             DocsTools.all() +
             // 140 — the release-check run, appended after the docs tools.

@@ -34,7 +34,16 @@ class DatasourceDetailUiControllerTest {
     private val schemaTree = mockk<DatasourceSchemaTreeBrowseModel>(relaxed = true)
     private val themeResolver = mockk<ThemeResolver>()
     private val semantics = mockk<SemanticsService>()
-    private val controller = DatasourceDetailUiController(registry, lakeTables, lakeBrowse, schemaTree, themeResolver, semantics, co.datapipelines.web.EVERYTHING_LENS)
+    private val controller =
+        DatasourceDetailUiController(
+            registry,
+            lakeTables,
+            lakeBrowse,
+            schemaTree,
+            themeResolver,
+            semantics,
+            co.datapipelines.web.EVERYTHING_LENS,
+        )
 
     private val workspaceId = UUID.randomUUID()
     private val request = mockk<HttpServletRequest>()

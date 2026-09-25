@@ -283,7 +283,15 @@ class TransformImplementsE2eTest {
     private fun importRoundTrip(successor: String) {
         val exported = rest(ALICE_SESSION).get("/api/v1/templates?name=$TRANSFORM").body()["data"] as ObjectNode
         exported.put("id", "test/rainy_days_copy.jsonata")
-        listOf("version", "body_hash", "status", "created_at", "created_by", "needs_review", "retired_facts").forEach { exported.remove(it) }
+        listOf(
+            "version",
+            "body_hash",
+            "status",
+            "created_at",
+            "created_by",
+            "needs_review",
+            "retired_facts",
+        ).forEach { exported.remove(it) }
         val bundle = mapper.writeValueAsString(mapOf("templates" to listOf(exported)))
 
         val sameWorkspace = rest(ALICE_SESSION).post("/api/v1/templates/import", bundle, expect = 200).body()["data"]["templates"][0]
@@ -294,7 +302,9 @@ class TransformImplementsE2eTest {
             { otherWorkspace["implements"].map { it.asText() }.shouldBeEmpty() },
             // What landed is what the next read serves — the kept citation is stored, not echoed.
             {
-                rest(ALICE_SESSION).get("/api/v1/templates?name=test/rainy_days_copy.jsonata").body()["data"]["implements"]
+                rest(ALICE_SESSION)
+                    .get("/api/v1/templates?name=test/rainy_days_copy.jsonata")
+                    .body()["data"]["implements"]
                     .map { it.asText() } shouldContainExactly listOf(successor)
             },
         )
@@ -452,7 +462,8 @@ class TransformImplementsE2eTest {
         // not a datasource it cannot see.
         metadata {
             it.execute(
-                "INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by) VALUES ('$DATASOURCE', '$WS_GLOBEX', '$ALICE')",
+                "INSERT INTO datasource_workspaces (datasource_name, workspace_id, granted_by)" +
+                    " VALUES ('$DATASOURCE', '$WS_GLOBEX', '$ALICE')",
             )
         }
     }
@@ -469,7 +480,9 @@ class TransformImplementsE2eTest {
 
     private fun seedAuthRows() {
         metadata { st ->
-            st.execute("INSERT INTO workspaces (id, name, display_name) VALUES ('$WS_ACME', 'acme', 'Acme'), ('$WS_GLOBEX', 'globex', 'Globex')")
+            st.execute(
+                "INSERT INTO workspaces (id, name, display_name) VALUES ('$WS_ACME', 'acme', 'Acme'), ('$WS_GLOBEX', 'globex', 'Globex')",
+            )
             st.execute(
                 """
                 INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES

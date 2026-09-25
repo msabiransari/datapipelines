@@ -56,7 +56,14 @@ class DatasourcesControllerTest {
     // mocked service here would test that the controller delegates and nothing about what
     // `POST /api/v1/datasources` actually does.
     private val registrations = DatasourceCreateService(registry, rules::resolveCreateBinding, grants)
-    private val controller = DatasourcesController(registry, rules, registrations, DatasourceUpdateService(registry, rules), co.datapipelines.web.EVERYTHING_LENS)
+    private val controller =
+        DatasourcesController(
+            registry,
+            rules,
+            registrations,
+            DatasourceUpdateService(registry, rules),
+            co.datapipelines.web.EVERYTHING_LENS,
+        )
     private val mapper = JsonMapper.builder().addModule(KotlinModule.Builder().build()).build()
 
     private val userId = UUID.randomUUID()

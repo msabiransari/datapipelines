@@ -906,10 +906,20 @@ class RoleVisibilityRenderTest {
         val authorLike =
             listOf(
                 RoleModel.NONE.copy(canRead = true, canExecute = true, canAuthor = true, roleLabel = "author"),
-                RoleModel.NONE.copy(canRead = true, canExecute = true, canAuthor = true, canAdminWorkspace = true, roleLabel = "workspace admin"),
+                RoleModel.NONE.copy(
+                    canRead = true,
+                    canExecute = true,
+                    canAuthor = true,
+                    canAdminWorkspace = true,
+                    roleLabel = "workspace admin",
+                ),
             )
         authorLike.forEach { roles ->
-            val html = render("partials/pipeline-lifecycle-release") { needsReviewReleaseModel(); withRoles(roles) }
+            val html =
+                render("partials/pipeline-lifecycle-release") {
+                    needsReviewReleaseModel()
+                    withRoles(roles)
+                }
             val block = Regex("<div class=\"plc-needs-review[^\"]*\"[^>]*>.*?</div>", RegexOption.DOT_MATCHES_ALL).find(html)!!.value
             block shouldContain "cites a retired fact: fact-old — superseded by fact-new"
             block shouldNotContain "data-verb="

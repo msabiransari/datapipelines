@@ -350,7 +350,11 @@ class PipelinesControllerTest {
         every { releases.release(any(), pipelineId, "hash-v2", userId) } returns
             PipelineReleaseService.Released(record.copy(currentVersion = 2), releasedDetail.copy(version = 2), draftBody)
 
-        controller.release(pipelineId, "hash-v2").data.get("warnings").size() shouldBe 0
+        controller
+            .release(pipelineId, "hash-v2")
+            .data
+            .get("warnings")
+            .size() shouldBe 0
 
         val warning =
             co.datapipelines.pipeline.ReleaseWarning.templateNeedsReview(

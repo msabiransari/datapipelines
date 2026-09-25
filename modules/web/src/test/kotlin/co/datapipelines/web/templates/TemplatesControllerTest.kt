@@ -386,7 +386,9 @@ class TemplatesControllerTest {
         authenticate()
         val fact = UUID.randomUUID()
         every { repository.list(any(), null, null, null, 0, 3, fact) } returns listOf(template())
-        controller.list(dialect = null, type = null, q = null, offset = 0, limit = 2, implements = "$fact").data.items.size shouldBe 1
+        controller
+            .list(dialect = null, type = null, q = null, offset = 0, limit = 2, implements = "$fact")
+            .data.items.size shouldBe 1
 
         shouldThrow<ApiException> { controller.list(dialect = null, type = null, q = null, offset = null, limit = null, implements = "x") }
             .code shouldBe "pipeline.execution.invalid_parameter_type"

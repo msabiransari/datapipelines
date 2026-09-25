@@ -123,9 +123,11 @@ class TemplateImplementsToolsTest {
         val base = transformArgs + ("expected_hash" to "h1")
 
         shouldThrow<McpError> { tool.call(McpArguments(base + ("implements" to "$fact")), ctx) }
-            .message.orEmpty() shouldContain "must be an array"
+            .message
+            .orEmpty() shouldContain "must be an array"
         shouldThrow<McpError> { tool.call(McpArguments(base + ("implements" to listOf(7))), ctx) }
-            .message.orEmpty() shouldContain "fact id string"
+            .message
+            .orEmpty() shouldContain "fact id string"
     }
 
     @Test
@@ -143,7 +145,8 @@ class TemplateImplementsToolsTest {
             rows.single()["needs_review"].asBoolean() shouldBe false
         }
         shouldThrow<McpError> { tool.call(McpArguments(mapOf("implements" to "not-a-fact")), ctx) }
-            .message.orEmpty() shouldContain "must be a UUID"
+            .message
+            .orEmpty() shouldContain "must be a UUID"
     }
 
     @Test
