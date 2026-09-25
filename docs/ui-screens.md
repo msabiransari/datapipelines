@@ -1421,55 +1421,59 @@ Two cards.
    never derived from the request, for the reason `OidcConfig` documents: a hostile `Host` /
    `X-Forwarded-Host` would otherwise choose a URL a reader is invited to paste into an agent's
    config next to a live API key. Unset, the card shows the `{host}/mcp` placeholder the
-   marketing site already uses rather than guessing. The key the config wants is the TOP BAR's
-   (D16): minted at sign-in, copied from the chip.
+   marketing site already uses rather than guessing. The key the config wants is created on
+   the Keys page (§4.19 — keys v2 A15 retired the top-bar chip and the login mint).
 
 ---
 
-### 4.19 API keys (179, D17 — the workspace's `endpoint` keys)
+### 4.19 API keys (keys v2 — the ONE creation path for every kind)
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /api-keys` |
-| Auth required | Yes — `api_key.read` (the page; its verbs `api_key.create` / `api_key.revoke` / `api_key.bind`): workspace admins and super admins (owner ruling 8) |
-| Purpose | Create, delete and associate the workspace's API keys — the credentials programs call published endpoints with |
+| Auth required | Yes — any authenticated principal; the page lists keys the caller CREATED (`mcp_key.own`), and its verbs are `mcp_key.create` (create), `mcp_key.revoke_own` (a creator's delete — the service checks `created_by`) / `api_key.revoke` + `server_key.revoke` (any key of the workspace), `api_key.bind` (associations) |
+| Purpose | Create, delete and associate keys of every kind — the `mcp` key an agent presents at `/mcp`, the `endpoint` keys programs call published endpoints with, the promotion peer's `server` key |
 | Design primitives | `.ds-card`, `.ds-table`, `.app-chip`, `.app-picker`, `.app-modal` |
-| JS | The create modal, the kind-conditional associations field, and the select-the-secret reveal |
+| JS | The create modal, the kind-conditional role/associations fields, and the select-the-secret reveal |
 | htmx | `hx-post="/partials/api-keys"` (create, into `#keyCreated`); `hx-delete="/partials/api-keys/{id}"` (delete, into `#keys-table-body`); `hx-post="/partials/api-keys/{id}/bindings"` (save an association SET) — each with a §5.1 Shape A out-of-band piece |
 
-The table lists the workspace's API keys, whoever created them: name + `dpk_…` prefix (12
-characters, D16's length), kind, **role** (#215 — fixed by the kind: `api caller` on an API key,
-`promotion receiver` on a server key; each kind carries exactly one role, so there is nothing to
-choose, record §3.1 and A1), **acts as** (the key's own identity, rendered "<key name> (API key)" —
-what its runs and received versions are attributed to, [Auth §4.7](auth.md#47-key-identities)),
-**created by** (the person, `api_keys.created_by`), associated endpoints (`/nyc/**` form; the root reads
-as the whole-tree wildcard), created, expires, last used — relative in the cell, absolute (UTC)
-on hover, like every table here. Deleted and expired keys keep their row and lose their verbs.
+The table lists the keys the signed-in person CREATED in this workspace: name + `dpk_…` prefix
+(12 characters, D16's length), kind, **role** (the role CHOSEN at creation — keys v2 A13/A14: a
+member role on an `mcp` key, `api caller` on an `endpoint` key, `promotion receiver` on a `server`
+key), **acts as** (the key's own identity, rendered "<key name> (API key)" — what its runs and
+received versions are attributed to, [Auth §4.7](auth.md#47-key-identities)), **created by** (the
+person, `api_keys.created_by`), associated endpoints (`/nyc/**` form; the root reads as the
+whole-tree wildcard), created, expires, last used — relative in the cell, absolute (UTC) on
+hover, like every table here. Deleted and expired keys keep their row and lose their verbs.
 
-- **Create** — one modal (**New API key**): **Kind → Name → Expiry → Associations**. Kind is one
-  radio card per kind the caller may create, each sentence naming the kind's fixed role
-  (`ApiKeyForm.kindChoices`): **API key** (`endpoint`, the api caller role — "the paths you bind
-  it to are its whole reach"; `api_key.create`, workspace admins and super admins) and, to a
-  super admin only, **Server key** (`server`, the promotion receiver role, no bindings;
-  `server_key.create`). There is NO role field, because no kind offers a second role, and NO
-  admin role on any key (record §3.1, A1); the service refuses another role with
-  `endpoint.key_kind_refused` and the per-kind permission with `auth.role_required`
-  (`WorkspaceService.requireIssuancePermission`). There is NO `user` choice (D16 — the login
-  hook mints those, and the service refuses `auth.key_kind_not_mintable` for every role).
+- **Create** — one modal (**New API key**): **Kind → Role → Name → Expiry → Associations**. Kind
+  is one radio card per kind the caller may create, each sentence naming what the kind reaches
+  (`ApiKeyForm.kindChoices`): **MCP key** (`mcp` — "an agent's key; it reaches /mcp and nothing
+  else"; `mcp_key.create`, held by author, promoter and workspace admin) with a **Role** select
+  offering exactly the roles the SUBSET RULE allows the caller (A14 — an author is offered
+  `author` only, a promoter `promoter` only, a workspace admin or super admin all three;
+  `RolePermissions.offerable` is the one predicate, and no key can carry `viewer` — A15 — or
+  `super_admin` — B1); **API key** (`endpoint`, the api caller role — "the paths you bind it to
+  are its whole reach"; `api_key.create`, workspace admins and super admins) and, to a super
+  admin only, **Server key** (`server`, the promotion receiver role, no bindings;
+  `server_key.create`). The service re-checks both the per-kind permission and the subset rule
+  (`WorkspaceService.requireIssuancePermission`, `RolePermissions.offerable`), so a forged
+  request meets the same refusals the dialog never offers.
   Expiry is the same server-resolved select §4.18 used to host (a custom date expires at the
   end of that day, UTC; a bad one is `400 auth.api_key.expiry_invalid`). Associations are the
   published-path picker: only LITERAL prefixes are offered, because `EndpointAuthorizer` walks
   the concrete request path's ancestors and a `{variable}` node would authorise nothing.
+  A name already taken by a live key of the workspace is `409 auth.key_name_taken` (A18).
   The secret is shown ONCE in a persistent inline panel; the response refreshes the whole
   table out-of-band (at TABLE level — a `tbody` OOB element dies in the browser's fragment
   parser) and points a toast at the panel.
-- **Delete** — revokes the key (a workspace-scoped, kind-pinned SQL revoke: it cannot touch
-  a user's MCP key or another workspace's). Since 2026-09-21 (#191) it works for BOTH kinds
-  the table lists — `endpoint` and `server` — through each kind's own workspace-scoped verb;
-  before then a server-key row's delete silently did nothing. **A `server` key's Delete is a
-  super admin's** (#215, owner ruling 2026-09-24 — the permissions record's `server_key.revoke`):
-  a workspace admin sees the row but not the verb, and the service refuses a hand-crafted
-  delete with `auth.role_required`.
+- **Delete** — revokes the key. The creator's own delete (`mcp_key.revoke_own`, the service
+  checks `created_by`) and the workspace admin's any-key delete (`api_key.revoke`; a `server`
+  key's is `server_key.revoke` and stays a super admin's — #215, owner ruling 2026-09-24 — so a
+  workspace admin sees the row but not the verb, and the service refuses a hand-crafted delete
+  with `auth.role_required`). Revoking an `endpoint` or `server` key deactivates its identity in
+  the same transaction; removing the member who CREATED a key revokes it too (A17/B6), and the
+  row then reads "created by <name> (removed)".
 - **Edit associations** — a per-row disclosure with the picker pre-checked to the key's
   current bindings; Save posts the whole SET and the service writes the delta (add/remove),
   so a checkbox never maps to "add" or "remove" by itself.

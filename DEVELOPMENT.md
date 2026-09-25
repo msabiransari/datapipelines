@@ -422,7 +422,7 @@ Click **Execute**. Watch the graph node turn blue → green. Result appears in t
 
 ### 8.5 Connect an Agent (MCP)
 
-Agents (Claude, CoPilot, OpenCode, Kimi, Cursor, …) talk to the running app through its MCP server — a Streamable HTTP endpoint at `POST /mcp` ([MCP spec §3](docs/mcp-server.md#3-transport--protocol)). The transport is **API-key-only**: no browser cookies, no OIDC session. Use your MCP key: it is minted for you when you sign in (one per workspace; copy it once from the top bar, delete it there and sign in again to rotate) — it acts as you, with your role in that workspace capped at author ([Auth §7.5](docs/auth.md#75-key-roles-scopes-removed)); it connects an MCP client to `/mcp` and nothing else.
+Agents (Claude, CoPilot, OpenCode, Kimi, Cursor, …) talk to the running app through its MCP server — a Streamable HTTP endpoint at `POST /mcp` ([MCP spec §3](docs/mcp-server.md#3-transport--protocol)). The transport is **API-key-only**: no browser cookies, no OIDC session. Create an MCP key on the **Keys page** (keys v2 A15 — no key is minted at sign-in): pick kind `mcp` and the role it should act with — the dialog offers only roles whose permissions are a subset of your own ([Auth §7.4](docs/auth.md#74-issuance)); copy the plaintext once; revoke it from the same page to rotate. The key acts as its own identity holding that role ([Auth §7.5](docs/auth.md#75-key-roles)); it connects an MCP client to `/mcp` and nothing else.
 
 Example client configuration (OpenCode — `~/.config/opencode/opencode.jsonc`, or a project-level `opencode.json`):
 

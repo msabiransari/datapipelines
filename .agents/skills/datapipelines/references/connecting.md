@@ -20,7 +20,7 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   `Authorization: Bearer dpk_<id>.<secret>`. Browser session cookies are rejected on
   `/mcp`. **Your key connects an MCP client and nothing else**: the REST API (`/api/v1/**`)
   refuses it on every route with `endpoint.key_kind_refused` (`details.reason =
-  user_key_off_surface`), before anything else is checked.
+  mcp_key_off_surface`), before anything else is checked.
 
 - **MCP tools:** the current catalog is the generated `references/tools.md` — rendered from
   the shipped tools' own descriptions, so it cannot drift; `docs_list` says what is documented.
@@ -30,14 +30,17 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   tools, then author it), `debug_failed_execution` (walk a failed execution to a
   diagnosis).
 
-- **Which key you have.** Your credential is your **MCP key** (wire kind `user`). It is
-  minted for you when you sign in: one per workspace, copied once from the top bar's key chip.
-  It acts as YOU, with your role in that workspace: a workspace admin's or super admin's key
-  works as an author, and a super admin with no membership there works as a viewer. There is
-  nothing to choose when it is minted, because there are no scopes any more. The other two key
-  kinds are not yours. An `endpoint` key ("API key") is a program's credential for published
-  endpoints. A `server` key is one deployment's credential for another. `/mcp` refuses both
-  with `endpoint.key_kind_refused`.
+- **Getting a key (keys v2).** Your credential is an **MCP key** (wire kind `mcp`). No key is
+  minted at sign-in (A15) — someone CREATES it on the Keys page: you (if your role holds
+  `mcp_key.create` — author, promoter and workspace admin do) or a colleague who does. The
+  creator picks the key's ROLE at creation — `author`, `promoter` or `workspace_admin` — and
+  may offer only roles whose permission set is a subset of their own (A14): an author can
+  offer author only, a promoter promoter only, a workspace admin or super admin any of the
+  three. `super_admin` is never a key role (B1), and viewer is not either (A15). The plaintext
+  is shown once at creation; the key acts as its own identity holding that role (A13). The
+  other two key kinds are not yours. An `endpoint` key ("API key") is a program's credential
+  for published endpoints. A `server` key is one deployment's credential for another. `/mcp`
+  refuses both with `endpoint.key_kind_refused`.
 
 - **What your role lets you do over MCP:**
   - **viewer:** read everything (pipelines, templates, datasources, endpoints, facts), run
@@ -52,15 +55,16 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
   datasource are UI-only: **no credential travels through an agent** (094). Ask a person to add
   the datasource in the UI, then use it by name.
 
-- **Your role is read on every request, not frozen into the key.** If a workspace admin
-  promotes you, your key authors within about a minute (the auth cache's TTL, 60 s by default)
-  with no new key. If your role is lowered, the key starts refusing what the new role lacks,
-  within the same minute. `auth.key_issuer_role_lost` (or `auth.role_required` with a
-  `details.reason`, on the two ownership rules of `executions_cancel` and
-  `templates_purge_draft`) means your ROLE is short. It is not retryable with this key or any
-  other, so ask a workspace admin. The key is also TIED to your membership. If you are removed
-  from the workspace, it stops working with `auth.api_key.invalid`. That is not retryable
-  either: ask for a re-invite, sign in again, and a fresh key is minted.
+- **The key's role is its OWN — it does not follow yours (A13).** A role change of the PERSON
+  who created the key changes nothing about it; a refusals-fresh check does not exist. If your
+  key's role is short for a task, a new key with a bigger role can only be created by someone
+  whose own permissions are a superset of that role (A14). `auth.role_required` (with
+  `details.required` and `details.held`) means the key's ROLE is short. It is not retryable
+  with this key or any other, so ask whoever can create a key of the needed role. The key is
+  also TIED to its creator's membership: if that member is removed from the workspace, the
+  keys they created there are revoked (A17/B6) and it stops working with
+  `auth.api_key.invalid`. That is not retryable either: ask for a re-invite, and create a new
+  key on the Keys page.
 
 - **You cannot register a datasource, and there is no tool that lets you.** **No credential
   travels through an agent.** A secret passed through you transits your context, your transcript
