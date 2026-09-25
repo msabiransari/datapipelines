@@ -361,6 +361,8 @@ class ArchitectureGuardTest {
                 "PipelinesController → PipelineCheckRunRepository",
                 "TemplateAuthoringTools → TemplateRepository",
                 "TemplateEditorController → TemplateRepository",
+                // Annotated `@org.springframework.stereotype.Controller` — found once the controller match read qualified names.
+                "TemplateLifecycleDialogController → TemplateRepository",
                 "TemplatePartialController → TemplateRepository",
                 "TemplateReadTools → TemplateRepository",
                 "TemplatesController → TemplateRepository",
