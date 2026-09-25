@@ -422,8 +422,11 @@
         <button type="button" id="app-avatar" class="app-avatar"
                 aria-haspopup="menu" aria-expanded="false" aria-controls="app-user-menu"
                 th:title="${currentUser?.displayName} ?: 'Account'">
+          <!-- 197: the picture URL never reaches the page — the img points at the app's
+               own /avatar proxy (CSP img-src is 'self' data:), which fetches the stored
+               provider URL server-side from an allowlisted host only. -->
           <img th:if="${currentUser?.profilePictureUrl != null}" class="app-avatar-img"
-               th:src="${currentUser.profilePictureUrl}" alt="" referrerpolicy="no-referrer">
+               th:src="@{/avatar}" alt="" referrerpolicy="no-referrer">
           <span th:if="${currentUser?.profilePictureUrl == null}" class="app-avatar-initials"
                 th:text="${currentUser != null} ? ${#strings.toUpperCase(#strings.substring(currentUser.displayName, 0, currentUser.displayName.length() >= 2 ? 2 : 1))} : '?'">MS</span>
         </button>

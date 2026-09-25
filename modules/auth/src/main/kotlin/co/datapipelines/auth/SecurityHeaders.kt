@@ -91,16 +91,20 @@ object SecurityHeaders {
     }
 
     /**
-     * `img-src` admits `https:` for one reason: the OIDC profile picture
-     * (`currentUser.profilePictureUrl`, an identity provider's host) — everything else the
-     * product renders is `'self'` or a `data:` icon.
+     * `img-src` names no external host (#197): the OIDC profile picture
+     * (`currentUser.profilePictureUrl`) is proxied through the app's own
+     * `GET /avatar` (the stored URL is fetched server-side, from an
+     * operator-allowlisted host only), so the browser loads every image from
+     * `'self'` or a `data:` icon and a standing `https:` grant — a
+     * cross-origin beacon for any user-authored URL that ever reached an
+     * `<img src>` — is gone. The picture URL itself never reaches the page.
      */
     private val DIRECTIVES =
         listOf(
             "default-src 'self'",
             SCRIPT_SRC_SELF,
             STYLE_SRC_SELF,
-            "img-src 'self' data: https:",
+            "img-src 'self' data:",
             "font-src 'self'",
             "connect-src 'self'",
             "frame-ancestors 'self'",

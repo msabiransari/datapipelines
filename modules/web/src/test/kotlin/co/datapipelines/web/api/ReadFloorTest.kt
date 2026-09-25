@@ -77,6 +77,7 @@ class ReadFloorTest {
         familyOf("/api-keys") shouldBeFamily Family.API_KEYS
         familyOf("/partials/mcp-key/secret") shouldBeFamily Family.SELF
         familyOf("/settings/password") shouldBeFamily Family.SELF
+        familyOf("/avatar") shouldBeFamily Family.SELF
     }
 
     private infix fun Family.shouldBeFamily(expected: Family) {
@@ -181,7 +182,8 @@ class ReadFloorTest {
             permissions = setOf(Permission.PROFILE_READ, Permission.PROFILE_PASSWORD, Permission.MCP_KEY_OWN),
             matches = { path ->
                 path == "/api/v1/auth/me" || path.startsWith("/api/v1/auth/api-keys") ||
-                    path.startsWith("/partials/mcp-key") || path == "/settings" || path.startsWith("/settings/")
+                    path.startsWith("/partials/mcp-key") || path == "/settings" || path.startsWith("/settings/") ||
+                    path == "/avatar" // #197 — the signed-in principal's own picture
             },
         ),
 

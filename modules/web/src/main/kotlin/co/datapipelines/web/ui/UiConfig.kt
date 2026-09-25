@@ -70,6 +70,14 @@ class UiConfig {
         templates: TemplateRepository,
     ): NavCounts = NavCounts(pipelines, templates)
 
+    /** #197: the avatar proxy's picture-host allowlist (typo'd entries refuse startup — see [AvatarHosts]). */
+    @Bean
+    fun avatarHosts(authProperties: co.datapipelines.auth.AuthProperties): AvatarHosts = AvatarHosts(authProperties)
+
+    /** #197: the avatar proxy's transport (redirects never followed, size cap — see [AvatarImageFetcher]). */
+    @Bean
+    fun avatarImageFetcher(): AvatarImageFetcher = AvatarImageFetcher()
+
     /** 106: the version/execution actor lookup both explorer details render. */
     @Bean
     fun actorNames(jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate): ActorNames = ActorNames(jdbc)

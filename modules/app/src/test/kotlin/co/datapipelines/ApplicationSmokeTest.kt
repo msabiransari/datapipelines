@@ -200,7 +200,7 @@ class ApplicationSmokeTest {
          * an operator does — as the string the browser receives (188).
          */
         const val CSP_POLICY =
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; " +
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
                 "connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */

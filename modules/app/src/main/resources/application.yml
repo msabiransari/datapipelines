@@ -165,6 +165,10 @@ datapipelines:
           client-secret: ${GOOGLE_CLIENT_SECRET:}
           issuer-uri: https://accounts.google.com
           display-name: "Sign in with Google"
+          # §3.4 (#197) — hosts the avatar proxy may fetch the stored picture URL from.
+          # NOT derivable from the issuer: Google serves pictures from lh3 (measured).
+          # Empty (the default) = no fetch; avatars render initials instead.
+          picture-hosts: ${DATAPIPELINES_AUTH_GOOGLE_PICTURE_HOSTS:lh3.googleusercontent.com}
         # Microsoft (Entra ID) — SINGLE-TENANT only in v1 (auth.md §11.1): the
         # issuer-uri MUST name your tenant, because the multi-tenant `/common`
         # endpoint cannot work via OIDC discovery — its metadata carries the
