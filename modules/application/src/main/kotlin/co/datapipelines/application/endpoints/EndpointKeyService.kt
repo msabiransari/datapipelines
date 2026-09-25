@@ -77,9 +77,12 @@ class EndpointKeyService(
         plaintext: String,
     ): IssuedApiKey = issueInternal(principal, name, role, kind, bindingPaths, expiresAt, plaintext)
 
-    /** The shared funnel: [plaintext] null = the random mint, else the supplied credential. */
-    // The issuance contract: every guard and refusal is its own step, each with a catalogued
-    // code; splitting the funnel hides the order the rules run in.
+    /**
+     * The shared funnel: [plaintext] null = the random mint, else the supplied credential.
+     *
+     * The issuance contract: every guard and refusal is its own step, each with a catalogued
+     * code; splitting the funnel hides the order the rules run in.
+     */
     @Suppress("LongParameterList", "ThrowsCount", "LongMethod")
     private fun issueInternal(
         principal: AuthenticatedPrincipal,

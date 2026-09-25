@@ -911,7 +911,7 @@ class PromoterLensSweepTest {
                         "INSERT INTO users (id, email, display_name, provider, provider_subject," +
                             " is_active, is_admin, kind) VALUES " +
                             "('${key.ownerId}', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}'," +
-                                " TRUE, FALSE, 'service')",
+                            " TRUE, FALSE, 'service')",
                     )
                 }
             }

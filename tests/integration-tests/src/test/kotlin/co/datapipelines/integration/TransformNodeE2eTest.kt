@@ -745,7 +745,7 @@ class TransformNodeE2eTest {
         }
 
         /** The whole seed — called from Order(1), when a context (and Flyway) exists. */
-    @Suppress("LongMethod") // the seed IS the fixture: identities, keys, datasources, scratch tables in one block
+        @Suppress("LongMethod") // the seed IS the fixture: identities, keys, datasources, scratch tables in one block
         private fun seedAll() {
             E2eClean.beforeSeeding()
             // The session user (workspace admin), its membership, and the MCP key (#215: the key
