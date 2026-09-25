@@ -231,7 +231,15 @@ class ApiKeysAdminController(
     private fun rows(principal: AuthenticatedPrincipal): List<ApiKeyRows.Row> {
         val workspaceId = principal.requireWorkspace().id
         val all = apiKeyRepository.findByWorkspace(workspaceId)
-        val visible = if (principal.holds(Permission.API_KEY_READ)) all else all.filter { it.kind == ApiKeyKind.MCP && it.createdBy == principal.userId }
+        val visible =
+            if (principal.holds(Permission.API_KEY_READ)) {
+                all
+            } else {
+                all.filter {
+                    it.kind == ApiKeyKind.MCP &&
+                        it.createdBy == principal.userId
+                }
+            }
         return keyRows.of(visible, Instant.now(), userLabels(workspaceId))
     }
 

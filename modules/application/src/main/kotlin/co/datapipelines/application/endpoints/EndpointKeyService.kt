@@ -106,7 +106,7 @@ class EndpointKeyService(
         // `server` key's role is its kind's, so a request that names anything else is refused
         // rather than quietly corrected.
         when (kind) {
-            ApiKeyKind.MCP ->
+            ApiKeyKind.MCP -> {
                 if (role == null || !role.isMemberKeyRole) {
                     throw refused(
                         "An mcp key carries a member role — one of " +
@@ -114,14 +114,16 @@ class EndpointKeyService(
                             " (keys v2: viewer is never a key role). Name \"role\".",
                     )
                 }
+            }
 
-            else ->
+            else -> {
                 if (role != null && role != KeyRole.forKind(kind)) {
                     throw refused(
                         "A ${kind.wire} key's role is ${KeyRole.forKind(kind)?.wire}; '${role.wire}' is not offered for it. " +
                             "Drop \"role\", or name the kind that role belongs to.",
                     )
                 }
+            }
         }
         // Not a refusal: an endpoint key with no bindings is legal and authorises nothing, which
         // is a coherent thing to mint (bind it later). It is worth an audit detail, not an error.

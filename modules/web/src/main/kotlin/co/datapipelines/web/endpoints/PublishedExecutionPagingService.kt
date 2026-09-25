@@ -8,6 +8,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrors
+import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.executions.ExecutionMetadataProjection
 import co.datapipelines.web.executions.ExecutionVisibility
 import co.datapipelines.web.executions.ResultCursor
@@ -68,7 +69,8 @@ class PublishedExecutionPagingService(
     ): ResponseEntity<Any> {
         requireBound(businessPath, principal)
         val record = ownExecution(executionId, principal)
-        return ResponseEntity.ok(co.datapipelines.web.api.ApiResponse.of(metadata.project(record, principal.requireWorkspace().id, includeResult = true)))
+        val projection = metadata.project(record, principal.requireWorkspace().id, includeResult = true)
+        return ResponseEntity.ok(ApiResponse.of(projection))
     }
 
     /**
@@ -92,7 +94,7 @@ class PublishedExecutionPagingService(
             ResponseEntity.ok().contentType(MediaType.parseMediaType("text/csv")).body<Any>(body)
         } else {
             val page = cursor.jsonPage(record, offset ?: 0L, limit)
-            ResponseEntity.ok(co.datapipelines.web.api.ApiResponse.of(page))
+            ResponseEntity.ok(ApiResponse.of(page))
         }
     }
 

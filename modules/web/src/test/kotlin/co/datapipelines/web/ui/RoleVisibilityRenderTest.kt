@@ -355,16 +355,14 @@ class RoleVisibilityRenderTest {
     // ------------------------------------------------------------------ 179: keys
 
     /**
+     * D17 — the `/api-keys` page's verbs are inside the `MANAGE_API_KEYS` guard
+     * (`canAdminWorkspace` / `isSuperAdmin`) even though the route refuses everyone else:
+     * a fragment rendered off its route — a test, a reuse — must not leak the verbs.
+     *
      * Keys v2 (A15): the top bar's chip is GONE — the login mint retired, the Keys page the one
      * creation path. The chip partial and its copyable state machine no longer exist; the
      * show-once affordance lives on the Keys page row (rendered by `api-keys-rows`, whose
      * `copyable` flag the page render test covers).
-     */
-
-    /**
-     * D17 — the `/api-keys` page's verbs are inside the `MANAGE_API_KEYS` guard
-     * (`canAdminWorkspace` / `isSuperAdmin`) even though the route refuses everyone else:
-     * a fragment rendered off its route — a test, a reuse — must not leak the verbs.
      */
     @Test
     fun `the api-keys page draws no verb for a reader and all of them for a workspace admin`() {
@@ -416,7 +414,11 @@ class RoleVisibilityRenderTest {
         setVariable(
             "kindChoices",
             ApiKeyForm.kindChoices(
-                listOf(co.datapipelines.auth.WorkspaceRole.AUTHOR, co.datapipelines.auth.WorkspaceRole.PROMOTER, co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN),
+                listOf(
+                    co.datapipelines.auth.WorkspaceRole.AUTHOR,
+                    co.datapipelines.auth.WorkspaceRole.PROMOTER,
+                    co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN,
+                ),
                 mayCreateApiKeys = true,
                 isSuperAdmin = true,
             ),
