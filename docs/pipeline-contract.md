@@ -1341,7 +1341,7 @@ The TRANSFORM node's execution-time refusals (7c, #7; the transform-nodes design
 The HTTP column is the class the node failure record carries, as for every execution-time
 family in §13.4; through `templates_evaluate` and the save-time test suite these surface
 inside `template.test_failed` (400) or as the tool's own status. The save-time twins of these
-checks are §12.13's `pipeline.validation.transform_*` rows.
+checks are §12.13's ten `pipeline.validation.transform_…` rows.
 
 | Code | HTTP | Description |
 |---|---|---|
