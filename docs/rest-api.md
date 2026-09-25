@@ -1647,7 +1647,7 @@ A complete OpenAPI 3.1 spec lives in `docs/api/openapi.yaml` and is published at
 
 Flows and rules are specified in [Auth](auth.md) (§4.7 key identities, §7.4 issuance, §7.5 key roles, §7.6 the permission catalog); this section defines the HTTP surface. All endpoints below live under `/api/v1`.
 
-### 16.1 API keys (own keys; creation is a workspace admin's — 179)
+### 16.1 API keys (creation is on the Keys page — keys v2)
 
 ```
 GET /auth/api-keys
@@ -1655,17 +1655,12 @@ GET /auth/api-keys
 Lists the keys the caller CREATED — their own MCP key and any key they minted (id, name, `kind`, `role`, `identity`, `created_by`, created_at, expires_at, last_used_at, is_revoked). Never returns secrets. (`mcp_key.own` — every role.)
 
 ```
-GET /auth/api-keys/mine
-```
-The caller's ONE live `user` key in the active workspace — the login-minted MCP key (D16): `id`, `name`, `prefix`, `copyable` (whether the sealed secret can still be served — false once the key has been copied, #213: the first read of the copy endpoint destroys the copyable secret in the same statement, and V32 cleared every pre-amendment copy), `created_at`. `data` is `null` when none exists (post-rotation, pre-login — a state, not an error).
-
-```
 POST /auth/api-keys
 Content-Type: application/json
 
 {"name": "nightly-sync", "kind": "endpoint", "role": "api_caller", "bindings": ["/nyc"], "expires_at": "2027-08-07T00:00:00Z"}
 ```
-**Workspace admins and super admins only** (`api_key.create`, since 179 — D17; a `server` key additionally `server_key.create`, super admins only). `role` and `expires_at` optional — the role follows the kind. The key is created with its own identity in one transaction ([Auth §4.7](auth.md#47-key-identities)). Response `201`:
+The ONE creation path for every kind (keys v2 A15 — the login mint is retired; the same route serves the Keys page's dialog). **`kind` is REQUIRED** — naming no kind is `400 auth.key_kind_not_mintable` (there is no default kind to fall back to). The create PERMISSION follows the kind: `mcp_key.create` for `mcp` (author, promoter, workspace admin — the LOWEST of the three create permissions, so the route's floor), `api_key.create` for `endpoint` (workspace admin), `server_key.create` for `server` (super admin). On an `mcp` key the requested `role` must also pass **the subset rule** (A14): a creator may give a key only a role whose permission set is a subset of their own in that workspace — a role outside it is `403 auth.role_required` (`details.required`, `details.held`). The key is created with its own identity in one transaction ([Auth §4.7](auth.md#47-key-identities)). Response `201`:
 
 ```json
 {
@@ -1688,22 +1683,22 @@ Content-Type: application/json
 
 `key` is the full plaintext, returned **exactly once** — it is never retrievable again.
 
-**`kind`** ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Enums §8A](enums.md#8a-apikeykind--what-an-api-key-is)) is `user`, `endpoint`, or `server`. It changes what the rest of the body means:
+**`kind`** ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings), [Enums §8A](enums.md#8a-apikeykind--what-an-api-key-is)) is `mcp`, `endpoint`, or `server`. It changes what the rest of the body means:
 
-| `kind` | `role` | `bindings` | Who may mint |
+| `kind` | `role` | `bindings` | Who may create |
 |---|---|---|---|
-| `user` | — | — | **Nobody, on any request surface (179, D16)**: minted by the login/switch hook, one per user per workspace. `400 auth.key_kind_not_mintable` for every role — and an ABSENT `kind` means `user`, so a pre-179 client gets the refusal, not a silently different credential |
+| `mcp` (V35, renamed from `user` — A19) | one of `author` \| `promoter` \| `workspace_admin`, chosen under the subset rule (A14) — never viewer (A15), never `super_admin` (B1) | Refused | Author (author only), promoter (promoter only), workspace admin (any of the three), super admin (any) — `mcp_key.create` + the subset rule |
 | `endpoint` | `api_caller` (the only one offered, record A1); another role is `403 endpoint.key_kind_refused` | The endpoint-tree nodes it authorises, validated BEFORE the key is minted — and since 2026-09-21 (#191) each must be the root or lie at or above a path the CALLER'S workspace publishes (`400 endpoint.path_invalid`, naming only the caller's own tree) | Workspace admins and super admins (`api_key.create`) |
-| `server` | `promotion_receiver`; another role is `403 endpoint.key_kind_refused` | Refused | Super admin only |
+| `server` | `promotion_receiver`; another role is `403 endpoint.key_kind_refused` | Refused | Super admin only (`server_key.create`) |
 
-**`scopes` is refused by name** (`400 pipeline.execution.invalid_parameter_type`, `details.field = "scopes"`): scopes were removed (#215, PK8), and a caller who still sends them believes the key will carry them. An unknown `role` token is the same 400 with `details.supported`. **An unbound published path is unservable until a key is bound to it** (#215 B3) — a session is refused on the published tree, and no other key kind reaches it.
+**`scopes` is refused by name** (`400 pipeline.execution.invalid_parameter_type`, `details.field = "scopes"`): scopes were removed (#215, PK8), and a caller who still sends them believes the key will carry them. An unknown `role` token is the same 400 with `details.supported`. **A name already taken by a live key in the workspace is `409 auth.key_name_taken`** (keys v2 A18; revoking the old key frees the name). **An unbound published path is unservable until a key is bound to it** (#215 B3) — a session is refused on the published tree, and no other key kind reaches it.
 
 An unknown `kind` is `403 endpoint.key_kind_refused`, naming the supported values. A `server` key is the credential a SENDING deployment presents as `DP-Promotion-Key` (§18); it authenticates nothing on this API — presented as `DP-API-Key` it is refused on every route with `403 endpoint.key_kind_refused` and `details.reason = "server_key_off_surface"`.
 
 ```
 DELETE /auth/api-keys/{key_id}
 ```
-Revokes a key the caller CREATED (creator-scoped; `mcp_key.own`, every role — this is also the MCP key's delete-to-rotate). Revoking an `endpoint` or `server` key deactivates its identity in the same transaction. Effective ≤ cache TTL, ~60s. `204 No Content`.
+Revokes a key the caller CREATED (creator-scoped; `mcp_key.revoke_own`, author and above — the service checks `created_by`). Revoking any key of the workspace is the workspace admin's `api_key.revoke` (a `server` key's is `server_key.revoke`). Revoking an `endpoint` or `server` key deactivates its identity in the same transaction; revoking a member's key ends with their removal (A17/B6). Effective ≤ cache TTL, ~60s. `204 No Content`.
 
 ### 16.2 Current principal
 
@@ -2030,6 +2025,18 @@ Headers: `DP-Result-TTL-Seconds` (§7.4's clamp) and `DP-Result-Page-Rows` (R-EP
 `page-max-rows`) are honoured; an unparseable value reads as absent, because the server clamps
 anyway. `Accept` must admit `application/json` (`*/*` and an absent header do), else `406`.
 
+**The result paging rides the business path** (keys v2 A16 — the framework reads are session-only
+now): a caller that started a run pages its result under the SAME path it called —
+`GET /api/<category>/v<n>/<path>/executions/{execution_id}` and
+`GET /api/<category>/v<n>/<path>/executions/{execution_id}/result` — with the same handlers'
+semantics as the framework's `GET /executions/{id}`[`/result`] ([REST §8](#8-executions)), served
+to the `api` key that STARTED the run and bound to this path. A run another key (or another
+workspace's key) started is the 404 rule ([Auth §11A.1](auth.md#11a1-the-404-rule)); a BROWSER
+SESSION is refused here exactly as it is on the serve route — this is a machine surface, and the
+session gets the same `401 auth.session.required` shape. The routes are delegated from the serve
+catch-all (the business path is variable-length, so no separate mapping can exist), and
+`EndpointAuthorizer`'s bound-walk runs before any read.
+
 ### 19.4 The response
 
 `200` — the body is the `data_ready` payload of [§6.4.7](#647-data_ready), verbatim:
@@ -2206,6 +2213,7 @@ and bound only while a budget stands behind it (`max-requests` > 0).
 | 2026-09-08 | v2.6 | 089 dp-lake registry (recorded with the §G corrections) | New **§9.8 Lake tables (the dp-lake catalog)** — `POST /datasources/{name}/tables`, `DELETE …/tables/{namespace}/{table}`, `POST …/tables/import` (inline `tables[]`, or a `manifest_url` fetched server-side and restricted to the datasource's own bucket/endpoint — the SSRF boundary), and `GET …/lake-tables` (`read`). The writes are `author`, with a GLOBAL datasource's registry admin-only as a workspaces D8 rule; every write evicts the pool and publishes the §5.7 invalidation. Two corrections landed with this row: the Iceberg `location` is the table's current metadata FILE, not its root (the measured rule, datasources.md §8C.7), and §9.7's introspection listing is registry-backed for LAKE as shipped (datasources.md §8C.3) — §9.8's "a later phase" sentence was written before 089 §C landed. All additive. |
 | 2026-09-15 | v2.13 | 138 §B definitions on the REST datasource reads | §9.2 / §9.3 / §9.7A: `GET /datasources` rows and `GET /datasources/{name}` carry `definitions` beside `facts` — the two blocks the MCP `datasources_list` / `datasources_get` have served since 136, from the same one-store-read; the listing used to carry neither and the detail `facts` alone. Additive; `[]` when nothing is recorded. |
 | 2026-09-14 | v2.12 | 136 §D PUT /templates inherits dialect and type | §8.4: `dialect` and `type` are optional on update — omitted, the working version's are inherited before the body is bound; a DIFFERENT dialect is refused `400 template.validation.dialect_invalid` (`details.dialect`, `established_dialect`, `template_id`) before validation or any write (the endpoint used to write a changed dialect silently — the defect 135 §C fixed on MCP only); a different `type` stays `type_immutable`. |
+| 2026-09-25 | v2.14 | keys v2 (#233) | **§16.1 rewritten**: the ONE creation path for every kind — `kind` REQUIRED (`400 auth.key_kind_not_mintable` with no default kind, A15), `mcp` (renamed from `user`, A19) offered with a CHOSEN role under the subset rule (A14; `mcp_key.create` + `mcp_key.revoke_own`), a live name conflict answered `409 auth.key_name_taken` (A18), `GET /auth/api-keys/mine` gone with the login mint. **§19.3**: the result paging documented under the business path (`GET /api/<cat>/v<n>/<path>/executions/{id}[/result]`, keys-v2 A16) — a session refused there as on the serve route. |
 | 2026-09-13 | v2.11 | 123 §A table resolution | §9.7: the columns endpoint is table-ADDRESSED — a table absent from the namespace's listing is now **`404 datasource.table_not_found`** (was an empty list), with a "Did you mean …?" line naming the nearest listed table; the message asserts non-existence on complete-catalog dialects and "does not exist, or the credentials cannot see it" on privilege-filtered ones ([Datasources §7A](datasources.md#7a-schema-introspection)). The empty-list rule survives for unknown `schema`/namespace filters on the listing endpoints; an existing table with zero readable columns stays an empty list. |
 | 2026-09-11 | v2.10 | 118 learned semantic layer | New **§9.7A**: the three introspection endpoints and `GET /datasources/{name}` carry the learned-fact block (`facts[]`, additive, omitted-when-none on the listings) — the same shape and code as the MCP twins; the drift check runs at read on `/columns` and on a complete `/tables` listing. No REST write for facts in round 1. |
 | 2026-09-10 | v2.9 | T187 release audit | §5.10 and the template release: both verbs are now **audited** (`pipeline.version.released` / `template.version.released`, with `version` and `via` = `session` or `api_key`) and §5.10 states who may release over REST (a promoter's session, or a key whose issuer is a promoter — D4's human decision, expressed either way). |

@@ -79,12 +79,20 @@ object AuthErrorCodes {
     const val KEY_ISSUER_ROLE_LOST = "auth.key_issuer_role_lost"
 
     /**
-     * 400 — on-demand issuance asked for a `user` key (roles design 2026-09-20, D16/§3.3).
-     * User keys are minted by the login/switch hook and nowhere else — one per user per
-     * workspace — so no request surface may create one. A 400, not a 403: the caller's
-     * credential and role are fine; the KIND is not mintable on demand.
+     * 400 — on-demand issuance named NO kind at all (keys v2 A15: the retired login mint's
+     * kind was the implicit default, and there is none now). A 400, not a 403: the caller's
+     * credential and role are fine; the request body is not.
      */
     const val KEY_KIND_NOT_MINTABLE = "auth.key_kind_not_mintable"
+
+    /**
+     * 409 — keys v2 A18: the create path named a key that already EXISTS (live) in the
+     * workspace. Its own code rather than a duplicate-name stand-in from another family,
+     * because the recovery is auth's own (revoke the existing key, or rename) and the
+     * conflict is the A18 index speaking through the service's clean check. Revoking the
+     * existing key frees the name.
+     */
+    const val KEY_NAME_TAKEN = "auth.key_name_taken"
 
     /**
      * 404 — the key is pinned to a workspace that has been DEACTIVATED (D-R10, design §6).
@@ -152,6 +160,7 @@ object AuthErrorCodes {
             ROLE_REQUIRED,
             KEY_ISSUER_ROLE_LOST,
             KEY_KIND_NOT_MINTABLE,
+            KEY_NAME_TAKEN,
             KEY_WORKSPACE_INACTIVE,
             PRINCIPAL_DEACTIVATED,
         )
@@ -502,16 +511,16 @@ class KeyRoleNotOfferableException(
 
 /**
  * Keys v2 A18 — the create path named a key that already EXISTS (live) in the workspace.
- * A 409 stand-in (`pipeline.validation.duplicate_name`, the catalog's duplicate-name row) with
- * `details.reason = key_name_taken`, since §13 has no auth-surface name-conflict code: the
- * nearest catalogued row and a stable reason token, the house pattern for a catalog gap.
+ * A 409 with its own catalogued code ([AuthErrorCodes.KEY_NAME_TAKEN]) — the conflict is
+ * auth's (the A18 unique index speaks through the service's clean check ahead of it), and
+ * `details.reason = key_name_taken` keeps the stable token the UI matches on.
  * Revoking the existing key frees the name.
  */
 class KeyNameTakenException(
     name: String,
     workspace: String?,
 ) : AuthException(
-        "pipeline.validation.duplicate_name",
+        AuthErrorCodes.KEY_NAME_TAKEN,
         HTTP_CONFLICT,
         "A live key named '$name' already exists in this workspace (keys v2 A18)",
         "That key name is already in use here. Revoke the old key first, or pick another name.",

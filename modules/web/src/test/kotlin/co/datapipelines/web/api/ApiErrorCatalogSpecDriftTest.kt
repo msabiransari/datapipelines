@@ -238,8 +238,13 @@ class ApiErrorCatalogSpecDriftTest {
          * `pipeline.transform.*` execution-time family plus `transform.js.unavailable`), landed in
          * the SAME commit as the constants, the catalog rows (500 family default, 503/504
          * exceptions) and the AuthErrors anchor. Re-derived from the document's own parse.
+         *
+         * 202 → 203 with keys v2 (#233): §13.7 gains `auth.key_name_taken` (409 — the A18
+         * name conflict's own code, replacing the borrowed `pipeline.validation.duplicate_name`
+         * stand-in), landed in the SAME commit as the constant, the exception and the catalog
+         * row. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 202
+        const val SECTION_13_ROW_COUNT = 203
 
         /**
          * §12's distinct validation codes.
