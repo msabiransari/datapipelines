@@ -400,7 +400,11 @@ class UserService(
     /**
      * Deactivates [targetId] (§4.2, §10.1 `auth.user.deactivated`). The liveness cache
      * is evicted immediately, so on this instance the user's sessions and API keys are
-     * dead on the very next request rather than at TTL expiry.
+     * dead on the very next request rather than at TTL expiry. Keys v2 A20 (owner ruling
+     * 2026-09-25) extends the reach: an `mcp` key's liveness includes its CREATOR's, so
+     * deactivating a person also refuses every `mcp` key they created (reversibly —
+     * reactivation restores them); `endpoint` and `server` keys stay creator-independent
+     * (PK2), and nothing is revoked either way.
      */
     fun deactivate(
         targetId: UUID,

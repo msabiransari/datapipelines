@@ -243,11 +243,12 @@ later role cannot slip past it.
 ### 3.4 The MCP key (PK4)
 
 It connects an MCP client and nothing else (A10): over REST the key is refused on every route,
-`endpoint.key_kind_refused` with `details.reason = user_key_off_surface`. Its role is re-read on
-every request (within the auth cache TTL, A9):
-- a member's role, with workspace admin mapped to author
-- a super admin who is a member: that membership's role capped at author
-- a super admin with no membership: viewer
+`endpoint.key_kind_refused` with `details.reason = user_key_off_surface`. Its role was ~~re-read on
+every request~~ — the whole paragraph below is RETIRED by A13 (the role is the key's own, chosen at
+creation; C2's freshness rule is gone with it):
+- ~~a member's role, with workspace admin mapped to author~~
+- ~~a super admin who is a member: that membership's role capped at author~~
+- ~~a super admin with no membership: viewer~~
 
 No MCP tool needs more than author: `MCP_TOOL_MIN_PERMISSION` holds 20 `VIEW`, 8 `EXECUTE` and 13
 `AUTHOR` entries.
@@ -278,9 +279,10 @@ test.**
   above, so no key gains access to table data.
 - Ruled: accepted (O1).
 
-**C2. MCP keys follow role changes at once.** On main the scope is fixed when the key is minted, so
-a viewer promoted to author needed a new key to author. With this change the promotion takes
-effect ~~on the next request~~ **within the auth cache TTL, 60 s by default** (A9).
+**C2. ~~MCP keys follow role changes at once.~~ RETIRED by A13 (2026-09-25, with PK4 and C3): the
+key's role is its OWN, chosen at creation, so a member's later role changes do not flow to it and
+there is no freshness to state. What replaced it is revocation's levers — revoke-own,
+`api_key.revoke`, member removal, the members-row lever (auth spec §7.4/§7.5).**
 
 **C3. Admin MCP keys are capped at author.** A workspace admin's or super admin's MCP key sees only
 its own executions over MCP. Nothing else changes over MCP (§3.4).
@@ -430,4 +432,5 @@ Rulings of 2026-09-25 (the keys-v2 lane, #233; the lane's first commit adds thes
 | A17 | Keys and identities are never hard-deleted by the application: revocation is their end state. A purge in the retention sweep deletes revoked keys and their identities once nothing references them. Removing a member revokes the keys that member created in that workspace (the C1 safety, restated for created-by). | §3.3, §5 |
 | A18 | A key name is unique within its workspace (`(workspace_id, name)` for live keys). `created_by`/`executed_by` keep the identity's id and its foreign key. | §3.3 |
 | A19 | The `user` kind is renamed `mcp` — on the wire, in the CHECK and in the docs: kind is the transport and the word says which. (`endpoint` and `server` stay.) | §3.1, §3.2, §3.4 |
+| A20 | An mcp key's liveness includes its CREATOR's: a deactivated person's mcp keys are refused `auth.principal_deactivated` until reactivation; endpoint and server keys are creator-independent (PK2); revocation remains the irreversible lever (A17, the members-row lever). Derived at the 233b validation (security pass 2026-09-25, finding 1); ruled by the owner 2026-09-25. The V37 conversion CTE stands (it reads the membership, never `users.is_active`). | §3.4, auth.md §7.3/§11A.3 |
 
