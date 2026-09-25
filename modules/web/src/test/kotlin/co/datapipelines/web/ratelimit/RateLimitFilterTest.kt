@@ -3,7 +3,10 @@ package co.datapipelines.web.ratelimit
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.auth.RateLimitExceededException
 import co.datapipelines.auth.WorkspaceContext
+import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.web.api.ApiErrorCatalog
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -84,6 +87,10 @@ class RateLimitFilterTest {
         response.status shouldBe 429
         response.getHeader("Retry-After") shouldBe "42"
         response.contentAsString shouldContain "\"code\":\"rate_limit.exceeded\""
+        // #232 — the API limiter's OWN sentence, the catalog's default for the code: about
+        // request volume, never the login damper's "too many sign-in attempts".
+        response.contentAsString shouldContain ApiErrorCatalog.userMessageFor(PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED)
+        response.contentAsString shouldNotContain RateLimitExceededException.LOGIN_USER_MESSAGE
         verify(exactly = 0) { chain.doFilter(any(), any()) }
     }
 
@@ -124,6 +131,27 @@ class RateLimitFilterTest {
 
         response.status shouldBe 429
         response.contentAsString shouldContain "\"code\":\"rate_limit.unavailable\""
+        verify(exactly = 0) { chain.doFilter(any(), any()) }
+    }
+
+    /**
+     * #232 — a throttled agent on `/mcp` gets the API sentence too. The report that opened
+     * the issue was a signed-in MCP caller answered with "Too many sign-in attempts": this
+     * surface is metered by the same filter, so the same catalog sentence must reach it.
+     */
+    @Test
+    fun `the mcp surface's throttled answer carries the API sentence, not the login one`() {
+        authenticate()
+        val response = MockHttpServletResponse()
+        val chain = mockk<FilterChain>(relaxed = true)
+
+        filter(allowed(remaining = 0).copy(allowed = false, retryAfterSeconds = 7))
+            .doFilter(MockHttpServletRequest("POST", "/mcp"), response, chain)
+
+        response.status shouldBe 429
+        response.contentAsString shouldContain "\"code\":\"rate_limit.exceeded\""
+        response.contentAsString shouldContain ApiErrorCatalog.userMessageFor(PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED)
+        response.contentAsString shouldNotContain RateLimitExceededException.LOGIN_USER_MESSAGE
         verify(exactly = 0) { chain.doFilter(any(), any()) }
     }
 
