@@ -71,6 +71,8 @@ class ApiKeyIssuanceTransactionIntegrationTest {
         val userService = UserService(UserRepository(jdbc), cache, properties, AuditLogger(jdbc, ObjectMapper()))
         val failingKeys =
             mockk<ApiKeyRepository> {
+                // Keys v2 A18: the name check runs BEFORE the insert; the probe name is free.
+                every { liveNameExists(any(), any()) } returns false
                 every { insert(any(), any(), any(), any(), any(), any(), any(), any(), any()) } throws
                     DataIntegrityViolationException("the key insert failed after the identity was written")
             }

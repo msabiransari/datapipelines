@@ -328,7 +328,6 @@ class ArchitectureGuardTest {
                 "ApiKeysAdminController → ApiKeyRepository",
                 "ApiKeysAdminController → EndpointKeyBindingRepository",
                 "ApiKeysAdminController → UserRepository",
-                "ApiKeysPartialController → ApiKeyRepository",
                 "AppShellAdvice → UserRepository",
                 "AuthController → ApiKeyRepository",
                 "DashboardPartialController → ExecutionRepository",
@@ -368,7 +367,6 @@ class ArchitectureGuardTest {
                 "TemplateReadTools → TemplateRepository",
                 "TemplatesController → TemplateRepository",
                 "TemplatesPurgeDraftTool → TemplateRepository",
-                "UiWorkspaceAdvice → ApiKeyRepository",
                 "UserSettingsController → UserRepository",
             )
 

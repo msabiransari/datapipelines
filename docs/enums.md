@@ -258,7 +258,7 @@ V23's three additive booleans (`author` / `promoter` / `admin`) were folded back
 
 ## 8D. `KeyRole` — the role a key carries
 
-**Source:** [Auth §7.5](auth.md#75-key-roles-scopes-removed) and the two key-role columns of the §7.6 catalog; the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §3.2
+**Source:** [Auth §7.5](auth.md#75-key-roles) and the two key-role columns of the §7.6 catalog; the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §3.2
 **Used by:** auth (`KeyRole`, `RolePermissions.of(KeyRole)`, `AuthenticatedPrincipal.keyRole`), persistence (`api_keys.role`, V34, CHECK `chk_api_keys_role`), the REST `role` field of key creation (rest-api §16.1), the Keys page's Role column.
 
 | Value | Carried by | Permissions |
@@ -637,7 +637,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 | `TemplateType` | template-hierarchy-design | templates, pipeline-contract |
 | `StagingEngine` | pipeline-contract | staging, dag-executor |
 | `UserKind` | [auth.md §4.7](auth.md#47-key-identities) | auth, metadata-db (the V34 CHECK) |
-| `KeyRole` | [auth.md §7.5](auth.md#75-key-roles-scopes-removed) | auth, metadata-db (the V34 CHECK), rest-api §16.1 |
+| `KeyRole` | [auth.md §7.5](auth.md#75-key-roles) | auth, metadata-db (the V34 CHECK), rest-api §16.1 |
 | `Permission` | [auth.md §11A](auth.md#11a-roles) / §7.6 | auth, every endpoint and MCP tool |
 | `WorkspaceRole` | [auth.md §11A](auth.md#11a-roles) | auth, metadata-db (the V29 CHECKs), rest-api §17, the members dropdown |
 | `NodeStatus` | dag-executor | rest-api, mcp-server |

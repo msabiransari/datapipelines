@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v3.1 (revised — see Change Log)
+**Status:** v3.3 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-09-24
@@ -850,7 +850,7 @@ Key roles are `snake_case` everywhere — storage, wire, the CHECK — and the U
 
 This matrix is the ONLY place authorization requirements are defined. [REST API](rest-api.md), [MCP Server](mcp-server.md), and [UI Screens](ui-screens.md) reference it; they never assert anything locally. Since #215 slice (a) it is the **permission catalog** of the [permissions and keys record](superpowers/specs/2026-09-23-permissions-and-keys-design.md) §2 (ratified 2026-09-23, amended 2026-09-24): one row per `<functionality>.<permission>` — 65 on this base — and every REST handler, UI route and MCP tool declares exactly ONE of them (`@RequiredScope(Permission.X)` on a handler; the tool's catalog entry, `McpToolCatalog.Entry.permission`, since slice (b)). The thirty coarse operations of v2 (`READ_RESOURCES` … `MANAGE_DATASOURCE_GRANTS`) are retired; each maps onto the permissions its surfaces were spread over.
 
-Since slice (b) there is **one** axis, the ROLE ([§7.5](#75-key-roles-scopes-removed), [§11A](#11a-roles)):
+Since slice (b) there is **one** axis, the ROLE ([§7.5](#75-key-roles), [§11A](#11a-roles)):
 
 - **The member roles** — the five columns `viewer` … `super_admin`; in code the ONE role table `RolePermissions`. For a session that is its own membership's role; for the MCP key it is its member's CURRENT role capped at author (PK4), re-read on every request, so a demotion reaches the key inside one validation-cache TTL. Super admin is a property of the USER, held in every workspace (D7): ✓ on every row except the two **fenced** ones — and never on a key (B1).
 - **The key roles** — the two columns `api_caller` and `promotion_receiver` (record §3.2): an `endpoint` or `server` key is judged by its key role's column and nothing else.
