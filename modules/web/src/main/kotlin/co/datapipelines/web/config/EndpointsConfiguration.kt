@@ -23,8 +23,8 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.web.endpoints.PublishedEndpointServeService
 import co.datapipelines.web.endpoints.PublishedExecutionPagingService
 import co.datapipelines.web.executions.ExecutionMetadataProjection
-import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.executions.ExecutionVisibility
+import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
@@ -173,8 +173,7 @@ class EndpointsConfiguration {
         metadata: ExecutionMetadataProjection,
         authorizer: EndpointAuthorizer,
         bindings: EndpointKeyBindingRepository,
-    ): PublishedExecutionPagingService =
-        PublishedExecutionPagingService(executions, cursor, visibility, metadata, authorizer, bindings)
+    ): PublishedExecutionPagingService = PublishedExecutionPagingService(executions, cursor, visibility, metadata, authorizer, bindings)
 
     /** The §5.2 hierarchical decision. Pure and stateless — one instance serves every request. */
     @Bean

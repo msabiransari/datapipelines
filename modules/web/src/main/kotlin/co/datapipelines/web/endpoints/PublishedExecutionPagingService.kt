@@ -5,15 +5,15 @@ import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
+import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrors
+import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.executions.ExecutionMetadataProjection
 import co.datapipelines.web.executions.ExecutionVisibility
 import co.datapipelines.web.executions.ResultCursor
-import co.datapipelines.executor.ExecutionRepository
-import co.datapipelines.web.api.ApiException
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody
@@ -120,14 +120,12 @@ class PublishedExecutionPagingService(
         val ancestors = EndpointPath.ancestors(businessPath)
         val decision =
             authorizer.authorize(businessPath, principal, workspaceId, bindings.findByPrefixes(ancestors, workspaceId))
-        when (decision) {
-            is EndpointAuthorizer.Decision.Allowed -> Unit
-            is EndpointAuthorizer.Decision.Refused ->
-                throw DatapipelinesException(
-                    code = decision.code,
-                    message = decision.message,
-                    details = mapOf("path" to businessPath),
-                )
+        if (decision is EndpointAuthorizer.Decision.Refused) {
+            throw DatapipelinesException(
+                code = decision.code,
+                message = decision.message,
+                details = mapOf("path" to businessPath),
+            )
         }
     }
 
@@ -138,7 +136,8 @@ class PublishedExecutionPagingService(
     private fun ownExecution(
         executionId: UUID,
         principal: AuthenticatedPrincipal,
-    ) = executions.findById(principal.requireWorkspace().id, executionId)
+    ) = executions
+        .findById(principal.requireWorkspace().id, executionId)
         ?.takeIf { visibility.visible(it, principal, executionId) }
         ?: throw ApiErrors.executionNotFound(executionId.toString())
 }
