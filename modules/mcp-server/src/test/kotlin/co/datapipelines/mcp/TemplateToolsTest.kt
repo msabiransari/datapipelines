@@ -56,7 +56,8 @@ class TemplateToolsTest {
         assertAll(
             {
                 (all.first() as Map<*, *>).keys shouldContainExactly
-                    setOf("id", "version", "type", "dialect", "display_name", "description", "is_library")
+                    // 7e: the citations (null on sql) and the read-time mark ride every row.
+                    setOf("id", "version", "type", "dialect", "display_name", "description", "is_library", "implements", "needs_review")
             },
             { libraries.map { (it as Map<*, *>)["id"] } shouldContainExactly listOf("test/dates.ftl") },
         )
@@ -164,7 +165,7 @@ class TemplateToolsTest {
     fun `create refuses with the catalogued code when authoring is disabled`() {
         val error =
             shouldThrow<DatapipelinesException> {
-                TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(false), validator).call(
+                McpFixtures.createTool(templates, co.datapipelines.pipeline.AuthoringGuard(false), validator).call(
                     McpArguments(mapOf("dialect" to "POSTGRES", "display_name" to "X", "description" to "d", "body" to "SELECT 1")),
                     authorCtx,
                 )
@@ -281,7 +282,7 @@ class TemplateToolsTest {
             templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.MCP)
         } returns McpFixtures.template()
 
-        TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
+        McpFixtures.createTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
             McpArguments(
                 mapOf(
                     "dialect" to "POSTGRES",
@@ -310,7 +311,7 @@ class TemplateToolsTest {
             templates.create(any(), any(), McpFixtures.USER, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.MCP)
         } returns McpFixtures.template()
 
-        TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
+        McpFixtures.createTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
             McpArguments(
                 mapOf(
                     "type" to "jsonata",
@@ -361,7 +362,7 @@ class TemplateToolsTest {
     fun `a typo inside a block is contract_invalid unknown_field, never a silent drop (7b)`() {
         val thrown =
             shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
-                TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
+                McpFixtures.createTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
                     McpArguments(
                         mapOf(
                             "type" to "jsonata",
@@ -389,7 +390,7 @@ class TemplateToolsTest {
     @Test
     fun `create rejects a malformed imports entry as a protocol error`() {
         shouldThrow<McpError> {
-            TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
+            McpFixtures.createTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(
                 McpArguments(
                     mapOf(
                         "dialect" to "POSTGRES",
@@ -502,13 +503,14 @@ class TemplateToolsTest {
                 "body" to "<#macro d></#macro>",
                 "is_library" to true,
             )
-        TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(McpArguments(library), authorCtx)
+        McpFixtures.createTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator).call(McpArguments(library), authorCtx)
 
         assertAll(
             { draft.captured.isLibrary shouldBe true },
             {
                 shouldThrow<McpError> {
-                    TemplatesCreateTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator)
+                    McpFixtures
+                        .createTool(templates, co.datapipelines.pipeline.AuthoringGuard(true), validator)
                         .call(McpArguments(library + mapOf("engine" to "jinja2")), authorCtx)
                 }.jsonRpcError.code() shouldBe McpArguments.INVALID_PARAMS
             },

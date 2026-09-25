@@ -79,7 +79,7 @@ class TemplatesControllerTest {
             co.datapipelines.web.EVERYTHING_LENS,
             validator,
             engines,
-            TemplateImportService(repository, validator),
+            TemplateImportService(repository, validator, co.datapipelines.templates.CitableFacts.NONE, mockk(relaxed = true)),
             drafts,
             releases,
             guard,
@@ -128,7 +128,8 @@ class TemplatesControllerTest {
     fun `create validates and stores, returning version 1`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
+        // 7e: the create goes through the draft service (it lands the stated `implements`).
+        every { drafts.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
             template()
 
         val stored = controller.create(createBody).data
@@ -147,7 +148,7 @@ class TemplatesControllerTest {
                 co.datapipelines.web.EVERYTHING_LENS,
                 validator,
                 engines,
-                TemplateImportService(repository, validator),
+                TemplateImportService(repository, validator, co.datapipelines.templates.CitableFacts.NONE, mockk(relaxed = true)),
                 drafts,
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(false),
@@ -379,6 +380,20 @@ class TemplatesControllerTest {
             .code shouldBe "pipeline.execution.invalid_parameter_type"
     }
 
+    /** 7e (rest-api §8.5) — `implements=<fact id>` reaches the read as a UUID; a malformed id is the filters' 400. */
+    @Test
+    fun `list passes the implements filter as a fact id and refuses a malformed one`() {
+        authenticate()
+        val fact = UUID.randomUUID()
+        every { repository.list(any(), null, null, null, 0, 3, fact) } returns listOf(template())
+        controller
+            .list(dialect = null, type = null, q = null, offset = 0, limit = 2, implements = "$fact")
+            .data.items.size shouldBe 1
+
+        shouldThrow<ApiException> { controller.list(dialect = null, type = null, q = null, offset = null, limit = null, implements = "x") }
+            .code shouldBe "pipeline.execution.invalid_parameter_type"
+    }
+
     // The `prefix` browse presentation — the REST mirror of `templates_list {prefix}` (067),
     // whose cases in TemplateToolsTest these mirror.
 
@@ -444,7 +459,7 @@ class TemplatesControllerTest {
     fun `create accepts an html payload without a dialect and echoes the type`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
+        every { drafts.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
             template().copy(type = TemplateType.HTML, dialect = null)
 
         val stored =
@@ -527,8 +542,8 @@ class TemplatesControllerTest {
                 co.datapipelines.web.EVERYTHING_LENS,
                 validator,
                 engines,
-                TemplateImportService(repository, validator),
-                TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true)),
+                TemplateImportService(repository, validator, co.datapipelines.templates.CitableFacts.NONE, mockk(relaxed = true)),
+                TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true), mockk(relaxed = true)),
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(true),
                 audit,

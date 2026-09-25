@@ -74,6 +74,26 @@ object PipelineResponses {
         return body
     }
 
+    /**
+     * The release response (rest-api §5.10, pipeline-contract §14): the [full] projection of the
+     * version just released plus `warnings` — ALWAYS present, `[]` on a clean release, one
+     * `{code, message, template, version}` per pin that reads `needs_review` (7e, transform-nodes
+     * design §8.2). A warning describes what was released; the status is still the release's.
+     */
+    fun released(released: co.datapipelines.pipeline.PipelineReleaseService.Released): JsonNode {
+        val body = full(released.record, released.bodyJson, released.version) as ObjectNode
+        val warnings = body.putArray("warnings")
+        released.warnings.forEach { warning ->
+            warnings
+                .addObject()
+                .put("code", warning.code)
+                .put("message", warning.message)
+                .put("template", warning.template)
+                .put("version", warning.version)
+        }
+        return body
+    }
+
     /** One entry of the versions listing — metadata only, no body (rest-api §5.4). */
     fun versionSummary(version: PipelineVersionRecord): Map<String, Any?> =
         mapOf<String, Any?>(

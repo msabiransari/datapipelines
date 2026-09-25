@@ -30,6 +30,10 @@ class TemplatesConfiguration {
     @Bean
     fun templateRepository(jdbc: NamedParameterJdbcTemplate): TemplateRepository = TemplateRepository(jdbc)
 
+    /** 7e — the `template_implements` rows (metadata-db §4.21): the citation writes and the two reverse reads. */
+    @Bean
+    fun templateImplementsRepository(jdbc: NamedParameterJdbcTemplate): TemplateImplementsRepository = TemplateImplementsRepository(jdbc)
+
     /** The read façade every template read surface passes through (178) — the lens is applied here, once. */
     @Bean
     fun templateService(repository: TemplateRepository): TemplateService = TemplateService(repository)
@@ -73,7 +77,17 @@ class TemplatesConfiguration {
         // the transform.* knobs are the app's wiring, not this module's). ObjectProvider keeps
         // this configuration loadable in a context that does not assemble the engine.
         runner: org.springframework.beans.factory.ObjectProvider<TransformTestRunner>,
-    ): TemplateValidator = TemplateValidator(libraryResolver, properties.maxBodyChars, suiteRunner = runner.ifAvailable)
+        // 7e — the §2.3 citation rule, implemented over the learned-fact store by the
+        // application layer (web's SemanticsConfiguration declares it). Absent, nothing is
+        // citable: a draft carrying `implements` is refused rather than stored unchecked.
+        citableFacts: org.springframework.beans.factory.ObjectProvider<CitableFacts>,
+    ): TemplateValidator =
+        TemplateValidator(
+            libraryResolver,
+            properties.maxBodyChars,
+            suiteRunner = runner.ifAvailable,
+            citableFacts = citableFacts.getIfAvailable { CitableFacts.NONE },
+        )
 
     @Bean
     fun templateDryRenderer(engines: WorkspaceTemplateEngines): TemplateDryRenderer = TemplateDryRendererImpl(engines)

@@ -59,6 +59,13 @@ class TransformBlocksMigrationTest {
         jdbc.jdbcTemplate.execute(
             TemplateFixtures.repoFile("modules/app/src/main/resources/db/migration/V33__transform_template_blocks.sql").readText(),
         )
+        // Then every later shipped migration, the TypedTemplatesMigrationTest precedent: the
+        // cases below drive the CURRENT repository, whose projection reads V36's
+        // `template_implements` (7e). None of them touches a template hash, so the pre-V33
+        // rows' hash-compat verdict is unchanged by construction.
+        ShippedMigrations.migrations(dir).filter { it.first > 33 }.forEach { pair ->
+            jdbc.jdbcTemplate.execute(pair.second.readText())
+        }
     }
 
     @Test

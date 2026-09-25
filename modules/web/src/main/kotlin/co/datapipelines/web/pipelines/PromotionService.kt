@@ -387,6 +387,9 @@ class PromotionService(
             stored.contract?.let { node.set<JsonNode>("contract", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
             stored.invariants?.let { node.set<JsonNode>("invariants", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
             stored.tests?.let { node.set<JsonNode>("tests", TransformBlocks.mapper.valueToTree<JsonNode>(it)) }
+            // 7e: the cited facts ride the payload OUTSIDE the hash (transform-nodes §2.3); the
+            // receiver keeps the ids that resolve there and drops the rest (owner ruling 2026-09-25).
+            stored.implements?.let { ids -> node.putArray("implements").apply { ids.forEach { add(it) } } }
             node.put("version", stored.version)
             node.put("body_hash", stored.bodyHash)
             val imports = node.putArray("imports")

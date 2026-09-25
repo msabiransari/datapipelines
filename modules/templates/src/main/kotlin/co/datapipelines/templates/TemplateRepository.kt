@@ -71,9 +71,19 @@ data class TemplateVersionSummary(
  * makes concurrent first-writers race-safe, the loser surfacing as
  * `template.version.conflict`); [writeDraft] overwrites the draft in place; [releaseDraft]
  * flips it to RELEASED and bumps `templates.current_version`; [discardDraft] deletes the
- * draft — always a hard delete here, because unlike `pipeline_versions` nothing references
- * a `template_versions` row by FK (pipeline pins are numbers in JSON, not constraints), so
- * §3.4's executed-draft branch cannot fire for templates.
+ * draft — always a hard delete here, because unlike `pipeline_versions` no EXECUTION references
+ * a `template_versions` row (pipeline pins are numbers in JSON, not constraints), so §3.4's
+ * executed-draft branch cannot fire for templates. The one FK onto a version is
+ * `template_implements`' (V36, 7e), and it cascades: a purged draft takes its citations.
+ *
+ * ## Citations are not content (7e)
+ *
+ * The projection ([SELECT_JOINED]) carries each version's cited facts and the retired ones
+ * among them — `implements`, `needs_review` — computed by the row's own query from
+ * [TemplateImplementsRepository]'s shared expressions, never stored on the version. They are
+ * outside [TEMPLATE_HASH_EXPR]: a citation never opens a draft, and it is the one thing a
+ * RELEASED version accepts after release (templates.md §5.1) — written by
+ * [TemplateImplementsRepository], never by a statement here.
  *
  * ## Draft content vs. index metadata — a deliberate asymmetry
  *
@@ -198,6 +208,11 @@ class TemplateRepository(
      * a search for `100%_off` searches for that literal string instead of turning into a wildcard
      * that scans everything.
      *
+     * [implements] (7e, transform-nodes design §8.3) keeps the templates whose LISTED version
+     * cites that fact — a parameterised join on `template_implements`, the fact joined through
+     * the template's own workspace so an id another workspace owns matches nothing (the
+     * not-found semantics of the read floor).
+     *
      * The `$TEMPLATE_LIVE_T` predicate is the derived entity status (versioning §3.2, 101) —
      * a DISCARDED template (every version discarded) leaves the listing exactly as the old
      * soft-delete predicate removed deleted rows.
@@ -209,6 +224,7 @@ class TemplateRepository(
         q: String? = null,
         offset: Int = 0,
         limit: Int = DEFAULT_PAGE_LIMIT,
+        implements: UUID? = null,
     ): List<Template> =
         jdbc.query(
             """
@@ -223,6 +239,7 @@ class TemplateRepository(
                 "dialect" to dialect?.wire,
                 "type" to type?.wire,
                 "pattern" to q?.let { "%${escapeLike(it)}%" },
+                "implements" to implements,
                 "workspaceId" to workspaceId,
                 "limit" to limit.coerceIn(1, MAX_PAGE_LIMIT),
                 "offset" to maxOf(0, offset),
@@ -241,6 +258,7 @@ class TemplateRepository(
         dialect: Dialect? = null,
         type: TemplateType? = null,
         q: String? = null,
+        implements: UUID? = null,
     ): Int =
         checkNotNull(
             jdbc.queryForObject(
@@ -254,6 +272,7 @@ class TemplateRepository(
                     "dialect" to dialect?.wire,
                     "type" to type?.wire,
                     "pattern" to q?.let { "%${escapeLike(it)}%" },
+                    "implements" to implements,
                     "workspaceId" to workspaceId,
                 ),
                 Int::class.java,
@@ -789,9 +808,9 @@ class TemplateRepository(
             ).singleOrNull()
 
     /**
-     * Purge the draft (versioning §5.4, 101): the version row is hard-deleted — nothing
-     * references a `template_versions` row by FK, so there are no executions to take with
-     * it. When the draft was the sole version the ENTITY row goes too (D57's twin: an
+     * Purge the draft (versioning §5.4, 101): the version row is hard-deleted — no execution
+     * references a `template_versions` row, so there are none to take with it; its citations
+     * (`template_implements`, V36) cascade with it. When the draft was the sole version the ENTITY row goes too (D57's twin: an
      * entity holds >= 1 version or does not exist); when the draft had become
      * `current_version` (the development fallback) the pointer recomputes.
      *
@@ -1126,7 +1145,9 @@ class TemplateRepository(
                    v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json::TEXT AS imports_json,
                    v.body, v.contract_json::TEXT AS contract_json, v.invariants_json::TEXT AS invariants_json,
                    v.tests_json::TEXT AS tests_json,
-                   v.created_at, v.created_by AS version_created_by, v.status, v.body_hash
+                   v.created_at, v.created_by AS version_created_by, v.status, v.body_hash,
+                   ${TemplateImplementsRepository.IMPLEMENTS_JSON_SQL} AS implements_json,
+                   ${TemplateImplementsRepository.RETIRED_FACTS_JSON_SQL} AS retired_facts_json
               FROM templates t
               JOIN template_versions v ON v.template_id = t.id
             """.trimIndent()
@@ -1156,6 +1177,12 @@ class TemplateRepository(
                   )
               AND (CAST(:dialect AS TEXT) IS NULL OR v.dialect = CAST(:dialect AS TEXT))
               AND (CAST(:type AS TEXT) IS NULL OR v.type = CAST(:type AS TEXT))
+              AND (
+                    CAST(:implements AS UUID) IS NULL
+                    OR EXISTS (SELECT 1 FROM template_implements ti JOIN learned_facts f ON f.id = ti.fact_id
+                                WHERE ti.template_id = v.template_id AND ti.version = v.version
+                                  AND ti.fact_id = CAST(:implements AS UUID) AND f.workspace_id = t.workspace_id)
+                  )
               AND (
                     CAST(:pattern AS TEXT) IS NULL
                     OR t.name ILIKE CAST(:pattern AS TEXT) ESCAPE '\'
@@ -1286,7 +1313,8 @@ class TemplateRepository(
             SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body,
                    v.contract_json, v.invariants_json, v.tests_json, v.created_at,
-                   v.created_by AS version_created_by, 'DRAFT' AS status, $TEMPLATE_HASH_EXPR AS body_hash
+                   v.created_by AS version_created_by, 'DRAFT' AS status, $TEMPLATE_HASH_EXPR AS body_hash,
+                   ${TemplateImplementsRepository.NO_CITATIONS_COLUMNS}
               FROM new_template t
               JOIN new_version v ON v.template_id = t.id
             """.trimIndent()
@@ -1313,7 +1341,8 @@ class TemplateRepository(
             SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body,
                    v.contract_json, v.invariants_json, v.tests_json, v.created_at,
-                   v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash
+                   v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash,
+                   ${TemplateImplementsRepository.NO_CITATIONS_COLUMNS}
               FROM new_template t
               JOIN new_version v ON v.template_id = t.id
             """.trimIndent()
@@ -1487,7 +1516,8 @@ class TemplateRepository(
             SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body,
                    v.contract_json, v.invariants_json, v.tests_json, v.created_at,
-                   v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash
+                   v.created_by AS version_created_by, 'RELEASED' AS status, $TEMPLATE_HASH_EXPR AS body_hash,
+                   ${TemplateImplementsRepository.NO_CITATIONS_COLUMNS}
               FROM bumped t
               JOIN new_version v ON v.template_id = t.id
             """.trimIndent()
@@ -1515,7 +1545,8 @@ class TemplateRepository(
             SELECT t.name AS id, t.display_name, t.description,
                    v.version, v.engine, v.type, v.dialect, v.is_library, v.imports_json, v.body,
                    v.contract_json, v.invariants_json, v.tests_json, v.created_at,
-                   v.created_by AS version_created_by, 'RELEASED' AS status, :bodyHash AS body_hash
+                   v.created_by AS version_created_by, 'RELEASED' AS status, :bodyHash AS body_hash,
+                   ${TemplateImplementsRepository.NO_CITATIONS_COLUMNS}
               FROM new_template t
               JOIN new_version v ON v.template_id = t.id
             """.trimIndent()
@@ -1718,7 +1749,16 @@ class TemplateRepository(
                     createdBy = rs.getObject("version_created_by", UUID::class.java),
                     status = PipelineVersionStatus.fromWire(rs.getString("status")),
                     bodyHash = rs.getString("body_hash"),
-                )
+                ).let { template ->
+                    // 7e (transform-nodes §2.3/§8.2): the citations and the retired ones among
+                    // them, computed by this row's own query. `implements` belongs to the
+                    // transform types (null on sql/html, like the blocks).
+                    template.copy(
+                        implements =
+                            if (template.type.isTransform) TemplateImplementsRepository.readIds(rs.getString("implements_json")) else null,
+                        retiredFacts = TemplateImplementsRepository.readRetired(rs.getString("retired_facts_json")),
+                    )
+                }
             }
 
         private val DETAIL_MAPPER =

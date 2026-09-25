@@ -892,4 +892,72 @@ class RoleVisibilityRenderTest {
         setVariable("faceLanguage", "JSONata")
         setVariable("panes", TransformPanes.of(stored))
     }
+
+    // ------------------------------------------------------------------ 7e: the semantic link
+
+    /**
+     * 7e (#7, transform-nodes design §9.4 — "No new UI verb: the marker and the warning row are
+     * text") — the release dialog's needs-review rows carry NO verb, for every role that holds
+     * `pipeline.release`; the confirm stays the dialog's one verb. A reader who cannot release
+     * (no `canAuthor`) sees the same text and no confirm at all.
+     */
+    @Test
+    fun `the release dialog's needs-review rows are text for every role - the confirm is still the only verb`() {
+        val authorLike =
+            listOf(
+                RoleModel.NONE.copy(canRead = true, canExecute = true, canAuthor = true, roleLabel = "author"),
+                RoleModel.NONE.copy(
+                    canRead = true,
+                    canExecute = true,
+                    canAuthor = true,
+                    canAdminWorkspace = true,
+                    roleLabel = "workspace admin",
+                ),
+            )
+        authorLike.forEach { roles ->
+            val html =
+                render("partials/pipeline-lifecycle-release") {
+                    needsReviewReleaseModel()
+                    withRoles(roles)
+                }
+            val block = Regex("<div class=\"plc-needs-review[^\"]*\"[^>]*>.*?</div>", RegexOption.DOT_MATCHES_ALL).find(html)!!.value
+            block shouldContain "cites a retired fact: fact-old — superseded by fact-new"
+            block shouldNotContain "data-verb="
+            Regex("data-verb=\"([a-z-]+)\"").findAll(html).map { it.groupValues[1] }.toList() shouldBe listOf("pipeline-release-confirm")
+        }
+        val reader =
+            render("partials/pipeline-lifecycle-release") {
+                needsReviewReleaseModel()
+                withRoles(RoleModel.NONE.copy(canRead = true, canExecute = true, roleLabel = "viewer"))
+            }
+        reader shouldContain "data-release-needs-review"
+        reader shouldNotContain "data-verb="
+    }
+
+    private fun WebContext.needsReviewReleaseModel() {
+        val retired = co.datapipelines.pipeline.RetiredFactCitation("fact-old", "superseded", "fact-new")
+        setVariable(
+            "dlg",
+            PipelineLifecycleDialogModel.ReleaseDialog(
+                id = java.util.UUID.fromString("22222222-2222-2222-2222-222222222222"),
+                name = "nyc/weather/probe",
+                version = 3,
+                updatedBy = "Muhammad",
+                updatedAgo = "2 hours ago",
+                updatedAt = java.time.Instant.parse("2026-09-25T10:00:00Z"),
+                pins =
+                    listOf(
+                        PipelineLifecycleDialogModel.PinView(
+                            id = "nyc/weather/rainy.jsonata",
+                            version = 2,
+                            status = co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+                            retiredFacts = listOf(retired),
+                        ),
+                    ),
+                hasChecks = false,
+                refusal = null,
+            ),
+        )
+        setVariable("from", "explorer")
+    }
 }

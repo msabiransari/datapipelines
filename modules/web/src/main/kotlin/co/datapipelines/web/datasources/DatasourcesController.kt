@@ -67,6 +67,12 @@ class DatasourcesController(
     private val rules: DatasourceWorkspaceRules,
     private val registrations: DatasourceCreateService,
     private val updates: DatasourceUpdateService,
+    /**
+     * 7e — the promoter lens: each rule under `definitions` carries `implemented_by`, the template
+     * versions the caller's `template.read` admits (transform-nodes design §8.3). No default —
+     * a missed caller must not compile into a listing that names drafts to a promoter.
+     */
+    private val lens: co.datapipelines.application.lens.PromoterLens,
     // 118 — the learned facts the listing and the detail carry (rest-api §9.7A), the same
     // enrichment the MCP twin uses; 138 §B — both blocks, `facts` AND `definitions`, on both
     // reads, from the same one-store-read the MCP `datasources_list` makes (136 §A). Defaulted so
@@ -122,9 +128,11 @@ class DatasourcesController(
             }
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val visible = datasources.listVisible(filter, workspaceId)
-        val items = visible.drop(page).take(size).map { it.toResponse() + blocks(workspaceId, it) }
+        val templateLens = lens.viewFor(principal).templates
+        val items = visible.drop(page).take(size).map { it.toResponse() + blocks(workspaceId, it, templateLens) }
         return ApiResponse.of(PagedData(items, Pagination.of(page, size, visible.size.toLong(), items.size)))
     }
 
@@ -139,16 +147,19 @@ class DatasourcesController(
     fun get(
         @PathVariable name: String,
     ): ApiResponse<Map<String, Any?>> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val datasource = datasources.getVisible(name, workspaceId) ?: throw ApiErrors.datasourceNotFound(name)
-        return ApiResponse.of(datasource.toResponse() + blocks(workspaceId, datasource))
+        return ApiResponse.of(datasource.toResponse() + blocks(workspaceId, datasource, lens.viewFor(principal).templates))
     }
 
     /** The two learned-fact blocks both reads carry, from one store read — the MCP twin's shape exactly. */
     private fun blocks(
         workspaceId: UUID,
         datasource: Datasource,
-    ): Map<String, Any?> = facts.forListing(workspaceId, datasource).let { mapOf("facts" to it.facts, "definitions" to it.definitions) }
+        templateLens: co.datapipelines.pipeline.ReadLens,
+    ): Map<String, Any?> =
+        facts.forListing(workspaceId, datasource, templateLens).let { mapOf("facts" to it.facts, "definitions" to it.definitions) }
 
     /**
      * §9.4 — update, under the D8 gates. `password` optional (omit to keep); `readonly`

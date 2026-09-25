@@ -93,6 +93,22 @@
           </div>
         </th:block>
 
+        <!-- 7e (transform-nodes design §8.2): a pinned version that cites a RETIRED learned fact
+             is a WARNING, never a refusal — one row per such pin, above the confirm, naming each
+             retired fact and its successor; the button below is untouched. The POST's
+             `warnings` carry the same facts (one port, one read). Text only, through th:text. -->
+        <div class="plc-needs-review u-text-sm u-mb-md" data-release-needs-review
+             th:if="${!#lists.isEmpty(dlg.needsReviewPins)}">
+          <ul class="plc-needs-review-pins">
+            <li th:each="p : ${dlg.needsReviewPins}" th:attr="data-needs-review-pin=${p.label}">
+              <span class="ds-badge ds-badge-warning">needs review</span>
+              <span class="u-mono" th:text="${p.label}">demo/lines.jsonata@2</span>
+              <span th:text="'cites a retired fact: ' + ${p.retiredFactsLabel}">cites a retired fact: 1b2… — superseded by 3c4…</span>
+            </li>
+          </ul>
+          <p class="u-secondary u-m0">Releasing is not blocked. Re-cite the successor with templates_update to clear the mark.</p>
+        </div>
+
         <p class="u-secondary u-text-sm u-mb-md">
           Releasing makes v<span th:text="${dlg.version}">3</span> the current version and locks it.
         </p>

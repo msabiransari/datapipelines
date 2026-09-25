@@ -63,14 +63,15 @@ class TemplateEditorController(
         // §9.6: the name is a query parameter — it may contain `/`, which can never travel
         // in a URL path segment (the container refuses %2F below routing).
         val view = lens.viewFor(principal).templates
-        val draft = source.fill(model, workspaceId, view, name, version, RoleModel.roles(principal).canAuthor).draft
+        val filled = source.fill(model, workspaceId, view, name, version, RoleModel.roles(principal).canAuthor)
+        val draft = filled.draft
         model.addAttribute("versions", reads.listVersions(workspaceId, view, name))
         model.addAttribute("hasDraft", draft != null)
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
-        // 7d (transform-nodes design §8.2): the `needs_review` marker renders behind this flag;
-        // lane 7e computes it from the cited facts. Until then no version is marked.
-        model.addAttribute("needsReview", false)
+        // 7e (transform-nodes design §8.2): the displayed version's `needs_review` marker —
+        // computed on read by the projection's own query (a cited fact is retired).
+        model.addAttribute("needsReview", filled.displayed?.needsReview == true)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model, principal)
         return "templates/editor"

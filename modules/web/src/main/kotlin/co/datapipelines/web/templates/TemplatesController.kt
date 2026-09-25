@@ -112,8 +112,9 @@ class TemplatesController(
         val workspaceId = principal.requireWorkspace().id
         val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
         // D55: authoring lands version 1 DRAFT (`status: "DRAFT"` in the response); a human
-        // releases it. The RELEASED create belongs to the import path alone.
-        return ApiResponse.of(templates.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT, principal.writeSurface()))
+        // releases it. The RELEASED create belongs to the import path alone. 7e: the draft
+        // service lands the stated `implements` on that version (the MCP twin's one path).
+        return ApiResponse.of(drafts.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT, principal.writeSurface()))
     }
 
     /**
@@ -169,8 +170,11 @@ class TemplatesController(
     /**
      * §8.5 — the listing; the repository paginates in SQL, `total` is the honest lower bound.
      * One of the two list shapes on `GET /api/v1/templates` (§9.6): answers when `name` AND
-     * `prefix` are both ABSENT.
+     * `prefix` are both ABSENT. `implements=<fact id>` (7e, transform-nodes design §8.3) keeps
+     * the templates whose listed version cites that fact; an id this workspace cannot see
+     * matches nothing (the filter joins the fact through the workspace), a malformed one is 400.
      */
+    @Suppress("LongParameterList") // one query parameter per documented filter (rest-api §8.5)
     @GetMapping(params = ["!name", "!prefix"])
     @RequiredScope(Permission.TEMPLATE_READ)
     fun list(
@@ -179,6 +183,7 @@ class TemplatesController(
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
+        @RequestParam(required = false) implements: String? = null,
     ): ApiResponse<PagedData<Template>> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
@@ -186,6 +191,7 @@ class TemplatesController(
         val size = Pagination.clampLimit(limit)
         val filter = dialect?.let { parseDialect(it) }
         val typeFilter = type?.let { parseType(it) }
+        val cites = implements?.let { parseFactId(it) }
         val raw =
             reads.list(
                 workspaceId,
@@ -196,6 +202,7 @@ class TemplatesController(
                 offset = page,
                 limit =
                     size + 1,
+                implements = cites,
             )
         val items = raw.take(size)
         return ApiResponse.of(PagedData(items, Pagination.unknownTotal(page, size, items.size, raw.size > size)))
@@ -804,6 +811,15 @@ class TemplatesController(
                 PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
                 "Unknown template type '$raw'.",
                 mapOf("type" to raw.take(MAX_ECHOED_VALUE_CHARS), "supported" to TemplateType.WIRE_VALUES),
+            )
+
+    /** The `implements` list filter (7e) — a fact id, else the `parseDialect` shape's 400. */
+    private fun parseFactId(raw: String): java.util.UUID =
+        runCatching { java.util.UUID.fromString(raw.trim()) }.getOrNull()
+            ?: throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "'implements' must be a learned-fact id (a UUID).",
+                mapOf("implements" to raw.take(MAX_ECHOED_VALUE_CHARS)),
             )
 
     private companion object {

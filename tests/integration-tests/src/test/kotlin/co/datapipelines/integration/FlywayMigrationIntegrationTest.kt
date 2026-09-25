@@ -128,6 +128,10 @@ class FlywayMigrationIntegrationTest {
                 // 215b (#215) — users.kind, api_keys.created_by + role + chk_api_keys_role, one
                 // service identity per endpoint/server key, api_keys.scopes dropped.
                 "34|key identities and roles|true",
+                // 7e (#7) — template_implements (a transform version's cited facts, outside the
+                // hash) and the partial successor index on learned_facts.supersedes. V35 is
+                // lane 233b's (feat/keys-v2); the orchestrator inserts its row at merge.
+                "36|template implements|true",
             )
     }
 
@@ -351,6 +355,40 @@ class FlywayMigrationIntegrationTest {
         definition shouldContain "jsonb_typeof(refs_json) = 'array'::text"
         definition shouldContain "scope = 'WORKSPACE'::text"
         definition shouldContain "jsonb_array_length(refs_json) >= 1"
+    }
+
+    /**
+     * 7e (V36, transform-nodes design §2.3/§8.2) — the citation table, read from the SHIPPED
+     * database: the three key columns and nothing else (no hash, no stored mark — `needs_review`
+     * is computed on read), a purged or deleted version takes its citations with it (CASCADE on
+     * the composite key), and a cited fact can never be deleted out from under a citation (no
+     * action on the fact key — facts are retired, never deleted, D-S11). Proven by the FKs' own
+     * definitions and delete actions, the V25 way; the behaviour is the templates module's suite.
+     */
+    @Test
+    fun `V36 creates the citation table cascading from the version and never from the fact`() {
+        columnsOf("template_implements") shouldContainExactly listOf("fact_id", "template_id", "version")
+
+        query(
+            "SELECT conname || '|' || confdeltype::text || '|' || pg_get_constraintdef(oid) FROM pg_constraint" +
+                " WHERE conrelid = 'template_implements'::regclass AND contype = 'f' ORDER BY conname",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "fk_template_implements_fact|a|FOREIGN KEY (fact_id) REFERENCES learned_facts(id)",
+                "fk_template_implements_version|c|FOREIGN KEY (template_id, version) " +
+                    "REFERENCES template_versions(template_id, version) ON DELETE CASCADE",
+            )
+
+        query(
+            "SELECT pg_get_indexdef(indexrelid) FROM pg_index" +
+                " WHERE indexrelid IN ('idx_template_implements_fact'::regclass, 'idx_learned_facts_supersedes'::regclass)" +
+                " ORDER BY indexrelid::regclass::text",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE INDEX idx_learned_facts_supersedes ON public.learned_facts USING btree (supersedes) " +
+                    "WHERE (supersedes IS NOT NULL)",
+                "CREATE INDEX idx_template_implements_fact ON public.template_implements USING btree (fact_id)",
+            )
     }
 
     @Test
@@ -689,7 +727,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the nineteen tables of metadata-db §4`() {
+    fun `creates exactly the twenty-one tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -721,6 +759,8 @@ class FlywayMigrationIntegrationTest {
                 "pipeline_versions",
                 "pipelines",
                 "published_endpoints",
+                // 7e (V36) — a transform version's cited facts (metadata-db §4.21).
+                "template_implements",
                 "template_versions",
                 "templates",
                 "users",
@@ -783,6 +823,8 @@ class FlywayMigrationIntegrationTest {
                 "lake_tables.uq_lake_tables_datasource_namespace_name",
                 // 118 (V25) — every read is per datasource; the workspace half is partial.
                 "learned_facts.idx_learned_facts_datasource",
+                // 7e (V36) — the successor of a retired fact (partial: few facts supersede one).
+                "learned_facts.idx_learned_facts_supersedes",
                 "learned_facts.idx_learned_facts_workspace",
                 "learned_facts.learned_facts_pkey",
                 // 137 (V27) — one claim per message identity (user, kind, act).
@@ -807,6 +849,9 @@ class FlywayMigrationIntegrationTest {
                 "published_endpoints.idx_published_endpoints_workspace",
                 "published_endpoints.published_endpoints_path_pattern_key",
                 "published_endpoints.published_endpoints_pkey",
+                // 7e (V36) — the reverse arrow (which versions cite this fact) and the PK.
+                "template_implements.idx_template_implements_fact",
+                "template_implements.template_implements_pkey",
                 "template_versions.idx_template_versions_dialect",
                 "template_versions.template_versions_pkey",
                 "template_versions.uq_template_versions_one_draft",

@@ -64,5 +64,6 @@ fun realShippedTools(): List<McpTool> {
         lens = McpFixtures.EVERYTHING_LENS,
         templateService = McpFixtures.templateService(mockk<TemplateRepository>()),
         templateEvaluateService = mockk<co.datapipelines.application.templates.TemplateEvaluateService>(),
+        templateDrafts = mockk<co.datapipelines.templates.TemplateDraftService>(),
     )
 }

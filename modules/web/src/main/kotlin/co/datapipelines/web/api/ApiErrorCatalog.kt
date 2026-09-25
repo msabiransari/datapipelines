@@ -215,6 +215,10 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Template.TEST_FAILED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.BLOCKS_NOT_ALLOWED to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE to HttpStatus.BAD_REQUEST,
+            // §13.9 (7e, the semantic link) — an `implements` entry that is not a citable fact:
+            // 400, not a 404 — the payload is the caller's to fix, and the one answer for
+            // "absent" and "not yours" is what keeps it from being an existence oracle.
+            PipelineErrorCodes.Template.IMPLEMENTS_UNRESOLVED to HttpStatus.BAD_REQUEST,
             // §13.7 (055) — 401 like the auth.promotion family default, same A2 reason.
             PipelineErrorCodes.Auth.PROMOTION_KEY_INVALID to HttpStatus.UNAUTHORIZED,
             // §13.7 — bad credentials is the one `auth.login.*` code that is a 401,
@@ -310,6 +314,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Execution.INSTANCE_LOST,
             PipelineErrorCodes.TypeMapping.UNKNOWN_SOURCE_TYPE,
             PipelineErrorCodes.TypeMapping.SQL_VARIANT,
+            // §13.13 (7e) — a WARNING in the release response's `warnings`, never an error
+            // status: a fact edit never blocks a release (transform-nodes design §8.2).
+            PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NEEDS_REVIEW,
         )
 
     /**
@@ -419,6 +426,10 @@ object ApiErrorCatalog {
                 "We couldn't find that template. It may have been deleted.",
             PipelineErrorCodes.Template.DUPLICATE_NAME to
                 "A template with that name already exists in this workspace. Pick a different name.",
+            // 7e — a 400 the author fixes; without the override it read "went wrong on our side".
+            PipelineErrorCodes.Template.IMPLEMENTS_UNRESOLVED to
+                "A fact this template cites isn't one it can cite here. Cite a definition, exclusion or " +
+                "preference recorded in this workspace, by its id.",
             PipelineErrorCodes.Workspace.DUPLICATE_NAME to
                 "A workspace with that name already exists. Pick a different name.",
             PipelineErrorCodes.Workspace.INVITATION_NOT_FOUND to

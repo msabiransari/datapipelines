@@ -930,6 +930,15 @@ object PipelineErrorCodes {
          * `templates_evaluate`.
          */
         const val RENDER_NOT_APPLICABLE = "template.render_not_applicable"
+
+        /**
+         * §13.9 (7e, transform-nodes design §2.3) — an `implements` entry does not resolve to a
+         * learned fact the writing workspace may cite: absent, invisible from the workspace, a
+         * DATASOURCE fact, or a WORKSPACE fact of a kind other than `definition`, `exclusion`
+         * or `preference`. One answer for all of them — not-found semantics, never "it exists
+         * but you cannot see it"; `details.fact_id` names the first offending entry.
+         */
+        const val IMPLEMENTS_UNRESOLVED = "template.implements_unresolved"
     }
 
     /** §13.10 — result retrieval. Defined in rest-api.md §7; cataloged here (D5/D9). */
@@ -1078,6 +1087,15 @@ object PipelineErrorCodes {
 
         /** §13.13 / versioning §5.3 — pipeline release blocked on a DRAFT template pin. */
         const val RELEASE_TEMPLATE_NOT_RELEASED = "pipeline.release.template_not_released"
+
+        /**
+         * §13.13 (7e, transform-nodes design §8.2) — a WARNING, never an error: the released
+         * pipeline pins a template version that reads `needs_review` (it cites a retired learned
+         * fact). Carried in the release response's `warnings` array and the release dialog's pin
+         * row; the release proceeds — a fact edit never blocks a release on its own. Never
+         * returned as an error status (`ApiErrorCatalog.NEVER_RETURNED_LIVE`, the §13.6 shape).
+         */
+        const val RELEASE_TEMPLATE_NEEDS_REVIEW = "pipeline.release.template_needs_review"
 
         /** §13.13 / versioning §10.3 — promotion selected a non-RELEASED version. */
         const val PROMOTION_NOT_RELEASED = "pipeline.promotion.not_released"

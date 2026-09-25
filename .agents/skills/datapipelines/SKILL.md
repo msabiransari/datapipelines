@@ -133,8 +133,9 @@ full paths. Use `prefix` to learn the shape, `q` to find a thing you can already
    means, joins) — what earlier sessions recorded, each with its `trust` and evidence. `observed` or
    `verified` with evidence saves you the probe; `stale` or `needs_review` is a warning, not a truth —
    re-verify it. `definitions` on the listing are rules earlier pipelines chose — read them before
-   you choose yours, and reuse or supersede, never re-choose. `datasources_get` is the same facts
-   for one datasource — the refresh after you `semantics_record`.
+   you choose yours, and reuse or supersede, never re-choose. Then find the transform that implements the
+   rule — its `implemented_by`, or `templates_list {"implements": "<fact id>"}` — and reuse it before writing
+   your own. `datasources_get` is the same facts for one datasource — the refresh after you `semantics_record`.
 
    **Record what you learned, with the query that showed it.** After you have established a
    fact about the data that introspection could not tell you — a unit, a time zone, a sample
@@ -295,8 +296,7 @@ draft. Its Do/Don't table is one screen; each row is a mistake an agent made her
 
 1. **Render before you create.** `templates_render` with representative values catches
    wrong SQL, bad interpolation, and dialect drift before a pipeline exists.
-2. **Test the datasource first.** `datasources_test` is cheap and answers connectivity
-   + credential questions immediately.
+2. **Test the datasource first.** `datasources_test` is cheap and settles connectivity and credentials at once.
 2½. **Learned facts are shared memory — keep them honest.** A fact you record with
    `evidence_sql` is `observed`; without it, only `asserted` — except a `definition`, `exclusion`
    or `preference`, which is a choice and lands `asserted` until a person confirms it. Two facts
@@ -391,7 +391,7 @@ draft. Its Do/Don't table is one screen; each row is a mistake an agent made her
 - **`references/node-types.md`** — wiring the DAG.
 - **`references/authoring-playbook.md`** — building anything non-trivial.
 - **`references/templates.md`** — writing SQL: templates, library imports, CALCULATOR nodes.
-- **`references/transforms.md`** — a transform template (JSONata), its contract/invariants/tests, `templates_evaluate`.
+- **`references/transforms.md`** — a transform template (JSONata), its contract/invariants/tests, `templates_evaluate`, `implements`.
 - **`references/naming.md`** — choosing where a new pipeline or template lives.
 - **`references/connecting.md`** — a first call, a role or credential refusal, no MCP transport.
 - **`references/dp-lake.md`** — the data is Parquet or Iceberg on S3, not in a database.

@@ -3,6 +3,7 @@ package co.datapipelines.web.config
 import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.application.semantics.LearnedFactsEnricher
 import co.datapipelines.application.semantics.SemanticsService
+import co.datapipelines.application.templates.TemplateImplementsService
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.SchemaIntrospector
@@ -10,6 +11,7 @@ import co.datapipelines.datasources.SqlProbe
 import co.datapipelines.datasources.semantics.LearnedFactRecorder
 import co.datapipelines.datasources.semantics.LearnedFactRepository
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.templates.TemplateImplementsRepository
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -37,6 +39,17 @@ class SemanticsConfiguration {
         datasources: DatasourceRegistry,
     ): LearnedFactRecorder = LearnedFactRecorder(repository, introspector, SqlProbe(datasources))
 
+    /**
+     * 7e — the semantic link's application half (transform-nodes design §2.3/§8.3): the citation
+     * rule the template validator asks through the `CitableFacts` port (declared by `templates`,
+     * found here by type), and the `implemented_by` reverse read the fact surfaces decorate with.
+     */
+    @Bean
+    fun templateImplementsService(
+        repository: LearnedFactRepository,
+        citations: TemplateImplementsRepository,
+    ): TemplateImplementsService = TemplateImplementsService(repository, citations)
+
     /** The three verbs above the principal, sharing the application's audit sink. */
     @Bean
     fun semanticsService(
@@ -44,12 +57,14 @@ class SemanticsConfiguration {
         recorder: LearnedFactRecorder,
         pipelines: PipelineRepository,
         auditSink: AuditEventSink,
-    ): SemanticsService = SemanticsService(repository, recorder, pipelines, auditSink)
+        implementations: TemplateImplementsService,
+    ): SemanticsService = SemanticsService(repository, recorder, pipelines, auditSink, implementations)
 
     /** D-S7 — the facts merged into every introspection response, with the D-S9 pipeline predicate. */
     @Bean
     fun factEnrichment(
         repository: LearnedFactRepository,
         pipelines: PipelineRepository,
-    ): FactEnrichment = LearnedFactsEnricher(repository, pipelines)
+        implementations: TemplateImplementsService,
+    ): FactEnrichment = LearnedFactsEnricher(repository, pipelines, implementations)
 }

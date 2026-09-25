@@ -99,6 +99,36 @@ type gate's `pipeline.transform.row_shape_mismatch` / `value_type_mismatch` /
 `datapipelines.transform.evaluate-timeout-seconds`, the suite ≤ `suite-timeout-seconds`;
 time catches recursion, depth catches nesting.
 
+## Implements — the rule this transform computes
+
+A workspace rule you or an earlier session recorded as a learned fact — a `definition`,
+`exclusion` or `preference` ("rainy = `precipitation_mm >= 2.5`", "tips are not revenue") —
+and the transform that computes it are one decision. Cite the rule on the version:
+
+```json
+{ "implements": ["<fact id of the definition>"] }
+```
+
+- **Only WORKSPACE rules of this workspace.** The ids come from `semantics_list` or the
+  `definitions` on `datasources_list` / `datasources_get`. Anything else — another
+  workspace's, a DATASOURCE fact (a transform never sees a datasource), a typo — is
+  `template.implements_unresolved` (`details.reason`: `unknown` / `malformed` / `too_many`,
+  at most 50). On `sql`/`html` the field is `template.blocks_not_allowed`.
+- **Not content.** `implements` is outside `body_hash`: it never opens a draft on its own.
+  On `templates_update`, **omitted keeps** the citations of the version you edit (a new draft
+  inherits the released one's); `[]` clears them. An update whose body equals the released
+  version and that states `implements` writes the citations ON the released version — no draft.
+- **Find before you write.** Every WORKSPACE fact on `semantics_list` and every rule under
+  `definitions` carries `implemented_by: [{template_id, version}]`; `templates_list
+  {"implements": "<fact id>"}` lists the templates whose listed version cites it. A rule
+  someone already implemented is a pin, not a new template.
+- **Drift.** When a cited fact is retired or superseded, every citing version reads
+  `needs_review: true` on `templates_get` / `templates_list`, and `retired_facts` names the
+  retired id and its `superseded_by`. Nothing changes the transform for you: read the
+  successor, re-verify the body against it, then `templates_update` citing the successor (on a
+  released version that opens no draft). A pipeline release pinning a `needs_review` version is
+  not refused — the human sees a `pipeline.release.template_needs_review` warning.
+
 ## The node
 
 ```json

@@ -139,6 +139,10 @@ class McpServerAutoConfiguration {
         // `web`'s EngineConfiguration), so an evaluation over MCP crosses the same pool, caps
         // and invariants. A plain parameter, the 068/074 pattern.
         templateEvaluateService: co.datapipelines.application.templates.TemplateEvaluateService,
+        // 117/7e — the template draft write REST PUT /templates goes through (declared by `web`'s
+        // TemplateLifecycleConfiguration). Injected, no longer built here: since 7e it carries the
+        // citation store, and one instance for both surfaces is what keeps the write rule single.
+        templateDrafts: co.datapipelines.templates.TemplateDraftService,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -153,10 +157,6 @@ class McpServerAutoConfiguration {
         // 040's used-by service, same inline-construction discipline (the templates module's
         // configuration declares the bean `web` consumes; this module builds its own).
         val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
-        // 117 — the template draft write REST PUT /templates goes through, built locally by the
-        // same discipline: stateless over (templates, authoring), so inline construction adds no
-        // wiring and the tool cannot describe a write path the server does not ship.
-        val templateDrafts = co.datapipelines.templates.TemplateDraftService(templates, authoring)
         val (tableLearning, renderFreshness) = entryPointChecks(jdbc, templates, introspector, datasources)
         return listOf(
             PipelinesListTool(pipelineService, lens),
@@ -179,7 +179,7 @@ class McpServerAutoConfiguration {
             TemplatesListTool(templateService, lens),
             TemplatesGetTool(templateService, lens),
             TemplatesUsedByTool(usage, lens),
-            TemplatesCreateTool(templates, authoring, templateValidator),
+            TemplatesCreateTool(templates, authoring, templateValidator, templateDrafts),
             TemplatesUpdateTool(templates, templateDrafts, templateValidator),
             TemplatesRenderTool(templates, templateEngines),
             // 7b — the transform evaluator (record §9.1): the SAME service the REST evaluate
@@ -187,8 +187,8 @@ class McpServerAutoConfiguration {
             TemplatesEvaluateTool(templateEvaluateService),
             // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
             TemplatesPurgeDraftTool(templates, usage, authoring),
-            DatasourcesListTool(datasources, factEnrichment),
-            DatasourcesGetTool(datasources, factEnrichment),
+            DatasourcesListTool(datasources, factEnrichment, lens),
+            DatasourcesGetTool(datasources, factEnrichment, lens),
             DatasourcesTestTool(datasources),
             DatasourcesGetSchemasTool(introspector, datasources),
             DatasourcesGetTablesTool(introspector, datasources, factEnrichment),
@@ -211,7 +211,7 @@ class McpServerAutoConfiguration {
             CalculatorsListTool(),
             CalculatorsGetTool(),
         ) + EndpointsTools.all(endpointPublishService, pipelines) + LakeTableTools.all(datasources, lakeTableRegistryService) +
-            SemanticsTools.all(datasources, semanticsService, introspector) +
+            SemanticsTools.all(datasources, semanticsService, introspector, lens) +
             // 120 — the skill docs as tools: no collaborators at all, the 072 reasoning —
             // the content is the packaged build artifact, read through the same SkillDocs
             // loader the resources use.

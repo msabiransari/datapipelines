@@ -42,6 +42,12 @@ internal fun McpArguments.dialect(name: String): Dialect? =
 /** §6.2.6 — the `is_library` filter description, kept off the schema line for length. */
 private const val IS_LIBRARY_FILTER_DESC = "Filter to library templates (macro collections) or executable templates."
 
+/** §6.2.6 — the `implements` filter description (7e, transform-nodes design §8.3). */
+private const val IMPLEMENTS_FILTER_DESC =
+    "A learned fact id: only templates whose listed version cites it (implements) — the transforms that " +
+        "implement a workspace definition, exclusion or preference. A fact this workspace cannot see matches " +
+        "nothing. Ignored while prefix is present, like q."
+
 /** §6.2.6 — the `type` filter description (046 §10; the transform types since 7b). */
 private const val TYPE_FILTER_DESC =
     "Filter by template kind: 'sql' (pipeline-referenced SQL), 'html' (rendered output), or a transform type " +
@@ -86,7 +92,10 @@ class TemplatesListTool(
                     "nodes (and carries a dialect), 'html' renders escaped output and declares none, and the " +
                     "transform types ('jsonata', 'javascript') evaluate the body as a pure function of its input " +
                     "and declare neither. Template ids are " +
-                    "unique per workspace — another workspace's template resolves as not-found." +
+                    "unique per workspace — another workspace's template resolves as not-found. A transform row " +
+                    "carries implements (the learned facts it cites) and needs_review (true when a cited fact was " +
+                    "retired); implements=<fact id> lists the transforms that implement that fact — reuse before " +
+                    "writing." +
                     " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +
                     "lens); every other template resolves as not-found.",
             schema =
@@ -99,6 +108,7 @@ class TemplatesListTool(
                     "q": {"type": "string"},
                     "prefix": {"type": "string", "description": "$PREFIX_ARG_DESC"},
                     "is_library": {"type": "boolean", "description": "$IS_LIBRARY_FILTER_DESC"},
+                    "implements": {"type": "string", "format": "uuid", "description": "$IMPLEMENTS_FILTER_DESC"},
                     "limit": {"type": "integer", "default": 50, "maximum": 200}
                   }
                 }
@@ -114,6 +124,9 @@ class TemplatesListTool(
         val isLibrary = args.boolean("is_library")
         val dialect = args.dialect("dialect")
         val type = args.string("type")?.let { TemplateType.fromWire(it) }
+        // 7e: a malformed id is a protocol fault (-32602); a well-formed one the workspace
+        // cannot see simply matches nothing (the SQL joins the fact through the workspace).
+        val implements = args.uuid("implements")
         // `has` and not `string`: `prefix: ""` is PRESENT and means the root, while
         // `string("prefix")` normalizes blank to null. The distinction is the whole browse
         // contract — absent is "flat list", empty is "the tree's top level".
@@ -130,6 +143,7 @@ class TemplatesListTool(
                 type = type,
                 q = args.string("q"),
                 limit = limit,
+                implements = implements,
             ).filter { isLibrary == null || it.isLibrary == isLibrary }
             .map { it.toMetadata() }
     }
@@ -185,6 +199,9 @@ class TemplatesListTool(
             "display_name" to displayName,
             "description" to description,
             "is_library" to isLibrary,
+            // 7e (§8.2/§8.3): the citations (null on sql/html) and the read-time mark.
+            "implements" to implements,
+            "needs_review" to needsReview,
         )
 }
 
@@ -206,7 +223,9 @@ class TemplatesGetTool(
             description =
                 "Get the body and metadata of a template version, including its imports array (the library " +
                     "macros it can call). Defaults to the working version — the draft when unreleased edits " +
-                    "exist, else the latest released." +
+                    "exist, else the latest released. A transform version carries implements (the learned facts " +
+                    "it cites) and needs_review: true when a cited fact was retired — retired_facts names each " +
+                    "one and its superseded_by; re-verify, then cite the successor with templates_update." +
                     " A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter " +
                     "lens); every other template resolves as not-found.",
             schema =
