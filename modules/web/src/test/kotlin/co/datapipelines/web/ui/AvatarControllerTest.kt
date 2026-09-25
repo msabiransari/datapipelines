@@ -13,11 +13,6 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.every
 import io.mockk.mockk
-import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.time.Duration
-import java.time.Instant
-import java.util.UUID
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -25,6 +20,11 @@ import org.junit.jupiter.api.TestInstance
 import org.springframework.http.MediaType
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.time.Duration
+import java.time.Instant
+import java.util.UUID
 
 /**
  * The avatar proxy's fence (#197), exercised over the REAL transport: the controller, the
@@ -236,6 +236,7 @@ class AvatarControllerTest {
     /** The wire the fetcher talks to: real statuses, real headers, and a per-path hit count. */
     private fun startImageServer(): HttpServer {
         val server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0)
+
         fun image(path: String) {
             server.createContext(path) { exchange ->
                 this@AvatarControllerTest.hits.merge(path, 1, Int::plus)

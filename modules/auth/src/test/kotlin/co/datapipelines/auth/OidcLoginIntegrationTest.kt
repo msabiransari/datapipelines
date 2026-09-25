@@ -204,7 +204,9 @@ class OidcLoginIntegrationTest {
             jar.containsKey("dp_session").shouldBeTrue()
 
             // The allowlist key reached the bean the AvatarHosts allowlist is built from.
-            authProperties.oidc.providers.single().pictureHosts shouldBe listOf("127.0.0.1")
+            authProperties.oidc.providers
+                .single()
+                .pictureHosts shouldBe listOf("127.0.0.1")
         } finally {
             jar.clear()
             jar.putAll(savedJar)

@@ -5,14 +5,6 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.auth.UserRepository
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
-import java.time.Instant
 import org.slf4j.LoggerFactory
 import org.springframework.http.CacheControl
 import org.springframework.http.HttpStatus
@@ -22,6 +14,14 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RestController
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
+import java.time.Instant
 
 /**
  * The avatar proxy (#197): `GET /avatar` serves the SIGNED-IN principal's own OIDC picture,
@@ -157,7 +157,9 @@ class AvatarConfiguration {
  * refuses STARTUP here rather than silently 404-ing avatars — the same shape
  * `ClientAddressResolver` set for `trusted-proxies` (Configuration §3.4).
  */
-class AvatarHosts(authProperties: AuthProperties) {
+class AvatarHosts(
+    authProperties: AuthProperties,
+) {
     val names: Set<String> =
         authProperties.oidc.providers
             .flatMap { it.pictureHosts }

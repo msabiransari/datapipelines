@@ -52,15 +52,16 @@ class PerUserRateLimitE2eTest {
 
         // Arm A — the session's own budget on REST: the second request of the minute is the
         // refusal, and it carries the request-volume sentence.
-        val restThrottled = drivePastBound {
-            given()
-                .port(port)
-                .asSession(jwt(viewerA, "viewer-a@ratelimit.test"))
-                .`when`()
-                .get("/api/v1/pipelines")
-                .then()
-                .extract()
-        }
+        val restThrottled =
+            drivePastBound {
+                given()
+                    .port(port)
+                    .asSession(jwt(viewerA, "viewer-a@ratelimit.test"))
+                    .`when`()
+                    .get("/api/v1/pipelines")
+                    .then()
+                    .extract()
+            }
         restThrottled.statusCode() shouldBe 429
         restThrottled.body().asString() shouldContain """"code":"rate_limit.exceeded""""
         restThrottled.body().asString() shouldContain API_SENTENCE
@@ -140,29 +141,31 @@ class PerUserRateLimitE2eTest {
             if (seeded) return
             seeded = true
             E2eClean.beforeSeeding()
-            DriverManager.getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password).use { connection ->
-                connection.createStatement().use { statement ->
-                    statement.execute(
-                        "INSERT INTO workspaces (id, name, display_name) VALUES ('$wsId', '$WS_NAME', 'Rate Limit 232')",
-                    )
-                    listOf(
-                        "viewer-a" to viewerA,
-                        "viewer-b" to viewerB,
-                    ).forEach { (label, id) ->
+            DriverManager
+                .getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password)
+                .use { connection ->
+                    connection.createStatement().use { statement ->
                         statement.execute(
-                            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
-                                "('$id', '$label@ratelimit.test', '$label', 'test', '$label-sub', TRUE, FALSE)",
+                            "INSERT INTO workspaces (id, name, display_name) VALUES ('$wsId', '$WS_NAME', 'Rate Limit 232')",
                         )
+                        listOf(
+                            "viewer-a" to viewerA,
+                            "viewer-b" to viewerB,
+                        ).forEach { (label, id) ->
+                            statement.execute(
+                                "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
+                                    "('$id', '$label@ratelimit.test', '$label', 'test', '$label-sub', TRUE, FALSE)",
+                            )
+                            statement.execute(
+                                "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$wsId', '$id', 'viewer')",
+                            )
+                        }
                         statement.execute(
-                            "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$wsId', '$id', 'viewer')",
+                            "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) VALUES " +
+                                "('${viewerBKey.id}', '$viewerB', '$viewerB', '${viewerBKey.name}', '${viewerBKey.hash}', '$wsId', 'user', NULL)",
                         )
                     }
-                    statement.execute(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) VALUES " +
-                            "('${viewerBKey.id}', '$viewerB', '$viewerB', '${viewerBKey.name}', '${viewerBKey.hash}', '$wsId', 'user', NULL)",
-                    )
                 }
-            }
         }
 
         private val oidc = OidcDiscoveryStub()
