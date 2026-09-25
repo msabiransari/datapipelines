@@ -379,14 +379,25 @@ class ExecutionsVisibilityTest {
                 .prepareStatement(
                     "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
                         " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                )                .use { ps ->
+                ).use { ps ->
                     // Keys v2 (A13/A14): every key acts as its own identity (user_id), holds the
                     // role CHOSEN for it (the member's own role here — the subset rule allows the
                     // member to grant it), and names its creator. The endpoint key is unchanged.
                     listOf(ALICE_KEY to "author", WANDA_KEY to "workspace_admin", PAM_KEY to "promoter").forEach { (key, role) ->
                         ps.setString(1, key.id)
                         ps.setObject(2, UUID.fromString(key.ownerId))
-                        ps.setObject(3, UUID.fromString(if (key === ALICE_KEY) ALICE else if (key === WANDA_KEY) WANDA else PAM))
+                        ps.setObject(
+                            3,
+                            UUID.fromString(
+                                if (key === ALICE_KEY) {
+                                    ALICE
+                                } else if (key === WANDA_KEY) {
+                                    WANDA
+                                } else {
+                                    PAM
+                                },
+                            ),
+                        )
                         ps.setString(4, key.name)
                         ps.setString(5, key.hash)
                         ps.setObject(6, UUID.fromString(WS_ACME))

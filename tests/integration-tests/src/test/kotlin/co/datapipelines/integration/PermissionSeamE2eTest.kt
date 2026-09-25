@@ -321,11 +321,11 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
         /**
          * The witnessed permissions — chosen across families, and in co-granted pairs a role walk cannot
          * separate (create/delete/update, read/execute, release/promote, read/cancel), plus instance-,
-          * key-, member- and profile-scoped rows. Fourteen; the record's floor is ten. `api_key.create`
-          * was witnessed until keys v2 moved the create routes onto `mcp_key.create`'s row and left
-          * `api_key.create` a service-CHECK claim with "No route of its own" (auth.md §7.6) — a
-          * permission with no surface proves nothing, so the slot moved with the routes.
-          */
+         * key-, member- and profile-scoped rows. Fourteen; the record's floor is ten. `api_key.create`
+         * was witnessed until keys v2 moved the create routes onto `mcp_key.create`'s row and left
+         * `api_key.create` a service-CHECK claim with "No route of its own" (auth.md §7.6) — a
+         * permission with no surface proves nothing, so the slot moved with the routes.
+         */
         val WITNESSED =
             listOf(
                 "pipeline.read",

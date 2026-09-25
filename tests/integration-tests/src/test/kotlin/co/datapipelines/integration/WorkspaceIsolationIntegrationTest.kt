@@ -642,8 +642,8 @@ class WorkspaceIsolationIntegrationTest {
             connection.createStatement().use { statement ->
                 statement.execute(
                     "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +
-                        "VALUES ('$ACME_CALLER_IDENTITY', '${ACME_CALLER_KEY.id.lowercase()}@keys.invalid', '${ACME_CALLER_KEY.name}', 'key', " +
-                        "'${ACME_CALLER_KEY.id}', TRUE, FALSE, 'service')",
+                        "VALUES ('$ACME_CALLER_IDENTITY', '${ACME_CALLER_KEY.id.lowercase()}@keys.invalid', " +
+                        "'${ACME_CALLER_KEY.name}', 'key', '${ACME_CALLER_KEY.id}', TRUE, FALSE, 'service')",
                 )
                 statement.execute(
                     "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +

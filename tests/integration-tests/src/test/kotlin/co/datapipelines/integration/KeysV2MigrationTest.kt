@@ -221,8 +221,7 @@ class KeysV2MigrationTest {
                 " JOIN api_keys k ON k.user_id = u.id WHERE k.id = '$keyId'",
         ) { listOf(it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getString(5)) }.single()
 
-    private fun nameOf(id: String): String =
-        query("SELECT name FROM api_keys WHERE id = '$id'") { it.getString(1) }.single()
+    private fun nameOf(id: String): String = query("SELECT name FROM api_keys WHERE id = '$id'") { it.getString(1) }.single()
 
     private fun columnsOf(table: String): List<String> =
         query("SELECT column_name FROM information_schema.columns WHERE table_name = '$table'") { it.getString(1) }

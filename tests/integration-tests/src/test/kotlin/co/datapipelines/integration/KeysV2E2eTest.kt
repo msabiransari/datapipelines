@@ -86,7 +86,9 @@ class KeysV2E2eTest {
         println("event=keys-v2-e2e serve body: ${serveBody.take(600)}")
         check(serveBody.contains("\"row_count\"")) { "no row_count in the serve response: ${serveBody.take(400)}" }
         val executionId =
-            io.restassured.path.json.JsonPath(serveBody).getString("execution_id")
+            io.restassured.path.json
+                .JsonPath(serveBody)
+                .getString("execution_id")
                 ?: error("the serve response carried no execution_id: ${serveBody.take(400)}")
         ownRunId = executionId
 
@@ -254,6 +256,7 @@ class KeysV2E2eTest {
     /** A signed session for the bootstrap admin — the principal shape the refusal is ABOUT. */
     private fun sessionJwt(userId: String): String {
         val now = System.currentTimeMillis() / 1000
+
         fun b64(value: String) = Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray())
         val header = b64("""{"alg":"HS256","typ":"JWT"}""")
         val payload =

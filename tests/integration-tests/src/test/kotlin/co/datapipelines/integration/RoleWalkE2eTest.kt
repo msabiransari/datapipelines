@@ -554,6 +554,7 @@ class RoleWalkE2eTest {
                 // `superAdminOver`, audited `acting_via=super_admin`.
                 "super_admin" to "0e000000-0000-0000-0000-000000000177",
             )
+
         /**
          * Keys v2 (A13/A14): the walk's MCP keys — one per MEMBER role, each acting as its own
          * `service` identity, created by the workspace admin through the service's creation
@@ -654,6 +655,7 @@ class RoleWalkE2eTest {
                             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     ).use { ps ->
                         val creator = USERS.getValue("workspace_admin")
+
                         // Keys v2 (A13): EVERY key acts as its own identity (seeded above, one per
                         // key), holds its own role — the member role chosen for the mcp keys, the
                         // transport role for the other two — and names its creator.
