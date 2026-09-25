@@ -61,15 +61,16 @@ object McpServerFactory {
      *
      * It opens with the workspace context (workspaces design §9) — the fact an agent needs
      * before its first tool call so it does not reason about invisible sibling workspaces
-     * (mcp-server.md §2) — and continues with the operating core DISTILLED: the introspect →
-     * template → pipeline → execute flow, the folder-path name grammar and
-     * `confirm_new_root`, "agents describe datasources, humans register them", the three
-     * recoveries an agent gets wrong most often, and the pointer to the full manual at
-     * `datapipelines://docs/skill`.
+     * (mcp-server.md §2) — and continues with the operating core DISTILLED and RANKED for a
+     * client that truncates it (#241): where the full manual lives (`docs_get`, the resource
+     * `datapipelines://docs/skill`, the HTTP twin), the draft rule, the folder-path name grammar
+     * and `confirm_new_root`, "humans register datasources", and the three recoveries an agent
+     * gets wrong most often.
      *
-     * **Hard cap 4096 bytes** (`ServerInstructionsTest`), because every line is paid for by
-     * every session of every client. Anything that does not change what an agent DOES on its
-     * first five calls belongs in the skill, not here.
+     * **Budget: 1,843 characters and bytes** (`McpClientCapTest`), 10 % under the 2,048
+     * characters Claude Code shows of a server's instructions by default — the rest is cut, so
+     * a line past it is a line no default session reads. Anything that does not change what an
+     * agent DOES on its first calls belongs in the skill, not here.
      *
      * It is a resource file rather than a Kotlin string for two reasons: a reviewer can read
      * the diff of a paragraph without reading Kotlin string concatenation, and the same BYTES
