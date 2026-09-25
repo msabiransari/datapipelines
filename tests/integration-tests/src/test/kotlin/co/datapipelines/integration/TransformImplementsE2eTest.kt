@@ -499,12 +499,28 @@ class TransformImplementsE2eTest {
             )
         }
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            // Keys v2 (A13/A14, the 233c base refresh): every key acts as its own `service`
+            // identity and carries the role chosen at creation — author, which the subset rule
+            // allows each creator (both are authors here).
             connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
+                .prepareStatement("INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES (?, ?, ?, 'key', ?, TRUE, FALSE, 'service')")
                 .use { ps ->
-                    for ((key, owner, workspace) in listOf(Triple(ALICE_KEY, ALICE, WS_ACME), Triple(BOB_KEY, BOB, WS_GLOBEX))) {
+                    for ((identity, key) in listOf(ALICE_KEY_IDENTITY to ALICE_KEY, BOB_KEY_IDENTITY to BOB_KEY)) {
+                        ps.setObject(1, UUID.fromString(identity))
+                        ps.setString(2, "${key.id.lowercase()}@keys.invalid")
+                        ps.setString(3, key.name)
+                        ps.setString(4, key.id)
+                        ps.addBatch()
+                    }
+                    ps.executeBatch()
+                }
+            connection
+                .prepareStatement("INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'author')")
+                .use { ps ->
+                    for ((key, owner, identity, workspace) in
+                        listOf(Quad(ALICE_KEY, ALICE, ALICE_KEY_IDENTITY, WS_ACME), Quad(BOB_KEY, BOB, BOB_KEY_IDENTITY, WS_GLOBEX))) {
                         ps.setString(1, key.id)
-                        ps.setObject(2, UUID.fromString(owner))
+                        ps.setObject(2, UUID.fromString(identity))
                         ps.setObject(3, UUID.fromString(owner))
                         ps.setString(4, key.name)
                         ps.setString(5, key.hash)
@@ -515,6 +531,14 @@ class TransformImplementsE2eTest {
                 }
         }
     }
+
+    /** The two key ids and their owners' identities and workspaces — a Triple with the identity spelled. */
+    private data class Quad(
+        val key: E2eAuth.SeededKey,
+        val owner: String,
+        val identity: String,
+        val workspace: String,
+    )
 
     private fun metadata(block: (java.sql.Statement) -> Unit) {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
@@ -537,6 +561,10 @@ class TransformImplementsE2eTest {
 
         private val ALICE_KEY = E2eAuth.generateKey("impl-alice-key")
         private val BOB_KEY = E2eAuth.generateKey("impl-bob-key")
+
+        /** Each key's own `service` identity (keys v2 A13) — the 233c base refresh. */
+        private val ALICE_KEY_IDENTITY = "7e7e0000-0000-0000-0000-00000000a12d"
+        private val BOB_KEY_IDENTITY = "7e7e0000-0000-0000-0000-00000000b0e4"
 
         private val random = SecureRandom()
         private val jwtSecret: String = E2eSession.newSecret()
