@@ -121,8 +121,14 @@ class ExecutionLauncher(
         // refused on a type failure — exactly like a declared parameter. 121 D5: the groups
         // ride too — a proper subset of a multi-output node's keys is refused here with
         // `calculator_keys_partial`, before anything runs, with the same rejected-bind shape.
-        ParameterBinder(launch.pipeline.parameters, launch.pipeline.calculatorOutputs(), launch.pipeline.calculatorOutputGroups())
-            .bindOrThrow(launch.parameters)
+        ParameterBinder(
+            launch.pipeline.parameters,
+            launch.pipeline.calculatorOutputs(),
+            launch.pipeline.calculatorOutputGroups(),
+            // 7c (#7): a value-mode TRANSFORM's `context_key` binds as an implicit optional
+            // input on the same rule — supplied, the child's node is skipped.
+            launch.pipeline.transformOutputKeys(),
+        ).bindOrThrow(launch.parameters)
 
         val key = launch.idempotencyKey ?: return LaunchDecision.Start(null)
         return when (val outcome = reserve(key, launch)) {

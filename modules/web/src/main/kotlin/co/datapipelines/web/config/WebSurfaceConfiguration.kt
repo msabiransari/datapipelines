@@ -168,6 +168,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun subPipelineRunner(
+        transformSupport: co.datapipelines.executor.TransformSupport,
         pipelines: PipelineRepository,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
@@ -208,6 +209,7 @@ class WebSurfaceConfiguration {
             eventLog = eventLog,
             eventRepository = eventRepository,
             executionRepository = executionRepository,
+            transformSupport = transformSupport,
         )
 
     /**
@@ -233,6 +235,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun executionStreamLauncher(
+        transformSupport: co.datapipelines.executor.TransformSupport,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
@@ -281,6 +284,7 @@ class WebSurfaceConfiguration {
             mapper = SseJson.mapper,
             scope = scope,
             subPipelineRunner = subPipelineRunner,
+            transformSupport = transformSupport,
         )
 
     /**
@@ -292,6 +296,7 @@ class WebSurfaceConfiguration {
     @Suppress("LongParameterList")
     @Bean
     fun recordingExecutionRunner(
+        transformSupport: co.datapipelines.executor.TransformSupport,
         templateEngines: WorkspaceTemplateEngines,
         datasourceRegistry: DatasourceRegistry,
         stagingFactory: StagingFactory,
@@ -332,6 +337,7 @@ class WebSurfaceConfiguration {
             eventRepository = eventRepository,
             executionRepository = executionRepository,
             subPipelineRunner = subPipelineRunner,
+            transformSupport = transformSupport,
         )
 
     /**

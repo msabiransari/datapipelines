@@ -11,7 +11,7 @@
 #     ./gradlew build      → must exit 0   (clean-state build)
 #     ./gradlew build      → must exit 0   (incremental build)
 #
-# After the cycles, two extra stages:
+# After the cycles, three extra stages:
 #   1. buildSrc guard tests (Gradle TestKit) — a consumer build only builds
 #      buildSrc through its JAR (verified: `build --dry-run` stops at
 #      :buildSrc:jar), so its test task NEVER runs automatically; the gate is
@@ -28,7 +28,12 @@
 #      no-verdict BEFORE any skip (018/F2). Skipped stages are counted and
 #      named in the summary (014/F4). The verdict branches live in
 #      scripts/lib/gate-stages.sh so they are drivable by fixtures.
-#   2. scripts/vuln-scan.sh (OSV-Scanner over the committed lockfiles). It
+#   2. the security-assurance stage (#217, record §10.2 / P1): the entry
+#      inventory, the public contract, the isolated-permission witness and the
+#      packaged-seam check, run on their own with their own log and verdict
+#      line. A class that did not run — no result file, zero tests, a skip —
+#      fails the stage (DEVELOPMENT.md §10.2).
+#   3. scripts/vuln-scan.sh (OSV-Scanner over the committed lockfiles). It
 #      fails the gate on real findings and warns without failing when the
 #      network is unreachable (fail-soft by design).
 #
@@ -199,6 +204,60 @@ case "$(gate_classify_buildsrc "$btest" "$LOGDIR/buildsrc-test.log" "$ROOT/build
   fail)
     fails=$((fails + 1))
     echo "  buildSrc tests  EXIT=$btest  (genuine failure; log: $LOGDIR/buildsrc-test.log)"
+    ;;
+esac
+
+# ---- security assurance (#217; record §10.2, owner decision P1) ---------------------
+# The local merge gate is the enforcement point (P1: direct push), so the security
+# aggregate is a stage of it, with a verdict line of its own rather than four classes
+# lost among the build's thousands. The build above already ran these classes; this
+# stage runs them again ALONE and forced (--rerun: never UP-TO-DATE, so the verdict is
+# about this tree), and reads the verdict from the JUnit XML, never from the exit code
+# (§9.4). A class with no result file, zero tests or a skip FAILS the stage — a missing
+# report is non-passing, not neutral (record §10.2). A tooling crash is classified like
+# every other stage (gate_crashed). CI re-runs the same classes cold in `integration`.
+echo
+SEC_CLASSES=(EntryInventoryE2eTest PublicContractE2eTest PermissionSeamE2eTest PackagedResolverTest)
+SEC_RESULTS="$ROOT/tests/integration-tests/build/test-results/test"
+sec_args=()
+for c in "${SEC_CLASSES[@]}"; do
+  rm -f "$SEC_RESULTS/TEST-co.datapipelines.integration.$c.xml"
+  sec_args+=(--tests "co.datapipelines.integration.$c")
+done
+sec=$(run "$LOGDIR/security-assurance.log" :tests:integration-tests:test --rerun "${sec_args[@]}" -x :tests:integration-tests:verifyTestsExecuted)
+sec_verdict="$(python3 - "$SEC_RESULTS" "${SEC_CLASSES[@]}" <<'SECPY'
+import os, sys, xml.etree.ElementTree as ET
+results, classes = sys.argv[1], sys.argv[2:]
+tests, problems = 0, []
+for c in classes:
+    path = os.path.join(results, f"TEST-co.datapipelines.integration.{c}.xml")
+    if not os.path.exists(path):
+        problems.append(f"{c}: no result file")
+        continue
+    r = ET.parse(path).getroot()
+    n, f, e, s = (int(r.get(k, "0")) for k in ("tests", "failures", "errors", "skipped"))
+    tests += n
+    if n == 0:
+        problems.append(f"{c}: zero tests")
+    if f or e:
+        problems.append(f"{c}: {f} failed, {e} errors")
+    if s:
+        problems.append(f"{c}: {s} skipped")
+print(("PASS " + str(tests)) if not problems else ("FAIL " + "; ".join(problems)))
+SECPY
+)"
+case "$sec_verdict" in
+  PASS*)
+    echo "  security-assurance  PASS — ${#SEC_CLASSES[@]} classes, ${sec_verdict#PASS } tests (entry inventory, public contract, isolated-permission witness, packaged seam)"
+    ;;
+  *)
+    fails=$((fails + 1))
+    if [ "$sec" -ne 0 ] && gate_crashed "$LOGDIR/security-assurance.log"; then
+      crashes=$((crashes + 1))
+      echo "  security-assurance  EXIT=$sec  ** TOOLING CRASH — no verdict, not a test failure **"
+    else
+      echo "  security-assurance  EXIT=$sec  (${sec_verdict#FAIL }; log: $LOGDIR/security-assurance.log)"
+    fi
     ;;
 esac
 

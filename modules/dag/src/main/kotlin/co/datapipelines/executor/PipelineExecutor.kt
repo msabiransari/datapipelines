@@ -1197,6 +1197,14 @@ fun pipelineExecutor(
      */
     calculatorKinds: (String) -> co.datapipelines.calculators.CalculatorKind? =
         co.datapipelines.calculators.CalculatorRegistry::find,
+    /**
+     * The TRANSFORM-node collaborators (7c, #7) — the pool, engines, resolver and bounds a
+     * TRANSFORM node dispatches to. The assembling layer (web) wires its `TransformSupport`
+     * bean; left null, a TRANSFORM node fails with `pipeline.transform.evaluation_failed`
+     * ("not wired in this runtime"), exactly as a PIPELINE node fails on an unwired
+     * composition port.
+     */
+    transforms: TransformSupport? = null,
 ): PipelineExecutor =
     PipelineExecutor(
         nodeRunner =
@@ -1210,6 +1218,7 @@ fun pipelineExecutor(
                 metrics,
                 subPipelineRunner,
                 calculatorKinds,
+                transforms,
             ),
         stagingFactory = stagingFactory,
         resultStore = resultStore,

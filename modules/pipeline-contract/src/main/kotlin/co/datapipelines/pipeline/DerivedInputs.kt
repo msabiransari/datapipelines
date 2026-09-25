@@ -35,7 +35,9 @@ object DerivedInputs {
         kinds: (String) -> CalculatorKind? = CalculatorRegistry::find,
     ) {
         val pipeline = PipelineJson.objectMapper().treeToValue(body, Pipeline::class.java)
-        val outputs = pipeline.calculatorOutputs(kinds)
+        // 7c (#7): a value-mode TRANSFORM's `context_key` is the same implicit optional input,
+        // typed ANY here — the contract that types it is the pinned template's, not the body's.
+        val outputs = pipeline.calculatorOutputs(kinds) + pipeline.transformOutputKeys().associateWith { null }
         if (outputs.isEmpty()) return
         val parameters = body.get("parameters") as? ObjectNode ?: body.putObject("parameters")
         outputs.forEach { (key, type) ->

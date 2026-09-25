@@ -79,7 +79,7 @@ class PipelineDeserializerTest {
         val outcome = deserializer.read(pipelineJson(node(null, type = "SELECT")))
 
         val failure = (outcome as DeserializationOutcome.Rejected).result.failures.single()
-        failure.message shouldContain "[DQL, DML, DDL, PIPELINE, CALCULATOR]"
+        failure.message shouldContain "[DQL, DML, DDL, PIPELINE, CALCULATOR, TRANSFORM]"
         failure.details["allowed"] shouldBe NodeType.WIRE_VALUES
     }
 

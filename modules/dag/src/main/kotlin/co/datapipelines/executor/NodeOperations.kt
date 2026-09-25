@@ -80,6 +80,20 @@ class NodeOperations(
                 NodeType.DDL -> OperationKind.STATEMENT to OperationDestination.NONE
                 NodeType.PIPELINE -> OperationKind.CHILD to destinationOf(node.output)
                 NodeType.CALCULATOR -> error("a CALCULATOR node has no operation")
+                NodeType.TRANSFORM -> transformOperation(node)
+            }
+
+        /**
+         * A TRANSFORM node's operation follows its output (§4.12): a tempdb write is a STAGE,
+         * the caller result is a MATERIALIZE. A value-mode node writes only a Context key — no
+         * operation, exactly like a CALCULATOR — and a datasource output is unreachable
+         * (§12.13 refuses it at save).
+         */
+        private fun transformOperation(node: ExecutableNode): Pair<OperationKind, OperationDestination> =
+            when (val output = node.output) {
+                is NodeOutput.Tempdb -> OperationKind.STAGE to destinationOf(output)
+                NodeOutput.Caller -> OperationKind.MATERIALIZE to OperationDestination.CALLER
+                is NodeOutput.Datasource, null -> error("a value-mode TRANSFORM node has no operation")
             }
 
         private fun dqlOperation(node: ExecutableNode): Pair<OperationKind, OperationDestination> =

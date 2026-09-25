@@ -9,6 +9,10 @@ dependencies {
     implementation(project(":modules:templates"))
     implementation(project(":modules:datasources"))
     implementation(project(":modules:staging"))
+    // 7c (#7): the TRANSFORM node evaluates through the script engine's pool and gates through
+    // its TypeGate (transform-nodes design §5). Declared like the others — module-structure
+    // §4.2's table and the root map carry the same row.
+    implementation(project(":modules:scripting"))
 
     implementation(libs.kotlinx.coroutines.core)
     // Redis: result store, idempotency keys, cancellation flags. One of exactly

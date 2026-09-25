@@ -199,11 +199,16 @@ data class AuthenticatedPrincipal(
      * row. Every other permission is judged over the active context; with none, it is the D-R5
      * 404 and is not held. Scopes are the credential axis and are not consulted here; the matrix
      * asks them at the route.
+     *
+     * Both member branches ask the installed [PermissionResolver] (security-assurance record §7.1,
+     * B4): the instance one with no role (the table answers [superAdmin] for every instance
+     * permission), the workspace one through [WorkspaceContext.permits]. A key role is read from
+     * the table, as `ScopeMatrix` reads it at admission ([PermissionResolver]'s KDoc says why).
      */
     fun holds(permission: Permission): Boolean =
         when {
             keyRole != null -> permission in RolePermissions.of(keyRole)
-            permission in RolePermissions.INSTANCE -> superAdmin
+            permission in RolePermissions.INSTANCE -> PermissionResolution.resolver.holds(workspace?.id, null, superAdmin, permission)
             else -> workspace?.permits(permission) ?: false
         }
 

@@ -174,7 +174,7 @@ class TemplateTypeRulesTest {
                 engine = Template.NONE_ENGINE,
                 dialect = null,
                 body = "function transform(input) { return input; }",
-                codes = listOf(TransformCodes.JS_UNAVAILABLE),
+                codes = listOf(PipelineErrorCodes.Transform.JS_UNAVAILABLE),
             ),
             Row(
                 name = "javascript + freemarker → engine_unsupported AND js unavailable",
@@ -182,7 +182,7 @@ class TemplateTypeRulesTest {
                 engine = Template.FREEMARKER_ENGINE,
                 dialect = null,
                 body = "function transform(input) { return input; }",
-                codes = listOf(PipelineErrorCodes.Template.ENGINE_UNSUPPORTED, TransformCodes.JS_UNAVAILABLE),
+                codes = listOf(PipelineErrorCodes.Template.ENGINE_UNSUPPORTED, PipelineErrorCodes.Transform.JS_UNAVAILABLE),
             ),
         )
 

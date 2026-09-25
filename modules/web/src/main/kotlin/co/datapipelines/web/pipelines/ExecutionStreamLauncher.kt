@@ -155,6 +155,12 @@ class ExecutionStreamLauncher(
      * a PIPELINE node fails `pipeline.node.child_execution_failed` ("not wired in this runtime").
      */
     private val subPipelineRunner: SubPipelineRunner? = null,
+    /**
+     * The TRANSFORM-node collaborators (7c, #7) — handed to the per-run executor; null only in
+     * module-slice wiring, where a TRANSFORM node fails `pipeline.transform.evaluation_failed`
+     * ("not wired in this runtime"), exactly as [subPipelineRunner] fails a PIPELINE node.
+     */
+    private val transformSupport: co.datapipelines.executor.TransformSupport? = null,
 ) {
     private val log = LoggerFactory.getLogger(ExecutionStreamLauncher::class.java)
 
@@ -345,6 +351,7 @@ class ExecutionStreamLauncher(
             metrics = executorMetrics,
             progress = executionProgress,
             subPipelineRunner = subPipelineRunner,
+            transforms = transformSupport,
         )
 
     private companion object {

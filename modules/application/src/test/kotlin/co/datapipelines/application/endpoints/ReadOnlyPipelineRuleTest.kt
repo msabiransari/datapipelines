@@ -182,6 +182,8 @@ class ReadOnlyPipelineRuleTest {
                     NodeType.PIPELINE to false,
                     // 072's calculator touches no datasource — admitted at the 074 merge.
                     NodeType.CALCULATOR to true,
+                    // 7c's TRANSFORM is tempdb-only by §12.13 — the read-only rule holds trivially.
+                    NodeType.TRANSFORM to true,
                 )
         }
     }
@@ -254,7 +256,8 @@ class ReadOnlyPipelineRuleTest {
     fun `the allowed set is the single constant the design promises`() {
         // The whole point of READ_ONLY_NODE_TYPES: admitting CALCULATOR (072) was one line here,
         // not a hunt through branches.
-        ReadOnlyPipelineRule.READ_ONLY_NODE_TYPES shouldBe setOf(NodeType.DQL, NodeType.PIPELINE, NodeType.CALCULATOR)
+        ReadOnlyPipelineRule.READ_ONLY_NODE_TYPES shouldBe
+            setOf(NodeType.DQL, NodeType.PIPELINE, NodeType.CALCULATOR, NodeType.TRANSFORM)
     }
 
     private fun rule(childless: Boolean = false) =

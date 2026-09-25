@@ -6,6 +6,7 @@ import com.lemonappdev.konsist.api.verify.assertEmpty
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -126,6 +127,85 @@ class ArchitectureGuardTest {
         }
     }
 
+    /**
+     * **Transports and jobs reach the data layer only through approved entry points** (#217 slice A;
+     * security-assurance record §6 — "architecture guards constrain transports and jobs to approved
+     * application entry services"; B5 — a job is unreachable from any transport).
+     *
+     * A TRANSPORT is a web controller or controller advice (`@Controller`, `@RestController`,
+     * `@ControllerAdvice` in `modules/web`) or an MCP tool (`modules/mcp-server`, its `*Configuration`
+     * wiring excepted). It asks a service; it never opens raw JDBC; and it touches a repository only
+     * through a direct read inventoried in [DIRECT_REPOSITORY_READS] — the reads that predate this rule,
+     * each workspace-scoped in its SQL (auth.md §11A.1) and walked by `WorkspaceIsolationSweepTest`.
+     * The record is explicit that the tree does not already conform and must not be assumed to: the
+     * list is an inventory, not an endorsement. A NEW pair fails by name (a new direct read is a
+     * reviewed decision, not a convenience); a pair that no longer exists fails too, so the list only
+     * shrinks. References are found by class NAME on code lines — an import, a same-package use and a
+     * fully-qualified constructor parameter (two exist) are all the same reach, and a controller
+     * annotated by its qualified name (`@org.springframework.stereotype.Controller`, one exists) is one.
+     *
+     * A JOB is an `@Scheduled` method. It lives only in [APPROVED_SCHEDULING_FILES], and no transport
+     * names a job's service or scheduler — the source half of B5; `EntryInventoryE2eTest` holds the
+     * runtime half (no scheduled bean is a request handler).
+     */
+    @Test
+    fun `transports and jobs reach the data layer only through approved entry points`() {
+        val repositories = repositoryTypes()
+        val transports = transportFiles()
+        val reads =
+            transports
+                .flatMap { file ->
+                    codeLines(file).flatMap { line ->
+                        repositories.findAll(line).map { "${file.nameWithoutExtension} → ${it.value}" }
+                    }
+                }.toSet()
+        val rawJdbc =
+            transports.flatMap { file ->
+                codeLines(file).filter { RAW_JDBC.containsMatchIn(it) }.map { "${file.name}: ${it.trim()}" }
+            }
+        val jobReach =
+            transports.flatMap { file ->
+                codeLines(file).filter { JOB_SERVICE.containsMatchIn(it) }.map { "${file.name}: ${it.trim()}" }
+            }
+        val scheduling = productionFiles().filter { file -> codeLines(file).any { SCHEDULED.containsMatchIn(it) } }.map { it.name }.toSet()
+
+        withClue(
+            "a transport reaching a repository outside the inventoried direct reads — go through a service, " +
+                "or add the pair with its review",
+        ) {
+            (reads - DIRECT_REPOSITORY_READS).sorted().joinToString("\n") shouldBe ""
+        }
+        withClue("inventoried direct reads that no longer exist — delete them from DIRECT_REPOSITORY_READS") {
+            (DIRECT_REPOSITORY_READS - reads).sorted().joinToString("\n") shouldBe ""
+        }
+        withClue("raw JDBC in a transport") { rawJdbc.joinToString("\n") shouldBe "" }
+        withClue("@Scheduled outside the approved scheduling files") {
+            (scheduling - APPROVED_SCHEDULING_FILES).joinToString("\n") shouldBe
+                ""
+        }
+        withClue("a transport naming a job's service or scheduler (B5)") { jobReach.joinToString("\n") shouldBe "" }
+
+        // Non-vacuity: the scan saw the transports and the jobs it exists for.
+        transports.size shouldBeGreaterThanOrEqual TRANSPORT_FLOOR
+        scheduling shouldBe APPROVED_SCHEDULING_FILES
+    }
+
+    /** Every `class|interface|object XRepository` declared in production code, as one alternation. */
+    private fun repositoryTypes(): Regex {
+        val names = productionFiles().flatMap { REPOSITORY_DECLARATION.findAll(it.readText()).map { m -> m.groupValues[1] } }.toSet()
+        return Regex("\\b(" + names.sorted().joinToString("|") + ")\\b")
+    }
+
+    /** The web controllers and advices, and the MCP transport's files — see the rule above. */
+    private fun transportFiles(): List<File> =
+        productionFiles().filter { file ->
+            (file.path.contains(moduleMainPath("web")) && CONTROLLER.containsMatchIn(file.readText())) ||
+                (file.path.contains(moduleMainPath("mcp-server")) && !file.name.endsWith("Configuration.kt"))
+        }
+
+    /** A file's lines that are code — KDoc and line comments describe rules, they do not break them. */
+    private fun codeLines(file: File): List<String> = file.readLines().filterNot { COMMENT_LINE.containsMatchIn(it) }
+
     /** The layering scan above proves nothing if it never looked at `modules/application`. */
     @Test
     fun `the layering scan actually covers the application module`() {
@@ -233,5 +313,88 @@ class ArchitectureGuardTest {
          * instead of quietly making the layering scan vacuous. Slices B and C will raise it.
          */
         const val EXPECTED_APPLICATION_MAIN_FILES = 1
+
+        /**
+         * The transports' direct repository reads, inventoried 2026-09-24 (#217 slice A) on base
+         * `cc779dcc`: `transport file → repository`. They predate the rule; each is workspace-scoped in
+         * its SQL (auth.md §11A.1). Moving them behind services is the record's slice C — until then this
+         * list only shrinks.
+         */
+        val DIRECT_REPOSITORY_READS =
+            setOf(
+                "AdminUsersPartialController → MailSendRepository",
+                "ApiConsoleController → ApiKeyRepository",
+                "ApiConsoleController → EndpointKeyBindingRepository",
+                "ApiKeysAdminController → ApiKeyRepository",
+                "ApiKeysAdminController → EndpointKeyBindingRepository",
+                "ApiKeysAdminController → UserRepository",
+                "ApiKeysPartialController → ApiKeyRepository",
+                "AppShellAdvice → UserRepository",
+                "AuthController → ApiKeyRepository",
+                "DashboardPartialController → ExecutionRepository",
+                "DatasourceGrantsController → DatasourceGrantRepository",
+                "DatasourceGrantsPartialController → DatasourceGrantRepository",
+                "DatasourcePartialController → DatasourceGrantRepository",
+                "EndpointsController → ApiKeyRepository",
+                "EndpointsController → EndpointKeyBindingRepository",
+                "EndpointsController → PipelineRepository",
+                "EndpointsTools → PipelineRepository",
+                "EntryPointChecks → TemplateRepository",
+                "ExecutionDetailController → ExecutionEventRepository",
+                "ExecutionDetailController → ExecutionRepository",
+                "ExecutionDetailController → PipelineRepository",
+                "ExecutionDetailPartialController → ExecutionRepository",
+                "ExecutionHistoryController → PipelineRepository",
+                "ExecutionTools → ExecutionRepository",
+                "ExecutionsController → ExecutionRepository",
+                "ExecutionsController → PipelineRepository",
+                "ExecutionsGetResultTool → ExecutionRepository",
+                "McpResourceCatalog → ExecutionRepository",
+                "McpResourceReader → ExecutionEventRepository",
+                "McpResourceReader → ExecutionRepository",
+                "PipelineAuthoringTools → PipelineRepository",
+                "PipelineChecksPartialsController → PipelineCheckRunRepository",
+                "PipelineExecuteTool → ExecutionRepository",
+                "PipelineNodeSqlPartialController → PipelineRepository",
+                "PipelineNodeSqlPartialController → TemplateRepository",
+                "PipelineTransferController → PipelineRepository",
+                "PipelineTransferController → TemplateRepository",
+                "PipelinesController → PipelineCheckRunRepository",
+                "TemplateAuthoringTools → TemplateRepository",
+                "TemplateEditorController → TemplateRepository",
+                // Annotated `@org.springframework.stereotype.Controller` — found once the controller match read qualified names.
+                "TemplateLifecycleDialogController → TemplateRepository",
+                "TemplatePartialController → TemplateRepository",
+                "TemplateReadTools → TemplateRepository",
+                "TemplatesController → TemplateRepository",
+                "TemplatesPurgeDraftTool → TemplateRepository",
+                "UiWorkspaceAdvice → ApiKeyRepository",
+                "UserSettingsController → UserRepository",
+            )
+
+        /** The three `@Scheduled` homes (auth.md §8.6's scheduled rows): the stale-execution sweep, the pool reaper, event retention. */
+        val APPROVED_SCHEDULING_FILES =
+            setOf("SweepSchedulingConfiguration.kt", "PoolReaperSchedulingConfiguration.kt", "RetentionSchedulingConfiguration.kt")
+
+        /** 100 transport files on the inventory base; a scan that finds far fewer is looking in the wrong place. */
+        const val TRANSPORT_FLOOR = 90
+
+        val REPOSITORY_DECLARATION =
+            Regex("^\\s*(?:open |internal |abstract )*(?:class|interface|object)\\s+(\\w+Repository)\\b", RegexOption.MULTILINE)
+
+        /** The annotation, also written fully qualified — a package prefix must not hide a transport. */
+        val CONTROLLER = Regex("^\\s*@(?:[\\w.]+\\.)?(RestController|Controller|ControllerAdvice)\\b", RegexOption.MULTILINE)
+        val COMMENT_LINE = Regex("^\\s*(\\*|/\\*|//)")
+        val SCHEDULED = Regex("^\\s*@(?:[\\w.]+\\.)?Scheduled\\b")
+        val RAW_JDBC =
+            Regex(
+                "^import (org\\.springframework\\.jdbc\\.|javax\\.sql\\.DataSource|" +
+                    "java\\.sql\\.(Connection|DriverManager|Statement|PreparedStatement|ResultSet))",
+            )
+        val JOB_SERVICE =
+            Regex(
+                "\\b(StaleExecutionSweeper|ExecutionEventRetention|reapRetiredPools|StaleExecutionSweepScheduler|" +
+                    "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler)\\b",
+            )
     }
 }

@@ -269,10 +269,15 @@ object RolePermissions {
     /** The workspace roles whose column holds [permission]. */
     fun rolesHolding(permission: Permission): Set<WorkspaceRole> = WorkspaceRole.entries.filterTo(mutableSetOf()) { permission in of(it) }
 
-    /** Does a member holding [role] (null: no membership) — or a super admin — hold [permission]? */
+    /**
+     * Does a member holding [role] (null: no membership) — or a super admin — hold [permission]?
+     * Asked of the installed [PermissionResolver] (security-assurance record §7.1, B4), with no
+     * workspace named: the callers here judge a role, not a request's context. In production that
+     * is [RolePermissionsResolver], which answers from this table.
+     */
     fun holds(
         role: WorkspaceRole?,
         superAdmin: Boolean,
         permission: Permission,
-    ): Boolean = (superAdmin && permission in SUPER_ADMIN) || (role != null && permission in of(role))
+    ): Boolean = PermissionResolution.resolver.holds(null, role, superAdmin, permission)
 }

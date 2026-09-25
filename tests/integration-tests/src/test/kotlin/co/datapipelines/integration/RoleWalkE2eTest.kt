@@ -20,7 +20,6 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.ApplicationContext
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import org.springframework.util.AntPathMatcher
 import java.security.SecureRandom
 import java.sql.DriverManager
 import java.time.Instant
@@ -295,7 +294,7 @@ class RoleWalkE2eTest {
      */
     @Test
     fun `every non-public handler declares a permission the doc has a row for, and every routed row is claimed`() {
-        val handlers = handlerMappings()
+        val handlers = EntryDiscovery.handlerMethods(context)
         val unannotated = handlers.filter { !it.public && it.permission == null }.map { "${it.handler} ${it.method} ${it.pattern}" }
         val undocumented =
             handlers.mapNotNull { it.permission }.distinct().filter { it !in permissionRows.keys }
@@ -325,14 +324,6 @@ class RoleWalkE2eTest {
         val permission: String,
     )
 
-    private data class Handler(
-        val method: String,
-        val pattern: String,
-        val handler: String,
-        val permission: String?,
-        val public: Boolean,
-    )
-
     private data class Answer(
         val status: Int,
         val code: String?,
@@ -342,86 +333,20 @@ class RoleWalkE2eTest {
     }
 
     private fun walkableRoutes(): List<Route> =
-        handlerMappings()
+        EntryDiscovery
+            .handlerMethods(context)
             .filter { !it.public }
             .filterNot { it.pattern.startsWith(PROMOTION_RECEIVER_PREFIX) }
             .map { h ->
                 Route(
                     h.method,
                     h.pattern,
-                    substitute(h.pattern),
+                    EntryDiscovery.concretePath(h.pattern),
                     h.handler,
                     requireNotNull(h.permission) { "${h.handler} has no permission" },
                 )
             }.distinct()
             .sortedWith(compareBy({ it.pattern }, { it.method }))
-
-    /**
-     * `RequestMappingHandlerMapping.getHandlerMethods()`, read by reflection: spring-webmvc is
-     * not on this module's compile classpath (module-structure §4.2 gives it `:modules:app`
-     * alone), and the information is the same either way.
-     */
-    private fun handlerMappings(): List<Handler> {
-        val mapping = context.getBean("requestMappingHandlerMapping")
-        val methods = mapping.javaClass.getMethod("getHandlerMethods").invoke(mapping) as Map<*, *>
-        return methods.entries.flatMap { (info, handlerMethod) ->
-            val patterns = patternsOf(info!!)
-            val verbs = verbsOf(info)
-            val method = handlerMethod!!.javaClass.getMethod("getMethod").invoke(handlerMethod) as java.lang.reflect.Method
-            val beanType = handlerMethod.javaClass.getMethod("getBeanType").invoke(handlerMethod) as Class<*>
-            val permission = requiredScopeOf(method) ?: requiredScopeOf(beanType)
-            patterns.flatMap { pattern ->
-                verbs.map { verb ->
-                    Handler(verb, pattern, "${beanType.simpleName}#${method.name}", permission, isPublic(pattern))
-                }
-            }
-        }
-    }
-
-    private fun patternsOf(info: Any): Set<String> {
-        val condition = info.javaClass.getMethod("getPathPatternsCondition").invoke(info)
-        @Suppress("UNCHECKED_CAST")
-        return condition.javaClass.getMethod("getPatternValues").invoke(condition) as Set<String>
-    }
-
-    private fun verbsOf(info: Any): Set<String> {
-        val condition = info.javaClass.getMethod("getMethodsCondition").invoke(info)
-        val methods = condition.javaClass.getMethod("getMethods").invoke(condition) as Set<*>
-        return methods.map { (it as Enum<*>).name }.toSet().ifEmpty { setOf("GET") }
-    }
-
-    /** The declared permission's WIRE name (`pipeline.read`) — the catalog's first column — read by reflection. */
-    private fun requiredScopeOf(element: java.lang.reflect.AnnotatedElement): String? =
-        element.annotations
-            .firstOrNull { it.annotationClass.simpleName == "RequiredScope" }
-            ?.let { annotation ->
-                val permission = annotation.javaClass.getMethod("value").invoke(annotation)
-                permission.javaClass.getMethod("getWire").invoke(permission) as String
-            }
-
-    /** The runtime's own allowlist (`PublicPaths.PATTERNS`), read by reflection, matched Ant-style as the interceptor matches it. */
-    private fun isPublic(pattern: String): Boolean {
-        val concrete = substitute(pattern)
-        return publicPatterns.any { antMatcher.match(it, concrete) } || pattern == "/"
-    }
-
-    private val publicPatterns: List<String> by lazy {
-        val type = Class.forName("co.datapipelines.auth.PublicPaths")
-        val instance = type.getField("INSTANCE").get(null)
-        @Suppress("UNCHECKED_CAST")
-        type.getMethod("getPATTERNS").invoke(instance) as List<String>
-    }
-
-    private val antMatcher = AntPathMatcher()
-
-    /** Well-formed identifiers that exist NOWHERE — an admitted role reaches the handler and finds no row. */
-    private fun substitute(pattern: String): String =
-        VARIABLE_PATTERN
-            .replace(pattern) { match ->
-                val variable = match.groupValues[1].substringBefore(':')
-                ABSENT_VALUES[variable] ?: if (variable.lowercase().endsWith("id")) ABSENT_UUID else "nobody-owns-this"
-            }.replace("/**", "/x")
-            .replace("*", "x")
 
     private fun call(
         route: Route,
@@ -552,7 +477,7 @@ class RoleWalkE2eTest {
         private const val LEAK_EXCERPT = 240
         private const val ROLE_REQUIRED = "auth.role_required"
         private const val PROMOTION_RECEIVER_PREFIX = "/api/v1/promotion/"
-        private const val ABSENT_UUID = "0d0e0000-0000-0000-0000-0000000000ff"
+        private const val ABSENT_UUID = EntryDiscovery.ABSENT_UUID
         private val MAPPER = ObjectMapper()
 
         private const val KEY_KIND_REFUSED = "endpoint.key_kind_refused"
@@ -612,29 +537,8 @@ class RoleWalkE2eTest {
          */
         private const val API_CALLER_REACHED_FLOOR = 1
 
-        private val VARIABLE_PATTERN = Regex("\\{([^}]+)\\}")
         private val CODE = Regex("\"code\"\\s*:\\s*\"([a-z_.]+)\"")
         private val REASON = Regex("\"reason\"\\s*:\\s*\"([a-z_]+)\"")
-
-        /** Identifiers by the variable NAME a route uses — the same table the isolation sweep keys on. */
-        private val ABSENT_VALUES: Map<String, String> =
-            mapOf(
-                "id" to ABSENT_UUID,
-                "pipelineId" to ABSENT_UUID,
-                "executionId" to ABSENT_UUID,
-                "userId" to ABSENT_UUID,
-                "name" to "nobody_owns_this",
-                "templateName" to "nobody_owns_this",
-                "version" to "1",
-                "workspace" to "no-such-workspace",
-                "email" to "nobody@nowhere.test",
-                "kind" to "welcome",
-                "action" to "activate",
-                "ns" to "nobody",
-                "t" to "nobody",
-                "slug" to "nobody",
-                "engine" to "postgres",
-            )
 
         val ROLES = RoleMatrixDocE2e.ROLE_COLUMNS
 

@@ -178,6 +178,52 @@ class PipelinesExecuteNodeToolTest {
     }
 
     @Test
+    fun `a TRANSFORM node is the standalone refusal pointing at templates_evaluate`() {
+        // 7c (#7): a TRANSFORM is a script over staged data, not SQL — the tool's one refusal
+        // code, the reason named, and `use` naming the verb that DOES evaluate it.
+        resolverReturns(rendered(nodeType = NodeType.TRANSFORM, source = ""))
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                tool.call(McpArguments(mapOf("pipeline_id" to pipelineId.toString(), "node_id" to "fetch")), ctx)
+            }
+
+        assertAll(
+            { thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED },
+            { thrown.details["reason"] shouldBe "transform_node" },
+            { thrown.details["use"] shouldBe "templates_evaluate" },
+        )
+        verify(exactly = 0) { runner.select(any(), any(), any(), any()) }
+        verify(exactly = 0) { datasources.getVisible(any(), any()) }
+    }
+
+    @Test
+    fun `a transform template's no-dialect resolver refusal maps to the same standalone refusal`() {
+        // The REAL resolution path: a transform template declares no dialect, so the resolver
+        // refuses its render with this exact sentence before the tool's `when` can fire. The
+        // sentence is the pinned contract of that branch — if the resolver rewords it, this
+        // test and the refusal need rewording together.
+        resolverReturns(
+            NodeSqlResolution.RenderFailed(
+                draft,
+                "Template 'test/shape.jsonata@3' has type 'jsonata' and no dialect; " +
+                    "only type 'sql' templates can render node SQL.",
+            ),
+        )
+
+        val thrown =
+            shouldThrow<DatapipelinesException> {
+                tool.call(McpArguments(mapOf("pipeline_id" to pipelineId.toString(), "node_id" to "fetch")), ctx)
+            }
+
+        assertAll(
+            { thrown.code shouldBe co.datapipelines.pipeline.PipelineErrorCodes.Node.STANDALONE_EXECUTION_REFUSED },
+            { thrown.details["reason"] shouldBe "transform_node" },
+            { thrown.details["use"] shouldBe "templates_evaluate" },
+        )
+    }
+
+    @Test
     fun `a rejected override and a missing template and a render failure map to their catalogued codes`() {
         resolverReturns(
             NodeSqlResolution.ParameterRejected(

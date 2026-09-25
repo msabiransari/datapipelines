@@ -79,6 +79,20 @@ interface TemplateDryRenderer {
         workspaceId: UUID,
         ref: TemplateRef,
     ): List<String>
+
+    /**
+     * 7c (#7, §12.13) — the pinned version's transform contract, as [TransformContractView].
+     *
+     * Null when the reference resolves to no stored version ([lookup] owns the
+     * not-found/version-not-found verdicts) or to a non-transform type (the caller's
+     * `transform_template_type` verdict covers it) — a null here must never double-report
+     * either. Defaulted so the seam's existing test doubles keep compiling; the templates
+     * module's implementation is the only production one.
+     */
+    fun transformContract(
+        workspaceId: UUID,
+        ref: TemplateRef,
+    ): TransformContractView? = null
 }
 
 /** What the registry knows about a `{id, version}` reference. */

@@ -136,6 +136,11 @@ class SubPipelineExecutionRunner(
      * collaborators; tests substitute a mock so the request the runner builds can be captured.
      */
     private val executorFactory: ((WebEventEmitter) -> PipelineExecutor)? = null,
+    /**
+     * The TRANSFORM-node collaborators (7c, #7) — handed to the per-child executor, as in
+     * [ExecutionStreamLauncher]; null only in module-slice wiring.
+     */
+    private val transformSupport: co.datapipelines.executor.TransformSupport? = null,
 ) : SubPipelineRunner {
     private val log = LoggerFactory.getLogger(SubPipelineExecutionRunner::class.java)
 
@@ -680,6 +685,7 @@ class SubPipelineExecutionRunner(
             metrics = executorMetrics,
             progress = executionProgress,
             subPipelineRunner = this,
+            transforms = transformSupport,
         )
 
     /** What the sink delivered — written by the child's caller node, read after `execute` returns. */

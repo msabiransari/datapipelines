@@ -83,8 +83,11 @@ data class WorkspaceContext(
     /** D7 — this action is being taken by a super admin outside their own memberships. */
     val actingViaSuperAdmin: Boolean get() = implicit
 
-    /** Does a principal in this context hold [permission]? The matrix's one question. */
-    fun permits(permission: Permission): Boolean = permission.satisfiedBy(role, superAdmin)
+    /**
+     * Does a principal in this context hold [permission]? The matrix's one question, asked of the
+     * installed [PermissionResolver] with this workspace named (security-assurance record §7.1, B4).
+     */
+    fun permits(permission: Permission): Boolean = PermissionResolution.resolver.holds(id, role, superAdmin, permission)
 
     /**
      * The ROLE this context was judged as — a refusal's `held` detail (#215 A.6): `super_admin`

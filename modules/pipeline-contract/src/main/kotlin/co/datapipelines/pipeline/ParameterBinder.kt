@@ -50,6 +50,15 @@ class ParameterBinder(
     private val parameters: Map<String, Parameter>,
     private val calculatorOutputs: Map<String, LogicalType?> = emptyMap(),
     private val calculatorGroups: Map<String, Set<String>> = emptyMap(),
+    /**
+     * The pipeline's value-mode TRANSFORM `context_key`s ([Pipeline.transformOutputKeys], 7c
+     * #7) — implicit optional inputs exactly like the calculator keys above, with one
+     * deliberate difference: the body carries no contract, so a supplied value binds
+     * UNCOERCED (any JSON value, containers included — an R4 object key accepts any JSON
+     * object) and the pinned contract's type gate checks it at the node, where the contract
+     * lives. Defaulted so every pre-7c construction is unchanged.
+     */
+    private val transformKeys: Set<String> = emptySet(),
 ) {
     /** Binds [inputs] — the `parameters` object of an execute request — into a Context. */
     fun bind(inputs: Map<String, JsonNode>): ParameterBindingResult {
@@ -79,6 +88,7 @@ class ParameterBinder(
             val supplied = inputs[name]?.takeUnless { it.isNull } ?: return@forEach
             coerceCalculatorInto(name, outputType, supplied, bound, failures)
         }
+        bindTransformKeys(inputs, bound)
         // 121 D5: the all-or-nothing check reads the REQUEST, not the bound map — a key whose
         // value failed coercion above is still "supplied", and its type failure is already
         // reported beside this one (exhaustive, like every rule here).
@@ -128,7 +138,13 @@ class ParameterBinder(
             // the collision is §12.10's save-time refusal, and the parameter wins its own name.
             calculatorOutputs
                 .filterKeys { it !in parameters }
-                .mapValues { (_, outputType) -> sampleValue(outputType ?: LogicalType.STRING) }
+                .mapValues { (_, outputType) -> sampleValue(outputType ?: LogicalType.STRING) } +
+            // 7c (#7): a value-mode TRANSFORM's key samples as STRING like an ANY-output
+            // calculator key — the dry render needs a value of some defined type, never a
+            // particular one, and the body carries no contract to sample from.
+            transformKeys
+                .filter { it !in parameters && it !in calculatorOutputs }
+                .associateWith { sampleValue(LogicalType.STRING) }
 
     private fun coerceInto(
         name: String,
@@ -172,6 +188,23 @@ class ParameterBinder(
             return
         }
         coerceInto(name, outputType, value, bound, failures)
+    }
+
+    /**
+     * The value-mode TRANSFORM keys (7c #7), the third bind tier after the parameters and
+     * calculator ones — supplied, the value enters the Context uncoerced (the contract's gate
+     * is the node's, at run); unsupplied, nothing, and the node runs. A name a parameter or
+     * calculator key owns is theirs (save-time collision).
+     */
+    private fun bindTransformKeys(
+        inputs: Map<String, JsonNode>,
+        bound: LinkedHashMap<String, Any?>,
+    ) {
+        transformKeys.forEach { name ->
+            if (name in parameters || name in calculatorOutputs) return@forEach
+            val supplied = inputs[name]?.takeUnless { it.isNull } ?: return@forEach
+            bound[name] = naturalJson(supplied)
+        }
     }
 
     private fun invalidType(
@@ -218,6 +251,13 @@ class ParameterBinder(
         )
 
     internal companion object {
+        /**
+         * A supplied TRANSFORM key's value as a plain JVM value (7c, #7) — containers
+         * included, because an R4 object key IS one. Uncoerced on purpose: the pinned
+         * contract's gate at the node is the type check (the body carries no contract).
+         */
+        private fun naturalJson(value: JsonNode): Any? = PipelineJson.objectMapper().convertValue(value, Any::class.java)
+
         /**
          * One representative value per canonical type. Fixed, never random: a dry render that
          * passes on Tuesday and fails on Wednesday is worse than one that never ran.

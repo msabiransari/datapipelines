@@ -72,6 +72,7 @@ Where the cataloged value is already UPPER (`DQL`, `POSTGRES`, `SUCCESS`), wire 
 | `DDL` | Data Definition Language — `CREATE`, `ALTER`, `DROP`, `TRUNCATE`. Produces success/failure. No `output` block. |
 | `PIPELINE` | Executes another pipeline as a child execution (pipeline composition). Carries a `pipeline` ref `{name, version}`, never `source`/`template`; may carry an `output` block only when the pinned child has a caller node ([Pipeline Contract §4.9](pipeline-contract.md#49-json-structure-pipeline-node), §8.5). |
 | `CALCULATOR` | Evaluates a catalog calculator and writes ONE typed value — or, on a multi-output kind (121), a named set of them — into the execution Context. Carries `kind`, `inputs` and `context_key` (single) or `context_keys` (multi — never both, never neither), never `source`/`template`/`output` — it runs no SQL and produces no table ([Pipeline Contract §4.10](pipeline-contract.md#410-json-structure-calculator-node), [Calculators](calculators.md)). |
+| `TRANSFORM` | Evaluates a pinned `jsonata`/`javascript` template as a pure function over staged data and the Context. Carries `template`, `inputs`, `output` (`row`/`table` modes) or `context_key` (`value` mode) and `strict`, never `source` — tempdb-only by construction ([Pipeline Contract §4.12](pipeline-contract.md#412-json-structure-transform-node), [DAG Executor §6.3](dag-executor.md#63-behavior-by-node-type)). |
 
 **Reserved for future:** `EXPRESSION`, `HTTP` (non-SQL node types — see [ROADMAP](ROADMAP.md)).
 
@@ -496,6 +497,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `workspace.*` | Workspace resolution, membership and provisioning refusals | pipeline-contract §13.12 (defined in [Auth §5](auth.md#5-oidc-login-flow)) |
 | `pipeline.version.*`, `pipeline.release.*`, `pipeline.promotion.*` | Draft/release version lifecycle and environment promotion | pipeline-contract §13.13 (defined in [Versioning](versioning.md)) |
 | `pipeline.check.*` | Release checks — the server-run cross-checks gating release | pipeline-contract §13.17 |
+| `pipeline.transform.*` | TRANSFORM node execution-time refusals (input contract, pool, gate, invariants, strict) | pipeline-contract §13.18 |
 | `template.version.*` | Template draft/release lifecycle | pipeline-contract §13.9 (defined in [Versioning](versioning.md)) |
 | `semantics.*` | The learned semantic layer: recording, evidence, duplicate and drift refusals | pipeline-contract §13.15 (defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md)) |
 | `mcp.*` | The MCP surface's own refusals (the resource surface's not-found is the JSON-RPC protocol's, not a code) | pipeline-contract §13.16 (defined in [MCP §6.2](mcp-server.md#62-tool-definitions)) |
