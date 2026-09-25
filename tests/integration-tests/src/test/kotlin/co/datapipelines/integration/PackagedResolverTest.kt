@@ -183,7 +183,9 @@ class PackagedResolverTest {
         const val PROJECT_PACKAGE = "co/datapipelines/"
         const val TEST_MODULE_PACKAGE = "co/datapipelines/integration/"
         val TEST_LIBRARIES = listOf("org/junit/", "io/kotest/", "io/mockk/")
-        val SWITCH = Regex("@(Profile|Conditional\\w*)\\b")
+
+        /** `@Profile`, any `@Conditional…`, also written fully qualified (`@org.springframework…Profile`). */
+        val SWITCH = Regex("@(?:[\\w.]+\\.)?(Profile|Conditional\\w*)\\b")
 
         /** A KDoc or line-comment line: prose about the rule, not a use of it. */
         val COMMENT = Regex("^\\s*(\\*|/\\*|//)")

@@ -44,8 +44,10 @@ import java.util.UUID
  * the production resolver. The security chain, the `ScopeInterceptor`, the MCP dispatcher, every
  * service and every filter run exactly as shipped. Then, for each witnessed permission, its
  * principal — a member of its own workspace — calls every governed REST/UI route with a session
- * and every MCP tool with its MCP key, and must be admitted where the route or tool declares that
- * permission (auth.md §7.6) and refused ON THE ROLE AXIS everywhere else.
+ * and every MCP tool with its MCP key, and must be admitted exactly where auth.md §7.6 PLACES that
+ * permission's surfaces and refused ON THE ROLE AXIS everywhere else. The expectation is the doc's
+ * placement, never the annotation being tested (record §5: the implementation's decision is not
+ * the oracle).
  *
  * The context is dirtied after the class: closing it closes the installation, which puts the
  * production resolver back for every other context in this JVM.
@@ -95,7 +97,11 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
                 mismatches += "$permission UNSCORABLE tool $tool: ${body.take(EXCERPT)}"
             }
             val reachedTools = toolAnswers.filterValues { body -> MCP_ROLE_REFUSALS.none { body.contains(it) } }.keys
-            val expectedRoutes = routes.filter { it.permission == permission }
+            // The oracle is the REVIEWED placement — the routes §7.6 names on this permission's row —
+            // never the annotation under test: a route re-declared with another permission would carry
+            // its expectation along with it (measured: delete re-declared as create stayed green that way).
+            val placed = rows[permission]?.routes.orEmpty().toSet()
+            val expectedRoutes = routes.filter { "${it.method} ${EntryDiscovery.canonical(it.pattern)}" in placed }
             val expectedTools = tools.filterValues { it == permission }.keys
 
             (reachedRoutes.toSet() - expectedRoutes.toSet()).forEach {
@@ -104,21 +110,21 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
             }
             (expectedRoutes.toSet() - reachedRoutes.toSet()).forEach {
                 mismatches +=
-                    "$permission REFUSED ${it.method} ${it.pattern} (declares it)"
+                    "$permission REFUSED ${it.method} ${it.pattern} (§7.6 places it on this row; the code declares ${it.permission})"
             }
             (reachedTools - expectedTools).forEach {
                 mismatches += "$permission REACHED tool $it (declares ${tools[it]}): ${toolAnswers.getValue(it).take(EXCERPT)}"
             }
-            (expectedTools - reachedTools).forEach { mismatches += "$permission REFUSED tool $it (declares it)" }
+            (expectedTools - reachedTools).forEach { mismatches += "$permission REFUSED tool $it (§7.6 places it on this row)" }
             matrix += "$permission routes=${expectedRoutes.size}/${reachedRoutes.size} tools=${expectedTools.size}/${reachedTools.size} " +
                 "refused=${routes.size - reachedRoutes.size + tools.size - reachedTools.size}"
         }
 
         println(matrix.joinToString("\n") { "event=seam.witness $it" })
         mismatches.joinToString("\n") shouldBe ""
-        // Non-vacuity: every witnessed permission reaches at least one surface of its own.
+        // Non-vacuity: every witnessed permission has at least one surface of its own in §7.6.
         WITNESSED.forEach { permission ->
-            (routes.count { it.permission == permission } + tools.count { it.value == permission }) shouldBeGreaterThanOrEqual 1
+            (rows[permission]?.routes.orEmpty().size + tools.count { it.value == permission }) shouldBeGreaterThanOrEqual 1
         }
         WITNESSED.size shouldBeGreaterThanOrEqual WITNESS_FLOOR
         routes.size shouldBeGreaterThanOrEqual ROUTE_FLOOR
