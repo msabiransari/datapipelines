@@ -2029,7 +2029,7 @@ anyway. `Accept` must admit `application/json` (`*/*` and an absent header do), 
 now): a caller that started a run pages its result under the SAME path it called —
 `GET /api/<category>/v<n>/<path>/executions/{execution_id}` and
 `GET /api/<category>/v<n>/<path>/executions/{execution_id}/result` — with the same handlers'
-semantics as the framework's `GET /executions/{id}`[`/result`] ([REST §8](#8-executions)), served
+semantics as the framework's `GET /executions/{id}`[`/result`] ([REST §10](#10-execution-history)), served
 to the `api` key that STARTED the run and bound to this path. A run another key (or another
 workspace's key) started is the 404 rule ([Auth §11A.1](auth.md#11a1-the-404-rule)); a BROWSER
 SESSION is refused here exactly as it is on the serve route — this is a machine surface, and the

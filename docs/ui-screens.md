@@ -49,7 +49,7 @@ Its response contract, so the idiom cannot drift into a third one:
 
 **htmx never calls `/api/v1`.** A JSON envelope is not a swappable fragment; pointing `hx-*` at the REST API would require client-side rendering, which principle 1 rules out. Every htmx interaction in §4 targets `/partials/**`.
 
-**Partials are a presentation layer, not a second implementation.** A `/partials/**` controller calls the *same* application service as its REST counterpart and renders the result into a Thymeleaf fragment. `POST /partials/api-keys` and `POST /api/v1/auth/api-keys` ([REST §16.1](rest-api.md#161-api-keys-own-keys-creation-is-a-workspace-admins--179)) differ only in how the response is serialized — same service, same validation, same refusal.
+**Partials are a presentation layer, not a second implementation.** A `/partials/**` controller calls the *same* application service as its REST counterpart and renders the result into a Thymeleaf fragment. `POST /partials/api-keys` and `POST /api/v1/auth/api-keys` ([REST §16.1](rest-api.md#161-api-keys-creation-is-on-the-keys-page--keys-v2)) differ only in how the response is serialized — same service, same validation, same refusal.
 
 **Auth on partials.** `/partials/**` is authenticated by the `dp_session` JWT cookie (never by `DP-API-Key` — API keys are for agents). State-changing partial requests (`POST`/`PATCH`/`DELETE`) are CSRF-protected: the frontend sends the `dp_csrf` cookie value in the `DP-CSRF-Token` header ([Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)). This is wired once in the layout (§3), not per-screen.
 

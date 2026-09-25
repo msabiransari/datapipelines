@@ -91,7 +91,7 @@ Both are validated by [Auth §7.3](auth.md#73-validation-flow) — same lookup, 
 
 API keys of the `mcp` kind (keys v2 #233, A13–A19) are:
 - **Created on the Keys page by anyone holding `mcp_key.create`** (author, promoter, workspace admin) — never at sign-in any more: the login mint is retired (A15), and `mcp_key.create`'s SUBSET RULE (A14) decides which ROLES the creator may give the key (never `viewer`, never a super-admin role — B1). Rotation is create-a-new-one-and-revoke-the-old (`mcp_key.revoke_own`).
-- Expiring or not, creator-scoped to revoke; HTTP surface in [REST API §16.1](rest-api.md#161-api-keys-own-keys-creation-is-a-workspace-admins--179).
+- Expiring or not, creator-scoped to revoke; HTTP surface in [REST API §16.1](rest-api.md#161-api-keys-creation-is-on-the-keys-page--keys-v2).
 - Acting as their OWN identity, which holds the CHOSEN member role (`author` | `promoter` | `workspace_admin`) in the key's workspace ([Auth §7.5](auth.md#75-key-roles), A13): nothing is derived from a membership at request time and nothing is capped — the role IS the key's authority, and **no key is ever a super admin** (B1), so no key reaches an instance verb.
 
 **The MCP key connects an MCP client to `/mcp` and nothing else** (#215 B2, owner ruling 2026-09-24: "MCP key should be only MCP"): presented on any REST route, page or partial it is refused with `403 endpoint.key_kind_refused`, `details.reason = "mcp_key_off_surface"` — a program that calls REST uses a person's session, and a program that calls published endpoints uses an `endpoint` key. The other two kinds ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)) do not reach `/mcp` at all — an `endpoint` key authorises published endpoints and a `server` key the promotion routes, and each is refused here with `403 endpoint.key_kind_refused` by `McpAuthFilter` (the interceptor never sees `/mcp`, which is a servlet, so the refusal is made again at the transport). Such a key could otherwise read the whole tool catalogue through `tools/list` without being able to call any of it.
@@ -2018,7 +2018,7 @@ Agents can use these for visibility into an execution while a `pipelines_execute
 Users discover the MCP endpoint via the UI's "Connect an Agent" page, which exposes:
 
 - The full MCP endpoint URL (`https://{host}/mcp`).
-- The MCP key's home ([UI Screens](ui-screens.md); REST surface in [REST API §16.1](rest-api.md#161-api-keys-own-keys-creation-is-a-workspace-admins--179)): the Keys page — the page must make creation (with the role choice), the prefix, the one-time copy of a migrated key's sealed secret and revoke-own findable, and state that the key's reach IS the role it was given.
+- The MCP key's home ([UI Screens](ui-screens.md); REST surface in [REST API §16.1](rest-api.md#161-api-keys-creation-is-on-the-keys-page--keys-v2)): the Keys page — the page must make creation (with the role choice), the prefix, the one-time copy of a migrated key's sealed secret and revoke-own findable, and state that the key's reach IS the role it was given.
 - A copy-pasteable configuration snippet for common agents, using whichever header that client supports (`DP-API-Key` or `Authorization: Bearer dpk_...` — §3.2):
   - Claude Desktop: `mcpServers` JSON for `claude_desktop_config.json`.
   - Cursor: settings JSON.

@@ -655,6 +655,9 @@ object PipelineErrorCodes {
         /** §13.7 — the workspace this key is pinned to has been deactivated (D-R10). */
         const val KEY_WORKSPACE_INACTIVE = "auth.key_workspace_inactive"
 
+        /** §13.7 (keys v2 A18) — the create path named a key that already exists live in the workspace (409). */
+        const val KEY_NAME_TAKEN = "auth.key_name_taken"
+
         /**
          * §13.7 (180, D15) — the principal's USER is deactivated: a session's or MCP key's
          * member, or an `endpoint`/`server` key's own identity (#215). One predicate judges it where the

@@ -173,7 +173,9 @@ class ApiKeyServiceTest {
             {
                 verify(
                     exactly = 1,
-                ) { repo.insert(issued.record.id, identityId, ownerId, "ci", any(), KeyRole.API_CALLER, null, workspaceId, ApiKeyKind.ENDPOINT) }
+                ) {
+                    repo.insert(issued.record.id, identityId, ownerId, "ci", any(), KeyRole.API_CALLER, null, workspaceId, ApiKeyKind.ENDPOINT)
+                }
             },
             { issued.record.userId shouldBe identityId },
             { issued.record.createdBy shouldBe ownerId },

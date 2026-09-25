@@ -74,7 +74,7 @@
       <p class="kicker">Step 2</p>
       <h2 id="step-key-title" class="ds-headline">Create your key on the Keys page</h2>
       <!-- claim: docs/ui-screens.md §4.19 (the Keys page, the ONE creation path), docs/auth.md §7.4 (keys v2: the role is chosen at creation under the subset rule; no key is minted at sign-in), §7.5 (the key acts as its own identity holding its chosen role) -->
-      <p class="section-lede"><strong>What you do.</strong> No key exists until someone creates one. Open the <strong>Keys page</strong>, choose <strong>New API key</strong>, pick the kind <code>mcp</code>, and give it a role — the dialog offers exactly the roles whose permissions are a subset of yours. <strong>Create</strong> shows the full key once; copy it into the client config in step 3 and keep the page's row for revoking later.</p>
+      <p class="section-lede"><strong>What you do.</strong> No key exists until someone creates one. Open the <strong>Keys page</strong>, choose <strong>New API key</strong>, pick the kind <code>mcp</code>, and give it a role: the dialog offers exactly the roles whose permissions are a subset of yours. <strong>Create</strong> shows the full key once; copy it into the client config in step 3 and keep the page's row for revoking later.</p>
       <div>
         <figure class="media-frame">
         <div class="media-bar"><span class="media-dots" aria-hidden="true">● ● ●</span><span>Keys page</span><span class="tag">Screenshot</span></div>
@@ -82,9 +82,9 @@
         <figcaption>The Keys page: choose the kind and the role, copy the shown-once key, revoke it there.</figcaption>
         </figure>
       </div>
-      <p><strong>What you see.</strong> The key acts as its own identity holding the role you gave it — an author-role key can create and run; a promoter-role key reads and promotes. For the demo workspace a workspace admin can offer any of the three roles, and an author exactly one: their own. The subset rule decides, never a promise.</p>
+      <p><strong>What you see.</strong> The key acts as its own identity holding the role you gave it. An author-role key can create and run; a promoter-role key reads and promotes. For the demo workspace a workspace admin can offer any of the three roles, and an author exactly one: their own. The subset rule decides, never a promise.</p>
       <!-- claim: docs/auth.md §7.4 (created on the Keys page; pinned to the workspace; revocation is a delete on the same page), docs/enums.md §8A/§8D (the kinds and the key roles) -->
-      <p><strong>What just happened.</strong> The key was created on the Keys page and pinned to the workspace you are in, <code>demo</code> here, with an identity of its own. It is shown exactly once — the server keeps only the hash, so paste it into the client config now. Deleting the key on the same page revokes it; removing the member who created a key revokes it too. Administration stays with signed-in people; no key can hold it.</p>
+      <p><strong>What just happened.</strong> The key was created on the Keys page and pinned to the workspace you are in, <code>demo</code> here, with an identity of its own. It is shown exactly once, and the server keeps only the hash, so paste it into the client config now. Deleting the key on the same page revokes it; removing the member who created a key revokes it too. Administration stays with signed-in people; no key can hold it.</p>
     </div>
   </section>
 
