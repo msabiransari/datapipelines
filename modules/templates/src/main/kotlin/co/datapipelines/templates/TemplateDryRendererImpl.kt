@@ -98,26 +98,36 @@ private fun viewOf(contract: TransformContract): co.datapipelines.pipeline.Trans
         inputs =
             contract.inputs.mapValues { (_, input) ->
                 when (input) {
-                    is TransformInput.Table ->
-                        co.datapipelines.pipeline.TransformContractView.Input.Table(input.columns.map(::viewColumn))
+                    is TransformInput.Table -> {
+                        co.datapipelines.pipeline.TransformContractView.Input
+                            .Table(input.columns.map(::viewColumn))
+                    }
 
-                    is TransformInput.Value ->
-                        co.datapipelines.pipeline.TransformContractView.Input.Value(input.type)
+                    is TransformInput.Value -> {
+                        co.datapipelines.pipeline.TransformContractView.Input
+                            .Value(input.type)
+                    }
                 }
             },
         output =
             when (val output = contract.output) {
-                is TransformOutput.Table ->
-                    co.datapipelines.pipeline.TransformContractView.Output.Table(output.columns.map(::viewColumn))
+                is TransformOutput.Table -> {
+                    co.datapipelines.pipeline.TransformContractView.Output
+                        .Table(output.columns.map(::viewColumn))
+                }
 
-                is TransformOutput.Value ->
-                    co.datapipelines.pipeline.TransformContractView.Output.Value(output.type)
+                is TransformOutput.Value -> {
+                    co.datapipelines.pipeline.TransformContractView.Output
+                        .Value(output.type)
+                }
 
-                is TransformOutput.Obj ->
+                is TransformOutput.Obj -> {
                     co.datapipelines.pipeline.TransformContractView.Output.Obj
+                }
             },
         rejects = contract.rejects,
     )
 
 private fun viewColumn(column: ContractColumn): co.datapipelines.pipeline.TransformContractView.Column =
-    co.datapipelines.pipeline.TransformContractView.Column(column.name, column.type, column.nullable)
+    co.datapipelines.pipeline.TransformContractView
+        .Column(column.name, column.type, column.nullable)

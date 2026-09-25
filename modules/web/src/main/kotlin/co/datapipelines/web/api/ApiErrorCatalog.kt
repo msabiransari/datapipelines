@@ -363,7 +363,8 @@ object ApiErrorCatalog {
             "pipeline.node." to "A step in the pipeline failed while it was running.",
             // 7c §13.18 — a TRANSFORM node's refusal: the transform, its inputs or its own
             // bounds are the place to look, exactly like the node family above.
-            "pipeline.transform." to "A transform step in the pipeline refused its input or its result. Check the named input or row in the error details.",
+            "pipeline.transform." to
+                "A transform step in the pipeline refused its input or its result. Check the named input or row in the error details.",
             "pipeline.staging." to "The pipeline ran out of room, or produced a value the temporary database couldn't hold.",
             "datasource.validation." to "These connection details aren't valid. Check them and try again.",
             "template.validation." to "This SQL template isn't valid. Check the reported problem and try again.",

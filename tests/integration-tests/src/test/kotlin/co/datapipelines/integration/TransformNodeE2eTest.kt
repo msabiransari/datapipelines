@@ -410,13 +410,26 @@ class TransformNodeE2eTest {
                 .jsonPath()
                 .getString("data.items[0].id")
 
-        val (refused, refusedError) = callTool(93, "pipelines_execute", mapOf("id" to draftPipeline, "parameters" to emptyMap<String, Any>()))
+        val (refused, refusedError) =
+            callTool(
+                93,
+                "pipelines_execute",
+                mapOf("id" to draftPipeline, "parameters" to emptyMap<String, Any>()),
+            )
         refusedError shouldBe true
         refused["error"]["code"].asText() shouldBe "pipeline.execution.template_unrendered"
 
         evaluateTemplate(DRAFT_TEMPLATE)
 
-        val (executed, executeError) = callTool(95, "pipelines_execute", mapOf("id" to draftPipeline, "parameters" to emptyMap<String, Any>()))
+        val (executed, executeError) =
+            callTool(
+                95,
+                "pipelines_execute",
+                mapOf(
+                    "id" to draftPipeline,
+                    "parameters" to emptyMap<String, Any>(),
+                ),
+            )
         withClue("the draft executes after templates_evaluate: $executed") { executeError shouldBe false }
         executed["status"].asText() shouldBe "SUCCESS"
     }
@@ -544,9 +557,11 @@ class TransformNodeE2eTest {
     }
 
     private fun createSqlTemplates() {
-        val stageHash = createSqlTemplate(STAGE_ORDERS_TEMPLATE, "POSTGRES", "SELECT order_id, amount_cents, customer_id FROM orders ORDER BY order_id")
+        val stageHash =
+            createSqlTemplate(STAGE_ORDERS_TEMPLATE, "POSTGRES", "SELECT order_id, amount_cents, customer_id FROM orders ORDER BY order_id")
         val tripsHash = createSqlTemplate(STAGE_TRIPS_TEMPLATE, "LAKE", "SELECT id, fare, company FROM trips")
-        val bigHash = createSqlTemplate(BIG_TRIPS_TEMPLATE, "H2", "SELECT id, fare, company FROM stg_trips WHERE fare >= :threshold ORDER BY id")
+        val bigHash =
+            createSqlTemplate(BIG_TRIPS_TEMPLATE, "H2", "SELECT id, fare, company FROM stg_trips WHERE fare >= :threshold ORDER BY id")
         val bindHash = createSqlTemplate(BIND_PAYLOAD_TEMPLATE, "H2", "SELECT * FROM order_lines WHERE customer_id = :payload")
         // The pins ride RELEASED so a pipeline release is possible and the transform draft is
         // the only draft pin in the Check B leg (Order 9).

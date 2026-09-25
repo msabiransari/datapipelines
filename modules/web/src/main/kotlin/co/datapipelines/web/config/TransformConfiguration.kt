@@ -106,8 +106,9 @@ class TransformConfiguration {
                             type = version.type,
                             status = version.status,
                             body = version.body,
-                            contract = version.contract
-                                ?: throw IllegalStateException("transform version ${ref.key} has no contract (chk_transform_blocks)"),
+                            contract =
+                                version.contract
+                                    ?: throw IllegalStateException("transform version ${ref.key} has no contract (chk_transform_blocks)"),
                             invariants = version.invariants.orEmpty(),
                         )
                     }
