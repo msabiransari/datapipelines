@@ -51,3 +51,14 @@ test("fields that are not panes leave the marker alone", () => {
   // A viewer's face renders no marker at all — the edit (impossible there anyway) is a no-op.
   assert.equal(face.markDirty(field(), docWith(null)), false);
 });
+
+test("a result swapped into #tf-result is scrolled into view; any other swap is left alone", () => {
+  const face = load();
+  const calls = [];
+  const target = (id) => ({ id, scrollIntoView: (opts) => calls.push([id, opts]) });
+  assert.equal(face.revealResult(target("tf-result")), true);
+  assert.deepEqual(calls, [["tf-result", { block: "nearest" }]], "instant, the nearest edge — no smooth motion to suppress");
+  assert.equal(face.revealResult(target("template-source")), false, "a whole-face swap (a save) is not scrolled");
+  assert.equal(face.revealResult(null), false);
+  assert.equal(calls.length, 1);
+});

@@ -20,9 +20,10 @@
        the only way to size a pane without a layout shift now that no inline script is
        allowed on the page (090's stylesheet lesson, one layer up). -->
   <script th:src="@{/js/splitter.js}"></script>
-  <!-- 7d: the transform face's one behaviour — the "unsaved changes" marker (Release publishes
-       the last SAVED draft, never what is typed). Delegated, so a face swapped in by the
-       version select or a save is covered without re-arming. -->
+  <!-- 7d: the transform face's two behaviours — the "unsaved changes" marker (Release publishes
+       the last SAVED draft, never what is typed) and scrolling a fresh result into view.
+       Delegated, so a face swapped in by the version select or a save is covered without
+       re-arming. -->
   <script th:src="@{/js/template-transform-face.js}" defer></script>
 
   <!-- 041 layout: the page is a two-row grid — this header, then a row that fills

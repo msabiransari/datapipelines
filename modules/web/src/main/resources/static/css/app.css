@@ -3374,6 +3374,17 @@ button.app-busy::after {
   overflow-y: auto;
 }
 
+/* The face's head — version, status, hash and the two verbs — stays in view while the panes
+   and a long result list scroll under it: after Run suite the author fixes a pane and runs
+   again without scrolling back up for the button. */
+.tf-face > .te-panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-page);
+  padding-block: var(--gap-xs);
+}
+
 .tf-panes {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3415,8 +3426,12 @@ button.app-busy::after {
   tab-size: 2;
 }
 
+/* A read-only pane is the textarea's size, not its content's: a long contract beside a short
+   body would otherwise stretch the whole row. It scrolls inside, and resizes like the textarea. */
 pre.tf-pane-input {
   flex: 0 0 auto;
+  height: 16rem;
+  min-height: 0;
   overflow: auto;
 }
 
