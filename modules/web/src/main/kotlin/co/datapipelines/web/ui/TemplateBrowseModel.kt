@@ -100,6 +100,7 @@ class TemplateBrowseModel(
         model.addAttribute("foldersTruncated", folderProbe.size > FOLDER_LIMIT)
         model.addAttribute("templates", leaves)
         model.addAttribute("drafts", templates.findDrafts(workspaceId, view.templates, leaves.map { it.id }))
+        model.addAttribute(NEEDS_REVIEW_IDS, noneNeedReview())
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", leafProbe.size > PAGE_SIZE)
         model.addAttribute("total", if (root) 0 else templates.countChildTemplates(workspaceId, view.templates, prefix, dialect, type))
@@ -119,6 +120,7 @@ class TemplateBrowseModel(
         model.addAttribute("foldersTruncated", false)
         model.addAttribute("templates", emptyList<Any>())
         model.addAttribute("drafts", emptyMap<String, Any>())
+        model.addAttribute(NEEDS_REVIEW_IDS, noneNeedReview())
         model.addAttribute("offset", 0)
         model.addAttribute("hasMore", false)
         model.addAttribute("total", 0)
@@ -144,6 +146,7 @@ class TemplateBrowseModel(
         model.addAttribute("searching", true)
         model.addAttribute("templates", items)
         model.addAttribute("drafts", templates.findDrafts(workspaceId, view.templates, items.map { it.id }))
+        model.addAttribute(NEEDS_REVIEW_IDS, noneNeedReview())
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", probe.size > PAGE_SIZE)
         model.addAttribute("total", templates.count(workspaceId, view.templates, dialect = dialect, type = type, q = q))
@@ -223,6 +226,8 @@ class TemplateBrowseModel(
         val now = Instant.now()
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
+        // 7d (§8.2): the working version's needs-review marker — lane 7e computes it.
+        model.addAttribute("needsReview", false)
         model.addAttribute("inUse", inUse)
         model.addAttribute(
             "versions",
@@ -318,6 +323,14 @@ class TemplateBrowseModel(
         return RUNS_VIEW
     }
 
+    /**
+     * 7d (transform-nodes design §8.2) — the ids whose working version is marked `needs_review`
+     * (it cites a retired or superseded fact). The marker renders behind this set in the tree
+     * and the search list; lane 7e computes it from the cited facts. Until then nothing is
+     * marked — an empty set, never a guess.
+     */
+    private fun noneNeedReview(): Set<String> = emptySet()
+
     /** The first [EXCERPT_LINES] lines of the current body — the Overview's peek at the source. */
     private fun excerpt(body: String): String = body.lineSequence().take(EXCERPT_LINES).joinToString("\n")
 
@@ -356,6 +369,9 @@ class TemplateBrowseModel(
         const val SEARCH_VIEW = "partials/template-search"
         const val DETAIL_VIEW = "partials/template-detail"
         const val RUNS_VIEW = "partials/template-runs"
+
+        /** The model attribute the needs-review marker reads in the tree and the search list (7d). */
+        const val NEEDS_REVIEW_IDS = "needsReviewIds"
 
         /** The Overview's source peek — the mock's "first 12 lines, then open full source". */
         const val EXCERPT_LINES = 12

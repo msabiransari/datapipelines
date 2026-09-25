@@ -47,6 +47,9 @@
         <span class="ds-badge ds-badge-default" th:if="${t.dialect != null}" th:text="${t.dialect.wire}">POSTGRES</span>
         <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning"
               th:title="'Draft v' + ${drafts[t.id].version} + ' is pending release — release it from the editor to publish.'">draft</span>
+        <!-- 7d (§8.2): the needs-review marker, as the tree leaf carries it (7e fills the set). -->
+        <span th:if="${needsReviewIds != null and #sets.contains(needsReviewIds, t.id)}" class="ds-badge ds-badge-warning" data-needs-review
+              title="A fact this template cites was retired or superseded — re-verify before you lean on it.">needs review</span>
       </button>
     </li>
   </ul>
