@@ -105,6 +105,10 @@ GUARDS[":modules:pipeline-contract"]="co.datapipelines.pipeline.PipelineErrorCod
 GUARDS[":modules:mcp-server"]="co.datapipelines.mcp.SkillDistributionTest co.datapipelines.mcp.McpToolSurfaceSpecDriftTest"
 GUARDS[":modules:app"]="co.datapipelines.config.OrgConfigKeysSpecDriftTest co.datapipelines.config.ConfigValidatorCheckCountTest"
 GUARDS[":modules:web"]="co.datapipelines.web.api.ApiErrorCatalogSpecDriftTest co.datapipelines.web.api.RequiredScopeCoverageTest co.datapipelines.web.api.RequiredScopeKonsistTest co.datapipelines.web.api.MutatingHandlerScopeFloorTest co.datapipelines.web.api.PublicRouteWalkerTest co.datapipelines.web.api.MatrixRowReachabilityTest co.datapipelines.web.api.ReadFloorTest co.datapipelines.web.ui.site.SiteRouteFloorTest co.datapipelines.web.ui.site.SiteSeoMetaTest co.datapipelines.web.ui.site.SiteKeywordCoverageTest co.datapipelines.web.ui.site.SiteHandTypedCountsGuardTest co.datapipelines.web.ui.site.SiteClaimCitationTest co.datapipelines.web.ui.DocsLinkRewriteTest"
+# 217a's architecture rule lives in the integration module and a lane rarely touches it, so the
+# changed-classes stage never runs it; a new transport→repository pair then surfaces at the merge
+# gate (7d, 2026-09-25). A source scan: no containers, seconds.
+GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest"
 args=()
 for m in "${!GUARDS[@]}"; do
   args+=("$m:test")

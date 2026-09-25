@@ -48,7 +48,6 @@ class TemplateTransformFaceControllerTest {
     private val drafts = mockk<TemplateDraftService>()
     private val controller =
         TemplateTransformFaceController(
-            templates,
             TemplateService(templates),
             co.datapipelines.web.EVERYTHING_LENS,
             TransformFixtures.validator(),

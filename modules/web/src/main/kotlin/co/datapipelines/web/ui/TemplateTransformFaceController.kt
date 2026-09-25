@@ -8,7 +8,6 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraftService
-import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TemplateValidationException
 import co.datapipelines.templates.TemplateValidator
@@ -48,8 +47,7 @@ import java.util.UUID
  */
 @Controller
 class TemplateTransformFaceController(
-    private val templates: TemplateRepository,
-    reads: TemplateService,
+    private val reads: TemplateService,
     private val lens: PromoterLens,
     private val validator: TemplateValidator,
     private val drafts: TemplateDraftService,
@@ -107,9 +105,10 @@ class TemplateTransformFaceController(
         @RequestParam tests: String,
         model: Model,
     ): String {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val working =
-            templates.findWorking(workspaceId, name)?.takeIf { it.type.isTransform }
+            reads.findWorking(workspaceId, lens.viewFor(principal).templates, name)?.takeIf { it.type.isTransform }
                 ?: return result(model, refusals = listOf(notATransform(name)))
         return when (val bound = TransformFace.bind(working, TransformPanes(body, contract, invariants, tests))) {
             is TransformFace.Bound.Refused -> result(model, refusals = bound.refusals)
@@ -154,7 +153,8 @@ class TemplateTransformFaceController(
         workspaceId: UUID,
         name: String,
     ): Working {
-        val working = templates.findWorking(workspaceId, name)?.takeIf { it.type.isTransform }
+        val working =
+            reads.findWorking(workspaceId, lens.viewFor(currentPrincipal()).templates, name)?.takeIf { it.type.isTransform }
         return when {
             working == null -> {
                 Working.Refused(notATransform(name))
