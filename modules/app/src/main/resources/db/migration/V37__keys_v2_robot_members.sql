@@ -1,5 +1,5 @@
 -- =============================================================================
--- V35 — Keys v2: every key is a robot member of one workspace (#233)
+-- V37 — Keys v2: every key is a robot member of one workspace (#233)
 --
 -- Authority: docs/superpowers/specs/2026-09-23-permissions-and-keys-design.md (RATIFIED
 -- 2026-09-23; amended 2026-09-24, A1–A12; amended 2026-09-25, A13–A19) §3, §10; recorded as
@@ -42,7 +42,7 @@
 --
 -- DOWN PATH (manual, lossy by design): the pre-v2 shapes are not recoverable — a converted
 -- login key's owner-linkage (user_id = the member) and the dropped column cannot be rebuilt
--- from what V35 leaves. Rolling the CODE back requires restoring the database from backup.
+-- from what V37 leaves. Rolling the CODE back requires restoring the database from backup.
 -- =============================================================================
 
 -- 1. The OLD constraints come off FIRST: the conversion below moves rows THROUGH states
@@ -96,7 +96,7 @@ BEGIN
        AND k.is_revoked = FALSE
        AND k.role IS NULL;
     GET DIAGNOSTICS revoked_count = ROW_COUNT;
-    RAISE NOTICE 'V35: % user-kind key(s) converted to identity-backed keys with their owner''s role; % revoked (viewer or no membership)',
+    RAISE NOTICE 'V37: % user-kind key(s) converted to identity-backed keys with their owner''s role; % revoked (viewer or no membership)',
         converted_count, revoked_count;
 END $$;
 
@@ -151,7 +151,7 @@ BEGIN
       FROM ranked r
      WHERE k.id = r.id AND r.rn > 1;
     GET DIAGNOSTICS renamed_count = ROW_COUNT;
-    RAISE NOTICE 'V35: renamed % duplicate live key name(s) — (workspace_id, name) is unique for live keys (A18)', renamed_count;
+    RAISE NOTICE 'V37: renamed % duplicate live key name(s) — (workspace_id, name) is unique for live keys (A18)', renamed_count;
 END $$;
 
 CREATE UNIQUE INDEX uq_api_keys_live_workspace_name

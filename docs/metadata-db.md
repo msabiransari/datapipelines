@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.25 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.27 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-09-24
+**Last updated:** 2026-09-25
 
 ---
 
@@ -70,6 +70,8 @@ datasources ──1:N── lake_tables (datasource_id references the datasource
 datasources ──1:N── learned_facts (datasource_name references the NAME primary key, ON DELETE CASCADE — §4.18)
 workspaces  ──1:N── learned_facts (workspace_id: the WORKSPACE-scope binding; recorded_in: provenance — §4.18)
 learned_facts ──1:N── learned_facts (supersedes — the drift history, §4.18)
+template_versions ──1:N── template_implements (composite (template_id, version), ON DELETE CASCADE — §4.21)
+learned_facts ──1:N── template_implements (fact_id, NO cascade — a cited fact is retired, never deleted, §4.21)
 users ──1:N── mail_sends (the claim row behind every notice sent about or to the user, ON DELETE CASCADE — §4.19)
 
 pipelines ──1:N── pipeline_check_runs (the server-run release-check history of the pipeline's versions — §4.20)
@@ -129,12 +131,12 @@ CREATE UNIQUE INDEX uq_users_provider_subject ON users(provider, provider_subjec
 
 ### 4.2 `api_keys`
 
-Keys (keys v2, V35): every key is a robot member of one workspace — the role is chosen at creation from the creator's own permissions, and kind is the transport. See [Auth spec §7](auth.md#7-api-keys).
+Keys (keys v2, V37): every key is a robot member of one workspace — the role is chosen at creation from the creator's own permissions, and kind is the transport. See [Auth spec §7](auth.md#7-api-keys).
 
 ```sql
 CREATE TABLE api_keys (
     id                    TEXT        PRIMARY KEY,          -- 'dpk_ABCDEFGHIJKL'
-    user_id               UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- who the key ACTS AS: its own `service` identity on EVERY kind (V34 endpoint/server; V35 mcp too)
+    user_id               UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- who the key ACTS AS: its own `service` identity on EVERY kind (V34 endpoint/server; V37 mcp too)
     created_by            UUID        NOT NULL REFERENCES users(id),  -- V34 (#215 B4): who created the key
     workspace_id          UUID        NOT NULL REFERENCES workspaces(id),   -- pinned at issuance (V4, D3)
     name                  TEXT        NOT NULL,             -- 'Claude Desktop key'
@@ -145,9 +147,9 @@ CREATE TABLE api_keys (
     expires_at            TIMESTAMPTZ,
     last_used_ip          INET,
     last_used_user_agent  TEXT,
-    kind                  TEXT        NOT NULL DEFAULT 'mcp',    -- 'mcp' (V35, renamed from 'user') | 'endpoint' (V11) | 'server' (V17)
+    kind                  TEXT        NOT NULL DEFAULT 'mcp',    -- 'mcp' (V37, renamed from 'user') | 'endpoint' (V11) | 'server' (V17)
     secret_sealed         BYTEA,                       -- V31: the full key, sealed (D16); NULL pre-R3, and NULL again from the first Copy on (#213 show-once; V32 cleared every pre-amendment copy)
-    role                  TEXT,                        -- V35 (keys v2 A13/A14): the CHOSEN role — author|promoter|workspace_admin on mcp, api_caller on endpoint, promotion_receiver on server; NULL only on a revoked pre-v2 row
+    role                  TEXT,                        -- V37 (keys v2 A13/A14): the CHOSEN role — author|promoter|workspace_admin on mcp, api_caller on endpoint, promotion_receiver on server; NULL only on a revoked pre-v2 row
     CONSTRAINT chk_api_keys_kind CHECK (kind IN ('mcp', 'endpoint', 'server')),
     CONSTRAINT chk_api_keys_role CHECK (
         (kind = 'mcp' AND role IS NOT NULL AND role IN ('author', 'promoter', 'workspace_admin'))
@@ -161,7 +163,7 @@ CREATE INDEX idx_api_keys_expires ON api_keys(expires_at)
     WHERE expires_at IS NOT NULL AND is_revoked = FALSE;
 CREATE INDEX idx_api_keys_endpoint_kind ON api_keys(workspace_id)
     WHERE kind = 'endpoint' AND is_revoked = FALSE;
--- V35 (keys v2 A18): a key's NAME is unique within its workspace among live keys.
+-- V37 (keys v2 A18): a key's NAME is unique within its workspace among live keys.
 CREATE UNIQUE INDEX uq_api_keys_live_workspace_name ON api_keys(workspace_id, name)
     WHERE is_revoked = FALSE;
 CREATE INDEX idx_api_keys_created_by ON api_keys(created_by);   -- V34: the creator's own-keys list
@@ -170,11 +172,11 @@ CREATE INDEX idx_api_keys_created_by ON api_keys(created_by);   -- V34: the crea
 **Notes:**
 - `id` is the public key prefix (`dpk_...`), not a UUID — it is the lookup handle presented in the `DP-API-Key` header (D10). `key_hash` is the Argon2id hash of the *full* key; the secret itself is returned exactly once at creation and never stored.
 - `workspace_id` (V4) pins the key to exactly one workspace at issuance (workspaces design D3): an agent key is a workspace-scoped credential, and the pinned workspace — not a request header — is the key's context. V4 backfills existing keys to `default`; slice 1 issues every new key into `default` from repository code (no column DEFAULT — slice 2 must find every pin by grepping the constant, [§4.11](#411-workspaces)).
-- `user_id` / `created_by` / `role` (V34 #215 + V35 keys v2 — [Auth §4.7](auth.md#47-key-identities), [§7.5](auth.md#75-key-roles)): `user_id` is who the key ACTS AS — its OWN `service` identity on every kind (endpoint/server since V34, `mcp` since V35 A13; created with the key in one transaction; revoking the key deactivates it). `created_by` is the person who created the key (the Keys page's "Created by"; own-key listing and revocation are creator-scoped; removing the member revokes the keys they created, A17/B6). `role` is CHOSEN at creation under the subset rule (A14) — `author|promoter|workspace_admin` on an `mcp` key, the transport role on the others. The CHECK spells every role-bearing arm with `role IS NOT NULL`, since a bare comparison is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN — V35's first draft omitted it on the `mcp` arm and ADMITTED a live NULL-role row (measured 2026-09-25; the arm now spells it). `scopes` was dropped (PK8); V34 refuses to run unless identities created = keys repointed = endpoint + server keys.
+- `user_id` / `created_by` / `role` (V34 #215 + V37 keys v2 — [Auth §4.7](auth.md#47-key-identities), [§7.5](auth.md#75-key-roles)): `user_id` is who the key ACTS AS — its OWN `service` identity on every kind (endpoint/server since V34, `mcp` since V37 A13; created with the key in one transaction; revoking the key deactivates it). `created_by` is the person who created the key (the Keys page's "Created by"; own-key listing and revocation are creator-scoped; removing the member revokes the keys they created, A17/B6). `role` is CHOSEN at creation under the subset rule (A14) — `author|promoter|workspace_admin` on an `mcp` key, the transport role on the others. The CHECK spells every role-bearing arm with `role IS NOT NULL`, since a bare comparison is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN — V37's first draft omitted it on the `mcp` arm and ADMITTED a live NULL-role row (measured 2026-09-25; the arm now spells it). `scopes` was dropped (PK8); V34 refuses to run unless identities created = keys repointed = endpoint + server keys.
 - `is_revoked` and `expires_at` are both re-checked on every request through the 60s cache in [Auth §11.4](auth.md#114-api-key-validation-cache) (D13), so revocation takes effect within ~1 minute.
 - Revocation is a soft flag, not a DELETE: `audit_log.key_id` must keep resolving to something meaningful. The retention sweep's purge hard-deletes a revoked key and its identity only once NOTHING references them (A17/B5).
-- `secret_sealed` (V31, [Auth §7.4](auth.md#74-issuance), D16): a created key's plaintext is sealed with the deployment's credential-encryption key (AAD = the key id) so the Keys page's show-once can open it — ONCE (#213, D16 amended 2026-09-23): the open and the clear are one owner-scoped statement, the key is hash-only from its first read on, and V32 nulled every pre-amendment copy fleet-wide. V35 (A15) dropped `minted_at_login` and its per-(user, workspace) unique index with the login mint: the Keys page is the one creation path.
-- `kind` (V11, renamed V35 A19) is the key's KIND ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): `mcp` (renamed from `user` — kind is the transport and the word says which) reaches `/mcp` and only `/mcp`; `endpoint` is a credential for published endpoints only. An `endpoint` key serves exactly the paths its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings) cover, and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'mcp'` follows the rename.
+- `secret_sealed` (V31, [Auth §7.4](auth.md#74-issuance), D16): a created key's plaintext is sealed with the deployment's credential-encryption key (AAD = the key id) so the Keys page's show-once can open it — ONCE (#213, D16 amended 2026-09-23): the open and the clear are one owner-scoped statement, the key is hash-only from its first read on, and V32 nulled every pre-amendment copy fleet-wide. V37 (A15) dropped `minted_at_login` and its per-(user, workspace) unique index with the login mint: the Keys page is the one creation path.
+- `kind` (V11, renamed V37 A19) is the key's KIND ([Auth §7.7](auth.md#77-key-kinds-and-published-endpoint-bindings)): `mcp` (renamed from `user` — kind is the transport and the word says which) reaches `/mcp` and only `/mcp`; `endpoint` is a credential for published endpoints only. An `endpoint` key serves exactly the paths its rows in [`endpoint_key_bindings`](#414-endpoint_key_bindings) cover, and one with no binding on any ancestor of the path it presents at authorises **nothing**. `DEFAULT 'mcp'` follows the rename.
 - No `updated_at` — the only mutations are `last_used_*` (written on use), `is_revoked` (written once) and `kind` (written once, at issuance), and all are self-timestamping or immutable.
 
 ### 4.3 `audit_log`
@@ -467,7 +469,7 @@ CREATE UNIQUE INDEX uq_template_versions_one_draft
 
 **Notes:**
 - `template_id` re-keyed from the TEXT human id to the surrogate `templates.id` in V4 (§4.8) — same FK name (`template_versions_template_id_fkey`), same `ON DELETE CASCADE`, new type. Lookups by human id join `templates` on the surrogate and filter `name` within the workspace; the join back is how a stored version "resolves to its named template".
-- **The version lifecycle mirrors `pipeline_versions` (V6, versioning §6)**: same statuses, same one-draft partial index, same four write paths, same DB-computed `body_hash` discipline. Two template-specific differences. First, the canonical body is the **version-owned field object** — `jsonb_build_object('engine', …, 'dialect', …, 'is_library', …, 'imports', imports_json, 'body', body)`, extended since V33 (7b) with the CASE arm `|| CASE WHEN contract_json IS NOT NULL THEN jsonb_build_object('contract', contract_json, 'invariants', invariants_json, 'tests', tests_json) ELSE '{}'::jsonb END` — present exactly on the transform types, so an `sql`/`html` row's hash is byte-identical before and after V33 (the migration test recomputes every pre-V33 row and finds zero changes; `type` is deliberately NOT in the hash — V8 explains why). Second, discard is always a hard delete — nothing references a `template_versions` row by FK (pipeline pins are numbers in JSON, not constraints), so versioning §3.4's executed-draft DISCARDED branch cannot fire here.
+- **The version lifecycle mirrors `pipeline_versions` (V6, versioning §6)**: same statuses, same one-draft partial index, same four write paths, same DB-computed `body_hash` discipline. Two template-specific differences. First, the canonical body is the **version-owned field object** — `jsonb_build_object('engine', …, 'dialect', …, 'is_library', …, 'imports', imports_json, 'body', body)`, extended since V33 (7b) with the CASE arm `|| CASE WHEN contract_json IS NOT NULL THEN jsonb_build_object('contract', contract_json, 'invariants', invariants_json, 'tests', tests_json) ELSE '{}'::jsonb END` — present exactly on the transform types, so an `sql`/`html` row's hash is byte-identical before and after V33 (the migration test recomputes every pre-V33 row and finds zero changes; `type` is deliberately NOT in the hash — V8 explains why). Second, discard is always a hard delete — no EXECUTION references a `template_versions` row (pipeline pins are numbers in JSON, not constraints), so versioning §3.4's executed-draft DISCARDED branch cannot fire here. The one FK that does reference a version is [`template_implements`](#421-template_implements)' (V36, 7e), and it cascades: a purged draft takes its citations with it.
 - **No `params_schema` column** (D3) — deleted, not deprecated. Any migration from a pre-v1.1 draft drops it.
 - `engine` carries the [`TemplateEngine`](enums.md#6-templateengine--template-language) value. It is `NOT NULL DEFAULT 'freemarker'` and deliberately has **no CHECK constraint**: the accepted value is type-conditional — `freemarker` iff `sql`/`html`, `none` iff a transform type (7b; enforced by save-time validation, D2), and future engines must not require a migration to become storable. The default exists for the sql/html write path, which never omits it.
 - `type` (V8, 046) is the template's kind, fixed at create and identical on every version (`template.validation.type_immutable` — the application twin of `chk_type_dialect`); V33 (7b) admits the two transform types in `chk_template_type`. `javascript` rows cannot be written today — the application refuses them at save until round two (`transform.js.unavailable`), and the CHECK admits the value so round two is not a schema change.
@@ -854,6 +856,33 @@ CREATE INDEX idx_pipeline_check_runs_latest
 - **`observed_json` is one small object, two shapes.** `{"value": "<the single cell, wire-encoded>"}` for `value` and `range` checks; `{"rows": <count>}` for a `rows` check. NULL whenever the verdict is `error` reached before a value could be read (unresolvable datasource, refusal, timeout, bind failure) — there is no observed value to record, and storing a placeholder would invent one.
 - **`parameters_json` stores the BOUND context, not the request.** Defaults are applied, undeclared supplied keys are absent, and every value is wire-encoded per its declared type — the row records what the statement actually ran with, which is the only parameters value an audit needs. A run whose bind failed stores the default `{}`: there is no bound context to record.
 
+### 4.21 `template_implements`
+
+**The learned facts a transform version cites as implementing** (V36, lane 7e, #7; the [transform-nodes design record](superpowers/specs/2026-09-09-transform-nodes-design.md) §2.3, §8.2, §8.3). A `jsonata`/`javascript` template version may say which WORKSPACE rules it implements — "this transform IS the workspace's definition of a rainy day" — so an agent that finds the definition finds the transform (`implemented_by`, the `templates_list implements=` filter), and a version whose cited rule is retired is served marked `needs_review`.
+
+```sql
+CREATE TABLE template_implements (
+    template_id UUID    NOT NULL,                  -- the templates SURROGATE, as template_versions keys it (V4)
+    version     INTEGER NOT NULL,
+    fact_id     UUID    NOT NULL,
+    PRIMARY KEY (template_id, version, fact_id),
+    CONSTRAINT fk_template_implements_version FOREIGN KEY (template_id, version)
+        REFERENCES template_versions (template_id, version) ON DELETE CASCADE,
+    CONSTRAINT fk_template_implements_fact FOREIGN KEY (fact_id)
+        REFERENCES learned_facts (id)            -- NO cascade: facts are retired, never deleted (D-S11)
+);
+
+CREATE INDEX idx_template_implements_fact ON template_implements (fact_id);
+CREATE INDEX idx_learned_facts_supersedes ON learned_facts (supersedes) WHERE supersedes IS NOT NULL;
+```
+
+**Notes:**
+- **Not content, not in the hash.** A citation is a claim about meaning, never a change of behaviour (R9): no `body_hash` expression reads this table, a write of `implements` alone never opens a draft or bumps a version, and a RELEASED version accepts it after release — the one post-release write [Templates §5.1](templates.md#51-rules) allows. The templates module's hash-equality test pins that the hash is byte-identical before and after a citation write.
+- **Which facts may be cited is the application's rule** (`template.implements_unresolved`, 400, at write): a fact visible from the writing workspace (the §4.18 predicate) that is a `WORKSPACE` fact of kind `definition`, `exclusion` or `preference`. A DATASOURCE fact is refused by rule — a transform never sees a datasource, so it cannot implement a fact about one. A CHECK cannot read another table, so there is no database twin.
+- **`needs_review` is computed on read, never stored.** Every template read (`TemplateRepository`'s projection) joins this table to `learned_facts` and marks the version when a cited fact is `retired`; the detail names each retired fact, its `retired_reason`, and its successor — the visible row whose `supersedes` is the retired id (a superseded fact is a retired one with reason `superseded`; there is no `superseded_by` column). `idx_learned_facts_supersedes` is what keeps that successor lookup an index read. Nothing re-maps a citation: clearing the mark is a deliberate `implements` write (cite the successor, or drop the citation).
+- **Deletes.** `(template_id, version)` cascades — a purged draft (versioning §5.4's hard delete) and an entity purge take their citations; `fact_id` does not — the product never deletes a fact (datasource delete is soft, §4.10), so a manual hard delete of a cited fact is refused rather than silently orphaning a transform's claim.
+- **Export, import, promotion** carry the ids on the version's payload; an import stores only the ids that resolve in the IMPORTING workspace and drops the rest without refusing (owner ruling 2026-09-25): `learned_facts` is environment-local (§5A), so a cross-deployment promotion lands with no citations, and a same-workspace round trip is lossless.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -870,7 +899,7 @@ CREATE INDEX idx_pipeline_check_runs_latest
 | `api_keys` | `idx_api_keys_user` | explicit (partial) | List a user's active keys |
 | `api_keys` | `idx_api_keys_expires` | explicit (partial) | Find expiring/expired keys for cleanup |
 | `api_keys` | `idx_api_keys_endpoint_kind` | explicit (partial) | The endpoint keys of a workspace — the endpoints screen and binding resolution; partial because mcp keys are the overwhelming majority (V11) |
-| `api_keys` | `uq_api_keys_live_workspace_name` | explicit (partial, unique) | V35 (keys v2 A18): a key NAME is unique within its workspace among LIVE keys — the duplicate-name arbiter behind the creation path's clean 409 |
+| `api_keys` | `uq_api_keys_live_workspace_name` | explicit (partial, unique) | V37 (keys v2 A18): a key NAME is unique within its workspace among LIVE keys — the duplicate-name arbiter behind the creation path's clean 409 |
 | `api_keys` | `idx_api_keys_created_by` | explicit | V34 (#215): the keys a person CREATED — own-key listing and creator-scoped revocation, now that `user_id` names an endpoint/server key's own identity |
 | `audit_log` | `audit_log_pkey` | via PK | Surrogate `BIGSERIAL` id |
 | `audit_log` | `idx_audit_timestamp` | explicit | Recent events (DESC) |
@@ -918,10 +947,13 @@ CREATE INDEX idx_pipeline_check_runs_latest
 | `learned_facts` | `learned_facts_pkey` | via PK | Lookup by id (`semantics_retire`, `supersedes`) |
 | `learned_facts` | `idx_learned_facts_datasource` | explicit | Every read is per datasource: the introspection enrichment, the listing, the drift check ([§4.18](#418-learned_facts)) |
 | `learned_facts` | `idx_learned_facts_workspace` | explicit (partial) | A workspace's own WORKSPACE facts; partial because DATASOURCE facts carry no workspace ([§4.18](#418-learned_facts)) |
+| `learned_facts` | `idx_learned_facts_supersedes` | explicit (partial) | V36 (7e): a retired fact's successor — the row whose `supersedes` names it — for the `needs_review` detail; partial because almost no fact supersedes another ([§4.21](#421-template_implements)) |
 | `mail_sends` | `mail_sends_pkey` | via PK | The claim's id — what `markSent` / `markFailed` update |
 | `mail_sends` | `uq_mail_sends_message` | via UNIQUE | One claim per message identity `(user_id, kind, act_id)` — the "never twice" rule; doubles as the per-user read the admin screen makes ([§4.19](#419-mail_sends)) |
 | `pipeline_check_runs` | `pipeline_check_runs_pkey` | via PK | The run row's id |
 | `pipeline_check_runs` | `idx_pipeline_check_runs_latest` | explicit | The latest run per `(pipeline_id, version, check_id)` — the release gate's and the UI's only read ([§4.20](#420-pipeline_check_runs)) |
+| `template_implements` | `template_implements_pkey` | via PK | `(template_id, version, fact_id)` — one version's citations (the `needs_review` join on read) |
+| `template_implements` | `idx_template_implements_fact` | explicit | V36 (7e): the reverse arrow — every version citing one fact (`implemented_by`, the `implements=` filter) ([§4.21](#421-template_implements)) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -970,6 +1002,7 @@ table and the test's expected-table list in the same commit.
 | `mail_sends` | derived | MailSend | — | — | The claim rows behind the notices THIS deployment sent about ITS users (§4.19) — a record of local sends, not authored, and meaningless beside another environment's `users` |
 | `pipeline_check_runs` | derived | CheckRun | — | `(pipeline, version, check_id)` | Produced by THIS deployment's server running the checks a pipeline body declares (§4.20): the observed value is only truthful against this environment's datasource data, which is the whole point of a check. The runs of a promoted pipeline are re-produced by the target's own runs, never transferred |
 | `lake_tables` | environment-local | LakeTable | — | — | Rows point at an environment-local [`datasources`](#410-datasources) row and at bucket locations whose credentials never leave the deployment; the registry is rebuilt on the target from its own manifest import, exactly as the datasource itself is re-registered there |
+| `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
 
 ---
 
@@ -1233,8 +1266,9 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.27 | V37 (keys v2, #233) | **Every key is a robot member of one workspace** (record §10 A13–A19). §4.2 `api_keys`: the `user` kind is renamed `mcp` (A19 — kind is the transport) and `DEFAULT 'mcp'` follows; `role` is the role CHOSEN at creation — `author\|promoter\|workspace_admin` on `mcp` (A13/A14), the transport roles unchanged; `chk_api_keys_kind` is replaced for the rename, `chk_api_keys_role` is replaced — every role-bearing arm spells `role IS NOT NULL` because `role = …` is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN, and the first draft's missing `IS NOT NULL` on the `mcp` arm ADMITTED a live NULL-role row (measured; fixed before merge); `minted_at_login` and its per-`(user, workspace)` unique index are DROPPED (A15 — the login mint is gone), and V37 CONVERTS every live `user`-kind row — the login-minted and the pre-R3 on-demand ones (V31 left the latter `minted_at_login = FALSE`; a row the final CHECK would refuse must not survive): an owner's membership `author\|promoter\|workspace_admin` → identity-backed key with that role, a viewer or membership-less owner → REVOKED, never guessed (B4, NOTICE counts); `created_by` keeps the human creator, whose removal revokes the key (A17/B6). New `uq_api_keys_live_workspace_name` — a live key's NAME is unique per workspace (A18; duplicates disambiguated by the migration, all but the newest gaining the key id's tail). `pipeline_executions.executed_by_key_kind`'s CHECK widens to admit `'mcp'` beside `'user'` for history. §5 index inventory swaps `api_keys_one_live_user_key` for `uq_api_keys_live_workspace_name`. |
+| 2026-09-25 | v1.26 | V36 (7e, #7) | New **§4.21 `template_implements`** — the WORKSPACE facts a transform version cites as implementing (transform-nodes design §2.3): PK `(template_id, version, fact_id)`, the composite FK to `template_versions` ON DELETE CASCADE (a purged draft takes its citations), the FK to `learned_facts` with NO cascade (facts are retired, never deleted), `idx_template_implements_fact` for the reverse arrow. Outside `body_hash`; `needs_review` computed on read, never stored. `learned_facts` gains the partial `idx_learned_facts_supersedes` (a retired fact's successor). §4.9's "nothing references a `template_versions` row by FK" note corrected; §5 gains the three indexes; §5A classifies the table promotable (carried on the version, resolvable ids kept on import — owner ruling 2026-09-25); the ERD gains both edges. Twenty-one tables. V37 is left unused — lane 233b's keys-v2 migration renumbered to V37 at the 233c base refresh (Flyway refuses a lower number after V36 has run). |
 | 2026-09-24 | v1.25 | V34 (215b, #215) | Key identities and key roles ([Auth §4.7](auth.md#47-key-identities), [§7.5](auth.md#75-key-roles)). §4.1 `users` gains `kind` (`human` \| `service` \| `system`, CHECK'd; the System row is set to `system`). §4.2 `api_keys` gains `created_by` (backfilled from `user_id`, NOT NULL, FK to `users`) and `role` with `chk_api_keys_role` — `api_caller` on every endpoint key, `promotion_receiver` on every server key, NULL on the MCP key; each non-null arm is spelled `role IS NOT NULL AND role = …`, because the record's `role = …` alone is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN. V34 creates one `service` identity per existing endpoint/server key (inactive for a revoked key), repoints the key's `user_id` to it, and refuses to run unless the three counts agree; `scopes` is DROPPED (PK8). New `idx_api_keys_created_by`. `pipeline_executions.executed_by`'s comment names the identity for endpoint/server-key runs; past rows are not rewritten. Down path is in the migration header (lossy by design). |
-| 2026-09-25 | v1.26 | V35 (keys v2, #233) | **Every key is a robot member of one workspace** (record §10 A13–A19). §4.2 `api_keys`: the `user` kind is renamed `mcp` (A19 — kind is the transport) and `DEFAULT 'mcp'` follows; `role` is the role CHOSEN at creation — `author\|promoter\|workspace_admin` on `mcp` (A13/A14), the transport roles unchanged; `chk_api_keys_kind` is replaced for the rename, `chk_api_keys_role` is replaced — every role-bearing arm spells `role IS NOT NULL` because `role = …` is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN, and the first draft's missing `IS NOT NULL` on the `mcp` arm ADMITTED a live NULL-role row (measured; fixed before merge); `minted_at_login` and its per-`(user, workspace)` unique index are DROPPED (A15 — the login mint is gone), and V35 CONVERTS every live `user`-kind row — the login-minted and the pre-R3 on-demand ones (V31 left the latter `minted_at_login = FALSE`; a row the final CHECK would refuse must not survive): an owner's membership `author\|promoter\|workspace_admin` → identity-backed key with that role, a viewer or membership-less owner → REVOKED, never guessed (B4, NOTICE counts); `created_by` keeps the human creator, whose removal revokes the key (A17/B6). New `uq_api_keys_live_workspace_name` — a live key's NAME is unique per workspace (A18; duplicates disambiguated by the migration, all but the newest gaining the key id's tail). `pipeline_executions.executed_by_key_kind`'s CHECK widens to admit `'mcp'` beside `'user'` for history. §5 index inventory swaps `api_keys_one_live_user_key` for `uq_api_keys_live_workspace_name`. |
 | 2026-09-23 | v1.24 | V32 (213, #213) | Data-only, no DDL: `UPDATE api_keys SET secret_sealed = NULL WHERE secret_sealed IS NOT NULL` — show-once (D16 amended 2026-09-23) makes the fleet hash-only immediately; the column stays for keys minted since, cleared on their first read. §4.2's column note updated. No down path (a cleared copy cannot be restored — that is the point). |
 | 2026-09-21 | v1.23 | V31 (179, roles R3) | §4.2 `api_keys` gains `secret_sealed BYTEA` (the login-minted key's plaintext sealed under the credential-encryption key, AAD = the key id) and `minted_at_login BOOLEAN`, plus the partial UNIQUE `api_keys_one_live_user_key` (`(user_id, workspace_id)` where `kind = 'user' AND NOT is_revoked`) — the migration revokes all but the newest live user key per pair first, with the count in a NOTICE. §5's table gains the index. |
 | 2026-09-20 | v1.22 | V29 + V30 (177, roles R1) | **§4.12 `workspace_members` and §4.17 `workspace_invitations` carry ONE `role`** (`viewer` \| `author` \| `promoter` \| `workspace_admin`, CHECK'd) — V23's three booleans folded back by V29 with the precedence admin → workspace_admin, else promoter, else author, else viewer; `idx_workspace_members_admins` keeps its name over the new predicate; the down path is in the migration and proven up-and-down by `WorkspaceRolesMigrationTest`. **§4.6 `pipeline_executions.triggered_by` → `executed_by`** (V30, D11 — the same NOT NULL FK, every actor kept) plus **`executed_by_key_kind`** (`user` \| `endpoint` \| `server` \| NULL, CHECK'd; backfilled from `triggered_via`: ENDPOINT → endpoint, MCP → user); the ERD edge follows. §4.6 also records `ENDPOINT` in `chk_triggered_via`, which V11 had widened without this document noticing. |

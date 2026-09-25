@@ -27,21 +27,21 @@ data class ApiKey(
     val workspaceId: UUID,
     val workspaceName: String,
     /**
-     * What this key IS (V11, §7.7; `mcp` since keys v2 V35 — A19). No default on purpose: a kind
+     * What this key IS (V11, §7.7; `mcp` since keys v2 V37 — A19). No default on purpose: a kind
      * is a creation decision (A15 — the Keys page is the one creation path), and a caller that
      * forgets it must fail to compile rather than mint a surprise.
      */
     val kind: ApiKeyKind,
     /**
      * Whether `api_keys.secret_sealed` holds the openable plaintext (V31; keys v2: the sealed
-     * copies that remain are the login-minted keys' unread ones, V35-migrated, until their first
+     * copies that remain are the login-minted keys' unread ones, V37-migrated, until their first
      * read — no new key is ever minted with one). The flag travels on the model — the Keys page
      * renders Copy from it — while the sealed BLOB never does:
      * [ApiKeyRepository.openAndClearSealedSecret] is the only read that touches the column.
      */
     val hasSealedSecret: Boolean = false,
     /**
-     * `api_keys.role` (V34; every live kind since keys v2 V35 — A13): the key role whose
+     * `api_keys.role` (V34; every live kind since keys v2 V37 — A13): the key role whose
      * [RolePermissions] column is the key's whole authority. Null ONLY on a revoked pre-v2
      * row the migration left untouched (the CHECK forbids it on a live one) — a live key
      * without a role never authenticates.

@@ -9,6 +9,8 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.RetiredFactCitation
+import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.TemplateUsageService
@@ -40,6 +42,12 @@ class PipelineLifecycleDialogModel(
      * from the ONE used-by scan every surface reads (040), never a scan of its own.
      */
     private val usage: TemplateUsageService,
+    /**
+     * 7e (transform-nodes design §8.2) — which pins cite a retired learned fact: the SAME port the
+     * release service's `warnings` read, so the dialog's rows and the POST's warnings agree.
+     * [TemplateReviewMarks.NONE] renders no rows (constructions that predate 7e).
+     */
+    private val reviewMarks: TemplateReviewMarks = TemplateReviewMarks.NONE,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     /** "v3 is not draft" and friends: a dialog for a shape the table refuses still OPENS. */
@@ -65,8 +73,20 @@ class PipelineLifecycleDialogModel(
          * template is shared. Zero for a pin the cascade cannot release.
          */
         val otherPinners: Int = 0,
+        /**
+         * 7e — the retired learned facts this pinned version cites (§8.2). Non-empty makes the
+         * pin [needsReview]: a WARNING row above the confirm, never a refusal — the button is
+         * untouched, because a fact edit never blocks a release on its own.
+         */
+        val retiredFacts: List<RetiredFactCitation> = emptyList(),
     ) {
         val label: String get() = "$id@$version"
+
+        /** 7e — the pinned version reads `needs_review` (it cites a retired fact). */
+        val needsReview: Boolean get() = retiredFacts.isNotEmpty()
+
+        /** `<id> — superseded by <id>; …` — the phrase the release warning's message uses too. */
+        val retiredFactsLabel: String get() = retiredFacts.joinToString("; ") { it.describe() }
 
         /** §5.3's rule, stated as the row's colour: anything but RELEASED blocks the release. */
         val blocksRelease: Boolean get() = status != RELEASED
@@ -119,6 +139,9 @@ class PipelineLifecycleDialogModel(
 
         /** 142 — every pin that is NOT a cascade row: the RELEASED ones and the blocking ones. */
         val otherPins: List<PinView> get() = pins.filter { !it.cascadable }
+
+        /** 7e — the pins that cite a retired fact: one warning row each, above the confirm. */
+        val needsReviewPins: List<PinView> get() = pins.filter { it.needsReview }
     }
 
     fun release(
@@ -142,21 +165,26 @@ class PipelineLifecycleDialogModel(
         }
         val body = repository.findVersionBody(workspaceId, id, draft.version)
         val parsed = body?.let { runCatching { deserializer.readOrThrow(it) }.getOrNull() }
-        val pins =
+        val refs =
             parsed
                 ?.nodes
                 ?.filter { it.template.id.isNotBlank() }
                 ?.map { it.template }
                 ?.distinct()
-                ?.map { ref ->
-                    val status = templates.statusOf(workspaceId, ref.id, ref.version)
-                    PinView(
-                        id = ref.id,
-                        version = ref.version,
-                        status = status,
-                        otherPinners = if (status == PipelineVersionStatus.DRAFT) otherPinners(workspaceId, id, ref) else 0,
-                    )
-                } ?: emptyList()
+                .orEmpty()
+        // 7e: one read for every pin — the retired citations the release would warn about.
+        val retired = if (refs.isEmpty()) emptyMap() else reviewMarks.retiredCitations(workspaceId, refs)
+        val pins =
+            refs.map { ref ->
+                val status = templates.statusOf(workspaceId, ref.id, ref.version)
+                PinView(
+                    id = ref.id,
+                    version = ref.version,
+                    status = status,
+                    otherPinners = if (status == PipelineVersionStatus.DRAFT) otherPinners(workspaceId, id, ref) else 0,
+                    retiredFacts = retired[ref].orEmpty(),
+                )
+            }
         return ReleaseDialog(
             id = id,
             name = record.name,

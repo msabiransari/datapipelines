@@ -153,15 +153,18 @@
         <div class="u-flex u-gap-md u-mb-md">
           <div class="u-grow">
             <label class="u-block u-secondary u-text-sm u-mb-xs">Type</label>
-            <select id="create-template-type" name="type" class="ds-input" required>
+            <!-- 7d: `data-transform-types` names the types that carry the three blocks below —
+                 rendered from TemplateType, so the script never keeps its own list. -->
+            <select id="create-template-type" name="type" class="ds-input" required
+                    th:attr="data-transform-types=${transformTypes}">
               <option th:each="ty : ${types}" th:value="${ty}" th:text="${ty}"
                       th:selected="${ty == 'sql'}">sql</option>
             </select>
           </div>
           <!-- `dialect` is CONDITIONAL on type: required for `sql`, hidden AND removed from
-               the submitted form for `html`. chk_type_dialect is the database's backstop and
-               the controller drops the field for `html` regardless — the form is not the
-               authority on that rule (§5.1). -->
+               the submitted form for `html` and the transform types. chk_type_dialect is the
+               database's backstop and the controller drops the field for them regardless —
+               the form is not the authority on that rule (§5.1). -->
           <div class="u-grow" id="create-template-dialect-field">
             <label class="u-block u-secondary u-text-sm u-mb-xs">Dialect</label>
             <select id="create-template-dialect" name="dialect" class="ds-input" required>
@@ -176,8 +179,37 @@
         </div>
         <div class="u-mb-md">
           <label class="u-block u-secondary u-text-sm u-mb-xs">Body</label>
-          <textarea name="body" class="ds-input app-template-body-input"
-                    placeholder="SELECT 1" required></textarea>
+          <!-- 7d: for a transform type the body starts as the record's example body (the blocks
+               below are its contract, invariants and tests); switching back to sql/html while
+               it is untouched clears it again. -->
+          <textarea id="create-template-body" name="body" class="ds-input app-template-body-input"
+                    placeholder="SELECT 1" required
+                    th:attr="data-transform-body=${skeleton?.body}"></textarea>
+        </div>
+        <!-- 7d (#7, transform-nodes design §2.2): a transform carries a contract, invariants and
+             tests inside its version — the create runs the suite, and one EMPTY-input case is
+             mandatory. Prefilled with the design record's example; hidden AND disabled (so not
+             submitted) unless the type is a transform, exactly as `dialect` is for html. -->
+        <div id="create-template-blocks-field" hidden>
+          <p class="u-muted u-text-xs u-m0 u-mb-xs">
+            A transform declares its contract, invariants and tests; the create runs the tests.
+            The example below is the design record's — edit it, or keep it and edit in the editor.
+          </p>
+          <div class="u-mb-md">
+            <label for="create-template-contract" class="u-block u-secondary u-text-sm u-mb-xs">Contract (JSON)</label>
+            <textarea id="create-template-contract" name="contract" class="ds-input app-template-body-input" disabled
+                      th:text="${skeleton?.contract}">{}</textarea>
+          </div>
+          <div class="u-mb-md">
+            <label for="create-template-invariants" class="u-block u-secondary u-text-sm u-mb-xs">Invariants (JSON)</label>
+            <textarea id="create-template-invariants" name="invariants" class="ds-input app-template-body-input" disabled
+                      th:text="${skeleton?.invariants}">[]</textarea>
+          </div>
+          <div class="u-mb-md">
+            <label for="create-template-tests" class="u-block u-secondary u-text-sm u-mb-xs">Tests (JSON)</label>
+            <textarea id="create-template-tests" name="tests" class="ds-input app-template-body-input" disabled
+                      th:text="${skeleton?.tests}">[]</textarea>
+          </div>
         </div>
         <div id="template-create-result" class="u-mb-md"></div>
         <button type="submit" data-verb="template-create-submit" class="ds-button ds-button-primary u-full">Create</button>

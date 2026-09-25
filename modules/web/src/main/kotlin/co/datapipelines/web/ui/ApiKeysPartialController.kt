@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.ResponseBody
  *
  * No new key is ever minted with a sealed copy — a key created on the page or over REST
  * returns its plaintext in the create response exactly once (§7.4). The sealed copies still
- * in flight are the login-minted keys the V35 migration converted (keys v2 A2): their
+ * in flight are the login-minted keys the V37 migration converted (keys v2 A2): their
  * creators may read the copy once, from the key's row on the Keys page, and the key is
  * hash-only from then on.
  *

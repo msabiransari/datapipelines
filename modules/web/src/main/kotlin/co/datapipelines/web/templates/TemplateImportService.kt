@@ -4,10 +4,13 @@ import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.templates.CitableFacts
+import co.datapipelines.templates.ImplementsIds
 import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDeserializationOutcome
 import co.datapipelines.templates.TemplateDeserializer
 import co.datapipelines.templates.TemplateDraft
+import co.datapipelines.templates.TemplateImplementsRepository
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateTypeRule
@@ -38,10 +41,24 @@ import java.util.UUID
  *
  * Per-entry semantics are unchanged — a failure aborts at that entry leaving the earlier
  * ones (a library import is re-runnable).
+ *
+ * ## `implements` travels, and lands where it resolves (7e, owner ruling 2026-09-25)
+ *
+ * An entry's cited facts (transform-nodes design §2.3) are outside the hash, so they never
+ * decide a §9.2 classification. Learned facts are environment-local and never promoted, so an
+ * id need not exist here: the entry keeps the ids [CitableFacts] admits for THIS workspace and
+ * DROPS the rest — never a refusal, which would make every promotion of a citing transform
+ * impossible. The kept ids land on the version the import WROTE; the idempotent re-import of an
+ * identical version writes nothing, citations included. A same-workspace export → import round
+ * trip is lossless; a cross-deployment promotion lands with none.
  */
 class TemplateImportService(
     private val templates: TemplateRepository,
     private val validator: TemplateValidator,
+    /** 7e — which cited facts this workspace can hold (the lenient half of the §2.3 rule). */
+    private val citableFacts: CitableFacts,
+    /** 7e — where the kept citations land. */
+    private val citations: TemplateImplementsRepository,
     private val deserializer: TemplateDeserializer = TemplateDeserializer(),
 ) {
     /**
@@ -55,13 +72,27 @@ class TemplateImportService(
         actorId: UUID,
     ): List<Template> =
         importEntries(body).map { (entry, preserved) ->
-            val draft = validator.validateOrThrow(entry, workspaceId)
-            if (preserved != null) {
-                importPreserved(workspaceId, draft, preserved, actorId)
-            } else {
-                importNextLocal(workspaceId, draft, actorId)
-            }
+            // 7e: the citable subset only (see the class KDoc) — before validation, so the
+            // validator's strict `implements_unresolved` never fires on an import.
+            val cited = entry.implements?.let { ImplementsIds.keepCitable(workspaceId, it, citableFacts) }
+            val draft = validator.validateOrThrow(entry.copy(implements = cited), workspaceId)
+            val landed =
+                if (preserved != null) {
+                    importPreserved(workspaceId, draft, preserved, actorId)
+                } else {
+                    Landed(importNextLocal(workspaceId, draft, actorId), wrote = true)
+                }
+            if (cited == null || !landed.wrote) return@map landed.template
+            val template = landed.template
+            citations.replace(workspaceId, template.id, template.version, ImplementsIds.parseLenient(cited))
+            templates.findVersion(workspaceId, template.id, template.version) ?: template
         }
+
+    /** What one entry produced, and whether the import WROTE it (a §9.2 idempotent no-op did not). */
+    private data class Landed(
+        val template: Template,
+        val wrote: Boolean,
+    )
 
     /** The `templates` array, each entry deserialized to a draft beside its preserved-version fields. */
     @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued 4xx
@@ -141,7 +172,7 @@ class TemplateImportService(
         draft: TemplateDraft,
         preserved: Preserved,
         actorId: UUID,
-    ): Template {
+    ): Landed {
         val id =
             draft.id
                 ?: throw ApiException(
@@ -183,7 +214,10 @@ class TemplateImportService(
         }
 
         if (!templates.existsId(workspaceId, id)) {
-            return templates.importTemplateVersion(workspaceId, draft, preserved.version, declared, preserved.releasedAt, actorId)
+            return Landed(
+                templates.importTemplateVersion(workspaceId, draft, preserved.version, declared, preserved.releasedAt, actorId),
+                wrote = true,
+            )
         }
         val target = templates.findVersionDetail(workspaceId, id, preserved.version)
         return when {
@@ -193,12 +227,13 @@ class TemplateImportService(
                 // html template re-importing onto its sql namesake is refused, not coerced).
                 val resolved = resolvedAgainstExisting(workspaceId, id, draft)
                 templates.insertReleasedVersion(workspaceId, id, resolved, preserved.version, declared, preserved.releasedAt, actorId)
-                templates.findVersion(workspaceId, id, preserved.version) ?: throw ApiErrors.templateNotFound(id)
+                Landed(templates.findVersion(workspaceId, id, preserved.version) ?: throw ApiErrors.templateNotFound(id), wrote = true)
             }
 
             target.status == PipelineVersionStatus.RELEASED && target.bodyHash == declared -> {
-                // Idempotent no-op: re-importing an old export is safe (§9.2).
-                templates.findVersion(workspaceId, id, preserved.version) ?: throw ApiErrors.templateNotFound(id)
+                // Idempotent no-op: re-importing an old export is safe (§9.2). Nothing is
+                // written — the local version's citations included (7e).
+                Landed(templates.findVersion(workspaceId, id, preserved.version) ?: throw ApiErrors.templateNotFound(id), wrote = false)
             }
 
             else -> {

@@ -509,7 +509,7 @@ open class ApiKeyService(
 
     /**
      * The one-time read of a key's SEALED plaintext (keys v2: the sealed copies in flight are
-     * the login-minted keys the V35 migration converted — their creators may read the copy
+     * the login-minted keys the V37 migration converted — their creators may read the copy
      * ONCE, #213 — after which the key is hash-only; no new key is ever minted with one).
      * Creator-scoped; null when the caller did not create the key, when its copy was already
      * read, or when it never carried one.

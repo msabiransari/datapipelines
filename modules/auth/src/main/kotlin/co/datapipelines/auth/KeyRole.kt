@@ -1,7 +1,7 @@
 package co.datapipelines.auth
 
 /**
- * A KEY's role — `api_keys.role` (V34, widened by keys v2 V35, #233). Pre-created and fixed:
+ * A KEY's role — `api_keys.role` (V34, widened by keys v2 V37, #233). Pre-created and fixed:
  * no key can hold a role outside its kind's family (the `chk_api_keys_role` CHECK), and no key
  * is ever a super admin (B1) — `super_admin` is not a value here.
  *

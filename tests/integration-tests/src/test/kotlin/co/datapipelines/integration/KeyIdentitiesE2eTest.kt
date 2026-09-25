@@ -51,7 +51,7 @@ import java.util.UUID
  *    non-vacuity count is the route count.
  * 5. **No key is a super admin (B1, keys v2 form)** — `super_admin` is NOT OFFERABLE (the subset
  *    rule refuses it at the creation route — no workspace membership holds it, D7) and NOT
- *    ACCEPTABLE (V35's CHECK refuses the role on the table itself), while the same person's
+ *    ACCEPTABLE (V37's CHECK refuses the role on the table itself), while the same person's
  *    SESSION in a workspace they are not a member of is the implicit super admin and authors.
  */
 @SpringBootTest(
@@ -300,7 +300,7 @@ class KeyIdentitiesE2eTest {
             .body("error.details.role", equalTo("super_admin"))
 
         // NOT ACCEPTABLE (B1): even a row forged past the service is refused by the DATABASE —
-        // `super_admin` is not a value `api_keys.role` accepts (V35's chk_api_keys_role).
+        // `super_admin` is not a value `api_keys.role` accepts (V37's chk_api_keys_role).
         shouldThrow<SQLException> {
             DriverManager
                 .getConnection(postgres.jdbcUrl, postgres.username, postgres.password)

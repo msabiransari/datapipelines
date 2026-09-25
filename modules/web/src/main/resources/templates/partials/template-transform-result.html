@@ -1,0 +1,98 @@
+<!-- 7d (#7, transform-nodes design §9.3) — the transform face's RESULT region (#tf-result):
+     a Save refusal, a Run suite that could not run, or the Run suite's per-case list.
+
+     Filled by TemplateTransformFaceController: `refusals` (FaceRefusal — the pane, 7b's code,
+     its message and details) and `suite` (SuiteResult — the save gate's verdict on the panes as
+     typed, and each case: pass/fail, the first difference's path, expected vs actual, the
+     refusal codes, every invariant's verdict with its message).
+
+     Every string is user- or engine-supplied — case names, invariant names and messages, the
+     diff sides, refusal messages: th:text only, never th:utext, no inline expressions; the diff
+     sides are text in <pre>. The marks (✓ ✗ –) are aria-hidden; the words beside them carry
+     the verdict. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="result" class="tf-result-body">
+
+  <th:block th:if="${!#lists.isEmpty(refusals)}">
+    <p class="tf-outcome tf-outcome-refused" data-tf-outcome="refused"
+       th:text="${saveRefused == true} ? 'Save refused — the draft was not changed.' : 'The suite did not run — fix these first.'">
+      Save refused — the draft was not changed.
+    </p>
+    <ul class="tf-refusals">
+      <li th:each="r : ${refusals}" class="tf-refusal" th:attr="data-tf-pane=${r.pane}">
+        <span th:if="${r.pane != null}" class="ds-badge ds-badge-danger" th:text="${r.pane}">tests</span>
+        <code class="tf-code" th:text="${r.code}">template.test_failed</code>
+        <span th:text="${r.message}">Test case 'x' failed.</span>
+        <pre th:if="${r.detail != null}" class="tf-detail" th:text="${r.detail}">case: x</pre>
+      </li>
+    </ul>
+  </th:block>
+
+  <th:block th:if="${suite != null and #lists.isEmpty(refusals)}">
+    <!-- A suite the gate refused STATICALLY never ran: the refusals, and no case list. -->
+    <th:block th:if="${!#lists.isEmpty(suite.refusals)}">
+      <p class="tf-outcome tf-outcome-refused" data-tf-outcome="static">The suite did not run — Save would refuse these first.</p>
+      <ul class="tf-refusals">
+        <li th:each="r : ${suite.refusals}" class="tf-refusal" th:attr="data-tf-pane=${r.pane}">
+          <span th:if="${r.pane != null}" class="ds-badge ds-badge-danger" th:text="${r.pane}">contract</span>
+          <code class="tf-code" th:text="${r.code}">template.contract_invalid</code>
+          <span th:text="${r.message}">A transform contract declares at least one input.</span>
+          <pre th:if="${r.detail != null}" class="tf-detail" th:text="${r.detail}">rule: inputs_empty</pre>
+        </li>
+      </ul>
+    </th:block>
+
+    <th:block th:if="${#lists.isEmpty(suite.refusals)}">
+      <p class="tf-outcome" th:classappend="${suite.saveAccepted} ? 'tf-outcome-ok' : 'tf-outcome-refused'"
+         th:attr="data-tf-outcome=${suite.saveAccepted} ? 'green' : 'red'">
+        <span th:text="${suite.passedCount} + ' of ' + ${#lists.size(suite.cases)} + ' cases pass'">2 of 3 cases pass</span>
+        <span aria-hidden="true">·</span>
+        <span th:if="${suite.saveAccepted}">Save would accept these panes.</span>
+        <span th:unless="${suite.saveAccepted}">Save would refuse them with <code th:text="${suite.saveCode}">template.test_failed</code>.</span>
+      </p>
+      <ol class="tf-cases">
+        <li th:each="c : ${suite.cases}" class="tf-case"
+            th:classappend="${c.passed} ? 'tf-case-pass' : (${c.notRun} ? 'tf-case-skip' : 'tf-case-fail')"
+            th:attr="data-tf-case=${c.name}, data-tf-passed=${c.passed}">
+          <div class="tf-case-head">
+            <span class="tf-mark" aria-hidden="true" th:text="${c.passed} ? '✓' : (${c.notRun} ? '–' : '✗')">✓</span>
+            <span class="tf-case-name" th:text="${c.name}">empty input</span>
+            <span class="tf-case-verdict" th:text="${c.passed} ? 'passes' : (${c.notRun} ? 'not run — the suite timeout was reached' : 'fails')">passes</span>
+          </div>
+          <dl class="tf-case-facts" th:if="${!c.passed and !c.notRun}">
+            <th:block th:if="${c.diffPath != null}">
+              <dt>First difference at</dt>
+              <dd><code data-tf-diff-path th:text="${c.diffPath}">$[0].amount</code></dd>
+            </th:block>
+            <th:block th:if="${c.expectedRefusal != null}">
+              <dt>Expected refusal</dt>
+              <dd><code th:text="${c.expectedRefusal}">pipeline.transform.input_contract_violation</code></dd>
+            </th:block>
+            <th:block th:if="${c.actualRefusal != null}">
+              <dt>Refused with</dt>
+              <dd><code data-tf-refusal th:text="${c.actualRefusal}">pipeline.transform.value_type_mismatch</code>
+                <span th:text="${c.refusalMessage}">amount: expected DECIMAL, got STRING</span></dd>
+            </th:block>
+            <th:block th:if="${c.expected != null}">
+              <dt>Expected</dt>
+              <dd><pre class="tf-diff" data-tf-expected th:text="${c.expected}">25</pre></dd>
+            </th:block>
+            <th:block th:if="${c.actual != null}">
+              <dt>Actual</dt>
+              <dd><pre class="tf-diff" data-tf-actual th:text="${c.actual}">12.5</pre></dd>
+            </th:block>
+          </dl>
+          <ul class="tf-invariants" th:if="${!#lists.isEmpty(c.invariants)}">
+            <li th:each="i : ${c.invariants}" th:classappend="${i.passed} ? 'tf-inv-pass' : 'tf-inv-fail'"
+                th:attr="data-tf-invariant=${i.name}, data-tf-holds=${i.passed}">
+              <span class="tf-mark" aria-hidden="true" th:text="${i.passed} ? '✓' : '✗'">✓</span>
+              <code th:text="${i.name}">one_to_one</code>
+              <span th:text="${i.passed} ? 'holds' : 'is false'">holds</span>
+              <span aria-hidden="true">—</span>
+              <span th:text="${i.message}">every input row is accepted or rejected, never lost</span>
+            </li>
+          </ul>
+        </li>
+      </ol>
+    </th:block>
+  </th:block>
+</div>

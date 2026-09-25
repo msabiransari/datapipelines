@@ -399,4 +399,71 @@ class TemplateEditorControllerTest {
     /** The success half of `edit`: an HX-Redirect entity, not a fragment. */
     @Suppress("UNCHECKED_CAST")
     private fun redirect(result: Any) = result as org.springframework.http.ResponseEntity<String>
+
+    // ------------------------------------------------------------------ 7d: the transform face
+
+    /**
+     * 7d — a transform template's source column IS the face: the page's model carries the four
+     * panes and the save precondition, and the version select's partial answers with the face
+     * view, so the first paint and every swap agree (TemplateSourceModel's one rule).
+     */
+    @Test
+    fun `a transform template's editor swaps the source column for the four-pane face, on the page and the partial`() {
+        authenticate()
+        val draft = TransformFixtures.storedSkeleton(version = 1, bodyHash = "hash-transform-draft")
+        every { templates.findLatest(any(), TransformFixtures.NAME) } returns null
+        every { templates.findDraftDetail(any(), TransformFixtures.NAME) } returns
+            draftDetail(1).copy(templateId = TransformFixtures.NAME, bodyHash = "hash-transform-draft")
+        every { templates.findVersion(any(), TransformFixtures.NAME, 1) } returns draft
+        every { templates.listVersions(any(), TransformFixtures.NAME) } returns emptyList()
+        every { themeResolver.resolve(any()) } returns "saas"
+
+        val page = ExtendedModelMap()
+        controller.editor(TransformFixtures.NAME, null, page, mockk(relaxed = true)) shouldBe "templates/editor"
+        page["isTransform"] shouldBe true
+        page["faceEditable"] shouldBe true
+        page["faceHash"] shouldBe "hash-transform-draft"
+        (page["panes"] as TransformPanes).contract shouldContain "\"mode\": \"row\""
+        page["needsReview"] shouldBe false
+
+        val partial = ExtendedModelMap()
+        controller.source(TransformFixtures.NAME, null, partial) shouldBe TransformFace.VIEW
+        partial["isTransform"] shouldBe true
+    }
+
+    @Test
+    fun `an sql template keeps the Freemarker source column - isTransform is false`() {
+        authenticate()
+        every { templates.findLatest(any(), "test/my_template.sql") } returns sampleTemplate
+        every { templates.findDraftDetail(any(), any()) } returns null
+
+        val model = ExtendedModelMap()
+        controller.source("test/my_template.sql", null, model) shouldBe "partials/template-source"
+        model["isTransform"] shouldBe false
+    }
+
+    /**
+     * 7d — Edit on a released TRANSFORM version copies its three blocks too. Before 7d the copy
+     * (`asDraft`) carried the body alone, so the draft write was refused `contract_invalid`
+     * blocks_missing — Edit could never open a released transform for editing.
+     */
+    @Test
+    fun `Edit on a released transform version copies the contract, invariants and tests with the body`() {
+        authenticate()
+        val released = TransformFixtures.storedSkeleton(version = 1, status = PipelineVersionStatus.RELEASED)
+        every { templates.findDraftDetail(any(), TransformFixtures.NAME) } returns null
+        every { templates.findVersion(any(), TransformFixtures.NAME, 1) } returns released
+        every { templates.findLatest(any(), TransformFixtures.NAME) } returns released
+        every { templates.findVersionDetail(any(), TransformFixtures.NAME, 1) } returns releasedDetail(1)
+        val written = slot<TemplateDraft>()
+        every { drafts.write(any(), TransformFixtures.NAME, capture(written), "hash-v1", userId, WriteSurface.SESSION) } returns
+            draftDetail(2)
+
+        redirect(controller.edit(TransformFixtures.NAME, 1)).statusCode.value() shouldBe 200
+
+        written.captured.engine shouldBe Template.NONE_ENGINE
+        written.captured.contract shouldBe released.contract
+        written.captured.invariants shouldBe released.invariants
+        written.captured.tests shouldBe released.tests
+    }
 }

@@ -122,6 +122,10 @@
              detail pane, one click away. -->
         <span th:if="${drafts != null && drafts[t.id] != null}" class="ds-badge ds-badge-warning tpl-leaf-draft"
               th:title="'Draft v' + ${drafts[t.id].version} + ' is pending release — release it to publish.'">draft</span>
+        <!-- 7d (transform-nodes design §8.2): a version citing a retired fact is MARKED on read,
+             never blocked; lane 7e fills `needsReviewIds` from the cited facts. -->
+        <span th:if="${needsReviewIds != null and #sets.contains(needsReviewIds, t.id)}" class="ds-badge ds-badge-warning" data-needs-review
+              title="A fact this template cites was retired or superseded — re-verify before you lean on it.">needs review</span>
       </button>
     </li>
   </ul>

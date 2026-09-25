@@ -339,6 +339,10 @@
                 <div>
                   <div class="pe-details-id" x-text="selectedNode.id"></div>
                   <div class="pe-details-kind" x-text="String(selectedNode.type || '').toLowerCase()"></div>
+                  <!-- 7d (§8.2): the pinned transform version cites a retired fact (lane 7e's flag,
+                       read off the resolved pin — init.js transformPinFor). -->
+                  <span class="ds-badge ds-badge-warning" data-needs-review
+                        x-show="(transformPinFor(selectedNode) || {}).needsReview === true">needs review</span>
                 </div>
               </div>
               <dl class="pe-kv">

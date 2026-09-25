@@ -149,7 +149,7 @@ class TypedTemplatesMigrationTest {
     @Test
     fun `a PUT carrying a different type is refused with type_immutable`() {
         val repository = TemplateRepository(jdbc)
-        val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true))
+        val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true), TemplateImplementsRepository(jdbc))
         val stored = checkNotNull(repository.findLatest(WORKSPACE_ID, "test/legacy_orders.sql"))
         val offending =
             TemplateFixtures

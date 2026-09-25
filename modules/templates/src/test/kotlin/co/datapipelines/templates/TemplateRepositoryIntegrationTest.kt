@@ -836,7 +836,7 @@ class TemplateRepositoryIntegrationTest {
 
     @Test
     fun `the template draft service branches, and a stale base is a version conflict`() {
-        val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true))
+        val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true), TemplateImplementsRepository(jdbc))
         repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 
@@ -886,7 +886,7 @@ class TemplateRepositoryIntegrationTest {
         // C2/C3's template mirror: the write path fails closed, and the import paths
         // (promotion) land RELEASED rows without ever opening a draft — if any import
         // statement below grew draft-creation logic, this is the test that goes red.
-        val disabled = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(false))
+        val disabled = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(false), TemplateImplementsRepository(jdbc))
         repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
 

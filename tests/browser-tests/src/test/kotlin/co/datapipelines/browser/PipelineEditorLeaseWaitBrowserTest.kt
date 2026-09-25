@@ -87,12 +87,21 @@ class PipelineEditorLeaseWaitBrowserTest : BrowserSuite() {
         val waitingB = samples.intervals("src_b", "waiting_output")
         val writingA = samples.intervals("src_a", "writing")
         val writingB = samples.intervals("src_b", "writing")
+        // #234: the sampled intervals are the DIRECT observation, but sampling can miss a
+        // whole phase (both gate reds: a node's write phase emitted no sample at all), so
+        // the pass criterion is a disjunction with the server's own stopwatch: each sample
+        // carries the node's CUMULATIVE per-phase durations (timings_ms), and with ONE
+        // staging connection — this fixture's own property — a nonzero wait on one writer
+        // is time queued behind the OTHER staging writer's lease, whose nonzero writing
+        // total is what it was doing while holding it. Sampling misses phases; a stopwatch
+        // wrapped around the lease cannot.
         check(
-            waitingA.any { w -> writingB.any { w.overlaps(it) } } ||
-                waitingB.any { w -> writingA.any { w.overlaps(it) } },
+            sampledOverlap(waitingA, waitingB, writingA, writingB) || durationsProveTurns(samples),
         ) {
-            "no waiting interval overlapped the other writer's writing interval; " +
-                "waits a=$waitingA b=$waitingB writes a=$writingA b=$writingB"
+            "no waiting interval overlapped the other writer's writing interval, and the " +
+                "terminal timings do not prove the turns either; " +
+                "waits  a=$waitingA b=$waitingB writes a=$writingA b=$writingB; " +
+                "terminal timings ${terminalTimings(samples)}; ${trailDump()}"
         }
 
         page.locator("[data-verb='pipeline-execute']:not([disabled])").waitFor(Locator.WaitForOptions().setTimeout(EXECUTION_TIMEOUT_MS))
@@ -100,6 +109,87 @@ class PipelineEditorLeaseWaitBrowserTest : BrowserSuite() {
         page.locator(".pe-card[data-node-id='src_a'] .pe-port .pe-port-line").innerText() shouldContain "committed · 700,000 rows"
         page.locator(".pe-card[data-node-id='src_b'] .pe-port .pe-port-line").innerText() shouldContain "committed · 700,000 rows"
     }
+
+    /**
+     * #234's falsification, pinned: the two gate reds' recorded samples are the fixture.
+     * The interval lists are EXACTLY what both failing gates printed (891cfb54, 81d5a327 —
+     * both incremental cycles); the third same-millisecond sample each node shows is a
+     * state outside the four printed sets, which is what those interval lists require (its
+     * exact state was not recorded — the recorder did not keep it, which is the gap this
+     * lane closes); the terminal `timings_ms` are cumulative totals CONSISTENT with the
+     * sampled intervals (the runs' exact totals were not printed either — the fix records
+     * them from here on). The old sampled-only assertion rejects both sets — that is the
+     * recorded red; the trail-derived verdict reads both green — that is the fix.
+     */
+    @Test
+    fun `the two gate failures are the fixture - the sampled-only assertion rejects them and the trail-derived verdict reads them green`() {
+        listOf(gate891cfb54Samples(), gate81d5a327Samples()).forEach { samples ->
+            sampledOverlap(
+                samples.intervals("src_a", "waiting_output"),
+                samples.intervals("src_b", "waiting_output"),
+                samples.intervals("src_a", "writing"),
+                samples.intervals("src_b", "writing"),
+            ) shouldBe false
+            durationsProveTurns(samples) shouldBe true
+        }
+    }
+
+    /** Gate on `891cfb54` (incremental cycle): `src_a`'s write phase between ms …112157 and …115370 emitted no sample. */
+    private fun gate891cfb54Samples(): List<OpSample> =
+        listOf(
+            OpSample("src_a", "writing", 1_790_292_112_157),
+            OpSample("src_a", "waiting_output", 1_790_292_112_157),
+            OpSample("src_a", "connecting", 1_790_292_112_157),
+            OpSample("src_a", "writing", 1_790_292_115_370),
+            OpSample(
+                "src_a",
+                "finalizing",
+                1_790_292_116_206,
+                timings = mapOf("waiting_output" to 120, "writing" to 4050, "finalizing" to 210),
+                rowsWritten = 700_000,
+            ),
+            OpSample("src_b", "writing", 1_790_292_112_146),
+            OpSample("src_b", "waiting_output", 1_790_292_112_146),
+            OpSample("src_b", "connecting", 1_790_292_112_146),
+            OpSample("src_b", "waiting_output", 1_790_292_113_342),
+            OpSample("src_b", "writing", 1_790_292_114_351),
+            OpSample(
+                "src_b",
+                "finalizing",
+                1_790_292_115_366,
+                timings = mapOf("waiting_output" to 1010, "writing" to 1015, "finalizing" to 180),
+                rowsWritten = 700_000,
+            ),
+        )
+
+    /** Gate on `81d5a327` (incremental cycle): `src_b`'s post-wait write phase emitted no sample at all. */
+    private fun gate81d5a327Samples(): List<OpSample> =
+        listOf(
+            OpSample("src_a", "waiting_output", 1_790_313_090_488),
+            OpSample("src_a", "writing", 1_790_313_090_489),
+            OpSample("src_a", "connecting", 1_790_313_090_490),
+            OpSample("src_a", "waiting_output", 1_790_313_091_686),
+            OpSample("src_a", "writing", 1_790_313_092_694),
+            OpSample("src_a", "writing", 1_790_313_093_703),
+            OpSample(
+                "src_a",
+                "finalizing",
+                1_790_313_094_653,
+                timings = mapOf("waiting_output" to 1008, "writing" to 1960, "finalizing" to 240),
+                rowsWritten = 700_000,
+            ),
+            OpSample("src_b", "writing", 1_790_313_090_478),
+            OpSample("src_b", "waiting_output", 1_790_313_090_478),
+            OpSample("src_b", "connecting", 1_790_313_090_479),
+            OpSample("src_b", "waiting_output", 1_790_313_091_679),
+            OpSample(
+                "src_b",
+                "finalizing",
+                1_790_313_092_689,
+                timings = mapOf("waiting_output" to 1010, "writing" to 900, "finalizing" to 190),
+                rowsWritten = 700_000,
+            ),
+        )
 
     /** One recorded port view — what the page was TOLD to show, in event order. */
     private data class TrailEntry(
@@ -141,7 +231,16 @@ class PipelineEditorLeaseWaitBrowserTest : BrowserSuite() {
               const origLog = editor.logEvent.bind(editor);
               editor.logEvent = function (t, p) {
                 if (t === 'node_progress' && p && (p.node_id === 'src_a' || p.node_id === 'src_b')) {
-                  window.__opSamples.push({ node: p.node_id, state: p.state, at: Date.parse(p.observed_at) });
+                  // #234: the sample's cumulative phase durations ride along — the terminal
+                  // sample's timings_ms is the server's own per-phase total, the record the
+                  // overlap falls back to when sampling missed a phase.
+                  window.__opSamples.push({
+                    node: p.node_id,
+                    state: p.state,
+                    at: Date.parse(p.observed_at),
+                    timings: p.timings_ms || {},
+                    rows: p.rows_written === undefined ? null : p.rows_written,
+                  });
                 }
                 return origLog(t, p);
               };
@@ -150,11 +249,13 @@ class PipelineEditorLeaseWaitBrowserTest : BrowserSuite() {
         ) shouldBe true
     }
 
-    /** One raw `node_progress` sample, on the server's own clock. */
+    /** One raw `node_progress` sample, on the server's own clock, with its cumulative phase durations. */
     private data class OpSample(
         val node: String,
         val state: String,
         val at: Long,
+        val timings: Map<String, Long> = emptyMap(),
+        val rowsWritten: Long? = null,
     )
 
     /** One node's intervals in [state]: each sample holds until that node's next sample. */
@@ -173,11 +274,67 @@ class PipelineEditorLeaseWaitBrowserTest : BrowserSuite() {
 
     private fun LongRange.overlaps(other: LongRange) = first <= other.last && other.first <= last
 
+    /** The pre-#234 predicate: a sampled waiting interval meeting the other writer's sampled writing interval. */
+    private fun sampledOverlap(
+        waitingA: List<LongRange>,
+        waitingB: List<LongRange>,
+        writingA: List<LongRange>,
+        writingB: List<LongRange>,
+    ): Boolean =
+        waitingA.any { w -> writingB.any { w.overlaps(it) } } ||
+            waitingB.any { w -> writingA.any { w.overlaps(it) } }
+
+    /**
+     * #234: the turns read off the server's own stopwatch. Every `node_progress` sample
+     * carries the node's CUMULATIVE per-phase durations (`timings_ms` — the observation is
+     * wrapped around the lease in NodeRunner/WritebackRunner), and the terminal sample's
+     * map is the phase total. With ONE operational staging connection (this fixture's own
+     * `max-connections=1`), a nonzero `waiting_output` on one writer can only be time
+     * queued behind the other staging writer's lease — the two nodes are the only staging
+     * contenders (`joined` waits for both) — and that other writer's nonzero `writing`
+     * total is what it was doing while it held it. Sampling can miss a phase (both gate
+     * reds did); the stopwatch cannot.
+     */
+    private fun durationsProveTurns(samples: List<OpSample>): Boolean =
+        (cumulativeMs(samples, "src_a", "waiting_output") > 0 && cumulativeMs(samples, "src_b", "writing") > 0) ||
+            (cumulativeMs(samples, "src_b", "waiting_output") > 0 && cumulativeMs(samples, "src_a", "writing") > 0)
+
+    /** A node's total in [phase]: the LAST-recorded sample's cumulative map (the terminal sample's totals). */
+    private fun cumulativeMs(
+        samples: List<OpSample>,
+        node: String,
+        phase: String,
+    ): Long =
+        samples
+            .filter { it.node == node }
+            .lastOrNull()
+            ?.timings
+            ?.get(phase) ?: 0L
+
+    /** Per-node terminal timings + written rows, for the failure message. */
+    private fun terminalTimings(samples: List<OpSample>): String =
+        samples
+            .groupBy { it.node }
+            .map { (node, ss) ->
+                val last = ss.last()
+                "$node: timings=${last.timings} rows=${last.rowsWritten}"
+            }.joinToString("; ")
+
     @Suppress("UNCHECKED_CAST")
     private fun opSamples(): List<OpSample> {
         val raw = page.evaluate("() => window.__opSamples || []") as List<Map<String, Any?>>
         return raw.map { e ->
-            OpSample(node = e["node"] as String, state = e["state"] as String, at = (e["at"] as Number).toLong())
+            val timings =
+                (e["timings"] as? Map<*, *> ?: emptyMap<Any, Any>())
+                    .map { (k, v) -> k as String to (v as Number).toLong() }
+                    .toMap()
+            OpSample(
+                node = e["node"] as String,
+                state = e["state"] as String,
+                at = (e["at"] as Number).toLong(),
+                timings = timings,
+                rowsWritten = (e["rows"] as? Number)?.toLong(),
+            )
         }
     }
 

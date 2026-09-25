@@ -1,5 +1,6 @@
 package co.datapipelines.application.semantics
 
+import co.datapipelines.application.templates.FactImplementations
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
@@ -12,6 +13,7 @@ import co.datapipelines.datasources.semantics.LearnedFactRepository
 import co.datapipelines.datasources.semantics.LearnedFactScope
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import java.time.Instant
@@ -40,6 +42,12 @@ class SemanticsService(
     private val recorder: LearnedFactRecorder,
     private val pipelines: PipelineRepository,
     private val audit: AuditEventSink,
+    /**
+     * 7e (transform-nodes design §8.3) — which template versions implement each WORKSPACE fact,
+     * for `implemented_by` on the listing's rows. [FactImplementations.NONE] (the default for
+     * constructions without the template store) lists every rule as implemented by nothing.
+     */
+    private val implementations: FactImplementations = FactImplementations.NONE,
 ) {
     /** A record request as the surface binds it — everything but the provenance. */
     data class RecordCommand(
@@ -117,18 +125,31 @@ class SemanticsService(
         return FactWire.full(stored, workspaceId, sourcePipelineFor(stored, workspaceId))
     }
 
-    /** The facts on [datasource] the caller's workspace may see, oldest first, as stored (no drift recompute — no columns in hand). */
+    /**
+     * The facts on [datasource] the caller's workspace may see, oldest first, as stored (no drift
+     * recompute — no columns in hand). Every WORKSPACE fact carries `implemented_by` (7e, §8.3):
+     * the template versions citing it that [templateLens] admits — the caller's `template.read`
+     * lens, with NO default (a promoter's is narrower, and a missed caller must not compile) —
+     * read in ONE query for the whole listing. A DATASOURCE fact carries none: nothing can cite it.
+     */
     fun list(
         principal: AuthenticatedPrincipal,
         datasource: Datasource,
         query: ListQuery,
+        templateLens: ReadLens,
     ): List<Map<String, Any?>> {
         val workspaceId = principal.requireWorkspace().id
-        return repository
-            .findVisibleByDatasource(datasource.name, workspaceId, includeRetired = query.includeRetired, since = query.since)
-            .filter { query.scope == null || it.scope == query.scope }
-            .filter { query.table == null || it.refs.any { ref -> ref.table == query.table } }
-            .map { FactWire.full(it, workspaceId, sourcePipelineFor(it, workspaceId)) }
+        val facts =
+            repository
+                .findVisibleByDatasource(datasource.name, workspaceId, includeRetired = query.includeRetired, since = query.since)
+                .filter { query.scope == null || it.scope == query.scope }
+                .filter { query.table == null || it.refs.any { ref -> ref.table == query.table } }
+        val rules = facts.filter { it.scope == LearnedFactScope.WORKSPACE }.map { it.id }
+        val implemented = if (rules.isEmpty()) emptyMap() else implementations.implementedBy(workspaceId, templateLens, rules)
+        return facts.map { fact ->
+            val implementedBy = if (fact.scope == LearnedFactScope.WORKSPACE) implemented[fact.id].orEmpty() else null
+            FactWire.full(fact, workspaceId, sourcePipelineFor(fact, workspaceId), implementedBy)
+        }
     }
 
     /** Retires the fact under [id] with [reason]; the visibility and the cross-workspace rule of §7.1. */

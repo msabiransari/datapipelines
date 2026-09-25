@@ -769,9 +769,14 @@ class RoleVisibilityRenderTest {
          */
         val ROUTE_GUARDED: Map<String, String> = emptyMap()
 
-        /** The inventory as 114 shipped it: 63 controls over 50 distinct verbs. */
-        const val SHIPPED_CONTROLS = 63
-        const val SHIPPED_VERBS = 50
+        /**
+         * The inventory as shipped, RE-DERIVED from the sweep (never incremented): 114 shipped 63
+         * controls over 50 verbs; the tree held 70 over 56 at 7d's base (81d5a327) with the floor
+         * still at 114's numbers; 7d's transform face adds `transform-save`, `transform-run-suite`
+         * and the face's own `template-edit` control — 73 over 58.
+         */
+        const val SHIPPED_CONTROLS = 73
+        const val SHIPPED_VERBS = 58
 
         /** The promotion plan the screen reads (055, `PromotionService.Plan`) — the real type. */
         val PROMOTION_PLAN =
@@ -791,5 +796,150 @@ class RoleVisibilityRenderTest {
                     ),
                 examined = 4,
             )
+    }
+
+    // ------------------------------------------------------------------ 7d: the transform face
+
+    /**
+     * 7d (#7, transform-nodes design §9.4) — a viewer's transform face is the four panes as
+     * read-only `<pre>` blocks and NOTHING else: no form, no textarea, no verb. The promoter
+     * (who releases nothing and edits nothing, D5) gets the same face.
+     */
+    @Test
+    fun `a viewer's transform face is four read-only panes and no verb - a promoter's too`() {
+        listOf(
+            RoleModel.NONE.copy(canRead = true, canExecute = true, roleLabel = "viewer"),
+            RoleModel.NONE.copy(canRead = true, canReadPromotion = true, canPromote = true, roleLabel = "promoter"),
+        ).forEach { roles ->
+            val html =
+                render(TransformFace.VIEW) {
+                    transformFaceModel()
+                    withRoles(roles)
+                }
+            Regex("<pre id=\"tf-[a-z]+-ro\"").findAll(html).count() shouldBe 4
+            html shouldNotContain "data-verb="
+            html shouldNotContain "<textarea"
+            html shouldNotContain "id=\"tf-form\""
+        }
+    }
+
+    /** The two new verbs are an author's (`template.update` / `template.evaluate`), on the editable draft. */
+    @Test
+    fun `an author's transform face on its draft carries Save draft and Run suite`() {
+        val author =
+            render(TransformFace.VIEW) {
+                transformFaceModel()
+                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+            }
+
+        author shouldContain "data-verb=\"transform-save\""
+        author shouldContain "data-verb=\"transform-run-suite\""
+        Regex("<textarea id=\"tf-").findAll(author).count() shouldBe 4
+        author shouldNotContain "data-verb=\"template-edit\""
+    }
+
+    /** A RELEASED working version is read-only for an author too: Edit opens a draft, and only a draft saves. */
+    @Test
+    fun `an author on a released transform version gets Edit - never Save draft or Run suite`() {
+        val html =
+            render(TransformFace.VIEW) {
+                transformFaceModel(editable = false)
+                withRoles(canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "author")
+            }
+
+        html shouldContain "data-verb=\"template-edit\""
+        html shouldNotContain "data-verb=\"transform-save\""
+        html shouldNotContain "data-verb=\"transform-run-suite\""
+    }
+
+    private fun WebContext.transformFaceModel(editable: Boolean = true) {
+        val stored =
+            TransformFixtures.storedSkeleton(
+                status =
+                    if (editable) {
+                        co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
+                    } else {
+                        co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
+                    },
+            )
+        setVariable("template", stored)
+        setVariable("templateName", stored.id)
+        setVariable("selectedVersion", stored.version)
+        setVariable("selectedStatus", stored.status.name)
+        setVariable("readOnly", false)
+        setVariable("isTransform", true)
+        setVariable("faceEditable", editable)
+        setVariable("faceHash", stored.bodyHash)
+        setVariable("faceHashShort", stored.bodyHash.take(12))
+        setVariable("faceLanguage", "JSONata")
+        setVariable("panes", TransformPanes.of(stored))
+    }
+
+    // ------------------------------------------------------------------ 7e: the semantic link
+
+    /**
+     * 7e (#7, transform-nodes design §9.4 — "No new UI verb: the marker and the warning row are
+     * text") — the release dialog's needs-review rows carry NO verb, for every role that holds
+     * `pipeline.release`; the confirm stays the dialog's one verb. A reader who cannot release
+     * (no `canAuthor`) sees the same text and no confirm at all.
+     */
+    @Test
+    fun `the release dialog's needs-review rows are text for every role - the confirm is still the only verb`() {
+        val authorLike =
+            listOf(
+                RoleModel.NONE.copy(canRead = true, canExecute = true, canAuthor = true, roleLabel = "author"),
+                RoleModel.NONE.copy(
+                    canRead = true,
+                    canExecute = true,
+                    canAuthor = true,
+                    canAdminWorkspace = true,
+                    roleLabel = "workspace admin",
+                ),
+            )
+        authorLike.forEach { roles ->
+            val html =
+                render("partials/pipeline-lifecycle-release") {
+                    needsReviewReleaseModel()
+                    withRoles(roles)
+                }
+            val block = Regex("<div class=\"plc-needs-review[^\"]*\"[^>]*>.*?</div>", RegexOption.DOT_MATCHES_ALL).find(html)!!.value
+            block shouldContain "cites a retired fact: fact-old — superseded by fact-new"
+            block shouldNotContain "data-verb="
+            Regex("data-verb=\"([a-z-]+)\"").findAll(html).map { it.groupValues[1] }.toList() shouldBe listOf("pipeline-release-confirm")
+        }
+        val reader =
+            render("partials/pipeline-lifecycle-release") {
+                needsReviewReleaseModel()
+                withRoles(RoleModel.NONE.copy(canRead = true, canExecute = true, roleLabel = "viewer"))
+            }
+        reader shouldContain "data-release-needs-review"
+        reader shouldNotContain "data-verb="
+    }
+
+    private fun WebContext.needsReviewReleaseModel() {
+        val retired = co.datapipelines.pipeline.RetiredFactCitation("fact-old", "superseded", "fact-new")
+        setVariable(
+            "dlg",
+            PipelineLifecycleDialogModel.ReleaseDialog(
+                id = java.util.UUID.fromString("22222222-2222-2222-2222-222222222222"),
+                name = "nyc/weather/probe",
+                version = 3,
+                updatedBy = "Muhammad",
+                updatedAgo = "2 hours ago",
+                updatedAt = java.time.Instant.parse("2026-09-25T10:00:00Z"),
+                pins =
+                    listOf(
+                        PipelineLifecycleDialogModel.PinView(
+                            id = "nyc/weather/rainy.jsonata",
+                            version = 2,
+                            status = co.datapipelines.pipeline.PipelineVersionStatus.RELEASED,
+                            retiredFacts = listOf(retired),
+                        ),
+                    ),
+                hasChecks = false,
+                refusal = null,
+            ),
+        )
+        setVariable("from", "explorer")
     }
 }

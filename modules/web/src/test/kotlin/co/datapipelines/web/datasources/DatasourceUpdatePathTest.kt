@@ -85,6 +85,7 @@ class DatasourceUpdatePathTest {
             rules,
             DatasourceCreateService(registry, rules::resolveCreateBinding, grants),
             DatasourceUpdateService(registry, rules),
+            co.datapipelines.web.EVERYTHING_LENS,
         )
 
     private fun ui(rules: DatasourceWorkspaceRules) =

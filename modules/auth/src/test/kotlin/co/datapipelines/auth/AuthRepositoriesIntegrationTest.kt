@@ -318,8 +318,8 @@ class AuthRepositoriesIntegrationTest {
 
     /**
      * The sealed column round-trips: the flag rides the model, the blob never does, and the
-     * column's remaining rows are the V35-migrated login keys (keys v2 A2 — no NEW key is ever
-     * minted with one). V35 dropped `minted_at_login`; the repository reads no such flag.
+     * column's remaining rows are the V37-migrated login keys (keys v2 A2 — no NEW key is ever
+     * minted with one). V37 dropped `minted_at_login`; the repository reads no such flag.
      */
     @Test
     fun `the sealed-copy flag round-trips and the model never carries the blob`() {
@@ -338,7 +338,7 @@ class AuthRepositoriesIntegrationTest {
                 DEFAULT_WORKSPACE_ID,
                 ApiKeyKind.MCP,
             )
-        // The blob is a migration leftover (V35): nothing in main writes one any more, so the
+        // The blob is a migration leftover (V37): nothing in main writes one any more, so the
         // fixture plants it directly and the repository's flag/read round-trip is what is tested.
         jdbc.jdbcTemplate.update("UPDATE api_keys SET secret_sealed = ? WHERE id = ?", sealed, key.id)
 

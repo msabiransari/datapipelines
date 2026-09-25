@@ -33,11 +33,14 @@ import org.junit.jupiter.api.assertAll
 class TemplatesUpdateToolTest {
     private val templates = mockk<TemplateRepository>()
     private val validator = mockk<TemplateValidator>()
+
+    /** 7e — the citation rows; relaxed because these wire tests assert the content write, not the citations. */
+    private val citations = mockk<co.datapipelines.templates.TemplateImplementsRepository>(relaxed = true)
     private val authoring = AuthoringGuard(true)
     private val ctx = McpFixtures.ctx()
 
     /** The REAL service REST §8.4 goes through — the tool must not re-decide any of its rules. */
-    private fun updateTool() = TemplatesUpdateTool(templates, TemplateDraftService(templates, authoring), validator)
+    private fun updateTool() = TemplatesUpdateTool(templates, TemplateDraftService(templates, authoring, citations), validator)
 
     private val args =
         McpArguments(
@@ -352,7 +355,7 @@ class TemplatesUpdateToolTest {
         // 135 §C: the tool reads the working version for the dialect before it validates; the
         // guard still fires at the write, exactly where REST's does.
         every { templates.findWorking(McpFixtures.WORKSPACE_ID, "test/revenue.sql") } returns stored(version = 1)
-        val hardened = TemplatesUpdateTool(templates, TemplateDraftService(templates, AuthoringGuard(false)), validator)
+        val hardened = TemplatesUpdateTool(templates, TemplateDraftService(templates, AuthoringGuard(false), citations), validator)
 
         val error = shouldThrow<DatapipelinesException> { hardened.call(args, ctx) }
 

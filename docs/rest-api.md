@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.30 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
+**Status:** v2.33 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-24
@@ -74,6 +74,7 @@ All datapipelines custom headers use the `DP-` prefix:
 
 | Header | Direction | Purpose |
 |---|---|---|
+| 2026-09-25 | v2.33 | keys v2 (#233) | **§16.1 rewritten**: the ONE creation path for every kind — `kind` REQUIRED (`400 auth.key_kind_not_mintable` with no default kind, A15), `mcp` (renamed from `user`, A19) offered with a CHOSEN role under the subset rule (A14; `mcp_key.create` + `mcp_key.revoke_own`), a live name conflict answered `409 auth.key_name_taken` (A18), `GET /auth/api-keys/mine` gone with the login mint. **§19.3**: the result paging documented under the business path (`GET /api/<cat>/v<n>/<path>/executions/{id}[/result]`, keys-v2 A16) — a session refused there as on the serve route. |
 | `DP-API-Key` | request | API-key authentication (§3.2) |
 | `DP-Correlation-Id` | both | Log/trace correlation (§3.4) |
 | `DP-CSRF-Token` | request | CSRF token for cookie-authenticated state-changing requests ([Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)) |
@@ -340,7 +341,22 @@ author's since 2026-09-20, D8); no key reaches it (the MCP key is confined to `/
 B2). **Audited** as `pipeline.version.released` with the version and `via` (`session` /
 `api_key`) — the record of who made the D4 decision and through what (T187).
 
-Response: `200 OK` with the released version's full shape (`status: "RELEASED"`).
+Response: `200 OK` with the released version's full shape (`status: "RELEASED"`) **plus
+`warnings`** (7e, [transform-nodes design](superpowers/specs/2026-09-09-transform-nodes-design.md) §8.2) —
+ALWAYS present, `[]` on a clean release, one `{code, message, template, version}` per pinned
+template version that reads `needs_review` (it cites a retired learned fact, [Templates §3.4](templates.md#34-implements-and-drift)):
+
+```json
+"warnings": [
+  { "code": "pipeline.release.template_needs_review",
+    "message": "Template 'nyc/weather/rainy_days.jsonata' v2 cites a retired fact: 1b2e… — superseded by 7c4a…. Released anyway — re-cite the successor (or drop the citation) with templates_update.",
+    "template": "nyc/weather/rainy_days.jsonata", "version": 2 }
+]
+```
+
+A warning never refuses and never changes the status: the release happened, the fact edit is
+the releaser's to know about ([Pipeline Contract §13.13](pipeline-contract.md#1313-versioning--draft-release-lifecycle--promotion)
+catalogues the code with HTTP `—`). The release dialog shows the same facts on its pin rows.
 
 ### 5.11 Purge pipeline draft
 
@@ -1018,7 +1034,9 @@ Templates declare no parameter schema — variables are declared by the pipeline
 
 `type` is chosen here and never changes afterwards: `sql` (the default) requires `dialect` and is what pipeline nodes reference; `html` declares no `dialect`, renders through an auto-escaping engine configuration, and cannot be referenced by a pipeline node (templates.md §3.2, 046); `jsonata` and `javascript` are the transform types (7b) — `engine: "none"`, no `dialect`, no `imports`, `is_library: false`, and the three blocks `contract` / `invariants` / `tests` are required on create and update (templates.md §3.3; `javascript` is refused until round two).
 
-Response: `201 Created` with full template (including `type`, version `1`, `created_at`).
+A transform body may carry **`implements`** (7e, [Templates §3.4](templates.md#34-implements-and-drift)): an array of learned-fact ids — WORKSPACE `definition`/`exclusion`/`preference` facts of this workspace, at most 50 — the rules this transform implements. Not content: outside `body_hash`. An id the workspace cannot cite is `400 template.implements_unresolved` (`details.fact_id`, `details.reason`); on `sql`/`html` the field is `400 template.blocks_not_allowed`.
+
+Response: `201 Created` with full template (including `type`, version `1`, `created_at`, and on a transform `implements` / `needs_review`).
 
 ### 8.2 Get template (working version)
 
@@ -1029,7 +1047,11 @@ GET /templates?name={path}
 Response carries the **working version's** projection (versioning §7, since 039 — the
 template mirror of §5.2): the DRAFT when one exists, else the latest released version. The
 projection states its `version`, `status` and `body_hash`, and a `draft` pointer is present
-when a draft exists.
+when a draft exists. Every template projection here and in §8.3/§8.5 carries **`needs_review`**
+(7e — `true` when a cited learned fact has been retired, computed on read, never stored) and,
+on a transform, **`implements`** (its cited fact ids, sorted) and — when marked —
+**`retired_facts`** (`[{fact_id, retired_reason, superseded_by}]`) ([Templates §3.4](templates.md#34-implements-and-drift)).
+The pipeline editor's TRANSFORM card reads `needs_review` off §8.3's read.
 
 ### 8.3 Get template (specific version)
 
@@ -1068,6 +1090,13 @@ Response: `200 OK` with the draft version's projection (`version`, `status: "DRA
 response carries `status: "RELEASED"` and no draft was created — though
 `display_name`/`description` still moved at save time (the §6 asymmetry: they are not part
 of the hashed artifact).
+
+**`implements` on update (7e, [Templates §3.4](templates.md#34-implements-and-drift)).** Not content, so it never decides whether a
+draft opens. Stated, it replaces the written version's citations (`[]` clears); **absent, it is
+inherited** from the version the edit is based on (owner ruling 2026-09-25). A body equal to the
+released content that states `implements` is the no-op above for content, and the citations land
+on the RELEASED version — the one post-release write templates.md §5.1 allows; that is how a
+`needs_review` version is cleared (cite the successor). Refusals as on create.
 
 ### 8.9 Release template
 
@@ -1125,7 +1154,7 @@ events. Responses mirror §5.12–§5.15 at template shape.
 GET /templates?dialect={dialect}&type={sql|html|jsonata|javascript}&q={search}&offset=0&limit=50
 ```
 
-The second shape on this route: answers only when `name` AND `prefix` are both ABSENT (§8's addressing note). The `type` filter (046) is optional; an unknown value is refused `400 pipeline.execution.invalid_parameter_type` naming the supported values.
+The second shape on this route: answers only when `name` AND `prefix` are both ABSENT (§8's addressing note). The `type` filter (046) is optional; an unknown value is refused `400 pipeline.execution.invalid_parameter_type` naming the supported values. **`&implements={fact_id}`** (7e, [Templates §3.4](templates.md#34-implements-and-drift)) keeps the templates whose listed version cites that learned fact — a parameterised join through the template's own workspace, so another workspace's fact id matches nothing; a malformed id is `400 pipeline.execution.invalid_parameter_type`. It applies to this flat shape only (like `q`).
 
 ```
 GET /templates?prefix={folder}&dialect={dialect}&type={sql|html|jsonata|javascript}&offset=0&limit=50
@@ -1204,6 +1233,8 @@ Content-Type: application/json
 ```
 
 Library templates (Freemarker macros usable via `#import`) are stored like regular templates; they're just referenced by other templates rather than by pipelines directly. See [Templates spec](templates.md).
+
+A transform entry may carry `implements` (7e). The import keeps the ids that resolve to citable facts in THIS workspace and drops the rest without refusing (owner ruling 2026-09-25 — learned facts are environment-local and never promoted, so a promotion from another deployment lands with none); the kept ids land on the version the import wrote, and an idempotent re-import that wrote nothing writes no citations ([Templates §3.4](templates.md#34-implements-and-drift)).
 
 ---
 
@@ -1356,7 +1387,7 @@ Notes:
 
 ```json
 // GET /datasources                   → data.items[i].facts and data.items[i].definitions (138 §B): the same two blocks as the detail; [] when none
-// GET /datasources/{name}            → data.facts: the datasource-wide kinds (window, sampling); data.definitions: the workspace's rules naming this datasource (138 §B); [] when none
+// GET /datasources/{name}            → data.facts: the datasource-wide kinds (window, sampling); data.definitions: the workspace's rules naming this datasource (138 §B); [] when none — each rule carries implemented_by (7e)
 // GET /datasources/{name}/tables     → data.tables[i].facts: TABLE-grain facts (a ref with no column); omitted when none
 // GET /datasources/{name}/tables/{table}/columns → data[i].facts: the facts with a ref on that column; omitted when none
 {
@@ -1375,6 +1406,7 @@ Notes:
 
 - `drift`, `evidence_summary`, `source_pipeline` and `conflict` are omitted-when-absent (the §3.2 envelope convention). `trust` is `asserted` / `observed` / `verified` / `needs_review` / `stale` (a `definition`, `exclusion` or `preference` lands `asserted` even with evidence — a choice is confirmed by a person, never observed; datasources.md §7E); retired facts are never served here.
 - **The drift check runs at read** (design §6): `/columns` recomputes each fact's per-table fingerprint from the columns it just read, and a COMPLETE `/tables` listing (no `namespace`/`schema` filter, not truncated) checks each fact's tables; a demotion (`needs_review`, `stale`) is written back to the row before it is served — idempotent, one-way; nothing re-maps. `GET /datasources/{name}` opens no connection and serves facts as stored.
+- **`implemented_by` (7e, [Templates §3.4](templates.md#34-implements-and-drift)):** every rule under `definitions` carries `[{template_id, version}]` — the live template versions citing it as the transform implementing it, under the caller's `template.read` lens (a promoter's: RELEASED versions of the templates it may read); `[]` when none. DATASOURCE facts never carry it — nothing can cite them.
 - **Visibility is the store's one predicate:** every DATASOURCE fact on a datasource the workspace can see, plus the workspace's own WORKSPACE facts. **Provenance stops at the reader's visibility (D-S9):** `from_this_workspace` says whether the active workspace recorded it, and `source_pipeline` is present only when the caller's workspace can read that pipeline. **Conflicts coexist (D-S5):** two live facts of one kind on the same refs both carry `conflict: true`.
 - Recording, listing and retiring facts are MCP verbs in round 1 (`semantics_record` / `semantics_list` / `semantics_retire`, [MCP §6.2.37–39](mcp-server.md#6237-semantics_record)); there is no REST write for facts yet. The refusal codes are [Pipeline Contract §13.15](pipeline-contract.md#1315-learned-semantics).
 
@@ -1687,7 +1719,7 @@ The ONE creation path for every kind (keys v2 A15 — the login mint is retired;
 
 | `kind` | `role` | `bindings` | Who may create |
 |---|---|---|---|
-| `mcp` (V35, renamed from `user` — A19) | one of `author` \| `promoter` \| `workspace_admin`, chosen under the subset rule (A14) — never viewer (A15), never `super_admin` (B1) | Refused | Author (author only), promoter (promoter only), workspace admin (any of the three), super admin (any) — `mcp_key.create` + the subset rule |
+| `mcp` (V37, renamed from `user` — A19) | one of `author` \| `promoter` \| `workspace_admin`, chosen under the subset rule (A14) — never viewer (A15), never `super_admin` (B1) | Refused | Author (author only), promoter (promoter only), workspace admin (any of the three), super admin (any) — `mcp_key.create` + the subset rule |
 | `endpoint` | `api_caller` (the only one offered, record A1); another role is `403 endpoint.key_kind_refused` | The endpoint-tree nodes it authorises, validated BEFORE the key is minted — and since 2026-09-21 (#191) each must be the root or lie at or above a path the CALLER'S workspace publishes (`400 endpoint.path_invalid`, naming only the caller's own tree) | Workspace admins and super admins (`api_key.create`) |
 | `server` | `promotion_receiver`; another role is `403 endpoint.key_kind_refused` | Refused | Super admin only (`server_key.create`) |
 
@@ -2164,6 +2196,7 @@ and bound only while a budget stands behind it (`max-requests` > 0).
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v2.32 | 7e (#7) the semantic link | Additive. **§5.10: the release response carries `warnings`** — `[]` when clean, one `pipeline.release.template_needs_review` `{code, message, template, version}` per pinned version citing a retired learned fact; never a refusal. **§8.1/§8.4: a transform accepts `implements`** (outside `body_hash`; inherited when an update omits it; lands on a released version without a draft; `400 template.implements_unresolved` / `template.blocks_not_allowed`). **§8.2/§8.3/§8.5: every projection carries `needs_review`**, a transform's `implements` and, when marked, `retired_facts`; **§8.5 gains `implements={fact_id}`**. §8.8: import keeps only the ids that resolve in the importing workspace (owner ruling 2026-09-25). **§9.7A: rules under `definitions` carry `implemented_by`.** Status caught up (it read v2.30 after v2.31's row). |
 | 2026-09-24 | v2.31 | 224 (#224) demo API | New **§19.8**: the demo family seeding publishes every seeded demo pipeline under `/demo/…` (the name-to-path mapping table), mints one configured `api_caller` key (`demo-public-key`) bound to all of them, and the demo-data page renders the same plaintext; the serve path's per-key request budget (`datapipelines.endpoints.key-request-budget`, 60/60, `429 rate_limit.exceeded` + `Retry-After`, per instance, every `api_caller` key; the lake endpoint's gate). §19.7 drops "per-endpoint rate limits" — a per-KEY budget now exists. |
 
 | 2026-09-24 | v2.30 | 215b (#215) key identities, key roles | **Deliberate breaks, owner-ruled (2026-09-24):** (1) **the MCP key is refused on every REST route** (§3.2 — B2: "MCP key should be only MCP"; `403 endpoint.key_kind_refused`, `details.reason = user_key_off_surface`) — REST is a session's surface plus the two confined key kinds; (2) **an unbound published path is unservable** until a key is bound (B3). §16.1: create takes `role` (never `scopes` — refused by name) and returns `role`, `identity {id, display_name}` and `created_by`; the list is the keys the caller created; revoking an endpoint/server key deactivates its identity. §16.2 `/auth/me` returns `role`, not `scopes`. §16.3: every user-admin route answers the unknown-user 404 for a non-person row, before any mutation. §5.16/§7.2: permissions named, not scopes. |
@@ -2213,7 +2246,6 @@ and bound only while a budget stands behind it (`max-requests` > 0).
 | 2026-09-08 | v2.6 | 089 dp-lake registry (recorded with the §G corrections) | New **§9.8 Lake tables (the dp-lake catalog)** — `POST /datasources/{name}/tables`, `DELETE …/tables/{namespace}/{table}`, `POST …/tables/import` (inline `tables[]`, or a `manifest_url` fetched server-side and restricted to the datasource's own bucket/endpoint — the SSRF boundary), and `GET …/lake-tables` (`read`). The writes are `author`, with a GLOBAL datasource's registry admin-only as a workspaces D8 rule; every write evicts the pool and publishes the §5.7 invalidation. Two corrections landed with this row: the Iceberg `location` is the table's current metadata FILE, not its root (the measured rule, datasources.md §8C.7), and §9.7's introspection listing is registry-backed for LAKE as shipped (datasources.md §8C.3) — §9.8's "a later phase" sentence was written before 089 §C landed. All additive. |
 | 2026-09-15 | v2.13 | 138 §B definitions on the REST datasource reads | §9.2 / §9.3 / §9.7A: `GET /datasources` rows and `GET /datasources/{name}` carry `definitions` beside `facts` — the two blocks the MCP `datasources_list` / `datasources_get` have served since 136, from the same one-store-read; the listing used to carry neither and the detail `facts` alone. Additive; `[]` when nothing is recorded. |
 | 2026-09-14 | v2.12 | 136 §D PUT /templates inherits dialect and type | §8.4: `dialect` and `type` are optional on update — omitted, the working version's are inherited before the body is bound; a DIFFERENT dialect is refused `400 template.validation.dialect_invalid` (`details.dialect`, `established_dialect`, `template_id`) before validation or any write (the endpoint used to write a changed dialect silently — the defect 135 §C fixed on MCP only); a different `type` stays `type_immutable`. |
-| 2026-09-25 | v2.14 | keys v2 (#233) | **§16.1 rewritten**: the ONE creation path for every kind — `kind` REQUIRED (`400 auth.key_kind_not_mintable` with no default kind, A15), `mcp` (renamed from `user`, A19) offered with a CHOSEN role under the subset rule (A14; `mcp_key.create` + `mcp_key.revoke_own`), a live name conflict answered `409 auth.key_name_taken` (A18), `GET /auth/api-keys/mine` gone with the login mint. **§19.3**: the result paging documented under the business path (`GET /api/<cat>/v<n>/<path>/executions/{id}[/result]`, keys-v2 A16) — a session refused there as on the serve route. |
 | 2026-09-13 | v2.11 | 123 §A table resolution | §9.7: the columns endpoint is table-ADDRESSED — a table absent from the namespace's listing is now **`404 datasource.table_not_found`** (was an empty list), with a "Did you mean …?" line naming the nearest listed table; the message asserts non-existence on complete-catalog dialects and "does not exist, or the credentials cannot see it" on privilege-filtered ones ([Datasources §7A](datasources.md#7a-schema-introspection)). The empty-list rule survives for unknown `schema`/namespace filters on the listing endpoints; an existing table with zero readable columns stays an empty list. |
 | 2026-09-11 | v2.10 | 118 learned semantic layer | New **§9.7A**: the three introspection endpoints and `GET /datasources/{name}` carry the learned-fact block (`facts[]`, additive, omitted-when-none on the listings) — the same shape and code as the MCP twins; the drift check runs at read on `/columns` and on a complete `/tables` listing. No REST write for facts in round 1. |
 | 2026-09-10 | v2.9 | T187 release audit | §5.10 and the template release: both verbs are now **audited** (`pipeline.version.released` / `template.version.released`, with `version` and `via` = `session` or `api_key`) and §5.10 states who may release over REST (a promoter's session, or a key whose issuer is a promoter — D4's human decision, expressed either way). |

@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.29 (revised — see Change Log)
+**Status:** v1.30 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-17
+**Last updated:** 2026-09-25
 
 ---
 
@@ -1199,8 +1199,9 @@ Defined and described in [Templates §7](templates.md#7-validation-rules).
 | `template.contract_invalid` | 400 | A transform template's `contract` block failed a §2.2 rule (transform-nodes design); `details.rule` names which (`row_mode_inputs`, `type_unsupported`, `mode_output_mismatch`, `empty_case_missing`, `row_case_lists_table`, `unknown_field`, …) (7b) |
 | `template.invariant_invalid` | 400 | A transform template's invariant does not compile as JSONata, or produced a non-boolean on a test case; `details` names the invariant (and the case) (7b) |
 | `template.test_failed` | 400 | A transform template's test case failed at save or at release (the suite runs on both — §8.1); `details` names the case, the assertion, and a diff bounded to 2 000 chars (7b) |
-| `template.blocks_not_allowed` | 400 | `contract` / `invariants` / `tests` on an `sql` / `html` template — the blocks belong to the transform types only (7b) |
+| `template.blocks_not_allowed` | 400 | `contract` / `invariants` / `tests` on an `sql` / `html` template — the blocks belong to the transform types only (7b); `implements` likewise (7e, transform-nodes design §2.3) |
 | `template.render_not_applicable` | 400 | `templates_render` / `POST /api/v1/templates/render` on a transform type — there is nothing to render; `details.use` points at `templates_evaluate` (7b) |
+| `template.implements_unresolved` | 400 | An `implements` entry on a template write does not resolve to a fact the writing workspace may cite — absent, not visible from the workspace, a DATASOURCE fact, or a WORKSPACE fact of a kind other than `definition` / `exclusion` / `preference` ([Templates §3.4](templates.md#34-implements-and-drift)). One answer for every case — not-found semantics, never "it exists but you cannot see it"; `details.fact_id` names the first offending entry. Refused before anything is written (7e) |
 
 ### 13.10 Result retrieval
 
@@ -1266,6 +1267,7 @@ entry, Versioning is the semantics).
 | `pipeline.version.not_eligible` | 409 | Manual switch targeted a version that is not a live, posture-eligible version — DISCARDED, missing, or a DRAFT under a hardened posture (101, [Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60) D60) |
 | `pipeline.version.confirm_mismatch` | 400 | The typed-confirm guard on the irreversible purge dialogs (102): the `confirm` form field did not name the version the dialog asked the user to type (`v4`). Checked BEFORE the lifecycle service runs — a mismatch never reaches the verb ([UI §5.1](ui-screens.md#51-standard-states) typed-confirm, the second use after the CLI's `--clean`) |
 | `pipeline.release.template_not_released` | 409 | Pipeline release blocked: the draft pins template version(s) still in DRAFT — release those templates first, or consent to the cascade with `release_pinned_templates=true` (142; `details.pins_not_released` lists every unreleased pin); a DISCARDED or MISSING pin is never releasable (Versioning §5.3 precondition 2) |
+| `pipeline.release.template_needs_review` | — | Not an error — a WARNING in the release response's `warnings` array (§14) and on the release dialog's pin row: the released pipeline pins a template version that reads `needs_review` because it cites a retired learned fact ([Templates §3.4](templates.md#34-implements-and-drift)). The release proceeds — a fact edit never blocks a release on its own; one warning per such pin, its `message` naming each retired fact and, when superseded, its successor (7e) |
 | `pipeline.promotion.not_released` | 409 | Promotion selected a pipeline whose candidate version is not RELEASED — drafts are never promoted (Versioning §10.3 guard 1) |
 | `pipeline.promotion.not_newer` | 409 | Promotion push of a version not greater than the target environment's current version for that pipeline — same-version pushes are a bug, not a no-op (Versioning §10.3 guard 2) |
 | `pipeline.promotion.missing_datasources` | 409 | Promotion pre-validation (Versioning §10.5): one or more datasource names the batch references do not exist on the target. Reported ONCE for the whole batch, `details.missing_datasources` naming every absent one, before anything is pushed — the target is left byte-unchanged rather than failing mid-batch |
@@ -1374,7 +1376,7 @@ This section sketches the CRUD operations. Full HTTP details are in the [REST AP
 | Get pipeline (specific version) | `GET /pipelines/{id}/versions/{version}` | |
 | List pipeline versions | `GET /pipelines/{id}/versions` | Returns version metadata. |
 | Update pipeline (writes the draft) | `PUT /pipelines/{id}` | Body: full pipeline JSON. Copy-on-write: first change after a release creates a DRAFT of the next version; further changes overwrite the draft in place. Hash-preconditioned. Never appends a released version. See [Versioning](versioning.md). |
-| Release pipeline (lock) | `POST /pipelines/{id}/release` | Human/UI action: promotes the DRAFT to RELEASED, bumps `current_version`. Hash-preconditioned; requires pinned template versions released. |
+| Release pipeline (lock) | `POST /pipelines/{id}/release` | Human/UI action: promotes the DRAFT to RELEASED, bumps `current_version`. Hash-preconditioned; requires pinned template versions released. The response carries `warnings: [{code, message, template, version}]` — empty on a clean release; `pipeline.release.template_needs_review` (§13.13) for every pinned version that cites a retired fact (7e). A warning never refuses. |
 | Discard draft | `POST /pipelines/{id}/draft/discard` | Deletes the DRAFT (or flips it to DISCARDED if an execution references it). |
 | Delete pipeline | `DELETE /pipelines/{id}` | Soft delete. Executions of deleted pipelines fail with `pipeline.execution.not_found`. |
 | List pipelines | `GET /pipelines` | Filterable by owner, datasource, etc. |
@@ -1601,6 +1603,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.30 | 7e (#7) the semantic link | §13.9 gains `template.implements_unresolved` (400 — an `implements` entry that is not a WORKSPACE `definition`/`exclusion`/`preference` fact visible from the writing workspace; not-found semantics) and the `template.blocks_not_allowed` row names `implements` beside the three blocks. §13.13 gains `pipeline.release.template_needs_review` with HTTP `—`: a WARNING in the release response's new `warnings` array, never an error status (the §13.6 type-mapping shape; `ApiErrorCatalog.NEVER_RETURNED_LIVE`). §14's release row names the response's `warnings`. Landed in the same commit as the constants, the catalog rows and the drift counts (§13 row count 202 → 204). |
 | 2026-09-24 | v1.29 | 7c (#7) the TRANSFORM node | `NodeType` gains `TRANSFORM` (§4.6 lists six). §4.12: the node — a pinned `jsonata`/`javascript` template evaluated as a pure function over staged data, `inputs`/`output`/`strict` conforming to the pinned contract (R3–R5), the implicit-optional-input rule for a value-mode `context_key`, and R4's one-reader rule for object keys. §4.7: the `rejects` companion of a tempdb output; §7.2: object keys persist as jsonb and read as TRANSFORM-only; §9.1: a `row`/`table`-mode TRANSFORM may be the caller node. §12.13 gains the ten `pipeline.validation.transform_*` rows (the §13 row count and §12 code count move in the same commit as the constants) and §13.18 the `pipeline.transform.*` execution-time family plus `transform.js.unavailable` — 7b's privately declared constants unified here and deleted. |
 | 2026-09-24 | v1.28 | 215a (#215) the permission catalog | §13's `auth.role_required` row: `details.required` is a catalog permission (`pipeline.update`) and `details.held` the role the caller was judged as. No code added, removed or renamed — the catalogued set and every drift count are unchanged. Status caught up with the change log (it read v1.24). |
 | 2026-09-23 | v1.27 | 7b (#7) transform template types | §13.9 gains the transform rows: `template.validation.freemarker_forbidden` (D-T9 — `imports`/`is_library`/a Freemarker construct on a transform type), `template.contract_invalid` (the §2.2 model rules, `details.rule` naming which), `template.invariant_invalid`, `template.test_failed` (the save/release suite), `template.blocks_not_allowed` (the blocks on `sql`/`html`) and `template.render_not_applicable` (`templates_render` on a transform type). The existing `type_invalid` / `dialect_not_allowed` / `engine_unsupported` rows' RULES changed: the type vocabulary is now four values, `dialect` is forbidden outside `sql`, and `engine` is type-conditional (`none` iff a transform type). Landed in the same commit as the constants, the catalog rows and the drift counts (§13 row count 183 → 189). The §13.18 Transform section is 7c's; the codes the runner emits until then are declared privately (the 7b handback names them). |

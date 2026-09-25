@@ -107,7 +107,7 @@ Update an existing pipeline by writing its DRAFT — the first update after a re
 
 Permission `template.read` · read-only
 
-List the templates of the key's pinned workspace. Templates are reusable generators referenced by id+version — sql/html bodies are authored in Freemarker, transform bodies are script expressions; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none, and the transform types ('jsonata', 'javascript') evaluate the body as a pure function of its input and declare neither. Template ids are unique per workspace — another workspace's template resolves as not-found. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
+List the templates of the key's pinned workspace. Templates are reusable generators referenced by id+version — sql/html bodies are authored in Freemarker, transform bodies are script expressions; each has a fixed type — 'sql' renders SQL for pipeline nodes (and carries a dialect), 'html' renders escaped output and declares none, and the transform types ('jsonata', 'javascript') evaluate the body as a pure function of its input and declare neither. Template ids are unique per workspace — another workspace's template resolves as not-found. A transform row carries implements (the learned facts it cites) and needs_review (true when a cited fact was retired); implements=<fact id> lists the transforms that implement that fact — reuse before writing. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -116,13 +116,14 @@ List the templates of the key's pinned workspace. Templates are reusable generat
 | `q` | string | optional |  |
 | `prefix` | string | optional | Browse ONE level of the folder tree instead of listing flat: returns that prefix's direct sub-folders (with counts) and its direct children. An empty string is the root. Use this to discover which roots and folders exist; use q to search across full paths. |
 | `is_library` | boolean | optional | Filter to library templates (macro collections) or executable templates. |
+| `implements` | string | optional | A learned fact id: only templates whose listed version cites it (implements) — the transforms that implement a workspace definition, exclusion or preference. A fact this workspace cannot see matches nothing. Ignored while prefix is present, like q. |
 | `limit` | integer, default `50` | optional |  |
 
 ### `templates_get`
 
 Permission `template.read` · read-only
 
-Get the body and metadata of a template version, including its imports array (the library macros it can call). Defaults to the working version — the draft when unreleased edits exist, else the latest released. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
+Get the body and metadata of a template version, including its imports array (the library macros it can call). Defaults to the working version — the draft when unreleased edits exist, else the latest released. A transform version carries implements (the learned facts it cites) and needs_review: true when a cited fact was retired — retired_facts names each one and its superseded_by; re-verify, then cite the successor with templates_update. A promoter's key sees only RELEASED templates newer than the promotion target's (the promoter lens); every other template resolves as not-found.
 
 | Argument | Type | | What it is |
 |---|---|---|---|
@@ -160,6 +161,7 @@ Create a new template. Templates use Freemarker syntax. A template declares NO p
 | `contract` | object | optional | Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): { mode: 'row'\|'table'\|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'\|'value'\|'object', ... }, rejects?: boolean }. Types are LogicalType wire names; a row-mode contract requires exactly one table input. |
 | `invariants` | array | optional | Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every test case and every real execution. May be empty but is required on a transform type. |
 | `tests` | array | optional | Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. Save runs the suite; release re-runs it. |
+| `implements` | array of string | optional | Transform types only (refused on sql/html with template.blocks_not_allowed): the learned facts this transform implements — ids of WORKSPACE facts (definition, exclusion, preference) recorded in this workspace; semantics_list and the definitions on datasources_list show them. A citation is not content: it is outside body_hash. An id this workspace cannot cite is template.implements_unresolved. At most 50. |
 | `confirm_new_root` | boolean | optional | Set true ONLY after a person has agreed to a new top-level folder. A name whose root segment has no pipelines or templates under it yet is refused with details.existing_roots listing the roots that do exist — reuse one of those, or ask the person first and then pass this. 'test/' never needs it. |
 
 ### `templates_update`
@@ -183,6 +185,7 @@ Update an existing template by writing its DRAFT — the first update after a re
 | `contract` | object | optional | Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): { mode: 'row'\|'table'\|'value', inputs: { name: { kind: 'table', columns: [{name, type, precision?, scale?, nullable?}] } or { kind: 'value', type, precision?, scale? } }, output: { kind: 'table'\|'value'\|'object', ... }, rejects?: boolean }. Types are LogicalType wire names; a row-mode contract requires exactly one table input. |
 | `invariants` | array | optional | Transform invariants: [{ name, expr, message }] — JSONata over { rows, rejects, inputs }, must be true on every test case and every real execution. May be empty but is required on a transform type. |
 | `tests` | array | optional | Transform test cases: [{ name, input: { rows?, inputs?, meta?, now? }, expect: { output } or { refusal } }] — non-empty, at least one case whose every table input and rows are empty, expect is exactly one of output/refusal. Save runs the suite; release re-runs it. |
+| `implements` | array of string | optional | Transform types only: the learned facts this version implements (WORKSPACE definition, exclusion or preference ids of this workspace). Omitted, the citations of the version you edit are kept (a new draft inherits the released version's); [] clears them. Not content — outside body_hash — so an update whose body equals the released version and changes only implements writes them ON the released version and opens no draft: that is how you clear needs_review (cite the superseding fact). An id this workspace cannot cite is template.implements_unresolved. At most 50. |
 
 ### `templates_render`
 
@@ -506,7 +509,7 @@ Record ONE fact you learned about a datasource that introspection could not tell
 
 Permission `semantic.read` · read-only
 
-List the learned facts recorded on a datasource this workspace can see — every DATASOURCE fact (whoever recorded it) and this workspace's own WORKSPACE facts — with trust, drift, refs, the evidence SQL and who recorded it through what. The same facts also arrive inline on datasources_get / _get_tables / _get_columns, which is where to read them while authoring; use this to review, to find a fact's id to supersede or retire, or to answer 'what was recorded since <time>'. Retired facts are hidden unless include_retired.
+List the learned facts recorded on a datasource this workspace can see — every DATASOURCE fact (whoever recorded it) and this workspace's own WORKSPACE facts — with trust, drift, refs, the evidence SQL and who recorded it through what. The same facts also arrive inline on datasources_get / _get_tables / _get_columns, which is where to read them while authoring; use this to review, to find a fact's id to supersede or retire, or to answer 'what was recorded since <time>'. Every WORKSPACE fact carries implemented_by: the template versions that cite it as the transform implementing that rule — reuse one before writing your own. Retired facts are hidden unless include_retired.
 
 | Argument | Type | | What it is |
 |---|---|---|---|

@@ -94,6 +94,24 @@ object McpFixtures {
         co.datapipelines.application.lens
             .PromoterLens { co.datapipelines.application.lens.LensedView.EVERYTHING }
 
+    /**
+     * 7e — `templates_create` over the REAL [co.datapipelines.templates.TemplateDraftService] (the
+     * create half of the citation rule lives there), sharing the suite's repository double so its
+     * `templates.create` stubs keep firing; the citation store is relaxed — the suites that assert
+     * citations run against Postgres.
+     */
+    fun createTool(
+        templates: co.datapipelines.templates.TemplateRepository,
+        authoring: AuthoringGuard,
+        validator: co.datapipelines.templates.TemplateValidator,
+    ): TemplatesCreateTool =
+        TemplatesCreateTool(
+            templates,
+            authoring,
+            validator,
+            co.datapipelines.templates.TemplateDraftService(templates, authoring, mockk(relaxed = true)),
+        )
+
     /** 178 — the real read façade over a (usually mocked) repository: under `Everything` it delegates call for call. */
     fun templateService(templates: co.datapipelines.templates.TemplateRepository): co.datapipelines.templates.TemplateService =
         co.datapipelines.templates.TemplateService(templates)

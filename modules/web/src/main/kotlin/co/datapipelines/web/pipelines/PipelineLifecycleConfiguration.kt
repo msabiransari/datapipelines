@@ -9,6 +9,7 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.ReleaseCheckGate
 import co.datapipelines.pipeline.TemplateReleaser
+import co.datapipelines.pipeline.TemplateReviewMarks
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.templates.TemplateRepository
 import org.springframework.context.annotation.Bean
@@ -68,7 +69,19 @@ class PipelineLifecycleConfiguration {
             co.datapipelines.pipeline.TemplateRef(released.detail.templateId, released.detail.version)
         }
 
+    /**
+     * 7e — "which pinned template versions cite a retired fact?" (transform-nodes design §8.2),
+     * as the port `pipeline-contract` declares — the [templateVersionStatuses] arrangement. It
+     * rides the templates module's citation read, whose SQL is the SAME expression every template
+     * projection's `needs_review` comes from, so the release warning, the dialog row and the
+     * explorer's marker cannot disagree.
+     */
     @Bean
+    fun templateReviewMarks(citations: co.datapipelines.templates.TemplateImplementsRepository): TemplateReviewMarks =
+        TemplateReviewMarks { workspaceId, pins -> citations.retiredCitations(workspaceId, pins) }
+
+    @Bean
+    @Suppress("LongParameterList") // one collaborator per release precondition and port
     fun pipelineReleaseService(
         pipelines: PipelineRepository,
         templates: TemplateVersionStatuses,
@@ -77,6 +90,7 @@ class PipelineLifecycleConfiguration {
         metadataTransactionManager: PlatformTransactionManager,
         checkGate: ReleaseCheckGate,
         templateReleaser: TemplateReleaser,
+        reviewMarks: TemplateReviewMarks,
     ): PipelineReleaseService =
         PipelineReleaseService(
             pipelines,
@@ -86,6 +100,7 @@ class PipelineLifecycleConfiguration {
             checkGate = checkGate,
             templateReleaser = templateReleaser,
             transactions = TransactionTemplate(metadataTransactionManager),
+            reviewMarks = reviewMarks,
         )
 
     /**

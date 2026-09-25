@@ -54,6 +54,13 @@ class TemplateValidator(
      * contract has no meaningful evaluation.
      */
     private val suiteRunner: TransformTestRunner? = null,
+    /**
+     * 7e — the §2.3 citation rule's one question ("which of these facts may this workspace
+     * cite?"), the port the application layer implements over the learned-fact store.
+     * [CitableFacts.NONE] (nothing is citable) keeps constructions that predate 7e fail-closed:
+     * a draft carrying `implements` is refused there, never silently stored.
+     */
+    private val citableFacts: CitableFacts = CitableFacts.NONE,
 ) {
     /**
      * Runs §7 against [draft] and returns every failure. Imports resolve within
@@ -94,6 +101,7 @@ class TemplateValidator(
         addTypeDialectFailures(draft, failures)
         addTransformFieldFailures(draft, failures)
         addTransformBlockFailures(draft, failures)
+        addImplementsFailure(draft, workspaceId, failures)
         addHtmlEntityFailure(draft, failures)
         addBodyFailures(draft, failures, trace)
         libraryResolver.validate(workspaceId, draft.imports, failures, trace)
@@ -316,7 +324,7 @@ class TemplateValidator(
      * the body parse is [addBodyFailures]', this is contract → invariants → tests; the suite
      * itself is [TransformTestRunner]'s, run by the service):
      *
-     *  - `sql`/`html` carry no blocks (`template.blocks_not_allowed`); a transform type carries
+     *  - `sql`/`html` carry no blocks and no `implements` (`template.blocks_not_allowed`); a transform type carries
      *    all three (the `chk_transform_blocks` twin, reported as `template.contract_invalid`
      *    with `blocks_missing`).
      *  - contract: at least one input (`inputs_empty`); input names are §6.1-shaped
@@ -339,6 +347,9 @@ class TemplateValidator(
                 "contract".takeIf { draft.contract != null },
                 "invariants".takeIf { draft.invariants != null },
                 "tests".takeIf { draft.tests != null },
+                // 7e (record §7): a citation belongs to a transform too — an sql/html template
+                // is never an implementation of a workspace rule.
+                "implements".takeIf { draft.implements != null },
             ).forEach { block ->
                 failures +=
                     TemplateValidationFailure(
@@ -373,6 +384,23 @@ class TemplateValidator(
         validateContract(contract, failures)
         validateInvariants(draft.invariants, failures)
         validateTests(contract, draft.tests, failures)
+    }
+
+    /**
+     * 7e, transform-nodes design §2.3 — every `implements` entry on a transform draft must be a
+     * fact [workspaceId] may cite ([ImplementsIds.unresolved]: a visible WORKSPACE definition,
+     * exclusion or preference; one not-found answer otherwise). Absent (`null`) is "not stated"
+     * and inherits at write time; on sql/html the presence itself is [addTransformBlockFailures]'
+     * `blocks_not_allowed`, so this rule only speaks for the transform types.
+     */
+    private fun addImplementsFailure(
+        draft: TemplateDraft,
+        workspaceId: java.util.UUID,
+        failures: MutableList<TemplateValidationFailure>,
+    ) {
+        val cited = draft.implements ?: return
+        if (!(draft.type ?: TemplateType.SQL).isTransform) return
+        ImplementsIds.unresolved(workspaceId, cited, citableFacts)?.let { failures += it }
     }
 
     private fun contractFailure(

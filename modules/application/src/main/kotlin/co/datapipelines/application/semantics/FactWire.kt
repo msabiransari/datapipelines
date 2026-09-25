@@ -2,6 +2,7 @@ package co.datapipelines.application.semantics
 
 import co.datapipelines.datasources.semantics.LearnedFact
 import co.datapipelines.datasources.semantics.LearnedFactDrift
+import co.datapipelines.templates.ImplementingVersion
 import java.util.UUID
 
 /**
@@ -22,6 +23,7 @@ object FactWire {
         verdict: LearnedFactDrift.Verdict,
         conflict: Boolean,
         sourcePipeline: Map<String, Any?>?,
+        implementedBy: List<ImplementingVersion>? = null,
     ): Map<String, Any?> =
         buildMap {
             put("id", fact.id.toString())
@@ -36,7 +38,18 @@ object FactWire {
             put("from_this_workspace", fact.recordedIn == readerWorkspaceId)
             sourcePipeline?.let { put("source_pipeline", it) }
             if (conflict) put("conflict", true)
+            implementedBy?.let { put("implemented_by", implementedByWire(it)) }
         }
+
+    /**
+     * 7e (transform-nodes design §8.3) — the `implemented_by` value: the template versions the
+     * reader's template lens admits that cite this fact, `[{template_id, version}]`. Present
+     * (possibly `[]`) on a WORKSPACE fact — "no transform implements this rule yet" is an answer —
+     * and ABSENT on a DATASOURCE fact, which a transform can never cite (§2.3): the caller passes
+     * null there, so the key's absence means "not applicable", never "none".
+     */
+    fun implementedByWire(versions: List<ImplementingVersion>): List<Map<String, Any?>> =
+        versions.map { mapOf("template_id" to it.templateId, "version" to it.version) }
 
     /**
      * `semantics_record`'s result and `semantics_list`'s rows: the summary plus everything an
@@ -47,6 +60,7 @@ object FactWire {
         fact: LearnedFact,
         readerWorkspaceId: UUID,
         sourcePipeline: Map<String, Any?>?,
+        implementedBy: List<ImplementingVersion>? = null,
     ): Map<String, Any?> =
         buildMap {
             putAll(
@@ -56,6 +70,7 @@ object FactWire {
                     LearnedFactDrift.Verdict(fact.trust, LearnedFactDrift.storedDrift(fact)),
                     conflict = false,
                     sourcePipeline,
+                    implementedBy,
                 ),
             )
             put("datasource", fact.datasourceName)

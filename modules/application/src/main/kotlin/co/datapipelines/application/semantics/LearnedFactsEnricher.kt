@@ -1,5 +1,6 @@
 package co.datapipelines.application.semantics
 
+import co.datapipelines.application.templates.FactImplementations
 import co.datapipelines.datasources.ColumnInfo
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.TableInfo
@@ -10,6 +11,8 @@ import co.datapipelines.datasources.semantics.LearnedFactRepository
 import co.datapipelines.datasources.semantics.LearnedFactScope
 import co.datapipelines.datasources.semantics.LearnedFactTrust
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.templates.ImplementingVersion
 import org.slf4j.LoggerFactory
 import java.util.UUID
 
@@ -58,17 +61,27 @@ interface FactEnrichment {
         }
     }
 
-    /** `datasources_list` / `datasources_get` — both blocks of [DatasourceBlocks], one store read. */
+    /**
+     * `datasources_list` / `datasources_get` — both blocks of [DatasourceBlocks], one store read.
+     * Each rule in [DatasourceBlocks.definitions] carries `implemented_by` (7e, transform-nodes
+     * design §8.3): the template versions citing it that [templateLens] — the reader's template
+     * lens, no default — admits. The listing is where an agent reads a rule first, so it is where
+     * the transform implementing it is found.
+     */
     fun forListing(
         readerWorkspaceId: UUID,
         datasource: Datasource,
+        templateLens: ReadLens,
     ): DatasourceBlocks
 
-    /** The REST `GET /datasources/{name}` twin — the datasource-wide kinds only, as [forListing] serves them. */
+    /**
+     * The datasource-wide kinds only, as [forListing] serves them. They are DATASOURCE facts, which
+     * nothing cites, so the template lens is irrelevant and nothing is admitted.
+     */
     fun forDatasource(
         readerWorkspaceId: UUID,
         datasource: Datasource,
-    ): List<Map<String, Any?>> = forListing(readerWorkspaceId, datasource).facts
+    ): List<Map<String, Any?>> = forListing(readerWorkspaceId, datasource, ReadLens.NOTHING).facts
 
     /**
      * `datasources_get_tables` — per listed table, its TABLE-grain facts (a ref with no column)
@@ -101,6 +114,7 @@ interface FactEnrichment {
                 override fun forListing(
                     readerWorkspaceId: UUID,
                     datasource: Datasource,
+                    templateLens: ReadLens,
                 ): DatasourceBlocks = DatasourceBlocks.EMPTY
 
                 override fun forTables(
@@ -125,25 +139,36 @@ interface FactEnrichment {
 class LearnedFactsEnricher(
     private val repository: LearnedFactRepository,
     private val pipelines: PipelineRepository,
+    /** 7e — the rules' `implemented_by`; [FactImplementations.NONE] lists every rule as implemented by nothing. */
+    private val implementations: FactImplementations = FactImplementations.NONE,
 ) : FactEnrichment {
     private val log = LoggerFactory.getLogger(LearnedFactsEnricher::class.java)
 
     override fun forListing(
         readerWorkspaceId: UUID,
         datasource: Datasource,
+        templateLens: ReadLens,
     ): FactEnrichment.DatasourceBlocks {
         // One read; the visibility predicate already keeps another workspace's rules out.
         val visible = repository.findVisibleByDatasource(datasource.name, readerWorkspaceId)
+        val rules = visible.filter { it.scope == LearnedFactScope.WORKSPACE }
+        // 7e: one reverse read for every rule on the listing (the fact index, lens in its SQL).
+        val implemented =
+            if (rules.isEmpty()) emptyMap() else implementations.implementedBy(readerWorkspaceId, templateLens, rules.map { it.id })
         return FactEnrichment.DatasourceBlocks(
             facts = asStored(visible.filter { it.kind in LearnedFactKind.DATASOURCE_WIDE }, readerWorkspaceId),
-            definitions = asStored(visible.filter { it.scope == LearnedFactScope.WORKSPACE }, readerWorkspaceId),
+            definitions = asStored(rules, readerWorkspaceId) { implemented[it.id].orEmpty() },
         )
     }
 
-    /** Served as stored — no columns in hand, so the verdict is the row's own trust and drift. */
+    /**
+     * Served as stored — no columns in hand, so the verdict is the row's own trust and drift.
+     * [implementedBy] is the 7e projection, given for the WORKSPACE rules only (null elsewhere).
+     */
     private fun asStored(
         facts: List<LearnedFact>,
         readerWorkspaceId: UUID,
+        implementedBy: (LearnedFact) -> List<ImplementingVersion>? = { null },
     ): List<Map<String, Any?>> {
         val conflicts = conflictsAmong(facts)
         return facts.map {
@@ -152,6 +177,7 @@ class LearnedFactsEnricher(
                 readerWorkspaceId,
                 LearnedFactDrift.Verdict(it.trust, LearnedFactDrift.storedDrift(it)),
                 it.id in conflicts,
+                implementedBy(it),
             )
         }
     }
@@ -254,7 +280,9 @@ class LearnedFactsEnricher(
         readerWorkspaceId: UUID,
         verdict: LearnedFactDrift.Verdict,
         conflict: Boolean,
-    ): Map<String, Any?> = FactWire.summary(fact, readerWorkspaceId, verdict, conflict, sourcePipelineFor(fact, readerWorkspaceId))
+        implementedBy: List<ImplementingVersion>? = null,
+    ): Map<String, Any?> =
+        FactWire.summary(fact, readerWorkspaceId, verdict, conflict, sourcePipelineFor(fact, readerWorkspaceId), implementedBy)
 
     /** D-S9 — the pipeline link, only where the reader may read it: the pipeline repositories' own predicate. */
     private fun sourcePipelineFor(

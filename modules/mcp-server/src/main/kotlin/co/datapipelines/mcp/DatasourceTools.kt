@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.application.semantics.FactEnrichment
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
@@ -88,6 +89,12 @@ internal fun Datasource.toMcpMetadata(): Map<String, Any?> =
 class DatasourcesListTool(
     private val datasources: DatasourceRegistry,
     private val facts: FactEnrichment = FactEnrichment.NONE,
+    /**
+     * 7e — the promoter lens, for the `implemented_by` each rule under `definitions` carries (the
+     * template versions the key's `template.read` admits). No default: a missed caller must not
+     * compile into a listing that names drafts to a promoter.
+     */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -133,8 +140,9 @@ class DatasourcesListTool(
         val filter = args.string("dialect")
         if (filter != null && Dialect.entries.none { it.wire == filter }) return emptyList<Map<String, Any?>>()
         val workspaceId = ctx.principal.requireWorkspace().id
+        val templateLens = lens.viewFor(ctx.principal).templates
         return datasources.listVisible(filter?.let { Dialect.fromWire(it) }, workspaceId).map {
-            it.toMcpMetadata() + blocks(facts.forListing(workspaceId, it))
+            it.toMcpMetadata() + blocks(facts.forListing(workspaceId, it, templateLens))
         }
     }
 }
@@ -143,6 +151,8 @@ class DatasourcesListTool(
 class DatasourcesGetTool(
     private val datasources: DatasourceRegistry,
     private val facts: FactEnrichment = FactEnrichment.NONE,
+    /** 7e — the promoter lens for the rules' `implemented_by`, as on [DatasourcesListTool]. */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -179,7 +189,8 @@ class DatasourcesGetTool(
         // 118 (design §7.2): the datasource-wide facts (window, sampling) and, since 136 §A, the
         // workspace's rules — served as stored: this read opens no connection, so there is
         // nothing to recompute drift against.
-        return gated.toMcpMetadata() + blocks(facts.forListing(ctx.principal.requireWorkspace().id, gated))
+        val templateLens = lens.viewFor(ctx.principal).templates
+        return gated.toMcpMetadata() + blocks(facts.forListing(ctx.principal.requireWorkspace().id, gated, templateLens))
     }
 }
 

@@ -1,9 +1,11 @@
 package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.RetiredFactCitation
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.typesystem.Dialect
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import java.time.Instant
 import java.util.UUID
@@ -89,7 +91,33 @@ data class Template(
     val invariants: List<TransformInvariant>? = null,
     @field:JsonProperty("tests") @get:JsonProperty("tests") @param:JsonProperty("tests")
     val tests: List<TransformTestCase>? = null,
+    /**
+     * The learned facts this version cites as implementing (7e, transform-nodes design §2.3) —
+     * fact ids, sorted; `[]` on a transform version that cites none, null on `sql`/`html`
+     * (like the blocks above: the field belongs to the transform types). NOT content: outside
+     * `body_hash`, stored in `template_implements`, carried by export/import/promotion.
+     */
+    @field:JsonProperty("implements") @get:JsonProperty("implements") @param:JsonProperty("implements")
+    val implements: List<String>? = null,
+    /**
+     * The cited facts that are RETIRED (7e, §8.2) — computed on read by the projection's own
+     * query, never stored; each names its reason and, when superseded, the successor. Omitted
+     * from the wire when empty. What [needsReview] is derived from.
+     */
+    @field:JsonProperty("retired_facts") @get:JsonProperty("retired_facts") @param:JsonProperty("retired_facts")
+    @field:JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @get:JsonInclude(JsonInclude.Include.NON_EMPTY)
+    val retiredFacts: List<RetiredFactCitation> = emptyList(),
 ) {
+    /**
+     * §8.2 — true when any cited fact is retired: the version is served MARKED, never edited and
+     * never re-mapped; clearing it is a deliberate `implements` write. Derived from
+     * [retiredFacts] so the flag and its detail cannot disagree, and serialized (never read
+     * back — an inbound `needs_review` is ignored like every server-computed field).
+     */
+    @get:JsonProperty("needs_review")
+    val needsReview: Boolean get() = retiredFacts.isNotEmpty()
+
     companion object {
         /** The only `schema_version` v1 accepts (templates.md §3.2). */
         const val SUPPORTED_SCHEMA_VERSION = 1
@@ -113,7 +141,9 @@ data class Template(
  *
  * A RELEASED or DISCARDED version is never written again: no statement in
  * [TemplateRepository] targets the content fields of a non-DRAFT row, and the entity purge
- * (101) is refused unless the sole version is a DRAFT. The **DRAFT** is the one mutable key —
+ * (101) is refused unless the sole version is a DRAFT. The ONE exception is not content: a
+ * version's `implements` citations (7e, [TemplateImplementsRepository]) are outside the hash
+ * and editable on a RELEASED version — nothing the engine renders or caches reads them. The **DRAFT** is the one mutable key —
  * `templates_update` / `PUT /templates` overwrite it IN PLACE (same id, same version number,
  * new content), and `templates_purge_draft` deletes it. So a [TemplateVersion] is safe to
  * cache by its [key] exactly when [status] is not [PipelineVersionStatus.DRAFT]; a draft

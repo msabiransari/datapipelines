@@ -123,6 +123,34 @@ private fun parseBlocks(args: McpArguments): Triple<TransformContract?, List<Tra
     return Triple(contract, invariants, tests)
 }
 
+/**
+ * 7e (transform-nodes design §2.3) — the `implements` argument: the learned facts the version
+ * cites, as strings. Absent (or JSON null) stays null — "not stated", which the write INHERITS
+ * (owner ruling 2026-09-25); the entries' own verdict is the validator's
+ * (`template.implements_unresolved`), so a malformed id is that catalogued refusal, not a
+ * protocol fault. A non-array or a non-string entry IS a protocol fault (-32602).
+ */
+private fun parseImplements(args: McpArguments): List<String>? =
+    args.listArg("implements")?.map { entry ->
+        entry as? String ?: throw McpArguments.invalidParams("Each 'implements' entry must be a fact id string.")
+    }
+
+/** §6.2.8 — the `implements` description on create (7e; transform types only). */
+private const val IMPLEMENTS_CREATE_DESC =
+    "Transform types only (refused on sql/html with template.blocks_not_allowed): the learned facts this " +
+        "transform implements — ids of WORKSPACE facts (definition, exclusion, preference) recorded in this " +
+        "workspace; semantics_list and the definitions on datasources_list show them. A citation is not content: " +
+        "it is outside body_hash. An id this workspace cannot cite is template.implements_unresolved. At most 50."
+
+/** §6.2.36 — the `implements` description on update (7e): the inherit / clear / released-version rules. */
+private const val IMPLEMENTS_UPDATE_DESC =
+    "Transform types only: the learned facts this version implements (WORKSPACE definition, exclusion or " +
+        "preference ids of this workspace). Omitted, the citations of the version you edit are kept (a new " +
+        "draft inherits the released version's); [] clears them. Not content — outside body_hash — so an update " +
+        "whose body equals the released version and changes only implements writes them ON the released " +
+        "version and opens no draft: that is how you clear needs_review (cite the superseding fact). An id this " +
+        "workspace cannot cite is template.implements_unresolved. At most 50."
+
 /** §6.2.8/§6.2.36 — the `contract` block description (7b; transform types only). */
 private const val CONTRACT_DESC =
     "Transform contract (transform types only — refused on sql/html with template.blocks_not_allowed): " +
@@ -216,6 +244,8 @@ class TemplatesCreateTool(
     private val templates: TemplateRepository,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     private val validator: TemplateValidator,
+    /** 7e — the create half of the write rule: version 1 and its stated citations, one service. */
+    private val drafts: TemplateDraftService,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -274,11 +304,13 @@ class TemplatesCreateTool(
                 contract = blocks.first,
                 invariants = blocks.second,
                 tests = blocks.third,
+                implements = parseImplements(args),
             )
         // D55: authoring lands version 1 DRAFT — the response's `status` says so, and a human
         // releases it from the UI. Pinning it from a draft pipeline is legal meanwhile
-        // (versioning §6 only bites when the PIPELINE is released).
-        return templates.create(
+        // (versioning §6 only bites when the PIPELINE is released). 7e: the service lands the
+        // stated `implements` on that version and returns the stored projection.
+        return drafts.create(
             workspaceId,
             validator.validateOrThrow(draft, workspaceId),
             ctx.principal.userId,
@@ -323,6 +355,7 @@ class TemplatesCreateTool(
                 "contract": {"type": "object", "description": "$CONTRACT_DESC"},
                 "invariants": {"type": "array", "description": "$INVARIANTS_DESC"},
                 "tests": {"type": "array", "description": "$TESTS_DESC"},
+                "implements": {"type": "array", "items": {"type": "string", "format": "uuid"}, "description": "$IMPLEMENTS_CREATE_DESC"},
                 "confirm_new_root": {"type": "boolean", "description": "${NewRootConfirmation.ARG_DESC}"}
               },
               "additionalProperties": false
@@ -421,6 +454,8 @@ class TemplatesUpdateTool(
                 contract = blocks.first,
                 invariants = blocks.second,
                 tests = blocks.third,
+                // 7e: absent stays null — the service inherits the base version's citations.
+                implements = parseImplements(args),
             )
         // Parse-only validation (§7.1) exactly as templates_create and the REST PUT run it,
         // then the SAME draft write PUT /templates makes (§8.4) — one write path, two surfaces.
@@ -516,7 +551,8 @@ class TemplatesUpdateTool(
                 "body": {"type": "string", "description": "$BODY_DESC"},
                 "contract": {"type": "object", "description": "$CONTRACT_DESC"},
                 "invariants": {"type": "array", "description": "$INVARIANTS_DESC"},
-                "tests": {"type": "array", "description": "$TESTS_DESC"}
+                "tests": {"type": "array", "description": "$TESTS_DESC"},
+                "implements": {"type": "array", "items": {"type": "string", "format": "uuid"}, "description": "$IMPLEMENTS_UPDATE_DESC"}
               },
               "additionalProperties": false
             }

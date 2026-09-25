@@ -148,6 +148,10 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun templateValidator(): TemplateValidator = mockk()
 
+        // 117/7e — the template draft write (declared by web's TemplateLifecycleConfiguration in
+        // the assembled application; it carries the citation store since 7e).
+        @Bean fun templateDraftService(): co.datapipelines.templates.TemplateDraftService = mockk()
+
         @Bean fun workspaceTemplateEngines(): WorkspaceTemplateEngines = mockk()
 
         @Bean fun auditLogger(): AuditLogger = mockk(relaxed = true)

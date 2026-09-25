@@ -47,7 +47,7 @@ class ApiKeyRepository(
     /**
      * Live keys with this NAME in this workspace (074, promotion §19.5).
      *
-     * A list, not a single row, for the readers that predate keys v2; since V35's unique index
+     * A list, not a single row, for the readers that predate keys v2; since V37's unique index
      * on live `(workspace_id, name)` (A18) the list has at most one row — promotion still
      * refuses to guess if it ever sees more.
      */
@@ -274,7 +274,7 @@ class ApiKeyRepository(
          * one column this projection must never return — a sealed secret riding the
          * hot validation path's row object is a secret one careless log away from a leak —
          * while `(k.secret_sealed IS NOT NULL)` is the fact the Keys page needs. `minted_at_login`
-         * left with the login mint (keys v2 V35, A15).
+         * left with the login mint (keys v2 V37, A15).
          */
         val SELECT_COLUMNS =
             """
@@ -303,11 +303,11 @@ class ApiKeyRepository(
             expiresAt = rs.getTimestamp("expires_at")?.toInstant(),
             workspaceId = rs.getObject("workspace_id", UUID::class.java),
             workspaceName = rs.getString("workspace_name"),
-            // V11, `mcp` since keys v2 V35 (A19). A row with an unexpected kind fails loudly
+            // V11, `mcp` since keys v2 V37 (A19). A row with an unexpected kind fails loudly
             // rather than authenticate — a key that cannot be classified authenticates for nobody.
             kind = ApiKeyKind.fromWire(rs.getString("kind")),
             hasSealedSecret = rs.getBoolean("has_sealed_secret"),
-            // V34, widened V35. Null only on the revoked pre-v2 rows the migration left
+            // V34, widened V37. Null only on the revoked pre-v2 rows the migration left
             // untouched (a revoked viewer key carries no role); a LIVE row's CHECK forbids it.
             role = KeyRole.fromWireOrNull(rs.getString("role")),
             createdBy = rs.getObject("created_by", UUID::class.java),

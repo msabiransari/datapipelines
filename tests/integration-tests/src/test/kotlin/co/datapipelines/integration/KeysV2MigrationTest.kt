@@ -15,11 +15,11 @@ import java.sql.ResultSet
 import java.util.UUID
 
 /**
- * V35 (`keys_v2_robot_members`) applied to a **populated** pre-V35 database, asserted at the row
+ * V37 (`keys_v2_robot_members`) applied to a **populated** pre-V37 database, asserted at the row
  * level — the keys-v2 B4 dry run with counts, in the [WorkspaceRolesMigrationTest] shape: the
- * shipped scripts are driven directly, V1 through V34, then pre-V35 rows in the old shape (the
+ * shipped scripts are driven directly, V1 through V34, then pre-V37 rows in the old shape (the
  * login mint: `minted_at_login = TRUE`, `kind = 'user'`, `role IS NULL`, `user_id = the member`),
- * then V35 — and every row the migration produces is named here.
+ * then V37 — and every row the migration produces is named here.
  *
  * What keys v2 (A13–A19, B4) promises, and what each test holds it to:
  * - an owner whose membership is author | promoter | workspace_admin keeps a LIVE key, now
@@ -50,19 +50,19 @@ class KeysV2MigrationTest {
     private val ws = UUID.randomUUID()
     private val otherWs = UUID.randomUUID()
 
-    private val authorKey = "dpk_V35AUTHOR01"
-    private val promoterKey = "dpk_V35PROMOT01"
-    private val adminKey = "dpk_V35ADMIN001"
-    private val viewerKey = "dpk_V35VIEWER01"
-    private val superKey = "dpk_V35SUPER001"
-    private val alreadyRevokedKey = "dpk_V35DEAD001"
-    private val dupKept = "dpk_V35DUPNEW1"
-    private val dupRenamed = "dpk_V35DUPOLD1"
+    private val authorKey = "dpk_V37AUTHOR01"
+    private val promoterKey = "dpk_V37PROMOT01"
+    private val adminKey = "dpk_V37ADMIN001"
+    private val viewerKey = "dpk_V37VIEWER01"
+    private val superKey = "dpk_V37SUPER001"
+    private val alreadyRevokedKey = "dpk_V37DEAD001"
+    private val dupKept = "dpk_V37DUPNEW1"
+    private val dupRenamed = "dpk_V37DUPOLD1"
 
     private val migrated by lazy {
-        MIGRATION_PATHS_PRE_V35.forEach { execute(repoFile(it).readText()) }
-        seedPreV35Rows()
-        execute(repoFile(V35_PATH).readText())
+        MIGRATION_PATHS_PRE_V37.forEach { execute(repoFile(it).readText()) }
+        seedPreV37Rows()
+        execute(repoFile(V37_PATH).readText())
         true
     }
 
@@ -121,7 +121,7 @@ class KeysV2MigrationTest {
     fun `duplicate live names are disambiguated and the workspace-name uniqueness holds for live keys`() {
         migrated shouldBe true
         // The newest keeps its name; the older gains the key id's tail. The dup rows are
-        // pre-R3 ON-DEMAND keys (minted_at_login FALSE, the V31 default) — the widened V35
+        // pre-R3 ON-DEMAND keys (minted_at_login FALSE, the V31 default) — the widened V37
         // conversion covers them too: live, identity-backed, with the owner's role.
         nameOf(dupKept) shouldBe "shared name"
         nameOf(dupRenamed) shouldBe "shared name (old1)"
@@ -131,20 +131,20 @@ class KeysV2MigrationTest {
             runCatching {
                 execute(
                     "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
-                        " VALUES ('dpk_V35DUPNEW2', '$dupOwnerA', '$dupOwnerA', 'shared name', 'h', '$ws', 'mcp', 'author')",
+                        " VALUES ('dpk_V37DUPNEW2', '$dupOwnerA', '$dupOwnerA', 'shared name', 'h', '$ws', 'mcp', 'author')",
                 )
             }.exceptionOrNull()
         refusal?.message.orEmpty().contains("uq_api_keys_live_workspace_name") shouldBe true
         // A REVOKED row may repeat a live name: the index is partial (A18's "for live keys").
         execute(
             "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role, is_revoked)" +
-                " VALUES ('dpk_V35DUPREV1', '$author', '$author', 'shared name', 'h', '$ws', 'mcp', 'author', TRUE)",
+                " VALUES ('dpk_V37DUPREV1', '$author', '$author', 'shared name', 'h', '$ws', 'mcp', 'author', TRUE)",
         )
     }
 
     // ---------------------------------------------------------------- fixtures
 
-    private fun seedPreV35Rows() {
+    private fun seedPreV37Rows() {
         execute(
             """
             INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
@@ -196,7 +196,7 @@ class KeysV2MigrationTest {
         )
     }
 
-    /** A pre-V35 login-minted key, in the shape V31/V34 left: kind `user`, no role, owner = member. */
+    /** A pre-V37 login-minted key, in the shape V31/V34 left: kind `user`, no role, owner = member. */
     private fun seedLoginKey(
         id: String,
         ownerId: UUID,
@@ -250,10 +250,10 @@ class KeysV2MigrationTest {
 
     private companion object {
         const val MIGRATION_DIR = "modules/app/src/main/resources/db/migration"
-        const val V35_PATH = "$MIGRATION_DIR/V35__keys_v2_robot_members.sql"
+        const val V37_PATH = "$MIGRATION_DIR/V37__keys_v2_robot_members.sql"
 
         /** V1 through V34, in Flyway's own order — spelled out, never globbed (the V29 test's rule). */
-        val MIGRATION_PATHS_PRE_V35 =
+        val MIGRATION_PATHS_PRE_V37 =
             listOf(
                 "V1__initial_schema.sql",
                 "V2__datasource_introspection_include_schemas.sql",
@@ -303,8 +303,8 @@ class KeysV2MigrationTest {
         }
 
         /**
-         * A scratch database: this suite builds the schema PART-WAY on purpose (V1–V34, pre-V35
-         * rows, then V35) — the V35 boundary is the subject.
+         * A scratch database: this suite builds the schema PART-WAY on purpose (V1–V34, pre-V37
+         * rows, then V37) — the V37 boundary is the subject.
          */
         val db = SharedE2e.scratchDatabase("pre_v35_keys_v2")
     }

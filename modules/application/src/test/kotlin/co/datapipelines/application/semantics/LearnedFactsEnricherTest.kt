@@ -168,7 +168,7 @@ class LearnedFactsEnricherTest {
         every { repository.findVisibleByDatasource("warehouse", SemanticsFixtures.ACME) } returns
             listOf(window, unit, rainyOnColumn, combinedNoRefs)
 
-        val blocks = enricher.forListing(SemanticsFixtures.ACME, SemanticsFixtures.warehouse)
+        val blocks = enricher.forListing(SemanticsFixtures.ACME, SemanticsFixtures.warehouse, co.datapipelines.pipeline.ReadLens.Everything)
 
         assertAll(
             { blocks.facts.map { it["kind"] } shouldContainExactly listOf("window") },

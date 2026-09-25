@@ -128,10 +128,14 @@ class FlywayMigrationIntegrationTest {
                 // 215b (#215) — users.kind, api_keys.created_by + role + chk_api_keys_role, one
                 // service identity per endpoint/server key, api_keys.scopes dropped.
                 "34|key identities and roles|true",
+                // 7e (#7) — template_implements (a transform version's cited facts, outside the
+                // hash) and the partial successor index on learned_facts.supersedes.
+                "36|template implements|true",
                 // keys v2 (#233) — kind `user`→`mcp` (A19), the login-minted keys converted or
                 // revoked (A15/B4), `minted_at_login` dropped (A15), the CHECK replaced with the
                 // robot-member matrix (A13/A14) and the live `(workspace_id, name)` uniqueness (A18).
-                "35|keys v2 robot members|true",
+                // Renumbered V37 → V37 at the 233c base refresh (V36 landed first).
+                "37|keys v2 robot members|true",
             )
     }
 
@@ -357,6 +361,40 @@ class FlywayMigrationIntegrationTest {
         definition shouldContain "jsonb_array_length(refs_json) >= 1"
     }
 
+    /**
+     * 7e (V36, transform-nodes design §2.3/§8.2) — the citation table, read from the SHIPPED
+     * database: the three key columns and nothing else (no hash, no stored mark — `needs_review`
+     * is computed on read), a purged or deleted version takes its citations with it (CASCADE on
+     * the composite key), and a cited fact can never be deleted out from under a citation (no
+     * action on the fact key — facts are retired, never deleted, D-S11). Proven by the FKs' own
+     * definitions and delete actions, the V25 way; the behaviour is the templates module's suite.
+     */
+    @Test
+    fun `V36 creates the citation table cascading from the version and never from the fact`() {
+        columnsOf("template_implements") shouldContainExactly listOf("fact_id", "template_id", "version")
+
+        query(
+            "SELECT conname || '|' || confdeltype::text || '|' || pg_get_constraintdef(oid) FROM pg_constraint" +
+                " WHERE conrelid = 'template_implements'::regclass AND contype = 'f' ORDER BY conname",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "fk_template_implements_fact|a|FOREIGN KEY (fact_id) REFERENCES learned_facts(id)",
+                "fk_template_implements_version|c|FOREIGN KEY (template_id, version) " +
+                    "REFERENCES template_versions(template_id, version) ON DELETE CASCADE",
+            )
+
+        query(
+            "SELECT pg_get_indexdef(indexrelid) FROM pg_index" +
+                " WHERE indexrelid IN ('idx_template_implements_fact'::regclass, 'idx_learned_facts_supersedes'::regclass)" +
+                " ORDER BY indexrelid::regclass::text",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE INDEX idx_learned_facts_supersedes ON public.learned_facts USING btree (supersedes) " +
+                    "WHERE (supersedes IS NOT NULL)",
+                "CREATE INDEX idx_template_implements_fact ON public.template_implements USING btree (fact_id)",
+            )
+    }
+
     @Test
     fun `V20 stamps the write surface on both version tables, checked and defaulted`() {
         // The ruling's schema half, read from the SHIPPED database: the columns exist on BOTH
@@ -544,10 +582,10 @@ class FlywayMigrationIntegrationTest {
      * the role CHECK is the per-kind family matrix (A13/A14), `minted_at_login` is gone (A15),
      * and the live `(workspace_id, name)` uniqueness (A18) is a database fact. The CHECK is
      * asserted by INSERTING (the V17 rule); the conversion of the login-minted ROWS is proven
-     * against a populated pre-V35 database by `KeysV2MigrationTest`.
+     * against a populated pre-V37 database by `KeysV2MigrationTest`.
      */
     @Test
-    fun `V35 makes every key a robot member - kind mcp, one role family per kind, no login mint`() {
+    fun `V37 makes every key a robot member - kind mcp, one role family per kind, no login mint`() {
         assertAll(
             { columnsOf("api_keys").contains("minted_at_login") shouldBe false },
             {
@@ -605,7 +643,7 @@ class FlywayMigrationIntegrationTest {
                             " VALUES ('$KIND_PROBE_USER', 'v17-probe@datapipelines.test', 'V17 probe', 'test', 'v17-probe', TRUE)" +
                             " ON CONFLICT (id) DO NOTHING",
                     )
-                    listOf("dpk_V35PROBE01", "dpk_V35PROBE02").forEach { id ->
+                    listOf("dpk_V37PROBE01", "dpk_V37PROBE02").forEach { id ->
                         statement.execute(
                             "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
                                 " VALUES ('$id', '$KIND_PROBE_USER', '$KIND_PROBE_USER', 'probe-dup', 'h'," +
@@ -766,7 +804,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the nineteen tables of metadata-db §4`() {
+    fun `creates exactly the twenty-one tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -798,6 +836,8 @@ class FlywayMigrationIntegrationTest {
                 "pipeline_versions",
                 "pipelines",
                 "published_endpoints",
+                // 7e (V36) — a transform version's cited facts (metadata-db §4.21).
+                "template_implements",
                 "template_versions",
                 "templates",
                 "users",
@@ -836,7 +876,7 @@ class FlywayMigrationIntegrationTest {
         indexes shouldContainExactlyInAnyOrder
             listOf(
                 "api_keys.api_keys_pkey",
-                // Keys v2 (V35, A18): live `(workspace_id, name)` is unique — the mint's V31
+                // Keys v2 (V37, A18): live `(workspace_id, name)` is unique — the mint's V31
                 // index is gone with the login mint.
                 "api_keys.uq_api_keys_live_workspace_name",
                 // 215b (V34): the keys a person CREATED, now that user_id names a key's identity.
@@ -860,6 +900,8 @@ class FlywayMigrationIntegrationTest {
                 "lake_tables.uq_lake_tables_datasource_namespace_name",
                 // 118 (V25) — every read is per datasource; the workspace half is partial.
                 "learned_facts.idx_learned_facts_datasource",
+                // 7e (V36) — the successor of a retired fact (partial: few facts supersede one).
+                "learned_facts.idx_learned_facts_supersedes",
                 "learned_facts.idx_learned_facts_workspace",
                 "learned_facts.learned_facts_pkey",
                 // 137 (V27) — one claim per message identity (user, kind, act).
@@ -884,6 +926,9 @@ class FlywayMigrationIntegrationTest {
                 "published_endpoints.idx_published_endpoints_workspace",
                 "published_endpoints.published_endpoints_path_pattern_key",
                 "published_endpoints.published_endpoints_pkey",
+                // 7e (V36) — the reverse arrow (which versions cite this fact) and the PK.
+                "template_implements.idx_template_implements_fact",
+                "template_implements.template_implements_pkey",
                 "template_versions.idx_template_versions_dialect",
                 "template_versions.template_versions_pkey",
                 "template_versions.uq_template_versions_one_draft",

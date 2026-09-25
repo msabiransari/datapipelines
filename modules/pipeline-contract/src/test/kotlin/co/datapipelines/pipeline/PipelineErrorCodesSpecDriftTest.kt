@@ -191,6 +191,9 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Template.TEST_FAILED,
                 PipelineErrorCodes.Template.BLOCKS_NOT_ALLOWED,
                 PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE,
+                // 7e (#7) — the citation refusal is about the version's own `implements` list,
+                // the same no-entity-dimension shape as 7b's block codes above.
+                PipelineErrorCodes.Template.IMPLEMENTS_UNRESOLVED,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,
                 PipelineErrorCodes.Limits.RATE_LIMIT_UNAVAILABLE,
                 PipelineErrorCodes.Result.EXECUTION_NOT_FOUND,

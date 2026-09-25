@@ -425,6 +425,55 @@ conservative unknown recovery and no automatic replay still apply. Results and a
 pipeline versions live in executor-owned records, reached through the generic execution
 reference; the scheduler does not acquire a pipeline schema just to display them.
 
+### 5.4 The executor and the execution message log (owner requirement 2026-09-25)
+
+**The executor.** The scheduler dispatches an occurrence to a registered executor and never
+interprets what the executor does. The first executor is the pipeline executor (§3.1, §5.3);
+reports, and any later job kind, are further executors registered under their own id with
+their own payload schema. `schedules.executor_id` names the executor; a run's execution
+reference is opaque to the scheduler; run state and reason come back through the port's
+standardized outcome (§5.3). Nothing pipeline-shaped enters scheduler tables or code.
+
+**Every execution keeps its messages; a scheduled run keeps them too.** Verified on main
+(2026-09-25): the execution engine publishes every event through one `EventEmitter`
+(`modules/dag`, dag-executor.md §10), and the implementation fans each event out to three
+places — the live SSE stream when a client is attached, the Redis replay log that outlives
+completion by one hour, and the durable `execution_events` record (metadata-db §4.7:
+`execution_id`, monotonic `event_id`, `event_type`, `timestamp`, `payload_json`). The nine
+event kinds are `execution_started`, `node_started`, `node_progress`, `node_completed`,
+`node_failed`, `pipeline_completed`, `pipeline_failed`, `execution_aborted`, `data_ready`.
+Rows are kept `datapipelines.executions.event-retention-days` (default 7) past completion;
+the execution row itself outlives its events. Requirements:
+
+- A scheduled run launches through the same lifecycle path as an interactive run (§7), so
+  the emitter runs and the durable record is written **without any streaming consumer**.
+  No dispatch path may bypass the emitter; a fake executor in the acceptance suite proves the
+  contract, and the pipeline executor's scheduled run proves the record row for row against
+  an interactive run of the same pipeline.
+- **The durable record is readable for its whole retention.** The execution detail page
+  already renders the durable rows as node-operation history (`ExecutionDetailController`);
+  `GET /api/v1/executions/{id}/events` replays only the Redis copy and answers
+  `410 result.expired` after the hour (rest-api.md §6.8). The first delivery makes the REST
+  read answer the durable rows as JSON (paged by `event_id`, `execution.read`) once the
+  Redis log is gone; the pipeline's own events stay in `execution_events`, written by the
+  pipeline as today, untouched by the scheduler.
+- The record holds exactly what the wire carries: the existing wire redaction applies
+  (no secrets, no result rows, no bearer material); resolved parameter values appear as
+  they do on the wire today. Retention and the executor's access rules are those of the
+  execution, not the schedule; deleting a schedule keeps its runs and their events.
+- **Two logs, one per owner, merged on read (owner 2026-09-25).** The scheduler keeps its
+  own append-only trail, `schedule_run_events` (§7): one row per transition of a run —
+  occurrence created, queued, claimed, dispatched, execution started (carrying the execution
+  reference), not started with its reason, retry within the lateness window, missed,
+  cancelled, reconciled with the execution's terminal state, unknown, notification enqueued /
+  sent / failed — each with its time, the worker and a reason code; the run row's `state` +
+  `reason` (§10 R6) is the projection of the latest row. The pipeline's events stay in
+  `execution_events`, and a future executor (reports) writes its own execution log the same
+  way. Nothing is copied between the logs. The run detail's **Messages** pane reads both —
+  the scheduler trail by run id, the execution's events by the execution reference — and
+  shows them merged in time order with a source label; a run whose execution never started
+  shows the scheduler trail alone, which is exactly the case an operator needs to read.
+
 ## 6. REST and UI
 
 Owner direction, explicitly clarified on 2026-09-22: **scheduler only, REST plus UI**.
@@ -489,8 +538,9 @@ depend on it, or make delivery depend on the entire new parameter UI engine.
 
 ### 6.1 Lifecycle notification emails
 
-Owner requirement: a list-of-email-addresses field per schedule, with notifications for
-start/stop/error/unknown. Proposal: `notification_emails: []` means off; a non-empty list
+Owner requirement (2026-09-22, reconfirmed 2026-09-25): a list-of-email-addresses field per
+schedule, stored with the schedule, with a notice on every status change of the job —
+start/stop/error/unknown below, plus the schedule-level blocked notice. Proposal: `notification_emails: []` means off; a non-empty list
 receives all four event types initially. Per-event toggles can follow if needed.
 
 | Event | Meaning / proposed subject label |
@@ -605,6 +655,11 @@ Logical schema, not executable DDL:
 - Notification events/deliveries: durable event identity, run or schedule-transition identity,
   recipient snapshot, sequence, payload metadata, attempt state, retry timing and Message-ID.
   Define retention with execution history; never delete queued deliveries silently.
+- `schedule_run_events` (§5.4): append-only, `run_id` FK, monotonic `seq` per run, `kind`,
+  `reason`, `at`, worker/instance, small `details` JSON (execution reference, retry number,
+  notification event id); never updated; retained with the run's history. The pipeline's
+  events stay in `execution_events` (metadata-db §4.7) and are not duplicated;
+  `schedule_runs.execution_id` is the join the merged read uses.
 
 Use `SCHEDULE` as the proposed execution-trigger spelling consistently; reconcile the old
 `SCHEDULED` future placeholder when code/enums/DDL land together. Add scheduler key-kind
@@ -674,6 +729,12 @@ Required evidence before describing the scheduler as complete:
   never reruns a job. Verify recipient/content isolation and outbox crash recovery.
 - API-mode instance does not dispatch tasks; worker instance does. Source/target evidence
   proves actual pipeline effects, not only scheduler history rows.
+
+- A scheduled run of a pipeline leaves the same `execution_events` rows as an interactive run
+  of the same pipeline (count and kinds), with no SSE client attached, and a complete
+  `schedule_run_events` trail; the run detail merges both in time order with a source label;
+  a run refused before launch shows its scheduler trail alone; the durable execution rows are
+  readable through REST after the Redis hour and until the retention cutoff.
 
 ### 8.1 Fable review before implementation lock
 
@@ -1003,3 +1064,27 @@ question, comes after #215.
 - **The §9.1 corrections A1, A10 and A11** describe the key model #215 replaces. Re-verify every
   §9.1 item against main after #215 merges, before the spec is fixed.
 - **The proposed order predates #215.** "After 7b, beside 7c" becomes "after #215".
+
+## 10. Owner rulings of 2026-09-25 (answers to §9.2 / §9.6; normative once ratified)
+
+Taken in the orchestrator session on 2026-09-25 with the review's recommendations in hand;
+the store note `notes/2026-09-25-scheduler-rulings.md` carries the consequences in full.
+
+| # | Hole | Ruling |
+|---|---|---|
+| R1 | Engine shape (B1) | One dispatcher recurring task: due schedules selected `FOR UPDATE SKIP LOCKED`, an occurrence row per fire (`ON CONFLICT (schedule_id, scheduled_at) DO NOTHING`), `next_due_at` advanced by the one occurrence function the preview also uses (our DST rule), a one-time `occurrence:<id>` task enqueued in the same transaction; the task starts the execution asynchronously and returns; a reconciler maps execution terminal states onto runs. |
+| R2 | Credential (B4/B7, §4) | **No scheduler keys and no key row.** Schedules fire under a per-instance `system` identity (`users.kind = system`, no bearer secret) holding the permission to execute pipelines — and later reports — and nothing more. §4's scheduler-key model, §4.2's matrix and §4.3's counts are withdrawn; runs are attributed to the schedule. |
+| R3 | Run visibility (B5) | Members by role: a scheduled run is visible to every member whose role reaches `execution.read` / `execution.result.read` for the workspace; own-only (D11) stays for interactive runs. |
+| R4 | Capacity (B3) | A per-instance `scheduler.max-concurrent-runs` budget in the configuration catalog, plus retry within the lateness window (with a metric); beyond the window the run is recorded not started. |
+| R5 | Origins (B8) | Follow the `current` pointer, drafts included (D63 consistency). Because a draft is mutable under its version number, the run records the fired version number and the body hash read at fire time. |
+| R6 | Run states (B2) | `state` + `reason`, one normative mapping table: SUCCESS→succeeded, FAILED→failed, ABORTED/cancelled→cancelled, ABORTED/shutdown→aborted, ABORTED/instance_lost→unknown (blocks the schedule), admission and pre-start refusals→not started; missed vs overlap-skip and catch-up as reasons. §2's guarantee reads "at most one automatic launch that may have begun work". |
+| R7 | Parameters (#194) | v1 binds literal parameter values per schedule, validated as an interactive run's are; the parameter engine plugs in later as another value source. |
+| R8 | Roles | `schedule.create/update/pause/delete` = author, workspace_admin, super_admin; `schedule.read` = every member including viewer; the promoter lens shows released-pipeline schedules only. A creator demoted to viewer keeps their schedules running but cannot manage them. The execution-role ceiling selector (B6) is dropped. |
+| R9 | Isolation | The "external customer isolation" acceptance line is dropped from v1: isolation is per workspace. |
+| R10 | Execution messages | §5.4: two logs, one per owner — the scheduler's own append-only `schedule_run_events` trail, the pipeline's events in `execution_events` as today — merged on read by the run detail's Messages pane; the durable execution rows readable through REST for their retention. |
+| R11 | Notifications | §6.1 stands as the owner's requirement: recipients stored on the schedule; a notice on every status change. |
+
+Sequencing: keys v2 (#233) lands first (the identity kinds and role catalog the system identity
+rides on); then lane 1 = this record's amendment (§9.1's A1–A19 folded in, this section made
+normative) + migration + the system identity + dispatcher/occurrences/reconciler with the two
+spike proofs of R1; §9.4's slices follow once lane 1 freezes the contract.

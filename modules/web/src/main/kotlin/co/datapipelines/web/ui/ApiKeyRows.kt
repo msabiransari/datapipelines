@@ -22,7 +22,7 @@ class ApiKeyRows(
 ) {
     /**
      * One key as the table shows it. [prefix] is the public `dpk_…` handle — never the secret,
-     * which exists only in the response that minted it (and, for the V35-migrated login keys,
+     * which exists only in the response that minted it (and, for the V37-migrated login keys,
      * in the sealed column the Keys page's copy endpoint opens once).
      *
      * [createdBy] is the CREATOR's display label — the Keys page lists the workspace's keys

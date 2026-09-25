@@ -32,6 +32,9 @@ import java.util.UUID
  * strict mock would pass exactly when the emission is missing.
  */
 class SemanticsServiceTest {
+    /** The template lens every pre-7e case reads through — no lens narrows a fact listing it does not test. */
+    private val everything: co.datapipelines.pipeline.ReadLens = co.datapipelines.pipeline.ReadLens.Everything
+
     private val repository = mockk<LearnedFactRepository>()
     private val recorder = mockk<LearnedFactRecorder>()
     private val pipelines = mockk<PipelineRepository>()
@@ -122,18 +125,21 @@ class SemanticsServiceTest {
                 SemanticsFixtures.principal(),
                 SemanticsFixtures.warehouse,
                 SemanticsService.ListQuery(includeRetired = true),
+                everything,
             )
         val orders =
             service.list(
                 SemanticsFixtures.principal(),
                 SemanticsFixtures.warehouse,
                 SemanticsService.ListQuery(table = "orders", includeRetired = true),
+                everything,
             )
         val workspace =
             service.list(
                 SemanticsFixtures.principal(),
                 SemanticsFixtures.warehouse,
                 SemanticsService.ListQuery(scope = LearnedFactScope.WORKSPACE, includeRetired = true),
+                everything,
             )
 
         assertAll(
@@ -151,7 +157,12 @@ class SemanticsServiceTest {
         every { repository.findVisibleByDatasource("warehouse", SemanticsFixtures.ACME, includeRetired = false, since = since) } returns
             emptyList()
 
-        service.list(SemanticsFixtures.principal(), SemanticsFixtures.warehouse, SemanticsService.ListQuery(since = since)) shouldBe
+        service.list(
+            SemanticsFixtures.principal(),
+            SemanticsFixtures.warehouse,
+            SemanticsService.ListQuery(since = since),
+            everything,
+        ) shouldBe
             emptyList()
     }
 
@@ -203,13 +214,21 @@ class SemanticsServiceTest {
         every { pipelines.findById(SemanticsFixtures.ACME, SemanticsFixtures.PIPELINE) } returns pipelineRecord()
         every { pipelines.findById(SemanticsFixtures.GLOBEX, SemanticsFixtures.PIPELINE) } returns null
 
-        val acme = service.list(SemanticsFixtures.principal(), SemanticsFixtures.warehouse, SemanticsService.ListQuery()).single()
+        val acme =
+            service
+                .list(
+                    SemanticsFixtures.principal(),
+                    SemanticsFixtures.warehouse,
+                    SemanticsService.ListQuery(),
+                    everything,
+                ).single()
         val globex =
             service
                 .list(
                     SemanticsFixtures.principal(workspaceId = SemanticsFixtures.GLOBEX),
                     SemanticsFixtures.warehouse,
                     SemanticsService.ListQuery(),
+                    everything,
                 ).single()
 
         assertAll(

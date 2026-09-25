@@ -106,6 +106,7 @@ class DatasourceSchemaControllerTest {
                 override fun forListing(
                     readerWorkspaceId: java.util.UUID,
                     datasource: Datasource,
+                    templateLens: co.datapipelines.pipeline.ReadLens,
                 ) = co.datapipelines.application.semantics.FactEnrichment.DatasourceBlocks.EMPTY
 
                 override fun forTables(

@@ -29,6 +29,11 @@ import java.util.UUID
  *    audit each template as if released by hand. A DISCARDED or MISSING pin is never
  *    releasable and refuses exactly as before, flag or no flag.
  *
+ * Releasing is never refused for the semantic link (transform-nodes design §8.2, 7e): a pin
+ * that reads `needs_review` — it cites a retired learned fact — is released as asked and
+ * reported in [Released.warnings] as `pipeline.release.template_needs_review`, read through
+ * the [TemplateReviewMarks] port AFTER the flip. A fact edit never blocks a release on its own.
+ *
  * The hash precondition (§4.2) rides the flip statement itself: `you release what you
  * tested`. The draft verb is PURGE (§5.4, 101): the row is hard-deleted together with its
  * executions — the FK never forces a tombstone — and the sole-draft case takes the entity
@@ -63,6 +68,12 @@ open class PipelineReleaseService(
      * metadata transaction is open on the thread (056 §E.2).
      */
     private val transactions: TransactionOperations = DIRECT_TRANSACTIONS,
+    /**
+     * 7e — which pinned template versions cite a retired fact (the `needs_review` read), as the
+     * port this module declares; `web` wires it over the templates module's citation read.
+     * [TemplateReviewMarks.NONE] keeps pre-7e constructions releasing with no warnings.
+     */
+    private val reviewMarks: TemplateReviewMarks = TemplateReviewMarks.NONE,
 ) {
     /** What a release produced: the bumped record, the released version, the released body. */
     data class Released(
@@ -84,6 +95,13 @@ open class PipelineReleaseService(
          * audit event per entry and list them on the pipeline's own event.
          */
         val templatesReleased: List<TemplateRef> = emptyList(),
+        /**
+         * 7e (transform-nodes design §8.2) — what the releaser should know about what was
+         * released, never a refusal: one `pipeline.release.template_needs_review` per pin that
+         * cites a retired learned fact, in pin order; empty on a clean release. The REST body
+         * carries it as `warnings`; the dialog renders the same facts on its pin rows.
+         */
+        val warnings: List<ReleaseWarning> = emptyList(),
     )
 
     /**
@@ -164,8 +182,38 @@ open class PipelineReleaseService(
                 flipped to cascaded
             }!!
         val (flipped, cascaded) = released
-        return Released(flipped.record, flipped.version, bodyJson, overridden.first, overridden.second, cascaded)
+        // 7e: read AFTER the flip and outside its transaction — a warning describes what was
+        // released and can never unwind it.
+        val warnings = reviewWarnings(workspaceId, pipeline)
+        return Released(flipped.record, flipped.version, bodyJson, overridden.first, overridden.second, cascaded, warnings)
     }
+
+    /**
+     * The §8.2 warnings: every distinct pin of the released body whose version cites a retired
+     * learned fact, in pin order, one warning each naming every retired fact and its successor.
+     */
+    private fun reviewWarnings(
+        workspaceId: UUID,
+        pipeline: Pipeline,
+    ): List<ReleaseWarning> {
+        val pins = templatePins(pipeline)
+        if (pins.isEmpty()) return emptyList()
+        val marks = reviewMarks.retiredCitations(workspaceId, pins)
+        return pins.mapNotNull { pin ->
+            marks[pin]?.takeIf { it.isNotEmpty() }?.let { ReleaseWarning.templateNeedsReview(pin, it) }
+        }
+    }
+
+    /**
+     * The body's template pins, distinct, in node order — only the nodes that HAVE one: a
+     * PIPELINE node pins a child pipeline and a CALCULATOR node a catalog function (see
+     * [draftPinsToRelease] for the defect the filter closed).
+     */
+    private fun templatePins(pipeline: Pipeline): List<TemplateRef> =
+        pipeline.nodes
+            .filter { it.type != NodeType.PIPELINE && it.type != NodeType.CALCULATOR }
+            .map { it.template }
+            .distinct()
 
     /**
      * The §6 pin guard, and the cascade's worklist (142): walks every template pin of the
@@ -189,12 +237,7 @@ open class PipelineReleaseService(
         pipeline: Pipeline,
         releasePinnedTemplates: Boolean,
     ): List<TemplateRef> {
-        val pins =
-            pipeline.nodes
-                .filter { it.type != NodeType.PIPELINE && it.type != NodeType.CALCULATOR }
-                .map { it.template }
-                .distinct()
-                .map { ref -> ref to templates.statusOf(workspaceId, ref.id, ref.version) }
+        val pins = templatePins(pipeline).map { ref -> ref to templates.statusOf(workspaceId, ref.id, ref.version) }
         val notReleased = pins.filter { (_, status) -> status != PipelineVersionStatus.RELEASED }
         val blocking =
             notReleased.firstOrNull { (_, status) -> !(releasePinnedTemplates && status == PipelineVersionStatus.DRAFT) }

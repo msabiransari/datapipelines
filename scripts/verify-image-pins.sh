@@ -9,11 +9,12 @@
 # green for days because the laptop had the image, and CI's integration job failed on every
 # push. A `docker pull` is a cache hit here and a 2-minute Testcontainers timeout there.
 #
-# What it does: greps the test trees for `registry/repo:tag` literals (the shape Testcontainers
-# takes), de-duplicates them, and asks the registry for each manifest with
-# `docker manifest inspect`, which never consults the local image store. Exit 1 listing every
-# pin the registry no longer serves; exit 0 when every pin resolves. Exit 2 when the grep found
-# nothing (a broken grep must never read as "all pins fine" — the non-vacuity floor).
+# What it does: greps the test trees for `registry/repo:tag` and `registry/repo@sha256:…`
+# literals (the shapes Testcontainers takes), de-duplicates them, and asks the registry for
+# each manifest with `docker manifest inspect`, which never consults the local image store.
+# Exit 1 listing every pin the registry no longer serves; exit 0 when every pin resolves.
+# Exit 2 when the grep found nothing (a broken grep must never read as "all pins fine" —
+# the non-vacuity floor).
 #
 # Runs: in CI before the integration tests (a missing pin fails in seconds, not after a
 # 2-minute pull timeout per suite), and by hand before a dependency review. Needs the Docker
@@ -24,11 +25,21 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 
 # registry-qualified or Docker-Hub-official images, with an exact tag; excludes build/ dirs.
-pins="$(grep -rhoE '"([a-z0-9.-]+(\.[a-z]{2,})(:[0-9]+)?/)?[a-z0-9._/-]+:[A-Za-z0-9][A-Za-z0-9._-]*"' \
+tag_pins="$(grep -rhoE '"([a-z0-9.-]+(\.[a-z]{2,})(:[0-9]+)?/)?[a-z0-9._/-]+:[A-Za-z0-9][A-Za-z0-9._-]*"' \
           modules/*/src/test tests/*/src/test 2>/dev/null \
         | tr -d '"' \
         | grep -E '^([a-z0-9.-]+\.[a-z]{2,}(:[0-9]+)?/[a-z0-9._/-]+|(postgres|redis|mysql|mariadb|minio/minio|greenmail/[a-z-]+|gvenzl/[a-z-]+|testcontainers/[a-z-]+))(:[A-Za-z0-9][A-Za-z0-9._-]*)$' \
         | sort -u)"
+
+# digest pins (`repo@sha256:<hex64>`); #229: a 64-hex digest is unambiguous, so no
+# registry allowlist — the manifest check itself is the verdict. This is the hole the
+# MinIO pin fell through: the tag-only grep never matched a `@sha256:` literal.
+digest_pins="$(grep -rhoE '"[a-z0-9.-]+(\.[a-z]{2,})?(:[0-9]+)?(/[a-z0-9._/-]+)?@sha256:[a-f0-9]{64}"' \
+          modules/*/src/test tests/*/src/test 2>/dev/null \
+        | tr -d '"' \
+        | sort -u)"
+
+pins="$(printf '%s\n%s\n' "$tag_pins" "$digest_pins" | grep . | sort -u)"
 
 count=$(printf '%s\n' "$pins" | grep -c . || true)
 if [ "$count" -eq 0 ]; then
