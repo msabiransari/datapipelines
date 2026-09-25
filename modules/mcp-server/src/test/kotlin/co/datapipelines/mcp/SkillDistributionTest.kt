@@ -17,9 +17,10 @@ import java.io.File
  * plugin. Every copy is derived from `.agents/skills/datapipelines/`, and each of the four
  * deliveries has an assertion here that goes red when its copy drifts.
  *
- * The caps are the other half. A skill that grows without a limit stops being read: the
- * connect-time `instructions` string is paid for by every session of every client (4 KB), and
- * `SKILL.md` is paid for by every trigger (400 lines). The references are what grows.
+ * The caps are the other half. A skill that grows without a limit stops being read: `SKILL.md`
+ * is paid for by every trigger (400 lines), and the references are what grows. The connect-time
+ * `instructions` string is capped by what a client SHOWS, which is [McpClientCapTest]'s (#241);
+ * its spec copy, the §15 Delivery 1 block, is pinned here like every other copy.
  */
 class SkillDistributionTest {
     private val repoSkill = File(SpecFiles.root, SpecFiles.SKILL_DIR)
@@ -120,25 +121,21 @@ class SkillDistributionTest {
     }
 
     @Test
-    fun `the connect-time instructions fit the 4 KB budget and point at the full manual`() {
-        val bytes = McpServerFactory.SERVER_INSTRUCTIONS.toByteArray(Charsets.UTF_8)
+    fun `mcp-server_md §15 carries the served handshake verbatim - 241`() {
+        // The spec's copy of Delivery 1 is a copy like the jar's and the plugin's: a reader of
+        // the spec must see the text a client receives, not a paraphrase of an older one.
+        val spec = SpecFiles.read(SpecFiles.MCP_SPEC_PATH)
+        val from = spec.indexOf(DELIVERY_1)
+        val to = spec.indexOf(DELIVERY_2)
+        withClue("mcp-server.md lost its §15 Delivery 1/2 headings") { (from in 0 until to) shouldBe true }
+        val block =
+            requireNotNull(TEXT_BLOCK.find(spec.substring(from, to))) {
+                "§15 Delivery 1 has no ```text block holding the handshake"
+            }.groupValues[1]
 
-        assertAll(
-            { bytes.size shouldBeLessThanOrEqual MAX_INSTRUCTIONS_BYTES },
-            // The workspace statement stays first: it is the fact an agent needs before its
-            // first tool call (workspaces design §9, quoted in mcp-server.md §5.1).
-            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "This server is workspace-scoped" },
-            // …and the last line is the handshake's whole point: where the rest lives.
-            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain McpResourceUri.skill() },
-            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "confirm_new_root" },
-            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "pipeline.version.conflict" },
-            // 144 — the learning path: the tool-shaped pointer, the playbook, and the
-            // no-MCP HTTP alternative, applying to creating and updating alike.
-            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "docs_get" },
-            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "authoring-playbook" },
-            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "/skill.md" },
-            { McpServerFactory.SERVER_INSTRUCTIONS shouldContain "updating" },
-        )
+        withClue("mcp-server.md §15 Delivery 1 is not the served text — copy server-instructions.txt into it") {
+            block shouldBe McpServerFactory.SERVER_INSTRUCTIONS
+        }
     }
 
     @Test
@@ -237,12 +234,15 @@ class SkillDistributionTest {
         /** 131 §A.3 — the line cap is met by choosing, never by folding a paragraph onto one line. */
         const val MAX_SKILL_LINE_CHARS = 200
 
-        /** 095 §C1/§E — every client injects this into every session. */
-        const val MAX_INSTRUCTIONS_BYTES = 4096
-
         const val PLUGIN_SKILL_DIR = "plugins/datapipelines/skills/datapipelines"
 
         /** 144 — a `docs_get {"name": "…"}` pointer in the connect-time instructions. */
         val INSTRUCTION_POINTER = Regex("""docs_get \{"name": "([a-z0-9-]+)"\}""")
+
+        const val DELIVERY_1 = "**Delivery 1 — the handshake (push).**"
+        const val DELIVERY_2 = "**Delivery 2 — the resource (pull, MCP).**"
+
+        /** The one fenced `text` block between them: the served handshake, verbatim. */
+        val TEXT_BLOCK = Regex("```text\n(.*?)\n```", RegexOption.DOT_MATCHES_ALL)
     }
 }

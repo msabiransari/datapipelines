@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.48 (frozen contract — additive-only changes after this point)
+**Status:** v1.49 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-09-24
+**Last updated:** 2026-09-25
 
 ---
 
@@ -163,7 +163,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 }
 ```
 
-- `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and names are per-workspace for pipelines and templates while datasource names are globally unique. The full text ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
+- `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and the key sees exactly the datasources granted to its workspace (D-R7). What follows is ranked for a client that truncates it (#241): where the manual lives, then the draft rule, the name grammar, "humans register datasources" and the three recoveries — all inside 1,843 characters, 10 % under the 2,048-character cap Claude Code applies by default. The full text is §15's Delivery 1 block and ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
 - `tools.listChanged: false` — the tool surface is **static**: the same 42 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
@@ -2119,16 +2119,48 @@ that directory. There is exactly one source; everything below is derived from it
 drift-tested against it.
 
 **Delivery 1 — the handshake (push).** `initialize`'s `instructions` (§5.1) is the operating
-core distilled: the introspection-first flow, the name grammar and `confirm_new_root`, "agents
-describe datasources, humans register them", the three recoveries an agent gets wrong most
-often, the draft rule, and a closing learning path that applies to creating AND updating:
-read the core (`docs_get`/`docs_list`, the resource, or — with no MCP transport — plain-HTTP
-`GET /skill.md` and `GET /skill/{reference}.md`), then the authoring playbook beyond two
-nodes, then the task's reference. It lives in
-`modules/mcp-server/src/main/resources/mcp/server-instructions.txt` — a file, so the diff is
-readable and the bytes are assertable — and is capped at **4096 bytes**, test-enforced: every
-client injects it into every session, so a line that does not change what an agent DOES on its
-first five calls belongs in the skill instead.
+core distilled, RANKED for a client that cuts it (#241): the workspace scope; then the learning
+path, which applies to creating AND updating — the core (`docs_get`, or the resource) beyond
+one node, the authoring playbook beyond two, the task's reference from `docs_list`, and
+plain-HTTP `GET /skill.md` / `GET /skill/{reference}.md` for a client with no MCP transport;
+then the draft rule, the name grammar and `confirm_new_root`, "humans register datasources" with
+introspection before SQL, and the three recoveries an agent gets wrong most often, one line each.
+It lives in `modules/mcp-server/src/main/resources/mcp/server-instructions.txt` — a file, so the
+diff is readable and the bytes are assertable.
+
+**Its budget is what a client SHOWS, not what the server sends.** Claude Code truncates an MCP
+server's instructions, and each tool's `description`, at **2,048 characters** unless the session
+sets `CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH` (read from the runtime, Claude Code 2.1.283, which
+compares the JavaScript string length — UTF-16 units — and appends `… [truncated]`). The
+handshake was 3,157 characters with its learning path from character 2,687, so every default
+session read a briefing that stopped mid-sentence and never named the manual. The text is
+therefore held to **1,843 characters and 1,843 UTF-8 bytes** (10 % headroom under the cap),
+every phrase an agent must see sits inside the first 2,048 characters, the rules keep the order
+above, and every tool description stays ≤ 2,048 characters — `McpClientCapTest`. A customer is
+never asked to raise the client's limit. The served text, verbatim (`SkillDistributionTest`
+pins this block to the file):
+
+```text
+This server is workspace-scoped: every tool and resource operates inside the workspace the API key is pinned to. Other workspaces' content is absent, not hidden (it resolves as not-found), and you see exactly the datasources granted to this workspace.
+
+READ THE MANUAL BEFORE YOU AUTHOR — creating a pipeline or updating one, the same sequence. Beyond one node: docs_get {"name": "skill"} (or the resource datapipelines://docs/skill). Beyond two nodes: ALSO docs_get {"name": "authoring-playbook"}, then the task's reference from docs_list. Without MCP, the same documents are plain HTTP, unauthenticated: GET /skill.md, then GET /skill/<reference>.md.
+
+Everything you author lands as a DRAFT — a create included — and is not live until a person releases it from the UI; no tool releases or promotes anything. Test it with pipelines_execute (no version runs your draft), then stop and say it awaits review.
+
+NAMES ARE FOLDER PATHS: 2-10 lower-case segments separated by "/" (acme/mobility/daily_by_zone.sql), never renamed. List the roots first (pipelines_list and templates_list with {"prefix": ""}) and reuse one; a new root is refused until you ASK THE PERSON and pass confirm_new_root: true. Experiments go under test/.
+
+HUMANS REGISTER DATASOURCES: no credential travels through an agent, so no tool creates or edits one — ask a person to add it in the UI. Introspect before writing SQL, never from recalled column names.
+
+WHEN SOMETHING FAILS:
+- pipeline.version.conflict: re-read with pipelines_get and rebase onto the current body_hash; a blind retry overwrites a human's edit.
+- A validation error is YOUR bug: fix the document, never resend it unchanged.
+- A failed execution's root cause is the LAST entry of error.exception.caused_by; report it with error.correlation_id.
+```
+
+Anything that does not change what an agent DOES on its first calls belongs in the skill, which
+states in full every rule this text shortens; the one fact the shortening dropped that the skill
+did not already carry — pipeline and template names are unique per workspace, datasource names
+across the server — moved to its Core concepts.
 
 **Delivery 2 — the resource (pull, MCP).** `datapipelines://docs/skill` and
 `datapipelines://docs/skill/{reference}` (§7.1, §7.2.4), `docs.read`, listed by
@@ -2175,7 +2207,9 @@ they may not list them. This is not a hypothetical: three hand-typed tool counts
 simultaneously when this was written.
 
 **The guards**, each able to go red: `SKILL.md` ≤ 400 lines and its front matter unchanged;
-`instructions` ≤ 4096 bytes and naming the resource URI; the packaged copy byte-identical to
+`instructions` within 1,843 characters and bytes, every phrase an agent must see inside the
+first 2,048 characters, its rules in their ranked order and equal to the Delivery 1 block above;
+every tool description ≤ 2,048 characters; the packaged copy byte-identical to
 the repo file for every file, both directions; the plugin copy likewise; `tools.md` equal to
 the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /skill.md`
 200 `text/markdown` anonymous and `GET /skill/nope.md` 404 in the envelope.
@@ -2186,6 +2220,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.49 | 241 (#241) the handshake under the client cap | No tool, schema or permission change (42 stays 42). **§5.1 `instructions` rewritten for what a client SHOWS**: Claude Code cuts server instructions and each tool description at 2,048 characters by default (`CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH`, read from the 2.1.283 runtime); the handshake was 3,157 characters with the learning path from character 2,687, so a default session never saw it. Now 1,783 characters / 1,791 bytes, ranked: workspace scope, the learning path (`docs_get` skill → `authoring-playbook` → `docs_list`, the HTTP twin), the draft rule, names + `confirm_new_root`, humans register datasources, three recoveries. The stale "datasources are bound or global" clause (global is gone since D-R7) is corrected to "exactly the datasources granted to this workspace". **§15 Delivery 1** carries the served text verbatim, pinned to the file by `SkillDistributionTest`; the 4096-byte cap is replaced by `McpClientCapTest` (1,843 characters and bytes, the required phrases inside the first 2,048 characters, the ranked order, every tool description ≤ 2,048). SKILL.md's Core concepts gains the one dropped fact it lacked (name uniqueness per workspace, datasource names per server). |
 | 2026-09-25 | v1.48 | 7e (#7) the semantic link | No tool added (42 stays 42), no permission changed. **`templates_create` / `templates_update` accept `implements`** (§6.2.8, §6.2.36): the learned facts a transform version cites, outside `body_hash`; on update an omitted `implements` is inherited (owner ruling 2026-09-25), `[]` clears, and an implements-only write on a released version opens no draft; refusals `template.implements_unresolved` (new, §13.9) and `template.blocks_not_allowed` on `sql`/`html`. **`templates_list` gains `implements=<fact id>`** (§6.2.6) and every row carries `implements` + `needs_review`; **`templates_get`** (§6.2.7) carries `implements`, `needs_review` (a cited fact retired, computed on read) and `retired_facts` (`{fact_id, retired_reason, superseded_by}`). **`semantics_list` rows** (§6.2.38) and the **`definitions`** on `datasources_list`/`datasources_get` (§6.2.10/§6.2.18a) carry `implemented_by` on every WORKSPACE fact, under the key's template lens. `tools.md` regenerated. |
 | 2026-09-24 | v1.47 | 215b (#215) key identities, key roles | **Scopes removed** ([Auth §7.5](auth.md#75-key-roles-scopes-removed)): every §6.2 tool's `**Scope:**` row is now its **`**Permission:**`** — the catalog permission the tool declares on `McpToolCatalog.Entry.permission` (moved there from the auth matrix); the MCP key acts as its member's current role capped at author (PK4) and is never a super admin (B1); a role refusal is `auth.key_issuer_role_lost`, an undeclared tool `auth.permission.undeclared`, the two ownership rules `auth.role_required` with `details.reason`. §4.1: **the MCP key connects an MCP client to `/mcp` and nothing else** (B2). Resources are filtered by each family's read permission (a promoter's key lists no executions). §14's refusal outcome is `permission_refused`. Drift fixed on the way: three `datasources_create` paragraphs (removed in 094) had been stranded under §6.2.26 `endpoints_delete` — gone. |
 | 2026-09-24 | v1.46 clarification | #219 | Correct §6.2.17 and §6.2.33 partition/pruning guidance and matching tool descriptions. Null means no registered key, not one file or a mandatory full scan. No tool, schema, permission or execution behavior changes. |

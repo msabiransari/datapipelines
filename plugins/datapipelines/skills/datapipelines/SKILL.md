@@ -16,9 +16,9 @@ REST API and a browser UI. Metadata lives in Postgres (Flyway); results/events i
 ## Core concepts
 
 **Pipeline** — a JSON document: `schema_version`, `name` (machine name, and a **folder
-path** — see *Folders* below), `display_name`, `description`, `parameters` (typed input
-map), and `nodes` (the DAG). `id`, `version`, `owner`, timestamps are server-assigned on
-create.
+path** — see *Folders* below; unique in its workspace, like a template's, while a datasource
+name is unique across the server), `display_name`, `description`, `parameters` (typed input
+map), and `nodes` (the DAG). `id`, `version`, `owner`, timestamps are server-assigned on create.
 
 **Versioning** — **everything you author is a DRAFT, always.** Create lands v1 as a DRAFT
 (`status: "DRAFT"`, `current_version: null`) and it is immediately executable; every later
