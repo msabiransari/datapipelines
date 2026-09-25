@@ -773,10 +773,12 @@ class RoleVisibilityRenderTest {
          * The inventory as shipped, RE-DERIVED from the sweep (never incremented): 114 shipped 63
          * controls over 50 verbs; the tree held 70 over 56 at 7d's base (81d5a327) with the floor
          * still at 114's numbers; 7d's transform face adds `transform-save`, `transform-run-suite`
-         * and the face's own `template-edit` control — 73 over 58.
+         * and the face's own `template-edit` control — 73 over 58; keys v2 retires the login-mint
+         * chip (A15), whose two controls and two verbs (`mcp-key-copy`, `mcp-key-delete`) leave
+         * the tree — 71 over 56 at the 233c base refresh of `feat/keys-v2`.
          */
-        const val SHIPPED_CONTROLS = 73
-        const val SHIPPED_VERBS = 58
+        const val SHIPPED_CONTROLS = 71
+        const val SHIPPED_VERBS = 56
 
         /** The promotion plan the screen reads (055, `PromotionService.Plan`) — the real type. */
         val PROMOTION_PLAN =
