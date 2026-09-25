@@ -966,6 +966,63 @@ Layering rules as ordinary unit tests (module-structure.md §7.8):
 `@Service`-stereotyped types, interfaces included). They run with the normal
 `test` task — no separate command.
 
+Since #217, `ArchitectureGuardTest` also holds the transports to approved entry
+points: a web controller or MCP tool reaches a repository only through the
+inventoried direct reads in the test (new pairs fail by name, stale ones too,
+so the list only shrinks), never opens raw JDBC, and never names a scheduled
+job's service; `@Scheduled` lives only in the three approved scheduling files.
+
+#### Security assurance: the gate's stage and the mutation runner
+
+The [security-assurance record](docs/superpowers/specs/2026-09-24-security-assurance-design.md)
+(#217, ratified 2026-09-24) makes the local merge gate its enforcement point (owner
+decision P1: direct push). Its tests and its mutations are two separate instruments.
+
+**The gate's `security-assurance` stage** (`scripts/gate.sh`, after the buildSrc
+tests). It runs four classes of `tests/integration-tests` alone, forced (`--rerun`),
+with their own log (`.gate-logs/security-assurance.log`) and a verdict line of their
+own:
+
+- `EntryInventoryE2eTest` — every registration the running app holds matches auth.md
+  §8.6's inventory, both ways, and every handler is placed on §7.6 or §8.6.2;
+- `PublicContractE2eTest` — every `PublicPaths` glob's row, probed anonymously;
+- `PermissionSeamE2eTest` — one permission at a time through the test-only resolver seam;
+- `PackagedResolverTest` — the built jar packages exactly one `PermissionResolver`.
+
+The verdict is read from the JUnit XML, not the exit code. A class with no result file,
+zero tests or a skip fails the stage: Gradle exits 0 when one `--tests` filter of
+several matches nothing, and the XML is the only thing that notices. The full build
+has already run these classes; the stage gives them a line nobody can lose among
+thousands. CI's `integration` job re-runs them cold.
+
+**The mutation runner** (`scripts/security-mutations/`). Ten curated defects (record §9,
+B6), each a literal sed pair in one production file, and each naming the ONE test that
+must go red:
+
+```bash
+# From a disposable worktree under .claude/worktrees/, on a branch that is not main,
+# with a clean tree (the runner refuses anything else):
+./scripts/security-mutations/run.sh --self-check   # it fails a mutation no test detects
+./scripts/security-mutations/run.sh                # all ten; or: run.sh 03 07
+```
+
+For each mutation it applies the pair and runs the class alone. It demands RED on the
+named test; a compile error or a missing result file counts as no verdict, never as a
+detection. It then reverts with the inverse pair, never `git checkout --`, demands a
+byte-identical tree and runs the class GREEN. `build/security-mutations/summary.md`
+records the base SHA, the patch hash, the failing assertion, the load and the duration.
+A class that stays green fails the run with `mutation NN not detected`.
+
+When it runs: **never per PR.** The `security-mutations` workflow runs it weekly and on
+demand. Run it by hand when a change touches `modules/auth`, `ScopeInterceptor`, the MCP
+dispatcher or `PublicPaths`. The ten took about three minutes on the dev box
+(2026-09-24). A new guard still ships with its own falsification when it is written;
+the mutations re-prove the existing guards over time.
+
+The ASVS 5.0.0 Level 2 evidence index — which guard stands behind which requirement
+family, and which rows are manual or outstanding — is
+[security-assurance.md](docs/security-assurance.md).
+
 ---
 
 ## 11. Project Structure
