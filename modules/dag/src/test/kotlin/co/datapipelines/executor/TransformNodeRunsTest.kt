@@ -30,6 +30,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import java.lang.management.ManagementFactory
+import java.lang.management.MemoryType
 import java.math.BigDecimal
 import java.time.Duration
 import java.time.Instant
@@ -746,9 +748,16 @@ class TransformNodeRunsTest {
             staging.stageRows("stg_big", schema, (1..200_000).asSequence().map { listOf(it) })
             val memIn = staging.stats().memoryUsedBytes
 
-            // The peak is sampled DURING the run, with a collection before each read, so what
-            // is measured is LIVE heap — a transient batch reads as itself, and a whole
-            // materialised input (the failure shape) would stand up and stay visible.
+            // The measurement is RETAINED LIVE SIZE, not whole-JVM used heap (issue #238):
+            // every sample collects, then sums the heap pools' collection usage — the size the
+            // last collection left live, garbage excluded by construction. The old sampler read
+            // `totalMemory() − freeMemory()`, the whole JVM's used heap, and whatever the
+            // collector deferred of the `System.gc()` hint read as the transform's overhead —
+            // the gate red at 6ff90545 and the CI red on 9ed119e2 were exactly that.
+            val baseline = memoryProofBaseline()
+            withClue("the retained-size probe read live heap (heap pools reporting a collection)") {
+                (baseline > 0) shouldBe true
+            }
             val peak =
                 java.util.concurrent.atomic
                     .AtomicLong(0)
@@ -758,12 +767,10 @@ class TransformNodeRunsTest {
             val sampler =
                 launch(kotlinx.coroutines.Dispatchers.IO) {
                     while (true) {
-                        @Suppress("ExplicitGarbageCollectionCall")
-                        System.gc()
-                        val used = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
-                        peak.updateAndGet { maxOf(it, used) }
+                        val live = liveRetainedBytes()
+                        peak.updateAndGet { maxOf(it, live) }
                         samples.incrementAndGet()
-                        kotlinx.coroutines.delay(50)
+                        kotlinx.coroutines.delay(SAMPLE_PERIOD_MS)
                     }
                 }
             val result = run(bigNode, support(resolved(bigContract, """[ rows.{ "n": n } ]"""), readBatchSize = batchSize))
@@ -771,21 +778,23 @@ class TransformNodeRunsTest {
 
             result.rowsIn shouldBe 200_000L
             result.rowsOut shouldBe 200_000L
-            // Live heap at the peak = the two legitimate tables (input + output) plus the
-            // streaming overhead (batches in flight, the engine's per-batch scratch, the
-            // store's write caches). The bound is the discriminator: the overhead stays under
-            // ONE FULL COPY of the input table — a materialised 200k-row input adds MORE than
-            // one copy of it in live maps (falsified below: the peak grows past the bound).
+            // Retained live heap at the peak = the baseline (the fork's other live data) plus
+            // the two legitimate tables the run itself stands up (the output table, growing to
+            // the input's size, and the batch in flight). The bound is the discriminator: the
+            // run's retained overhead stays under TWO full copies of the input table — a
+            // materialised 200k-row input adds MORE than that in live structures (falsified
+            // below: the peak grows past the bound).
             val inputTableBytes = memIn - (mem0 + witnessBytes)
-            val bound = memIn + 2 * inputTableBytes
+            val bound = baseline + 2 * inputTableBytes
             println(
-                "memory proof: mem0=${mem0}B, witness=${witnessBytes}B, input table=${inputTableBytes}B, " +
-                    "live-heap peak during run=${peak.get()}B over ${samples.get()} samples, bound=${bound}B",
+                "memory proof: baseline=${baseline}B over $MEMORY_PROOF_SAMPLES samples, " +
+                    "peak retained during run=${peak.get()}B over ${samples.get()} samples, " +
+                    "input table=${inputTableBytes}B, bound=baseline + 2 × input=${bound}B",
             )
             withClue("the sampler saw the run at all (vacuity guard)") { (samples.get() >= 3) shouldBe true }
             withClue(
-                "the streaming overhead (peak ${peak.get() - memIn}B over the input table) " +
-                    "stays under one full copy of it (${inputTableBytes}B) — a materialised input adds more",
+                "the streaming overhead (peak ${peak.get() - baseline}B over the baseline) " +
+                    "stays under two full copies of the input table (${2 * inputTableBytes}B) — a materialised input adds more",
             ) {
                 (peak.get() < bound) shouldBe true
             }
@@ -799,6 +808,47 @@ class TransformNodeRunsTest {
 // These four are state-free — no instance field of the spec is read here.
 
 private const val TEMPLATE = "acme/shape/order_lines.jsonata"
+
+// The memory proof's sampling shape (issue #238): the pre-run baseline takes this many
+// readings of the same probe the run sampler uses, and both sample on the same period.
+private const val MEMORY_PROOF_SAMPLES = 5
+private const val SAMPLE_PERIOD_MS = 50L
+
+/**
+ * The heap size the most recent collection left live, summed over the JVM's heap pools —
+ * the measurement the memory proof reads (issue #238). [MemoryPoolMXBean.getCollectionUsage]
+ * is the snapshot each pool took at its last collection, so uncollected garbage is excluded
+ * by construction; the whole-JVM form this replaces (`totalMemory() − freeMemory()` after a
+ * `System.gc()` hint) counts whatever the collector deferred under load, which is what read
+ * as the transform's overhead in the gate red at 6ff90545 and the CI red on 9ed119e2. The
+ * pool-usage form is chosen over `MemoryMXBean.heapMemoryUsage` after a full collection
+ * precisely because it does not depend on the hint being honoured (or on
+ * `-XX:+ExplicitGCInvokesConcurrent` being absent).
+ */
+private fun liveRetainedBytes(): Long {
+    @Suppress("ExplicitGarbageCollectionCall")
+    System.gc()
+    return ManagementFactory
+        .getMemoryPoolMXBeans()
+        .filter { it.type == MemoryType.HEAP }
+        .sumOf { it.collectionUsage?.used ?: 0L }
+}
+
+/**
+ * The memory proof's pre-run baseline (issue #238): [MEMORY_PROOF_SAMPLES] readings of
+ * [liveRetainedBytes] on the same period the run sampler uses, median — the fork JVM's
+ * other live data (the H2 store's own structures, the engine's warm classes), subtracted
+ * from the peak rather than measured as overhead.
+ */
+private suspend fun memoryProofBaseline(): Long {
+    val readings =
+        MutableList(MEMORY_PROOF_SAMPLES) {
+            val live = liveRetainedBytes()
+            kotlinx.coroutines.delay(SAMPLE_PERIOD_MS)
+            live
+        }
+    return readings.sorted()[MEMORY_PROOF_SAMPLES / 2]
+}
 
 private fun resolved(
     contract: TransformContract,
