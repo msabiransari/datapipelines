@@ -7,8 +7,10 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.pipeline.WriteSurface
+import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
@@ -148,10 +150,16 @@ class TemplatePartialController(
      * would give is a refusal here.
      *
      * `type` is a create-time input and appears on no other form (§5.3 makes it immutable);
-     * `dialect` is conditional on it — required for `sql`, absent for `html`, with the
-     * database's `chk_type_dialect` as the backstop. There is no rename affordance because
-     * §4.5 offers no rename: `name` is a create-time input, full stop.
+     * `dialect` is conditional on it — required for `sql`, absent for `html` and the transform
+     * types, with the database's `chk_type_dialect` as the backstop. There is no rename
+     * affordance because §4.5 offers no rename: `name` is a create-time input, full stop.
+     *
+     * 7d: a transform type (`jsonata` / `javascript`) also submits its three blocks — the modal
+     * prefills the design record's example — and they bind through the same binder the
+     * transform face's Save uses (7b's deserializer, strict), so a typo in a block is the
+     * `contract_invalid` the REST create would give. The create then runs the suite (7b's gate).
      */
+    @Suppress("LongParameterList", "LongMethod") // one form field per parameter; the two type families share one refusal path
     @PostMapping("/partials/templates")
     @RequiredScope(Permission.TEMPLATE_CREATE)
     fun create(
@@ -162,6 +170,9 @@ class TemplatePartialController(
         @RequestParam(required = false) displayName: String?,
         @RequestParam(required = false) description: String?,
         @RequestParam body: String,
+        @RequestParam(required = false) contract: String? = null,
+        @RequestParam(required = false) invariants: String? = null,
+        @RequestParam(required = false) tests: String? = null,
     ): Any {
         val principal = principal() ?: error("No authenticated principal")
         val workspaceId = principal.requireWorkspace().id
@@ -174,18 +185,35 @@ class TemplatePartialController(
             if (templates.existsId(workspaceId, trimmedName)) {
                 return refused("A template named '$trimmedName' already exists.")
             }
+            val shownName = displayName?.trim()?.takeIf { it.isNotEmpty() } ?: trimmedName
             val draft =
-                TemplateDraft(
-                    id = trimmedName,
-                    type = templateType,
-                    // §5.1's chk_type_dialect: a dialect belongs to `sql` only. The form hides
-                    // the control for `html`; dropping any value it might still carry is what
-                    // makes the server, not the form, the authority on that rule.
-                    dialect = if (templateType == TemplateType.SQL) TemplateFilters.dialect(dialect) else null,
-                    displayName = displayName?.trim()?.takeIf { it.isNotEmpty() } ?: trimmedName,
-                    description = description?.trim().orEmpty(),
-                    body = body,
-                )
+                if (templateType.isTransform) {
+                    val identity =
+                        TransformFace.Identity(
+                            trimmedName,
+                            templateType.wire,
+                            Template.NONE_ENGINE,
+                            shownName,
+                            description?.trim().orEmpty(),
+                        )
+                    val panes = TransformPanes(body, contract.orEmpty(), invariants.orEmpty(), tests.orEmpty())
+                    when (val bound = TransformFace.bind(identity, panes)) {
+                        is TransformFace.Bound.Refused -> return refused(bound.refusals.joinToString(" ") { it.line })
+                        is TransformFace.Bound.Draft -> bound.draft
+                    }
+                } else {
+                    TemplateDraft(
+                        id = trimmedName,
+                        type = templateType,
+                        // §5.1's chk_type_dialect: a dialect belongs to `sql` only. The form hides
+                        // the control for `html`; dropping any value it might still carry is what
+                        // makes the server, not the form, the authority on that rule.
+                        dialect = if (templateType == TemplateType.SQL) TemplateFilters.dialect(dialect) else null,
+                        displayName = shownName,
+                        description = description?.trim().orEmpty(),
+                        body = body,
+                    )
+                }
             validator.validateOrThrow(draft, workspaceId)
             // D55: the editor's create lands version 1 DRAFT — the same rule the API follows.
             templates.create(workspaceId, draft, principal.userId, CreateLifecycle.DRAFT, WriteSurface.SESSION)
@@ -203,7 +231,18 @@ class TemplatePartialController(
         } catch (e: TemplateValidationException) {
             // The server's rejection is the one that counts (§9.5). The grammar hint rides
             // along only here, where a name-shape refusal is the likely cause.
-            refused(e.result.failures.joinToString(" ") { it.message } + " " + TemplateNameGrammar.DESCRIPTION)
+            if (templateType.isTransform) {
+                // 7d: a transform's refusals name their block and 7b's code — the suite ran,
+                // and "which case, which pane" is the whole answer. The grammar hint only when
+                // the NAME is what failed.
+                val nameFailed = e.result.failures.any { it.code == PipelineErrorCodes.Template.ID_INVALID }
+                refused(
+                    e.result.failures.joinToString(" ") { TransformFace.refusalOf(it).line } +
+                        if (nameFailed) " " + TemplateNameGrammar.DESCRIPTION else "",
+                )
+            } else {
+                refused(e.result.failures.joinToString(" ") { it.message } + " " + TemplateNameGrammar.DESCRIPTION)
+            }
         } catch (e: DatapipelinesException) {
             refused(e.message ?: "The template was rejected.")
         }

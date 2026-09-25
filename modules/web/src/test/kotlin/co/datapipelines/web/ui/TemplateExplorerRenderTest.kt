@@ -263,6 +263,117 @@ class TemplateExplorerRenderTest {
         viewer shouldContain "Open in editor"
     }
 
+    // ------------------------------------------------------------------ 7d: the three faces
+
+    /**
+     * 7d (§9.3) — the create modal offers all four types, and a transform type's blocks field
+     * is there, prefilled with the design record's example, hidden and DISABLED until the type
+     * asks for it (a disabled control is not submitted — the dialect rule's mechanism).
+     */
+    @Test
+    fun `the create modal offers the four types and carries the transform blocks, hidden and disabled`() {
+        val html =
+            render("templates/list") {
+                fillPage()
+                setVariable("transformTypes", "jsonata,javascript")
+                setVariable("skeleton", TransformSkeleton)
+            }
+
+        listOf("sql", "html", "jsonata", "javascript").forEach { type -> html shouldContain "<option value=\"$type\"" }
+        html shouldContain "data-transform-types=\"jsonata,javascript\""
+        html shouldContain "id=\"create-template-blocks-field\" hidden"
+        html shouldContain "id=\"create-template-contract\" name=\"contract\" class=\"ds-input app-template-body-input\" disabled"
+        html shouldContain "name=\"invariants\""
+        html shouldContain "name=\"tests\""
+        // The example, escaped by th:text — the record's mandatory empty case is in it.
+        html shouldContain "&quot;empty input&quot;"
+        html shouldContain "data-transform-body=\""
+        // The type filter lists the same four values.
+        html shouldContain "id=\"template-filter-type\""
+        html shouldContain "<option value=\"jsonata\">jsonata</option>"
+    }
+
+    @Test
+    fun `a transform leaf and search row show their language as the type badge, with no dialect`() {
+        val jsonata = template("acme/finance/order_lines.jsonata", TemplateType.JSONATA)
+        val tree =
+            render("partials/template-tree-level") {
+                fillNestedLevel()
+                setVariable("templates", listOf(jsonata))
+            }
+        tree shouldContain ">jsonata</span>"
+        tree shouldNotContain ">POSTGRES</span>"
+
+        val search =
+            render("partials/template-search") {
+                fillSearch()
+                setVariable("templates", listOf(jsonata))
+            }
+        search shouldContain ">jsonata</span>"
+    }
+
+    /**
+     * 7d (§8.2) — the `needs_review` marker renders behind its flag, in the tree, the search
+     * list and the detail; lane 7e sets the flag. Absent by default: a marker nobody computed
+     * would be a claim nobody checked.
+     */
+    @Test
+    fun `the needs-review marker renders only when its flag is set - tree, search and detail`() {
+        val id = "acme/finance/monthly_revenue.sql"
+        render("partials/template-tree-level") { fillNestedLevel() } shouldNotContain "data-needs-review"
+        render("partials/template-tree-level") {
+            fillNestedLevel()
+            setVariable(TemplateBrowseModel.NEEDS_REVIEW_IDS, setOf(id))
+        } shouldContain "data-needs-review"
+
+        render("partials/template-search") {
+            fillSearch()
+            setVariable(TemplateBrowseModel.NEEDS_REVIEW_IDS, setOf(DEEP_PATH))
+        } shouldContain "data-needs-review"
+        render("partials/template-search") {
+            fillSearch()
+            setVariable(TemplateBrowseModel.NEEDS_REVIEW_IDS, emptySet<String>())
+        } shouldNotContain "data-needs-review"
+
+        render("partials/template-detail") { fillDetail() } shouldNotContain "data-needs-review"
+        render("partials/template-detail") {
+            fillDetail()
+            setVariable("needsReview", true)
+        } shouldContain "data-needs-review"
+    }
+
+    @Test
+    fun `a transform's detail shows its declared mode and inputs, not the Freemarker references`() {
+        val html =
+            render("partials/template-detail") {
+                fillDetail()
+                setVariable("template", TransformFixtures.storedSkeleton())
+            }
+
+        html shouldContain ">Mode<"
+        html shouldContain ">row</dd>"
+        html shouldContain ">orders</span>"
+        html shouldContain ">min_total</span>"
+        html shouldNotContain ">References<"
+        html shouldContain ">jsonata</span>"
+        html shouldContain ">none</span>"
+    }
+
+    /**
+     * The filter FALSIFICATION at the binding the partial uses: `jsonata` binds to exactly the
+     * JSONATA type (the repository's exact-match filter), never to `html` — and an unknown
+     * value binds to nothing, which shows everything rather than nothing (the dialect filter's
+     * long-standing rule). The browser test proves the same through the live list.
+     */
+    @Test
+    fun `the type filter binds jsonata to JSONATA exactly, and an unknown value to no filter`() {
+        TemplateFilters.type("jsonata") shouldBe TemplateType.JSONATA
+        TemplateFilters.type("javascript") shouldBe TemplateType.JAVASCRIPT
+        TemplateFilters.type("JSONata") shouldBe TemplateType.JSONATA
+        TemplateFilters.type("jsonnet") shouldBe null
+        (TemplateFilters.type("jsonata") == TemplateType.HTML) shouldBe false
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     /**

@@ -87,6 +87,9 @@
               <span class="ds-badge ds-badge-default" th:if="${template.dialect != null}"
                     th:text="${template.dialect.wire}">POSTGRES</span>
               <span class="ds-badge ds-badge-default app-chip-mono" th:text="${template.engine}">freemarker</span>
+              <!-- 7d (§8.2): the working version cites a retired fact — marked, never blocked. -->
+              <span th:if="${needsReview == true}" class="ds-badge ds-badge-warning" data-needs-review
+                    title="A fact this version cites was retired or superseded — re-verify before you lean on it.">needs review</span>
             </div>
 
             <p class="tplx-measure u-pre-line" th:if="${!#strings.isEmpty(template.description)}"
@@ -96,12 +99,25 @@
               <!-- A template declares NO parameter schema anywhere in this system (only a
                    pipeline does), so this is what the body REFERENCES, said as that. Calling
                    it "parameters" would invent a contract the server does not hold anyone to. -->
-              <dt>References</dt>
-              <dd>
-                <th:block th:if="${#lists.isEmpty(interpolations)}">—</th:block>
-                <th:block th:each="v, i : ${interpolations}"><span class="u-mono" th:text="${v}">start_date</span><span
-                     th:if="${!i.last}" class="u-muted"> · </span></th:block>
-              </dd>
+              <!-- 7d: a transform DECLARES its inputs (its contract), so it shows the declared
+                   mode and inputs; sql/html keep the derived References reading below. -->
+              <th:block th:if="${template.contract != null}">
+                <dt>Mode</dt>
+                <dd class="u-mono" th:text="${template.contract.mode.wire}">row</dd>
+                <dt>Inputs</dt>
+                <dd>
+                  <th:block th:each="in, i : ${template.contract.inputs.keySet()}"><span class="u-mono" th:text="${in}">orders</span><span
+                       th:if="${!i.last}" class="u-muted"> · </span></th:block>
+                </dd>
+              </th:block>
+              <th:block th:if="${template.contract == null}">
+                <dt>References</dt>
+                <dd>
+                  <th:block th:if="${#lists.isEmpty(interpolations)}">—</th:block>
+                  <th:block th:each="v, i : ${interpolations}"><span class="u-mono" th:text="${v}">start_date</span><span
+                       th:if="${!i.last}" class="u-muted"> · </span></th:block>
+                </dd>
+              </th:block>
               <dt>Created</dt>
               <dd th:text="${#temporals.format(template.createdAt, 'yyyy-MM-dd HH:mm')}">2026-09-02 10:00</dd>
             </dl>

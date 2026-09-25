@@ -1,0 +1,131 @@
+<!-- 7d (#7, transform-nodes design §9.3) — the TRANSFORM editor face: the template editor's
+     source column for a `jsonata` / `javascript` template.
+
+     Four panes — body, contract, invariants, tests — each a plain <textarea> with the class
+     the create modal's body uses (no editor component, no grammar, no CDN: the record's §11
+     defers a code editor to the "template editor, per type" row). The three block panes are
+     JSON, pretty-printed from the stored version on every paint (TransformPanes.of).
+
+     EDITABLE only on the working DRAFT for an author (TemplateSourceModel + TransformFace.fill:
+     `faceEditable`). Every other case — a viewer, a promoter, a RELEASED working version, an
+     older version picked in the select — renders the four panes as read-only <pre> blocks, never
+     as disabled controls (the §9.3 reasoning the source column gives for `type`). An author on a
+     released version gets the existing Edit verb, which copies it into a draft.
+
+     The two verbs:
+       - Save draft (`transform-save`, template.update) submits #tf-form to
+         /partials/templates/transform-face/save — 7b's write path and save gate, under the
+         draft's body_hash. Success re-renders THIS fragment (new hash); a refusal is retargeted
+         into #tf-result only, so the panes keep exactly what was typed.
+       - Run suite (`transform-run-suite`, template.evaluate) posts the same four fields to
+         /partials/templates/transform-face/run-suite and swaps the result list into #tf-result.
+         It runs the panes AS TYPED — unsaved (owner ruling 2026-09-25): a saved draft is
+         always green, because the save gate runs the whole suite.
+
+     This fragment is the column's ONE definition: the editor page th:replaces it for a
+     transform template, and GET /partials/templates/transform-face and the save's success both
+     return it — the root keeps the source column's stable id, so the version select's
+     outerHTML swap targets the same node for every template type.
+
+     Every string here is user-supplied (the body, the blocks, the refusals): th:text only. -->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="face" id="template-source" class="te-source tf-face"
+     th:attr="data-tf-editable=${canAuthor == true and faceEditable == true}">
+
+  <div class="te-panel-head">
+    <div class="u-row">
+      <h2>Transform</h2>
+      <span class="ds-badge ds-badge-default" th:text="'v' + ${selectedVersion}">v2</span>
+      <span class="ds-badge"
+            th:classappend="${selectedStatus == 'DRAFT'} ? 'ds-badge-warning' : 'ds-badge-success'"
+            th:text="${selectedStatus}">DRAFT</span>
+      <span class="u-mono u-text-xs u-secondary" data-tf-hash th:title="${faceHash}"
+            th:text="'hash ' + ${faceHashShort}">hash 1a2b3c4d5e6f</span>
+      <span th:if="${canAuthor != true or faceEditable != true}" class="u-secondary u-text-sm">read-only</span>
+      <!-- template-transform-face.js reveals this on the first keystroke in a pane: Release
+           publishes the last SAVED draft, never what is typed, so unsaved edits say so. -->
+      <span th:if="${canAuthor == true and faceEditable == true}" id="tf-dirty" class="ds-badge ds-badge-warning" hidden>unsaved changes</span>
+    </div>
+    <div class="u-row">
+      <button th:if="${canAuthor == true and faceEditable != true}" data-verb="template-edit" class="ds-button ds-button-primary ds-button-sm" id="tpl-edit-version"
+              th:attr="hx-post=@{/partials/templates/editor/edit(name=${templateName},version=${selectedVersion})}"
+              hx-target="#tpl-edit-refusal" hx-swap="innerHTML">Edit</button>
+      <button th:if="${canAuthor == true and faceEditable == true}" data-verb="transform-run-suite" type="button" class="ds-button ds-button-secondary ds-button-sm" id="tf-run-suite"
+              th:attr="hx-post=@{/partials/templates/transform-face/run-suite}"
+              hx-include="#tf-form" hx-target="#tf-result" hx-swap="innerHTML" hx-indicator="#tf-spinner">Run suite</button>
+      <button th:if="${canAuthor == true and faceEditable == true}" data-verb="transform-save" type="submit" form="tf-form" class="ds-button ds-button-primary ds-button-sm" id="tf-save">Save draft</button>
+      <span id="tf-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
+    </div>
+  </div>
+
+  <!-- Release provenance (versioning §3.1), as the source column shows it. -->
+  <p th:if="${releasedAt != null}" class="u-m0 u-secondary u-text-sm">
+    <span>Released</span>
+    <span th:text="${#temporals.format(releasedAt, 'yyyy-MM-dd HH:mm')}">2026-09-01 10:00</span>
+    <th:block th:if="${releasedBy != null}">
+      <span>by</span>
+      <span class="u-mono" th:text="${releasedBy}">user-id</span>
+    </th:block>
+  </p>
+
+  <!-- Edit's refusal target (the source column's contract: a 200 carrying the reason). -->
+  <div id="tpl-edit-refusal"></div>
+
+  <!-- EDITABLE: the working draft, for an author. -->
+  <form th:if="${canAuthor == true and faceEditable == true}" id="tf-form" class="tf-panes"
+        th:attr="hx-post=@{/partials/templates/transform-face/save}"
+        hx-target="#template-source" hx-swap="outerHTML" hx-indicator="#tf-spinner">
+    <input type="hidden" name="name" th:value="${templateName}">
+    <input type="hidden" name="bodyHash" th:value="${faceHash}">
+    <div class="tf-pane tf-pane-body">
+      <label for="tf-body" class="tf-pane-label"><span>Body</span><span class="ds-caption" th:text="${faceLanguage}">JSONata</span></label>
+      <textarea id="tf-body" name="body" class="ds-textarea app-template-body-input tf-pane-input" spellcheck="false"
+                th:text="${panes.body}">rows</textarea>
+    </div>
+    <div class="tf-pane">
+      <label for="tf-contract" class="tf-pane-label"><span>Contract</span><span class="ds-caption">JSON</span></label>
+      <textarea id="tf-contract" name="contract" class="ds-textarea app-template-body-input tf-pane-input" spellcheck="false"
+                th:text="${panes.contract}">{}</textarea>
+    </div>
+    <div class="tf-pane">
+      <label for="tf-invariants" class="tf-pane-label"><span>Invariants</span><span class="ds-caption">JSON</span></label>
+      <textarea id="tf-invariants" name="invariants" class="ds-textarea app-template-body-input tf-pane-input" spellcheck="false"
+                th:text="${panes.invariants}">[]</textarea>
+    </div>
+    <div class="tf-pane">
+      <label for="tf-tests" class="tf-pane-label"><span>Tests</span><span class="ds-caption">JSON</span></label>
+      <textarea id="tf-tests" name="tests" class="ds-textarea app-template-body-input tf-pane-input" spellcheck="false"
+                th:text="${panes.tests}">[]</textarea>
+    </div>
+  </form>
+
+  <!-- READ-ONLY: every other reader and version — four <pre> blocks, never a form control. -->
+  <div th:if="${canAuthor != true or faceEditable != true}" class="tf-panes" data-tf-readonly>
+    <section class="tf-pane tf-pane-body">
+      <h3 class="tf-pane-label"><span>Body</span><span class="ds-caption" th:text="${faceLanguage}">JSONata</span></h3>
+      <pre id="tf-body-ro" class="te-readonly tf-pane-input" th:text="${panes.body}">rows</pre>
+    </section>
+    <section class="tf-pane">
+      <h3 class="tf-pane-label"><span>Contract</span><span class="ds-caption">JSON</span></h3>
+      <pre id="tf-contract-ro" class="te-readonly tf-pane-input" th:text="${panes.contract}">{}</pre>
+    </section>
+    <section class="tf-pane">
+      <h3 class="tf-pane-label"><span>Invariants</span><span class="ds-caption">JSON</span></h3>
+      <pre id="tf-invariants-ro" class="te-readonly tf-pane-input" th:text="${panes.invariants}">[]</pre>
+    </section>
+    <section class="tf-pane">
+      <h3 class="tf-pane-label"><span>Tests</span><span class="ds-caption">JSON</span></h3>
+      <pre id="tf-tests-ro" class="te-readonly tf-pane-input" th:text="${panes.tests}">[]</pre>
+    </section>
+  </div>
+
+  <!-- The result region: a save refusal or the run-suite list lands here (the result partial);
+       a successful save re-renders the whole face with the line below. -->
+  <div id="tf-result" class="tf-result" aria-live="polite">
+    <p th:if="${faceSaved == true}" class="tf-outcome tf-outcome-ok" data-tf-outcome="saved">
+      <span>Saved — draft</span>
+      <span th:text="'v' + ${selectedVersion}">v2</span>
+      <span>now hashes to</span>
+      <code th:text="${faceHashShort}">1a2b3c4d5e6f</code>
+    </p>
+  </div>
+</div>

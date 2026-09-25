@@ -37,10 +37,31 @@
     select.disabled = !isSql;
     select.required = isSql;
   }
+  /* 7d (#7): a transform type (`data-transform-types` on the type select, rendered from
+     TemplateType) carries three JSON blocks — the blocks field is shown and ENABLED for one
+     and hidden and DISABLED otherwise (a disabled control is not submitted, the dialect
+     rule's own mechanism). The body starts as the example's body for a transform when it is
+     empty, and is cleared again when the author switches back while it is untouched — so the
+     SQL placeholder is never hidden behind a JSONata body nobody typed. */
+  function syncTemplateBlocks() {
+    var type = document.getElementById('create-template-type');
+    var field = document.getElementById('create-template-blocks-field');
+    var body = document.getElementById('create-template-body');
+    if (!type || !field || !body) return;
+    var transforms = (type.getAttribute('data-transform-types') || '').split(',');
+    var isTransform = transforms.indexOf(type.value) !== -1;
+    field.hidden = !isTransform;
+    var blocks = field.querySelectorAll('textarea');
+    for (var i = 0; i < blocks.length; i++) blocks[i].disabled = !isTransform;
+    var example = body.getAttribute('data-transform-body') || '';
+    if (isTransform && body.value === '') body.value = example;
+    if (!isTransform && body.value === example) body.value = '';
+  }
   // 076 §D: arm immediately when this fragment arrives in a boosted swap
   // (DOMContentLoaded has long fired); wait for the parse only on a cold load.
   var initCreateTemplateModal = function() {
     syncTemplateDialect();
+    syncTemplateBlocks();
     var result = document.getElementById('template-create-result');
     if (!result) return;
 
@@ -86,7 +107,10 @@
       else if (action === "template-create-close") { evt.preventDefault(); hideCreateTemplateModal(); }
     });
     document.body.addEventListener("change", function (evt) {
-      if (evt.target && evt.target.id === "create-template-type") syncTemplateDialect();
+      if (evt.target && evt.target.id === "create-template-type") {
+        syncTemplateDialect();
+        syncTemplateBlocks();
+      }
     });
   }
 })();

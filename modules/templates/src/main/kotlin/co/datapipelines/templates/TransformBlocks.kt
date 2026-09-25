@@ -1,6 +1,7 @@
 package co.datapipelines.templates
 
 import co.datapipelines.typesystem.LogicalType
+import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonSubTypes
@@ -196,6 +197,18 @@ data class TransformTestInput(
  * must refuse with — a type-gate refusal or an engine refusal; an unexpected success is a
  * failure too). [output] is bound as a tree so a JSON-null expectation is distinguishable from
  * an absent one.
+ *
+ * ## `output: null` beside a refusal is ABSENT (#236)
+ *
+ * The stored jsonb text writes an absent [output] as `"output": null` (this mapper writes
+ * nulls, and the body hash is computed in Postgres over that exact text, so the writer does not
+ * change). Read back, JSON null binds a `JsonNode` as `NullNode` — non-null — so every stored
+ * refusal-expecting case came back declaring BOTH, and the save-time `expect_shape` rule refused
+ * it on release and on every get → update round trip. [of] is the binding: a JSON-null output
+ * beside a [refusal] is read as absent — a case cannot legitimately hold both (`expect_shape`
+ * refuses that at save), so it is the only reading the system itself ever produces. A JSON-null
+ * output with NO refusal stays a JSON-null expectation; a non-null output beside a refusal is
+ * still `expect_shape`.
  */
 @JsonIgnoreProperties(ignoreUnknown = false)
 data class TransformTestExpect(
@@ -203,7 +216,17 @@ data class TransformTestExpect(
     val output: JsonNode? = null,
     @field:JsonProperty("refusal") @get:JsonProperty("refusal") @param:JsonProperty("refusal")
     val refusal: String? = null,
-)
+) {
+    companion object {
+        /** The JSON binding (#236): `output: null` beside a [refusal] reads as absent. */
+        @JvmStatic
+        @JsonCreator
+        fun of(
+            @JsonProperty("output") output: JsonNode?,
+            @JsonProperty("refusal") refusal: String?,
+        ): TransformTestExpect = TransformTestExpect(output = output?.takeUnless { refusal != null && it.isNull }, refusal = refusal)
+    }
+}
 
 /** One test case (record §2.2): a name, its input object, its expectation. */
 @JsonIgnoreProperties(ignoreUnknown = false)
