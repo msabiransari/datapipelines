@@ -33,6 +33,9 @@ import java.nio.file.Paths
  *  3. A VIEWER — the product's rule is D-R3, "viewers execute": every workspace member may
  *     run what they can read — gets the same button, and activates it from the KEYBOARD
  *     (focus, Enter); the focus is still on the disc once the run is live (159's keeper).
+ *     #220: the handoff is read off the RECORDED focusin (a recorder installed before
+ *     Enter), never off a sampled activeElement — the re-render and the keeper's restore
+ *     are two deferred steps, and one sample between them loses the race under load.
  *     The brief's premise that a viewer sees no button was checked against
  *     `RoleModel.roles` and is false in a browser session; the `canExecute=false` render is
  *     the template contract `RoleVisibilityRenderTest` pins, and graph-markers.test.mjs pins
@@ -137,10 +140,20 @@ class PipelineEditorStartMarkerBrowserTest : BrowserSuite() {
             // Keyboard: focus the disc and press Enter.
             disc.focus()
             vp.evaluate("() => document.activeElement && document.activeElement.classList.contains('pe-marker-run')") shouldBe true
+            installFocusRecorder(vp)
             vp.keyboard().press("Enter")
             waitUntil(vp, "the viewer's run started from the keyboard") { runningAgrees(vp) }
             // 159: the html-label re-rendered the disc as Cancel; the keeper handed focus to
             // the replacement, so the next Enter would cancel — the keyboard never lost its place.
+            // #220: the handoff is read off the RECORDED focusin — the keeper's restore is a
+            // .focus() call, and a focusin is a durable fact once fired — never off a sampled
+            // activeElement: under load the assertion used to run between the re-render's
+            // mutation and the keeper's deferred (setTimeout 0) restore, with focus still on
+            // <body>. The recorder entry is the re-render's own completion signal; the instant
+            // below is asserted only after it.
+            waitUntil(vp, "the keeper handed focus to the re-rendered Cancel disc", { focusDump(vp) }) {
+                focusTrail(vp).any { it.classes.contains(CANCEL_DISC_CLASS) }
+            }
             vp.evaluate("() => document.activeElement && document.activeElement.classList.contains('pe-marker-cancel')") shouldBe true
             vp.locator("[data-verb='pipeline-execute']:not([disabled])").waitFor(Locator.WaitForOptions().setTimeout(EXECUTION_TIMEOUT_MS))
             vp.locator(".pe-card-boundary-end .pe-marker-word").innerText().trim() shouldBe "Finished"
@@ -353,6 +366,61 @@ class PipelineEditorStartMarkerBrowserTest : BrowserSuite() {
             "() => window.__peInstance && window.__peInstance.sseHandler ? window.__peInstance.sseHandler.executionId : null",
         ) as String?
 
+    /**
+     * #220: the focus recorder — one entry per focusin the page fires, in event order,
+     * installed before Enter so the keeper's restore (a deferred .focus()) is RECORDED
+     * rather than sampled. The disc's re-render Start→Cancel goes through the deferred
+     * html-label re-render and the keeper's setTimeout(0) restore; a single activeElement
+     * read between the two loses the race under load (#220's red). A recorded focusin on
+     * the re-rendered disc is the handoff's own completion signal.
+     */
+    private fun installFocusRecorder(on: Page) {
+        on.evaluate(
+            """() => {
+              if (window.__focusTrail) return true;
+              window.__focusTrail = [];
+              document.addEventListener('focusin', function (e) {
+                const t = e.target;
+                window.__focusTrail.push({
+                  at: Date.now(),
+                  tag: t && t.tagName ? t.tagName : '',
+                  cls: t && t.classList ? Array.from(t.classList) : [],
+                  label: t && t.getAttribute ? (t.getAttribute('aria-label') || '') : '',
+                });
+              }, true);
+              return true;
+            }""",
+        ) shouldBe true
+    }
+
+    /** One recorded focusin — what the page actually focused, in event order. */
+    private data class FocusEntry(
+        val at: Long,
+        val tag: String,
+        val classes: List<String>,
+        val label: String,
+    )
+
+    @Suppress("UNCHECKED_CAST")
+    private fun focusTrail(on: Page): List<FocusEntry> {
+        val raw = on.evaluate("() => window.__focusTrail || []") as List<Map<String, Any?>>
+        return raw.map { e ->
+            FocusEntry(
+                at = (e["at"] as Number).toLong(),
+                tag = e["tag"] as String,
+                classes = (e["cls"] as List<*>).map { it as String },
+                label = e["label"] as String,
+            )
+        }
+    }
+
+    /** The recorded focus trail, compressed, for failure messages. */
+    private fun focusDump(on: Page): String =
+        "focus trail: " +
+            focusTrail(on).joinToString(" → ") { e ->
+                (listOf(e.tag) + e.classes + (if (e.label.isNotEmpty()) listOf("\"${e.label}\"") else emptyList())).joinToString(".")
+            }
+
     /** The persisted status, polled until terminal: the executions API is the record, the stream only the delivery. */
     private fun awaitTerminalStatus(
         on: Page,
@@ -386,6 +454,14 @@ class PipelineEditorStartMarkerBrowserTest : BrowserSuite() {
         on: Page,
         what: String,
         done: () -> Boolean,
+    ) = waitUntil(on, what, { "" }, done)
+
+    /** #220: the diagnostics lambda rides the failure message — a red carries its own evidence. */
+    private fun waitUntil(
+        on: Page,
+        what: String,
+        diagnostics: () -> String,
+        done: () -> Boolean,
     ) {
         val deadline = System.currentTimeMillis() + EXECUTION_TIMEOUT_MS.toLong()
         while (System.currentTimeMillis() < deadline) {
@@ -398,7 +474,7 @@ class PipelineEditorStartMarkerBrowserTest : BrowserSuite() {
             if (ok) return
             Thread.sleep(POLL_MS)
         }
-        error("never saw: $what (on ${on.url()})")
+        error("never saw: $what ${diagnostics()} (on ${on.url()})")
     }
 
     private fun shoot(state: String) {
@@ -423,6 +499,9 @@ class PipelineEditorStartMarkerBrowserTest : BrowserSuite() {
     private companion object {
         const val EXECUTION_TIMEOUT_MS = 180_000.0
         const val POLL_MS = 40L
+
+        /** The re-rendered disc's class — the keeper's restore target (#220's recorded predicate). */
+        const val CANCEL_DISC_CLASS = "pe-marker-cancel"
         val ELAPSED = Regex("\\d+ ms|\\d+\\.\\d s|\\d+m \\d+s")
 
         /** A hand's hold between press and release — inside the window the re-render used to open. */
