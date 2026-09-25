@@ -162,7 +162,8 @@ class PerUserRateLimitE2eTest {
                         }
                         statement.execute(
                             "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) VALUES " +
-                                "('${viewerBKey.id}', '$viewerB', '$viewerB', '${viewerBKey.name}', '${viewerBKey.hash}', '$wsId', 'user', NULL)",
+                                "('${viewerBKey.id}', '$viewerB', '$viewerB', '${viewerBKey.name}', " +
+                                "'${viewerBKey.hash}', '$wsId', 'user', NULL)",
                         )
                     }
                 }
