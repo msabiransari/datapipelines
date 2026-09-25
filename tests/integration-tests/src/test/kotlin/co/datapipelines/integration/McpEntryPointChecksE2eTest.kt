@@ -245,6 +245,102 @@ class McpEntryPointChecksE2eTest {
         }
     }
 
+    /**
+     * A20 (owner ruling 2026-09-25, derived at the 233b security pass) over the REAL filter
+     * chain: an `mcp` key whose CREATOR is deactivated is refused `401
+     * auth.principal_deactivated` on /mcp, and reactivating the creator restores the key —
+     * no revoke, no re-mint (a read, never a write). The creator deliberately holds NO
+     * membership in the key's workspace: the ruling is about liveness, not membership, so this
+     * is also the "creator left the workspace" edge — the key lives while they are active, and
+     * its end state stays revocation (A17). The deactivation goes through the admin's own
+     * route (`POST /api/v1/auth/users/{id}/deactivate`, `user.manage`, super admin), the
+     * production path, so the liveness cache is evicted on this instance and the refusal lands
+     * on the very next request (auth.md §11.4), not at TTL expiry.
+     */
+    @Test
+    @Order(10)
+    fun `an mcp key dies with its creator's deactivation and returns on reactivation (A20)`() {
+        val creatorId = UUID.randomUUID().toString()
+        val identityId = UUID.randomUUID().toString()
+        val key = E2eAuth.generateKey("a20-creator-key")
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
+                        "('$creatorId', 'a20-creator@datapipelines.test', 'A20 Creator', 'test', '$creatorId', TRUE, FALSE)",
+                )
+                // The key's own `service` identity (keys v2 A13) — live for the whole test.
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                        "('$identityId', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}', TRUE, FALSE, 'service')",
+                )
+            }
+            connection
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'author')",
+                ).use { ps ->
+                    ps.setString(1, key.id)
+                    ps.setObject(2, UUID.fromString(identityId))
+                    ps.setObject(3, UUID.fromString(creatorId))
+                    ps.setString(4, key.name)
+                    ps.setString(5, key.hash)
+                    ps.setObject(6, UUID.fromString(WORKSPACE_ID))
+                    ps.executeUpdate()
+                }
+        }
+        val toolsList = """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"""
+
+        fun rawMcp(
+            plaintext: String,
+            method: String,
+        ): HttpResponse<String> {
+            val request =
+                HttpRequest
+                    .newBuilder(URI.create("http://localhost:$port$method"))
+                    .header("DP-API-Key", plaintext)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .POST(HttpRequest.BodyPublishers.ofString(toolsList))
+                    .build()
+            return http.send(request, HttpResponse.BodyHandlers.ofString())
+        }
+
+        fun adminPost(path: String): HttpResponse<String> {
+            val request =
+                HttpRequest
+                    .newBuilder(URI.create("http://localhost:$port$path"))
+                    .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                    .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build()
+            return http.send(request, HttpResponse.BodyHandlers.ofString())
+        }
+
+        // The control: with the creator ACTIVE, the key reaches the transport (tools/list answers).
+        withClue("the key must work while its creator is active") {
+            rawMcp(key.plaintext, "/mcp").statusCode() shouldBe 200
+        }
+
+        // Deactivate the creator through the admin route (the audited production flip).
+        val deactivated = adminPost("/api/v1/auth/users/$creatorId/deactivate")
+        withClue("the admin deactivation must succeed: ${deactivated.body()}") { deactivated.statusCode() shouldBe 200 }
+
+        val refused = rawMcp(key.plaintext, "/mcp")
+        withClue("a deactivated creator's mcp key must be refused: ${refused.body()}") {
+            refused.statusCode() shouldBe 401
+            refused.body().contains("\"code\":\"auth.principal_deactivated\"") shouldBe true
+        }
+
+        // Reactivation restores the key (D-R10's shape): the same plaintext works again.
+        val reactivated = adminPost("/api/v1/auth/users/$creatorId/activate")
+        withClue("the admin reactivation must succeed: ${reactivated.body()}") { reactivated.statusCode() shouldBe 200 }
+        withClue("reactivating the creator must restore the key") {
+            rawMcp(key.plaintext, "/mcp").statusCode() shouldBe 200
+        }
+    }
+
     // ---------------------------------------------------------------------------------
 
     private fun registerDatasource(

@@ -46,15 +46,20 @@ import javax.crypto.spec.SecretKeySpec
  * | session of a deactivated user                           | 401 `auth.principal_deactivated`  |
  * | any key whose IDENTITY is deactivated (keys v2: an      | 401 `auth.principal_deactivated`  |
  * | `mcp` key's own identity, an `endpoint`/`server` key's) |                                   |
+ * | an `mcp` key whose CREATOR is deactivated (A20)         | 401 `auth.principal_deactivated`  |
  * | `mcp` / `endpoint` / `server` key, pin deactivated      | 404 `auth.key_workspace_inactive` |
  * | server key on the promotion peer, either                | 401 `auth.promotion.key_invalid`  |
  * | any key, a deactivated workspace's published endpoint   | 404 — the unknown-path body       |
  *
- * Since keys v2 (A13) EVERY key acts as its own `service` identity, and liveness is that
- * identity's — never its creator's (record §3.3, A2): the live control keys here were
- * created by the DEACTIVATED user and still serve. (The pre-v2 row "a `user` key whose MEMBER
- * is deactivated" is gone with the login mint: a member's deactivation cascades to nothing —
- * A2 — so the mcp arm proves the identity's liveness instead.) A dead credential is refused
+ * Since keys v2 (A13) EVERY key acts as its own `service` identity, and the identity's liveness
+ * is what the ACTS-AS read judges (record §3.3, A2). A20 (owner ruling 2026-09-25) adds the ONE
+ * creator read an `mcp` key owes: its CREATOR's user liveness — a deactivated person's `mcp`
+ * keys are refused with the same code, until reactivation restores them (a read, never a
+ * write). The `endpoint` and `server` control keys here were created by the DEACTIVATED user
+ * and still serve — the independence half of A20 (PK2), proven on the live chain every run.
+ * (The pre-v2 row "a `user` key whose MEMBER is deactivated" is gone with the login mint: a
+ * member's deactivation cascades to nothing — A2 — so the mcp arm proves the identity's
+ * liveness instead, and the A20 arm the creator's.) A dead credential is refused
  * before its KIND is judged, so a dead MCP key gets the liveness code on REST too, not B2's
  * kind refusal.
  *
@@ -606,7 +611,7 @@ class DeactivationSweepTest {
         /** The REST control's person: its live SESSION walks every route (#215 B2 — REST is a session's surface). */
         private const val REST_CONTROL_USER = "0c000000-0000-0000-0000-000000000180"
 
-        /** The `service` identities (keys v2 A13: every key's own): two deactivated, seven live. */
+        /** The `service` identities (keys v2 A13: every key's own): three deactivated, seven live. */
         private const val DEAD_OWNER_IDENTITY = "5e000000-0000-0000-0000-000000000180"
         private const val DEAD_WS_IDENTITY = "5e000000-0000-0000-0000-000000000187"
         private const val CONTROL_IDENTITY = "5e000000-0000-0000-0000-000000000188"
@@ -616,6 +621,7 @@ class DeactivationSweepTest {
         private const val DEAD_WS_SERVER_IDENTITY = "5e000000-0000-0000-0000-000000000184"
         private const val CONTROL_SERVER_IDENTITY = "5e000000-0000-0000-0000-000000000185"
         private const val CONTROL_ENDPOINT_IDENTITY = "5e000000-0000-0000-0000-000000000186"
+        private const val DEAD_CREATOR_KEY_IDENTITY = "5e000000-0000-0000-0000-000000000189"
         private const val DEAD_PIPELINE = "abc00000-0000-0000-0000-000000000182"
         private const val LIVE_PIPELINE = "abc00000-0000-0000-0000-000000000183"
         private const val DEAD_ENDPOINT = "abc00000-0000-0000-0000-000000000184"
@@ -626,9 +632,9 @@ class DeactivationSweepTest {
         /**
          * (key, who it acts as, who created it, workspace, kind) — every key the sweep presents,
          * seeded by SQL. Keys v2 (A13): every key — `mcp` included — acts as its own `service`
-         * identity ([identityActive] says whether it is live); a member's deactivation cascades
-         * to nothing, so the deactivated-owner arm of the pre-v2 world is a deactivated-identity
-         * arm.
+         * identity ([identityActive] says whether it is live). A20 adds the creator read for
+         * `mcp` keys only: the `mcp-key:deactivated-owner` arm pairs a LIVE identity with a DEAD
+         * creator, while the pre-v2 "deactivated member" shape is a deactivated-identity arm.
          */
         private class Seed(
             val key: E2eAuth.SeededKey,
@@ -654,16 +660,24 @@ class DeactivationSweepTest {
         private val DEAD_WS_SERVER_KEY = E2eAuth.generateKey("dead-ws-server")
         private val DEAD_IDENTITY_SERVER_KEY = E2eAuth.generateKey("dead-identity-server")
 
+        /** The A20 arm's key: a LIVE identity, a LIVE workspace — and a DEACTIVATED creator. */
+        private val DEAD_CREATOR_MCP_KEY = E2eAuth.generateKey("dead-creator-mcp")
+
         /** The MCP test's live key: lists the tool catalogue the dead arms are walked over. */
         private val CONTROL_KEY = E2eAuth.generateKey("control-mcp")
 
-        /** Live keys CREATED BY THE DEACTIVATED USER — liveness is the identity's, never the creator's (A2). */
+        /**
+         * Live keys CREATED BY THE DEACTIVATED USER — `endpoint` and `server` kinds, which A20
+         * leaves creator-independent (PK2): these are the independence half of the ruling,
+         * walked live on the serve and promotion paths every run.
+         */
         private val CONTROL_SERVER_KEY = E2eAuth.generateKey("control-server")
         private val CONTROL_ENDPOINT_KEY = E2eAuth.generateKey("control-endpoint")
 
         private val SEEDS =
             listOf(
                 Seed(DEAD_OWNER_USER_KEY, DEAD_OWNER_IDENTITY, DEAD_USER, WS_LIVE, "mcp", identityActive = false),
+                Seed(DEAD_CREATOR_MCP_KEY, DEAD_CREATOR_KEY_IDENTITY, DEAD_USER, WS_LIVE, "mcp"),
                 Seed(DEAD_WS_USER_KEY, DEAD_WS_IDENTITY, LIVE_USER, WS_DEAD, "mcp"),
                 Seed(DEAD_WS_ENDPOINT_KEY, DEAD_WS_ENDPOINT_IDENTITY, LIVE_USER, WS_DEAD, "endpoint"),
                 Seed(DEAD_IDENTITY_ENDPOINT_KEY, DEAD_ENDPOINT_IDENTITY, LIVE_USER, WS_LIVE, "endpoint", identityActive = false),
@@ -684,6 +698,7 @@ class DeactivationSweepTest {
                     session = sessionJwt(DEAD_USER, "dead@dsweep.test", WS_LIVE_NAME),
                 ),
                 Arm("mcp-key:deactivated-identity", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_OWNER_USER_KEY),
+                Arm("mcp-key:deactivated-owner", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_CREATOR_MCP_KEY),
                 Arm("mcp-key:deactivated-workspace", HTTP_NOT_FOUND, KEY_WORKSPACE_INACTIVE, DEAD_WS_USER_KEY),
                 Arm("endpoint-key:deactivated-identity", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_IDENTITY_ENDPOINT_KEY),
                 Arm("endpoint-key:deactivated-workspace", HTTP_NOT_FOUND, KEY_WORKSPACE_INACTIVE, DEAD_WS_ENDPOINT_KEY),

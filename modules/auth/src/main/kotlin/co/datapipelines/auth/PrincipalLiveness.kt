@@ -5,10 +5,15 @@ import java.util.UUID
 /**
  * The ONE liveness predicate (D15, roles design §3.5; #215 A2): a principal is live when the user
  * it ACTS AS is `is_active` — the person for a session and an MCP key, the key's own `service`
- * identity for an `endpoint` or `server` key, never the key's creator — AND, when the credential
- * pins a workspace, that workspace is active. The key's own liveness (revoked, expired) is judged
+ * identity for an `endpoint` or `server` key — AND, when the credential
+ * pins a workspace, that workspace is active. The principal is never the key's creator; since
+ * keys v2 A20 (owner ruling 2026-09-25) an `mcp` key ADDITIONALLY requires its creator's user
+ * liveness — the [check] with a null pin, from `ApiKeyService.liveActor` — while `endpoint` and
+ * `server` keys stay creator-independent (PK2). The key's own liveness (revoked, expired) is judged
  * with its record just before. Nothing is cascaded (A2): deactivating a workspace revokes no key
- * and deactivates no identity, so reactivating it restores exactly what was live before. Judged
+ * and deactivates no identity, so reactivating it restores exactly what was live before — and
+ * reactivating a creator restores their `mcp` keys the same way (A20 is a read, never a write).
+ * Judged
  * where each credential becomes a principal — `JwtAuthenticationFilter` for a session,
  * `ApiKeyService.validate` for `user`/`endpoint` keys, `ApiKeyService.validateServerKey` for
  * the promotion peer — which is the earliest point a refusal can happen and the one every

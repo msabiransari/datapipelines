@@ -24,6 +24,11 @@
 --    An owner's SUPER-ADMIN flag grants nothing here: only the explicit membership's role
 --    counts, because the key's role must be one the owner HOLDS in that workspace (the subset
 --    rule, A14) and the owner's membership IS what they hold.
+--    A20 (owner ruling 2026-09-25): the conversion CTE may STAND under the creator-liveness
+--    rule — it reads the owner's MEMBERSHIP, never `users.is_active`, so a key whose owner
+--    is deactivated converts exactly as this header describes and then stays DEAD at request
+--    time (`auth.principal_deactivated` from ApiKeyService.liveActor) until the owner is
+--    reactivated. Liveness is judged at validation, never migrated.
 --
 -- 3. `minted_at_login` and its one-live-key unique index are DROPPED (A15): no key is minted
 --    at sign-in any more; the Keys page is the one creation path. Revoked pre-v2 login keys

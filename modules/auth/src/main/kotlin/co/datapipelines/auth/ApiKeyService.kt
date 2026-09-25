@@ -258,7 +258,8 @@ open class ApiKeyService(
      * The principal is the key's OWN identity ([ApiKey.userId]), for every kind (keys v2 A13);
      * its authority is the KEY's role ([ApiKey.role]) — nothing is read from a membership.
      * `superAdmin` is FALSE for every key (B1): no key resolves an instance permission,
-     * whoever minted it.
+     * whoever minted it. An `mcp` key additionally requires its CREATOR's liveness (A20):
+     * a deactivated person's `mcp` keys are refused here, before any surface logic runs.
      */
     open fun validate(presentedKey: String): AuthenticatedPrincipal {
         val record = verifiedRecord(presentedKey)
@@ -367,10 +368,22 @@ open class ApiKeyService(
      * (the 404 rule), both within the cache TTL. A row that is GONE is not a principal that was
      * deactivated — that stays the plain invalid-key answer. The key's own liveness (revoked,
      * expired) was judged by [usableRecord] before this.
+     *
+     * A20 (owner ruling 2026-09-25, derived at the 233b security pass): an `mcp` key's liveness
+     * also includes its CREATOR's — a deactivated person's `mcp` keys are refused
+     * `auth.principal_deactivated` until reactivation, through the same cached
+     * [UserService.isActive] read (§11.4) and the same refusal an identity gets. `endpoint` and
+     * `server` keys stay creator-independent (PK2, 215b): the human behind a promotion or
+     * published-endpoint credential is not on its authority path. The creator is judged after
+     * the identity, so a deactivated person's deactivated key is told apart by neither — both
+     * are the one liveness code. The creator's MEMBERSHIP is read by nothing here: a key whose
+     * creator left the workspace (or lost their role, A13) lives or dies by revocation (A17),
+     * never by a membership lookup.
      */
     private fun liveActor(record: ApiKey): User {
         val actor = userService.snapshot(record.userId) ?: throw ApiKeyInvalidException()
         principalLiveness.require(actor.id, PrincipalLiveness.Pin(record.workspaceId, record.workspaceName))
+        if (record.kind == ApiKeyKind.MCP) principalLiveness.require(record.createdBy, null)
         return actor
     }
 

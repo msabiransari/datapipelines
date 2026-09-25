@@ -26,6 +26,10 @@ import java.util.UUID
  *   IDENTITY-BACKED: `role` set from the membership, `user_id` moved to a fresh `service`
  *   identity (provider 'key', subject = the key id, `@keys.invalid`), `created_by` keeping the
  *   owner — the person who may revoke it and whose removal revokes it (A17);
+ * - an owner seeded `is_active = FALSE` converts exactly the same (A20, owner ruling
+ *   2026-09-25: the CTE reads the membership, never `users.is_active`) — the converted key is
+ *   then DEAD at request time until the owner is reactivated, which is the validation path's
+ *   judgment (`ApiKeyService.liveActor`), never the migration's;
  * - a viewer's key, and the key of an owner with NO membership (the super-admin case #225
  *   turned on), are REVOKED, never upgraded and never guessed;
  * - an owner's SUPER-ADMIN flag alone grants nothing: only the explicit membership counts;
@@ -47,6 +51,7 @@ class KeysV2MigrationTest {
     private val superAdmin = UUID.randomUUID()
     private val dupOwnerA = UUID.randomUUID()
     private val dupOwnerB = UUID.randomUUID()
+    private val deadOwner = UUID.randomUUID()
     private val ws = UUID.randomUUID()
     private val otherWs = UUID.randomUUID()
 
@@ -58,6 +63,7 @@ class KeysV2MigrationTest {
     private val alreadyRevokedKey = "dpk_V37DEAD001"
     private val dupKept = "dpk_V37DUPNEW1"
     private val dupRenamed = "dpk_V37DUPOLD1"
+    private val deadOwnerKey = "dpk_V37INACTIV1"
 
     private val migrated by lazy {
         MIGRATION_PATHS_PRE_V37.forEach { execute(repoFile(it).readText()) }
@@ -82,6 +88,21 @@ class KeysV2MigrationTest {
 
     @Test
     @Order(2)
+    fun `an inactive owner's key still converts - liveness is judged at request time, not migrated (A20)`() {
+        migrated shouldBe true
+        // The conversion reads the owner's MEMBERSHIP, never `users.is_active` (A20, owner
+        // ruling 2026-09-25): the key is identity-backed and LIVE in the row world — and
+        // refused at validation (`auth.principal_deactivated`) until the owner is
+        // reactivated. That refusal is the request path's judgment (ApiKeyService.liveActor),
+        // proven over the real filter chain by the DeactivationSweepTest
+        // `mcp-key:deactivated-owner` arm and McpEntryPointChecksE2eTest's
+        // deactivate/reactivate case. Reactivation restores the key: nothing was revoked.
+        keyRow(deadOwnerKey) shouldBe listOf("author", "false", deadOwner.toString())
+        identityRow(deadOwnerKey) shouldBe listOf("service", "key", deadOwnerKey, "${deadOwnerKey.lowercase()}@keys.invalid", "true")
+    }
+
+    @Test
+    @Order(3)
     fun `a viewer's key and a membership-less owner's key are revoked, never upgraded`() {
         migrated shouldBe true
         keyRow(viewerKey)[1] shouldBe "true"
@@ -93,7 +114,7 @@ class KeysV2MigrationTest {
     }
 
     @Test
-    @Order(3)
+    @Order(4)
     fun `an already-revoked login key is left untouched - history is not rewritten`() {
         migrated shouldBe true
         keyRow(alreadyRevokedKey) shouldBe listOf("NULL", "true", superAdmin.toString())
@@ -105,7 +126,7 @@ class KeysV2MigrationTest {
     // ---------------------------------------------------------------- the schema (A15/A18/A19)
 
     @Test
-    @Order(4)
+    @Order(5)
     fun `the login mint's column and index are gone, and kind user is renamed mcp everywhere`() {
         migrated shouldBe true
         columnsOf("api_keys") shouldNotContain "minted_at_login"
@@ -117,7 +138,7 @@ class KeysV2MigrationTest {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     fun `duplicate live names are disambiguated and the workspace-name uniqueness holds for live keys`() {
         migrated shouldBe true
         // The newest keeps its name; the older gains the key id's tail. The dup rows are
@@ -154,7 +175,8 @@ class KeysV2MigrationTest {
                 ('$viewer', 'viewer@acme.test', 'Viewer', 'test', 'viewer-sub', TRUE, FALSE),
                 ('$superAdmin', 'boss@acme.test', 'Boss', 'test', 'boss-sub', TRUE, TRUE),
                 ('$dupOwnerA', 'dupa@acme.test', 'Dup A', 'test', 'dupa-sub', TRUE, FALSE),
-                ('$dupOwnerB', 'dupb@acme.test', 'Dup B', 'test', 'dupb-sub', TRUE, FALSE)
+                ('$dupOwnerB', 'dupb@acme.test', 'Dup B', 'test', 'dupb-sub', TRUE, FALSE),
+                ('$deadOwner', 'deadowner@acme.test', 'Dead Owner', 'test', 'deadowner-sub', FALSE, FALSE)
             """.trimIndent(),
         )
         execute(
@@ -173,6 +195,7 @@ class KeysV2MigrationTest {
                 ('$ws', '$viewer', 'viewer'),
                 ('$ws', '$dupOwnerA', 'author'),
                 ('$ws', '$dupOwnerB', 'author'),
+                ('$ws', '$deadOwner', 'author'),
                 ('$otherWs', '$superAdmin', 'workspace_admin')
             """.trimIndent(),
         )
@@ -184,6 +207,7 @@ class KeysV2MigrationTest {
         seedLoginKey(viewerKey, viewer, ws)
         seedLoginKey(superKey, superAdmin, ws)
         seedLoginKey(alreadyRevokedKey, superAdmin, ws, revoked = true)
+        seedLoginKey(deadOwnerKey, deadOwner, ws)
         // The duplicate live names: same workspace, same name, different created_at.
         execute(
             "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role, is_revoked, created_at)" +

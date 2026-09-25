@@ -405,15 +405,16 @@ class ApiKeyServiceTest {
 
     /**
      * Keys v2 A13/B1: the MCP key acts as its OWN identity with its OWN member role — no
-     * membership is read, nothing is capped, and a member's role change does not flow to the key
+     * membership is read, nothing is capped, and a member's DEMOTION does not flow to the key
      * (C2 retired). No key is ever a super admin (B1): neither the principal's flag nor its
-     * context's is set.
+     * context's is set. A20 adds the ONE creator read — liveness; the deactivated-creator
+     * refusal is the next test, and a removed member's key is answered by its revocation (A17).
      */
     @Test
     fun `an mcp key validates against its OWN role - its owner's role is never consulted`() {
         val key = mcpKey(KeyRole.AUTHOR)
 
-        // The owner is demoted, deactivated, gone — the key is unaffected (no derivation).
+        // The owner is demoted — the key is unaffected (no derivation).
         every { userService.snapshot(identityId) } returns identity()
 
         val principal = service.validate(key)
@@ -442,6 +443,27 @@ class ApiKeyServiceTest {
         )
     }
 
+    /**
+     * A20 (owner ruling 2026-09-25): an `mcp` key's liveness includes its CREATOR's. The key's
+     * own identity is LIVE here — the refusal is the deactivated person behind the key, the
+     * same code an identity's deactivation gets, reversible on reactivation. The creator's
+     * MEMBERSHIP is read by nothing: only `is_active` is.
+     */
+    @Test
+    fun `a deactivated creator's mcp key is refused principal_deactivated (A20)`() {
+        val key = mcpKey(KeyRole.AUTHOR)
+
+        every { userService.isActive(identityId) } returns true
+        every { userService.isActive(ownerId) } returns false
+
+        shouldThrow<PrincipalDeactivatedException> { service.validate(key) }.code shouldBe AuthErrorCodes.PRINCIPAL_DEACTIVATED
+    }
+
+    /**
+     * A17: the lever for a creator who is GONE (a removed member) is the REVOCATION the removal
+     * performed in the same act — validation answers from the revoked row and reads no
+     * membership, no creator row.
+     */
     @Test
     fun `a revoked MCP key is refused before anything else about it is judged`() {
         val key = mcpKey(KeyRole.AUTHOR)
