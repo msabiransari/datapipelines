@@ -668,7 +668,6 @@ class TransformNodeE2eTest {
     // ------------------------------------------------------------ seeds
 
     companion object {
-
         /** The fixture's own bucket: the checked-in Iceberg metadata's absolute `s3://dp-lake-it/…`
          * URIs resolve only there (LakeMinioE2eTest's note). Uploading the same bytes is idempotent. */
         private const val BUCKET = "dp-lake-it"
@@ -835,7 +834,6 @@ class TransformNodeE2eTest {
         }
     }
 }
-
 
 // ---------------------------------------------------------------- fixtures, file-level
 
