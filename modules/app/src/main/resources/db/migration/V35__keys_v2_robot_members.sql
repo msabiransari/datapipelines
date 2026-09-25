@@ -41,16 +41,13 @@
 -- from what V35 leaves. Rolling the CODE back requires restoring the database from backup.
 -- =============================================================================
 
--- 1. kind `user` → `mcp` (A19).
--- The kind CHECK widens FIRST (V17's own pattern: Postgres has no ALTER for a CHECK
--- expression), the rows rename, and the CHECK re-narrows to the v2 set — which fails the
--- migration if any 'user' row survived the UPDATE, so the rename is self-checking.
+-- 1. The OLD constraints come off FIRST: the conversion below moves rows THROUGH states
+-- neither CHECK admits (a `user`-kind row gaining a role; an `mcp` row still role-less).
+-- Postgres has no ALTER for a CHECK expression, so both are dropped and re-created at the
+-- end — where they validate the FINAL world, which is what makes the migration self-checking.
 ALTER TABLE api_keys DROP CONSTRAINT chk_api_keys_kind;
-ALTER TABLE api_keys ADD CONSTRAINT chk_api_keys_kind CHECK (kind IN ('user', 'mcp', 'endpoint', 'server'));
+ALTER TABLE api_keys DROP CONSTRAINT chk_api_keys_role;
 ALTER TABLE api_keys ALTER COLUMN kind SET DEFAULT 'mcp';
-UPDATE api_keys SET kind = 'mcp' WHERE kind = 'user';
-ALTER TABLE api_keys DROP CONSTRAINT chk_api_keys_kind;
-ALTER TABLE api_keys ADD CONSTRAINT chk_api_keys_kind CHECK (kind IN ('mcp', 'endpoint', 'server'));
 
 -- 2. The login-minted keys (B4, one DO block = one statement group inside Flyway's transaction).
 DO $$
@@ -97,7 +94,11 @@ BEGIN
         converted_count, revoked_count;
 END $$;
 
--- 3. The login mint is gone (A15).
+-- 3. kind `user` → `mcp` (A19), now that every live row carries a role.
+UPDATE api_keys SET kind = 'mcp' WHERE kind = 'user';
+ALTER TABLE api_keys ADD CONSTRAINT chk_api_keys_kind CHECK (kind IN ('mcp', 'endpoint', 'server'));
+
+-- 3b. The login mint is gone (A15).
 DROP INDEX IF EXISTS api_keys_one_live_user_key;
 ALTER TABLE api_keys DROP COLUMN minted_at_login;
 
@@ -109,8 +110,8 @@ ALTER TABLE pipeline_executions
     ADD CONSTRAINT chk_executions_executed_by_key_kind
         CHECK (executed_by_key_kind IS NULL OR executed_by_key_kind IN ('user', 'mcp', 'endpoint', 'server'));
 
--- 4. The CHECK (A13/A14/A19) and the live-name uniqueness (A18).
-ALTER TABLE api_keys DROP CONSTRAINT chk_api_keys_role;
+-- 4. The CHECK (A13/A14/A19) and the live-name uniqueness (A18). The old CHECK was already
+-- dropped in step 1 (before the conversion moved rows through in-between states).
 -- `role IS NOT NULL` on the transport arms is NOT redundant (V34's own lesson): under SQL's
 -- three-valued logic `role = 'api_caller'` is UNKNOWN for a NULL role, a CHECK passes on
 -- UNKNOWN, and the record's spelling would admit an `endpoint` or `server` key with no role.

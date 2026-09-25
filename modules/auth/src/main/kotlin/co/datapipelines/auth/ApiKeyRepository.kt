@@ -213,6 +213,23 @@ class ApiKeyRepository(
             .toSet()
 
     /**
+     * True when a LIVE key named [name] already exists in [workspaceId] (keys v2 A18 — the
+     * partial unique index makes it a database fact; this read is the create path's clean
+     * refusal ahead of it, so a duplicate name answers a catalogued conflict instead of the
+     * constraint's raw failure).
+     */
+    fun liveNameExists(
+        workspaceId: UUID,
+        name: String,
+    ): Boolean =
+        jdbc
+            .query(
+                "SELECT 1 FROM api_keys WHERE workspace_id = :wid AND name = :name AND is_revoked = FALSE LIMIT 1",
+                MapSqlParameterSource("wid", workspaceId).addValue("name", name),
+            ) { _, _ -> true }
+            .firstOrNull() ?: false
+
+    /**
      * Soft revoke of a key [userId] CREATED (the "your own keys" delete, `mcp_key.revoke_own`).
      * Returns the revoked key, or null when no live key of theirs had that id — the caller
      * deactivates the identity in the same transaction.

@@ -20,30 +20,29 @@ import java.security.SecureRandom
 import java.sql.DriverManager
 import java.sql.ResultSet
 import java.util.Base64
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
- * **The login-minted MCP key, end to end** (179, roles design D16/§3.3 — gate 1 of the lane
- * brief), over the wire against the FULL application: real logins through `POST /login`, the
- * real `WorkspaceService.workspaceForLogin` hook, the real V31 table, and the real sealed
- * store opened by the top bar's copy endpoint.
+ * **Keys v2: creation, over the wire** (keys v2 A13–A19 — the lane's gates), against the FULL
+ * application: real logins through `POST /login`, the real Keys-page and REST creation paths,
+ * the real subset rule, and the real database CHECK.
  *
  * The properties pinned, one per test:
  *
- *  1. A user who owes a forced password change gets NO key — the mint waits for the first
- *     login AFTER the change (the gate, not a race).
- *  2. The first clean login mints exactly one `user` key — `mcp/<workspace>`, the role's
- *     scope set, `minted_at_login`, the sealed secret — and the second login mints NONE.
- *  3. Switching workspaces mints there too (one per user per workspace, V31's index).
- *  4. Delete-to-rotate: the top bar's DELETE revokes; the next switch mints a NEW id.
- *  5. The copy endpoint serves the OPENED secret, and that secret authenticates — the
- *     seal→open round trip is the live key, not a lookalike.
- *  6. No request surface mints a `user` key: REST and htmx answer `auth.key_kind_not_mintable`
- *     (400), on the one surface a workspace admin reaches (the role walk covers the rest).
- *  7. Concurrent logins leave ONE key — the unique index, not the check-then-insert, is the
- *     arbiter.
+ *  1. **A first login mints NOTHING** — no membership event creates a key (A15); the gate's
+ *     falsification: the mint's old hook, restored in a test configuration, fails the first
+ *     assertion. A login that owes a password change mints nothing either (it minted nothing
+ *     before, for a different reason).
+ *  2. Creating an `mcp` key over REST works: role `author` on the row, an identity as its
+ *     user, the creator as `created_by`, and the plaintext exactly once.
+ *  3. The subset rule over the wire: a PROMOTER may mint `promoter` but not `author`; a
+ *     workspace admin may mint all three; a viewer reaches no create route at all.
+ *  4. A duplicate live name is a catalogued 409; revoking frees the name (A18).
+ *  5. Revoke-own: `DELETE /api/v1/auth/api-keys/{id}` revokes a key the caller created — and
+ *     is silent on a key it did not (A14).
+ *  6. The retired wires stay retired: kind `user` is an unknown kind; an absent kind is the
+ *     catalogued 400; `GET /api/v1/auth/api-keys/mine` and `DELETE /partials/mcp-key` no
+ *     longer exist.
  *
  * Namespaced (`mint-*@…`, `mint-acme`) because the module's containers are shared between
  * suites in one JVM run.
@@ -59,78 +58,300 @@ class ApiKeyMintingTest {
 
     @Test
     @Order(1)
-    fun `a login that owes a password change mints nothing - the first clean login mints`() {
+    fun `a first login mints nothing - and neither does a login that owes a password change`() {
         ensureCleanSlate()
         val first = postLogin(ADMIN_EMAIL, SEED_PASSWORD)
         first.statusCode shouldBe 302
 
-        // The bootstrap admin owes the forced change (§5A.4): NO key yet — minting into a
-        // session the gate holds would start a credential's life unreachable.
+        // The bootstrap admin owes the forced change (§5A.4): no key.
         keyRows(ADMIN_EMAIL) shouldHaveSize 0
 
         postPasswordChange(first.sessionCookie(), first.csrfToken, SEED_PASSWORD, ADMIN_PASSWORD, ADMIN_PASSWORD)
             .statusCode shouldBe 200
 
-        // The first CLEAN login. The admin holds no membership yet, so D-R11's demo join
-        // fires — and the mint lands there, carrying the SUPER ADMIN's ladder (D7), not the
-        // demo membership's viewer reach: the key must not be capped below its issuer.
-        val clean = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
-        clean.statusCode shouldBe 302
+        // The first CLEAN login — and still no key anywhere: the login mint is retired
+        // (keys v2 A15). The falsification: restoring `McpKeyMint` in AuthConfiguration and
+        // `ApiKeyService.mintLoginKey` makes this exact assertion red.
+        postLogin(ADMIN_EMAIL, ADMIN_PASSWORD).statusCode shouldBe 302
+        keyRows(ADMIN_EMAIL) shouldHaveSize 0
 
-        val rows = keyRows(ADMIN_EMAIL)
-        rows shouldHaveSize 1
-        rows.single()["workspace"] shouldBe "demo"
-        rows.single()["minted_at_login"] shouldBe true
-        rows.single()["name"] shouldBe "mcp/demo"
-        rows.single()["secret_sealed"] shouldBe true
-        // #215 PK4: the MCP key carries no role and no scopes of its own — it acts as its
-        // member (created_by = user_id), whose role is read per request and capped at author.
-        rows.single()["role_is_null"] shouldBe true
-        rows.single()["self_created"] shouldBe true
+        // A workspace creation plus switch mints nothing either (the switch half of D16, gone).
+        val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
+        createWorkspace(admin.sessionCookie(), admin.csrfToken, WS_ACME)
+        switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
+        keyRows(ADMIN_EMAIL) shouldHaveSize 0
     }
 
     @Test
     @Order(2)
-    fun `a second login mints nothing - mine keeps returning the same key`() {
+    fun `creating an mcp key on the Keys-page path works - role, identity, creator, plaintext once`() {
         val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
-        val firstId = mine(admin.sessionCookie())["id"] as String
+        val session = switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
 
-        postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
+        val created =
+            given()
+                .port(port)
+                .cookie("dp_session", session)
+                .cookie("dp_csrf", admin.csrfToken)
+                .header("DP-CSRF-Token", admin.csrfToken)
+                .contentType(ContentType.JSON)
+                .body("""{"name":"my-agent","kind":"mcp","role":"author"}""")
+                .`when`()
+                .post("/api/v1/auth/api-keys")
+                .then()
+                .statusCode(201)
+                .body("data.kind", Matchers.equalTo("mcp"))
+                .body("data.role", Matchers.equalTo("author"))
+                .body("data.key", Matchers.startsWith("dpk_"))
+                .extract()
 
-        keyRows(ADMIN_EMAIL) shouldHaveSize 1
-        (mine(admin.sessionCookie())["id"] as String) shouldBe firstId
+        val plaintext = created.jsonPath().getString("data.key")
+        plaintext shouldMatch Regex("^dpk_[A-Z2-7]{12}\\.[A-Z2-7]{48}$")
+
+        val rows = keyRows(ADMIN_EMAIL)
+        rows shouldHaveSize 1
+        rows.single()["workspace"] shouldBe WS_ACME
+        rows.single()["name"] shouldBe "my-agent"
+        rows.single()["role"] shouldBe "author"
+        // Identity-backed (A13): the key acts as a `service` row, and the creator is the person.
+        rows.single()["identity_kind"] shouldBe "service"
+        rows.single()["created_by_is_me"] shouldBe true
+
+        // The created key authenticates over /mcp — its ONE surface — and is refused off it
+        // with the keys-v2 reason.
+        mcpList(plaintext).then().statusCode(200).body("result.isError", Matchers.not(Matchers.equalTo(true)))
+        given()
+            .port(port)
+            .header("DP-API-Key", plaintext)
+            .`when`()
+            .get("/api/v1/auth/me")
+            .then()
+            .statusCode(403)
+            .body("error.code", Matchers.equalTo("endpoint.key_kind_refused"))
+            .body("error.details.reason", Matchers.equalTo("mcp_key_off_surface"))
     }
 
     @Test
     @Order(3)
-    fun `switching workspaces mints there - one live key per user per workspace`() {
+    fun `the subset rule over the wire - a promoter mints promoter only, a workspace admin all three, a viewer nothing`() {
         val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
-        createWorkspace(admin.sessionCookie(), admin.csrfToken, WS_ACME)
+        val session = switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
 
-        val switched = switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
+        // A promoter and a viewer join the workspace — seeded as rows + memberships (the
+        // members partial INVITES an unknown email; local accounts are not its subject).
+        seedMember(PROMOTER_EMAIL, "promoter")
+        seedMember(VIEWER_EMAIL, "viewer")
 
-        // The switch's workspace has its own key, minted by the switch, carrying the role
-        // the admin holds THERE (workspace admin → the author's full ladder).
-        val rows = keyRows(ADMIN_EMAIL)
-        rows shouldHaveSize 2
-        val acme = rows.single { it["workspace"] == WS_ACME }
-        acme["name"] shouldBe "mcp/$WS_ACME"
-        acme["minted_at_login"] shouldBe true
-        acme["role_is_null"] shouldBe true
-        acme["self_created"] shouldBe true
-        // …and the re-stamped session's active workspace is the switched one.
-        mine(switched)["name"] shouldBe "mcp/$WS_ACME"
+        val promoter = postLogin(PROMOTER_EMAIL, MEMBER_PASSWORD)
+        promoter.statusCode shouldBe 302
+
+        // A promoter may mint a promoter-role key (equal columns)…
+        given()
+            .port(port)
+            .cookie("dp_session", promoter.sessionCookie())
+            .cookie("dp_csrf", promoter.csrfToken)
+            .header("DP-CSRF-Token", promoter.csrfToken)
+            .contentType(ContentType.JSON)
+            .body("""{"name":"p-agent","kind":"mcp","role":"promoter"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(201)
+
+        // …and NOT an author-role key: A14's refusal names the ROLE that was asked for and
+        // the role the creator was judged as.
+        given()
+            .port(port)
+            .cookie("dp_session", promoter.sessionCookie())
+            .cookie("dp_csrf", promoter.csrfToken)
+            .header("DP-CSRF-Token", promoter.csrfToken)
+            .contentType(ContentType.JSON)
+            .body("""{"name":"p-agent-2","kind":"mcp","role":"author"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(403)
+            .body("error.code", Matchers.equalTo("auth.role_required"))
+            .body("error.details.required", Matchers.equalTo("author"))
+            .body("error.details.held", Matchers.equalTo("promoter"))
+
+        // A viewer holds no mcp_key.create at all: the route refuses before the body is read.
+        val viewer = postLogin(VIEWER_EMAIL, MEMBER_PASSWORD)
+        given()
+            .port(port)
+            .cookie("dp_session", viewer.sessionCookie())
+            .cookie("dp_csrf", viewer.csrfToken)
+            .header("DP-CSRF-Token", viewer.csrfToken)
+            .contentType(ContentType.JSON)
+            .body("""{"name":"v-agent","kind":"mcp","role":"author"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(403)
+            .body("error.code", Matchers.equalTo("auth.role_required"))
+            .body("error.details.required", Matchers.equalTo("mcp_key.create"))
+
+        // The workspace admin mints the remaining roles.
+        val wsAdmin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
+        val adminSession = switch(wsAdmin.sessionCookie(), wsAdmin.csrfToken, WS_ACME)
+        listOf("promoter", "workspace_admin").forEach { role ->
+            given()
+                .port(port)
+                .cookie("dp_session", adminSession)
+                .cookie("dp_csrf", wsAdmin.csrfToken)
+                .header("DP-CSRF-Token", wsAdmin.csrfToken)
+                .contentType(ContentType.JSON)
+                .body("""{"name":"admin-$role","kind":"mcp","role":"$role"}""")
+                .`when`()
+                .post("/api/v1/auth/api-keys")
+                .then()
+                .statusCode(201)
+                .body("data.role", Matchers.equalTo(role))
+        }
     }
 
     @Test
     @Order(4)
-    fun `delete-to-rotate - the top bar's DELETE revokes, the next switch mints a new id`() {
+    fun `a duplicate live name is a catalogued conflict, and revoking frees the name (A18)`() {
         val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
         val session = switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
-        val before = mine(session)["id"] as String
 
-        // The top bar's verb: DELETE /partials/mcp-key, no id — the ONE live key in the
-        // active workspace is unambiguous (V31).
+        given()
+            .port(port)
+            .cookie("dp_session", session)
+            .cookie("dp_csrf", admin.csrfToken)
+            .header("DP-CSRF-Token", admin.csrfToken)
+            .contentType(ContentType.JSON)
+            .body("""{"name":"dup-agent","kind":"mcp","role":"author"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(201)
+
+        given()
+            .port(port)
+            .cookie("dp_session", session)
+            .cookie("dp_csrf", admin.csrfToken)
+            .header("DP-CSRF-Token", admin.csrfToken)
+            .contentType(ContentType.JSON)
+            .body("""{"name":"dup-agent","kind":"mcp","role":"author"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(409)
+            .body("error.details.reason", Matchers.equalTo("key_name_taken"))
+
+        // Revoke-own (A14): the creator's delete — and the name is free again.
+        val keyId = keyRows(ADMIN_EMAIL).single { it["name"] == "dup-agent" && it["live"] == true }["id"] as String
+        given()
+            .port(port)
+            .cookie("dp_session", session)
+            .cookie("dp_csrf", admin.csrfToken)
+            .header("DP-CSRF-Token", admin.csrfToken)
+            .`when`()
+            .delete("/api/v1/auth/api-keys/$keyId")
+            .then()
+            .statusCode(204)
+
+        given()
+            .port(port)
+            .cookie("dp_session", session)
+            .cookie("dp_csrf", admin.csrfToken)
+            .header("DP-CSRF-Token", admin.csrfToken)
+            .contentType(ContentType.JSON)
+            .body("""{"name":"dup-agent","kind":"mcp","role":"promoter"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(201)
+    }
+
+    @Test
+    @Order(5)
+    fun `revoke-own - the creator revokes theirs, the workspace admin revokes any (A14)`() {
+        // The promoter creates a key of their own...
+        val promoter = postLogin(PROMOTER_EMAIL, MEMBER_PASSWORD)
+        val promoterSession = switch(promoter.sessionCookie(), promoter.csrfToken, WS_ACME)
+        val latestAnswer = given()
+            .port(port)
+            .cookie("dp_session", promoterSession)
+            .cookie("dp_csrf", promoter.csrfToken)
+            .header("DP-CSRF-Token", promoter.csrfToken)
+            .contentType(ContentType.JSON)
+            .body("""{"name":"p-agent-del","kind":"mcp","role":"promoter"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+        println("DEBUG p-agent-del -> " + latestAnswer.statusCode + " " + latestAnswer.body().asString().take(300))
+        latestAnswer
+            .then()
+            .statusCode(201)
+
+        val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
+        val adminSession = switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
+
+        val foreignId =
+            keyRows(PROMOTER_EMAIL).single { it["name"] == "p-agent-del" && it["live"] == true }["id"] as String
+
+        // The admin holds api_key.revoke — a foreign key is revoked through the same route.
+        given()
+            .port(port)
+            .cookie("dp_session", adminSession)
+            .cookie("dp_csrf", admin.csrfToken)
+            .header("DP-CSRF-Token", admin.csrfToken)
+            .cookie("dp_csrf", admin.csrfToken)
+            .header("DP-CSRF-Token", admin.csrfToken)
+            .`when`()
+            .delete("/api/v1/auth/api-keys/$foreignId")
+            .then()
+            .statusCode(204)
+        keyRows(PROMOTER_EMAIL).count { it["name"] == "p-agent-del" && it["live"] == true } shouldBe 0
+    }
+
+    @Test
+    @Order(6)
+    fun `the retired wires stay retired - user kind, absent kind, mine, rotate`() {
+        val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
+        val session = switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
+
+        // kind `user` — the pre-v2 wire word — is simply unknown now (A19) …
+        val debugAnswer =
+            given()
+                .port(port)
+                .cookie("dp_session", session)
+                .cookie("dp_csrf", admin.csrfToken)
+                .header("DP-CSRF-Token", admin.csrfToken)
+                .contentType(ContentType.JSON)
+                .body("""{"name":"claude","kind":"user"}""")
+                .`when`()
+                .post("/api/v1/auth/api-keys")
+        debugAnswer
+            .then()
+            .statusCode(403)
+            .body("error.code", Matchers.equalTo("endpoint.key_kind_refused"))
+
+        // … and an ABSENT kind is the catalogued 400 (there is no default any more).
+        given()
+            .port(port)
+            .cookie("dp_session", session)
+            .cookie("dp_csrf", admin.csrfToken)
+            .header("DP-CSRF-Token", admin.csrfToken)
+            .contentType(ContentType.JSON)
+            .body("""{"name":"claude"}""")
+            .`when`()
+            .post("/api/v1/auth/api-keys")
+            .then()
+            .statusCode(400)
+            .body("error.code", Matchers.equalTo("auth.key_kind_not_mintable"))
+
+        // The chip's endpoints are gone with the chip (A15). `mine` now falls inside the
+        // {keyId} template, which answers GET with 405 — either way the route is gone.
+        given()
+            .port(port)
+            .cookie("dp_session", session)
+            .`when`()
+            .get("/api/v1/auth/api-keys/mine")
+            .then()
+            .statusCode(405)
         given()
             .port(port)
             .cookie("dp_session", session)
@@ -139,67 +360,109 @@ class ApiKeyMintingTest {
             .`when`()
             .delete("/partials/mcp-key")
             .then()
-            .statusCode(200)
-
-        // The old key is revoked, and NOTHING is minted until the next entry (a login or a
-        // switch — the DP-Workspace header path mints nothing, by design).
-        mine(session)["id"] shouldBe null
-        keyRows(ADMIN_EMAIL).count { it["workspace"] == WS_ACME } shouldBe 0
-
-        val reentered = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
-        val back = switch(reentered.sessionCookie(), reentered.csrfToken, WS_ACME)
-
-        val after = mine(back)["id"] as String
-        after shouldNotBe before
-        after shouldMatch Regex("dpk_[A-Z2-7]{12}")
-        keyRows(ADMIN_EMAIL).count { it["workspace"] == WS_ACME } shouldBe 1
+            // No mapping answers this any more; Spring's no-handler answer for the verb.
+            .statusCode(404)
     }
 
-    @Test
-    @Order(5)
-    fun `the copy endpoint serves the opened secret, and that secret authenticates`() {
-        val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
-        val session = switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
-        val keyId = mine(session)["id"] as String
+    // ------------------------------------------------------------------ helpers
 
-        val secret =
-            given()
-                .port(port)
-                .cookie("dp_session", session)
-                .`when`()
-                .get("/partials/mcp-key/secret")
-                .then()
-                .statusCode(200)
-                .header("Cache-Control", Matchers.containsString("no-store"))
-                .extract()
-                .asString()
+    /**
+     * This suite creates its world through the APP (the creation IS the subject), so it
+     * cannot `E2eClean.beforeSeeding`. What it can and must do is delete its OWN namespaced
+     * rows, so a re-run on the shared container does not collide with the last run's.
+     * Dependency order, children first — identities included (keys v2: every key has one).
+     */
+    private fun ensureCleanSlate() {
+        if (cleaned) return
+        cleaned = true
+        val memberEmails = listOf(PROMOTER_EMAIL, VIEWER_EMAIL)
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                val mintUsers =
+                    (memberEmails + ADMIN_EMAIL)
+                        .joinToString(", ") { "'$it'" }
+                statement.execute(
+                    "DELETE FROM api_keys WHERE workspace_id IN (SELECT id FROM workspaces WHERE name LIKE 'mint-%') " +
+                        "OR created_by IN (SELECT id FROM users WHERE email IN ($mintUsers))",
+                )
+                statement.execute(
+                    "DELETE FROM users WHERE kind = 'service' AND email LIKE '%@keys.invalid' AND " +
+                        "provider_subject IN (SELECT id FROM api_keys WHERE workspace_id IN " +
+                        "(SELECT id FROM workspaces WHERE name LIKE 'mint-%'))",
+                )
+                statement.execute(
+                    "DELETE FROM workspace_invitations WHERE workspace_id IN (SELECT id FROM workspaces WHERE name LIKE 'mint-%')",
+                )
+                statement.execute(
+                    "DELETE FROM workspace_members WHERE workspace_id IN (SELECT id FROM workspaces WHERE name LIKE 'mint-%') " +
+                        "OR user_id IN (SELECT id FROM users WHERE email IN ($mintUsers))",
+                )
+                statement.execute("DELETE FROM workspaces WHERE name LIKE 'mint-%'")
+                statement.execute("DELETE FROM users WHERE email IN ($mintUsers) AND email <> '$ADMIN_EMAIL'")
+                // The bootstrap admin is the LocalAdminSeeder's row: keep the row, but a
+                // re-run needs the seed credential BACK and the forced change owed again.
+                val hash = E2eAuth.argon2Hash(SEED_PASSWORD)
+                statement.execute(
+                    "UPDATE users SET password_hash = '$hash', password_changed_at = NOW(), must_change_password = TRUE, " +
+                        "failed_login_count = 0, locked_until = NULL WHERE email = '$ADMIN_EMAIL'",
+                )
+            }
+        }
+    }
 
-        // The opened secret IS the live key: the id the chip shows, and it serves /mcp …
-        secret shouldMatch Regex("^${Regex.escape(keyId)}\\.[A-Z2-7]{48}$")
-        mcpList(secret).then().statusCode(200).body("result.isError", Matchers.not(Matchers.equalTo(true)))
-        // … and only /mcp (#215 B2): REST refuses it as a key kind, not as a bad credential.
-        given()
-            .port(port)
-            .header("DP-API-Key", secret)
-            .`when`()
-            .get("/api/v1/auth/me")
-            .then()
-            .statusCode(403)
-            .body("error.code", Matchers.equalTo("endpoint.key_kind_refused"))
-            .body("error.details.reason", Matchers.equalTo("user_key_off_surface"))
+    private var cleaned = false
 
-        // #213 show-once: that one GET destroyed the copyable copy in the same act that
-        // served it — a second GET is 404 (the chip's Copy is gone with it) …
-        given()
-            .port(port)
-            .cookie("dp_session", session)
-            .`when`()
-            .get("/partials/mcp-key/secret")
-            .then()
-            .statusCode(404)
+    /** This suite's key rows CREATED BY [email]: the facts keys v2 states about each. */
+    private fun keyRows(email: String): List<Map<String, Any?>> =
+        query(
+            """
+            SELECT k.id, w.name AS workspace, k.name, COALESCE(k.role, 'NULL') AS role,
+                   u.kind AS identity_kind, (k.created_by = k2.id) AS created_by_is_me,
+                   NOT k.is_revoked AS live
+              FROM api_keys k
+              JOIN workspaces w ON w.id = k.workspace_id
+              JOIN users k2 ON k2.id = k.created_by
+              LEFT JOIN users u ON u.id = k.user_id
+             WHERE k2.email = '$email'
+             ORDER BY k.created_at
+            """.trimIndent(),
+        ) { rs ->
+            mapOf(
+                "id" to rs.getString("id"),
+                "workspace" to rs.getString("workspace"),
+                "name" to rs.getString("name"),
+                "role" to rs.getString("role"),
+                "identity_kind" to rs.getString("identity_kind"),
+                "created_by_is_me" to rs.getBoolean("created_by_is_me"),
+                "live" to rs.getBoolean("live"),
+            )
+        }
 
-        // … and the key itself is untouched: the Argon2id hash still serves a real read.
-        mcpList(secret).then().statusCode(200).body("result.isError", Matchers.not(Matchers.equalTo(true)))
+    /**
+     * Seeds [email] as a SETTLED local member of `mint-acme` with [role] — straight to SQL,
+     * because the members partial INVITES an unknown email rather than creating a local
+     * account, and this suite's subject is the key, not the invitation flow. The Argon2id
+     * hash comes from the same helper every suite's key fixture uses.
+     */
+    private fun seedMember(
+        email: String,
+        role: String,
+    ) {
+        val hash = E2eAuth.argon2Hash(MEMBER_PASSWORD)
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, password_hash, " +
+                        "password_changed_at, must_change_password) VALUES " +
+                        "(gen_random_uuid(), '$email', '${email.substringBefore('@')}', 'local', '$email', TRUE, '$hash', NOW(), FALSE)" +
+                        " ON CONFLICT (email) DO NOTHING",
+                )
+                statement.execute(
+                    "INSERT INTO workspace_members (workspace_id, user_id, role) " +
+                        "SELECT (SELECT id FROM workspaces WHERE name = '$WS_ACME'), id, '$role' FROM users WHERE email = '$email'",
+                )
+            }
+        }
     }
 
     /** `pipelines_list` over `/mcp` — the MCP key's one surface (#215 B2). */
@@ -212,194 +475,6 @@ class ApiKeyMintingTest {
             .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pipelines_list","arguments":{}}}""")
             .`when`()
             .post("/mcp")
-
-    @Test
-    @Order(6)
-    fun `no request surface mints a user key - REST and htmx refuse with the catalogued 400`() {
-        val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
-        val before = keyRows(ADMIN_EMAIL).size
-
-        // REST, default (absent) kind and explicit — both mean `user`, both refused.
-        given()
-            .port(port)
-            .cookie("dp_session", admin.sessionCookie())
-            .cookie("dp_csrf", admin.csrfToken)
-            .header("DP-CSRF-Token", admin.csrfToken)
-            .contentType(ContentType.JSON)
-            .body("""{"name":"on-demand"}""")
-            .`when`()
-            .post("/api/v1/auth/api-keys")
-            .then()
-            .statusCode(400)
-            .body("error.code", Matchers.equalTo("auth.key_kind_not_mintable"))
-        given()
-            .port(port)
-            .cookie("dp_session", admin.sessionCookie())
-            .cookie("dp_csrf", admin.csrfToken)
-            .header("DP-CSRF-Token", admin.csrfToken)
-            .contentType(ContentType.JSON)
-            .body("""{"name":"on-demand","kind":"user"}""")
-            .`when`()
-            .post("/api/v1/auth/api-keys")
-            .then()
-            .statusCode(400)
-            .body("error.code", Matchers.equalTo("auth.key_kind_not_mintable"))
-
-        // The htmx surface (the /api-keys page's form) — the same refusal, from the funnel.
-        // HX-Request is what makes the answer a Shape C toast rather than the 400 page.
-        given()
-            .port(port)
-            .cookie("dp_session", admin.sessionCookie())
-            .cookie("dp_csrf", admin.csrfToken)
-            .header("DP-CSRF-Token", admin.csrfToken)
-            .header("HX-Request", "true")
-            .contentType(ContentType.URLENC)
-            .formParam("kind", "user")
-            .formParam("name", "on-demand")
-            .`when`()
-            .post("/partials/api-keys")
-            .then()
-            .statusCode(400)
-            .body(Matchers.containsString("auth.key_kind_not_mintable"))
-
-        // Nothing was minted anywhere along the way.
-        keyRows(ADMIN_EMAIL) shouldHaveSize before
-
-        // …and the workspace admin's own verb still works: an API (endpoint) key is a 201.
-        given()
-            .port(port)
-            .cookie("dp_session", admin.sessionCookie())
-            .cookie("dp_csrf", admin.csrfToken)
-            .header("DP-CSRF-Token", admin.csrfToken)
-            .contentType(ContentType.JSON)
-            .body("""{"name":"ci","kind":"endpoint"}""")
-            .`when`()
-            .post("/api/v1/auth/api-keys")
-            .then()
-            .statusCode(201)
-            .body("data.kind", Matchers.equalTo("endpoint"))
-            .body("data.key", Matchers.startsWith("dpk_"))
-    }
-
-    @Test
-    @Order(7)
-    fun `concurrent logins leave exactly one key - the unique index is the arbiter`() {
-        // A fresh member with a settled password who has NEVER logged in clean: both
-        // threads mint. (The one-time-password login itself mints nothing — the gate.)
-        val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
-        val oneTime = createLocalUser(admin.sessionCookie(), admin.csrfToken, RACER_EMAIL, workspace = WS_ACME, role = "viewer")
-        val racerLogin = postLogin(RACER_EMAIL, oneTime)
-        keyRows(RACER_EMAIL) shouldHaveSize 0
-        postPasswordChange(racerLogin.sessionCookie(), racerLogin.csrfToken, oneTime, RACER_PASSWORD, RACER_PASSWORD)
-            .statusCode shouldBe 200
-
-        val ready = CountDownLatch(1)
-        val results = mutableListOf<Int>()
-        val threads =
-            (1..2).map {
-                thread {
-                    ready.await()
-                    val response = postLogin(RACER_EMAIL, RACER_PASSWORD)
-                    synchronized(results) { results += response.statusCode }
-                }
-            }
-        ready.countDown()
-        threads.forEach { it.join(TimeUnit.SECONDS.toMillis(30)) }
-
-        results shouldHaveSize 2
-        results.forEach { it shouldBe 302 }
-        // Two mints raced; the V31 partial unique index decided, and the loser re-read.
-        keyRows(RACER_EMAIL) shouldHaveSize 1
-    }
-
-    // ------------------------------------------------------------------ helpers
-
-    /**
-     * This suite creates its world through the APP (the creation IS the subject), so it
-     * cannot `E2eClean.beforeSeeding` (that truncates the demo content the mint-into-demo
-     * assertion needs). What it can and must do is delete its OWN namespaced rows, so a
-     * re-run on the shared container does not collide with the last run's: workspace
-     * `mint-acme`, users `mint-*@datapipelines.test`, and the keys and bindings between
-     * them. Dependency order, children first.
-     */
-    private fun ensureCleanSlate() {
-        if (cleaned) return
-        cleaned = true
-        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-            connection.createStatement().use { statement ->
-                statement.execute(
-                    "DELETE FROM endpoint_key_bindings WHERE api_key_id IN " +
-                        "(SELECT id FROM api_keys WHERE name LIKE 'on-demand%' OR workspace_id IN " +
-                        "(SELECT id FROM workspaces WHERE name LIKE 'mint-%'))",
-                )
-                statement.execute(
-                    "DELETE FROM api_keys WHERE workspace_id IN (SELECT id FROM workspaces WHERE name LIKE 'mint-%') " +
-                        "OR user_id IN (SELECT id FROM users WHERE email LIKE 'mint-%@datapipelines.test')",
-                )
-                statement.execute(
-                    "DELETE FROM workspace_invitations WHERE workspace_id IN (SELECT id FROM workspaces WHERE name LIKE 'mint-%')",
-                )
-                statement.execute(
-                    "DELETE FROM workspace_members WHERE workspace_id IN (SELECT id FROM workspaces WHERE name LIKE 'mint-%') " +
-                        "OR user_id IN (SELECT id FROM users WHERE email LIKE 'mint-%@datapipelines.test')",
-                )
-                statement.execute("DELETE FROM workspaces WHERE name LIKE 'mint-%'")
-                statement.execute("DELETE FROM users WHERE email LIKE 'mint-%@datapipelines.test' AND email <> '$ADMIN_EMAIL'")
-                // The bootstrap admin is the LocalAdminSeeder's row: keep the row, but a
-                // re-run needs the seed credential BACK and the forced change owed again —
-                // otherwise the first login's gate assertion runs against a settled account.
-                // A real Argon2id hash of THIS run's seed password, from the same helper
-                // every suite's key fixture uses (E2eAuth) — the hasher is stateless, so a
-                // test-side one matches what the app's verifies.
-                val hash = E2eAuth.argon2Hash(SEED_PASSWORD)
-                statement.execute(
-                    "UPDATE users SET password_hash = '$hash', password_changed_at = NOW(), must_change_password = TRUE, " +
-                        "failed_login_count = 0, locked_until = NULL WHERE email = '$ADMIN_EMAIL'",
-                )
-            }
-        }
-    }
-
-    private var cleaned = false
-
-    /** The top bar's read: the caller's live MCP key in the session's active workspace. */
-    private fun mine(session: String): Map<String, Any?> {
-        val body =
-            given()
-                .port(port)
-                .cookie("dp_session", session)
-                .`when`()
-                .get("/api/v1/auth/api-keys/mine")
-                .then()
-                .statusCode(200)
-                .extract()
-                .jsonPath()
-                .getMap<String, Any?>("data")
-        return body ?: emptyMap()
-    }
-
-    /** This suite's LIVE `user` key rows: workspace name, name, the V34 role/creator facts, the two V31 columns. */
-    private fun keyRows(email: String): List<Map<String, Any>> =
-        query(
-            """
-            SELECT w.name AS workspace, k.name, (k.role IS NULL) AS role_is_null,
-                   (k.created_by = k.user_id) AS self_created,
-                   k.minted_at_login, (k.secret_sealed IS NOT NULL) AS secret_sealed
-              FROM api_keys k
-              JOIN users u ON u.id = k.user_id
-              JOIN workspaces w ON w.id = k.workspace_id
-             WHERE u.email = '$email' AND k.kind = 'user' AND k.is_revoked = FALSE
-            """.trimIndent(),
-        ) { rs ->
-            mapOf(
-                "workspace" to rs.getString("workspace"),
-                "name" to rs.getString("name"),
-                "role_is_null" to rs.getBoolean("role_is_null"),
-                "self_created" to rs.getBoolean("self_created"),
-                "minted_at_login" to rs.getBoolean("minted_at_login"),
-                "secret_sealed" to rs.getBoolean("secret_sealed"),
-            )
-        }
 
     private fun createWorkspace(
         session: String,
@@ -441,33 +516,6 @@ class ApiKeyMintingTest {
                 .statusCode(302)
                 .extract()
         return response.detailedCookies().firstOrNull { it.name == "dp_session" }?.value ?: session
-    }
-
-    /** Creates a local user through the REAL admin partial; returns the one-time password. */
-    private fun createLocalUser(
-        session: String,
-        csrf: String,
-        email: String,
-        workspace: String,
-        role: String,
-    ): String {
-        val response =
-            given()
-                .port(port)
-                .cookie("dp_session", session)
-                .cookie("dp_csrf", csrf)
-                .header("DP-CSRF-Token", csrf)
-                .contentType(ContentType.URLENC)
-                .formParam("email", email)
-                .formParam("displayName", email.substringBefore('@'))
-                .formParam("workspace", workspace)
-                .formParam("role", role)
-                .`when`()
-                .post("/partials/admin/users")
-        response.statusCode shouldBe 200
-        return checkNotNull(ONE_TIME_PASSWORD.find(response.body().asString())) {
-            "no one-time password in the create response"
-        }.groupValues[1]
     }
 
     private data class LoginResponse(
@@ -553,10 +601,11 @@ class ApiKeyMintingTest {
     companion object {
         /** Namespaced to THIS suite — the module's containers are shared between suites in one run. */
         private const val ADMIN_EMAIL = "mint-admin@datapipelines.test"
-        private const val RACER_EMAIL = "mint-racer@datapipelines.test"
+        private const val PROMOTER_EMAIL = "mint-promoter@datapipelines.test"
+        private const val VIEWER_EMAIL = "mint-viewer@datapipelines.test"
         private const val WS_ACME = "mint-acme"
         private const val ADMIN_PASSWORD = "a-brand-new-admin-password"
-        private const val RACER_PASSWORD = "a-brand-new-racer-password"
+        private const val MEMBER_PASSWORD = "a-brand-new-member-password"
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
         private val CSRF_FIELD = Regex("""name="_csrf" value="([^"]+)"""")

@@ -144,6 +144,11 @@ open class ApiKeyService(
         val keyId = fullKey.substringBefore('.')
         val hash = secretHasher.hash(fullKey)
 
+        // A18: a live key's name is unique in its workspace. Checked here so the create path
+        // answers a catalogued conflict rather than the unique index's raw failure — the index
+        // stays the arbiter of a lost race.
+        if (apiKeyRepository.liveNameExists(workspaceId, name)) throw KeyNameTakenException(name, context.name)
+
         val identity = userService.provisionIdentity(keyId, name)
         val record =
             apiKeyRepository.insert(

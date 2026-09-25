@@ -7,6 +7,7 @@ private const val HTTP_UNAUTHORIZED = 401
 private const val HTTP_FORBIDDEN = 403
 private const val HTTP_NOT_FOUND = 404
 private const val HTTP_TOO_MANY_REQUESTS = 429
+private const val HTTP_CONFLICT = 409
 
 /**
  * Request attributes shared between the auth filters and the Spring Security
@@ -493,6 +494,30 @@ class KeyRoleNotOfferableException(
             buildMap {
                 put("required", requested.wire)
                 heldRole?.let { put("held", it) }
+                workspace?.let { put("workspace", it) }
+            },
+    )
+
+/**
+ * Keys v2 A18 — the create path named a key that already EXISTS (live) in the workspace.
+ * A 409 stand-in (`pipeline.validation.duplicate_name`, the catalog's duplicate-name row) with
+ * `details.reason = key_name_taken`, since §13 has no auth-surface name-conflict code: the
+ * nearest catalogued row and a stable reason token, the house pattern for a catalog gap.
+ * Revoking the existing key frees the name.
+ */
+class KeyNameTakenException(
+    name: String,
+    workspace: String?,
+) : AuthException(
+        "pipeline.validation.duplicate_name",
+        HTTP_CONFLICT,
+        "A live key named '$name' already exists in this workspace (keys v2 A18)",
+        "That key name is already in use here. Revoke the old key first, or pick another name.",
+        details =
+            buildMap {
+                put("reason", "key_name_taken")
+                put("field", "name")
+                put("value", name.take(MAX_ECHOED_EXPIRY_CHARS))
                 workspace?.let { put("workspace", it) }
             },
     )

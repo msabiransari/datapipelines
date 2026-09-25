@@ -128,6 +128,10 @@ class FlywayMigrationIntegrationTest {
                 // 215b (#215) — users.kind, api_keys.created_by + role + chk_api_keys_role, one
                 // service identity per endpoint/server key, api_keys.scopes dropped.
                 "34|key identities and roles|true",
+                // keys v2 (#233) — kind `user`→`mcp` (A19), the login-minted keys converted or
+                // revoked (A15/B4), `minted_at_login` dropped (A15), the CHECK replaced with the
+                // robot-member matrix (A13/A14) and the live `(workspace_id, name)` uniqueness (A18).
+                "35|keys v2 robot members|true",
             )
     }
 
@@ -501,6 +505,7 @@ class FlywayMigrationIntegrationTest {
 
     private fun roleFor(kind: String): String =
         when (kind) {
+            "mcp" -> "'author'"
             "endpoint" -> "'api_caller'"
             "server" -> "'promotion_receiver'"
             else -> "NULL"
@@ -513,18 +518,6 @@ class FlywayMigrationIntegrationTest {
             { columnsOf("api_keys").contains("scopes") shouldBe false },
             { columnsOf("api_keys").containsAll(listOf("created_by", "role")) shouldBe true },
             { columnsOf("users").contains("kind") shouldBe true },
-        )
-        // The CHECK is asserted by INSERTING (the V17 rule). The first three rows are the
-        // contract; the NULL-role rows are the arm the record's spelling admitted — a bare
-        // `role = 'api_caller'` is UNKNOWN for NULL, and a CHECK passes on UNKNOWN.
-        assertAll(
-            { roleAccepted("user", null) shouldBe true },
-            { roleAccepted("endpoint", "api_caller") shouldBe true },
-            { roleAccepted("server", "promotion_receiver") shouldBe true },
-            { roleAccepted("endpoint", null) shouldBe false },
-            { roleAccepted("server", null) shouldBe false },
-            { roleAccepted("user", "api_caller") shouldBe false },
-            { roleAccepted("endpoint", "promotion_receiver") shouldBe false },
         )
         // users.kind is closed: a fourth kind is refused.
         dataSource.connection.use { connection ->
@@ -546,10 +539,93 @@ class FlywayMigrationIntegrationTest {
         }
     }
 
-    /** True when `api_keys` accepts ([kind], [role]); the probe row is always rolled back. */
+    /**
+     * Keys v2 (#233) on the SHIPPED database: the kind matrix is the robot-member one (A19),
+     * the role CHECK is the per-kind family matrix (A13/A14), `minted_at_login` is gone (A15),
+     * and the live `(workspace_id, name)` uniqueness (A18) is a database fact. The CHECK is
+     * asserted by INSERTING (the V17 rule); the conversion of the login-minted ROWS is proven
+     * against a populated pre-V35 database by `KeysV2MigrationTest`.
+     */
+    @Test
+    fun `V35 makes every key a robot member - kind mcp, one role family per kind, no login mint`() {
+        assertAll(
+            { columnsOf("api_keys").contains("minted_at_login") shouldBe false },
+            {
+                query("SELECT indexname FROM pg_indexes WHERE tablename = 'api_keys'") { it.getString(1) } shouldContain
+                    "uq_api_keys_live_workspace_name"
+            },
+        )
+        // The dropped V31 index, by absence: a name the old mint created is no longer there.
+        query("SELECT indexname FROM pg_indexes WHERE tablename = 'api_keys'") { it.getString(1) }
+            .contains("api_keys_one_live_user_key") shouldBe false
+
+        // Kind set (A19): `mcp` in, `user` out.
+        assertAll(
+            { kindAccepted("mcp") shouldBe true },
+            { kindAccepted("endpoint") shouldBe true },
+            { kindAccepted("server") shouldBe true },
+            { kindAccepted("user") shouldBe false },
+        )
+        // Role matrix (A13/A14): an `mcp` key carries one of the three MEMBER roles — never
+        // viewer (A15), never a transport role, never NULL while live; the transport kinds keep
+        // their fixed roles and refuse every other; a revoked pre-v2 `mcp` row may carry NULL.
+        assertAll(
+            { roleAccepted("mcp", "author") shouldBe true },
+            { roleAccepted("mcp", "promoter") shouldBe true },
+            { roleAccepted("mcp", "workspace_admin") shouldBe true },
+            { roleAccepted("mcp", "viewer") shouldBe false },
+            { roleAccepted("mcp", "api_caller") shouldBe false },
+            { roleAccepted("mcp", "promotion_receiver") shouldBe false },
+            { roleAccepted("mcp", "super_admin") shouldBe false },
+            { roleAccepted("mcp", null) shouldBe false },
+            { roleAccepted("mcp", null, revoked = true) shouldBe true },
+            { roleAccepted("endpoint", "api_caller") shouldBe true },
+            { roleAccepted("endpoint", null) shouldBe false },
+            { roleAccepted("endpoint", "author") shouldBe false },
+            { roleAccepted("server", "promotion_receiver") shouldBe true },
+            { roleAccepted("server", null) shouldBe false },
+            { roleAccepted("server", "api_caller") shouldBe false },
+        )
+        // A18: a second LIVE key of the same name in one workspace is refused by the index.
+        liveNameDuplicateRefused() shouldBe true
+    }
+
+    /**
+     * True when the live `(workspace_id, name)` unique index refuses a duplicate; the probe
+     * rows are always rolled back.
+     */
+    private fun liveNameDuplicateRefused(): Boolean =
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active)" +
+                            " VALUES ('$KIND_PROBE_USER', 'v17-probe@datapipelines.test', 'V17 probe', 'test', 'v17-probe', TRUE)" +
+                            " ON CONFLICT (id) DO NOTHING",
+                    )
+                    listOf("dpk_V35PROBE01", "dpk_V35PROBE02").forEach { id ->
+                        statement.execute(
+                            "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                                " VALUES ('$id', '$KIND_PROBE_USER', '$KIND_PROBE_USER', 'probe-dup', 'h'," +
+                                " (SELECT id FROM workspaces LIMIT 1), 'mcp', 'author')",
+                        )
+                    }
+                }
+                false
+            } catch (e: java.sql.SQLException) {
+                check(e.message.orEmpty().contains("uq_api_keys_live_workspace_name")) { "unexpected SQL failure: ${e.message}" }
+                true
+            } finally {
+                connection.rollback()
+            }
+        }
+
+    /** True when `api_keys` accepts ([kind], [role], [revoked]); the probe row is always rolled back. */
     private fun roleAccepted(
         kind: String,
         role: String?,
+        revoked: Boolean = false,
     ): Boolean =
         dataSource.connection.use { connection ->
             connection.autoCommit = false
@@ -557,13 +633,13 @@ class FlywayMigrationIntegrationTest {
                 connection.createStatement().use { statement ->
                     statement.execute(
                         "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active)" +
-                            " VALUES (\'$KIND_PROBE_USER\', \'v17-probe@datapipelines.test\', \'V17 probe\'," +
-                            " \'test\', \'v17-probe\', TRUE) ON CONFLICT (id) DO NOTHING",
+                            " VALUES ('$KIND_PROBE_USER', 'v17-probe@datapipelines.test', 'V17 probe'," +
+                            " 'test', 'v17-probe', TRUE) ON CONFLICT (id) DO NOTHING",
                     )
                     statement.execute(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
-                            " VALUES (\'dpk_V34PROBE01\', \'$KIND_PROBE_USER\', \'$KIND_PROBE_USER\', \'probe\', \'h\'," +
-                            " (SELECT id FROM workspaces LIMIT 1), \'$kind\', ${role?.let { "'$it'" } ?: "NULL"})",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role, is_revoked)" +
+                            " VALUES ('dpk_V34PROBE01', '$KIND_PROBE_USER', '$KIND_PROBE_USER', 'probe', 'h'," +
+                            " (SELECT id FROM workspaces LIMIT 1), '$kind', ${role?.let { "'$it'" } ?: "NULL"}, $revoked)",
                     )
                 }
                 true
