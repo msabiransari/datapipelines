@@ -265,12 +265,11 @@ class TransformFaceBrowserTest : BrowserSuite() {
             listOf(1100, 1440, 1920).forEach { width ->
                 shot("$name-$width-$theme", viewport = width)
                 // The page must not be wider than the window: no sideways scroll, and no <main> wider
-                // than the window and clipped (which a scroll-width check alone cannot see). At 1100
-                // the SHELL's top bar sizes the column 43px past the window on every template editor
-                // (sql measured identically, before this lane) — #237; the face adds nothing to it.
+                // than the window and clipped (which a scroll-width check alone cannot see). Asked at
+                // 1100 too since #237: the shell's top bar sized the column 43px past that window on
+                // every template editor, and this guard carried a tolerance for it until the fix.
                 val widths = page.evaluate(PAGE_WIDTHS) as List<*>
-                val clipped = widths.any { (it as Number).toInt() > width }
-                if (clipped && width > SHELL_CLIP_BELOW) overflowing += "$width/$theme: scroll, main.right = $widths"
+                if (widths.any { (it as Number).toInt() > width }) overflowing += "$width/$theme: scroll, main.right = $widths"
             }
         }
         overflowing.shouldBeEmpty()
@@ -297,9 +296,6 @@ class TransformFaceBrowserTest : BrowserSuite() {
     }
 
     private companion object {
-        /** #237: below this width the shell's top bar (not the face) clips `<main>` on every template editor. */
-        const val SHELL_CLIP_BELOW = 1280
-
         /** The document's scroll width and `<main>`'s right edge — both must be within the window. */
         const val PAGE_WIDTHS =
             "() => [document.documentElement.scrollWidth, Math.round(document.querySelector('main').getBoundingClientRect().right)]"
