@@ -96,7 +96,7 @@ class TransformConfiguration {
         templates: TemplateRepository,
         pool: ScriptEvaluationPool,
         properties: TransformProperties,
-        stagingProperties: co.datapipelines.staging.H2StagingProperties,
+        stagingProperties: StagingH2Properties,
     ): co.datapipelines.executor.TransformSupport =
         co.datapipelines.executor.TransformSupport(
             resolver =

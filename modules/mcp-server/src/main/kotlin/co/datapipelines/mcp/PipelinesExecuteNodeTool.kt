@@ -158,6 +158,14 @@ class PipelinesExecuteNodeTool(
             }
 
             is NodeSqlResolution.RenderFailed -> {
+                // 7c (#7): a transform template declares no dialect, so the resolver refuses
+                // its render with its own no-dialect sentence BEFORE any tool verdict can name
+                // the node type. That sentence — pinned by the tool test — is the one shape a
+                // TRANSFORM node produces here, and the tool's answer for it is the tempdb
+                // refusal with `use: templates_evaluate`, never a render failure.
+                if (resolution.message.contains("only type 'sql' templates can render node SQL")) {
+                    standaloneRefused(resolution.version, nodeId, "transform_node")
+                }
                 throw DatapipelinesException(
                     code = PipelineErrorCodes.Node.TEMPLATE_RENDER_FAILED,
                     message = resolution.message,
