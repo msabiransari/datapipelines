@@ -778,7 +778,8 @@ class PublishedEndpointE2eTest {
                     listOf(ADMIN_KEY to "ep-admin-key", FOREIGN_KEY to "ep-foreign-key").forEach { (key, name) ->
                         statement.execute(
                             "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
-                                "(gen_random_uuid(), '${key.id.lowercase()}@keys.invalid', '$name', 'key', '${key.id}', TRUE, FALSE, 'service')",
+                                "(gen_random_uuid(), '${key.id.lowercase()}@keys.invalid', '$name', 'key', " +
+                                    "'${key.id}', TRUE, FALSE, 'service')",
                         )
                     }
                 }

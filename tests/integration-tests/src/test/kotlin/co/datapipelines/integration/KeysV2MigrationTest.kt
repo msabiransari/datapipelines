@@ -191,7 +191,8 @@ class KeysV2MigrationTest {
         )
         execute(
             "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role, is_revoked, created_at)" +
-                " VALUES ('$dupRenamed', '$dupOwnerB', '$dupOwnerB', 'shared name', 'h', '$ws', 'user', NULL, FALSE, '2026-08-01T00:00:00Z')",
+                " VALUES ('$dupRenamed', '$dupOwnerB', '$dupOwnerB', 'shared name', 'h', '$ws', 'user', NULL, FALSE," +
+                        " '2026-08-01T00:00:00Z')",
         )
     }
 

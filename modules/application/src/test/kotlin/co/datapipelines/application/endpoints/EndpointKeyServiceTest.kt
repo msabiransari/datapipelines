@@ -318,11 +318,6 @@ class EndpointKeyServiceTest {
         shouldThrow<DatapipelinesException> { block() }.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED
     }
 
-    /** Asserts the block refuses with the D16 not-mintable-on-demand code. */
-    private fun notMintable(block: () -> Unit) {
-        shouldThrow<DatapipelinesException> { block() }.code shouldBe "auth.key_kind_not_mintable"
-    }
-
     private fun principal() =
         AuthenticatedPrincipal(
             userId = ACTOR,

@@ -121,6 +121,7 @@ class AuthController(
     @PostMapping("/api-keys")
     @ResponseStatus(HttpStatus.CREATED)
     @RequiredScope(Permission.MCP_KEY_CREATE)
+    @Suppress("ThrowsCount") // each refusal is its own catalogued code with its own details — merging hides which one fired
     fun createKey(
         @RequestBody body: CreateApiKeyRequest,
     ): ApiResponse<Map<String, Any?>> {

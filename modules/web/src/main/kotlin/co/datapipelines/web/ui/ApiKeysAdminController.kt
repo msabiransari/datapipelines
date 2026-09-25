@@ -228,6 +228,10 @@ class ApiKeysAdminController(
      * they are responsible for. Revoked keys stay VISIBLE (their `is_revoked` is a fact an
      * operator checks).
      */
+    private companion object {
+        private const val MAX_ECHOED_ROLE_CHARS = 32
+    }
+
     private fun rows(principal: AuthenticatedPrincipal): List<ApiKeyRows.Row> {
         val workspaceId = principal.requireWorkspace().id
         val all = apiKeyRepository.findByWorkspace(workspaceId)
@@ -285,7 +289,7 @@ class ApiKeysAdminController(
             ?: throw DatapipelinesException(
                 code = PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED,
                 message = "Unknown key role '$raw'. Supported: ${KeyRole.WIRE_VALUES.joinToString(", ")}.",
-                details = mapOf("reason" to "role_unknown", "role" to raw.take(32)),
+                details = mapOf("reason" to "role_unknown", "role" to raw.take(MAX_ECHOED_ROLE_CHARS)),
             )
 
     private fun unknownKind(raw: String) =

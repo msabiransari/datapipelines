@@ -745,6 +745,7 @@ class TransformNodeE2eTest {
         }
 
         /** The whole seed — called from Order(1), when a context (and Flyway) exists. */
+    @Suppress("LongMethod") // the seed IS the fixture: identities, keys, datasources, scratch tables in one block
         private fun seedAll() {
             E2eClean.beforeSeeding()
             // The session user (workspace admin), its membership, and the MCP key (#215: the key
@@ -771,7 +772,8 @@ class TransformNodeE2eTest {
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'workspace_admin')",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'workspace_admin')",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
                         ps.setObject(2, UUID.fromString(KEY_IDENTITY))

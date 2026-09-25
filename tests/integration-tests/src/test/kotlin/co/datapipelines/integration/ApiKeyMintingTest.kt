@@ -133,6 +133,7 @@ class ApiKeyMintingTest {
 
     @Test
     @Order(3)
+    @Suppress("LongMethod") // every ordered creator-role x requested-role cell is one matrix row; splitting it orphans a cell
     fun `the subset rule over the wire - a promoter mints promoter only, a workspace admin all three, a viewer nothing`() {
         val admin = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
         val session = switch(admin.sessionCookie(), admin.csrfToken, WS_ACME)
@@ -611,7 +612,6 @@ class ApiKeyMintingTest {
         private const val BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
         private val CSRF_FIELD = Regex("""name="_csrf" value="([^"]+)"""")
-        private val ONE_TIME_PASSWORD = Regex("""([A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4})""")
 
         private val random = SecureRandom()
 

@@ -594,6 +594,7 @@ class FlywayMigrationIntegrationTest {
      * True when the live `(workspace_id, name)` unique index refuses a duplicate; the probe
      * rows are always rolled back.
      */
+    @Suppress("NestedBlockDepth") // the probe rolls back inside one connection block; extracting the SQL would hide the rollback boundary
     private fun liveNameDuplicateRefused(): Boolean =
         dataSource.connection.use { connection ->
             connection.autoCommit = false

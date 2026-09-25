@@ -527,7 +527,6 @@ class RoleWalkE2eTest {
         private const val AUTHOR_REFUSED_FLOOR = 15
         private const val PROMOTER_REFUSED_FLOOR = 60
         private const val WS_ADMIN_REFUSED_FLOOR = 8
-        private const val MCP_VIEWER_REFUSED_FLOOR = 15
         private const val MCP_PROMOTER_REFUSED_FLOOR = 22
 
         /**
@@ -645,7 +644,8 @@ class RoleWalkE2eTest {
                     (MCP_KEYS.values + listOf(API_CALLER_KEY, RECEIVER_KEY)).forEach { key ->
                         statement.execute(
                             "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
-                                "('${key.ownerId}', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}', TRUE, FALSE, 'service')",
+                                "('${key.ownerId}', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', " +
+                                    "'${key.id}', TRUE, FALSE, 'service')",
                         )
                     }
                 }

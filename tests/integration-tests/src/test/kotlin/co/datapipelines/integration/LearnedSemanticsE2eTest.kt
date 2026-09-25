@@ -402,6 +402,7 @@ class LearnedSemanticsE2eTest {
         }
     }
 
+    @Suppress("LongMethod") // the seed IS the fixture: identities, memberships, pipelines in one spelled-out block
     private fun seedAuthRows() {
         metadata { st ->
             st.execute(
@@ -449,8 +450,10 @@ class LearnedSemanticsE2eTest {
                     PROMOTER_KEY to VERA_KEY_IDENTITY,
                 )) {
                     st.execute(
-                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
-                            "('$identity', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}', TRUE, FALSE, 'service')",
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject," +
+                            " is_active, is_admin, kind) VALUES " +
+                            "('$identity', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}'," +
+                                " TRUE, FALSE, 'service')",
                     )
                 }
             }

@@ -404,6 +404,9 @@ open class ApiKeyService(
      * not create — throws.
      */
     @Transactional("metadataTransactionManager")
+    // One guarded return per RULE — merged, the caller could not tell which silence it got
+    // (the same justification ScopeMatrix.allowed's suppression carries).
+    @Suppress("ReturnCount")
     open fun revokeAs(
         principal: AuthenticatedPrincipal,
         keyId: String,

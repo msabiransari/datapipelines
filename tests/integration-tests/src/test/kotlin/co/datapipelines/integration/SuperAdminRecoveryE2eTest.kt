@@ -354,7 +354,8 @@ class SuperAdminRecoveryE2eTest {
                     // The key's own identity (keys v2 A13) — its own statement: the column list above omits `kind`.
                     statement.execute(
                         "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
-                            "('$ROOT_KEY_IDENTITY', '${ROOT_KEY.id.lowercase()}@keys.invalid', '${ROOT_KEY.name}', 'key', '${ROOT_KEY.id}', TRUE, FALSE, 'service')",
+                            "('$ROOT_KEY_IDENTITY', '${ROOT_KEY.id.lowercase()}@keys.invalid', '${ROOT_KEY.name}'," +
+                            " 'key', '${ROOT_KEY.id}', TRUE, FALSE, 'service')",
                     )
                 }
                 connection
