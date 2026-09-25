@@ -2,7 +2,11 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.auth.ApiKeyExpiryInvalidException
 import co.datapipelines.auth.ApiKeyKind
+import co.datapipelines.auth.KeyRole
+import co.datapipelines.auth.RolePermissions
+import co.datapipelines.auth.WorkspaceRole
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
@@ -86,34 +90,61 @@ class ApiKeyFormTest {
     }
 
     @Test
-    fun `the server kind is offered to an admin only, and the user kind to nobody (D16)`() {
+    fun `the cards follow the caller's permissions - the mcp roles are offerable's answer (A14)`() {
         assertAll(
-            { ApiKeyForm.kindChoices(isAdmin = false).map { it.wire } shouldBe listOf("endpoint") },
-            { ApiKeyForm.kindChoices(isAdmin = true).map { it.wire } shouldBe listOf("endpoint", "server") },
-            // 179: `user` is minted by the login hook only — no form offers it, on any role.
-            { ApiKeyForm.kindChoices(isAdmin = true).none { it.wire == "user" } shouldBe true },
+            // An author: the mcp card with `author` only, no endpoint/server cards.
+            {
+                val choices = ApiKeyForm.kindChoices(listOf(WorkspaceRole.AUTHOR), mayCreateApiKeys = false, isSuperAdmin = false)
+                choices.map { it.wire } shouldBe listOf("mcp")
+                choices.single().roles.map { it.wire } shouldBe listOf("author")
+            },
+            // A workspace admin: every mcp role, the endpoint card, no server card.
+            {
+                val choices =
+                    ApiKeyForm.kindChoices(
+                        RolePermissions.KEY_OFFERABLE,
+                        mayCreateApiKeys = true,
+                        isSuperAdmin = false,
+                    )
+                choices.map { it.wire } shouldBe listOf("mcp", "endpoint")
+                choices.first().roles.map { it.wire } shouldBe listOf("author", "promoter", "workspace_admin")
+            },
+            // A super admin sees the server card too.
+            {
+                val choices =
+                    ApiKeyForm.kindChoices(RolePermissions.KEY_OFFERABLE, mayCreateApiKeys = true, isSuperAdmin = true)
+                choices.map { it.wire } shouldBe listOf("mcp", "endpoint", "server")
+            },
+            // A viewer: no create permission, no mcp card at all (A15 — no card, never an empty choice).
+            {
+                ApiKeyForm.kindChoices(emptyList(), mayCreateApiKeys = false, isSuperAdmin = false).shouldBeEmpty()
+            },
         )
     }
 
     @Test
     fun `each kind declares which fields it takes, and the answers match the service's rules`() {
-        val byWire = ApiKeyForm.kindChoices(isAdmin = true).associateBy { it.wire }
+        val byWire =
+            ApiKeyForm.kindChoices(RolePermissions.KEY_OFFERABLE, mayCreateApiKeys = true, isSuperAdmin = true).associateBy { it.wire }
 
         assertAll(
+            { byWire.getValue(ApiKeyKind.MCP.wire).takesBindings shouldBe false },
             { byWire.getValue(ApiKeyKind.ENDPOINT.wire).takesBindings shouldBe true },
             { byWire.getValue(ApiKeyKind.SERVER.wire).takesBindings shouldBe false },
             // The same statement the issuance service makes, from the other side: every kind
-            // the form offers acts as its own identity (#215) — the MCP (`user`) kind is gone.
+            // the form offers acts as its own identity (keys v2 A13) — and the form offers
+            // every kind there is, because the Keys page is the ONE creation path (A15).
             { byWire.keys shouldBe ApiKeyKind.IDENTITY_KINDS.map { it.wire }.toSet() },
         )
     }
 
     @Test
-    fun `the endpoint kind is labelled API key - D17's rename, the wire value unchanged`() {
-        // "API key" is what a person reads; `endpoint` stays the wire and storage value.
-        val choice = ApiKeyForm.kindChoices(isAdmin = false).single()
-        choice.label shouldBe "API key"
-        choice.wire shouldBe "endpoint"
+    fun `the kinds are labelled for a person - MCP key, API key, Server key (A19, D17)`() {
+        val byWire =
+            ApiKeyForm.kindChoices(RolePermissions.KEY_OFFERABLE, mayCreateApiKeys = true, isSuperAdmin = true).associateBy { it.wire }
+        byWire.getValue("mcp").label shouldBe "MCP key"
+        byWire.getValue("endpoint").label shouldBe "API key"
+        byWire.getValue("server").label shouldBe "Server key"
     }
 
     @Test

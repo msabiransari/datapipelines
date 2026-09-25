@@ -4,6 +4,7 @@ import co.datapipelines.application.endpoints.EndpointKeyBinding
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
+import co.datapipelines.auth.KeyRole
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
@@ -139,7 +140,7 @@ class ApiKeyRowsTest {
     @Suppress("LongParameterList") // a row, spelled out
     private fun key(
         id: String = "dpk_RGAXQ7T2MKLP",
-        kind: ApiKeyKind = ApiKeyKind.USER,
+        kind: ApiKeyKind = ApiKeyKind.MCP,
         createdAt: Instant = Instant.parse("2026-09-05T09:00:00Z"),
         lastUsedAt: Instant? = null,
         expiresAt: Instant? = null,
@@ -156,6 +157,7 @@ class ApiKeyRowsTest {
         workspaceId = workspaceId,
         workspaceName = "acme",
         kind = kind,
+        role = KeyRole.forKind(kind) ?: KeyRole.AUTHOR,
     )
 
     private fun binding(path: String) = EndpointKeyBinding(path, "dpk_ENDPOINT001", workspaceId, userId, now)

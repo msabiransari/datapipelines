@@ -15,8 +15,8 @@ import org.springframework.security.core.context.SecurityContextHolder
 import java.util.UUID
 
 /**
- * #215 B2's FIRST line, on its own: [ApiKeyFilter] refuses a valid MCP (`user`) key on every path
- * but `/mcp` — `403 endpoint.key_kind_refused`, `details.reason = user_key_off_surface` — and the
+ * Keys v2's FIRST line, on its own: [ApiKeyFilter] refuses a valid MCP key on every path
+ * but `/mcp` — `403 endpoint.key_kind_refused`, `details.reason = mcp_key_off_surface` — and the
  * chain STOPS, so nothing downstream answers. `ScopeInterceptor`'s kind table refuses the same
  * key on every MVC route as the second line, which is why this suite also probes paths no
  * interceptor sees (a public route, a static asset): only the filter can refuse there, so a filter
@@ -69,14 +69,14 @@ class ApiKeyFilterMcpOnlyTest {
 
     @Test
     fun `the MCP key is refused on every path off mcp - the chain stops, the confinement code answers`() {
-        val key = keyOf(ApiKeyKind.USER)
+        val key = keyOf(ApiKeyKind.MCP)
         OFF_MCP.forEach { path ->
             val (response, reached) = present(path, key)
             reached.shouldBeNull()
             response.status shouldBe HTTP_FORBIDDEN
             val error = mapper.readValue(response.contentAsString, Map::class.java)["error"] as Map<*, *>
             error["code"] shouldBe ScopeInterceptor.ENDPOINT_KEY_KIND_REFUSED
-            (error["details"] as Map<*, *>)["reason"] shouldBe "user_key_off_surface"
+            (error["details"] as Map<*, *>)["reason"] shouldBe "mcp_key_off_surface"
             // …and the refused request leaves no authentication behind for a later filter.
             SecurityContextHolder.getContext().authentication.shouldBeNull()
         }
@@ -84,7 +84,7 @@ class ApiKeyFilterMcpOnlyTest {
 
     @Test
     fun `the MCP key passes the filter on mcp - its one surface`() {
-        val (response, reached) = present("/mcp", keyOf(ApiKeyKind.USER))
+        val (response, reached) = present("/mcp", keyOf(ApiKeyKind.MCP))
         reached.shouldNotBeNull()
         response.status shouldBe HTTP_OK
     }

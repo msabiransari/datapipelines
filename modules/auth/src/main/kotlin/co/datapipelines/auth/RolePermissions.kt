@@ -23,7 +23,9 @@ import co.datapipelines.auth.Permission.EXECUTION_READ
 import co.datapipelines.auth.Permission.EXECUTION_READ_ALL
 import co.datapipelines.auth.Permission.EXECUTION_RESULT_READ
 import co.datapipelines.auth.Permission.LAKE_TABLE_MANAGE
+import co.datapipelines.auth.Permission.MCP_KEY_CREATE
 import co.datapipelines.auth.Permission.MCP_KEY_OWN
+import co.datapipelines.auth.Permission.MCP_KEY_REVOKE_OWN
 import co.datapipelines.auth.Permission.PIPELINE_CREATE
 import co.datapipelines.auth.Permission.PIPELINE_DELETE
 import co.datapipelines.auth.Permission.PIPELINE_EXECUTE
@@ -77,9 +79,12 @@ import co.datapipelines.auth.Permission.WORKSPACE_UPDATE
  * promote (D8). A super admin is not a role (D7, `users.is_admin`): it holds [SUPER_ADMIN] —
  * every permission but the two [FENCED] ones — in every workspace.
  *
- * The two KEY roles (#215 slice (b), record §3.2) are columns of the same table: [of] a
- * [KeyRole]. A key role never includes an instance permission and never a member-only verb —
- * `ScopeMatrixSpecDriftTest` compares both columns with auth.md §7.6, and `RoleMatrixTest`
+ * The KEY roles (#215 slice (b), widened by keys v2 — record §3.2, A13/A14/B1) are columns of the
+ * same table: [of] a [KeyRole]. The three MEMBER key roles (`author`, `promoter`, `workspace_admin`
+ * — what an `mcp` key carries) read the SAME columns the member roles hold; the two transport
+ * roles (`api_caller`, `promotion_receiver`) are key-only. A key role never includes an instance
+ * permission and never the member-only administration verbs beyond its column's reach —
+ * `ScopeMatrixSpecDriftTest` compares the columns with auth.md §7.6, and `RoleMatrixTest`
  * pins that no key role reaches [INSTANCE].
  */
 object RolePermissions {
@@ -137,6 +142,8 @@ object RolePermissions {
                 SEMANTIC_RECORD,
                 SEMANTIC_RETIRE,
                 PROMOTION_READ,
+                MCP_KEY_CREATE,
+                MCP_KEY_REVOKE_OWN,
             )
 
     /**
@@ -158,6 +165,8 @@ object RolePermissions {
             PROMOTION_READ,
             PROMOTION_PROMOTE,
             MCP_KEY_OWN,
+            MCP_KEY_CREATE,
+            MCP_KEY_REVOKE_OWN,
             WORKSPACE_SWITCH,
             PROFILE_READ,
             PROFILE_PREFERENCE,
@@ -231,12 +240,31 @@ object RolePermissions {
             WorkspaceRole.WORKSPACE_ADMIN -> WORKSPACE_ADMIN
         }
 
-    /** Every permission a key of [role] holds — one key-role column of the table. */
+    /** Every permission a key of [role] holds — one key-role column of the table (keys v2 B1: the union enum). */
     fun of(role: KeyRole): Set<Permission> =
         when (role) {
             KeyRole.API_CALLER -> API_CALLER
             KeyRole.PROMOTION_RECEIVER -> PROMOTION_RECEIVER
+            KeyRole.AUTHOR -> AUTHOR
+            KeyRole.PROMOTER -> PROMOTER
+            KeyRole.WORKSPACE_ADMIN -> WORKSPACE_ADMIN
         }
+
+    /**
+     * The MEMBER roles an `mcp` key may carry, in dialog order — author first (keys v2 A15).
+     * Viewer is never a key role (A15) and super admin is not a role at all (D7, B1).
+     */
+    val KEY_OFFERABLE: List<WorkspaceRole> = listOf(WorkspaceRole.AUTHOR, WorkspaceRole.PROMOTER, WorkspaceRole.WORKSPACE_ADMIN)
+
+    /**
+     * The subset rule (keys v2 A14, record O3 ruled): which key roles [creator]'s permission set
+     * may mint — exactly those whose column is a SUBSET of the creator's own permissions in that
+     * workspace. No ordinal ladder exists: promoter and author are not comparable, and neither
+     * may mint the other; a workspace admin's column contains both, so an admin may mint any of
+     * the three; a super admin holds every permission, so any role. The same predicate, applied
+     * to the requested role alone, is the service's creation guard (`ApiKeyService.issue`).
+     */
+    fun offerable(creator: Set<Permission>): Set<WorkspaceRole> = KEY_OFFERABLE.filterTo(mutableSetOf()) { role -> creator.containsAll(of(role)) }
 
     /** The workspace roles whose column holds [permission]. */
     fun rolesHolding(permission: Permission): Set<WorkspaceRole> = WorkspaceRole.entries.filterTo(mutableSetOf()) { permission in of(it) }

@@ -234,8 +234,7 @@ class ApiKeyInvalidException(
         AuthErrorCodes.API_KEY_INVALID,
         HTTP_UNAUTHORIZED,
         reason,
-        "That key is not valid. Your MCP key rotates by deleting it in the top bar and signing in again; " +
-            "an API key is created on /api-keys by a workspace admin.",
+        "That key is not valid. An MCP key is created on the Keys page; an API key is created there too.",
     )
 
 /**
@@ -261,8 +260,7 @@ class ApiKeyExpiredException :
         AuthErrorCodes.API_KEY_EXPIRED,
         HTTP_UNAUTHORIZED,
         "API key past expiration",
-        "That key has expired. Your MCP key rotates by deleting it in the top bar and signing in again; " +
-            "an API key is created on /api-keys by a workspace admin.",
+        "That key has expired. Create a new one on the Keys page.",
     )
 
 class SessionInvalidException(
@@ -437,19 +435,20 @@ class RoleRequiredException(
     )
 
 /**
- * On-demand issuance asked for a `user` key (D16 — roles design 2026-09-20 §3.3). A user
- * key is minted by the login/switch hook and nowhere else: exactly one per user per
- * workspace, rotated by deleting it and signing in again. No request surface — REST, htmx
- * or MCP — may create one, so the kind is refused for EVERY role rather than gated to one.
+ * A create request named NO kind (keys v2, A15): the login mint is gone, every key is created
+ * on demand by a person who chooses what it is, and guessing a default would mint a credential
+ * the caller did not ask for. A 400, not a 403: the caller's credential and role are fine; the
+ * request body is incomplete. (The code predates keys v2, when the login-minted kind was the
+ * one that could not be minted on demand; with that kind retired the condition it answers is
+ * "no kind at all".)
  */
-class KeyKindNotMintableException(
-    kind: ApiKeyKind,
-) : AuthException(
+class KeyKindNotMintableException :
+    AuthException(
         AuthErrorCodes.KEY_KIND_NOT_MINTABLE,
         HTTP_BAD_REQUEST,
-        "Keys of kind '${kind.wire}' are not mintable on demand",
-        "Your MCP key is created for you when you sign in. To rotate it, delete it from the top bar and sign in again.",
-        details = mapOf("kind" to kind.wire),
+        "Key issuance requires a kind",
+        "Choose what the key is for: an MCP key, an API key, or a server key.",
+        details = mapOf("supported" to ApiKeyKind.WIRE_VALUES),
     )
 
 /**
@@ -467,4 +466,33 @@ class KeyWorkspaceInactiveException(
         "The workspace '$workspace' this key is pinned to is deactivated",
         "This API key's workspace has been deactivated. Contact an administrator.",
         details = mapOf("workspace" to workspace),
+    )
+
+/**
+ * The subset rule refused the requested key role (keys v2 A14, record O3 ruled): a creator may
+ * give a key only a role whose permission set is a subset of the creator's own permissions in
+ * that workspace. No ordinal ladder exists — promoter and author are not comparable and neither
+ * may mint the other; a workspace admin may mint any of the three member roles; a super admin
+ * any role at all.
+ *
+ * The refusal is `auth.role_required` (the same code the matrix writes), and per A14 the
+ * details carry the ROLE that was asked for (`required = <the role>`) and the role the creator
+ * was judged as (`held = <creator role>`) — "ask someone who holds it" is the only useful next
+ * step, and it needs both halves.
+ */
+class KeyRoleNotOfferableException(
+    requested: KeyRole,
+    heldRole: String?,
+    workspace: String?,
+) : AuthException(
+        AuthErrorCodes.ROLE_REQUIRED,
+        HTTP_FORBIDDEN,
+        "A key may only carry a role whose permissions the creator holds; '${requested.wire}' exceeds the creator's",
+        "You can only give a key a role whose permissions you hold yourself in this workspace.",
+        details =
+            buildMap {
+                put("required", requested.wire)
+                heldRole?.let { put("held", it) }
+                workspace?.let { put("workspace", it) }
+            },
     )

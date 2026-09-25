@@ -76,8 +76,8 @@ class ExecutionsListTool(
             name = "executions_list",
             description =
                 "List recent pipeline executions of the key's pinned workspace, optionally filtered by pipeline or status. " +
-                    "Returns the runs YOU started (this key's user); a workspace admin's key returns every run of the " +
-                    "workspace, including runs started by published endpoints. Other members' runs are not listed.",
+                    "The key acts as its own role: your own runs are always listed, plus every run of the workspace when " +
+                    "the key's role holds execution.read_all (a workspace-admin-role key). Other members' runs are not listed.",
             schema =
                 """
                 {
@@ -136,8 +136,8 @@ class ExecutionsGetTool(
                     "(datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the " +
                     "exception chain with stack frames — read error.code first, then error.exception.caused_by (root " +
                     "cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result " +
-                    "rows, use executions_get_result. Visible for YOUR OWN runs (this key's user), or any run of the " +
-                    "workspace when the key's user is a workspace admin; another member's execution is not found.",
+                    "rows, use executions_get_result. Visible for YOUR OWN runs (this key's own), or any run of the " +
+                    "workspace when the key's role holds execution.read_all; another member's execution is not found.",
             schema =
                 """
                 {

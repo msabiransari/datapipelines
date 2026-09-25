@@ -56,7 +56,7 @@ class WorkspacesControllerApiKeyTest {
     fun clearContext() = SecurityContextHolder.clearContext()
 
     /** A workspace ADMIN's MCP key — the highest member role, uncapped, so nothing but its kind can refuse it. */
-    private fun authenticateMcpKey() = authenticate(AuthMethod.API_KEY, keyKind = ApiKeyKind.USER, keyId = "dpk_TESTKEY")
+    private fun authenticateMcpKey() = authenticate(AuthMethod.API_KEY, keyKind = ApiKeyKind.MCP, keyId = "dpk_TESTKEY")
 
     private fun authenticateSession() = authenticate(AuthMethod.OIDC, keyKind = null, keyId = null)
 
@@ -132,7 +132,7 @@ class WorkspacesControllerApiKeyTest {
                 response.status shouldBe 403
                 val error = mapper.readValue(response.contentAsString, Map::class.java)["error"] as Map<*, *>
                 error["code"] shouldBe ScopeInterceptor.ENDPOINT_KEY_KIND_REFUSED
-                (error["details"] as Map<*, *>)["reason"] shouldBe "user_key_off_surface"
+                (error["details"] as Map<*, *>)["reason"] shouldBe "mcp_key_off_surface"
             }
         }
         // Non-vacuity: the walk found the controller's routes — the reads, the membership verbs

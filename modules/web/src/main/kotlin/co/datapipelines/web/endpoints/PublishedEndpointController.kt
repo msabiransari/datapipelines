@@ -10,6 +10,7 @@ import co.datapipelines.web.api.ApiErrorResponse
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.config.WebHeaders
 import jakarta.servlet.http.HttpServletRequest
+import java.util.UUID
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -51,6 +52,8 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping(PublishedEndpointController.ROOT)
 class PublishedEndpointController(
     private val serveService: PublishedEndpointServeService,
+    /** Keys v2 A16/B3 — the business-path paging read, reached THROUGH this catch-all (see its KDoc). */
+    private val pagingService: PublishedExecutionPagingService,
 ) {
     /** Every method on the subtree; `GET` serves, everything else is a `405` carrying `Allow: GET`. */
     @RequestMapping(CATCH_ALL)
@@ -70,7 +73,27 @@ class PublishedEndpointController(
                 )
         }
 
-        return when (val outcome = serveService.serve(pathOf(request), currentPrincipal(), validatorRequest(request))) {
+        val path = pathOf(request)
+        // Keys v2 A16/B3: the paging suffix is the key's own-run read under the business path.
+        // Delegation happens after the serve path's session refusal — the shared rule order of
+        // §5 — so a session on a paging route is refused exactly as on a serve route.
+        parse(path)?.let { paged ->
+            val principal = currentPrincipal()
+            return if (paged.isResult) {
+                pagingService.executionResult(
+                    businessPath = paged.businessPath,
+                    executionId = paged.executionId,
+                    principal = principal,
+                    offset = request.getParameter("offset")?.toLongOrNull(),
+                    limit = request.getParameter("limit")?.toIntOrNull(),
+                    format = request.getParameter("format"),
+                )
+            } else {
+                pagingService.executionMetadata(paged.businessPath, paged.executionId, principal)
+            }
+        }
+
+        return when (val outcome = serveService.serve(path, currentPrincipal(), validatorRequest(request))) {
             is PublishedEndpointServeService.Outcome.Served -> {
                 ResponseEntity
                     .ok()
@@ -155,5 +178,33 @@ class PublishedEndpointController(
         const val CATCH_ALL = "/{category:" + EndpointPath.CATEGORY_URL_PATTERN + "}/**"
 
         private const val HTTP_GET = "GET"
+
+        /**
+         * The keys-v2 paging suffix (A16/B3): `<business path>/executions/{id}` or
+         * `<business path>/executions/{id}/result`, where the business path is at least
+         * `<category>/<version>`. Parsed HERE so the serve controller can hand the request to
+         * [PublishedExecutionPagingService] before the registry is consulted.
+         */
+        private val PAGING = Regex("^(/[^/]+/[^/]+(?:/[^/]+)*)/executions/([0-9a-fA-F-]{36})(/result)?$")
+        private val EXECUTION_ID = Regex("^[0-9a-fA-F-]{36}$")
+
+        /** A parsed paging path: the business path without the suffix, the run, and which read. */
+        data class Paged(
+            val businessPath: String,
+            val executionId: UUID,
+            val isResult: Boolean,
+        )
+
+        fun parse(path: String): Paged? {
+            val match = PAGING.matchEntire(path) ?: return null
+            // A strict UUID or the shape is not paging — it may be an ordinary served path whose
+            // last segment happens to look like one, so fall through to the registry.
+            val id = runCatching { UUID.fromString(match.groupValues[2]) }.getOrNull() ?: return null
+            return Paged(
+                businessPath = match.groupValues[1],
+                executionId = id,
+                isResult = match.groupValues[3].isNotEmpty(),
+            )
+        }
     }
 }

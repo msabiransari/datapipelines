@@ -68,12 +68,14 @@ class ExecutionsControllerTest {
         userId: UUID,
         workspaceAdmin: Boolean = false,
     ) {
+        // A SESSION principal: keys v2 A16 makes the framework execution reads session-only,
+        // so the ownership rule these tests pin is exercised the way its callers see it.
         val principal =
             AuthenticatedPrincipal(
                 userId,
                 "a@b.c",
                 "A",
-                AuthMethod.API_KEY,
+                AuthMethod.OIDC,
                 "dpk_x",
                 workspace =
                     WorkspaceContext(

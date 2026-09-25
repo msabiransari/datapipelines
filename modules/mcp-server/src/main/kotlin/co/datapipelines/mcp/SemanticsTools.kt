@@ -283,8 +283,8 @@ class SemanticsRetireTool(
                 "Retire one learned fact with a reason — it stops being served beside the columns but keeps its row " +
                     "(facts are never deleted; history is the audit). Prefer semantics_record with supersedes when " +
                     "you know the correct fact: that retires the old one and records the new in one step. A fact " +
-                    "this workspace cannot see is not-found; a DATASOURCE fact another workspace established can " +
-                    "only be retired by a workspace admin. Mutating.",
+                    "this workspace cannot see is not-found; a DATASOURCE fact another workspace established needs " +
+                    "datasource.manage — the permission decides, not a role. Mutating.",
             schema =
                 """
                 {

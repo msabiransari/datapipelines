@@ -62,13 +62,10 @@ class NativeDialogBanTest {
     @Test
     fun `the exclusion is the key surfaces' htmx attributes - nothing else`() {
         // A floor, not a ceiling: if someone widens the exclusion to a directory, this pins
-        // that the key screens carry exactly the htmx attributes the exclusion names — one
-        // destructive confirm per surface (179 moved the console's to the /api-keys page's
-        // Delete and the top bar chip's rotate).
+        // that the key screens carry exactly the htmx attributes the exclusion names — the
+        // /api-keys page's Delete (keys v2: the chip and its rotate are gone with the login mint).
         val keysPage = Files.readString(projectRoot().resolve("modules/web/src/main/resources/templates/api/keys.html"))
         Regex("hx-confirm").findAll(keysPage).count() shouldBeExactly 1
-        val chip = Files.readString(projectRoot().resolve("modules/web/src/main/resources/templates/partials/mcp-key-chip.html"))
-        Regex("hx-confirm").findAll(chip).count() shouldBeExactly 1
     }
 
     private val roots =

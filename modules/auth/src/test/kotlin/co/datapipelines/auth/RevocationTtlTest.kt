@@ -76,7 +76,7 @@ class RevocationTtlTest {
         val hash = slot<String>()
         // #215: an `endpoint` key acts as its own identity (B4) — created with it, validated as it.
         every { userService.provisionIdentity(any(), any()) } answers { identity() }
-        every { repo.insert(any(), identityId, ownerId, any(), capture(hash), any(), any(), ApiKeyKind.ENDPOINT) } answers {
+        every { repo.insert(any(), identityId, ownerId, any(), capture(hash), any(), any(), any(), ApiKeyKind.ENDPOINT) } answers {
             ApiKey(
                 id = firstArg(),
                 userId = identityId,
@@ -85,10 +85,11 @@ class RevocationTtlTest {
                 isRevoked = false,
                 createdAt = Instant.now(),
                 lastUsedAt = null,
-                expiresAt = arg(5),
-                workspaceId = arg(6),
+                expiresAt = arg(6),
+                workspaceId = arg(7),
                 workspaceName = "acme",
                 kind = ApiKeyKind.ENDPOINT,
+                role = KeyRole.API_CALLER,
                 createdBy = ownerId,
             )
         }
@@ -106,7 +107,7 @@ class RevocationTtlTest {
 
         every { repo.revoke(issued.record.id, ownerId) } returns issued.record.copy(isRevoked = true)
         every { repo.findById(issued.record.id) } returns issued.record.copy(isRevoked = true)
-        service.revoke(issued.record.id, ownerId)
+        service.revokeOwn(issued.record.id, ownerId)
 
         shouldThrow<ApiKeyInvalidException> { service.validate(issued.plaintext) }
     }

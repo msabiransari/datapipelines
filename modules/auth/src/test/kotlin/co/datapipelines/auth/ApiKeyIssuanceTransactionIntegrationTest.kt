@@ -71,7 +71,7 @@ class ApiKeyIssuanceTransactionIntegrationTest {
         val userService = UserService(UserRepository(jdbc), cache, properties, AuditLogger(jdbc, ObjectMapper()))
         val failingKeys =
             mockk<ApiKeyRepository> {
-                every { insert(any(), any(), any(), any(), any(), any(), any(), any()) } throws
+                every { insert(any(), any(), any(), any(), any(), any(), any(), any(), any()) } throws
                     DataIntegrityViolationException("the key insert failed after the identity was written")
             }
         val workspaceService =

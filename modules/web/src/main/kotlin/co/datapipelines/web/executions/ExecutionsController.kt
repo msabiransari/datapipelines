@@ -2,6 +2,7 @@ package co.datapipelines.web.executions
 
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.executor.AbortReason
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionRecord
@@ -55,6 +56,9 @@ class ExecutionsController(
     private val pipelines: co.datapipelines.pipeline.PipelineRepository,
     /** §7.2/§7.7 — the one visibility rule, shared with the result cursor. */
     private val visibility: ExecutionVisibility = ExecutionVisibility(),
+    /** §10.2 — the ONE metadata projection, shared with the business-path paging read (A16). */
+    private val metadata: ExecutionMetadataProjection =
+        ExecutionMetadataProjection(pipelines, resultStore, resultUrls),
 ) {
     /**
      * §10.1 — the listing. Filters are evaluated **in SQL** by the repository (gate C, B4): the
@@ -99,7 +103,7 @@ class ExecutionsController(
         // or no `released_at` at all (still DRAFT, or DISCARDED). Informational only — never
         // execution behaviour, never promotion eligibility.
         val releasedAt = pipelines.releasedAtFor(workspaceId, pageItems.map { it.pipelineId to it.pipelineVersion })
-        val items = pageItems.map { it.toMetadata(includeResult = false, draftRun(it, releasedAt)) }
+        val items = pageItems.map { metadata.project(it, metadata.draftRun(it, releasedAt), includeResult = false) }
         return ApiResponse.of(PagedData(items, Pagination.unknownTotal(page, size, items.size, raw.size > size)))
     }
 
@@ -109,15 +113,20 @@ class ExecutionsController(
     fun get(
         @PathVariable id: UUID,
     ): ApiResponse<Map<String, Any?>> {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        // Keys v2 A16/B3: these framework reads are SESSIONS-ONLY — an `api` key pages its
+        // runs under the business path it is bound to. The interceptor already refuses every
+        // key kind before any handler; this is the second line, so a handler reached some
+        // other way still refuses.
+        requireSession(principal)
+        val workspaceId = principal.requireWorkspace().id
         // §7.7 — the SHARED rule, not `visibleTo` alone: an endpoint key that could fetch a
         // result but not see that its execution exists would be a contradiction a client trips
         // over immediately.
         val record =
-            executions.findById(workspaceId, id)?.takeIf { visibility.visible(it, currentPrincipal(), id) }
+            executions.findById(workspaceId, id)?.takeIf { visibility.visible(it, principal, id) }
                 ?: throw ApiErrors.executionNotFound(id.toString())
-        val releasedAt = pipelines.releasedAtFor(workspaceId, listOf(record.pipelineId to record.pipelineVersion))
-        return ApiResponse.of(record.toMetadata(includeResult = true, draftRun(record, releasedAt)))
+        return ApiResponse.of(metadata.project(record, workspaceId, includeResult = true))
     }
 
     /**
@@ -176,6 +185,8 @@ class ExecutionsController(
         @RequestParam(required = false) format: String?,
     ): ResponseEntity<Any> {
         val principal = currentPrincipal()
+        // Keys v2 A16/B3 — the session-only second line, as on `get`.
+        requireSession(principal)
         val chosen = cursor.formatOf(format)
         val record = cursor.readable(id, principal)
         if (chosen == ResultCursor.FORMAT_CSV) {
@@ -186,59 +197,17 @@ class ExecutionsController(
         return ResponseEntity.ok(ApiResponse.of(page))
     }
 
-    /** versioning §8: draft run ⇔ `started_at < released_at`, or no `released_at` at all. */
-    private fun draftRun(
-        record: ExecutionRecord,
-        releasedAt: Map<Pair<java.util.UUID, Int>, java.time.Instant?>,
-    ): Boolean {
-        val at = releasedAt[record.pipelineId to record.pipelineVersion]
-        return at == null || record.startedAt.isBefore(at)
-    }
-
-    /** The §10.2 projection — metadata only, never rows. */
-    private fun ExecutionRecord.toMetadata(
-        includeResult: Boolean,
-        draftRun: Boolean,
-    ): Map<String, Any?> =
-        buildMap {
-            put("execution_id", executionId.toString())
-            put("pipeline_id", pipelineId.toString())
-            put("pipeline_version", pipelineVersion)
-            put("status", status.name)
-            // The §8 draft marker: this execution ran a version that was a draft at the time
-            // (or still is / was discarded). Informational — a label in history, nothing more.
-            put("draft_run", draftRun)
-            put("parameters", ExecutorJson.mapper.readTree(parametersJson))
-            put("started_at", startedAt.toString())
-            put("completed_at", completedAt?.toString())
-            put("duration_ms", durationMs)
-            put("node_stats", nodeStatsJson?.let { ExecutorJson.mapper.readTree(it) })
-            put("error", errorJson?.let { ExecutorJson.mapper.readTree(it) })
-            put("failed_node_id", failedNodeId)
-            put("correlation_id", correlationId?.toString())
-            // D11 (2026-09-20, rest-api §10.2): `executed_by` replaced `triggered_by`; the key kind
-            // says whether a key ran it and which kind (null = a signed-in session).
-            put("executed_by", executedBy.toString())
-            put("executed_by_key_kind", executedByKeyKind?.wire)
-            put("triggered_via", triggeredVia.name)
-            put("result_row_count", resultRowCount)
-            put("result_size_bytes", resultSizeBytes)
-            // The composition lineage V3 added (metadata-db §4.6). The history UI renders it and
-            // the repository has always selected it; only this projection dropped it, so an API
-            // client could see a child execution but never learn it was one (T1). Null parents mark
-            // a root; `root_execution_id` is NOT NULL since V3's backfill and equals `execution_id`
-            // for a root, so `?root_execution_id=` grouping needs no special case.
-            put("parent_execution_id", parentExecutionId?.toString())
-            put("parent_node_id", parentNodeId)
-            put("root_execution_id", rootExecutionId?.toString())
-            if (includeResult && status == ExecutionStatus.SUCCESS && resultRowCount != null) {
-                // Present only while the result is actually fetchable (§10.2).
-                resultStore.describe(resultStore.keyFor(executionId))?.let { view ->
-                    put("result_url", resultUrls.urlFor(executionId))
-                    put("result_expires_at", view.expiresAt.toString())
-                }
-            }
+    /** Keys v2 A16 — the framework's execution reads are session-only; the serve path's answer for a key. */
+    private fun requireSession(principal: co.datapipelines.auth.AuthenticatedPrincipal) {
+        if (principal.authMethod == co.datapipelines.auth.AuthMethod.API_KEY) {
+            throw co.datapipelines.web.api.ApiException(
+                PipelineErrorCodes.Auth.SESSION_REQUIRED,
+                "Execution reads under /api/v1 are session-only. An API key pages the results of the runs it " +
+                    "started under the business path it is bound to (keys v2 A16).",
+                mapOf("reason" to "key_off_surface"),
+            )
         }
+    }
 
     private fun parseStatus(raw: String): ExecutionStatus =
         runCatching { ExecutionStatus.valueOf(raw.trim().uppercase()) }.getOrNull()

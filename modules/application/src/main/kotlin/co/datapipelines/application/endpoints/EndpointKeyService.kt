@@ -5,7 +5,6 @@ import co.datapipelines.auth.ApiKeyService
 import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.IssuedApiKey
-import co.datapipelines.auth.KeyKindNotMintableException
 import co.datapipelines.auth.KeyRole
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
@@ -47,9 +46,8 @@ class EndpointKeyService(
      * Issues a key of [kind], binding it at every path in [bindingPaths].
      *
      * @throws DatapipelinesException `endpoint.path_invalid` for a malformed binding path, or
-     *   `endpoint.key_kind_refused` when the kind and the other arguments contradict each other.
-     * @throws KeyKindNotMintableException `auth.key_kind_not_mintable` for `kind = user` —
-     *   since 179 (D16) a user key is minted by the login hook only, never on demand.
+     *   `endpoint.key_kind_refused` when the kind and the other arguments contradict each other
+     *   (keys v2: an `mcp` key is refused with bindings, and without a member `role`).
      */
     @Suppress("LongParameterList", "ThrowsCount") // the issuance contract; each refusal has its own catalogued code
     fun issue(
@@ -93,30 +91,37 @@ class EndpointKeyService(
         val workspaceId = principal.requireWorkspace().id
         val normalized = bindingPaths.map(::normalizeBinding)
 
-        // D16 (179): a `user` key is minted by the LOGIN/SWITCH hook and nowhere else — one
-        // per user per workspace, rotated by deleting it and signing in again. Every request
-        // surface (REST, this page's form, and any future caller of this funnel) refuses the
-        // kind outright, for EVERY role: `auth.key_kind_not_mintable`, before anything else
-        // is validated, so the refusal never depends on which other argument happened to
-        // fail first.
-        if (kind == ApiKeyKind.USER) {
-            throw KeyKindNotMintableException(kind)
-        }
-
-        // Bindings belong to exactly ONE kind. Stated as "not endpoint" rather than "is user"
-        // so a kind added later (091's `server` was) cannot fall through and silently WRITE
-        // binding rows that nothing would ever consult.
+        // Keys v2 (A15): every kind is minted on demand, on the Keys page or over REST — the
+        // login mint is gone. Bindings belong to exactly ONE kind, stated as "not endpoint"
+        // so a kind added later cannot fall through and silently WRITE binding rows that
+        // nothing would ever consult.
         if (kind != ApiKeyKind.ENDPOINT && normalized.isNotEmpty()) {
             throw refused(
                 "Endpoint bindings belong to a key of kind 'endpoint'; a ${kind.wire} key is authorised by " +
                     "${authorityOf(kind)}. Mint it with \"kind\": \"endpoint\", or drop the bindings.",
             )
         }
-        if (role != null && role != KeyRole.forKind(kind)) {
-            throw refused(
-                "A ${kind.wire} key's role is ${KeyRole.forKind(kind)?.wire}; '${role.wire}' is not offered for it. " +
-                    "Drop \"role\", or name the kind that role belongs to.",
-            )
+        // The kind/role contract (keys v2 A13): an `mcp` key's member role is REQUIRED — a
+        // live mcp key without one is a row the database CHECK refuses — and an `endpoint` or
+        // `server` key's role is its kind's, so a request that names anything else is refused
+        // rather than quietly corrected.
+        when (kind) {
+            ApiKeyKind.MCP ->
+                if (role == null || !role.isMemberKeyRole) {
+                    throw refused(
+                        "An mcp key carries a member role — one of " +
+                            KeyRole.MEMBER_KEY_ROLES.joinToString(", ") { it.wire } +
+                            " (keys v2: viewer is never a key role). Name \"role\".",
+                    )
+                }
+
+            else ->
+                if (role != null && role != KeyRole.forKind(kind)) {
+                    throw refused(
+                        "A ${kind.wire} key's role is ${KeyRole.forKind(kind)?.wire}; '${role.wire}' is not offered for it. " +
+                            "Drop \"role\", or name the kind that role belongs to.",
+                    )
+                }
         }
         // Not a refusal: an endpoint key with no bindings is legal and authorises nothing, which
         // is a coherent thing to mint (bind it later). It is worth an audit detail, not an error.
@@ -135,6 +140,7 @@ class EndpointKeyService(
                     workspaceId = workspaceId,
                     expiresAt = expiresAt,
                     kind = kind,
+                    role = role,
                 )
             } else {
                 apiKeys.issue(
@@ -143,6 +149,7 @@ class EndpointKeyService(
                     workspaceId = workspaceId,
                     expiresAt = expiresAt,
                     kind = kind,
+                    role = role,
                     plaintext = plaintext,
                 )
             }
@@ -273,7 +280,7 @@ class EndpointKeyService(
     /** What decides a kind's authority, for a refusal that tells the caller what to do instead. */
     private fun authorityOf(kind: ApiKeyKind): String =
         when (kind) {
-            ApiKeyKind.USER -> "its member's role"
+            ApiKeyKind.MCP -> "its role in its workspace, over /mcp"
             ApiKeyKind.ENDPOINT -> "its bindings"
             ApiKeyKind.SERVER -> "the promotion route family it opens"
         }

@@ -18,7 +18,7 @@ interface McpTool {
     /** The tool's wire definition — name, description and JSON input schema (§6.2). */
     val definition: McpSchema.Tool
 
-    /** The tool name, i.e. the key the §7.6 scope matrix and the dispatcher are keyed on. */
+    /** The tool name, i.e. the key the §7.6 permission catalog and the dispatcher are keyed on. */
     val name: String get() = definition.name()
 
     /**

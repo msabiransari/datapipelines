@@ -355,41 +355,11 @@ class RoleVisibilityRenderTest {
     // ------------------------------------------------------------------ 179: keys
 
     /**
-     * D16 — the top bar's chip (partials/mcp-key-chip): prefix and BOTH verbs when an
-     * UNCOPIED key exists; NO copy control once the key's one copy was read (#213: the
-     * first Copy destroys the sealed secret server-side, so "copied" and "minted before
-     * V31" are the same state to the chip — `copyable = false`), the rotation hint in its
-     * place. Every role holds VIEW_OWN_MCP_KEY, so the role question does not arise here —
-     * what this pins is the copyable state machine.
+     * Keys v2 (A15): the top bar's chip is GONE — the login mint retired, the Keys page the one
+     * creation path. The chip partial and its copyable state machine no longer exist; the
+     * show-once affordance lives on the Keys page row (rendered by `api-keys-rows`, whose
+     * `copyable` flag the page render test covers).
      */
-    @Test
-    fun `the top bar chip shows copy only while the key's one copy is unread`() {
-        val copyable =
-            engine().process(
-                "partials/mcp-key-chip",
-                bare().apply { setVariable("mcpKey", McpKeyChip(prefix = "dpk_ABCDEFGH…", copyable = true)) },
-            )
-        copyable shouldContain "dpk_ABCDEFGH…"
-        copyable shouldContain "data-mcp-copy=\"/partials/mcp-key/secret\""
-        copyable shouldContain "hx-delete=\"/partials/mcp-key\""
-
-        val copied =
-            engine().process(
-                "partials/mcp-key-chip",
-                bare().apply { setVariable("mcpKey", McpKeyChip(prefix = "dpk_ABCDEFGH…", copyable = false)) },
-            )
-        copied shouldContain "dpk_ABCDEFGH…"
-        copied shouldNotContain "data-mcp-copy"
-        // Rotation is a read key's only way back to a copyable one — the delete stays, and
-        // the title says why there is no Copy (#213 wording, replacing the pre-V31 one).
-        copied shouldContain "hx-delete=\"/partials/mcp-key\""
-        copied shouldContain "Copied already — delete it and sign in again to get a new key you can copy"
-
-        val none =
-            engine().process("partials/mcp-key-chip", bare().apply { setVariable("mcpKey", null) })
-        none shouldNotContain "data-verb="
-        none shouldContain "minted when you next sign in"
-    }
 
     /**
      * D17 — the `/api-keys` page's verbs are inside the `MANAGE_API_KEYS` guard
@@ -405,11 +375,14 @@ class RoleVisibilityRenderTest {
         admin shouldContain "data-verb=\"key-bind\""
 
         // The page's own route refuses this render; what is pinned here is that the TEMPLATE
-        // would not leak the verbs if it ever rendered off its route.
+        // would not leak the verbs if it ever rendered off its route. Keys v2: a viewer's
+        // kindChoices are EMPTY (no create permission, no mcp card — A15), which is what the
+        // controller stamps, so even the header button cannot leak.
         val reader =
             render("api/keys") {
                 apiKeysModel()
                 withRoles(canAuthor = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "viewer")
+                setVariable("kindChoices", emptyList<Any>())
             }
         reader shouldNotContain "data-verb="
     }
@@ -440,7 +413,14 @@ class RoleVisibilityRenderTest {
                 ),
             ),
         )
-        setVariable("kindChoices", ApiKeyForm.kindChoices(isAdmin = true))
+        setVariable(
+            "kindChoices",
+            ApiKeyForm.kindChoices(
+                listOf(co.datapipelines.auth.WorkspaceRole.AUTHOR, co.datapipelines.auth.WorkspaceRole.PROMOTER, co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN),
+                mayCreateApiKeys = true,
+                isSuperAdmin = true,
+            ),
+        )
         setVariable("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
         setVariable("expiryCustomWire", ApiKeyForm.CUSTOM)
         setVariable("bindingNodes", listOf("/", "/nyc"))

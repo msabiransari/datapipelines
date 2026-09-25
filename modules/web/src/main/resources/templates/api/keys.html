@@ -22,7 +22,7 @@
 
   <div class="ds-card app-card-table">
     <div class="app-card-h">
-      <h2 class="ds-title">API keys</h2>
+      <h2 class="ds-title">Keys</h2>
       <span class="app-card-note" th:text="${#lists.size(keys)} + ' total'">4 total</span>
     </div>
 
@@ -52,9 +52,9 @@
         <tr th:if="${keys == null || keys.isEmpty()}">
           <td colspan="10">
             <div class="app-empty">
-              <b>No API keys</b>
-              An API key is how a program calls this workspace's published endpoints. Create one with
-              <strong>New API key</strong> and associate it with the paths it may reach.
+              <b>No keys</b>
+              A key is how a program acts in this workspace — an MCP key for an AI agent, an API key
+              for this workspace's published endpoints. Create one with <strong>Create a key</strong>.
             </div>
           </td>
         </tr>
@@ -105,7 +105,7 @@
                 <button type="submit" class="ds-button ds-button-secondary ds-button-sm">Save associations</button>
               </form>
             </details>
-            <button th:if="${k.isLive and (canAdminWorkspace == true or isSuperAdmin == true) and (k.kind != 'server' or isSuperAdmin == true)}" data-verb="key-revoke"
+            <button th:if="${k.isLive and (canAuthor == true or canAdminWorkspace == true or isSuperAdmin == true) and (k.kind != 'server' or isSuperAdmin == true)}" data-verb="key-revoke"
                     class="ds-button ds-button-ghost ds-button-sm u-danger"
                     th:attr="hx-delete=@{/partials/api-keys/{id}(id=${k.id})}"
                     hx-target="#keys-table-body"
@@ -127,12 +127,12 @@
        can never offer a value the server refuses. There is NO user kind (D16) and no
        scope field: an API key's role is `api caller`, its reach is its associations (#215);
        the role choice is slice (c)'s dialog. -->
-  <div th:if="${canAdminWorkspace == true or isSuperAdmin == true}" id="key-modal" class="u-backdrop u-backdrop-hidden">
+  <div th:if="${not #lists.isEmpty(kindChoices)}" id="key-modal" class="u-backdrop u-backdrop-hidden">
     <div class="ds-card app-modal app-modal-md">
       <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close u-text-xl" data-action="key-modal-close">
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
       </button>
-      <h2 class="ds-title u-m0 u-mb-md">New API key</h2>
+      <h2 class="ds-title u-m0 u-mb-md">Create a key</h2>
       <form id="createKeyForm"
             th:attr="hx-post=@{/partials/api-keys}"
             hx-target="#keyCreated"
@@ -144,7 +144,8 @@
           <legend class="u-block u-secondary u-text-sm u-mb-xs">Kind</legend>
           <label class="app-kind" th:each="kc, kcStat : ${kindChoices}">
             <input type="radio" name="kind" th:value="${kc.wire}" th:checked="${kcStat.first}"
-                   th:attr="data-bindings=${kc.takesBindings}">
+                   th:attr="data-bindings=${kc.takesBindings},
+                            data-roles=${#strings.listJoin(kc.roles.![wire + ':' + label], '|')}">
             <span class="app-kind-b">
               <b th:text="${kc.label}">API key</b>
               <span th:text="${kc.summary}">what it is</span>
@@ -152,16 +153,24 @@
           </label>
         </fieldset>
 
-        <!-- 2 — Name. Deliberately NOT unique: `api_keys.name` carries no uniqueness
-             constraint, and two people in one workspace may legitimately both have a
-             "ci" key. The hint says so rather than letting a collision surprise. -->
+        <!-- 2 — Role, the mcp kind only (keys v2 A13/A14): the key acts as its own identity
+             with this role, and the SUBSET RULE has already filtered the options — you can
+             only give a key a role whose permissions you hold yourself. The server re-checks. -->
+        <div class="u-mb-md u-hidden" id="key-role-field">
+          <label class="u-block u-secondary u-text-sm u-mb-xs" for="key-role">Role</label>
+          <select id="key-role" name="role" class="ds-input u-full"></select>
+          <p class="u-text-xs u-m0 u-mt-xs">What the agent may do is exactly this role's — no more, no less. You can only offer roles whose permissions you hold.</p>
+        </div>
+
+        <!-- 3 — Name. Unique per workspace among LIVE keys (keys v2 A18): the database
+             refuses a second live key of one name, so the hint says pick a fresh one. -->
         <div class="u-mb-md">
           <label class="u-block u-secondary u-text-sm u-mb-xs" for="key-name">Name</label>
           <input id="key-name" type="text" name="name" class="ds-input u-full" placeholder="nightly-sync" required maxlength="120">
-          <p class="u-text-xs u-m0 u-mt-xs">For you to recognise it later. Names are not unique — the prefix is what identifies a key.</p>
+          <p class="u-text-xs u-m0 u-mt-xs">For you to recognise it later. Names are unique per workspace while a key lives — revoking one frees its name.</p>
         </div>
 
-        <!-- 3 — Expiry. A select, plus a date input the last option reveals. Resolved
+        <!-- 4 — Expiry. A select, plus a date input the last option reveals. Resolved
              server-side from the same table (ApiKeyForm): a custom date means the END of
              that day, UTC, and a date already past is refused rather than clamped. -->
         <div class="u-mb-md">
@@ -172,7 +181,7 @@
           <input id="key-expiry-date" type="date" name="expiryDate" class="ds-input u-full u-mt-xs u-hidden">
         </div>
 
-        <!-- 4 — Associations, the API-key kind only. The nodes are the LITERAL prefixes of
+        <!-- 5 — Associations, the API-key kind only. The nodes are the LITERAL prefixes of
              this workspace's published paths: the authorizer walks the concrete request
              path's ancestors, so a node with a {variable} segment would authorise nothing. -->
         <div class="u-mb-lg" id="key-bindings-field">

@@ -81,8 +81,9 @@ object EndpointsTools {
                         "declared parameter; remaining parameters come from the query string. A leading /api prefix " +
                         "is stripped, not refused. A path that could match " +
                         "the same URL as an existing one is refused (endpoint.path_conflict) rather than resolved by " +
-                        "precedence. Calling the endpoint needs an API key bound to it — mint and bind one over REST or " +
-                        "in the UI (auth.md §7.7); an unbound endpoint accepts user keys with the execute scope.",
+                        "precedence. Calling the endpoint needs an API key bound to it — create one with the " +
+                        "api_caller role and bind it over REST or in the UI (auth.md §7.7); an endpoint bound to no " +
+                        "key is served to no one, and an MCP key never reaches REST at all (it acts over /mcp only).",
                 schema = CREATE_SCHEMA,
             )
 

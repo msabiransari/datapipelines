@@ -70,7 +70,7 @@ class EndpointKeyServiceTest {
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID },
-            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any()) } },
+            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any(), any()) } },
             { verify(exactly = 0) { bindings.insert(any()) } },
         )
     }
@@ -86,22 +86,21 @@ class EndpointKeyServiceTest {
             { refused.code shouldBe PipelineErrorCodes.Endpoint.KEY_KIND_REFUSED },
             // The message names the role the kind DOES carry — what the caller should have asked for.
             { refused.message.orEmpty() shouldContain "api_caller" },
-            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any()) } },
+            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any(), any()) } },
         )
     }
 
     @Test
     fun `a USER key is refused on this surface for every role - the login hook mints those (D16)`() {
-        // 179: on-demand `user` minting is gone, with or without bindings, with or without
-        // scopes. The refusal is FIRST in the funnel so it never depends on which other
-        // argument would have failed, and it is its own catalogued code because the recovery
-        // differs: sign in, don't retry with different arguments.
+        // Keys v2 (A15): no kind is minted by a login hook any more, so the old
+        // `auth.key_kind_not_mintable` refusal answers a request that names NO kind at all —
+        // EndpointKeyService never sees null; its funnel now demands an mcp ROLE instead.
         listOf(emptyList(), listOf("/nyc")).forEach { paths ->
             val refused =
                 shouldThrow<DatapipelinesException> {
-                    service.issue(principal(), "x", null, ApiKeyKind.USER, paths, null)
+                    service.issue(principal(), "x", null, ApiKeyKind.MCP, paths, null)
                 }
-            refused.code shouldBe "auth.key_kind_not_mintable"
+            refused.code shouldBe "endpoint.key_kind_refused"
         }
     }
 
@@ -109,20 +108,27 @@ class EndpointKeyServiceTest {
     fun `the kind matrix - each kind accepts exactly what its authority is made of (091, 179)`() {
         // One table for the whole rule, because the failure it guards against is a kind added
         // later falling through a check written as "is user" instead of "is not endpoint".
-        // Since 179 the USER row is a refusal in every column: the login hook mints those.
+        // Keys v2: an mcp key carries a MEMBER role (named, required) and no bindings; the
+        // transport kinds carry exactly their own role — named or omitted, never the other's.
         stubIssue()
 
         assertAll(
-            // user: never mintable on demand (D16)
-            { notMintable { service.issue(principal(), "u", null, ApiKeyKind.USER, emptyList(), null) } },
-            { notMintable { service.issue(principal(), "u", null, ApiKeyKind.USER, listOf("/nyc"), null) } },
-            // role (#215): each kind carries exactly its own — named or omitted, never the other's
+            // mcp (keys v2 A13/A14): the member role is required; viewer is never a key role
+            { service.issue(principal(), "m", KeyRole.AUTHOR, ApiKeyKind.MCP, emptyList(), null) },
+            { service.issue(principal(), "m", KeyRole.PROMOTER, ApiKeyKind.MCP, emptyList(), null) },
+            { service.issue(principal(), "m", KeyRole.WORKSPACE_ADMIN, ApiKeyKind.MCP, emptyList(), null) },
+            { refusalFor { service.issue(principal(), "m", null, ApiKeyKind.MCP, emptyList(), null) } },
+            { refusalFor { service.issue(principal(), "m", KeyRole.API_CALLER, ApiKeyKind.MCP, emptyList(), null) } },
+            // role (#215): each transport kind carries exactly its own — named or omitted, never the other's
             { service.issue(principal(), "e", KeyRole.API_CALLER, ApiKeyKind.ENDPOINT, emptyList(), null) },
+            { service.issue(principal(), "e", null, ApiKeyKind.ENDPOINT, emptyList(), null) },
             { service.issue(principal(), "s", KeyRole.PROMOTION_RECEIVER, ApiKeyKind.SERVER, emptyList(), null) },
+            { service.issue(principal(), "s", null, ApiKeyKind.SERVER, emptyList(), null) },
             { refusalFor { service.issue(principal(), "e", KeyRole.PROMOTION_RECEIVER, ApiKeyKind.ENDPOINT, emptyList(), null) } },
             { refusalFor { service.issue(principal(), "s", KeyRole.API_CALLER, ApiKeyKind.SERVER, emptyList(), null) } },
             // bindings: only an ENDPOINT key
             { service.issue(principal(), "e", null, ApiKeyKind.ENDPOINT, listOf("/nyc"), null) },
+            { refusalFor { service.issue(principal(), "m", KeyRole.AUTHOR, ApiKeyKind.MCP, listOf("/nyc"), null) } },
             { refusalFor { service.issue(principal(), "s", null, ApiKeyKind.SERVER, listOf("/nyc"), null) } },
             // expiry: every kind takes one — a promotion credential that never expires is the
             // whole problem 091 set out to fix.
@@ -242,7 +248,7 @@ class EndpointKeyServiceTest {
 
         assertAll(
             { refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_INVALID },
-            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any()) } },
+            { verify(exactly = 0) { apiKeys.issue(any(), any(), any(), any(), any(), any()) } },
         )
     }
 
@@ -279,25 +285,33 @@ class EndpointKeyServiceTest {
         )
 
     private fun stubIssue() {
-        every { apiKeys.issue(any(), any(), any(), any(), any()) } returns
-            IssuedApiKey(
-                record =
-                    ApiKey(
-                        id = KEY_ID,
-                        userId = ACTOR,
-                        name = "k",
-                        keyHash = "hash",
-                        isRevoked = false,
-                        createdAt = Instant.EPOCH,
-                        lastUsedAt = null,
-                        expiresAt = null,
-                        workspaceId = WORKSPACE,
-                        workspaceName = "default",
-                        kind = ApiKeyKind.ENDPOINT,
-                    ),
-                plaintext = "$KEY_ID.secret",
-            )
+        // Both issuance overloads (the random mint and the supplied plaintext, keys v2 role param):
+        // the funnel's tests only assert that the funnel CALLED the service and returned its answer.
+        every { apiKeys.issue(any(), any(), any(), any(), any(), any(), any()) } returns
+            stubbedIssue()
+        every { apiKeys.issue(any(), any(), any(), any(), any(), any()) } returns
+            stubbedIssue()
     }
+
+    private fun stubbedIssue(): IssuedApiKey =
+        IssuedApiKey(
+            record =
+                ApiKey(
+                    id = KEY_ID,
+                    userId = ACTOR,
+                    name = "k",
+                    keyHash = "hash",
+                    isRevoked = false,
+                    createdAt = Instant.EPOCH,
+                    lastUsedAt = null,
+                    expiresAt = null,
+                    workspaceId = WORKSPACE,
+                    workspaceName = "default",
+                    kind = ApiKeyKind.ENDPOINT,
+                    role = KeyRole.API_CALLER,
+                ),
+            plaintext = "$KEY_ID.secret",
+        )
 
     /** Asserts the block refuses with the kind-contradiction code. */
     private fun refusalFor(block: () -> Unit) {

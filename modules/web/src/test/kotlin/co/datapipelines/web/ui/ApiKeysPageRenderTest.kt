@@ -54,7 +54,7 @@ class ApiKeysPageRenderTest {
         context.setVariable("authenticated", true)
         context.setVariable("currentPath", "/api-keys")
         context.setVariable("keys", emptyList<Any>())
-        context.setVariable("kindChoices", ApiKeyForm.kindChoices(isAdmin = true))
+        context.setVariable("kindChoices", ApiKeyForm.kindChoices(listOf(co.datapipelines.auth.WorkspaceRole.AUTHOR, co.datapipelines.auth.WorkspaceRole.PROMOTER, co.datapipelines.auth.WorkspaceRole.WORKSPACE_ADMIN), mayCreateApiKeys = true, isSuperAdmin = true))
         context.setVariable("expiryChoices", ApiKeyForm.EXPIRY_CHOICES)
         context.setVariable("expiryCustomWire", ApiKeyForm.CUSTOM)
         context.setVariable("bindingNodes", ApiKeyForm.bindingNodes(listOf("/nyc/mobility/briefing")))

@@ -5,6 +5,7 @@ import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
 import co.datapipelines.auth.ApiKeyRepository
 import co.datapipelines.auth.ApiKeyService
+import co.datapipelines.auth.KeyKindNotMintableException
 import co.datapipelines.auth.KeyRole
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
@@ -33,9 +34,10 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * §16.1 create body. A key carries a ROLE, never scopes (#215, record PK8): `role` may be omitted
- * (it follows the kind — `api_caller` for `endpoint`, `promotion_receiver` for `server`) and is
- * refused when it names a role the kind cannot hold.
+ * §16.1 create body (keys v2, #233). A key carries a KIND (what it is) and a ROLE (what it may
+ * do): `role` is REQUIRED for `kind: "mcp"` — one of the member roles the subset rule allows
+ * the creator — and optional for `endpoint`/`server`, whose role is fixed by the kind and which
+ * refuse a contradicting one rather than quietly correcting it.
  */
 data class CreateApiKeyRequest(
     @field:JsonProperty("name") @get:JsonProperty("name") @param:JsonProperty("name")
@@ -52,8 +54,9 @@ data class CreateApiKeyRequest(
     @field:JsonProperty("expires_at") @get:JsonProperty("expires_at") @param:JsonProperty("expires_at")
     val expiresAt: Instant? = null,
     /**
-     * §7.7 — `endpoint` or `server`. Absent means `user`, which the service refuses for every
-     * role (`auth.key_kind_not_mintable`, D16): the login hook mints those.
+     * §7.7 — `mcp`, `endpoint` or `server` (keys v2 A19). REQUIRED: the login mint that used to
+     * make a default kind is retired (A15), and minting a credential the caller did not name
+     * would be worse than refusing the request.
      */
     @field:JsonProperty("kind") @get:JsonProperty("kind") @param:JsonProperty("kind")
     val kind: String? = null,
@@ -71,21 +74,24 @@ data class CreateApiKeyRequest(
  * principal, and user administration.
  *
  * Enforcement is the annotation + `auth`'s ScopeInterceptor, which asks [ScopeMatrix] for the
- * declared catalog permission (`mcp_key.own`, `api_key.create`, `profile.read`, `user.manage`);
- * the per-kind create permission and the creation limit (#215, record §3.1/O3) live in
- * [ApiKeyService.issue]. Audit events are written by the services, not here (auth.md §10.1).
+ * declared catalog permission (`mcp_key.own`, `mcp_key.create`, `mcp_key.revoke_own`,
+ * `profile.read`, `user.manage`); the per-kind create floors and the subset rule (keys v2 A14)
+ * live in [ApiKeyService.issue], the own-or-admin revocation in [ApiKeyService.revokeAs]. Audit
+ * events are written by the services, not here (auth.md §10.1).
  *
- * Since 179 (D16/D17) issuance and the self surface are DIFFERENT permissions: a `user` key is
- * minted by the login hook and nowhere else (`auth.key_kind_not_mintable` answers any
- * attempt), and creating `endpoint` keys is the workspace admin's `api_key.create`. What
- * every role keeps is the view/delete of its OWN login-minted key — `mcp_key.own`.
+ * Since keys v2 (#233) issuance is `mcp_key.create` at the route — author, promoter, workspace
+ * admin — with `api_key.create`/`server_key.create` asked per kind in the service; revocation
+ * of a key YOU created is `mcp_key.revoke_own`, any key in the workspace needing
+ * `api_key.revoke` there. What every role keeps is the view of its OWN created keys —
+ * `mcp_key.own`.
  *
  * ## Catalog gaps — reported, not papered over
  * §13 has no `auth.user.not_found` and no "api key not found" code. Unknown users are answered
  * with the correct status (404) and the nearest catalogued not-found code, with
  * `details.reason = "user_not_found"` removing any ambiguity — the stand-in pattern this module
  * documents in `ApiErrors`. Key revocation is deliberately idempotent: `204` whether or not the
- * key existed, so the endpoint discloses nothing about key-id existence.
+ * key existed (or was the caller's to revoke), so the endpoint discloses nothing about key-id
+ * existence.
  */
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -107,38 +113,14 @@ class AuthController(
         ApiResponse.of(apiKeyRepository.findByUser(currentPrincipal().userId).map { it.toResponse() })
 
     /**
-     * §16.1 (179, D16) — the caller's ONE live MCP key in the ACTIVE workspace: what the top
-     * bar shows (id, prefix, whether the sealed secret can be copied). 404-shaped emptiness is
-     * deliberately NOT used — "no key yet" is a state, not an error, so the answer is
-     * `data: null` and the caller renders the sign-in hint.
-     */
-    @GetMapping("/api-keys/mine")
-    @RequiredScope(Permission.MCP_KEY_OWN)
-    fun myMcpKey(): ApiResponse<Map<String, Any?>?> {
-        val principal = currentPrincipal()
-        val key =
-            principal.workspace?.let { apiKeyRepository.findLiveUserKey(principal.userId, it.id) }
-                ?: return ApiResponse.of(null)
-        return ApiResponse.of(
-            mapOf(
-                "id" to key.id,
-                "name" to key.name,
-                "prefix" to key.id.take(MCP_PREFIX_CHARS) + "…",
-                "copyable" to key.hasSealedSecret,
-                "created_at" to key.createdAt.toString(),
-            ),
-        )
-    }
-
-    /**
-     * §16.1 — issue (D17: the `MANAGE_API_KEYS` row since 179 — a workspace admin's verb).
-     * `kind` absent means `user`, which the service REFUSES (`auth.key_kind_not_mintable`):
-     * the refusal, not a silently different credential, is what a pre-179 client should meet.
-     * The plaintext `key` is in this response exactly once.
+     * §16.1 — issue (keys v2 A13–A15: the ONE creation path for every kind, the page's form
+     * driving the same service). `kind` is REQUIRED (`auth.key_kind_not_mintable` without one —
+     * no default exists any more), and an `mcp` key REQUIRES `role`: the member role the subset
+     * rule allows this caller to give. The plaintext `key` is in this response exactly once.
      */
     @PostMapping("/api-keys")
     @ResponseStatus(HttpStatus.CREATED)
-    @RequiredScope(Permission.API_KEY_CREATE)
+    @RequiredScope(Permission.MCP_KEY_CREATE)
     fun createKey(
         @RequestBody body: CreateApiKeyRequest,
     ): ApiResponse<Map<String, Any?>> {
@@ -160,7 +142,7 @@ class AuthController(
                         "Unknown key kind '$it'. Supported: ${ApiKeyKind.WIRE_VALUES.joinToString(", ")}.",
                         mapOf("kind" to it, "supported" to ApiKeyKind.WIRE_VALUES),
                     )
-            } ?: ApiKeyKind.DEFAULT
+            } ?: throw KeyKindNotMintableException()
         // D3 + §7.4: the key pins the creator's ACTIVE workspace (their membership in it is
         // re-checked inside issue). No request-payload workspace exists in v1 — cross-workspace
         // key issuance has no surface. §7.7's bindings ride the same call, before the mint.
@@ -182,14 +164,19 @@ class AuthController(
         )
     }
 
-    /** §16.1 — revoke. Idempotent `204`: no existence disclosure (see the class KDoc). */
+    /**
+     * §16.1 — revoke a key YOU created (`mcp_key.revoke_own`, keys v2 A14). A caller holding
+     * `api_key.revoke` may revoke any key of the active workspace through the same route (a
+     * `server` key additionally `server_key.revoke`, asked in the service); anything the caller
+     * may not touch answers the idempotent `204` — no existence disclosure.
+     */
     @DeleteMapping("/api-keys/{keyId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @RequiredScope(Permission.MCP_KEY_OWN)
+    @RequiredScope(Permission.MCP_KEY_REVOKE_OWN)
     fun revokeKey(
         @PathVariable keyId: String,
     ) {
-        apiKeys.revoke(keyId, currentPrincipal().userId)
+        apiKeys.revokeAs(currentPrincipal(), keyId)
     }
 
     /** §16.2 — the current principal, for agents and the UI to discover who they act as and with what role. */
@@ -299,9 +286,8 @@ class AuthController(
             )
 
     /**
-     * §16.1's key shape (#215): `role` (null for the MCP key, whose role is its member's), the
-     * `identity` the key ACTS AS — its own `service` identity, or the member for the MCP key — and
-     * `created_by`, the person who created it.
+     * §16.1's key shape (keys v2): `role` — the key's OWN role, of every kind — the `identity`
+     * it ACTS AS (its own `service` identity), and `created_by`, the person who created it.
      */
     private fun ApiKey.toResponse(): Map<String, Any?> =
         mapOf(
@@ -330,8 +316,5 @@ class AuthController(
 
     private companion object {
         const val MAX_ECHOED_VALUE_CHARS = 32
-
-        /** D16 — the top bar shows this many characters of the key (the `dpk_` id head). */
-        const val MCP_PREFIX_CHARS = 12
     }
 }

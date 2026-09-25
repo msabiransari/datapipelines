@@ -409,14 +409,8 @@
         <svg class="ds-icon ds-icon-md" data-mode-icon="dark" th:attr="hidden=${activeTheme == 'dark'} ? null : 'hidden'" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#moon"></use></svg>
       </button>
 
-      <!-- 179 (D16) — the MCP-key chip, right side beside the user menu: the caller's
-           login-minted key for the ACTIVE workspace. Omitted entirely when no live key
-           exists (post-rotation, pre-login); the chip partial carries both states for its
-           htmx refresh. th:if CANNOT share an element with th:replace (the layout's own
-           note at the toast bin), so the condition wraps the th:block. -->
-      <th:block th:if="${mcpKey != null}">
-        <div th:replace="~{partials/mcp-key-chip :: chip(${mcpKey})}"></div>
-      </th:block>
+      <!-- The MCP-key chip (179, D16) is gone — keys v2 (A15) retired the login mint, and
+           the Keys page (/api-keys) is the one creation path for every kind. -->
 
       <div class="app-user">
         <button type="button" id="app-avatar" class="app-avatar"

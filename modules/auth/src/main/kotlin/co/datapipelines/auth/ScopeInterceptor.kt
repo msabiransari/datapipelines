@@ -323,22 +323,18 @@ class ScopeInterceptor(
         /** The reserved-category test, mirrored from `EndpointPath.RESERVED_CATEGORY` (see above). */
         private val RESERVED_ENDPOINT_CATEGORY = Regex("^v[0-9]+$|^api$")
 
-        /**
-         * `GET /api/v1/executions/{id}` and `.../result` — the cursor of an execution an endpoint
-         * key started (§7.7). Whether THIS key started THAT execution is the handler's check, not
-         * this one's: here the question is only "may this credential be on this route".
-         */
-        val EXECUTION_READ = Regex("^/api/v1/executions/[^/]+(/result)?$")
-
         /** §13.14's code, spelled here because `auth` does not depend on `pipeline-contract`. */
         const val ENDPOINT_KEY_KIND_REFUSED = "endpoint.key_kind_refused"
 
         /**
-         * The whole reach of each key kind over MVC routes (§7.7), in ONE expression: an
-         * `endpoint` key gets the published-endpoint surface plus the two execution reads that let
-         * it collect a run it started; a `server` key gets the promotion receiver's route family;
-         * the MCP (`user`) key gets NO MVC route (#215 B2, owner ruling 2026-09-24 — "MCP key should
-         * be only MCP"): its surface is the `/mcp` servlet, which never reaches this interceptor.
+         * The whole reach of each key kind over MVC routes (§7.7), in ONE expression (keys v2,
+         * A16): an `endpoint` key gets the published-endpoint surface ONLY — its result paging
+         * (`/api/<category>/v<n>/<path>/executions/{id}` and `/result`) rides the published
+         * paths, so no separate reach is granted and the framework's own
+         * `/api/v1/executions/…` reads are OFF its surface (A16 retired them); a `server` key
+         * gets the promotion receiver's route family; the MCP key gets NO MVC route (A10, B2 —
+         * "MCP key should be only MCP"): its surface is the `/mcp` servlet, which never reaches
+         * this interceptor.
          *
          * A server key normally reaches the promotion routes through `DP-Promotion-Key`, whose
          * filter runs upstream and refuses the whole prefix without a valid one; the prefix is
@@ -350,15 +346,15 @@ class ScopeInterceptor(
             uri: String,
         ): Boolean =
             when (kind) {
-                ApiKeyKind.USER -> uri == MCP_PREFIX || uri.startsWith("$MCP_PREFIX/")
-                ApiKeyKind.ENDPOINT -> isPublishedEndpointPath(uri) || EXECUTION_READ.matches(uri)
+                ApiKeyKind.MCP -> uri == MCP_PREFIX || uri.startsWith("$MCP_PREFIX/")
+                ApiKeyKind.ENDPOINT -> isPublishedEndpointPath(uri)
                 ApiKeyKind.SERVER -> uri.startsWith(PromotionServerKeyFilter.PROMOTION_PREFIX)
             }
 
         /** The audit `reason` for each kind, off its surface. */
         val OFF_SURFACE_REASON: Map<ApiKeyKind, String> =
             mapOf(
-                ApiKeyKind.USER to "user_key_off_surface",
+                ApiKeyKind.MCP to "mcp_key_off_surface",
                 ApiKeyKind.ENDPOINT to "endpoint_key_off_surface",
                 ApiKeyKind.SERVER to "server_key_off_surface",
             )
@@ -366,10 +362,11 @@ class ScopeInterceptor(
         /** What the refusal tells the caller — the operator-actionable half. */
         val OFF_SURFACE_MESSAGE: Map<ApiKeyKind, String> =
             mapOf(
-                ApiKeyKind.USER to
+                ApiKeyKind.MCP to
                     "An MCP key connects an MCP client to /mcp and nothing else; REST and the UI take a signed-in session.",
                 ApiKeyKind.ENDPOINT to
-                    "An endpoint key may only call published endpoints and read the executions it started.",
+                    "An API key may only call the published endpoints it is bound to, and page the results of the " +
+                        "executions it started, under those endpoints' paths.",
                 ApiKeyKind.SERVER to
                     "A server key may only be presented as DP-Promotion-Key on the promotion routes of a receiving deployment.",
             )

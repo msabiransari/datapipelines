@@ -32,7 +32,7 @@ class UiLayoutChromeAdviceTest {
     private val themeResolver = mockk<ThemeResolver>()
     private val workspaceService = mockk<WorkspaceService>()
 
-    private val advice = UiWorkspaceAdvice(workspaceService, themeResolver, mockk())
+    private val advice = UiWorkspaceAdvice(workspaceService, themeResolver)
 
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()

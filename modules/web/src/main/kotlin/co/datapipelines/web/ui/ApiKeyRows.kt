@@ -22,14 +22,13 @@ class ApiKeyRows(
 ) {
     /**
      * One key as the table shows it. [prefix] is the public `dpk_…` handle — never the secret,
-     * which exists only in the response that minted it (and, since V31, in the sealed column
-     * the top bar's copy endpoint opens).
+     * which exists only in the response that minted it (and, for the V35-migrated login keys,
+     * in the sealed column the Keys page's copy endpoint opens once).
      *
-     * [createdBy] is the CREATOR's display label — the `/api-keys` page lists the whole
-     * workspace's API keys (D17), so who created each one is a column, not an assumption.
-     * [actsAs] is the key's own identity (#215, record §3.3) — the name its runs and received
-     * versions are attributed to — and [role] its key role's label (`api caller`,
-     * `promotion receiver`).
+     * [createdBy] is the CREATOR's display label — the Keys page lists the workspace's keys
+     * (D17), so who created each one is a column, not an assumption. [actsAs] is the key's own
+     * identity (#215, record §3.3) — the name its runs and received versions are attributed to
+     * — and [role] its key role's label (`author`, `api caller`, …).
      */
     data class Row(
         val id: String,
@@ -48,12 +47,20 @@ class ApiKeyRows(
         val expiresAbsolute: String?,
         val isRevoked: Boolean,
         val isExpired: Boolean,
+        /** The key still carries its one readable sealed copy (V31 leftovers) — the row may offer Copy. */
+        val copyable: Boolean = false,
     ) {
         /** A key that can still authenticate — the only kind with a revoke affordance. */
         val isLive: Boolean get() = !isRevoked && !isExpired
 
-        /** D17: the UI name — `endpoint` reads "API key" everywhere a person looks. */
-        val kindLabel: String get() = if (kind == ApiKeyKind.ENDPOINT.wire) "API key" else "Server key"
+        /** The UI name (keys v2 A19): `mcp` reads "MCP key", `endpoint` reads "API key". */
+        val kindLabel: String
+            get() =
+                when (kind) {
+                    ApiKeyKind.MCP.wire -> "MCP key"
+                    ApiKeyKind.ENDPOINT.wire -> "API key"
+                    else -> "Server key"
+                }
     }
 
     /**
@@ -84,7 +91,11 @@ class ApiKeyRows(
             name = key.name,
             kind = key.kind.wire,
             prefix = key.id.take(PREFIX_CHARS) + "…",
-            createdBy = userLabels[key.createdBy] ?: UNKNOWN_OWNER,
+            createdBy =
+                (userLabels[key.createdBy] ?: UNKNOWN_OWNER) +
+                    // B6: on a revoked row the creator may be gone — the label says so rather
+                    // than leaving a live-looking name on a dead credential.
+                    if (key.isRevoked) " (removed)" else "",
             actsAs = userLabels[key.userId] ?: UNKNOWN_OWNER,
             role = key.role?.label,
             boundPaths =
@@ -103,6 +114,7 @@ class ApiKeyRows(
             // An expired key is dead exactly as a revoked one is (§7.3 step 5), and the table
             // says so rather than showing a live-looking row with a past date in it.
             isExpired = key.expiresAt?.isBefore(now) ?: false,
+            copyable = key.hasSealedSecret,
         )
 
     companion object {
