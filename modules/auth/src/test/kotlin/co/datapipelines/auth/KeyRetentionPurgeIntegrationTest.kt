@@ -134,7 +134,7 @@ class KeyRetentionPurgeIntegrationTest {
         val id = UUID.randomUUID()
         jdbc.jdbcTemplate.execute(
             "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES" +
-                " ('$id', '${id}@keys.invalid', 'purge-identity', 'key', 'subject-$id', $active, FALSE, 'service')",
+                " ('$id', '$id@keys.invalid', 'purge-identity', 'key', 'subject-$id', $active, FALSE, 'service')",
         )
         return id
     }

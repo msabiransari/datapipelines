@@ -503,8 +503,10 @@ class TransformImplementsE2eTest {
             // identity and carries the role chosen at creation — author, which the subset rule
             // allows each creator (both are authors here).
             connection
-                .prepareStatement("INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES (?, ?, ?, 'key', ?, TRUE, FALSE, 'service')")
-                .use { ps ->
+                .prepareStatement(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind)" +
+                        " VALUES (?, ?, ?, 'key', ?, TRUE, FALSE, 'service')",
+                ).use { ps ->
                     for ((identity, key) in listOf(ALICE_KEY_IDENTITY to ALICE_KEY, BOB_KEY_IDENTITY to BOB_KEY)) {
                         ps.setObject(1, UUID.fromString(identity))
                         ps.setString(2, "${key.id.lowercase()}@keys.invalid")
@@ -515,16 +517,22 @@ class TransformImplementsE2eTest {
                     ps.executeBatch()
                 }
             connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'author')")
-                .use { ps ->
-                    for ((key, owner, identity, workspace) in
-                        listOf(Quad(ALICE_KEY, ALICE, ALICE_KEY_IDENTITY, WS_ACME), Quad(BOB_KEY, BOB, BOB_KEY_IDENTITY, WS_GLOBEX))) {
-                        ps.setString(1, key.id)
-                        ps.setObject(2, UUID.fromString(identity))
-                        ps.setObject(3, UUID.fromString(owner))
-                        ps.setString(4, key.name)
-                        ps.setString(5, key.hash)
-                        ps.setObject(6, UUID.fromString(workspace))
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'author')",
+                ).use { ps ->
+                    val seeds =
+                        listOf(
+                            Quad(ALICE_KEY, ALICE, ALICE_KEY_IDENTITY, WS_ACME),
+                            Quad(BOB_KEY, BOB, BOB_KEY_IDENTITY, WS_GLOBEX),
+                        )
+                    for (seed in seeds) {
+                        ps.setString(1, seed.key.id)
+                        ps.setObject(2, UUID.fromString(seed.identity))
+                        ps.setObject(3, UUID.fromString(seed.owner))
+                        ps.setString(4, seed.key.name)
+                        ps.setString(5, seed.key.hash)
+                        ps.setObject(6, UUID.fromString(seed.workspace))
                         ps.addBatch()
                     }
                     ps.executeBatch()
@@ -563,8 +571,8 @@ class TransformImplementsE2eTest {
         private val BOB_KEY = E2eAuth.generateKey("impl-bob-key")
 
         /** Each key's own `service` identity (keys v2 A13) — the 233c base refresh. */
-        private val ALICE_KEY_IDENTITY = "7e7e0000-0000-0000-0000-00000000a12d"
-        private val BOB_KEY_IDENTITY = "7e7e0000-0000-0000-0000-00000000b0e4"
+        private const val ALICE_KEY_IDENTITY = "7e7e0000-0000-0000-0000-00000000a12d"
+        private const val BOB_KEY_IDENTITY = "7e7e0000-0000-0000-0000-00000000b0e4"
 
         private val random = SecureRandom()
         private val jwtSecret: String = E2eSession.newSecret()
