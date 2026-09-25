@@ -360,7 +360,13 @@ internal object CompositionRules {
             val parentName = reference.groupValues[1]
             // 7c (#7): the parent's value-mode TRANSFORM keys resolve as a tier too, untyped
             // (ANY) like an ANY-output calculator key — the contract types them, not the body.
-            val tier = ParentTier.resolve(parentName, pipeline, pipeline.calculatorOutputs() + pipeline.transformOutputKeys().associateWith { null }, org)
+            val tier =
+                ParentTier.resolve(
+                    parentName,
+                    pipeline,
+                    pipeline.calculatorOutputs() + pipeline.transformOutputKeys().associateWith { null },
+                    org,
+                )
             if (mismatched(tier, target)) {
                 into.add(
                     Validation.PIPELINE_PARAMETER_TYPE_MISMATCH,

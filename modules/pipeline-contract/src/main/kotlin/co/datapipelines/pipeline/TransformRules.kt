@@ -63,18 +63,33 @@ internal object TransformRules {
         val staged = StagedTables.of(pipeline)
         val deploymentKeys = orgContext.keys + ContextKeys.PLATFORM
 
+        val ruleContext =
+            RuleContext(pipeline, contracts, deploymentKeys, keyToWriter, objectKeys, ancestors, staged, kinds)
         pipeline.nodes.forEachIndexed { index, node ->
             if (node.type == NodeType.TRANSFORM) {
-                checkTransformNode(
-                    index, node, pipeline, contracts[node.id], contracts, deploymentKeys, keyToWriter, objectKeys,
-                    ancestors, staged, kinds, into,
-                )
+                checkTransformNode(index, node, contracts[node.id], ruleContext, into)
             } else {
                 checkForeignFields(index, node, into)
             }
         }
-        checkObjectKeyBindings(pipeline, objectKeys, templates, workspaceId, keyToWriter, into)
+        checkObjectKeyBindings(templates, workspaceId, ruleContext, into)
     }
+
+    /**
+     * Everything the §12.13 rules read about the rest of the pipeline, derived once in
+     * [check] — one value threaded through the rule functions instead of seven parameters
+     * (the same derivation §12.10 builds for the calculators, widened to the TRANSFORM keys).
+     */
+    private class RuleContext(
+        val pipeline: Pipeline,
+        val contracts: Map<String, TransformContractView?>,
+        val deploymentKeys: Set<String>,
+        val keyToWriter: Map<String, String>,
+        val objectKeys: Set<String>,
+        val ancestors: Ancestry,
+        val staged: StagedTables,
+        val kinds: (String) -> co.datapipelines.calculators.CalculatorKind?,
+    )
 
     /** Every Context key [node] writes — the calculator shapes plus a value-mode TRANSFORM's `context_key`. */
     private fun writtenKeys(node: Node): List<String> =
@@ -90,19 +105,11 @@ internal object TransformRules {
 
     // ---------------------------------------------------------------- the node
 
-    @Suppress("LongParameterList")
     private fun checkTransformNode(
         index: Int,
         node: Node,
-        pipeline: Pipeline,
         contract: TransformContractView?,
-        contracts: Map<String, TransformContractView?>,
-        deploymentKeys: Set<String>,
-        keyToWriter: Map<String, String>,
-        objectKeys: Set<String>,
-        ancestors: Ancestry,
-        staged: StagedTables,
-        kinds: (String) -> co.datapipelines.calculators.CalculatorKind?,
+        ruleContext: RuleContext,
         into: FailureCollector,
     ) {
         if (node.source.isNotBlank()) {
@@ -115,8 +122,8 @@ internal object TransformRules {
             )
         }
         if (contract != null) {
-            checkInputs(index, node, pipeline, contract, contracts, deploymentKeys, keyToWriter, objectKeys, ancestors, staged, kinds, into)
-            checkOutput(index, node, pipeline, contract, keyToWriter, into)
+            checkInputs(index, node, contract, ruleContext, into)
+            checkOutput(index, node, contract, ruleContext, into)
             if (node.strict == true && !contract.rejects) {
                 into.add(
                     Validation.TRANSFORM_STRICT_WITHOUT_REJECTS,
@@ -157,19 +164,11 @@ internal object TransformRules {
 
     // ---------------------------------------------------------------- inputs
 
-    @Suppress("LongParameterList")
     private fun checkInputs(
         index: Int,
         node: Node,
-        pipeline: Pipeline,
         contract: TransformContractView,
-        contracts: Map<String, TransformContractView?>,
-        deploymentKeys: Set<String>,
-        keyToWriter: Map<String, String>,
-        objectKeys: Set<String>,
-        ancestors: Ancestry,
-        staged: StagedTables,
-        kinds: (String) -> co.datapipelines.calculators.CalculatorKind?,
+        ruleContext: RuleContext,
         into: FailureCollector,
     ) {
         val supplied = node.inputs.orEmpty()
@@ -205,34 +204,23 @@ internal object TransformRules {
                 }
 
                 reference.startsWith("$") && reference.length > 1 -> {
-                    checkValueInput(
-                        path, index, node, name, input, reference.substring(1), pipeline,
-                        deploymentKeys, keyToWriter, objectKeys, ancestors, contracts, kinds, into,
-                    )
+                    checkValueInput(path, node, name, input, reference.substring(1), ruleContext, into)
                 }
 
                 else -> {
-                    checkTableInput(path, node, name, input, reference, ancestors, staged, into)
+                    checkTableInput(path, node, name, input, reference, ruleContext.staged, into)
                 }
             }
         }
     }
 
-    @Suppress("LongParameterList")
     private fun checkValueInput(
         path: String,
-        index: Int,
         node: Node,
         name: String,
         input: TransformContractView.Input,
         key: String,
-        pipeline: Pipeline,
-        deploymentKeys: Set<String>,
-        keyToWriter: Map<String, String>,
-        objectKeys: Set<String>,
-        ancestors: Ancestry,
-        contracts: Map<String, TransformContractView?>,
-        kinds: (String) -> co.datapipelines.calculators.CalculatorKind?,
+        ruleContext: RuleContext,
         into: FailureCollector,
     ) {
         if (input !is TransformContractView.Input.Value) {
@@ -247,18 +235,35 @@ internal object TransformRules {
         }
         // An object-valued key (R4) binds ONLY here — a TRANSFORM value input — and fits no
         // declared LogicalType, so the type check does not apply to it.
-        if (key in objectKeys) {
-            checkOrdering(path, node, key, keyToWriter, ancestors, into)
+        if (key in ruleContext.objectKeys) {
+            checkOrdering(path, node, key, ruleContext.keyToWriter, ruleContext.ancestors, into)
             return
         }
+        checkValueInputType(path, node, name, input, key, ruleContext, into)
+    }
+
+    /**
+     * The value input's type resolution (§3.1): the Context tier the key lives in — platform
+     * type, org key as STRING, declared parameter — else the writer's resolved output, with
+     * §12.10's unknown and ordering refusals on the way.
+     */
+    private fun checkValueInputType(
+        path: String,
+        node: Node,
+        name: String,
+        input: TransformContractView.Input.Value,
+        key: String,
+        ruleContext: RuleContext,
+        into: FailureCollector,
+    ) {
         val declaredType =
             when {
                 key in ContextKeys.PLATFORM_TYPES -> ContextKeys.PLATFORM_TYPES.getValue(key)
-                key in deploymentKeys -> LogicalType.STRING
-                else -> pipeline.parameters[key]?.type
+                key in ruleContext.deploymentKeys -> LogicalType.STRING
+                else -> ruleContext.pipeline.parameters[key]?.type
             }
         if (declaredType == null) {
-            val writer = keyToWriter[key]
+            val writer = ruleContext.keyToWriter[key]
             when {
                 writer == null -> {
                     into.add(
@@ -271,34 +276,17 @@ internal object TransformRules {
                     return
                 }
 
-                writer != node.id && !ancestors.reaches(node.id, writer) -> {
+                writer != node.id && !ruleContext.ancestors.reaches(node.id, writer) -> {
                     unordered(path, node, key, writer, into)
                     return
                 }
             }
         }
-        checkValueInputType(path, node, name, input, key, declaredType, pipeline, keyToWriter, contracts, kinds, into)
-    }
-
-    @Suppress("LongParameterList")
-    private fun checkValueInputType(
-        path: String,
-        node: Node,
-        name: String,
-        input: TransformContractView.Input.Value,
-        key: String,
-        declaredType: LogicalType?,
-        pipeline: Pipeline,
-        keyToWriter: Map<String, String>,
-        contracts: Map<String, TransformContractView?>,
-        kinds: (String) -> co.datapipelines.calculators.CalculatorKind?,
-        into: FailureCollector,
-    ) {
         val referenceType =
             declaredType
-                ?: keyToWriter[key]
-                    ?.let { writerId -> pipeline.node(writerId) }
-                    ?.let { writer -> writerOutputType(writer, key, contracts, kinds) }
+                ?: ruleContext.keyToWriter[key]
+                    ?.let { writerId -> ruleContext.pipeline.node(writerId) }
+                    ?.let { writer -> writerOutputType(writer, key, ruleContext) }
                 ?: return
         if (referenceType != input.type) {
             into.add(
@@ -324,19 +312,22 @@ internal object TransformRules {
     private fun writerOutputType(
         writer: Node,
         key: String,
-        contracts: Map<String, TransformContractView?>,
-        kinds: (String) -> co.datapipelines.calculators.CalculatorKind?,
+        ruleContext: RuleContext,
     ): LogicalType? =
         when (writer.type) {
-            NodeType.CALCULATOR ->
+            NodeType.CALCULATOR -> {
                 writer.kind
-                    ?.let(kinds)
+                    ?.let(ruleContext.kinds)
                     ?.let { kind -> calculatorOutputEntries(writer, kind).firstOrNull { it.first == key }?.second }
+            }
 
-            NodeType.TRANSFORM ->
-                (contracts[writer.id]?.output as? TransformContractView.Output.Value)?.type
+            NodeType.TRANSFORM -> {
+                (ruleContext.contracts[writer.id]?.output as? TransformContractView.Output.Value)?.type
+            }
 
-            else -> null
+            else -> {
+                null
+            }
         }
 
     private fun checkTableInput(
@@ -345,7 +336,6 @@ internal object TransformRules {
         name: String,
         input: TransformContractView.Input,
         table: String,
-        ancestors: Ancestry,
         staged: StagedTables,
         into: FailureCollector,
     ) {
@@ -408,14 +398,13 @@ internal object TransformRules {
     private fun checkOutput(
         index: Int,
         node: Node,
-        pipeline: Pipeline,
         contract: TransformContractView,
-        keyToWriter: Map<String, String>,
+        ruleContext: RuleContext,
         into: FailureCollector,
     ) {
         when (contract.mode) {
             TransformContractView.Mode.ROW, TransformContractView.Mode.TABLE -> checkTableModeOutput(index, node, contract, into)
-            TransformContractView.Mode.VALUE -> checkValueModeOutput(index, node, pipeline, contract, keyToWriter, into)
+            TransformContractView.Mode.VALUE -> checkValueModeOutput(index, node, ruleContext, into)
         }
     }
 
@@ -436,35 +425,7 @@ internal object TransformRules {
         }
         when (val output = node.output) {
             is NodeOutput.Tempdb -> {
-                if (output.table.isBlank()) {
-                    into.add(
-                        Validation.OUTPUT_TABLE_MISSING,
-                        "nodes[$index].output.table",
-                        "A tempdb output requires 'table' — it is the name downstream nodes query.",
-                        mapOf("node" to node.id.truncateForError()),
-                    )
-                }
-                when {
-                    contract.rejects && output.rejects.isNullOrBlank() -> {
-                        into.add(
-                            Validation.TRANSFORM_REJECTS_MISSING,
-                            "nodes[$index].output.rejects",
-                            "TRANSFORM node '${node.id.truncateForError()}' pins a rejects-declaring contract, so its " +
-                                "output must name the rejects table — rejects are never silently dropped.",
-                            mapOf("node" to node.id.truncateForError()),
-                        )
-                    }
-
-                    !contract.rejects && output.rejects != null -> {
-                        into.add(
-                            Validation.TRANSFORM_REJECTS_UNDECLARED,
-                            "nodes[$index].output.rejects",
-                            "TRANSFORM node '${node.id.truncateForError()}' names a rejects table, but the pinned " +
-                                "contract declares no rejects.",
-                            mapOf("node" to node.id.truncateForError()),
-                        )
-                    }
-                }
+                checkTempdbTableOutput(index, node, contract, output, into)
             }
 
             NodeOutput.Caller -> {
@@ -493,12 +454,53 @@ internal object TransformRules {
         }
     }
 
+    /**
+     * The tempdb target of a row/table-mode output: the table is required, and the rejects
+     * pair is declared together — a rejects-declaring contract must name the rejects table,
+     * a rejects table without the contract is refused (R5's other half).
+     */
+    private fun checkTempdbTableOutput(
+        index: Int,
+        node: Node,
+        contract: TransformContractView,
+        output: NodeOutput.Tempdb,
+        into: FailureCollector,
+    ) {
+        if (output.table.isBlank()) {
+            into.add(
+                Validation.OUTPUT_TABLE_MISSING,
+                "nodes[$index].output.table",
+                "A tempdb output requires 'table' — it is the name downstream nodes query.",
+                mapOf("node" to node.id.truncateForError()),
+            )
+        }
+        when {
+            contract.rejects && output.rejects.isNullOrBlank() -> {
+                into.add(
+                    Validation.TRANSFORM_REJECTS_MISSING,
+                    "nodes[$index].output.rejects",
+                    "TRANSFORM node '${node.id.truncateForError()}' pins a rejects-declaring contract, so its " +
+                        "output must name the rejects table — rejects are never silently dropped.",
+                    mapOf("node" to node.id.truncateForError()),
+                )
+            }
+
+            !contract.rejects && output.rejects != null -> {
+                into.add(
+                    Validation.TRANSFORM_REJECTS_UNDECLARED,
+                    "nodes[$index].output.rejects",
+                    "TRANSFORM node '${node.id.truncateForError()}' names a rejects table, but the pinned " +
+                        "contract declares no rejects.",
+                    mapOf("node" to node.id.truncateForError()),
+                )
+            }
+        }
+    }
+
     private fun checkValueModeOutput(
         index: Int,
         node: Node,
-        pipeline: Pipeline,
-        contract: TransformContractView,
-        keyToWriter: Map<String, String>,
+        ruleContext: RuleContext,
         into: FailureCollector,
     ) {
         if (node.output != null) {
@@ -531,7 +533,7 @@ internal object TransformRules {
             )
             return
         }
-        if (pipeline.parameters.containsKey(key)) {
+        if (ruleContext.pipeline.parameters.containsKey(key)) {
             into.add(
                 Validation.CALCULATOR_OUTPUT_COLLISION,
                 "nodes[$index].context_key",
@@ -541,8 +543,8 @@ internal object TransformRules {
             )
             return
         }
-        val other = keyToWriter[key]
-        if (other != null && other != node.id && pipeline.node(other)?.type == NodeType.TRANSFORM) {
+        val other = ruleContext.keyToWriter[key]
+        if (other != null && other != node.id && ruleContext.pipeline.node(other)?.type == NodeType.TRANSFORM) {
             // Reported here only when the OTHER writer is a TRANSFORM too — a collision with a
             // CALCULATOR is §12.10's verdict on the calculator node (its writer map includes
             // transform keys), and one edit must not buy an author two errors.
@@ -564,24 +566,25 @@ internal object TransformRules {
      * them), a calculator's `inputs` `$key`, and a PIPELINE node's `parameters` `${ref}`.
      */
     private fun checkObjectKeyBindings(
-        pipeline: Pipeline,
-        objectKeys: Set<String>,
         templates: TemplateDryRenderer,
         workspaceId: UUID,
-        keyToWriter: Map<String, String>,
+        ruleContext: RuleContext,
         into: FailureCollector,
     ) {
-        if (objectKeys.isEmpty()) return
-        pipeline.nodes.forEachIndexed { index, node ->
+        if (ruleContext.objectKeys.isEmpty()) return
+        ruleContext.pipeline.nodes.forEachIndexed { index, node ->
             when (node.type) {
                 NodeType.DQL, NodeType.DML, NodeType.DDL -> {
                     if (node.template.id.isBlank()) return@forEachIndexed
                     templates
                         .boundParameters(workspaceId, node.template)
-                        .filter { it in objectKeys }
+                        .filter { it in ruleContext.objectKeys }
                         .forEach { key ->
                             objectKeyBound(
-                                "nodes[$index].template", node, key, keyToWriter,
+                                "nodes[$index].template",
+                                node,
+                                key,
+                                ruleContext.keyToWriter,
                                 "bound as :$key in its SQL — an object value has no SQL bind channel (R4)",
                                 into,
                             )
@@ -591,9 +594,12 @@ internal object TransformRules {
                 NodeType.CALCULATOR -> {
                     node.inputs.orEmpty().forEach { (input, value) ->
                         val key = referenceIn(value) ?: return@forEach
-                        if (key in objectKeys) {
+                        if (key in ruleContext.objectKeys) {
                             objectKeyBound(
-                                "nodes[$index].inputs.${input.truncateForError()}", node, key, keyToWriter,
+                                "nodes[$index].inputs.${input.truncateForError()}",
+                                node,
+                                key,
+                                ruleContext.keyToWriter,
                                 "a calculator input is a scalar channel — an object has no canonical reading (R4)",
                                 into,
                             )
@@ -604,9 +610,12 @@ internal object TransformRules {
                 NodeType.PIPELINE -> {
                     node.parameters.orEmpty().forEach { (parameter, value) ->
                         val key = pipelineReferenceIn(value) ?: return@forEach
-                        if (key in objectKeys) {
+                        if (key in ruleContext.objectKeys) {
                             objectKeyBound(
-                                "nodes[$index].parameters.${parameter.truncateForError()}", node, key, keyToWriter,
+                                "nodes[$index].parameters.${parameter.truncateForError()}",
+                                node,
+                                key,
+                                ruleContext.keyToWriter,
                                 "a composition parameter is a scalar channel (R4)",
                                 into,
                             )
@@ -614,7 +623,9 @@ internal object TransformRules {
                     }
                 }
 
-                else -> Unit
+                else -> {
+                    // a TRANSFORM value input binds no table and declares nothing here
+                }
             }
         }
     }
@@ -710,7 +721,9 @@ internal class StagedTables private constructor(
                     setOfNotNull(output.table.takeUnless { it.isBlank() }, output.rejects?.takeUnless { it.isBlank() })
                 }
 
-                else -> emptySet()
+                else -> {
+                    emptySet()
+                }
             }
     }
 }

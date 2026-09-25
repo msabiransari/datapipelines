@@ -83,17 +83,18 @@ class DemoPipelineHashNeutralityTest {
             val copy = tree.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
             val tempdb = copy.path("settings").path("tempdb")
             if (tempdb is com.fasterxml.jackson.databind.node.ObjectNode) tempdb.remove("config")
-            copy.path("nodes").forEach { node ->
-                if (node is com.fasterxml.jackson.databind.node.ObjectNode) {
-                    if (node.path("source").asText() == "") node.remove("source")
-                    val template = node.path("template")
-                    if (template is com.fasterxml.jackson.databind.node.ObjectNode) {
-                        template.remove("key")
-                        if (template.path("id").asText() == "" && template.path("version").asInt() == 0) node.remove("template")
-                    }
-                }
-            }
+            copy.path("nodes").forEach { node -> normalizedNode(node) }
             return copy
+        }
+
+        /** Drops one node's asymmetries — the source default and the lenient CALCULATOR template default. */
+        private fun normalizedNode(node: JsonNode) {
+            if (node !is com.fasterxml.jackson.databind.node.ObjectNode) return
+            if (node.path("source").asText() == "") node.remove("source")
+            val template = node.path("template")
+            if (template !is com.fasterxml.jackson.databind.node.ObjectNode) return
+            template.remove("key")
+            if (template.path("id").asText() == "" && template.path("version").asInt() == 0) node.remove("template")
         }
     }
 }

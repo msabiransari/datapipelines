@@ -88,14 +88,7 @@ class ParameterBinder(
             val supplied = inputs[name]?.takeUnless { it.isNull } ?: return@forEach
             coerceCalculatorInto(name, outputType, supplied, bound, failures)
         }
-        // 7c (#7): the value-mode TRANSFORM keys — supplied, the value enters the Context
-        // uncoerced (the contract's gate is the node's, at run); unsupplied, nothing, and the
-        // node runs. A name a parameter or calculator key owns is theirs (save-time collision).
-        transformKeys.forEach { name ->
-            if (name in parameters || name in calculatorOutputs) return@forEach
-            val supplied = inputs[name]?.takeUnless { it.isNull } ?: return@forEach
-            bound[name] = naturalJson(supplied)
-        }
+        bindTransformKeys(inputs, bound)
         // 121 D5: the all-or-nothing check reads the REQUEST, not the bound map — a key whose
         // value failed coercion above is still "supplied", and its type failure is already
         // reported beside this one (exhaustive, like every rule here).
@@ -195,6 +188,23 @@ class ParameterBinder(
             return
         }
         coerceInto(name, outputType, value, bound, failures)
+    }
+
+    /**
+     * The value-mode TRANSFORM keys (7c #7), the third bind tier after the parameters and
+     * calculator ones — supplied, the value enters the Context uncoerced (the contract's gate
+     * is the node's, at run); unsupplied, nothing, and the node runs. A name a parameter or
+     * calculator key owns is theirs (save-time collision).
+     */
+    private fun bindTransformKeys(
+        inputs: Map<String, JsonNode>,
+        bound: LinkedHashMap<String, Any?>,
+    ) {
+        transformKeys.forEach { name ->
+            if (name in parameters || name in calculatorOutputs) return@forEach
+            val supplied = inputs[name]?.takeUnless { it.isNull } ?: return@forEach
+            bound[name] = naturalJson(supplied)
+        }
     }
 
     private fun invalidType(

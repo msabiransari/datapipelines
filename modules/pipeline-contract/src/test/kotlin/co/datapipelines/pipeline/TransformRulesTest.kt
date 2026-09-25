@@ -210,7 +210,14 @@ class TransformRulesTest {
                     nodes =
                         listOf(
                             stageNode(),
-                            transformNode(inputs = mapOf("orders" to Fixtures.json("\"elsewhere\""), "tz" to Fixtures.json("\"\$org_timezone\""), "min_total" to Fixtures.json("\"\$min_total\""))),
+                            transformNode(
+                                inputs =
+                                    mapOf(
+                                        "orders" to Fixtures.json("\"elsewhere\""),
+                                        "tz" to Fixtures.json("\"\$org_timezone\""),
+                                        "min_total" to Fixtures.json("\"\$min_total\""),
+                                    ),
+                            ),
                         ),
                     parameters = parameters,
                 ),
@@ -244,7 +251,14 @@ class TransformRulesTest {
                     nodes =
                         listOf(
                             stageNode(),
-                            transformNode(inputs = mapOf("orders" to Fixtures.json("\"stg_orders\""), "tz" to Fixtures.json("\"\$org_nowhere\""), "min_total" to Fixtures.json("\"\$min_total\""))),
+                            transformNode(
+                                inputs =
+                                    mapOf(
+                                        "orders" to Fixtures.json("\"stg_orders\""),
+                                        "tz" to Fixtures.json("\"\$org_nowhere\""),
+                                        "min_total" to Fixtures.json("\"\$min_total\""),
+                                    ),
+                            ),
                         ),
                     parameters = parameters,
                 ),
@@ -261,7 +275,13 @@ class TransformRulesTest {
                     nodes =
                         listOf(
                             stageNode(),
-                            transformNode(inputs = mapOf("orders" to Fixtures.json("\"stg_orders\""), "tz" to Fixtures.json("\"\$org_timezone\""))),
+                            transformNode(
+                                inputs =
+                                    mapOf(
+                                        "orders" to Fixtures.json("\"stg_orders\""),
+                                        "tz" to Fixtures.json("\"\$org_timezone\""),
+                                    ),
+                            ),
                         ),
                     parameters = parameters,
                 ),
@@ -279,7 +299,14 @@ class TransformRulesTest {
                     nodes =
                         listOf(
                             stageNode(),
-                            transformNode(inputs = mapOf("orders" to Fixtures.json("\"stg_orders\""), "tz" to Fixtures.json("\"\$min_total\""), "min_total" to Fixtures.json("\"\$org_timezone\""))),
+                            transformNode(
+                                inputs =
+                                    mapOf(
+                                        "orders" to Fixtures.json("\"stg_orders\""),
+                                        "tz" to Fixtures.json("\"\$min_total\""),
+                                        "min_total" to Fixtures.json("\"\$org_timezone\""),
+                                    ),
+                            ),
                         ),
                     parameters = parameters,
                 ),
@@ -297,7 +324,14 @@ class TransformRulesTest {
                     nodes =
                         listOf(
                             stageNode(),
-                            transformNode(inputs = mapOf("orders" to Fixtures.json("\"\$org_timezone\""), "tz" to Fixtures.json("\"\$org_timezone\""), "min_total" to Fixtures.json("\"\$min_total\""))),
+                            transformNode(
+                                inputs =
+                                    mapOf(
+                                        "orders" to Fixtures.json("\"\$org_timezone\""),
+                                        "tz" to Fixtures.json("\"\$org_timezone\""),
+                                        "min_total" to Fixtures.json("\"\$min_total\""),
+                                    ),
+                            ),
                         ),
                     parameters = parameters,
                 ),
@@ -412,7 +446,10 @@ class TransformRulesTest {
             )
 
         when (outcome) {
-            is DeserializationOutcome.Parsed -> error("expected the wire scan to refuse rejects on a caller output")
+            is DeserializationOutcome.Parsed -> {
+                error("expected the wire scan to refuse rejects on a caller output")
+            }
+
             is DeserializationOutcome.Rejected -> {
                 outcome.result.codes shouldContainExactlyInAnyOrder listOf(Validation.TRANSFORM_REJECTS_ON_CALLER)
             }
@@ -427,7 +464,11 @@ class TransformRulesTest {
                 templates = stub(contract = CONTRACT.copy(rejects = false)),
             )
 
-        result.codes shouldContainExactlyInAnyOrder listOf(Validation.TRANSFORM_STRICT_WITHOUT_REJECTS, Validation.TRANSFORM_REJECTS_UNDECLARED)
+        result.codes shouldContainExactlyInAnyOrder
+            listOf(
+                Validation.TRANSFORM_STRICT_WITHOUT_REJECTS,
+                Validation.TRANSFORM_REJECTS_UNDECLARED,
+            )
     }
 
     @Test
@@ -493,7 +534,11 @@ class TransformRulesTest {
                             stageNode(),
                             writer,
                             Fixtures.calculatorNode(
-                                inputs = mapOf("date" to Fixtures.json("\"\$payload\""), "fiscal_start" to Fixtures.json("\"\$org_fiscal_start_date\"")),
+                                inputs =
+                                    mapOf(
+                                        "date" to Fixtures.json("\"\$payload\""),
+                                        "fiscal_start" to Fixtures.json("\"\$org_fiscal_start_date\""),
+                                    ),
                                 dependsOn = listOf("wrap"),
                             ),
                         ),

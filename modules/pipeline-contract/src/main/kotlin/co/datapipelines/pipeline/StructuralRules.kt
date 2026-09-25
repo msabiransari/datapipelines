@@ -134,7 +134,9 @@ internal object StructuralRules {
                     register(index, "datasource:${output.datasource.truncateForError()}", output.table, "output.table", namespaced, into)
                 }
 
-                else -> Unit
+                else -> {
+                    // no standalone output table to register for this shape
+                }
             }
         }
         namespaced.forEach { (namespace, tables) ->
