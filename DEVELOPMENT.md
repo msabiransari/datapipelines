@@ -615,12 +615,32 @@ had the image cached, while CI failed on every push.
   available without logging in, but will not receive any updates" — chainguard.dev, read
   2026-09-24), which is why a digest and not a mirror is enough here; the guard below is the
   backstop should that policy ever change.
-- **`./scripts/verify-image-pins.sh` is the guard.** It greps every pin out of the test trees and
-  asks each registry for the manifest with `docker manifest inspect`, which never reads the local
-  image store. CI runs it before the gate's build and before the integration tests, so a withdrawn
-  image fails in seconds with the pin named, instead of two minutes per suite into a pull timeout.
-  Run it by hand before a dependency review. It exits 2 when its grep finds nothing (a broken grep
-  must never read as "all fine").
+- **The MSSQL server is `mcr.microsoft.com/mssql/server`, pinned by digest (#229).** The
+  `2022-latest` tag is a moving target: between 2026-08-20 and 2026-09-25 Microsoft repointed
+  it at a different build (`docker manifest inspect`, read 2026-09-25). The suite pins the
+  build it has proven on (`16.0.4275.2`, `sha256:97b44885…`) in
+  `MssqlConnectivityIntegrationTest.kt` beside the date it was cached. To move the pin:
+  `docker pull mcr.microsoft.com/mssql/server:2022-latest`, read the new RepoDigest, run
+  `MssqlConnectivityIntegrationTest` and `DialectConnectivityIntegrationTest` against it, and
+  land that as its own gated commit. The same suite streams the container's stdout/stderr
+  into the test's stderr (a `withLogConsumer`), so a container that dies during startup
+  leaves its own errorlog in the JUnit XML — that is how the #229 reds were diagnosed: NOT
+  "the listener answered before the engine was ready", but `sqlservr` aborting with the
+  fatal error `Unable to create a new asynchronous I/O context. Please increase sysctl
+  fs.aio-max-nr` (errno 11, EAGAIN): the gate shape (six test forks booting containers over
+  a busy box) transiently exhausts the HOST's AIO context pool, and the engine dies. The
+  suite relaunches once on that signature after the pool drains; the durable fix is the
+  host's — raise the ceiling (e.g. `sysctl -w fs.aio-max-nr=1048576`, persisted in
+  `/etc/sysctl.d/`, a root action), which the 65536 default does not cover a loaded
+  multi-container box. CI must carry the same ceiling or the same red can surface there.
+- **`./scripts/verify-image-pins.sh` is the guard.** It greps every pin out of the test trees —
+  tag pins (`registry/repo:tag`) and digest pins (`registry/repo@sha256:…`, seen since #229;
+  the MinIO digests were invisible to the tag-only grep) — and asks each registry for the
+  manifest with `docker manifest inspect`, which never reads the local image store. CI runs it
+  before the gate's build and before the integration tests, so a withdrawn image fails in
+  seconds with the pin named, instead of two minutes per suite into a pull timeout. Run it by
+  hand before a dependency review. It exits 2 when its grep finds nothing (a broken grep must
+  never read as "all fine").
 - **When the guard goes red on the S3 pin:** pull `cgr.dev/chainguard/minio:latest`, read
   `docker image inspect … --format '{{index .RepoDigests 0}}'` and `minio --version`, move both
   pins to the new digest, run `LakeConnectivityIntegrationTest`, `LakeMinioE2eTest` and
