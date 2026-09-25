@@ -264,7 +264,8 @@ object RolePermissions {
      * the three; a super admin holds every permission, so any role. The same predicate, applied
      * to the requested role alone, is the service's creation guard (`ApiKeyService.issue`).
      */
-    fun offerable(creator: Set<Permission>): Set<WorkspaceRole> = KEY_OFFERABLE.filterTo(mutableSetOf()) { role -> creator.containsAll(of(role)) }
+    fun offerable(creator: Set<Permission>): Set<WorkspaceRole> =
+        KEY_OFFERABLE.filterTo(mutableSetOf()) { role -> creator.containsAll(of(role)) }
 
     /** The workspace roles whose column holds [permission]. */
     fun rolesHolding(permission: Permission): Set<WorkspaceRole> = WorkspaceRole.entries.filterTo(mutableSetOf()) { permission in of(it) }

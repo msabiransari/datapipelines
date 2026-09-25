@@ -366,7 +366,7 @@ class ScopeInterceptor(
                     "An MCP key connects an MCP client to /mcp and nothing else; REST and the UI take a signed-in session.",
                 ApiKeyKind.ENDPOINT to
                     "An API key may only call the published endpoints it is bound to, and page the results of the " +
-                        "executions it started, under those endpoints' paths.",
+                    "executions it started, under those endpoints' paths.",
                 ApiKeyKind.SERVER to
                     "A server key may only be presented as DP-Promotion-Key on the promotion routes of a receiving deployment.",
             )

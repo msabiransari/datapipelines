@@ -192,7 +192,17 @@ class AuthRepositoriesIntegrationTest {
         // Keys v2 (A13): the MCP key acts as its OWN identity too, with the member role chosen
         // at creation — owner, role, identity round-trip the same way for every kind.
         val mcp =
-            keys.insert("dpk_MCP000000001", identity.id, owner.id, "mcp/default", "hash", KeyRole.AUTHOR, null, DEFAULT_WORKSPACE_ID, ApiKeyKind.MCP)
+            keys.insert(
+                "dpk_MCP000000001",
+                identity.id,
+                owner.id,
+                "mcp/default",
+                "hash",
+                KeyRole.AUTHOR,
+                null,
+                DEFAULT_WORKSPACE_ID,
+                ApiKeyKind.MCP,
+            )
 
         val found = checkNotNull(keys.findById("dpk_ABCDEFGHIJKL"))
         assertAll(
@@ -210,7 +220,17 @@ class AuthRepositoriesIntegrationTest {
     @Test
     fun `the database refuses a key whose role contradicts its kind and a user row of an unknown kind`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
-        keys.insert("dpk_EPCHECK00001", owner.id, owner.id, "ep", "hash", KeyRole.API_CALLER, null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
+        keys.insert(
+            "dpk_EPCHECK00001",
+            owner.id,
+            owner.id,
+            "ep",
+            "hash",
+            KeyRole.API_CALLER,
+            null,
+            DEFAULT_WORKSPACE_ID,
+            ApiKeyKind.ENDPOINT,
+        )
 
         assertAll(
             {
@@ -326,7 +346,18 @@ class AuthRepositoriesIntegrationTest {
         keys.findById(key.id)!!.hasSealedSecret.shouldBeTrue()
 
         // A row with no sealed copy reads false, with nothing to open.
-        val bare = keys.insert("dpk_LEGACY000001", owner.id, owner.id, "old", "hash", KeyRole.AUTHOR, null, DEFAULT_WORKSPACE_ID, ApiKeyKind.MCP)
+        val bare =
+            keys.insert(
+                "dpk_LEGACY000001",
+                owner.id,
+                owner.id,
+                "old",
+                "hash",
+                KeyRole.AUTHOR,
+                null,
+                DEFAULT_WORKSPACE_ID,
+                ApiKeyKind.MCP,
+            )
         bare.hasSealedSecret.shouldBeFalse()
     }
 
@@ -392,9 +423,39 @@ class AuthRepositoriesIntegrationTest {
     fun `the workspace listing and revoke are kind-pinned and workspace-pinned`() {
         val owner = users.insert("owner@company.com", "Owner", null, "google", "sub", isAdmin = false)
         val other = users.insert("other@company.com", "Other", null, "google", "sub2", isAdmin = false)
-        keys.insert("dpk_EP0000000001", owner.id, owner.id, "ep-mine", "hash", KeyRole.API_CALLER, null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
-        keys.insert("dpk_EP0000000002", other.id, other.id, "ep-theirs", "hash", KeyRole.API_CALLER, null, DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT)
-        keys.insert("dpk_SRV000000001", owner.id, owner.id, "srv", "hash", KeyRole.PROMOTION_RECEIVER, null, DEFAULT_WORKSPACE_ID, ApiKeyKind.SERVER)
+        keys.insert(
+            "dpk_EP0000000001",
+            owner.id,
+            owner.id,
+            "ep-mine",
+            "hash",
+            KeyRole.API_CALLER,
+            null,
+            DEFAULT_WORKSPACE_ID,
+            ApiKeyKind.ENDPOINT,
+        )
+        keys.insert(
+            "dpk_EP0000000002",
+            other.id,
+            other.id,
+            "ep-theirs",
+            "hash",
+            KeyRole.API_CALLER,
+            null,
+            DEFAULT_WORKSPACE_ID,
+            ApiKeyKind.ENDPOINT,
+        )
+        keys.insert(
+            "dpk_SRV000000001",
+            owner.id,
+            owner.id,
+            "srv",
+            "hash",
+            KeyRole.PROMOTION_RECEIVER,
+            null,
+            DEFAULT_WORKSPACE_ID,
+            ApiKeyKind.SERVER,
+        )
 
         // The /api-keys table: the workspace's keys of one kind, whoever created them.
         keys.findByWorkspaceAndKind(DEFAULT_WORKSPACE_ID, ApiKeyKind.ENDPOINT).map { it.name } shouldContainExactlyInAnyOrder

@@ -203,7 +203,9 @@ class AuthHttpBoundaryTest {
     ): String {
         val plaintext = "$id.${"A".repeat(SECRET_CHARS)}"
         val identity =
-            UserRepository(jdbc).insert("$id@keys.invalid", name, null, UserService.KEY_PROVIDER, id, isAdmin = false, kind = UserKind.SERVICE)
+            UserRepository(
+                jdbc,
+            ).insert("$id@keys.invalid", name, null, UserService.KEY_PROVIDER, id, isAdmin = false, kind = UserKind.SERVICE)
         ApiKeyRepository(jdbc).insert(
             id,
             identity.id,

@@ -171,10 +171,18 @@ class ApiKeyServiceTest {
         assertAll(
             { verify(exactly = 1) { userService.provisionIdentity(issued.record.id, "ci") } },
             {
-                verify(
-                    exactly = 1,
-                ) {
-                    repo.insert(issued.record.id, identityId, ownerId, "ci", any(), KeyRole.API_CALLER, null, workspaceId, ApiKeyKind.ENDPOINT)
+                verify {
+                    repo.insert(
+                        issued.record.id,
+                        identityId,
+                        ownerId,
+                        "ci",
+                        any(),
+                        KeyRole.API_CALLER,
+                        null,
+                        workspaceId,
+                        ApiKeyKind.ENDPOINT,
+                    )
                 }
             },
             { issued.record.userId shouldBe identityId },
@@ -549,7 +557,8 @@ class ApiKeyServiceTest {
         verify(exactly = 2) { userService.deactivateIdentity(identityId) }
 
         // A server key needs server_key.revoke: refused before the SQL.
-        val server = record(id = "dpk_SRVDROP0001", createdBy = UUID.randomUUID(), kind = ApiKeyKind.SERVER, role = KeyRole.PROMOTION_RECEIVER)
+        val server =
+            record(id = "dpk_SRVDROP0001", createdBy = UUID.randomUUID(), kind = ApiKeyKind.SERVER, role = KeyRole.PROMOTION_RECEIVER)
         every { repo.findById(server.id) } returns server
         shouldThrow<RoleRequiredException> { service.revokeAs(creator, server.id) }
             .details["required"] shouldBe Permission.SERVER_KEY_REVOKE.wire

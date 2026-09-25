@@ -189,25 +189,28 @@ open class ApiKeyService(
         requested: KeyRole?,
     ): KeyRole =
         when (kind) {
-            ApiKeyKind.MCP ->
+            ApiKeyKind.MCP -> {
                 requested?.takeIf { it.isMemberKeyRole }
                     ?: throw IllegalArgumentException(
                         "An mcp key carries a member role — one of ${KeyRole.MEMBER_KEY_ROLES.map { it.wire }}.",
                     )
+            }
 
             // A transport kind's role is its kind's: null means "the fixed one", anything else
             // is refused rather than quietly corrected (EndpointKeyService's rule, kept here).
-            ApiKeyKind.ENDPOINT ->
+            ApiKeyKind.ENDPOINT -> {
                 when (requested) {
                     null, KeyRole.API_CALLER -> KeyRole.API_CALLER
                     else -> throw IllegalArgumentException("An endpoint key's role is api_caller.")
                 }
+            }
 
-            ApiKeyKind.SERVER ->
+            ApiKeyKind.SERVER -> {
                 when (requested) {
                     null, KeyRole.PROMOTION_RECEIVER -> KeyRole.PROMOTION_RECEIVER
                     else -> throw IllegalArgumentException("A server key's role is promotion_receiver.")
                 }
+            }
         }
 
     /**
