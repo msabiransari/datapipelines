@@ -60,12 +60,19 @@ open class KeyRetentionPurge(
      * Every `(table, column)` of the live schema whose FK references `users(id)` — the
      * predicate the whole purge is built from, re-read per run. Excludes the constraint's own
      * table when it is `users` (no self-reference exists, but the query stays honest).
+     *
+     * The PROJECTED side is the referencing one (`kcu.*`): `ccu` still SELECTS the referenced
+     * side — `ccu.table_name = 'users' AND ccu.column_name = 'id'` is what makes the list "FKs
+     * to users" — but the rows the purge needs name the tables and columns that HOLD the
+     * reference. (233c, B5: the first draft projected `ccu.*`, so every row was
+     * `('users','id')` and both NOT EXISTS predicates compared `users.id` to itself — nothing
+     * was ever purged, silently.)
      */
     private fun foreignKeysToUsers(): List<Pair<String, String>> =
         jdbc
             .query(
                 """
-                SELECT ccu.table_name AS referencing_table, ccu.column_name AS referencing_column
+                SELECT kcu.table_name AS referencing_table, kcu.column_name AS referencing_column
                   FROM information_schema.table_constraints tc
                   JOIN information_schema.key_column_usage kcu
                     ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
