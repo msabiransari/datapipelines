@@ -522,7 +522,11 @@ class DomainConfiguration {
     fun templateImportService(
         templates: TemplateRepository,
         validator: TemplateValidator,
-    ): TemplateImportService = TemplateImportService(templates, validator)
+        // 7e — the lenient half of the §2.3 citation rule and the rows the kept ids land in
+        // (owner ruling 2026-09-25: an import keeps what resolves here, drops the rest).
+        citableFacts: co.datapipelines.templates.CitableFacts,
+        citations: co.datapipelines.templates.TemplateImplementsRepository,
+    ): TemplateImportService = TemplateImportService(templates, validator, citableFacts, citations)
 }
 
 /**

@@ -96,7 +96,10 @@ open class TemplateService(
         id: String,
     ): Boolean = lens.admits(id) && templates.existsId(workspaceId, id)
 
-    /** The `GET /templates` page: the repository's SQL page, or the admitted rows paged in memory. */
+    /**
+     * The `GET /templates` page: the repository's SQL page, or the admitted rows paged in memory.
+     * [implements] (7e, §8.3) keeps the templates whose listed version cites that fact.
+     */
     open fun list(
         workspaceId: UUID,
         lens: ReadLens,
@@ -105,9 +108,10 @@ open class TemplateService(
         q: String? = null,
         offset: Int = 0,
         limit: Int = TemplateRepository.DEFAULT_PAGE_LIMIT,
+        implements: UUID? = null,
     ): List<Template> {
-        if (lens.isEverything) return templates.list(workspaceId, dialect, type, q, offset, limit)
-        return admitted(workspaceId, lens, dialect, type, q)
+        if (lens.isEverything) return templates.list(workspaceId, dialect, type, q, offset, limit, implements)
+        return admitted(workspaceId, lens, dialect, type, q, implements)
             .drop(maxOf(0, offset))
             .take(limit.coerceIn(1, TemplateRepository.MAX_PAGE_LIMIT))
     }
@@ -119,9 +123,10 @@ open class TemplateService(
         dialect: Dialect? = null,
         type: TemplateType? = null,
         q: String? = null,
+        implements: UUID? = null,
     ): Int {
-        if (lens.isEverything) return templates.count(workspaceId, dialect, type, q)
-        return admitted(workspaceId, lens, dialect, type, q).size
+        if (lens.isEverything) return templates.count(workspaceId, dialect, type, q, implements)
+        return admitted(workspaceId, lens, dialect, type, q, implements).size
     }
 
     /** One tree level's direct sub-folders, counted over the admitted subtree. */
@@ -225,11 +230,12 @@ open class TemplateService(
         dialect: Dialect?,
         type: TemplateType?,
         q: String?,
+        implements: UUID? = null,
     ): List<Template> {
         val all = mutableListOf<Template>()
         var offset = 0
         while (true) {
-            val page = templates.list(workspaceId, dialect, type, q, offset, TemplateRepository.MAX_PAGE_LIMIT)
+            val page = templates.list(workspaceId, dialect, type, q, offset, TemplateRepository.MAX_PAGE_LIMIT, implements)
             all += page
             if (page.size < TemplateRepository.MAX_PAGE_LIMIT) break
             offset += TemplateRepository.MAX_PAGE_LIMIT

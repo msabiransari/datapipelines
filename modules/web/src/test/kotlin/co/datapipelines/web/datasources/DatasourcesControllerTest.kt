@@ -56,7 +56,7 @@ class DatasourcesControllerTest {
     // mocked service here would test that the controller delegates and nothing about what
     // `POST /api/v1/datasources` actually does.
     private val registrations = DatasourceCreateService(registry, rules::resolveCreateBinding, grants)
-    private val controller = DatasourcesController(registry, rules, registrations, DatasourceUpdateService(registry, rules))
+    private val controller = DatasourcesController(registry, rules, registrations, DatasourceUpdateService(registry, rules), co.datapipelines.web.EVERYTHING_LENS)
     private val mapper = JsonMapper.builder().addModule(KotlinModule.Builder().build()).build()
 
     private val userId = UUID.randomUUID()
@@ -258,6 +258,7 @@ class DatasourcesControllerTest {
                 rules,
                 registrations,
                 DatasourceUpdateService(registry, rules),
+                co.datapipelines.web.EVERYTHING_LENS,
                 enrichmentReturning(recorded, definitions),
             )
         every { registry.listVisible(null, workspaceId) } returns listOf(datasource(), datasource().copy(name = "lake-one"))
@@ -294,6 +295,7 @@ class DatasourcesControllerTest {
             override fun forListing(
                 readerWorkspaceId: UUID,
                 datasource: Datasource,
+                templateLens: co.datapipelines.pipeline.ReadLens,
             ): FactEnrichment.DatasourceBlocks =
                 if (datasource.name == "pg-prod") {
                     FactEnrichment.DatasourceBlocks(recorded, definitions)

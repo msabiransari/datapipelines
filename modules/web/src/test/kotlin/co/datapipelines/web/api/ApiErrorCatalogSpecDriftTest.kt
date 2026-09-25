@@ -238,8 +238,14 @@ class ApiErrorCatalogSpecDriftTest {
          * `pipeline.transform.*` execution-time family plus `transform.js.unavailable`), landed in
          * the SAME commit as the constants, the catalog rows (500 family default, 503/504
          * exceptions) and the AuthErrors anchor. Re-derived from the document's own parse.
+         *
+         * 202 → 204 with 7e (#7, the semantic link): §13.9 gains `template.implements_unresolved`
+         * (400, an explicit catalog row — the bare `template.` codes have no family default) and
+         * §13.13 gains `pipeline.release.template_needs_review` with HTTP `—` (a warning in the
+         * release response, listed in NEVER_RETURNED_LIVE like the §13.6 type-mapping warnings),
+         * landed in the SAME commit as their constants. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 202
+        const val SECTION_13_ROW_COUNT = 204
 
         /**
          * §12's distinct validation codes.

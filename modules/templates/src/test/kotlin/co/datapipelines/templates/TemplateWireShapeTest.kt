@@ -63,6 +63,8 @@ class TemplateWireShapeTest {
             "created_at",
             "created_by",
             "is_library",
+            // 7e: the read-side mark is always on the wire (false when nothing cited is retired).
+            "needs_review",
         ).forEach { key -> withClue("missing wire key: $key") { keys.contains(key) shouldBe true } }
     }
 
@@ -70,7 +72,17 @@ class TemplateWireShapeTest {
     fun `no camelCase spelling leaks into the wire shape`() {
         val keys = serializedKeys()
 
-        listOf("schemaVersion", "displayName", "createdAt", "createdBy", "isLibrary", "library").forEach { key ->
+        listOf(
+            "schemaVersion",
+            "displayName",
+            "createdAt",
+            "createdBy",
+            "isLibrary",
+            "library",
+            // 7e — the Java-Beans `is`/`^[a-z][A-Z]` traps the pinned keys exist for.
+            "needsReview",
+            "retiredFacts",
+        ).forEach { key ->
             withClue("camelCase key leaked into the wire shape: $key") { keys.contains(key) shouldBe false }
         }
     }

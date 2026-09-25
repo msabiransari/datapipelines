@@ -5,6 +5,7 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.templates.Template
 import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
@@ -100,7 +101,7 @@ class TemplateBrowseModel(
         model.addAttribute("foldersTruncated", folderProbe.size > FOLDER_LIMIT)
         model.addAttribute("templates", leaves)
         model.addAttribute("drafts", templates.findDrafts(workspaceId, view.templates, leaves.map { it.id }))
-        model.addAttribute(NEEDS_REVIEW_IDS, noneNeedReview())
+        model.addAttribute(NEEDS_REVIEW_IDS, needReview(leaves))
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", leafProbe.size > PAGE_SIZE)
         model.addAttribute("total", if (root) 0 else templates.countChildTemplates(workspaceId, view.templates, prefix, dialect, type))
@@ -120,7 +121,7 @@ class TemplateBrowseModel(
         model.addAttribute("foldersTruncated", false)
         model.addAttribute("templates", emptyList<Any>())
         model.addAttribute("drafts", emptyMap<String, Any>())
-        model.addAttribute(NEEDS_REVIEW_IDS, noneNeedReview())
+        model.addAttribute(NEEDS_REVIEW_IDS, needReview(emptyList()))
         model.addAttribute("offset", 0)
         model.addAttribute("hasMore", false)
         model.addAttribute("total", 0)
@@ -146,7 +147,7 @@ class TemplateBrowseModel(
         model.addAttribute("searching", true)
         model.addAttribute("templates", items)
         model.addAttribute("drafts", templates.findDrafts(workspaceId, view.templates, items.map { it.id }))
-        model.addAttribute(NEEDS_REVIEW_IDS, noneNeedReview())
+        model.addAttribute(NEEDS_REVIEW_IDS, needReview(items))
         model.addAttribute("offset", page)
         model.addAttribute("hasMore", probe.size > PAGE_SIZE)
         model.addAttribute("total", templates.count(workspaceId, view.templates, dialect = dialect, type = type, q = q))
@@ -226,8 +227,9 @@ class TemplateBrowseModel(
         val now = Instant.now()
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
-        // 7d (§8.2): the working version's needs-review marker — lane 7e computes it.
-        model.addAttribute("needsReview", false)
+        // 7e (§8.2): the working version's needs-review marker — computed on read by the
+        // projection's own query (a cited fact is retired), never stored.
+        model.addAttribute("needsReview", template.needsReview)
         model.addAttribute("inUse", inUse)
         model.addAttribute(
             "versions",
@@ -324,12 +326,12 @@ class TemplateBrowseModel(
     }
 
     /**
-     * 7d (transform-nodes design §8.2) — the ids whose working version is marked `needs_review`
-     * (it cites a retired or superseded fact). The marker renders behind this set in the tree
-     * and the search list; lane 7e computes it from the cited facts. Until then nothing is
-     * marked — an empty set, never a guess.
+     * 7e (transform-nodes design §8.2) — the ids among [rows] whose listed version reads
+     * `needs_review` (it cites a retired or superseded fact), computed on read by the template
+     * projection's own query. The marker renders behind this set in the tree and the search list
+     * (7d); a real [HashSet], never Kotlin's internal `EmptySet`, which SpEL cannot call into.
      */
-    private fun noneNeedReview(): Set<String> = emptySet()
+    private fun needReview(rows: List<Template>): Set<String> = rows.filter { it.needsReview }.mapTo(HashSet()) { it.id }
 
     /** The first [EXCERPT_LINES] lines of the current body — the Overview's peek at the source. */
     private fun excerpt(body: String): String = body.lineSequence().take(EXCERPT_LINES).joinToString("\n")

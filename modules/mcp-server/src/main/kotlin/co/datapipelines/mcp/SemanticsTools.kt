@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.application.semantics.SemanticsService
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.DatasourceUnreachableException
@@ -219,6 +220,11 @@ class SemanticsRecordTool(
 class SemanticsListTool(
     private val datasources: DatasourceRegistry,
     private val service: SemanticsService,
+    /**
+     * 7e — the promoter lens: each WORKSPACE fact's `implemented_by` lists only the template
+     * versions the key's `template.read` admits. No default (a missed caller must not compile).
+     */
+    private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -229,7 +235,9 @@ class SemanticsListTool(
                     "evidence SQL and who recorded it through what. The same facts also arrive inline on " +
                     "datasources_get / _get_tables / _get_columns, which is where to read them while authoring; use " +
                     "this to review, to find a fact's id to supersede or retire, or to answer 'what was recorded " +
-                    "since <time>'. Retired facts are hidden unless include_retired.",
+                    "since <time>'. Every WORKSPACE fact carries implemented_by: the template versions that cite it " +
+                    "as the transform implementing that rule — reuse one before writing your own. Retired facts are " +
+                    "hidden unless include_retired.",
             schema =
                 """
                 {
@@ -260,7 +268,7 @@ class SemanticsListTool(
                 since = args.string("since")?.let { sinceOf(it) },
             )
         val gated = datasources.requireVisible(name, ctx)
-        val facts = service.list(ctx.principal, gated, query)
+        val facts = service.list(ctx.principal, gated, query, lens.viewFor(ctx.principal).templates)
         return mapOf("datasource" to gated.name, "facts" to facts, "count" to facts.size)
     }
 
@@ -319,10 +327,11 @@ object SemanticsTools {
         datasources: DatasourceRegistry,
         service: SemanticsService,
         introspector: SchemaIntrospector,
+        lens: PromoterLens,
     ): List<McpTool> =
         listOf(
             SemanticsRecordTool(datasources, service, introspector),
-            SemanticsListTool(datasources, service),
+            SemanticsListTool(datasources, service, lens),
             SemanticsRetireTool(service),
         )
 }

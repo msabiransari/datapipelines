@@ -240,6 +240,9 @@ class PipelinesController(
      * the pipeline's event listing them; the refusal's `details.pins_not_released` is what a
      * client reads to decide whether to retry with it. Same query carrier as the override
      * flag, for the same reason: the endpoint has no body.
+     * The body is the released version's projection plus `warnings` (7e, transform-nodes design
+     * §8.2): `[]` on a clean release, one `pipeline.release.template_needs_review` per pinned
+     * version that cites a retired learned fact — a warning, never a refusal.
      * UI-driven in practice (D4: agents never release); no MCP tool is exposed.
      */
     @PostMapping("/{id}/release")
@@ -262,7 +265,9 @@ class PipelinesController(
                 releasePinnedTemplates,
             )
         LifecycleVerbs.auditRelease(audit, principal, workspaceId, id, released)
-        return ApiResponse.of(PipelineResponses.full(released.record, released.bodyJson, released.version))
+        // 7e: the body carries `warnings` (transform-nodes design §8.2) — a pinned version that
+        // cites a retired learned fact is released and reported, never refused.
+        return ApiResponse.of(PipelineResponses.released(released))
     }
 
     /**

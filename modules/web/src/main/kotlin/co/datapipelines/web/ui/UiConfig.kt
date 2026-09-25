@@ -141,8 +141,10 @@ class UiConfig {
         actorNames: ActorNames,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
         usage: co.datapipelines.templates.TemplateUsageService,
+        // 7e — the release dialog's needs-review rows read the SAME port the release warning does.
+        reviewMarks: co.datapipelines.pipeline.TemplateReviewMarks,
     ): PipelineLifecycleDialogModel =
-        PipelineLifecycleDialogModel(repository, templates, exclusiveTemplates, runStats, actorNames, authoring, usage)
+        PipelineLifecycleDialogModel(repository, templates, exclusiveTemplates, runStats, actorNames, authoring, usage, reviewMarks)
 
     /** 102: the template twin of [pipelineLifecycleDialogModel]. */
     @Bean

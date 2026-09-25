@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.18 (living document — updated as enums evolve)
+**Status:** v1.19 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -477,7 +477,7 @@ Pre-created and fixed: a key role is a function of the key's kind, the MCP (`use
 **Source:** [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) — the ONLY catalog of concrete error codes. This section registers domains; deliberately no code list here, so there is exactly one place a code can drift from.
 **Used by:** every spec that defines error codes.
 
-Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `datasource.table_not_found`, `datasource.table_forbidden`, `template.not_found`, `rate_limit.exceeded`, `rate_limit.unavailable`, every `semantics.*` code — a learned fact has no sub-entity — and `mcp.doc_not_found`). Additive-only — never reused, never renamed.
+Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `datasource.table_not_found`, `datasource.table_forbidden`, `template.not_found`, the bare `template.*` block and citation codes (`template.contract_invalid`, …, `template.implements_unresolved` — about the version's own content, 7b/7e), `rate_limit.exceeded`, `rate_limit.unavailable`, every `semantics.*` code — a learned fact has no sub-entity — and `mcp.doc_not_found`). Additive-only — never reused, never renamed.
 
 | Domain | Description | Catalog section |
 |---|---|---|
@@ -495,7 +495,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `rate_limit.unavailable` | The limiter could not decide; the request is refused (fail closed) | pipeline-contract §13.11 |
 | `idempotency.*` | Idempotency-key conflicts | pipeline-contract §13.11 |
 | `workspace.*` | Workspace resolution, membership and provisioning refusals | pipeline-contract §13.12 (defined in [Auth §5](auth.md#5-oidc-login-flow)) |
-| `pipeline.version.*`, `pipeline.release.*`, `pipeline.promotion.*` | Draft/release version lifecycle and environment promotion | pipeline-contract §13.13 (defined in [Versioning](versioning.md)) |
+| `pipeline.version.*`, `pipeline.release.*`, `pipeline.promotion.*` | Draft/release version lifecycle and environment promotion — plus one WARNING, `pipeline.release.template_needs_review` (7e), returned in the release response's `warnings` array, never as an error | pipeline-contract §13.13 (defined in [Versioning](versioning.md)) |
 | `pipeline.check.*` | Release checks — the server-run cross-checks gating release | pipeline-contract §13.17 |
 | `pipeline.transform.*` | TRANSFORM node execution-time refusals (input contract, pool, gate, invariants, strict) | pipeline-contract §13.18 |
 | `template.version.*` | Template draft/release lifecycle | pipeline-contract §13.9 (defined in [Versioning](versioning.md)) |
@@ -674,6 +674,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.19 | 7e (#7) the semantic link | §16: the `pipeline.release.*` row names its one WARNING code (`pipeline.release.template_needs_review`, in the release response's `warnings`, never an error), and the two-segment list names the bare `template.*` block/citation codes (7b's, and 7e's `template.implements_unresolved`). No enum value added, removed or renamed. |
 | 2026-09-24 | v1.18 | 215b (#215) key identities, key roles | **§8 `Scope` is replaced by §8 `UserKind`** (`human` / `service` / `system`, V34) and new **§8D `KeyRole`** (`api_caller`, `promotion_receiver`) — scopes were removed (PK8). §8A's kinds restated as where a credential may be presented, the role as what it may do; §8B is one axis. §15's `auth.scope.denied` keeps its name, now for every authorization refusal; §16/§17 name `auth.permission.undeclared`. Cross-reference rows for the two new enums. |
 | 2026-09-24 | v1.17 | 215a (#215) the permission catalog | **§8B `Permission` is the catalog**: the seven coarse values (`view` … `super_admin`) are replaced by the 65 `<functionality>.<permission>` values of auth §7.6, which is now their single authority — this section points there instead of restating them. §8 and §8C name the new code homes (`RolePermissions`, the permission key-scope table). Status caught up with the change log (it read v1.15 while the rows had reached v1.16). |
 | 2026-09-21 | v1.14 | 179 (#179) keys | §8A `user`: minted ONLY by the login/switch hook, one per user per workspace (D16) — the "default for any key minted without an explicit kind" sentence is gone with on-demand minting. No value added, removed or renamed; the wire set is unchanged |

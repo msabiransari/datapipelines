@@ -1060,3 +1060,19 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
 .plc-release:not(:has([data-consent-input]:not(:checked))) .plc-cascade-off {
   display: none;
 }
+
+/* 7e — the release dialog's needs-review rows (§4.3d, transform-nodes design §8.2): each pin
+   that cites a retired learned fact, one row above the confirm. A WARNING, never a refusal —
+   nothing here touches the submit. The badge is the design system's warning badge. */
+.plc-needs-review-pins {
+  margin: 0 0 var(--gap-xs, 4px);
+  padding-left: 0;
+  list-style: none;
+}
+
+.plc-needs-review-pins li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-xs, 4px);
+}

@@ -79,7 +79,7 @@ class TemplatesControllerTest {
             co.datapipelines.web.EVERYTHING_LENS,
             validator,
             engines,
-            TemplateImportService(repository, validator),
+            TemplateImportService(repository, validator, co.datapipelines.templates.CitableFacts.NONE, mockk(relaxed = true)),
             drafts,
             releases,
             guard,
@@ -128,7 +128,8 @@ class TemplatesControllerTest {
     fun `create validates and stores, returning version 1`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
+        // 7e: the create goes through the draft service (it lands the stated `implements`).
+        every { drafts.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
             template()
 
         val stored = controller.create(createBody).data
@@ -147,7 +148,7 @@ class TemplatesControllerTest {
                 co.datapipelines.web.EVERYTHING_LENS,
                 validator,
                 engines,
-                TemplateImportService(repository, validator),
+                TemplateImportService(repository, validator, co.datapipelines.templates.CitableFacts.NONE, mockk(relaxed = true)),
                 drafts,
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(false),
@@ -444,7 +445,7 @@ class TemplatesControllerTest {
     fun `create accepts an html payload without a dialect and echoes the type`() {
         authenticate()
         every { validator.validateOrThrow(any(), any()) } answers { firstArg() }
-        every { repository.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
+        every { drafts.create(any(), any(), userId, co.datapipelines.pipeline.CreateLifecycle.DRAFT, WriteSurface.SESSION) } returns
             template().copy(type = TemplateType.HTML, dialect = null)
 
         val stored =
@@ -527,8 +528,8 @@ class TemplatesControllerTest {
                 co.datapipelines.web.EVERYTHING_LENS,
                 validator,
                 engines,
-                TemplateImportService(repository, validator),
-                TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true)),
+                TemplateImportService(repository, validator, co.datapipelines.templates.CitableFacts.NONE, mockk(relaxed = true)),
+                TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true), mockk(relaxed = true)),
                 releases,
                 co.datapipelines.pipeline.AuthoringGuard(true),
                 audit,

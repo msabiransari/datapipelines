@@ -1,6 +1,7 @@
 package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.typesystem.DatapipelinesException
 import java.util.UUID
 
@@ -16,11 +17,54 @@ import java.util.UUID
  * stored hash of the version the caller based its edit on — the DRAFT's for an in-place
  * write, the current RELEASED row's for a first write. Zero rows ⇒ 409
  * `template.version.conflict` with the current state in `details`.
+ *
+ * ## The citations ride the same write (7e, transform-nodes design §2.3)
+ *
+ * `implements` is not content: it is outside the hash, so it never decides whether a draft is
+ * opened — the §5.1 no-op still returns the RELEASED version, and a write that changes ONLY the
+ * citations lands them on that released version (the one post-release write templates.md §5.1
+ * allows). After the content write, the version it answered with gets the citations:
+ *  - `implements` stated → exactly that list (`[]` clears);
+ *  - absent (null) → INHERITED (owner ruling 2026-09-25): an in-place draft write and a
+ *    no-op keep their own; a write that OPENED a new draft copies the released version's
+ *    forward, so an edit that did not mention them — the transform face's Save draft never
+ *    does — cannot silently drop the semantic link.
+ * The ids were validated by [TemplateValidator] before the call (every surface validates
+ * first). Deliberately not one transaction with the content write: the draft write recovers
+ * from a lost race by reading the winner after a unique violation, which an enclosing
+ * transaction would abort (`PipelineService.update`'s finding). Each statement is atomic on its
+ * own; a failure between them leaves the version with its previous citations — a claim, never
+ * content — and the call fails loudly.
  */
 class TemplateDraftService(
     private val templates: TemplateRepository,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
+    /** 7e — the `template_implements` rows the write lands its citations in. */
+    private val citations: TemplateImplementsRepository,
 ) {
+    /**
+     * Creates the template (version 1, [lifecycle]) from the ALREADY VALIDATED [draft] and lands
+     * its stated `implements` on that version — the create half of the rule above (a new
+     * template has nothing to inherit). Returns the stored projection, citations included.
+     *
+     * @throws DatapipelinesException `template.authoring.disabled`, or the repository's
+     *   `template.validation.duplicate_name`.
+     */
+    fun create(
+        workspaceId: UUID,
+        draft: TemplateDraft,
+        actor: UUID,
+        lifecycle: co.datapipelines.pipeline.CreateLifecycle,
+        via: co.datapipelines.pipeline.WriteSurface,
+    ): Template {
+        authoring.requireTemplateAuthoring()
+        val created = templates.create(workspaceId, draft, actor, lifecycle, via)
+        val cited = draft.implements?.let { ImplementsIds.parseLenient(it) }
+        if (cited.isNullOrEmpty()) return created
+        citations.replace(workspaceId, created.id, created.version, cited)
+        return templates.findVersion(workspaceId, created.id, created.version) ?: created
+    }
+
     /**
      * Writes [draft] as the template's version — creating the draft first when the caller is
      * the first writer after a release (§5.1), overwriting it in place otherwise (§5.2).
@@ -60,12 +104,39 @@ class TemplateDraftService(
 
         val existingDraft = templates.findDraftDetail(workspaceId, id)
         if (existingDraft != null) {
-            templates.writeDraft(workspaceId, id, resolved, expectedHash, actor, via)?.let { return it }
+            templates.writeDraft(workspaceId, id, resolved, expectedHash, actor, via)?.let {
+                return cite(workspaceId, id, it, resolved.implements, inheritFrom = null)
+            }
             // No rows: stale hash, or the draft was discarded mid-write — fall through to
             // the create branch, whose guard decides.
         }
-        return templates.createDraft(workspaceId, id, resolved, expectedHash, actor, via)
-            ?: throw staleBase(workspaceId, id)
+        val written =
+            templates.createDraft(workspaceId, id, resolved, expectedHash, actor, via)
+                ?: throw staleBase(workspaceId, id)
+        // A NEW draft (not the §5.1 no-op, which answers RELEASED) inherits from the released
+        // version its hash was checked against — `current_version` by the guard's own predicate.
+        val base =
+            if (written.status == PipelineVersionStatus.DRAFT && latest.type.isTransform) {
+                templates.findLatest(workspaceId, id)?.version
+            } else {
+                null
+            }
+        return cite(workspaceId, id, written, resolved.implements, inheritFrom = base)
+    }
+
+    /** Lands the citations on the [written] version: the stated list, else the inherited one, else unchanged. */
+    private fun cite(
+        workspaceId: UUID,
+        id: String,
+        written: TemplateVersionDetail,
+        stated: List<String>?,
+        inheritFrom: Int?,
+    ): TemplateVersionDetail {
+        when {
+            stated != null -> citations.replace(workspaceId, id, written.version, ImplementsIds.parseLenient(stated))
+            inheritFrom != null && inheritFrom != written.version -> citations.copy(workspaceId, id, inheritFrom, written.version)
+        }
+        return written
     }
 
     private fun staleBase(

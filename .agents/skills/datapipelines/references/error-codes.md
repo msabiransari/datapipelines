@@ -51,6 +51,7 @@ Part of the `datapipelines` skill — the operating core is `SKILL.md` beside th
 | `template.test_failed` | A test case failed at save or release | `details` names the case and the bounded diff, or the invariant that is false — fix the body or the expectation |
 | `template.blocks_not_allowed` | `contract`/`invariants`/`tests` on an `sql`/`html` template | The blocks belong to the transform types only |
 | `template.render_not_applicable` | `templates_render` (or REST `/render`) on a transform type | Use `templates_evaluate` — `details.use` says so |
+| `template.implements_unresolved` | An `implements` id is not a rule this workspace can cite (`details.reason`: `unknown` / `malformed` / `too_many`) | Cite only WORKSPACE `definition`/`exclusion`/`preference` ids from `semantics_list` or the listing's `definitions`; `blocks_not_allowed` means the template is `sql`/`html` |
 | `transform.js.unavailable` | A `javascript` template was saved | Round two's engine is not shipped yet; author `jsonata` |
 | `pipeline.validation.transform_template_type` | A TRANSFORM node pins a template that is not `jsonata`/`javascript` | Pin a transform template — `templates_list` filters by type |
 | `pipeline.validation.transform_input_unknown` | A TRANSFORM `inputs` entry names a tempdb table no ancestor stages, or a `$key` nobody writes | Stage the table upstream with `depends_on`, or name a key that exists (a parameter, an org/platform key, another node's `context_key`) |

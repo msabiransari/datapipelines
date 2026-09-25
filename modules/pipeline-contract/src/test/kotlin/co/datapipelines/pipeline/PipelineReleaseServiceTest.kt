@@ -3,6 +3,7 @@ package co.datapipelines.pipeline
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.Called
 import io.mockk.every
 import io.mockk.mockk
@@ -154,6 +155,71 @@ class PipelineReleaseServiceTest {
 
         released.record.currentVersion shouldBe 2
         released.version.status shouldBe PipelineVersionStatus.RELEASED
+    }
+
+    /** The flip's answer for [draftBody] — v2 RELEASED, the pointer moved. */
+    private fun releasedFlip() =
+        PipelineRepository.Released(
+            pipelineRecord().copy(currentVersion = 2),
+            draftDetail().copy(status = PipelineVersionStatus.RELEASED, version = 2),
+        )
+
+    /**
+     * 7e (transform-nodes design §8.2) — pinning a version that cites a retired fact WARNS and
+     * the release PROCEEDS: the flip happens exactly as for a clean pin, and the result carries
+     * one `pipeline.release.template_needs_review` naming the pin, the retired fact and its
+     * successor. The falsification (the handback's F-3) makes the warning a refusal and this
+     * case goes red at the release call.
+     */
+    @Test
+    fun `a pin citing a retired fact warns and the release proceeds`() {
+        val marks = mockk<TemplateReviewMarks>()
+        val withMarks =
+            PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true), reviewMarks = marks)
+        every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
+        every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
+        every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        every {
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+        } returns releasedFlip()
+        val pin = TemplateRef("test/t.sql", 2)
+        every { marks.retiredCitations(workspaceId, listOf(pin)) } returns
+            mapOf(pin to listOf(RetiredFactCitation("fact-old", "superseded", "fact-new")))
+
+        val released = withMarks.release(workspaceId, pipelineId, "draft-hash", userId)
+
+        released.version.status shouldBe PipelineVersionStatus.RELEASED
+        released.record.currentVersion shouldBe 2
+        released.warnings.size shouldBe 1
+        val warning = released.warnings.single()
+        warning.code shouldBe PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NEEDS_REVIEW
+        warning.template shouldBe "test/t.sql"
+        warning.version shouldBe 2
+        warning.message shouldContain "fact-old — superseded by fact-new"
+        verify(exactly = 1) { pipelines.releaseDraft(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a clean pin carries no warning, and a refused release never reads the marks`() {
+        val marks = mockk<TemplateReviewMarks>()
+        val withMarks =
+            PipelineReleaseService(pipelines, templates, validator, AuthoringGuard(true), reviewMarks = marks)
+        every { pipelines.findDraftDetail(workspaceId, pipelineId) } returns draftDetail()
+        every { pipelines.findVersionBody(workspaceId, pipelineId, 2) } returns draftBody
+        every { validator.validateOrThrow(any(), workspaceId) } answers { firstArg() }
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.RELEASED
+        every {
+            pipelines.releaseDraft(workspaceId, pipelineId, "test/monthly_revenue", "M", "d", "draft-hash", userId)
+        } returns releasedFlip()
+        every { marks.retiredCitations(workspaceId, any()) } returns emptyMap()
+
+        withMarks.release(workspaceId, pipelineId, "draft-hash", userId).warnings shouldBe emptyList()
+
+        // A DRAFT pin refuses BEFORE the flip; the warning read belongs to a release that happened.
+        every { templates.statusOf(workspaceId, "test/t.sql", 2) } returns PipelineVersionStatus.DRAFT
+        shouldThrow<DatapipelinesException> { withMarks.release(workspaceId, pipelineId, "draft-hash", userId) }
+        verify(exactly = 1) { marks.retiredCitations(any(), any()) }
     }
 
     @Test

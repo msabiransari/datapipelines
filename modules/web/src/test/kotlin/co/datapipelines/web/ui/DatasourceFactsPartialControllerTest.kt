@@ -43,7 +43,7 @@ import java.util.UUID
 class DatasourceFactsPartialControllerTest {
     private val datasources = mockk<DatasourceRegistry>()
     private val semantics = mockk<SemanticsService>()
-    private val controller = DatasourceFactsPartialController(datasources, semantics)
+    private val controller = DatasourceFactsPartialController(datasources, semantics, co.datapipelines.web.EVERYTHING_LENS)
     private val workspaceId = UUID.randomUUID()
 
     @AfterEach
@@ -65,7 +65,7 @@ class DatasourceFactsPartialControllerTest {
         val refusal = controller.dialog(ExtendedModelMap(), "theirs") as ModelAndView
 
         refusal.viewName shouldBe "partials/inline-refusal"
-        verify(exactly = 0) { semantics.list(any(), any(), any()) }
+        verify(exactly = 0) { semantics.list(any(), any(), any(), any()) }
     }
 
     @Test
@@ -73,7 +73,7 @@ class DatasourceFactsPartialControllerTest {
         authenticate()
         val datasource = datasource()
         every { datasources.getVisible("warehouse", workspaceId) } returns datasource
-        every { semantics.list(any(), datasource, SemanticsService.ListQuery()) } returns
+        every { semantics.list(any(), datasource, SemanticsService.ListQuery(), any()) } returns
             listOf(
                 fact(trust = "observed", extra = mapOf("conflict" to true)),
                 fact(
@@ -112,7 +112,7 @@ class DatasourceFactsPartialControllerTest {
         authenticate()
         val datasource = datasource()
         every { datasources.getVisible("warehouse", workspaceId) } returns datasource
-        every { semantics.list(any(), datasource, SemanticsService.ListQuery()) } returns emptyList()
+        every { semantics.list(any(), datasource, SemanticsService.ListQuery(), any()) } returns emptyList()
 
         val model = ExtendedModelMap()
         controller.dialog(model, "warehouse")

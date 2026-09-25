@@ -66,4 +66,15 @@ data class TemplateDraft(
     val invariants: List<TransformInvariant>? = null,
     @field:JsonProperty("tests") @get:JsonProperty("tests") @param:JsonProperty("tests")
     val tests: List<TransformTestCase>? = null,
+    /**
+     * The learned facts this version cites as implementing (7e, transform-nodes design §2.3):
+     * fact ids as the caller sent them. NOT content — outside the hash, never a reason to open
+     * a draft. **Null means "not stated"** and the write INHERITS the citations of the version
+     * it is based on (owner ruling 2026-09-25); `[]` clears them. Refused on `sql`/`html` with
+     * `template.blocks_not_allowed`; each entry must resolve to a citable fact
+     * (`template.implements_unresolved`) — both [TemplateValidator]'s. Strings, not UUIDs, so a
+     * malformed id is that catalogued refusal rather than a binding failure.
+     */
+    @field:JsonProperty("implements") @get:JsonProperty("implements") @param:JsonProperty("implements")
+    val implements: List<String>? = null,
 )

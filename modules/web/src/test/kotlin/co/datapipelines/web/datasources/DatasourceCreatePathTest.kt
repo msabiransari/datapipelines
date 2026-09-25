@@ -64,6 +64,7 @@ class DatasourceCreatePathTest {
             rules,
             DatasourceCreateService(registry, rules::resolveCreateBinding, grants),
             DatasourceUpdateService(registry, rules),
+            co.datapipelines.web.EVERYTHING_LENS,
         )
     }
 

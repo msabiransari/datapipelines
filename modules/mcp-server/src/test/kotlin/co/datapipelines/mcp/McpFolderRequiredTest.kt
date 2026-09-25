@@ -101,7 +101,7 @@ class McpFolderRequiredTest {
     fun `templates_create refuses a folderless id with reason folder_required`() {
         val thrown =
             shouldThrow<TemplateValidationException> {
-                TemplatesCreateTool(mockk<TemplateRepository>(), AuthoringGuard(true), templateValidator)
+                McpFixtures.createTool(mockk<TemplateRepository>(), AuthoringGuard(true), templateValidator)
                     .call(McpArguments(templateArgs("scratch")), ctx)
             }
 
@@ -114,7 +114,7 @@ class McpFolderRequiredTest {
     fun `templates_create says grammar, not folder_required, when a folder would not fix it`() {
         val thrown =
             shouldThrow<TemplateValidationException> {
-                TemplatesCreateTool(mockk<TemplateRepository>(), AuthoringGuard(true), templateValidator)
+                McpFixtures.createTool(mockk<TemplateRepository>(), AuthoringGuard(true), templateValidator)
                     .call(McpArguments(templateArgs("_helper")), ctx)
             }
 
@@ -137,7 +137,7 @@ class McpFolderRequiredTest {
                 .inputSchema()
                 .toString()
         val templateSchema =
-            TemplatesCreateTool(mockk<TemplateRepository>(), AuthoringGuard(true), templateValidator)
+            McpFixtures.createTool(mockk<TemplateRepository>(), AuthoringGuard(true), templateValidator)
                 .definition
                 .inputSchema()
                 .toString()
@@ -186,7 +186,7 @@ class McpFolderRequiredTest {
 
         val refusal =
             shouldThrow<DatapipelinesException> {
-                TemplatesCreateTool(templates, AuthoringGuard(true), templateValidator)
+                McpFixtures.createTool(templates, AuthoringGuard(true), templateValidator)
                     .call(McpArguments(templateArgs("analytics/revenue.sql")), ctx)
             }
 
@@ -197,7 +197,7 @@ class McpFolderRequiredTest {
         // the proof that the new-root refusal is behind us.
         val afterConfirmation =
             shouldThrow<Throwable> {
-                TemplatesCreateTool(templates, AuthoringGuard(true), templateValidator)
+                McpFixtures.createTool(templates, AuthoringGuard(true), templateValidator)
                     .call(McpArguments(templateArgs("analytics/revenue.sql") + mapOf("confirm_new_root" to true)), ctx)
             }
 

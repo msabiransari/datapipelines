@@ -35,6 +35,8 @@ import org.springframework.web.servlet.ModelAndView
 class DatasourceFactsPartialController(
     private val datasources: DatasourceRegistry,
     private val semantics: SemanticsService,
+    /** 7e — the template lens the facts' `implemented_by` is read through (no default). */
+    private val lens: co.datapipelines.application.lens.PromoterLens,
 ) {
     /** The dialog: every live fact on the datasource this workspace may see, oldest first. */
     @GetMapping("/partials/datasources/{name}/facts")
@@ -45,7 +47,8 @@ class DatasourceFactsPartialController(
     ): Any {
         val principal = requirePrincipal()
         val datasource = datasources.getVisible(name, principal.requireWorkspace().id) ?: return notFound(name)
-        DatasourceFactsModel.fill(model, datasource, semantics.list(principal, datasource, SemanticsService.ListQuery()))
+        val facts = semantics.list(principal, datasource, SemanticsService.ListQuery(), lens.viewFor(principal).templates)
+        DatasourceFactsModel.fill(model, datasource, facts)
         return "partials/datasource-facts :: dialog"
     }
 

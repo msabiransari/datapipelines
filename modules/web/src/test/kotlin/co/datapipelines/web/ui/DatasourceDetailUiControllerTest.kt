@@ -34,7 +34,7 @@ class DatasourceDetailUiControllerTest {
     private val schemaTree = mockk<DatasourceSchemaTreeBrowseModel>(relaxed = true)
     private val themeResolver = mockk<ThemeResolver>()
     private val semantics = mockk<SemanticsService>()
-    private val controller = DatasourceDetailUiController(registry, lakeTables, lakeBrowse, schemaTree, themeResolver, semantics)
+    private val controller = DatasourceDetailUiController(registry, lakeTables, lakeBrowse, schemaTree, themeResolver, semantics, co.datapipelines.web.EVERYTHING_LENS)
 
     private val workspaceId = UUID.randomUUID()
     private val request = mockk<HttpServletRequest>()
@@ -66,7 +66,7 @@ class DatasourceDetailUiControllerTest {
         val ds = postgres()
         every { themeResolver.resolve(any()) } returns "saas"
         every { registry.getVisible("pg-demo", workspaceId) } returns ds
-        every { semantics.list(any(), any(), any()) } returns emptyList()
+        every { semantics.list(any(), any(), any(), any()) } returns emptyList()
 
         val model = ExtendedModelMap()
         val view = controller.detail(model, request, "pg-demo")
@@ -85,7 +85,7 @@ class DatasourceDetailUiControllerTest {
         every { themeResolver.resolve(any()) } returns "saas"
         every { registry.getVisible("lake-demo", workspaceId) } returns ds
         every { lakeTables.list(ds) } returns emptyList()
-        every { semantics.list(any(), any(), any()) } returns emptyList()
+        every { semantics.list(any(), any(), any(), any()) } returns emptyList()
 
         val model = ExtendedModelMap()
         controller.detail(model, request, "lake-demo")

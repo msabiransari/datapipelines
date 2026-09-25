@@ -58,6 +58,8 @@ class TemplateErrorCodesSpecDriftTest {
             // spellings — `contract_invalid`, `invariant_invalid`, `test_failed`,
             // `blocks_not_allowed`, `render_not_applicable` — the record (transform-nodes
             // design §7) names them without the `validation.` infix.
+            // §13.9 gained `template.implements_unresolved` on 2026-09-25 (7e, #7) — the same
+            // bare shape, the record's §7 row.
             val nonValidationShape =
                 documented.filterNot {
                     it.startsWith("template.validation.") || it.startsWith("template.version.") ||
@@ -68,7 +70,8 @@ class TemplateErrorCodesSpecDriftTest {
                         it == PipelineErrorCodes.Template.INVARIANT_INVALID ||
                         it == PipelineErrorCodes.Template.TEST_FAILED ||
                         it == PipelineErrorCodes.Template.BLOCKS_NOT_ALLOWED ||
-                        it == PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE
+                        it == PipelineErrorCodes.Template.RENDER_NOT_APPLICABLE ||
+                        it == PipelineErrorCodes.Template.IMPLEMENTS_UNRESOLVED
                 }
             nonValidationShape.shouldBeEmpty()
         }

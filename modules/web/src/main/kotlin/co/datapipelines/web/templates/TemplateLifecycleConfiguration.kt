@@ -23,7 +23,9 @@ class TemplateLifecycleConfiguration {
     fun templateDraftService(
         templates: TemplateRepository,
         authoring: AuthoringGuard,
-    ): TemplateDraftService = TemplateDraftService(templates, authoring)
+        // 7e — the citation rows the write lands `implements` in (inherit or replace).
+        citations: co.datapipelines.templates.TemplateImplementsRepository,
+    ): TemplateDraftService = TemplateDraftService(templates, authoring, citations)
 
     @Bean
     fun templateReleaseService(

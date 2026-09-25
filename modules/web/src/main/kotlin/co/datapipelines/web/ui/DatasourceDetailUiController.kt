@@ -37,6 +37,8 @@ class DatasourceDetailUiController(
     private val themeResolver: ThemeResolver,
     // 118 §7.3 — the learned facts rendered inline under the catalog tree, read-only.
     private val semantics: co.datapipelines.application.semantics.SemanticsService,
+    // 7e — the template lens the facts' `implemented_by` is read through (no default).
+    private val lens: co.datapipelines.application.lens.PromoterLens,
 ) {
     /** The page: the LAKE registry for a LAKE datasource, the schema tree for every other dialect. */
     @GetMapping("/datasources/{name}")
@@ -68,6 +70,7 @@ class DatasourceDetailUiController(
                     datasource,
                     co.datapipelines.application.semantics.SemanticsService
                         .ListQuery(),
+                    lens.viewFor(it).templates,
                 )
             }
                 ?: emptyList()

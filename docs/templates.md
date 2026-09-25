@@ -1,9 +1,9 @@
 # Templates Specification
 
-**Status:** v1.12 (frozen contract — additive-only changes after this point)
+**Status:** v1.14 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-25
 
 ---
 
@@ -76,6 +76,9 @@ Note that the body contains **no `<#import>` directive**. The engine synthesizes
 | `created_at` | ISO 8601 timestamp | yes | Server-assigned. |
 | `created_by` | string (UUID) | yes | User ID of creator. |
 | `is_library` | boolean | yes | `true` if this template exists to be imported by others. A library body contains **only `<#macro>` / `<#function>` definitions — no output outside macro definitions** (§6.2); `body` is still required. `false` if the template is executable directly by a pipeline node. `true` on a transform type is refused with `template.validation.freemarker_forbidden` (§7). |
+| `implements` | array of learned-fact ids | optional — **transform types only** | The workspace rules this transform version implements (§3.4, 7e): ids of `WORKSPACE` facts of kind `definition` / `exclusion` / `preference` visible from the workspace, at most 50. **Not content** — outside `body_hash`. Read back sorted; `[]` on a transform that cites none, `null` on `sql`/`html` (present there, it is `template.blocks_not_allowed`). On an update, absent is INHERITED and `[]` clears (§3.4). |
+| `needs_review` | boolean | read-only | `true` when a fact this version cites has been retired (§3.4) — computed on read, never stored; always present, `false` on every `sql`/`html` version. |
+| `retired_facts` | array of `{fact_id, retired_reason, superseded_by}` | read-only | The retired citations behind `needs_review` — `superseded_by` is the fact that replaced it (null for a plain retirement). Omitted when empty. |
 
 **Render context.** There is no `params_schema` field. The variables a body may reference are exactly the keys of the calling pipeline's `parameters` map, defaults applied — see [Pipeline Contract §7.4](pipeline-contract.md#74-template-variable-resolution).
 
@@ -140,6 +143,29 @@ Example (the design record's own — a row-mode transform over staged orders):
 ```
 
 **Save and release run the suite (§8.1 of the record).** Every case runs through the real engine on the bounded evaluation pool under `datapipelines.transform.evaluate-timeout-seconds`; its output passes the type gate against the contract (a `DECIMAL` output is rounded half-even to its declared scale, R1); the invariants run on it; the result is compared to `expect` after canonicalisation — exact equality or a refusal code, no tolerances. The suite is bounded by `suite-timeout-seconds`. The first failure refuses the save with `template.test_failed` naming the case and the assertion (a diff bounded to 2 000 chars). **Release re-runs the suite** on the version being released — a suite that passed at save fails at release only if the engine changed, which is the case worth catching.
+
+### 3.4 Implements and drift
+
+The semantic link between a transform and the workspace's rules — the [transform-nodes design record](superpowers/specs/2026-09-09-transform-nodes-design.md) §2.3, §8.2 and §8.3 (R9), in the product voice. A rule an agent recorded as a learned fact — "a rainy day is `precipitation_mm >= 2.5`", "tips are excluded from revenue" — and the transform that computes it are two halves of one decision. `implements` joins them, so whoever finds the rule finds the code, and whoever reads the code sees when the rule moved under it.
+
+**What can be cited.** A transform version (`jsonata` / `javascript`) may cite the learned facts it implements: a list of fact ids, each a `WORKSPACE` fact of kind `definition`, `exclusion` or `preference` that the writing workspace can see ([Metadata DB §4.18](metadata-db.md#418-learned_facts)'s one visibility predicate). Anything else — an id that exists nowhere, another workspace's rule, a `DATASOURCE` fact (a transform never sees a datasource, so it cannot implement a fact about one) or a malformed id — is refused before anything is written with `template.implements_unresolved` (400; `details.fact_id` names the first offender, `details.reason` is `unknown`, `malformed` or `too_many`). `unknown` is deliberately one answer for "absent", "not yours" and "not citable": never "it exists but you cannot see it". At most 50 citations per version. A retired fact may still be cited — the version then reads `needs_review` at once. On `sql` / `html` the field itself is `template.blocks_not_allowed`.
+
+**Not content.** A citation is a claim about meaning, never a change of behaviour, so it lives in its own table (`template_implements`, [Metadata DB §4.21](metadata-db.md#421-template_implements)) and **outside `body_hash`**: writing it never opens a draft and never bumps a version, and it is the ONE thing a RELEASED version accepts after release (§5.1). The write rides the existing update — `templates_update` / `PUT /templates`, same hash precondition:
+
+- `implements` stated → exactly that list lands on the version the write produced (`[]` clears);
+- `implements` **absent → inherited** (owner ruling 2026-09-25): an in-place draft write keeps the draft's citations, a write that opens a new draft copies the released version's forward, and the §5.1 no-op keeps its own — so an edit that never mentions citations (the transform editor's Save draft is one) cannot silently drop the link;
+- an update whose content equals the released version and that states `implements` is the §5.1 no-op for content — `status: RELEASED`, no draft — and the citations land **on the released version**. While a draft is open the precondition makes every write the draft's.
+
+**Drift (§8.2 of the record, D-S6 applied to code).** When a cited fact is retired — including superseded: a superseded fact is a retired one with `retired_reason = 'superseded'`, and its successor is the visible fact whose `supersedes` names it — every version citing it reads **`needs_review: true`** with `retired_facts` naming each retired citation and its `superseded_by`. The mark is computed ON READ by the template's own query (every read path: get, list, the explorer tree and search, the editor header, the pipeline editor's node card) — never stored, never auto-remapped, never an edit of the version. The name is shared with the fact trust state `needs_review` on purpose: both mean "re-verify before you lean on it". **Clearing it is a deliberate act**: cite the successor, or drop the citation, with an update. Pinning a `needs_review` version at pipeline release is a **warning**, never a refusal — the release response's `warnings` carries `pipeline.release.template_needs_review` ([Pipeline Contract §13.13](pipeline-contract.md#1313-versioning--draft-release-lifecycle--promotion)) and the release dialog shows a row per such pin; a fact edit never blocks a release on its own.
+
+**Discovery (§8.3).** Two reverse reads, one per direction, both over the citation table's fact index:
+
+- from the rule: every WORKSPACE fact on `semantics_list`, and every rule under `definitions` on `datasources_list` / `datasources_get` (MCP and REST), carries **`implemented_by: [{template_id, version}]`** — the live (DRAFT or RELEASED) versions citing it that the reader's `template.read` lens admits (a promoter's lens: RELEASED versions of the admitted names), `[]` when none; a DISCARDED version is never listed;
+- from the template list: `templates_list` / `GET /api/v1/templates` accept **`implements=<fact_id>`** and keep the templates whose listed version cites it — an id the workspace cannot see matches nothing.
+
+The authoring rule this enables (the skill's learn-first step): search the facts, find the definition, find the transform that implements it, **reuse before writing**.
+
+**Moving between environments.** Export, import and the promotion payload carry `implements` as ids; the importing workspace keeps the ids that resolve THERE (the citable rule above) and drops the rest without refusing (owner ruling 2026-09-25) — learned facts are environment-local and never promoted, so a cross-deployment promotion lands with no citations, and a same-workspace export → import round trip is lossless. An import that writes nothing (the §9.2 idempotent re-import of an identical version) writes no citations either.
 
 ---
 
@@ -277,7 +303,7 @@ built-in would invite the belief that interpolation is now safe.
 ### 5.1 Rules
 
 - Versions are integers, monotonically increasing per template id.
-- A **RELEASED** (or DISCARDED) version is immutable — `body`, `imports`, `dialect`, `engine` cannot be changed once released; no write path touches a non-draft row's content, and the entity purge is refused unless the sole version is a DRAFT. The **sole DRAFT is overwritten in place** by `templates_update` / `PUT /templates` (117, §5.3): same id, same version number, new content and a new `body_hash`; `templates_purge_draft` deletes it. The render caches key on content, not on `{id, version}` alone (132, §8.3) — a draft you updated is the body that renders and runs next, on every instance, without a restart.
+- A **RELEASED** (or DISCARDED) version is immutable — `body`, `imports`, `dialect`, `engine` cannot be changed once released; no write path touches a non-draft row's content, and the entity purge is refused unless the sole version is a DRAFT. **The one exception is not content:** a transform version's `implements` citations (§3.4, 7e) are outside `body_hash` and may be written on a RELEASED version through the same update (an implements-only write opens no draft). The **sole DRAFT is overwritten in place** by `templates_update` / `PUT /templates` (117, §5.3): same id, same version number, new content and a new `body_hash`; `templates_purge_draft` deletes it. The render caches key on content, not on `{id, version}` alone (132, §8.3) — a draft you updated is the body that renders and runs next, on every instance, without a restart.
 - Deleting a template (soft delete) does not affect existing versions. Pipelines referencing deleted templates' versions continue to work until those pipelines are explicitly modified. **The delete is refused with `409 template.in_use` while any pipeline version pins any version of the template** (§5.4) — the refusal names who blocks; it does not change delete semantics.
 - Versions never reused, never renumbered.
 
@@ -543,7 +569,7 @@ too). When a grouped expression carries a `:name`, prefer one of those two shape
 | Get working version | `GET /templates?name={id}` |
 | Get specific version | `GET /templates/versions?name={id}&version={n}` |
 | Update (writes the draft branch) | `PUT /templates` — `id` in the body; MCP twin `templates_update` (§6.2.36) |
-| List | `GET /templates?dialect={d}&type={t}&q={search}` |
+| List | `GET /templates?dialect={d}&type={t}&q={search}&implements={fact_id}` — `implements` keeps the templates whose listed version cites that learned fact (§3.4, 7e) |
 | Delete (soft; `409 template.in_use` while referenced — §5.4) | `DELETE /templates?name={id}` |
 | Preview render with a caller-supplied context | `POST /templates/render` — `name`, `version`, `context` in the body |
 
@@ -736,6 +762,7 @@ ORDER BY r.total DESC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.14 | 7e (#7) the semantic link | New **§3.4 Implements and drift**: a transform version cites the WORKSPACE `definition`/`exclusion`/`preference` facts it implements (`template.implements_unresolved` otherwise, not-found semantics; `blocks_not_allowed` on `sql`/`html`); citations are outside `body_hash`, editable on a released version, INHERITED when an update omits them (owner ruling 2026-09-25); a retired cited fact marks every citing version `needs_review` on read with `retired_facts` naming it and its successor, cleared only by a deliberate re-cite; release warns (`pipeline.release.template_needs_review`), never refuses; `implemented_by` on the fact surfaces and `implements=` on the list for discovery; import keeps only the ids that resolve in the importing workspace (owner ruling 2026-09-25). §3.2 gains `implements`, `needs_review`, `retired_facts`; §5.1 names the one post-release write; §9 the list filter. Status caught up (it read v1.12 after v1.13's row). |
 | 2026-09-23 | v1.13 | 7b (#7) transform templates | **The two transform types land**: `jsonata` and `javascript` as `TemplateType` values (§3.2; `javascript` refused at save until round two). `engine` becomes type-conditional (`none` iff a transform type); `dialect` is forbidden outside `sql`; `imports`/`is_library`/Freemarker-in-body are `template.validation.freemarker_forbidden` (D-T9). New **§3.3**: the contract/invariants/tests blocks — strict binding (`unknown_field`), every model rule with its detail name, the mandatory empty case (R2's `row_case_lists_table`, the pinned clock), and the save/release test-suite rule on the bounded evaluation pool. §7's table gains `freemarker_forbidden`, `contract_invalid`, `invariant_invalid`, `test_failed`, `blocks_not_allowed`, `render_not_applicable`; §8 gains **§8.0 Evaluate beside render** (`templates_evaluate` / `POST /api/v1/templates/evaluate`, the render refusal, and the evaluate-counts-as-render rule for Check B); §11.2 notes the blocks' growth rule. The `TemplateTypeBehaviour` object owns the per-type rules (record §2.4), with the sql/html refusals proven byte-identical by the golden. |
 | 2026-09-14 | v1.12 | 132 draft cache | §5.1's immutability rule is now exact: a RELEASED/DISCARDED version is immutable, the sole DRAFT is overwritten in place (117) and purged. §8.3 rewritten: both render-cache tiers key on content — the registry caches non-DRAFT rows only and re-reads a draft on every lookup; the parsed-template cache keys on `{id}@{version}#{body_hash}`; the loader's `lastModified` is the row's write stamp; invalidation is by construction on every instance, no bus. Fixes the 2026-09-14 acceptance defect where a rendered-then-updated draft kept rendering and executing its first body. |
 | 2026-09-11 | v1.11 | 117 templates_update | §5.3 gains the MCP twin: `templates_update` ([MCP §6.2.36](mcp-server.md#6236-templates_update)) — the same parse-only validation and the same `TemplateDraftService.write` the REST PUT makes, the `If-Match` hash carried as the required `expected_hash` argument, and the type-immutability refusal named on every surface. §9's CRUD table names the twin. `templates_purge_draft` is explicitly not the edit verb. |

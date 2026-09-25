@@ -128,7 +128,7 @@ class SemanticsToolsTest {
         val record = shouldThrow<DatapipelinesException> { recordTool().call(McpArguments(recordArgs()), other) }
         val list =
             shouldThrow<DatapipelinesException> {
-                SemanticsListTool(registry, service).call(
+                SemanticsListTool(registry, service, McpFixtures.EVERYTHING_LENS).call(
                     McpArguments(
                         mapOf("datasource" to "warehouse"),
                     ),
@@ -141,7 +141,7 @@ class SemanticsToolsTest {
             { list.code shouldBe PipelineErrorCodes.Datasource.NOT_FOUND },
         )
         verify(exactly = 0) { service.record(any(), any(), any(), any()) }
-        verify(exactly = 0) { service.list(any(), any(), any()) }
+        verify(exactly = 0) { service.list(any(), any(), any(), any()) }
     }
 
     @Test
@@ -159,7 +159,7 @@ class SemanticsToolsTest {
             }
         val badSince =
             shouldThrow<McpError> {
-                SemanticsListTool(registry, service).call(
+                SemanticsListTool(registry, service, McpFixtures.EVERYTHING_LENS).call(
                     McpArguments(
                         mapOf(
                             "datasource" to "warehouse",
@@ -333,10 +333,10 @@ class SemanticsToolsTest {
     @Test
     fun `list binds the filters and wraps the service's rows with a count`() {
         val query = slot<SemanticsService.ListQuery>()
-        every { service.list(any(), warehouse, capture(query)) } returns listOf(mapOf("id" to "f1"), mapOf("id" to "f2"))
+        every { service.list(any(), warehouse, capture(query), any()) } returns listOf(mapOf("id" to "f1"), mapOf("id" to "f2"))
 
         val result =
-            SemanticsListTool(registry, service).call(
+            SemanticsListTool(registry, service, McpFixtures.EVERYTHING_LENS).call(
                 McpArguments(
                     mapOf(
                         "datasource" to "warehouse",
