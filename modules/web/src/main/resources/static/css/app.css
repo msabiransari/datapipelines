@@ -22,6 +22,11 @@
   --type-pipeline-bg: var(--accent-success-bg);
   --type-calc: #7c3aed;
   --type-calc-bg: #ede9fe;
+  /* 7d (#7): the TRANSFORM node — a teal between the DQL (info) and PIPELINE (success)
+     accents, derived from the THEME's own pair so every theme and both modes carry it;
+     no literal colour (the two above predate the rule). */
+  --type-transform: color-mix(in srgb, var(--accent-info) 45%, var(--accent-success));
+  --type-transform-bg: color-mix(in srgb, var(--accent-info-bg) 50%, var(--accent-success-bg));
   --brand: var(--text-link);
   --brand-soft: color-mix(in srgb, var(--brand) 16%, var(--surface-default));
   --border-faint: color-mix(in srgb, var(--border-subtle) 40%, var(--surface-default));
@@ -42,6 +47,7 @@
 [data-type="ddl"] { --type: var(--type-ddl); --type-bg: var(--type-ddl-bg); }
 [data-type="pipeline"] { --type: var(--type-pipeline); --type-bg: var(--type-pipeline-bg); }
 [data-type="calc"] { --type: var(--type-calc); --type-bg: var(--type-calc-bg); }
+[data-type="transform"] { --type: var(--type-transform); --type-bg: var(--type-transform-bg); }
 
 /* Application-level semantic tokens — derive from design system, never hardcoded hex */
 :root {
@@ -3357,4 +3363,177 @@ button.app-busy::after {
   :root.rail-open .app-rail-backdrop {
     transition: none !important;
   }
+}
+
+/* ---- 7d (#7, transform-nodes design §9.3) — the TRANSFORM editor face ----
+ * Four panes over one transform version, two by two on the editor's wide column and one
+ * column on a narrow one; the result list under them. The panes are the create modal's
+ * mono textarea (`.app-template-body-input`) or the source column's read-only <pre>
+ * (`.te-readonly`); nothing here names a colour — pass/fail read the accent tokens. */
+.tf-face {
+  overflow-y: auto;
+}
+
+.tf-panes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap-md);
+}
+
+@media (max-width: 1100px) {
+  .tf-panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tf-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  min-width: 0;
+  margin: 0;
+}
+
+.tf-pane-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+/* A pane's editing surface: tall enough for a contract without scrolling the page, and
+   resizable only vertically so the two-column grid keeps its shape. 16rem is geometry
+   (roughly sixteen lines of the mono face); the spacing scale has no token for it. */
+.tf-pane-input {
+  min-height: 16rem;
+  resize: vertical;
+  font-size: var(--text-sm);
+  tab-size: 2;
+}
+
+pre.tf-pane-input {
+  flex: 0 0 auto;
+  overflow: auto;
+}
+
+.tf-result:empty {
+  display: none;
+}
+
+.tf-outcome {
+  margin: 0 0 var(--gap-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.tf-outcome-ok {
+  color: var(--accent-success);
+}
+
+.tf-outcome-refused {
+  color: var(--accent-danger);
+}
+
+.tf-refusals,
+.tf-cases,
+.tf-invariants {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tf-refusal,
+.tf-case {
+  padding: var(--gap-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-base);
+  background: var(--surface-default);
+  margin-bottom: var(--gap-xs);
+  font-size: var(--text-sm);
+}
+
+.tf-case-fail {
+  border-color: var(--accent-danger);
+}
+
+.tf-case-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-sm);
+}
+
+.tf-case-name {
+  font-weight: var(--weight-semibold);
+}
+
+.tf-case-verdict {
+  color: var(--text-secondary);
+}
+
+.tf-mark {
+  font-family: var(--font-mono);
+}
+
+.tf-case-pass > .tf-case-head .tf-mark,
+.tf-inv-pass > .tf-mark {
+  color: var(--accent-success);
+}
+
+.tf-case-fail > .tf-case-head .tf-mark,
+.tf-inv-fail > .tf-mark {
+  color: var(--accent-danger);
+}
+
+.tf-case-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--gap-xs) var(--gap-sm);
+  margin: var(--gap-sm) 0 0;
+}
+
+.tf-case-facts dt {
+  color: var(--text-secondary);
+}
+
+.tf-case-facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.tf-diff,
+.tf-detail {
+  margin: 0;
+  padding: var(--gap-xs) var(--gap-sm);
+  border-radius: var(--radius-base);
+  background: var(--surface-inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tf-invariants {
+  margin-top: var(--gap-xs);
+}
+
+.tf-invariants li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-xs);
+}
+
+.tf-code {
+  font-family: var(--font-mono);
+}
+
+/* 7d (§8.2) — the node card's needs-review marker rides the kind line (graph.js
+   buildCardHtml), so it adds no height to a card the layout already measured. */
+.pe-card-review {
+  color: var(--accent-warning);
+  text-transform: none;
 }

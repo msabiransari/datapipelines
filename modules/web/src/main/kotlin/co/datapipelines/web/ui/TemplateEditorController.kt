@@ -4,7 +4,6 @@ import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
-import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.Template
@@ -13,7 +12,6 @@ import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateJson
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
-import co.datapipelines.templates.TemplateVersionDetail
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.CorrelationId
@@ -43,6 +41,9 @@ class TemplateEditorController(
     private val reads: TemplateService,
     private val lens: PromoterLens,
 ) {
+    /** The source column's one rule, shared with the transform face's routes (7d). */
+    private val source = TemplateSourceModel(reads)
+
     @GetMapping("/templates/editor")
     // 143 (T315): the page floors at READ, the pipeline editor's 122 rule — the operation
     // the screen exists to perform for its LOWEST role is reading the source. What it
@@ -62,11 +63,14 @@ class TemplateEditorController(
         // §9.6: the name is a query parameter — it may contain `/`, which can never travel
         // in a URL path segment (the container refuses %2F below routing).
         val view = lens.viewFor(principal).templates
-        val draft = fillSource(model, workspaceId, view, name, version, RoleModel.roles(principal).canAuthor)
+        val draft = source.fill(model, workspaceId, view, name, version, RoleModel.roles(principal).canAuthor).draft
         model.addAttribute("versions", reads.listVersions(workspaceId, view, name))
         model.addAttribute("hasDraft", draft != null)
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
+        // 7d (transform-nodes design §8.2): the `needs_review` marker renders behind this flag;
+        // lane 7e computes it from the cited facts. Until then no version is marked.
+        model.addAttribute("needsReview", false)
         model.addAttribute("activeTheme", themeResolver.resolve(request))
         RoleModel.stamp(model, principal)
         return "templates/editor"
@@ -86,9 +90,10 @@ class TemplateEditorController(
     ): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        fillSource(model, workspaceId, lens.viewFor(principal).templates, name, version, RoleModel.roles(principal).canAuthor)
+        val filled = source.fill(model, workspaceId, lens.viewFor(principal).templates, name, version, RoleModel.roles(principal).canAuthor)
         RoleModel.stamp(model, principal)
-        return "partials/template-source"
+        // 7d: a transform template's column is the face — the same answer the face's own GET gives.
+        return filled.view
     }
 
     /**
@@ -147,60 +152,6 @@ class TemplateEditorController(
         }
     }
 
-    /**
-     * The source column's model, shared by the page and its partial.
-     *
-     * 039 O14: the default is the WORKING version — the draft when one exists, else the
-     * current release. Selecting a DIFFERENT entry is what changed in R5: that version is
-     * shown READ-ONLY, with its badge and, when RELEASED, who released it and when. The
-     * editable textarea only ever carries the working version, so no selection can make a
-     * RELEASED row the write target.
-     *
-     * 143 (T315): `readOnly` is the version rule ABOVE combined with the author capability —
-     * a reader (viewer, or a promoter, who releases but does not edit) sees every version,
-     * the working one included, in the read-only surface; the editable textarea exists only
-     * for an author on the working version. The same rule feeds the page and the partial,
-     * so no version selection can hand a non-author a textarea. [canAuthor] arrives from
-     * [RoleModel], already narrowed by an API key's scope.
-     *
-     * Returns the draft detail it had to read anyway, so the page's header affordances
-     * (the pending-release badge, Release, Discard) cost no second query.
-     */
-    private fun fillSource(
-        model: Model,
-        workspaceId: UUID,
-        view: ReadLens,
-        name: String,
-        requested: Int?,
-        canAuthor: Boolean,
-    ): TemplateVersionDetail? {
-        val draft = reads.findDraftDetail(workspaceId, view, name)
-        val latest = reads.findLatest(workspaceId, view, name)
-        val workingVersion = draft?.version ?: latest?.version
-        val selectedVersion = requested ?: workingVersion
-        // A `version` naming no stored row (a hand-typed URL) falls back to the current
-        // release rather than painting an EMPTY editable textarea, which would be a lie
-        // about what the author is looking at.
-        val displayed =
-            when {
-                selectedVersion == null -> null
-                latest != null && selectedVersion == latest.version -> latest
-                else -> reads.findVersion(workspaceId, view, name, selectedVersion)
-            } ?: latest
-        val readOnly = displayed != null && workingVersion != null && (displayed.version != workingVersion || !canAuthor)
-        // `readOnly` proves `displayed` non-null; Kotlin's data-flow carries that here.
-        val detail = if (readOnly) reads.findVersionDetail(workspaceId, view, name, displayed.version) else null
-        model.addAttribute("template", displayed)
-        model.addAttribute("templateName", name)
-        model.addAttribute("selectedVersion", displayed?.version ?: selectedVersion)
-        model.addAttribute("workingVersion", workingVersion)
-        model.addAttribute("readOnly", readOnly)
-        model.addAttribute("selectedStatus", (detail?.status ?: displayed?.status)?.name)
-        model.addAttribute("releasedAt", detail?.releasedAt)
-        model.addAttribute("releasedBy", detail?.releasedBy?.toString())
-        return draft
-    }
-
     /** A stored version, verbatim, as the inbound draft shape the write path takes. */
     private fun Template.asDraft(): TemplateDraft =
         TemplateDraft(
@@ -214,6 +165,11 @@ class TemplateEditorController(
             imports = imports,
             body = body,
             isLibrary = isLibrary,
+            // 7d: a transform version's three blocks are content (inside `body_hash`); dropping
+            // them made Edit on a released jsonata version a `contract_invalid` blocks_missing.
+            contract = contract,
+            invariants = invariants,
+            tests = tests,
         )
 
     /**
