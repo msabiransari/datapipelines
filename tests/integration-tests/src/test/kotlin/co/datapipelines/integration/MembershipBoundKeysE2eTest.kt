@@ -23,24 +23,27 @@ import java.sql.ResultSet
 import java.util.Base64
 
 /**
- * **A member's login-minted key ends with the membership it is pinned to — and a workspace
- * admin can revoke it** (#200, roles record §3.7), proven at the wire against the FULL
- * application: real logins through `POST /login`, the real `workspaceForLogin` mint hook,
- * the real member-removal and key-revoke verbs, and three surfaces: `/mcp` (`pipelines_list`),
- * the ONE surface the key serves, and REST (`GET /api/v1/pipelines`) and a published endpoint,
- * which refuse a live MCP key (`403 endpoint.key_kind_refused`, `user_key_off_surface` —
- * #215 B2) but answer a DEAD one like any dead credential, because the key is validated first.
+ * **A member's CREATED key ends with the membership it is pinned to — and a workspace admin
+ * can revoke the keys a member created** (#200, roles record §3.7; keys v2 A17/B6 restatement),
+ * proven at the wire against the FULL application: real logins through `POST /login`, the real
+ * Keys-page creation path (`POST /api/v1/auth/api-keys` with a role — the login mint is
+ * retired, A15), the real member-removal and created-key-revoke verbs, and three surfaces:
+ * `/mcp` (`pipelines_list`), the ONE surface the key serves, and REST (`GET /api/v1/pipelines`)
+ * and a published endpoint, which refuse a live MCP key (`403 endpoint.key_kind_refused`,
+ * `mcp_key_off_surface` — #215 B2) but answer a DEAD one like any dead credential, because the
+ * key is validated first.
  *
- *  - **(a) removal revokes the key (§3.7 ruling 1).** A member's key serves `/mcp` and is
- *    refused off it; the admin removes the member; the SAME key answers `auth.api_key.invalid`
- *    (401) on all three. Re-invite + next login mints a NEW key that serves again — removal
- *    is a membership fact, not an identity ban.
- *  - **(b) an admin revoke keeps the member (§3.7 ruling 3).** A fresh member's key serves
- *    `/mcp`; the admin revokes it (`DELETE .../members/{id}/key`, `204`); the key answers 401
- *    on all three while the member's SESSION keeps working — revoking a key is not
- *    deactivation — and the next login mints a fresh key. The verb is idempotent: revoking
- *    again is another `204`, and no automatic rotation exists to do this for anyone
- *    (§3.7 ruling 2 — recovery is an admin act).
+ *  - **(a) removal revokes the keys the member CREATED (§3.7 ruling 1, restated for
+ *    created-by).** A member creates a key (role author, the subset rule) and it serves `/mcp`;
+ *    the admin removes the member; the SAME key answers `auth.api_key.invalid` (401) on all
+ *    three. Re-invite + a NEW created key serves again — removal is a membership fact, not an
+ *    identity ban, and (A15) no key is minted at the next login: the member creates one.
+ *  - **(b) an admin revoke keeps the member (§3.7 ruling 3).** A fresh member's created key
+ *    serves `/mcp`; the admin revokes every key the member created
+ *    (`DELETE .../members/{id}/key`, `204`); the key answers 401 on all three while the
+ *    member's SESSION keeps working — revoking a key is not deactivation. The verb is
+ *    idempotent: revoking again is another `204`, and no automatic rotation exists to do this
+ *    for anyone (§3.7 ruling 2 — recovery is the member's own new key on the Keys page).
  *
  * Non-vacuity: each revocation is preceded by ≥ [SERVED_FLOOR] answered `200`s on `/mcp`, and
  * the two off-surface refusals, printed per phase (`event=keybound.phase …`).
@@ -60,11 +63,11 @@ class MembershipBoundKeysE2eTest {
 
     @Test
     @Order(1)
-    fun `a - removing the member ends their key on every surface it served, and re-entry mints fresh`() {
+    fun `a - removing the member ends the keys they created on every surface they served, and re-entry creates fresh`() {
         val world = ensureWorld()
-        val bob = memberSession(BOB_EMAIL, world.bobOneTime)
+        val bob = memberKey(BOB_EMAIL, world.bobOneTime, "kbound-bob-key")
 
-        // Non-vacuity: the key the login minted serves /mcp BEFORE anything ends it.
+        // Non-vacuity: the key the member CREATED serves /mcp BEFORE anything ends it.
         val servedBefore = serveAll(bob.key)
         val before = servedBefore.entries.joinToString(" ") { "${it.key}:${it.value}" }
         println("event=keybound.phase phase=removal_before served=$before")
@@ -75,9 +78,10 @@ class MembershipBoundKeysE2eTest {
         // The SAME key, all three surfaces: 401 — the credential, not the person.
         serveAllExpectInvalid(bob.key)
 
-        // Re-entry: re-invite, sign in again — a NEW key, and the surfaces answer again.
+        // Re-entry: re-invite, sign in again, CREATE a new key on the Keys page — and the
+        // surfaces answer again (A15: no key is minted at the login; the member creates one).
         withAdmin { reinvite(it, world.acme, BOB_EMAIL) }
-        val bobAgain = memberSession(BOB_EMAIL, world.bobOneTime, settled = true)
+        val bobAgain = memberKey(BOB_EMAIL, world.bobOneTime, "kbound-bob-key-2", settled = true)
         bobAgain.userId shouldBe bob.userId
         bobAgain.keyId shouldNotContain bob.keyId
         val servedAfter = serveAll(bobAgain.key)
@@ -88,9 +92,9 @@ class MembershipBoundKeysE2eTest {
 
     @Test
     @Order(2)
-    fun `b - an admin revokes a member's key, the member's session survives, the next login mints fresh`() {
+    fun `b - an admin revokes the keys a member created, the member's session survives, and they create a fresh one`() {
         val world = ensureWorld()
-        val carol = memberSession(CAROL_EMAIL, world.carolOneTime)
+        val carol = memberKey(CAROL_EMAIL, world.carolOneTime, "kbound-carol-key")
 
         val servedBefore = serveAll(carol.key)
         val beforeRevoke = servedBefore.entries.joinToString(" ") { "${it.key}:${it.value}" }
@@ -99,7 +103,7 @@ class MembershipBoundKeysE2eTest {
 
         withAdmin { admin ->
             revokeMemberKey(admin, world.acme, carol.userId)
-            // Idempotent: no live key any more, and the verb still answers the success it asked for.
+            // Idempotent: no live created key any more, and the verb still answers the success it asked for.
             revokeMemberKey(admin, world.acme, carol.userId)
         }
 
@@ -117,8 +121,8 @@ class MembershipBoundKeysE2eTest {
             .statusCode(200)
             .body("data.email", Matchers.equalTo(CAROL_EMAIL))
 
-        // The next login mints a fresh key, and it serves.
-        val carolAgain = memberSession(CAROL_EMAIL, world.carolOneTime, settled = true)
+        // The member creates a fresh key on the Keys page (A15 — no login mint), and it serves.
+        val carolAgain = memberKey(CAROL_EMAIL, world.carolOneTime, "kbound-carol-key-2", settled = true)
         carolAgain.userId shouldBe carol.userId
         carolAgain.keyId shouldNotContain carol.keyId
         val servedAfter = serveAll(carolAgain.key)
@@ -132,9 +136,9 @@ class MembershipBoundKeysE2eTest {
     /**
      * The fixture, created ONCE through the product's own surfaces: the admin's workspace
      * with a released pipeline published as an endpoint, and two local members (each created
-     * with a one-time password, settled before their first clean login — the mint waits for
-     * it). Everything is `kbound`-namespaced so a re-run on the shared container cannot
-     * collide with the last run's rows.
+     * with a one-time password, settled before their first clean login). Everything is
+     * `kbound`-namespaced so a re-run on the shared container cannot collide with the last
+     * run's rows.
      */
     private class World(
         val acme: String,
@@ -150,8 +154,8 @@ class MembershipBoundKeysE2eTest {
         admin.statusCode shouldBe 302
 
         // The workspace, then the admin's ENTRY into it. The re-stamped SESSION drives the
-        // publishing fixture — its active workspace decides where every write lands; the MCP
-        // key the switch minted is confined to /mcp (#215 B2) and plays no part here.
+        // publishing fixture — its active workspace decides where every write lands. (No key
+        // is minted at sign-in, A15 — the members create their own in the tests.)
         createWorkspace(admin.sessionCookie(), admin.csrfToken, WS_ACME)
         val publisher = AdminAuth(switch(admin.sessionCookie(), admin.csrfToken, WS_ACME), admin.csrfToken)
 
@@ -315,71 +319,60 @@ class MembershipBoundKeysE2eTest {
     }
 
     /**
-     * Real login → settle the forced change → clean login (the mint fires HERE) → the key.
-     * A member who already settled their password in this run ([settled]) signs in with
-     * [MEMBER_PASSWORD] directly — re-entry consumes no second one-time credential.
+     * Real login → settle the forced change on first entry → clean login → CREATE a key on the
+     * Keys page's REST path (keys v2 A15: no login mint — `POST /api/v1/auth/api-keys`, kind
+     * `mcp`, role `author`, the one role an author creator can offer). A member who already
+     * settled their password in this run ([settled]) signs in with [MEMBER_PASSWORD] directly —
+     * re-entry consumes no second one-time credential.
      */
-    private fun memberSession(
+    private fun memberKey(
         email: String,
         oneTime: String,
+        keyName: String,
         settled: Boolean = false,
     ): MemberSession {
+        val session: String
+        val csrf: String
         if (settled) {
             val login = postLogin(email, MEMBER_PASSWORD)
             if (login.sessionCookieOrNull() == null) diagnose("settled", login)
             login.statusCode shouldBe 302
-            val session = login.sessionCookie()
-            val mine = mine(session)
-            return MemberSession(
-                userId = userIdOf(email),
-                session = session,
-                keyId = mine["id"] as String,
-                key = secretOf(session),
-            )
+            session = login.sessionCookie()
+            csrf = login.csrfToken
+        } else {
+            val first = postLogin(email, oneTime)
+            if (first.sessionCookieOrNull() == null) diagnose("first", first)
+            first.statusCode shouldBe 302
+            postPasswordChange(first.sessionCookie(), first.csrfToken, oneTime, MEMBER_PASSWORD, MEMBER_PASSWORD)
+                .statusCode shouldBe 200
+            val clean = postLogin(email, MEMBER_PASSWORD)
+            if (clean.sessionCookieOrNull() == null) diagnose("clean", clean)
+            clean.statusCode shouldBe 302
+            session = clean.sessionCookie()
+            csrf = clean.csrfToken
         }
-        val first = postLogin(email, oneTime)
-        if (first.sessionCookieOrNull() == null) diagnose("first", first)
-        first.statusCode shouldBe 302
-        postPasswordChange(first.sessionCookie(), first.csrfToken, oneTime, MEMBER_PASSWORD, MEMBER_PASSWORD)
-            .statusCode shouldBe 200
-        val clean = postLogin(email, MEMBER_PASSWORD)
-        if (clean.sessionCookieOrNull() == null) diagnose("clean", clean)
-        clean.statusCode shouldBe 302
-        val session = clean.sessionCookie()
-        val mine = mine(session)
+        val created =
+            given()
+                .port(port)
+                .cookie("dp_session", session)
+                .cookie("dp_csrf", csrf)
+                .header("DP-CSRF-Token", csrf)
+                .contentType(ContentType.JSON)
+                .body("""{"name": "$keyName", "kind": "mcp", "role": "author"}""")
+                .`when`()
+                .post("/api/v1/auth/api-keys")
+                .then()
+                .statusCode(201)
+                .body("data.role", Matchers.equalTo("author"))
+                .extract()
+                .jsonPath()
         return MemberSession(
             userId = userIdOf(email),
             session = session,
-            keyId = mine["id"] as String,
-            key = secretOf(session),
+            keyId = created.getString("data.id"),
+            key = created.getString("data.key"),
         )
     }
-
-    /** The plaintext of the session's live MCP key — the top bar's copy endpoint (own key only). */
-    private fun secretOf(session: String): String =
-        given()
-            .port(port)
-            .cookie("dp_session", session)
-            .`when`()
-            .get("/partials/mcp-key/secret")
-            .then()
-            .statusCode(200)
-            .header("Cache-Control", Matchers.containsString("no-store"))
-            .extract()
-            .asString()
-
-    /** The top bar's read: the caller's live MCP key in the session's active workspace. */
-    private fun mine(session: String): Map<String, Any?> =
-        given()
-            .port(port)
-            .cookie("dp_session", session)
-            .`when`()
-            .get("/api/v1/auth/api-keys/mine")
-            .then()
-            .statusCode(200)
-            .extract()
-            .jsonPath()
-            .getMap<String, Any?>("data")
 
     private fun userIdOf(email: String): String = query("SELECT id::text FROM users WHERE email = '$email'") { it.getString(1) }.single()
 
@@ -759,7 +752,7 @@ class MembershipBoundKeysE2eTest {
         private const val SERVED_FLOOR = 3
 
         /** #215 B2: the reason a live MCP key is refused off `/mcp`. */
-        private const val OFF_SURFACE = "user_key_off_surface"
+        private const val OFF_SURFACE = "mcp_key_off_surface"
         private const val SERVE_ATTEMPTS = 3
 
         private val CSRF_FIELD = Regex("""name="_csrf" value="([^"]+)"""")

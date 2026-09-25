@@ -44,16 +44,19 @@ import javax.crypto.spec.SecretKeySpec
  * | principal                                               | REST / MCP                        |
  * |---------------------------------------------------------|-----------------------------------|
  * | session of a deactivated user                           | 401 `auth.principal_deactivated`  |
- * | `user` key whose member is deactivated                  | 401 `auth.principal_deactivated`  |
- * | `endpoint` / `server` key whose IDENTITY is deactivated | 401 `auth.principal_deactivated`  |
- * | `user` / `endpoint` / `server` key, pin deactivated     | 404 `auth.key_workspace_inactive` |
+ * | any key whose IDENTITY is deactivated (keys v2: an      | 401 `auth.principal_deactivated`  |
+ * | `mcp` key's own identity, an `endpoint`/`server` key's) |                                   |
+ * | `mcp` / `endpoint` / `server` key, pin deactivated      | 404 `auth.key_workspace_inactive` |
  * | server key on the promotion peer, either                | 401 `auth.promotion.key_invalid`  |
  * | any key, a deactivated workspace's published endpoint   | 404 — the unknown-path body       |
  *
- * Since #215 an `endpoint` or `server` key acts as its own `service` identity, and liveness is
- * that identity's — never its creator's (record §3.3, A2): the live control keys here were
- * created by the DEACTIVATED user and still serve. A dead credential is refused before its KIND
- * is judged, so a dead MCP key gets the liveness code on REST too, not B2's kind refusal.
+ * Since keys v2 (A13) EVERY key acts as its own `service` identity, and liveness is that
+ * identity's — never its creator's (record §3.3, A2): the live control keys here were
+ * created by the DEACTIVATED user and still serve. (The pre-v2 row "a `user` key whose MEMBER
+ * is deactivated" is gone with the login mint: a member's deactivation cascades to nothing —
+ * A2 — so the mcp arm proves the identity's liveness instead.) A dead credential is refused
+ * before its KIND is judged, so a dead MCP key gets the liveness code on REST too, not B2's
+ * kind refusal.
  *
  * ## What is proven beyond the codes
  * - A deactivated session navigating a PAGE is sent to `/login?error=inactive` with its cookie
@@ -603,7 +606,10 @@ class DeactivationSweepTest {
         /** The REST control's person: its live SESSION walks every route (#215 B2 — REST is a session's surface). */
         private const val REST_CONTROL_USER = "0c000000-0000-0000-0000-000000000180"
 
-        /** The `service` identities (#215 PK5): two deactivated, four live. */
+        /** The `service` identities (keys v2 A13: every key's own): two deactivated, seven live. */
+        private const val DEAD_OWNER_IDENTITY = "5e000000-0000-0000-0000-000000000180"
+        private const val DEAD_WS_IDENTITY = "5e000000-0000-0000-0000-000000000187"
+        private const val CONTROL_IDENTITY = "5e000000-0000-0000-0000-000000000188"
         private const val DEAD_ENDPOINT_IDENTITY = "5e000000-0000-0000-0000-000000000181"
         private const val DEAD_SERVER_IDENTITY = "5e000000-0000-0000-0000-000000000182"
         private const val DEAD_WS_ENDPOINT_IDENTITY = "5e000000-0000-0000-0000-000000000183"
@@ -619,8 +625,10 @@ class DeactivationSweepTest {
 
         /**
          * (key, who it acts as, who created it, workspace, kind) — every key the sweep presents,
-         * seeded by SQL. An MCP (`user`) key acts as its member, who created it; an `endpoint`
-         * or `server` key acts as its own identity ([identityActive] says whether it is live).
+         * seeded by SQL. Keys v2 (A13): every key — `mcp` included — acts as its own `service`
+         * identity ([identityActive] says whether it is live); a member's deactivation cascades
+         * to nothing, so the deactivated-owner arm of the pre-v2 world is a deactivated-identity
+         * arm.
          */
         private class Seed(
             val key: E2eAuth.SeededKey,
@@ -632,21 +640,22 @@ class DeactivationSweepTest {
         ) {
             val role: String? =
                 when (kind) {
+                    "mcp" -> "workspace_admin"
                     "endpoint" -> "api_caller"
                     "server" -> "promotion_receiver"
                     else -> null
                 }
         }
 
-        private val DEAD_OWNER_USER_KEY = E2eAuth.generateKey("dead-owner-user")
-        private val DEAD_WS_USER_KEY = E2eAuth.generateKey("dead-ws-user")
+        private val DEAD_OWNER_USER_KEY = E2eAuth.generateKey("dead-owner-mcp")
+        private val DEAD_WS_USER_KEY = E2eAuth.generateKey("dead-ws-mcp")
         private val DEAD_WS_ENDPOINT_KEY = E2eAuth.generateKey("dead-ws-endpoint")
         private val DEAD_IDENTITY_ENDPOINT_KEY = E2eAuth.generateKey("dead-identity-endpoint")
         private val DEAD_WS_SERVER_KEY = E2eAuth.generateKey("dead-ws-server")
         private val DEAD_IDENTITY_SERVER_KEY = E2eAuth.generateKey("dead-identity-server")
 
         /** The MCP test's live key: lists the tool catalogue the dead arms are walked over. */
-        private val CONTROL_KEY = E2eAuth.generateKey("control-user")
+        private val CONTROL_KEY = E2eAuth.generateKey("control-mcp")
 
         /** Live keys CREATED BY THE DEACTIVATED USER — liveness is the identity's, never the creator's (A2). */
         private val CONTROL_SERVER_KEY = E2eAuth.generateKey("control-server")
@@ -654,13 +663,13 @@ class DeactivationSweepTest {
 
         private val SEEDS =
             listOf(
-                Seed(DEAD_OWNER_USER_KEY, DEAD_USER, DEAD_USER, WS_LIVE, "user"),
-                Seed(DEAD_WS_USER_KEY, LIVE_USER, LIVE_USER, WS_DEAD, "user"),
+                Seed(DEAD_OWNER_USER_KEY, DEAD_OWNER_IDENTITY, DEAD_USER, WS_LIVE, "mcp", identityActive = false),
+                Seed(DEAD_WS_USER_KEY, DEAD_WS_IDENTITY, LIVE_USER, WS_DEAD, "mcp"),
                 Seed(DEAD_WS_ENDPOINT_KEY, DEAD_WS_ENDPOINT_IDENTITY, LIVE_USER, WS_DEAD, "endpoint"),
                 Seed(DEAD_IDENTITY_ENDPOINT_KEY, DEAD_ENDPOINT_IDENTITY, LIVE_USER, WS_LIVE, "endpoint", identityActive = false),
                 Seed(DEAD_WS_SERVER_KEY, DEAD_WS_SERVER_IDENTITY, LIVE_USER, WS_DEAD, "server"),
                 Seed(DEAD_IDENTITY_SERVER_KEY, DEAD_SERVER_IDENTITY, LIVE_USER, WS_LIVE, "server", identityActive = false),
-                Seed(CONTROL_KEY, LIVE_USER, LIVE_USER, WS_LIVE, "user"),
+                Seed(CONTROL_KEY, CONTROL_IDENTITY, LIVE_USER, WS_LIVE, "mcp"),
                 Seed(CONTROL_SERVER_KEY, CONTROL_SERVER_IDENTITY, DEAD_USER, WS_LIVE, "server"),
                 Seed(CONTROL_ENDPOINT_KEY, CONTROL_ENDPOINT_IDENTITY, DEAD_USER, WS_LIVE, "endpoint"),
             )
@@ -674,8 +683,8 @@ class DeactivationSweepTest {
                     key = null,
                     session = sessionJwt(DEAD_USER, "dead@dsweep.test", WS_LIVE_NAME),
                 ),
-                Arm("user-key:deactivated-owner", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_OWNER_USER_KEY),
-                Arm("user-key:deactivated-workspace", HTTP_NOT_FOUND, KEY_WORKSPACE_INACTIVE, DEAD_WS_USER_KEY),
+                Arm("mcp-key:deactivated-identity", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_OWNER_USER_KEY),
+                Arm("mcp-key:deactivated-workspace", HTTP_NOT_FOUND, KEY_WORKSPACE_INACTIVE, DEAD_WS_USER_KEY),
                 Arm("endpoint-key:deactivated-identity", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_IDENTITY_ENDPOINT_KEY),
                 Arm("endpoint-key:deactivated-workspace", HTTP_NOT_FOUND, KEY_WORKSPACE_INACTIVE, DEAD_WS_ENDPOINT_KEY),
                 Arm("server-key:deactivated-identity", HTTP_UNAUTHORIZED, PRINCIPAL_DEACTIVATED, DEAD_IDENTITY_SERVER_KEY),
@@ -753,11 +762,11 @@ class DeactivationSweepTest {
                             "('$DEAD_USER', 'dead@dsweep.test', 'Dead', 'test', 'dsweep-dead', FALSE, FALSE), " +
                             "('$REST_CONTROL_USER', 'control@dsweep.test', 'Control', 'test', 'dsweep-control', TRUE, FALSE)",
                     )
-                    // Each endpoint/server key's own identity, built as V34 and ApiKeyService build one.
-                    SEEDS.filter { it.kind != "user" }.forEach { seed ->
+                    // Every key's own identity, built as V34/ApiKeyService build one (keys v2 A13).
+                    SEEDS.forEach { seed ->
                         statement.execute(
                             "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +
-                                "VALUES ('${seed.actsAs}', '${seed.key.id}@keys.invalid', '${seed.key.name}', 'key', " +
+                                "VALUES ('${seed.actsAs}', '${seed.key.id.lowercase()}@keys.invalid', '${seed.key.name}', 'key', " +
                                 "'${seed.key.id}', ${seed.identityActive}, FALSE, 'service')",
                         )
                     }

@@ -147,7 +147,7 @@ class WorkspaceIsolationIntegrationTest {
             .get("/api/v1/pipelines")
             .then()
             .statusCode(403)
-            .body("error.details.reason", org.hamcrest.Matchers.equalTo("user_key_off_surface"))
+            .body("error.details.reason", org.hamcrest.Matchers.equalTo("mcp_key_off_surface"))
     }
 
     // ---------------------------------------------------------------- session switching
@@ -301,7 +301,7 @@ class WorkspaceIsolationIntegrationTest {
         // liveness is cached by id for the TTL and `WorkspaceService.deactivate` is what
         // evicts it. A raw SQL flip models a world the service never produces.
         ensureSeeded()
-        seedKey(GLOBEX_INACTIVE_KEY, WS_GLOBEX)
+        seedKey(GLOBEX_INACTIVE_KEY, WS_GLOBEX, creator = BOB)
         setDeactivated(port, "globex", true).statusCode(200)
         try {
             // (i) REST
@@ -428,7 +428,10 @@ class WorkspaceIsolationIntegrationTest {
         // value: the session JWTs below are signed with the same secret the app validates.
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
 
-        private val ALICE_KEY = E2eAuth.generateKey("alice-key", ownerId = ALICE)
+        private val ALICE_KEY = E2eAuth.generateKey("alice-key", ownerId = ALICE_KEY_IDENTITY)
+
+        /** Alice's mcp key's own `service` identity (keys v2 A13). */
+        private const val ALICE_KEY_IDENTITY = "5e000000-0000-0000-0000-00000000acbf"
 
         /** #215 B2: REST is a session's surface — the two members' sessions, pinned by their ACTIVE workspace. */
         private val ALICE_SESSION get() = sessionJwt(ALICE, "alice@acme.test", "acme")
@@ -440,10 +443,10 @@ class WorkspaceIsolationIntegrationTest {
 
         /**
          * Pinned to globex but seeded only by the deactivation test — a key no other test
-         * validates. Owned by DAVE since 179: V31's one-live-user-key-per-(user, workspace)
-         * index makes a second live `user` key for BOB in globex uninsertable.
+         * validates. Its own identity carries it (keys v2 A13); DAVE creates it.
          */
-        private val GLOBEX_INACTIVE_KEY = E2eAuth.generateKey("globex-inactive-key", ownerId = DAVE)
+        private const val GLOBEX_INACTIVE_IDENTITY = "5e000000-0000-0000-0000-00000000acc0"
+        private val GLOBEX_INACTIVE_KEY = E2eAuth.generateKey("globex-inactive-key", ownerId = GLOBEX_INACTIVE_IDENTITY)
 
         /**
          * Mints the session JWT exactly as `JwtService.issue` does (HS256, `iss`, iat/exp,
@@ -633,26 +636,36 @@ class WorkspaceIsolationIntegrationTest {
         }
 
         private fun seedKeys(connection: java.sql.Connection) {
-            // Alice's MCP key (the sweep's `/mcp` principal) acts as Alice, who created it.
+            // Both identities FIRST (the api_keys rows FK to them): acme's api_caller key acts as
+            // its own `service` identity (record §3.3), created by Alice; keys v2 A13 gives
+            // Alice's mcp key one too.
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +
+                        "VALUES ('$ACME_CALLER_IDENTITY', '${ACME_CALLER_KEY.id.lowercase()}@keys.invalid', '${ACME_CALLER_KEY.name}', 'key', " +
+                        "'${ACME_CALLER_KEY.id}', TRUE, FALSE, 'service')",
+                )
+                statement.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +
+                        "VALUES ('$ALICE_KEY_IDENTITY', '${ALICE_KEY.id.lowercase()}@keys.invalid', '${ALICE_KEY.name}', 'key', " +
+                        "'${ALICE_KEY.id}', TRUE, FALSE, 'service')",
+                )
+            }
+            // Alice's MCP key (the sweep's `/mcp` principal) acts as its own identity and holds
+            // the workspace_admin role its creator holds (keys v2 A13/A14).
             connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                .use { ps ->
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'workspace_admin')",
+                ).use { ps ->
                     ps.setString(1, ALICE_KEY.id)
-                    ps.setObject(2, UUID.fromString(ALICE))
+                    ps.setObject(2, UUID.fromString(ALICE_KEY_IDENTITY))
                     ps.setObject(3, UUID.fromString(ALICE))
                     ps.setString(4, ALICE_KEY.name)
                     ps.setString(5, ALICE_KEY.hash)
                     ps.setObject(6, UUID.fromString(WS_ACME))
                     ps.executeUpdate()
                 }
-            // acme's api_caller key acts as its own `service` identity (record §3.3), created by Alice.
-            connection.createStatement().use { statement ->
-                statement.execute(
-                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +
-                        "VALUES ('$ACME_CALLER_IDENTITY', '${ACME_CALLER_KEY.id}@keys.invalid', '${ACME_CALLER_KEY.name}', 'key', " +
-                        "'${ACME_CALLER_KEY.id}', TRUE, FALSE, 'service')",
-                )
-            }
             connection
                 .prepareStatement(
                     "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
@@ -672,15 +685,27 @@ class WorkspaceIsolationIntegrationTest {
         private fun seedKey(
             key: E2eAuth.SeededKey,
             workspaceId: String,
+            creator: String,
         ) {
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+                connection.createStatement().use { statement ->
+                    // Keys v2 (A13): the key acts as its own identity (the key's ownerId), which
+                    // the suite defines per key; the role only has to satisfy the CHECK — the key
+                    // never gets past its workspace's liveness.
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) " +
+                            "VALUES ('${key.ownerId}', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', " +
+                            "'${key.id}', TRUE, FALSE, 'service')",
+                    )
+                }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'author')",
                     ).use { ps ->
                         ps.setString(1, key.id)
                         ps.setObject(2, UUID.fromString(key.ownerId))
-                        ps.setObject(3, UUID.fromString(key.ownerId))
+                        ps.setObject(3, UUID.fromString(creator))
                         ps.setString(4, key.name)
                         ps.setString(5, key.hash)
                         ps.setObject(6, UUID.fromString(workspaceId))

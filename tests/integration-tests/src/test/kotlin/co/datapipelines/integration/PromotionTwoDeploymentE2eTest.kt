@@ -425,20 +425,20 @@ class PromotionTwoDeploymentE2eTest {
 
     @Test
     @Order(51)
-    fun `a user key, a revoked server key and an expired one are all the SAME refusal`() {
+    fun `an mcp key, a revoked server key and an expired one are all the SAME refusal`() {
         // Every one of these is a live row in uat's own `api_keys`, so each proves a different
         // branch of the store's check — and all three answer identically, because a caller must
         // not be able to classify a credential by presenting it here. Each key is presented for
         // the FIRST time in this test: a key validated once is cached for the TTL (auth §7.3),
         // so revoking a key mid-test would prove the cache, not the check.
-        // The wrong-kind probe is an MCP key of its own member (one live `user` key per
-        // (user, workspace), V31).
+        // The wrong-kind probe is an mcp key of its own identity (keys v2 A13/A19: the `user`
+        // kind is renamed `mcp`; a kind that is not `server` is the promotion peer's wrong kind).
         uatJdbc.execute(
             "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin)" +
                 " VALUES ('$WRONG_KIND_USER_ID', 'e2e-wrong-kind@datapipelines.test', 'E2E WrongKind'," +
                 " 'test', 'e2e-wrong-sub', TRUE, FALSE)",
         )
-        val wrongKind = seedServerKeyOnUat("an ordinary agent key", kind = "user", ownerId = WRONG_KIND_USER_ID)
+        val wrongKind = seedServerKeyOnUat("an ordinary agent key", kind = "mcp", ownerId = WRONG_KIND_USER_ID)
         val revoked = seedServerKeyOnUat("revoked receiver", revoked = true)
         val expired = seedServerKeyOnUat("expired receiver", expiresAt = "2020-01-01T00:00:00Z")
 
@@ -490,24 +490,18 @@ class PromotionTwoDeploymentE2eTest {
     ): E2eAuth.SeededKey {
         val key = E2eAuth.generateKey(name)
         val expiry = expiresAt?.let { "'$it'::timestamptz" } ?: "NULL"
-        // #215 (record §3.3, PK5): a server key acts as its OWN `service` identity, created with
-        // it — inactive when the key is revoked — and created BY the admin. An MCP (`user`) key
-        // acts as its member, who created it.
-        val actsAs =
-            if (kind == "server") {
-                val identity = UUID.randomUUID().toString()
-                uatJdbc.execute(
-                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind)" +
-                        " VALUES ('$identity', '${key.id}@keys.invalid', '$name', 'key', '${key.id}', ${!revoked}, FALSE, 'service')",
-                )
-                identity
-            } else {
-                ownerId
-            }
-        val role = if (kind == "server") "'promotion_receiver'" else "NULL"
+        // Keys v2 (A13): EVERY key acts as its own `service` identity, created with it —
+        // inactive when the key is revoked — and created BY the admin. The role is the key's
+        // own: the transport role for a `server` key, an offerable member role for `mcp`.
+        val identity = UUID.randomUUID().toString()
+        uatJdbc.execute(
+            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind)" +
+                " VALUES ('$identity', '${key.id}@keys.invalid', '$name', 'key', '${key.id}', ${!revoked}, FALSE, 'service')",
+        )
+        val role = if (kind == "server") "'promotion_receiver'" else "'workspace_admin'"
         uatJdbc.execute(
             "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role, is_revoked, expires_at)" +
-                " VALUES ('${key.id}', '$actsAs', '$ownerId', '$name', '${key.hash}', '$WORKSPACE_ID_TEXT'," +
+                " VALUES ('${key.id}', '$identity', '$ownerId', '$name', '${key.hash}', '$WORKSPACE_ID_TEXT'," +
                 " '$kind', $role, $revoked, $expiry)",
         )
         return key

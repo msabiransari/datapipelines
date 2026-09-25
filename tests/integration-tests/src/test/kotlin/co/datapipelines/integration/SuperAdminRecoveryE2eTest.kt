@@ -298,7 +298,10 @@ class SuperAdminRecoveryE2eTest {
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
 
         /** Pinned to `default` — the proof that a key gets no null-context exception. */
-        private val ROOT_KEY = E2eAuth.generateKey("root-key", ownerId = ROOT)
+        private val ROOT_KEY = E2eAuth.generateKey("root-key", ownerId = ROOT_KEY_IDENTITY)
+
+        /** The key's own `service` identity (keys v2 A13). */
+        private const val ROOT_KEY_IDENTITY = "5e500000-0000-0000-0000-000000000170"
 
         private fun sessionJwt(
             userId: String,
@@ -348,13 +351,19 @@ class SuperAdminRecoveryE2eTest {
                             ('$NOBODY', 'nobody@company.test', 'Nobody', 'test', 'nobody-sub', TRUE, FALSE)
                         """.trimIndent(),
                     )
+                    // The key's own identity (keys v2 A13) — its own statement: the column list above omits `kind`.
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                            "('$ROOT_KEY_IDENTITY', '${ROOT_KEY.id.lowercase()}@keys.invalid', '${ROOT_KEY.name}', 'key', '${ROOT_KEY.id}', TRUE, FALSE, 'service')",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?, ?, ?, ?, ?, 'mcp', 'workspace_admin')",
                     ).use { ps ->
                         ps.setString(1, ROOT_KEY.id)
-                        ps.setObject(2, UUID.fromString(ROOT))
+                        ps.setObject(2, UUID.fromString(ROOT_KEY_IDENTITY))
                         ps.setObject(3, UUID.fromString(ROOT))
                         ps.setString(4, ROOT_KEY.name)
                         ps.setString(5, ROOT_KEY.hash)

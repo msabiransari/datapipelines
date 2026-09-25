@@ -128,11 +128,12 @@ class PublishedEndpointE2eTest {
                 .jsonPath()
                 .getString("execution_id")
 
+        // Keys v2 A16: the key's own-run cursor rides the business path, not the framework read.
         given()
             .port(port)
             .header(API_KEY_HEADER, endpointKey)
             .`when`()
-            .get("/api/v1/executions/$executionId/result")
+            .get("/api/nyc/v1/revenue/Manhattan/executions/$executionId/result")
             .then()
             .statusCode(200)
             .body("data.rows.size()", equalTo(3))
@@ -237,7 +238,7 @@ class PublishedEndpointE2eTest {
                 .then()
                 .statusCode(403)
                 .body("error.code", equalTo("endpoint.key_kind_refused"))
-                .body("error.details.reason", equalTo("user_key_off_surface"))
+                .body("error.details.reason", equalTo("mcp_key_off_surface"))
         }
     }
 
@@ -254,7 +255,7 @@ class PublishedEndpointE2eTest {
             .get("/api/trade/v1/summary")
             .then()
             .statusCode(403)
-            .body("error.details.reason", equalTo("user_key_off_surface"))
+            .body("error.details.reason", equalTo("mcp_key_off_surface"))
         given()
             .port(port)
             .asSession(ADMIN_SESSION)
@@ -474,7 +475,7 @@ class PublishedEndpointE2eTest {
                     .port(port)
                     .header(API_KEY_HEADER, endpointKey)
                     .`when`()
-                    .get("/api/v1/executions/$accepted/result")
+                    .get("/api/nyc/v1/revenue/Manhattan/executions/$accepted/result")
                     .then()
                     .extract()
                     .statusCode()
@@ -485,7 +486,7 @@ class PublishedEndpointE2eTest {
             .port(port)
             .header(API_KEY_HEADER, endpointKey)
             .`when`()
-            .get("/api/v1/executions/$accepted/result")
+            .get("/api/nyc/v1/revenue/Manhattan/executions/$accepted/result")
             .then()
             .statusCode(200)
             .body("data.rows.size()", equalTo(1))
@@ -773,20 +774,27 @@ class PublishedEndpointE2eTest {
                         VALUES ('$OTHER_WORKSPACE', '$ADMIN_USER', 'workspace_admin')
                         """.trimIndent(),
                     )
+                    // Keys v2 (A13): each key acts as its own `service` identity.
+                    listOf(ADMIN_KEY to "ep-admin-key", FOREIGN_KEY to "ep-foreign-key").forEach { (key, name) ->
+                        statement.execute(
+                            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                                "(gen_random_uuid(), '${key.id.lowercase()}@keys.invalid', '$name', 'key', '${key.id}', TRUE, FALSE, 'service')",
+                        )
+                    }
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind)" +
-                            " VALUES (?, ?, ?, ?, ?, ?::uuid, ?)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, (SELECT id FROM users WHERE provider_subject = ?), ?, ?, ?, ?::uuid, 'mcp', ?)",
                     ).use { ps ->
                         listOf(ADMIN_KEY to DEFAULT_WORKSPACE, FOREIGN_KEY to OTHER_WORKSPACE).forEach { (key, workspace) ->
                             ps.setString(1, key.id)
-                            ps.setObject(2, UUID.fromString(ADMIN_USER))
+                            ps.setString(2, key.id)
                             ps.setObject(3, UUID.fromString(ADMIN_USER))
                             ps.setString(4, key.name)
                             ps.setString(5, key.hash)
                             ps.setString(6, workspace)
-                            ps.setString(7, "user")
+                            ps.setString(7, "workspace_admin")
                             ps.addBatch()
                         }
                         ps.executeBatch()

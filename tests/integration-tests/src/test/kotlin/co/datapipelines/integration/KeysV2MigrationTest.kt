@@ -120,9 +120,12 @@ class KeysV2MigrationTest {
     @Order(5)
     fun `duplicate live names are disambiguated and the workspace-name uniqueness holds for live keys`() {
         migrated shouldBe true
-        // The newest keeps its name; the older gains the key id's tail.
+        // The newest keeps its name; the older gains the key id's tail. The dup rows are
+        // pre-R3 ON-DEMAND keys (minted_at_login FALSE, the V31 default) — the widened V35
+        // conversion covers them too: live, identity-backed, with the owner's role.
         nameOf(dupKept) shouldBe "shared name"
         nameOf(dupRenamed) shouldBe "shared name (old1)"
+        keyRow(dupKept) shouldBe listOf("author", "false", dupOwnerA.toString())
         // The unique index refuses a third live row of the same name in the same workspace.
         val refusal =
             runCatching {
@@ -168,6 +171,8 @@ class KeysV2MigrationTest {
                 ('$ws', '$promoter', 'promoter'),
                 ('$ws', '$admin', 'workspace_admin'),
                 ('$ws', '$viewer', 'viewer'),
+                ('$ws', '$dupOwnerA', 'author'),
+                ('$ws', '$dupOwnerB', 'author'),
                 ('$otherWs', '$superAdmin', 'workspace_admin')
             """.trimIndent(),
         )

@@ -84,9 +84,10 @@ class JarSmokeE2eTest {
         authorSession = sessionJwt(AUTHOR_USER, "smoke-author@test")
         viewerSession = sessionJwt(VIEWER_USER, "smoke-viewer@test")
         promoterSession = sessionJwt(PROMOTER_USER, "smoke-promoter@test")
-        mcpKey = seedMcpKey("mcp/smoke", USER).plaintext
-        // 179 (D16): the mint endpoint itself is still exercised on the packaged jar — and
-        // its answer for a `user` key is the refusal, because the login hook mints those.
+        mcpKey = seedMcpKey("mcp/smoke", USER, MCP_KEY_IDENTITY).plaintext
+        // 179 (D16), keys v2 form: the mint endpoint itself is still exercised on the packaged
+        // jar — and its answer for a request naming no kind is the refusal (there is no default
+        // kind to fall back to).
         mintApiKeyRefused()
     }
 
@@ -235,7 +236,7 @@ class JarSmokeE2eTest {
                 .header("DP-API-Key", mcpKey)
         val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         response.statusCode() shouldBe 403
-        response.body() shouldContain "user_key_off_surface"
+        response.body() shouldContain "mcp_key_off_surface"
     }
 
     @Test
@@ -445,23 +446,31 @@ class JarSmokeE2eTest {
     }
 
     /**
-     * Seeds an MCP key by SQL (179, D16: a `user` key is minted by the login hook, never by a
-     * request) — the same shape every other suite's fixture takes (E2eAuth hashes; the row
-     * is the suite's to write). It acts as its member: created_by = user_id, no role (#215 PK4).
+     * Seeds an mcp key by SQL (keys v2: the Keys page is the one creation path; a fixture may
+     * write the row directly, as every other suite's fixture does — E2eAuth hashes; the row is
+     * the suite's to write). Keys v2 (A13): the key acts as its own `service` identity and holds
+     * its creator's workspace_admin role.
      */
     private fun seedMcpKey(
         name: String,
         ownerId: String,
+        identityId: String,
     ): E2eAuth.SeededKey {
-        val key = E2eAuth.generateKey(name, ownerId = ownerId)
+        val key = E2eAuth.generateKey(name, ownerId = identityId)
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { c ->
+            c.createStatement().use { s ->
+                s.execute(
+                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                        "('$identityId', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}', TRUE, FALSE, 'service')",
+                )
+            }
             c
                 .prepareStatement(
-                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id)" +
-                        " VALUES (?, ?, ?, ?, ?, '$WORKSPACE')",
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, '$WORKSPACE', 'mcp', 'workspace_admin')",
                 ).use { ps ->
                     ps.setString(1, key.id)
-                    ps.setObject(2, UUID.fromString(ownerId))
+                    ps.setObject(2, UUID.fromString(identityId))
                     ps.setObject(3, UUID.fromString(ownerId))
                     ps.setString(4, key.name)
                     ps.setString(5, key.hash)
@@ -544,6 +553,9 @@ class JarSmokeE2eTest {
         val USER = UUID.randomUUID().toString()
         val AUTHOR_USER = UUID.randomUUID().toString()
         val VIEWER_USER = UUID.randomUUID().toString()
+
+        /** The mcp key's own `service` identity (keys v2 A13). */
+        val MCP_KEY_IDENTITY = UUID.randomUUID().toString()
         val PROMOTER_USER = UUID.randomUUID().toString()
         val WORKSPACE = UUID.randomUUID().toString()
         val PIPELINE = UUID.randomUUID().toString()

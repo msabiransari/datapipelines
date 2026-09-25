@@ -239,6 +239,7 @@ class ApiKeyMintingTest {
             .post("/api/v1/auth/api-keys")
             .then()
             .statusCode(409)
+            .body("error.code", Matchers.equalTo("auth.key_name_taken"))
             .body("error.details.reason", Matchers.equalTo("key_name_taken"))
 
         // Revoke-own (A14): the creator's delete — and the name is free again.

@@ -413,6 +413,9 @@ class ReleaseChecksE2eTest {
 
         private val ADMIN_USER_ID: String = UUID.randomUUID().toString()
 
+        /** The key's own `service` identity (keys v2 A13). */
+        private val KEY_IDENTITY: String = UUID.randomUUID().toString()
+
         /** The per-run JWT secret — registered as `datapipelines.jwt.secret` and used to sign the session (#215 B2). */
         private val JWT_SECRET = E2eSession.newSecret()
 
@@ -471,14 +474,19 @@ class ReleaseChecksE2eTest {
                         "INSERT INTO workspace_members (workspace_id, user_id, role)" +
                             " VALUES ('$MCP_WORKSPACE', '$ADMIN_USER_ID', 'workspace_admin') ON CONFLICT DO NOTHING",
                     )
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                            "('$KEY_IDENTITY', '${ADMIN_KEY.id.lowercase()}@keys.invalid', '${ADMIN_KEY.name}', 'key', " +
+                            "'${ADMIN_KEY.id}', TRUE, FALSE, 'service')",
+                    )
                 }
                 connection
                     .prepareStatement(
-                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id)" +
-                            " VALUES (?, ?::uuid, ?::uuid, ?, ?, ?::uuid)",
+                        "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                            " VALUES (?, ?::uuid, ?::uuid, ?, ?, ?::uuid, 'mcp', 'workspace_admin')",
                     ).use { ps ->
                         ps.setString(1, ADMIN_KEY.id)
-                        ps.setString(2, ADMIN_USER_ID)
+                        ps.setString(2, KEY_IDENTITY)
                         ps.setString(3, ADMIN_USER_ID)
                         ps.setString(4, ADMIN_KEY.name)
                         ps.setString(5, ADMIN_KEY.hash)

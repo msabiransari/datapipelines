@@ -102,12 +102,12 @@ class PromoterLensSweepTest {
         println("event=lens.sweep.inventory routes=${walk.size}")
         walk.size shouldBeGreaterThanOrEqual MINIMUM_ROUTES
 
-        // #215 B2: REST is the session's surface alone — the promoter's MCP key is refused on every
-        // route by KIND before the lens is ever asked (pinned here, so the walk below is not the
-        // key's), and the key's lens is walked over /mcp in test 2.
+        // #215 B2, keys v2: REST is the session's surface alone — the promoter's MCP key is refused
+        // on every route by KIND before the lens is ever asked (pinned here, so the walk below is
+        // not the key's), and the key's lens is walked over /mcp in test 2.
         val keyOnRest = call("/api/v1/pipelines", keyHeaderFor(PROMOTER))
         keyOnRest.status shouldBe HTTP_FORBIDDEN
-        keyOnRest.body.contains("user_key_off_surface") shouldBe true
+        keyOnRest.body.contains("mcp_key_off_surface") shouldBe true
         listOf("session" to sessionFor(PROMOTER)).forEach { (credential, auth) ->
             val findings = Findings()
             walk.forEach { route -> sweep(route, credential, auth, findings) }
@@ -319,8 +319,8 @@ class PromoterLensSweepTest {
             references.map { it.path("pipeline_version_status").asText() }.toSet() shouldBe setOf("RELEASED")
             references.map { it.path("pipeline_version").asInt() }.contains(4) shouldBe false
             refused(tool("templates_used_by", """{"id":"$T/newer.sql","version":4}""", keyFor(PROMOTER))) shouldBe true
-            withClue("non-vacuity: the viewer's used_by v3 carries the DRAFT pin") {
-                toolResult(tool("templates_used_by", """{"id":"$T/newer.sql","version":3}""", keyFor(VIEWER)))
+            withClue("non-vacuity: the author-role key's (not lensed) used_by v3 carries the DRAFT pin") {
+                toolResult(tool("templates_used_by", """{"id":"$T/newer.sql","version":3}""", keyFor(AUTHOR)))
                     .path("references")
                     .map { it.path("pipeline_version_status").asText() }
                     .contains("DRAFT") shouldBe true
@@ -363,7 +363,7 @@ class PromoterLensSweepTest {
             call("/api/v1/templates?name=$T/newer.sql", auth).body.contains(DRAFT_MARKER) shouldBe true
         }
         reachableGetRoutes().forEach { route -> identifierPairs(route).forEach { (hidden, _) -> call(hidden, auth) } }
-        names(toolResult(tool("pipelines_list", "{}", keyFor(VIEWER))), "name") shouldContainExactlyInAnyOrder
+        names(toolResult(tool("pipelines_list", "{}", keyFor(AUTHOR))), "name") shouldContainExactlyInAnyOrder
             VISIBLE_PIPELINES + HIDDEN_PIPELINES
         railBadges(call("/pipelines", auth).body) shouldBe
             listOf(VISIBLE_PIPELINES.size + HIDDEN_PIPELINES.size, VISIBLE_TEMPLATES.size + HIDDEN_TEMPLATES.size)
@@ -658,6 +658,7 @@ class PromoterLensSweepTest {
         private const val MINIMUM_PAIRS = 15
 
         private const val PROMOTER = "promoter"
+        private const val AUTHOR = "author"
         private const val VIEWER = "viewer"
         private const val WS_ID = "abc00000-0000-0000-0000-000000000178"
         private const val WS_NAME = "lenswalk"
@@ -687,10 +688,23 @@ class PromoterLensSweepTest {
         private val USERS: Map<String, String> =
             mapOf(
                 VIEWER to "0a000000-0000-0000-0000-000000000178",
+                AUTHOR to "0b000000-0000-0000-0000-000000000178",
                 PROMOTER to "0c000000-0000-0000-0000-000000000178",
             )
+
+        /** The keys' own `service` identities (keys v2 A13). */
+        private const val PROMOTER_KEY_IDENTITY = "5e000000-0000-0000-0000-000000000178"
+        private const val AUTHOR_KEY_IDENTITY = "5e000000-0000-0000-0000-000000000179"
+
+        /**
+         * Keys v2 (A13/A15): no viewer key exists — the lens CONTRAST key is an author-role key
+         * (author is not lensed), and the lens key is a promoter-role key, the one lensed role.
+         */
         private val KEYS: Map<String, E2eAuth.SeededKey> =
-            USERS.mapValues { (role, id) -> E2eAuth.generateKey("$role-lens-key", ownerId = id) }
+            mapOf(
+                PROMOTER to E2eAuth.generateKey("promoter-lens-key", ownerId = PROMOTER_KEY_IDENTITY),
+                AUTHOR to E2eAuth.generateKey("author-lens-key", ownerId = AUTHOR_KEY_IDENTITY),
+            )
 
         private val random = SecureRandom()
         private val jwtSecret: String = Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES).also { random.nextBytes(it) })
@@ -890,16 +904,29 @@ class PromoterLensSweepTest {
         }
 
         private fun seedKeys(connection: java.sql.Connection) {
+            // The identities FIRST (the key rows FK to them) — keys v2 A13.
+            connection.createStatement().use { statement ->
+                KEYS.values.forEach { key ->
+                    statement.execute(
+                        "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                            "('${key.ownerId}', '${key.id.lowercase()}@keys.invalid', '${key.name}', 'key', '${key.id}', TRUE, FALSE, 'service')",
+                    )
+                }
+            }
             connection
-                .prepareStatement("INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id) VALUES (?, ?, ?, ?, ?, ?)")
-                .use { ps ->
-                    KEYS.values.forEach { key ->
+                .prepareStatement(
+                    "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role)" +
+                        " VALUES (?, ?, ?, ?, ?, ?, 'mcp', ?)",
+                ).use { ps ->
+                    mapOf(PROMOTER to PROMOTER, AUTHOR to AUTHOR).forEach { (roleName, role) ->
+                        val key = KEYS.getValue(roleName)
                         ps.setString(1, key.id)
                         ps.setObject(2, UUID.fromString(key.ownerId))
-                        ps.setObject(3, UUID.fromString(key.ownerId))
+                        ps.setObject(3, UUID.fromString(USERS.getValue(role)))
                         ps.setString(4, key.name)
                         ps.setString(5, key.hash)
                         ps.setObject(6, UUID.fromString(WS_ID))
+                        ps.setString(7, role)
                         ps.addBatch()
                     }
                     ps.executeBatch()

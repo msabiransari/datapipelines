@@ -43,7 +43,7 @@ import javax.crypto.spec.SecretKeySpec
  *
  * ## The keys over REST (#215 B2, record §3.1)
  * Every key kind is walked over every REST route too: the MCP key is refused on ALL of them
- * (`endpoint.key_kind_refused`, `user_key_off_surface`); an `api_caller` key reaches only the
+ * (`endpoint.key_kind_refused`, `mcp_key_off_surface`); an `api_caller` key reaches only the
  * published-endpoint surface and the two reads of its own executions; a `promotion_receiver` key
  * presented as `DP-API-Key` reaches none (its surface is the promotion family, walked by
  * `PromotionTwoDeploymentE2eTest`).
