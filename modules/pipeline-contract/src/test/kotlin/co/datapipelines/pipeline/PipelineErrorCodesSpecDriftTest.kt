@@ -169,6 +169,9 @@ class PipelineErrorCodesSpecDriftTest {
                 // credential requested, not of a named entity, so the code is two-segment
                 // like its key_* siblings above.
                 PipelineErrorCodes.Auth.KEY_KIND_NOT_MINTABLE,
+                // Keys v2 (A18) — the NAME conflict is a property of the credential request,
+                // not of a named entity: two segments like its key_* siblings above.
+                PipelineErrorCodes.Auth.KEY_NAME_TAKEN,
                 PipelineErrorCodes.Auth.KEY_WORKSPACE_INACTIVE,
                 // 180 — "deactivated" is a state of the PRINCIPAL, not of a named entity.
                 PipelineErrorCodes.Auth.PRINCIPAL_DEACTIVATED,
