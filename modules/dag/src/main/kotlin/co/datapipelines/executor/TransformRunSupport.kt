@@ -45,14 +45,25 @@ internal object TransformValues {
         type: LogicalType,
     ): Any? =
         when (value) {
-            null -> null
+            null -> {
+                null
+            }
+
             is LocalDate, is LocalTime, is OffsetDateTime, is Instant, is LocalDateTime -> {
                 JsonEncoder.encode(value, ColumnSchema("value", type, nullable = true))
             }
 
-            is BigInteger -> value.toString()
-            is BigDecimal -> if (type == LogicalType.BIGDECIMAL) value.toPlainString() else value
-            else -> value
+            is BigInteger -> {
+                value.toString()
+            }
+
+            is BigDecimal -> {
+                if (type == LogicalType.BIGDECIMAL) value.toPlainString() else value
+            }
+
+            else -> {
+                value
+            }
         }
 
     /** The JVM form a gated wire value is stored as — in tempdb and in the Context (§6 reversed). */
@@ -61,20 +72,42 @@ internal object TransformValues {
         column: ContractColumn,
     ): Any? =
         when (value) {
-            null -> null
-            else ->
+            null -> {
+                null
+            }
+
+            else -> {
                 when (column.type) {
-                    LogicalType.DATE -> LocalDate.parse(value.toString())
-                    LogicalType.TIME -> LocalTime.parse(value.toString())
-                    LogicalType.TIMESTAMP ->
+                    LogicalType.DATE -> {
+                        LocalDate.parse(value.toString())
+                    }
+
+                    LogicalType.TIME -> {
+                        LocalTime.parse(value.toString())
+                    }
+
+                    LogicalType.TIMESTAMP -> {
                         runCatching { OffsetDateTime.parse(value.toString()) }
                             .getOrElse { LocalDateTime.parse(value.toString()).toInstant(ZoneOffset.UTC) }
+                    }
 
-                    LogicalType.BIGDECIMAL -> BigDecimal(value.toString())
-                    LogicalType.BIGINTEGER -> BigInteger(value.toString()).longValueExact()
-                    LogicalType.INTEGER -> BigDecimal(value.toString()).intValueExact()
-                    else -> value
+                    LogicalType.BIGDECIMAL -> {
+                        BigDecimal(value.toString())
+                    }
+
+                    LogicalType.BIGINTEGER -> {
+                        BigInteger(value.toString()).longValueExact()
+                    }
+
+                    LogicalType.INTEGER -> {
+                        BigDecimal(value.toString()).intValueExact()
+                    }
+
+                    else -> {
+                        value
+                    }
                 }
+            }
         }
 
     /** One gated row as a storage row in contract column order. */
@@ -95,14 +128,20 @@ internal object TransformValues {
         output: TransformOutput,
     ): Any? =
         when (output) {
-            is TransformOutput.Obj -> gated
-            is TransformOutput.Value ->
+            is TransformOutput.Obj -> {
+                gated
+            }
+
+            is TransformOutput.Value -> {
                 storageValueOf(
                     gated,
                     ContractColumn("value", output.type, output.precision, output.scale),
                 )
+            }
 
-            is TransformOutput.Table -> gated
+            is TransformOutput.Table -> {
+                gated
+            }
         }
 
     /** The text rendering of a value-mode write for the node stats (the typed value is in the Context). */
@@ -182,9 +221,15 @@ internal object TransformFailures {
         node: ExecutableNode,
     ): Exception =
         when (error) {
-            is CancellationException -> error
-            is DatapipelinesException -> error
-            else ->
+            is CancellationException -> {
+                error
+            }
+
+            is DatapipelinesException -> {
+                error
+            }
+
+            else -> {
                 DatapipelinesException(
                     code = PipelineErrorCodes.Transform.EVALUATION_FAILED,
                     message =
@@ -192,6 +237,7 @@ internal object TransformFailures {
                     details = mapOf("node" to node.id),
                     cause = error,
                 )
+            }
         }
 
     /** The §13.18 code for one gate refusal — the mapping the whole system shares. */

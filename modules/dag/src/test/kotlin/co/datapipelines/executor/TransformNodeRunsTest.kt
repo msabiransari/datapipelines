@@ -58,7 +58,6 @@ class TransformNodeRunsTest {
     // ---------------------------------------------------------------- fixtures
 
     private companion object {
-        const val TEMPLATE = "acme/shape/order_lines.jsonata"
         val NOW: Instant = Instant.parse("2026-09-24T10:15:30Z")
 
         val ORDER_COLUMNS =
@@ -84,10 +83,13 @@ class TransformNodeRunsTest {
                 rejects = rejects,
             )
 
-        /** The partition body: missing customers are rejected, cents become currency. */
-        // The array constructors are load-bearing: JSONata flattens a singleton sequence to
-        // the value and drops an undefined one, so a bare rows[pred].{} is an object (or
-        // missing) at match counts one and zero, never the array the contract declares.
+        /**
+         * The partition body: missing customers are rejected, cents become currency.
+         *
+         * The array constructors are load-bearing: JSONata flattens a singleton sequence to
+         * the value and drops an undefined one, so a bare rows[pred].{} is an object (or
+         * missing) at match counts one and zero, never the array the contract declares.
+         */
         const val PARTITION_BODY =
             """{
               "rows": [ rows[customer_id != null].{
@@ -95,18 +97,6 @@ class TransformNodeRunsTest {
               "rejects": [ rows[customer_id = null].{ "row": $, "reason": "customer_id missing" } ]
             }"""
     }
-
-    private fun resolved(
-        contract: TransformContract,
-        body: String,
-        invariants: List<TransformInvariant> = emptyList(),
-    ) = ResolvedTransform(
-        type = co.datapipelines.pipeline.TemplateType.JSONATA,
-        status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
-        body = body,
-        contract = contract,
-        invariants = invariants,
-    )
 
     private fun support(
         resolved: ResolvedTransform,
@@ -131,7 +121,12 @@ class TransformNodeRunsTest {
             executionId = executionId,
             staging = staging,
             handle = handle,
-            values = if (callerSupplied.isEmpty()) RunContext.of(all) else callerContext(callerSupplied.single(), all[callerSupplied.single()]),
+            values =
+                if (callerSupplied.isEmpty()) {
+                    RunContext.of(all)
+                } else {
+                    callerContext(callerSupplied.single(), all[callerSupplied.single()])
+                },
             warnings = warnings,
             resultTtlSeconds = 300,
             renderBudgetChars = 1_000_000,
@@ -172,39 +167,16 @@ class TransformNodeRunsTest {
         return RunContext.create(
             co.datapipelines.pipeline.OrgContext.DEFAULTS,
             pipeline,
-            mapOf(key to com.fasterxml.jackson.databind.ObjectMapper().valueToTree(value)),
+            mapOf(
+                key to
+                    com.fasterxml.jackson.databind
+                        .ObjectMapper()
+                        .valueToTree(value),
+            ),
             executionId,
             NOW,
         )
     }
-
-    private fun jsonText(value: String): com.fasterxml.jackson.databind.JsonNode =
-        com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.textNode(value)
-
-    private fun node(
-        id: String = "shape_orders",
-        inputs: Map<String, com.fasterxml.jackson.databind.JsonNode> =
-            mapOf("orders" to jsonText("stg_orders")),
-        output: NodeOutput? = NodeOutput.Tempdb("order_lines", rejects = "order_lines_rejected"),
-        strict: Boolean? = null,
-        contextKey: String? = null,
-        timeoutSeconds: Int? = null,
-    ): ExecutableNode =
-        ExecutableNode.from(
-            Node(
-                id = id,
-                description = "transform $id",
-                type = NodeType.TRANSFORM,
-                source = "",
-                template = TemplateRef(TEMPLATE, 3),
-                output = output,
-                dependsOn = listOf("stage_orders"),
-                inputs = inputs,
-                contextKey = contextKey,
-                strict = strict,
-                settings = timeoutSeconds?.let { co.datapipelines.pipeline.NodeSettings(timeoutSeconds = it) },
-            ),
-        )
 
     private suspend fun stageOrders(rows: List<List<Any?>>) {
         staging.stageRows(
@@ -216,13 +188,18 @@ class TransformNodeRunsTest {
 
     private suspend fun readTable(table: String): List<Map<String, Any?>> =
         staging.withQuery("SELECT * FROM ${SqlIdentifiers.quote(table)}") { rs ->
-            val schema = co.datapipelines.datasources.ResultRowReader.schemaOf(rs.metaData, Dialect.H2)
+            val schema =
+                co.datapipelines.datasources.ResultRowReader
+                    .schemaOf(rs.metaData, Dialect.H2)
             buildList {
                 while (rs.next()) {
                     add(
-                        schema.columns.mapIndexed { index, column ->
-                            column.name to co.datapipelines.datasources.ResultRowReader.readValue(rs, index + 1, column)
-                        }.toMap(),
+                        schema.columns
+                            .mapIndexed { index, column ->
+                                column.name to
+                                    co.datapipelines.datasources.ResultRowReader
+                                        .readValue(rs, index + 1, column)
+                            }.toMap(),
                     )
                 }
             }
@@ -321,7 +298,12 @@ class TransformNodeRunsTest {
             val error =
                 failureOf(
                     node(),
-                    support(resolved(rowContract(rejects = false), """[ rows.{ "order_id": order_id, "amount": amount_cents, "customer_id": customer_id, "extra": 1 } ]""")),
+                    support(
+                        resolved(
+                            rowContract(rejects = false),
+                            """[ rows.{ "order_id": order_id, "amount": amount_cents, "customer_id": customer_id, "extra": 1 } ]""",
+                        ),
+                    ),
                 )
 
             error.code shouldBe PipelineErrorCodes.Transform.ROW_SHAPE_MISMATCH
@@ -335,7 +317,12 @@ class TransformNodeRunsTest {
             val error =
                 failureOf(
                     node(),
-                    support(resolved(rowContract(rejects = false), """[ rows.{ "order_id": "abc", "amount": amount_cents, "customer_id": customer_id } ]""")),
+                    support(
+                        resolved(
+                            rowContract(rejects = false),
+                            """[ rows.{ "order_id": "abc", "amount": amount_cents, "customer_id": customer_id } ]""",
+                        ),
+                    ),
                 )
 
             error.code shouldBe PipelineErrorCodes.Transform.VALUE_TYPE_MISMATCH
@@ -345,7 +332,15 @@ class TransformNodeRunsTest {
     fun `a DECIMAL output is rounded half-even to its declared scale - R1's own example`() =
         runBlocking<Unit> {
             stageOrders(listOf(listOf(1, 1250, "alice")))
-            run(node(output = NodeOutput.Tempdb("order_lines")), support(resolved(rowContract(rejects = false), """[ rows.{ "order_id": order_id, "amount": 0.1 * 3, "customer_id": customer_id } ]""")))
+            run(
+                node(output = NodeOutput.Tempdb("order_lines")),
+                support(
+                    resolved(
+                        rowContract(rejects = false),
+                        """[ rows.{ "order_id": order_id, "amount": 0.1 * 3, "customer_id": customer_id } ]""",
+                    ),
+                ),
+            )
 
             // 0.1 * 3 is 0.30000000000000004 in binary; the gate's answer is 0.30 (R1).
             readTable("order_lines").single()["amount"] shouldBe BigDecimal("0.30")
@@ -394,7 +389,11 @@ class TransformNodeRunsTest {
             stageOrders(listOf(listOf(1, 1250, "alice"), listOf(2, 800, null)))
             val invariants =
                 listOf(
-                    TransformInvariant("one_to_one", "\$count(rows) + \$count(rejects) = \$count(inputs.orders)", "every input row is accepted or rejected"),
+                    TransformInvariant(
+                        "one_to_one",
+                        "\$count(rows) + \$count(rejects) = \$count(inputs.orders)",
+                        "every input row is accepted or rejected",
+                    ),
                 )
             val result = run(node(), support(resolved(rowContract(), PARTITION_BODY, invariants)))
 
@@ -409,7 +408,11 @@ class TransformNodeRunsTest {
             stageOrders(listOf(listOf(1, 1250, "alice")))
             val invariants =
                 listOf(
-                    TransformInvariant("customer_present", "\$count(rows[customer_id = null]) = 0", "every accepted row carries a customer id"),
+                    TransformInvariant(
+                        "customer_present",
+                        "\$count(rows[customer_id = null]) = 0",
+                        "every accepted row carries a customer id",
+                    ),
                     TransformInvariant("always_false", "1 = 2", "a witness that must fail"),
                 )
             val error = failureOf(node(), support(resolved(rowContract(), PARTITION_BODY, invariants)))
@@ -427,7 +430,14 @@ class TransformNodeRunsTest {
             val error =
                 failureOf(
                     node(output = NodeOutput.Tempdb("order_lines")),
-                    support(resolved(rowContract(rejects = false), """[ rows.{ "order_id": order_id, "amount": amount_cents, "customer_id": customer_id } ]""", invariants), maxInputRows = 5),
+                    support(
+                        resolved(
+                            rowContract(rejects = false),
+                            """[ rows.{ "order_id": order_id, "amount": amount_cents, "customer_id": customer_id } ]""",
+                            invariants,
+                        ),
+                        maxInputRows = 5,
+                    ),
                 )
 
             error.code shouldBe PipelineErrorCodes.Transform.INVARIANTS_TOO_LARGE
@@ -440,7 +450,13 @@ class TransformNodeRunsTest {
             val result =
                 run(
                     node(output = NodeOutput.Tempdb("order_lines")),
-                    support(resolved(rowContract(rejects = false), """[ rows.{ "order_id": order_id, "amount": amount_cents, "customer_id": customer_id } ]"""), maxInputRows = 5),
+                    support(
+                        resolved(
+                            rowContract(rejects = false),
+                            """[ rows.{ "order_id": order_id, "amount": amount_cents, "customer_id": customer_id } ]""",
+                        ),
+                        maxInputRows = 5,
+                    ),
                 )
 
             result.rowsOut shouldBe 10
@@ -535,7 +551,12 @@ class TransformNodeRunsTest {
             val result =
                 run(
                     node(id = "wrap", output = null, contextKey = "payload"),
-                    support(resolved(objectContract, """{ "total_cents": ${'$'}sum(inputs.orders.amount_cents), "rows": ${'$'}count(inputs.orders) }""")),
+                    support(
+                        resolved(
+                            objectContract,
+                            """{ "total_cents": ${'$'}sum(inputs.orders.amount_cents), "rows": ${'$'}count(inputs.orders) }""",
+                        ),
+                    ),
                     ctx,
                 )
 
@@ -615,7 +636,12 @@ class TransformNodeRunsTest {
             val result =
                 run(
                     node(output = NodeOutput.Caller),
-                    support(resolved(tableContract, """[ inputs.orders.{ "order_id": order_id, "amount": amount_cents / 100, "customer_id": customer_id } ]""")),
+                    support(
+                        resolved(
+                            tableContract,
+                            """[ inputs.orders.{ "order_id": order_id, "amount": amount_cents / 100, "customer_id": customer_id } ]""",
+                        ),
+                    ),
                     resultStore = store,
                 )
 
@@ -652,11 +678,12 @@ class TransformNodeRunsTest {
     fun `a full pool refuses with pool_exhausted`() =
         runBlocking<Unit> {
             val pool = ScriptEvaluationPool(1, 1, Duration.ofSeconds(2), ScriptEvaluationPool.SYSTEM)
-            val hold = launch(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching {
-                    pool.run(EvaluationLimits(Duration.ofSeconds(10), 100, now = NOW), "holder") { Thread.sleep(2_000) }
+            val hold =
+                launch(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {
+                        pool.run(EvaluationLimits(Duration.ofSeconds(10), 100, now = NOW), "holder") { Thread.sleep(2_000) }
+                    }
                 }
-            }
             // Give the holder a moment to take the one admission slot.
             kotlinx.coroutines.delay(200)
             stageOrders(listOf(listOf(1, 1250, "alice")))
@@ -675,12 +702,15 @@ class TransformNodeRunsTest {
             val pool = ScriptEvaluationPool(1, 4, Duration.ofSeconds(1), ScriptEvaluationPool.SYSTEM)
             stageOrders(listOf(listOf(1, 1250, "alice")))
             val started = Instant.now()
+            // The pad bomb, on its own line — the raw string alone is 137 chars, over the cap
+            // when inlined into the call.
+            val padBody = """[ rows.{ "order_id": order_id, "amount": amount_cents, "customer_id": ${'$'}pad(customer_id, 100000000) } ]"""
             val error =
                 failureOf(
                     // timeout_seconds 6 → the evaluation's wall clock is 6 − cancel-grace(5) = 1 s
                     // (record §4.3: the engine reports first); the pool abandons at 1 + 1 s.
                     node(timeoutSeconds = 6),
-                    support(resolved(rowContract(), """[ rows.{ "order_id": order_id, "amount": amount_cents, "customer_id": ${'$'}pad(customer_id, 100000000) } ]"""), pool = pool),
+                    support(resolved(rowContract(), padBody), pool = pool),
                     config = ExecutorConfig(cancelGraceSeconds = 5),
                 )
 
@@ -719,8 +749,12 @@ class TransformNodeRunsTest {
             // The peak is sampled DURING the run, with a collection before each read, so what
             // is measured is LIVE heap — a transient batch reads as itself, and a whole
             // materialised input (the failure shape) would stand up and stay visible.
-            val peak = java.util.concurrent.atomic.AtomicLong(0)
-            val samples = java.util.concurrent.atomic.AtomicInteger(0)
+            val peak =
+                java.util.concurrent.atomic
+                    .AtomicLong(0)
+            val samples =
+                java.util.concurrent.atomic
+                    .AtomicInteger(0)
             val sampler =
                 launch(kotlinx.coroutines.Dispatchers.IO) {
                     while (true) {
@@ -757,3 +791,52 @@ class TransformNodeRunsTest {
             }
         }
 }
+
+// ---------------------------------------------------------------- fixtures, file-level
+
+// Kept out of the spec class: the class sits just under detekt's LargeClass threshold
+// (600 lines of code, companion excluded), and the §5.3 expectation wraps need the room.
+// These four are state-free — no instance field of the spec is read here.
+
+private const val TEMPLATE = "acme/shape/order_lines.jsonata"
+
+private fun resolved(
+    contract: TransformContract,
+    body: String,
+    invariants: List<TransformInvariant> = emptyList(),
+) = ResolvedTransform(
+    type = co.datapipelines.pipeline.TemplateType.JSONATA,
+    status = co.datapipelines.pipeline.PipelineVersionStatus.DRAFT,
+    body = body,
+    contract = contract,
+    invariants = invariants,
+)
+
+private fun jsonText(value: String): com.fasterxml.jackson.databind.JsonNode =
+    com.fasterxml.jackson.databind.node.JsonNodeFactory.instance
+        .textNode(value)
+
+private fun node(
+    id: String = "shape_orders",
+    inputs: Map<String, com.fasterxml.jackson.databind.JsonNode> =
+        mapOf("orders" to jsonText("stg_orders")),
+    output: NodeOutput? = NodeOutput.Tempdb("order_lines", rejects = "order_lines_rejected"),
+    strict: Boolean? = null,
+    contextKey: String? = null,
+    timeoutSeconds: Int? = null,
+): ExecutableNode =
+    ExecutableNode.from(
+        Node(
+            id = id,
+            description = "transform $id",
+            type = NodeType.TRANSFORM,
+            source = "",
+            template = TemplateRef(TEMPLATE, 3),
+            output = output,
+            dependsOn = listOf("stage_orders"),
+            inputs = inputs,
+            contextKey = contextKey,
+            strict = strict,
+            settings = timeoutSeconds?.let { co.datapipelines.pipeline.NodeSettings(timeoutSeconds = it) },
+        ),
+    )

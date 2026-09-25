@@ -14,6 +14,7 @@ import co.datapipelines.scripting.ScriptEngine
 import co.datapipelines.scripting.ScriptEvaluationPool
 import co.datapipelines.scripting.ScriptLanguage
 import co.datapipelines.scripting.TypeGate
+import co.datapipelines.staging.StageResult
 import co.datapipelines.staging.StagingMemoryLimitException
 import co.datapipelines.templates.ContractColumn
 import co.datapipelines.templates.TransformContract
@@ -143,7 +144,8 @@ internal object TransformNodeRuns {
      */
     private val compiledCache = ConcurrentHashMap<String, CompiledScript>()
 
-    @Suppress("LongParameterList") // the run's fixed collaborators — the runner hands them through once
+    // The runner hands the collaborators through once; the registry miss and the §5.5 cleanup rethrows each name themselves.
+    @Suppress("LongParameterList", "ThrowsCount")
     suspend fun run(
         node: ExecutableNode,
         ctx: NodeExecutionContext,
@@ -279,25 +281,18 @@ internal object TransformNodeRuns {
         val supplied = ctx.values[contextKey]
         when (val output = contract.output) {
             is TransformOutput.Obj -> {
-                when (
-                    val verdict =
-                        TypeGate.over(emptyList(), support.maxStringBytes).gateObject(supplied, support.maxValueBytes)
-                ) {
-                    is TypeGate.GateResult.Refuse -> throw TransformFailures.inputContract(node, describe(verdict.refusal), "supplied_value")
-                    is TypeGate.GateResult.Pass -> Unit
-                }
+                gateSupplied(node, TypeGate.over(emptyList(), support.maxStringBytes).gateObject(supplied, support.maxValueBytes))
             }
 
             is TransformOutput.Value -> {
                 val column = ColumnSchema(contextKey, output.type, output.precision, output.scale, nullable = false)
                 val wire = TransformValues.wireValueOf(supplied, output.type)
-                when (val verdict = TypeGate.over(listOf(column), support.maxStringBytes).gateValue(wire, column)) {
-                    is TypeGate.GateResult.Refuse -> throw TransformFailures.inputContract(node, describe(verdict.refusal), "supplied_value")
-                    is TypeGate.GateResult.Pass -> Unit
-                }
+                gateSupplied(node, TypeGate.over(listOf(column), support.maxStringBytes).gateValue(wire, column))
             }
 
-            is TransformOutput.Table -> error("unreachable: a caller-supplied key exists only on value mode")
+            is TransformOutput.Table -> {
+                error("unreachable: a caller-supplied key exists only on value mode")
+            }
         }
         return NodeResult.of(
             nodeId = node.id,
@@ -307,6 +302,20 @@ internal object TransformNodeRuns {
             contextValue = TransformValues.renderContextValue(ctx.values[contextKey]),
             providedBy = NodeResult.PROVIDED_BY_CALLER,
         )
+    }
+
+    /**
+     * The supplied value's gate verdict (§3.1): a refusal is the input-contract refusal naming
+     * the supplied value; a pass is accepted and the node skips.
+     */
+    private fun gateSupplied(
+        node: ExecutableNode,
+        verdict: TypeGate.GateResult,
+    ) {
+        when (verdict) {
+            is TypeGate.GateResult.Refuse -> throw TransformFailures.inputContract(node, describe(verdict.refusal), "supplied_value")
+            is TypeGate.GateResult.Pass -> Unit
+        }
     }
 
     /**
@@ -357,7 +366,14 @@ internal object TransformNodeRuns {
 /**
  * One TRANSFORM run's state — the per-mode legs of [TransformNodeRuns], split out so the
  * dispatch object stays a dispatch object. Everything here is fixed for the run.
+ *
+ * The run drives the record's four phases (§5): input shaping ([shapeRowInput],
+ * [resolveValueInputs], [loadTableInputs]), the evaluation ([evaluate], [batchRows]), the
+ * output gate ([shapeAndGateTable] and its pieces), and §5.4's invariants-and-strict —
+ * [invariants], one collaborator, [TransformInvariants]. §5.5's atomic commit stays here:
+ * the written-tables registry, the budget re-checks and [dropWritten].
  */
+@Suppress("LongParameterList") // the run's fixed state — constructed once per node, every field private
 internal class TransformRun(
     private val node: ExecutableNode,
     private val ctx: NodeExecutionContext,
@@ -372,24 +388,56 @@ internal class TransformRun(
 ) {
     private val contract: TransformContract get() = resolved.contract
 
+    /** §5.4 — the invariants-and-strict phase, the record's own seam, as one collaborator. */
+    private val invariants = TransformInvariants(node, ctx, support, resolved, limits)
+
     /** Tables whose `stageRows` COMPLETED — dropped on any later refusal (§5.5). */
     private val written = mutableListOf<String>()
 
     /** The rejects table's name, when this run stages one — strict's read target (§5.4). */
     private var rejectsTable: String? = null
 
-    /**
-     * Row-mode caller outputs with invariants declared: the accepted/rejected halves buffered
-     * during the single pass, because no tempdb table exists to read back (§5.4). Bounded —
-     * the buffer refuses past `max-input-rows` with `invariants_too_large`.
-     */
-    private val bufferedRows = mutableListOf<Map<String, Any?>>()
-    private val bufferedRejects = mutableListOf<RejectedRow>()
-    private var buffered = false
-
     // ---------------------------------------------------------------- row mode
 
+    /**
+     * Row mode (§5.2): shape the input once, drive the write per output target — each phase
+     * its own function, the batch loop in [batchRows] — then §5.4 in [invariants].
+     */
     suspend fun rowMode(): NodeResult {
+        val shape = shapeRowInput()
+        val write =
+            when (val output = node.output) {
+                is NodeOutput.Tempdb -> stageRowModeTempdb(shape, output)
+                NodeOutput.Caller -> deliverRowModeCaller(shape)
+                else -> error("unreachable: §12.13 refuses ${node.output} on a row-mode TRANSFORM")
+            }
+        val invariantsChecked =
+            invariants.check(
+                shape.valueInputs,
+                InvariantSource.Row(shape.quotedInput, shape.inputName, shape.inputColumns, shape.outputColumns),
+                shape.rejectColumns,
+                written,
+                rejectsTable,
+            )
+        invariants.checkStrict(write.rowsRejected, rejectsTable)
+        return NodeResult.of(
+            nodeId = node.id,
+            rowsOut = write.rowsOut,
+            startedAt = startedAt,
+            callerResultRef = write.delivered?.callerResultRef,
+            bytesOutEstimate = write.delivered?.bytesOutEstimate ?: NodeResult.NOT_MEASURED,
+            rowsIn = write.rowsIn,
+            rowsRejected = write.rowsRejected,
+            invariantsChecked = invariantsChecked,
+        )
+    }
+
+    /**
+     * The row-mode input, shaped once (§5.1): the single table input under its contract name,
+     * its staged schema, the value inputs resolved against the live Context — and the drain
+     * metadata: the quoted select list, the §5.4 rejects columns, the caller-buffer switch.
+     */
+    private suspend fun shapeRowInput(): ShapedRowInput {
         val inputEntry =
             contract.inputs.entries.singleOrNull { it.value is TransformInput.Table }
                 ?: throw TransformFailures.inputContract(node, "row mode requires exactly one table input", "row_mode_inputs")
@@ -398,213 +446,236 @@ internal class TransformRun(
         val quotedInput = quoteTable(stagedTableName(inputEntry.key))
         val stagedSchema = stagedSchema(quotedInput)
         TransformChecks.coverCheck(node, inputEntry.key, inputColumns, stagedSchema)
-        val selectList = inputColumns.joinToString(", ") { SqlIdentifiers.quote(it.name) }
-        val valueInputs = resolveValueInputs()
-        val collect = resolved.invariants.isNotEmpty() && node.output == NodeOutput.Caller
+        return ShapedRowInput(
+            inputName = inputEntry.key,
+            inputColumns = inputColumns,
+            outputColumns = outputColumns,
+            quotedInput = quotedInput,
+            selectList = inputColumns.joinToString(", ") { SqlIdentifiers.quote(it.name) },
+            stagedSchema = stagedSchema,
+            valueInputs = resolveValueInputs(),
+            rejectColumns = rejectColumnsOf(outputColumns),
+            collect = resolved.invariants.isNotEmpty() && node.output == NodeOutput.Caller,
+        )
+    }
 
+    /**
+     * The tempdb write half of row mode (§5.2): the accepted drain, then — when the contract
+     * declares rejects — a second pass of the same staged input for the rejects drain (the
+     * class KDoc's two passes; the function is pure, the partition re-derives).
+     */
+    private suspend fun stageRowModeTempdb(
+        shape: ShapedRowInput,
+        output: NodeOutput.Tempdb,
+    ): RowModeWrite {
+        val outTable = requireTable(output.table)
+        beginOperation()
+        val observer = stagingObserver()
         var rowsIn = 0L
-        var rowsOut = 0L
+        val rowsOut =
+            TransformNodeRuns.phase(ctx, NodePhase.STAGE, node.id) {
+                ctx.staging
+                    .withQuery("SELECT ${shape.selectList} FROM ${shape.quotedInput}") { rs ->
+                        ctx.staging.stageRows(
+                            outTable,
+                            shape.outputColumns.toColumnSchemas(),
+                            batchRows(rs, shape, Split.ACCEPTED) { rowsIn += it },
+                            observer,
+                        )
+                    }.let { stageCompleted(outTable, it) }
+            }
         var rowsRejected = 0L
-        var delivered: NodeResult? = null
-        when (val output = node.output) {
-            is NodeOutput.Tempdb -> {
-                val outTable = requireTable(output.table)
-                beginOperation()
-                val observer = StagingObserverBridge(node.id, ctx.operations.observerFor(node.id), ctx.nodeProgress)
-                val staged =
-                    TransformNodeRuns.phase(ctx, NodePhase.STAGE, node.id) {
-                        ctx.staging.withQuery("SELECT $selectList FROM $quotedInput") { rs ->
+        if (contract.rejects) {
+            val rejectsName = requireTable(output.rejects.orEmpty())
+            rowsRejected =
+                TransformNodeRuns.phase(ctx, NodePhase.STAGE, node.id) {
+                    ctx.staging
+                        .withQuery("SELECT ${shape.selectList} FROM ${shape.quotedInput}") { rs ->
                             ctx.staging.stageRows(
-                                outTable,
-                                outputColumns.toColumnSchemas(),
-                                batchRows(rs, inputColumns, stagedSchema, valueInputs, outputColumns, Split.ACCEPTED) {
-                                    rowsIn += it
-                                },
+                                rejectsName,
+                                shape.inputColumns.toColumnSchemas() + TransformValues.REASON_COLUMN,
+                                batchRows(rs, shape, Split.REJECTED) {},
                                 observer,
                             )
-                        }
-                    }
-                written += outTable
-                rowsOut = staged.rowsStaged
-                reCheckStagingBudget()
-                if (contract.rejects) {
-                    val rejectsName = requireTable(output.rejects.orEmpty())
-                    val stagedRejects =
-                        TransformNodeRuns.phase(ctx, NodePhase.STAGE, node.id) {
-                            ctx.staging.withQuery("SELECT $selectList FROM $quotedInput") { rs ->
-                                ctx.staging.stageRows(
-                                    rejectsName,
-                                    inputColumns.toColumnSchemas() + TransformValues.REASON_COLUMN,
-                                    batchRows(rs, inputColumns, stagedSchema, valueInputs, outputColumns, Split.REJECTED) {},
-                                    observer,
-                                )
-                            }
-                        }
-                    written += rejectsName
-                    rejectsTable = rejectsName
-                    rowsRejected = stagedRejects.rowsStaged
-                    reCheckStagingBudget()
+                        }.let { stageCompleted(rejectsName, it) }
+                }
+            rejectsTable = rejectsName
+        }
+        return RowModeWrite(rowsIn = rowsIn, rowsOut = rowsOut, rowsRejected = rowsRejected)
+    }
+
+    /** The caller half of row mode (§9.6): one drain, delivered as the run's result. */
+    private suspend fun deliverRowModeCaller(shape: ShapedRowInput): RowModeWrite {
+        beginOperation()
+        var rowsIn = 0L
+        val delivered =
+            TransformNodeRuns.phase(ctx, NodePhase.MATERIALIZE, node.id) {
+                ctx.staging.withQuery("SELECT ${shape.selectList} FROM ${shape.quotedInput}") { rs ->
+                    deliverCaller(
+                        shape.outputColumns.toColumnSchemas(),
+                        batchRows(rs, shape, Split.ACCEPTED, collectRejects = shape.collect) { rowsIn += it },
+                    )
                 }
             }
-
-            NodeOutput.Caller -> {
-                beginOperation()
-                delivered =
-                    TransformNodeRuns.phase(ctx, NodePhase.MATERIALIZE, node.id) {
-                        ctx.staging.withQuery("SELECT $selectList FROM $quotedInput") { rs ->
-                            deliverCaller(
-                                outputColumns.toColumnSchemas(),
-                                batchRows(
-                                    rs, inputColumns, stagedSchema, valueInputs, outputColumns, Split.ACCEPTED,
-                                    collectRejects = collect,
-                                ) { rowsIn += it },
-                            )
-                        }
-                    }
-                rowsOut = delivered.rowsOut
-            }
-
-            else -> error("unreachable: §12.13 refuses ${node.output} on a row-mode TRANSFORM")
-        }
-        val invariantsChecked = checkInvariants(valueInputs, InvariantSource.Row(quotedInput, inputEntry.key, inputColumns, outputColumns))
-        checkStrict(rowsRejected)
-        return NodeResult.of(
-            nodeId = node.id,
-            rowsOut = rowsOut,
-            startedAt = startedAt,
-            callerResultRef = delivered?.callerResultRef,
-            bytesOutEstimate = delivered?.bytesOutEstimate ?: NodeResult.NOT_MEASURED,
-            rowsIn = rowsIn,
-            rowsRejected = rowsRejected,
-            invariantsChecked = invariantsChecked,
-        )
+        return RowModeWrite(rowsIn = rowsIn, rowsOut = delivered.rowsOut, rowsRejected = 0, delivered = delivered)
     }
 
     // ---------------------------------------------------------------- table / value modes
 
     /**
-     * The single-evaluation modes (§5.2): every table input loaded whole — capped BEFORE
-     * loading (`input_too_large`) — one evaluation on the pool, the output gated, then the
-     * write. A `value` run writes its Context key only after invariants and strict pass (§5.5).
+     * The single-evaluation modes (§5.2): shape the inputs, one evaluation on the pool, then
+     * the §5.3 gate and §5.5 write in [gateAndWriteSingleShot], §5.4 in [invariants], and the
+     * value-mode Context write — [commitValue] — only after invariants and strict pass.
      */
     suspend fun singleShot(tableMode: Boolean): NodeResult {
         val valueInputs = resolveValueInputs()
         val loadedTables = loadTableInputs()
-        val inputObject = mapOf("inputs" to (valueInputs + loadedTables), "meta" to meta)
         val evaluated =
             TransformNodeRuns.phase(ctx, NodePhase.EXECUTE, node.id) {
-                evaluate(inputObject)
+                evaluate(mapOf("inputs" to (valueInputs + loadedTables), "meta" to meta))
             }
+        val write = gateAndWriteSingleShot(evaluated)
+        val invariantsChecked =
+            invariants.check(
+                valueInputs + loadedTables,
+                InvariantSource.Single(if (tableMode) write.gatedRows else write.gatedValue),
+                write.rejectColumns,
+                written,
+                rejectsTable,
+            )
+        invariants.checkStrict(write.rowsRejected, rejectsTable)
+        // §5.5: the Context key is written only after invariants and strict pass.
+        if (!tableMode) commitValue(write.gatedValue)
+        return NodeResult.of(
+            nodeId = node.id,
+            rowsOut = write.rowsOut,
+            startedAt = startedAt,
+            callerResultRef = write.delivered?.callerResultRef,
+            bytesOutEstimate = write.delivered?.bytesOutEstimate ?: NodeResult.NOT_MEASURED,
+            contextKey = if (tableMode) null else node.contextKey,
+            contextValue = if (tableMode) null else TransformValues.renderContextValue(write.gatedValue),
+            rowsIn = loadedTables.values.sumOf { it.size.toLong() },
+            rowsRejected = write.rowsRejected,
+            invariantsChecked = invariantsChecked,
+        )
+    }
 
-        var rowsOut = 0L
-        var rowsRejected = 0L
-        var delivered: NodeResult? = null
-        var gatedValue: Any? = null
-        var gatedRows: List<Map<String, Any?>> = emptyList()
+    /**
+     * The §5.3 gate and §5.5 write of a single-shot run, per output kind: a table output
+     * writes tempdb or the caller; a value/object output is gated and waits for [commitValue].
+     */
+    private suspend fun gateAndWriteSingleShot(evaluated: Any?): SingleShotWrite =
         when (val output = contract.output) {
             is TransformOutput.Table -> {
-                val outputColumns = output.columns
-                val gated = shapeAndGateTable(outputColumns, evaluated, batch = null)
-                gatedRows = gated.rows
+                val gated = shapeAndGateTable(output.columns, evaluated, batch = null)
                 when (val nodeOutput = node.output) {
-                    is NodeOutput.Tempdb -> {
-                        val outTable = requireTable(nodeOutput.table)
-                        beginOperation()
-                        val observer = StagingObserverBridge(node.id, ctx.operations.observerFor(node.id), ctx.nodeProgress)
-                        val staged =
-                            TransformNodeRuns.phase(ctx, NodePhase.STAGE, node.id) {
-                                ctx.staging.stageRows(
-                                    outTable,
-                                    outputColumns.toColumnSchemas(),
-                                    gated.rows.asSequence().map { TransformValues.storageRow(it, outputColumns) },
-                                    observer,
-                                )
-                            }
-                        written += outTable
-                        rowsOut = staged.rowsStaged
-                        reCheckStagingBudget()
-                        if (contract.rejects) {
-                            val rejectsName = requireTable(nodeOutput.rejects.orEmpty())
-                            val stagedRejects =
-                                TransformNodeRuns.phase(ctx, NodePhase.STAGE, node.id) {
-                                    ctx.staging.stageRows(
-                                        rejectsName,
-                                        outputColumns.toColumnSchemas() + TransformValues.REASON_COLUMN,
-                                        gated.rejects.asSequence().map { TransformValues.rejectRow(it, outputColumns) },
-                                        observer,
-                                    )
-                                }
-                            written += rejectsName
-                            rejectsTable = rejectsName
-                            rowsRejected = stagedRejects.rowsStaged
-                            reCheckStagingBudget()
-                        }
-                    }
-
-                    NodeOutput.Caller -> {
-                        beginOperation()
-                        delivered =
-                            TransformNodeRuns.phase(ctx, NodePhase.MATERIALIZE, node.id) {
-                                deliverCaller(
-                                    outputColumns.toColumnSchemas(),
-                                    gated.rows.asSequence().map { TransformValues.storageRow(it, outputColumns) },
-                                )
-                            }
-                        rowsOut = delivered.rowsOut
-                    }
-
+                    is NodeOutput.Tempdb -> writeTableOutput(output, gated, nodeOutput)
+                    NodeOutput.Caller -> deliverTableOutput(output, gated)
                     else -> error("unreachable: §12.13 refuses ${node.output} on a table-mode TRANSFORM")
                 }
             }
 
             is TransformOutput.Value -> {
-                val column = ColumnSchema("value", output.type, output.precision, output.scale, nullable = false)
-                gatedValue =
-                    when (
-                        val verdict =
-                            TypeGate.over(listOf(column), support.maxStringBytes).gateValue(evaluated, column)
-                    ) {
-                        is TypeGate.GateResult.Refuse -> throw TransformFailures.gateFailure(node, verdict.refusal, batch = null)
-                        is TypeGate.GateResult.Pass -> verdict.value
-                    }
-                valueSizeCheck(gatedValue)
+                SingleShotWrite(gatedValue = gateValueOutput(output, evaluated))
             }
 
             is TransformOutput.Obj -> {
-                gatedValue =
-                    when (
-                        val verdict =
-                            TypeGate.over(emptyList(), support.maxStringBytes).gateObject(evaluated, support.maxValueBytes)
-                    ) {
-                        is TypeGate.GateResult.Refuse -> throw TransformFailures.gateFailure(node, verdict.refusal, batch = null)
-                        is TypeGate.GateResult.Pass -> verdict.value
-                    }
+                SingleShotWrite(gatedValue = gateObjectOutput(evaluated))
             }
         }
-        val invariantsChecked =
-            checkInvariants(
-                valueInputs + loadedTables,
-                InvariantSource.Single(if (tableMode) gatedRows else gatedValue),
-            )
-        checkStrict(rowsRejected)
-        // §5.5: the Context key is written only after invariants and strict pass.
-        if (!tableMode) {
-            val contextKey =
-                requireNotNull(node.contextKey) { "value-mode TRANSFORM '${node.id}' reached the executor with no context_key (§12.13)" }
-            ctx.values.put(contextKey, TransformValues.contextForm(gatedValue, contract.output))
+
+    /** The tempdb write of a table-mode run (§5.5): the gated rows, then the gated rejects. */
+    private suspend fun writeTableOutput(
+        output: TransformOutput.Table,
+        gated: GatedTable,
+        nodeOutput: NodeOutput.Tempdb,
+    ): SingleShotWrite {
+        val outTable = requireTable(nodeOutput.table)
+        beginOperation()
+        val observer = stagingObserver()
+        val rowsOut =
+            TransformNodeRuns.phase(ctx, NodePhase.STAGE, node.id) {
+                ctx.staging
+                    .stageRows(
+                        outTable,
+                        output.columns.toColumnSchemas(),
+                        gated.rows.asSequence().map { TransformValues.storageRow(it, output.columns) },
+                        observer,
+                    ).let { stageCompleted(outTable, it) }
+            }
+        var rowsRejected = 0L
+        if (contract.rejects) {
+            val rejectsName = requireTable(nodeOutput.rejects.orEmpty())
+            rowsRejected =
+                TransformNodeRuns.phase(ctx, NodePhase.STAGE, node.id) {
+                    ctx.staging
+                        .stageRows(
+                            rejectsName,
+                            output.columns.toColumnSchemas() + TransformValues.REASON_COLUMN,
+                            gated.rejects.asSequence().map { TransformValues.rejectRow(it, output.columns) },
+                            observer,
+                        ).let { stageCompleted(rejectsName, it) }
+                }
+            rejectsTable = rejectsName
         }
-        return NodeResult.of(
-            nodeId = node.id,
+        return SingleShotWrite(
+            gatedRows = gated.rows,
+            rejectColumns = rejectColumnsOf(output.columns),
             rowsOut = rowsOut,
-            startedAt = startedAt,
-            callerResultRef = delivered?.callerResultRef,
-            bytesOutEstimate = delivered?.bytesOutEstimate ?: NodeResult.NOT_MEASURED,
-            contextKey = if (tableMode) null else node.contextKey,
-            contextValue = if (tableMode) null else TransformValues.renderContextValue(gatedValue),
-            rowsIn = loadedTables.values.sumOf { it.size.toLong() },
             rowsRejected = rowsRejected,
-            invariantsChecked = invariantsChecked,
         )
+    }
+
+    /** The caller delivery of a table-mode run (§9.6). */
+    private suspend fun deliverTableOutput(
+        output: TransformOutput.Table,
+        gated: GatedTable,
+    ): SingleShotWrite {
+        beginOperation()
+        val delivered =
+            TransformNodeRuns.phase(ctx, NodePhase.MATERIALIZE, node.id) {
+                deliverCaller(
+                    output.columns.toColumnSchemas(),
+                    gated.rows.asSequence().map { TransformValues.storageRow(it, output.columns) },
+                )
+            }
+        return SingleShotWrite(
+            gatedRows = gated.rows,
+            rejectColumns = rejectColumnsOf(output.columns),
+            rowsOut = delivered.rowsOut,
+            delivered = delivered,
+        )
+    }
+
+    /** The §5.3 gate on a value output (§5.3's type table), plus §4.3's size cap. */
+    private fun gateValueOutput(
+        output: TransformOutput.Value,
+        evaluated: Any?,
+    ): Any? {
+        val column = ColumnSchema("value", output.type, output.precision, output.scale, nullable = false)
+        val gated =
+            when (val verdict = TypeGate.over(listOf(column), support.maxStringBytes).gateValue(evaluated, column)) {
+                is TypeGate.GateResult.Refuse -> throw TransformFailures.gateFailure(node, verdict.refusal, batch = null)
+                is TypeGate.GateResult.Pass -> verdict.value
+            }
+        valueSizeCheck(gated)
+        return gated
+    }
+
+    /** The §5.3 gate on an object output (R4): any JSON object, under the value cap. */
+    private fun gateObjectOutput(evaluated: Any?): Any? =
+        when (val verdict = TypeGate.over(emptyList(), support.maxStringBytes).gateObject(evaluated, support.maxValueBytes)) {
+            is TypeGate.GateResult.Refuse -> throw TransformFailures.gateFailure(node, verdict.refusal, batch = null)
+            is TypeGate.GateResult.Pass -> verdict.value
+        }
+
+    /** §5.5's value-mode commit: the Context key gets the gated value, invariants and strict having passed. */
+    private fun commitValue(gatedValue: Any?) {
+        val contextKey =
+            requireNotNull(node.contextKey) {
+                "value-mode TRANSFORM '${node.id}' reached the executor with no context_key (§12.13)"
+            }
+        ctx.values.put(contextKey, TransformValues.contextForm(gatedValue, contract.output))
     }
 
     // ---------------------------------------------------------------- the batch loop
@@ -613,20 +684,51 @@ internal class TransformRun(
     private enum class Split { ACCEPTED, REJECTED }
 
     /**
+     * The row-mode input, shaped once (§5.1) and shared by every drain: the single table
+     * input under its contract name, its staged schema, the value inputs, and the drain
+     * metadata — the quoted select list, the §5.4 rejects columns, the caller-buffer switch.
+     */
+    private data class ShapedRowInput(
+        val inputName: String,
+        val inputColumns: List<ContractColumn>,
+        val outputColumns: List<ContractColumn>,
+        val quotedInput: String,
+        val selectList: String,
+        val stagedSchema: List<ColumnSchema>,
+        val valueInputs: Map<String, Any?>,
+        val rejectColumns: List<ContractColumn>,
+        val collect: Boolean,
+    )
+
+    /** What a row-mode write half produced — the counts the run's stats and strict check need. */
+    private data class RowModeWrite(
+        val rowsIn: Long,
+        val rowsOut: Long,
+        val rowsRejected: Long,
+        val delivered: NodeResult? = null,
+    )
+
+    /** What a single-shot run's §5.3 gate produced and where §5.5's write put it. */
+    private data class SingleShotWrite(
+        val gatedRows: List<Map<String, Any?>> = emptyList(),
+        val gatedValue: Any? = null,
+        val rejectColumns: List<ContractColumn> = emptyList(),
+        val rowsOut: Long = 0,
+        val rowsRejected: Long = 0,
+        val delivered: NodeResult? = null,
+    )
+
+    /**
      * The row-mode batch loop as a lazy sequence of storage rows (§5.2): read
      * `result-batch-size` rows of the staged input, scan §5.1's nullable rule, evaluate
      * `{ rows, inputs, meta }` on the pool, gate every returned row (§5.3 — batch and row
      * numbers ride the refusal), yield the half [keep] names. Nothing but the current batch
      * lives in the JVM. [collectRejects] buffers both halves for a caller output's invariants
-     * (bounded — see [buffer]).
+     * (bounded — see [TransformInvariants.buffer]).
      */
-    @Suppress("LongParameterList") // the loop's fixed context — one per drain
     private fun batchRows(
         rs: ResultSet,
-        inputColumns: List<ContractColumn>,
-        stagedSchema: List<ColumnSchema>,
-        valueInputs: Map<String, Any?>,
-        outputColumns: List<ContractColumn>,
+        shape: ShapedRowInput,
         keep: Split,
         collectRejects: Boolean = false,
         countRead: (Long) -> Unit,
@@ -634,53 +736,20 @@ internal class TransformRun(
         sequence {
             var batchNumber = 0
             while (true) {
-                val batch = readBatch(rs, inputColumns, support.readBatchSize)
+                val batch = readWireBatch(rs, shape.inputColumns, support.readBatchSize)
                 if (batch.isEmpty()) break
                 batchNumber++
                 countRead(batch.size.toLong())
-                TransformChecks.nullableScan(node, batch, inputColumns, stagedSchema, batchNumber)
-                val evaluated = evaluate(mapOf("rows" to batch, "inputs" to valueInputs, "meta" to meta))
-                val gated = shapeAndGateTable(outputColumns, evaluated, batchNumber)
-                if (collectRejects) buffer(gated)
+                TransformChecks.nullableScan(node, batch, shape.inputColumns, shape.stagedSchema, batchNumber)
+                val evaluated = evaluate(mapOf("rows" to batch, "inputs" to shape.valueInputs, "meta" to meta))
+                val gated = shapeAndGateTable(shape.outputColumns, evaluated, batchNumber)
+                if (collectRejects) invariants.buffer(gated)
                 when (keep) {
-                    Split.ACCEPTED -> gated.rows.forEach { yield(TransformValues.storageRow(it, outputColumns)) }
-                    Split.REJECTED -> gated.rejects.forEach { yield(TransformValues.rejectRow(it, inputColumns)) }
+                    Split.ACCEPTED -> gated.rows.forEach { yield(TransformValues.storageRow(it, shape.outputColumns)) }
+                    Split.REJECTED -> gated.rejects.forEach { yield(TransformValues.rejectRow(it, shape.inputColumns)) }
                 }
             }
         }
-
-    /** One batch of the staged input, decoded and converted to the wire forms the engine sees (§6). */
-    private fun readBatch(
-        rs: ResultSet,
-        columns: List<ContractColumn>,
-        batchSize: Int,
-    ): List<Map<String, Any?>> {
-        val schemas = columns.toColumnSchemas()
-        val batch = ArrayList<Map<String, Any?>>(batchSize.coerceAtMost(1_024))
-        while (batch.size < batchSize && rs.next()) {
-            val row = LinkedHashMap<String, Any?>(columns.size)
-            columns.forEachIndexed { index, column ->
-                val decoded = ResultRowReader.readValue(rs, index + 1, schemas[index])
-                row[column.name] = TransformValues.wireValueOf(decoded, column.type)
-            }
-            batch += row
-        }
-        return batch
-    }
-
-    /**
-     * The caller-output's invariants buffer (§5.4): bounded by `max-input-rows` — an output
-     * the invariants could never read back anyway fails HERE, before the heap pays for it.
-     */
-    private fun buffer(gated: GatedTable) {
-        buffered = true
-        bufferedRows += gated.rows
-        bufferedRejects += gated.rejects
-        val total = bufferedRows.size + bufferedRejects.size
-        if (total > support.maxInputRows) {
-            throw TransformFailures.invariantsTooLarge(node, total.toLong(), support.maxInputRows)
-        }
-    }
 
     // ---------------------------------------------------------------- inputs (§5.1)
 
@@ -701,7 +770,8 @@ internal class TransformRun(
             .mapValues { (name, input) ->
                 input as TransformInput.Value
                 val key =
-                    node.inputs.orEmpty()[name]
+                    node.inputs
+                        .orEmpty()[name]
                         ?.takeIf { it.isTextual }
                         ?.asText()
                         ?.removePrefix("$")
@@ -711,19 +781,33 @@ internal class TransformRun(
                         val verdict =
                             TypeGate.over(emptyList(), support.maxStringBytes).gateObject(value, support.maxValueBytes)
                     ) {
-                        is TypeGate.GateResult.Refuse ->
-                            throw TransformFailures.inputContract(node, "input '$name': ${TransformNodeRuns.describe(verdict.refusal)}", "object_too_large")
+                        is TypeGate.GateResult.Refuse -> {
+                            throw TransformFailures.inputContract(
+                                node,
+                                "input '$name': ${TransformNodeRuns.describe(verdict.refusal)}",
+                                "object_too_large",
+                            )
+                        }
 
-                        is TypeGate.GateResult.Pass -> verdict.value
+                        is TypeGate.GateResult.Pass -> {
+                            verdict.value
+                        }
                     }
                 } else {
                     val wire = TransformValues.wireValueOf(value, input.type)
                     val column = ColumnSchema(name, input.type, input.precision, input.scale, nullable = false)
                     when (val verdict = TypeGate.over(listOf(column), support.maxStringBytes).gateValue(wire, column)) {
-                        is TypeGate.GateResult.Refuse ->
-                            throw TransformFailures.inputContract(node, "input '$name': ${TransformNodeRuns.describe(verdict.refusal)}", "value_type")
+                        is TypeGate.GateResult.Refuse -> {
+                            throw TransformFailures.inputContract(
+                                node,
+                                "input '$name': ${TransformNodeRuns.describe(verdict.refusal)}",
+                                "value_type",
+                            )
+                        }
 
-                        is TypeGate.GateResult.Pass -> verdict.value
+                        is TypeGate.GateResult.Pass -> {
+                            verdict.value
+                        }
                     }
                 }
             }
@@ -746,7 +830,7 @@ internal class TransformRun(
                     ctx.staging.withQuery("SELECT $selectList FROM $quoted") { rs ->
                         buildList {
                             while (true) {
-                                val batch = readBatch(rs, input.columns, support.readBatchSize)
+                                val batch = readWireBatch(rs, input.columns, support.readBatchSize)
                                 if (batch.isEmpty()) break
                                 addAll(batch)
                             }
@@ -758,7 +842,8 @@ internal class TransformRun(
 
     /** The table name a node's `inputs` entry names (a staged table, never a `$key` — §12.13). */
     private fun stagedTableName(input: String): String =
-        node.inputs.orEmpty()[input]
+        node.inputs
+            .orEmpty()[input]
             ?.takeIf { it.isTextual }
             ?.asText()
             ?: throw TransformFailures.inputContract(node, "input '$input' names no staged table", "input_missing")
@@ -775,8 +860,13 @@ internal class TransformRun(
             throw TransformFailures.decorate(e, node)
         }
 
-    /** The engine's result shaped per the contract and gated row by row (§5.3, R1). */
-    @Suppress("UNCHECKED_CAST") // gateRow's Pass value is a LinkedHashMap by the gate's contract
+    /**
+     * The engine's result shaped per the contract and gated row by row (§5.3, R1).
+     *
+     * gateRow's Pass value is a LinkedHashMap; the top-level shape refusal, a non-object row
+     * and each gated value's refusal name themselves.
+     */
+    @Suppress("UNCHECKED_CAST", "ThrowsCount")
     private fun shapeAndGateTable(
         outputColumns: List<ContractColumn>,
         evaluated: Any?,
@@ -804,20 +894,31 @@ internal class TransformRun(
         return GatedTable(rows, rejects)
     }
 
-    /** The `{ rows, rejects }` or bare array the function returned, as raw lists (§5.3's mix-shape rule). */
-    private fun shapeRows(evaluated: Any?): Pair<List<*>, List<*>>? {
-        if (!contract.rejects) {
-            val rows = evaluated as? List<*> ?: return null
-            return rows to emptyList<Any?>()
-        }
-        val asMap = evaluated as? Map<*, *> ?: return null
-        val rows = asMap["rows"] as? List<*> ?: return null
-        val rejects = asMap["rejects"] as? List<*> ?: return null
-        return rows to rejects
-    }
+    /**
+     * The `{ rows, rejects }` or bare array the function returned, as raw lists (§5.3's
+     * mix-shape rule) — null when it matches neither declared form.
+     */
+    private fun shapeRows(evaluated: Any?): Pair<List<*>, List<*>>? =
+        when {
+            !contract.rejects -> {
+                (evaluated as? List<*>)?.let { it to emptyList<Any?>() }
+            }
 
-    /** The rejects half, gated: `row` fits the mode's reject columns, `reason` is a non-empty string (§5.3). */
-    @Suppress("UNCHECKED_CAST") // gateRow's Pass value is a LinkedHashMap by the gate's contract
+            else -> {
+                (evaluated as? Map<*, *>)?.let { asMap ->
+                    val rows = asMap["rows"] as? List<*>
+                    val rejects = asMap["rejects"] as? List<*>
+                    if (rows != null && rejects != null) rows to rejects else null
+                }
+            }
+        }
+
+    /**
+     * The rejects half, gated: `row` fits the mode's reject columns, `reason` is a non-empty
+     * string (§5.3). gateRow's Pass value is a LinkedHashMap; each reject defect — shape,
+     * reason, row, gate — names itself.
+     */
+    @Suppress("UNCHECKED_CAST", "ThrowsCount")
     private fun gateRejects(
         outputColumns: List<ContractColumn>,
         rawRejects: List<*>,
@@ -852,193 +953,33 @@ internal class TransformRun(
     /** The rejects' row columns (record §2.2): the single table input's in row mode, the output's otherwise. */
     private fun rejectColumnsOf(outputColumns: List<ContractColumn>): List<ContractColumn> =
         when (contract.mode) {
-            TransformMode.ROW -> contract.inputs.values.filterIsInstance<TransformInput.Table>().singleOrNull()?.columns
-            else -> outputColumns
+            TransformMode.ROW -> {
+                contract.inputs.values
+                    .filterIsInstance<TransformInput.Table>()
+                    .singleOrNull()
+                    ?.columns
+            }
+
+            else -> {
+                outputColumns
+            }
         }.orEmpty()
 
-    // ---------------------------------------------------------------- invariants + strict (§5.4)
+    // ---------------------------------------------------------------- §5.5's commit plumbing
 
-    /**
-     * What the invariants read back (§5.4): the WRITTEN tempdb tables — never the JVM's
-     * memory of them — with the single table input read back under its contract name in row
-     * mode; the single-evaluation modes' value/caller output, which has no table, reads as
-     * the gated value itself.
-     */
-    private sealed interface InvariantSource {
-        /** Row mode: [quotedInput] is the staged input table; [inputName] its contract name. */
-        data class Row(
-            val quotedInput: String,
-            val inputName: String,
-            val inputColumns: List<ContractColumn>,
-            val outputColumns: List<ContractColumn>,
-        ) : InvariantSource
-
-        /** Table/value mode: [gated] is the caller output's rows or the gated value. */
-        data class Single(
-            val gated: Any?,
-        ) : InvariantSource
-    }
-
-    /**
-     * §5.4: every declared invariant over `{ rows, rejects, inputs }`, read back from the
-     * written tables under the `max-input-rows` bound — and NO bound when the template
-     * declares no invariant: then the node streams without any read-back at all. Returns how
-     * many invariants were evaluated.
-     */
-    private suspend fun checkInvariants(
-        inputs: Map<String, Any?>,
-        source: InvariantSource,
-    ): Int {
-        val invariants = resolved.invariants
-        if (invariants.isEmpty()) return 0
-        val total = readBackSize(inputs, source)
-        if (total > support.maxInputRows) {
-            throw TransformFailures.invariantsTooLarge(node, total, support.maxInputRows)
-        }
-        val invariantObject = invariantObjectOf(inputs, source)
-        val jsonata =
-            support.engines[ScriptLanguage.JSONATA]
-                ?: throw DatapipelinesException(
-                    code = PipelineErrorCodes.Transform.EVALUATION_FAILED,
-                    message = "No JSONata engine wired for the invariants of node '${node.id}'.",
-                    details = mapOf("node" to node.id),
-                )
-        invariants.forEach { invariant ->
-            val verdict =
-                try {
-                    support.pool.run(limits, "${node.template.key} invariant '${invariant.name}'") {
-                        jsonata.evaluate(jsonata.compile(invariant.expr), invariantObject, limits)
-                    }
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") e: Exception,
-                ) {
-                    throw TransformFailures.decorate(e, node)
-                }
-            if (verdict != true) {
-                throw DatapipelinesException(
-                    code = PipelineErrorCodes.Transform.INVARIANT_FAILED,
-                    message = "TRANSFORM node '${node.id}': invariant '${invariant.name}' is not true: ${invariant.message}",
-                    details = mapOf("node" to node.id, "invariant" to invariant.name, "message" to invariant.message),
-                )
-            }
-        }
-        return invariants.size
-    }
-
-    /** The §5.4 bound's count: rows + rejects + table inputs, before anything is read back. */
-    private suspend fun readBackSize(
-        inputs: Map<String, Any?>,
-        source: InvariantSource,
+    /** One COMPLETED `stageRows` write, in the SQL paths' order: §5.5's registry, then the budget re-check. */
+    private suspend fun stageCompleted(
+        name: String,
+        staged: StageResult,
     ): Long {
-        var total = 0L
-        written.forEach { total += countRows(quoteTable(it)) }
-        when (source) {
-            is InvariantSource.Row -> {
-                if (buffered) {
-                    total += bufferedRows.size + bufferedRejects.size
-                }
-                total += countRows(source.quotedInput)
-            }
-
-            is InvariantSource.Single -> {
-                inputs.values.filterIsInstance<List<*>>().forEach { total += it.size.toLong() }
-            }
-        }
-        return total
+        written += name
+        reCheckStagingBudget()
+        return staged.rowsStaged
     }
 
-    /** Builds the invariants' `{ rows, rejects, inputs }` (§5.4). */
-    private suspend fun invariantObjectOf(
-        inputs: Map<String, Any?>,
-        source: InvariantSource,
-    ): Map<String, Any?> =
-        when (source) {
-            is InvariantSource.Row -> {
-                val rows: Any
-                val rejects: Any
-                if (buffered) {
-                    rows = bufferedRows
-                    rejects = bufferedRejects.map { mapOf("row" to it.row, "reason" to it.reason) }
-                } else {
-                    rows = written.firstOrNull()?.let { loadBack(quoteTable(it), source.outputColumns) }.orEmpty()
-                    rejects =
-                        rejectsTable
-                            ?.let { loadBackRejects(quoteTable(it), rejectColumnsOf(source.outputColumns)) }
-                            .orEmpty()
-                }
-                val inputRows = loadBack(source.quotedInput, source.inputColumns)
-                mapOf("rows" to rows, "rejects" to rejects, "inputs" to (inputs + mapOf(source.inputName to inputRows)))
-            }
-
-            is InvariantSource.Single -> {
-                val rows =
-                    when {
-                        written.isNotEmpty() -> loadBack(quoteTable(written.first()), (contract.output as TransformOutput.Table).columns)
-                        else -> source.gated ?: emptyList<Any?>()
-                    }
-                val rejects =
-                    rejectsTable
-                        ?.let { loadBackRejects(quoteTable(it), rejectColumnsOf((contract.output as TransformOutput.Table).columns)) }
-                        .orEmpty()
-                mapOf("rows" to rows, "rejects" to rejects, "inputs" to inputs)
-            }
-        }
-
-    /** A written table read back whole as wire-shaped row maps (called only under the §5.4 bound). */
-    private suspend fun loadBack(
-        quotedTable: String,
-        columns: List<ContractColumn>,
-    ): List<Map<String, Any?>> {
-        if (columns.isEmpty()) return emptyList()
-        val selectList = columns.joinToString(", ") { SqlIdentifiers.quote(it.name) }
-        return ctx.staging.withQuery("SELECT $selectList FROM $quotedTable") { rs ->
-            buildList {
-                while (true) {
-                    val batch = readBatch(rs, columns, support.readBatchSize)
-                    if (batch.isEmpty()) break
-                    addAll(batch)
-                }
-            }
-        }
-    }
-
-    /** The rejects table read back as `{ row, reason }` pairs — the shape the invariants see (§5.4). */
-    private suspend fun loadBackRejects(
-        quotedTable: String,
-        columns: List<ContractColumn>,
-    ): List<Map<String, Any?>> =
-        loadBack(quotedTable, columns + TransformValues.REASON_CONTRACT_COLUMN).map { staged ->
-            mapOf(
-                "row" to columns.associate { it.name to staged[it.name] },
-                "reason" to staged[TransformValues.REASON_COLUMN.name],
-            )
-        }
-
-    /** §5.4's second half: a non-empty rejects table with `strict: true` fails the node. */
-    private suspend fun checkStrict(rowsRejected: Long) {
-        val table = rejectsTable ?: return
-        if (node.strict != true || !contract.rejects || rowsRejected == 0L) return
-        val reasons =
-            ctx.staging.withQuery(
-                "SELECT ${SqlIdentifiers.quote(TransformValues.REASON_COLUMN.name)} FROM ${quoteTable(table)} LIMIT $STRICT_REASON_SAMPLE",
-            ) { rs ->
-                buildList {
-                    while (rs.next()) add(rs.getString(1))
-                }
-            }
-        throw DatapipelinesException(
-            code = PipelineErrorCodes.Transform.REJECTS_STRICT,
-            message =
-                "TRANSFORM node '${node.id}' is strict and the function rejected $rowsRejected row(s): " +
-                    reasons.joinToString("; "),
-            details =
-                mapOf(
-                    "node" to node.id,
-                    "rejected" to rowsRejected,
-                    "first_reasons" to reasons,
-                ),
-        )
-    }
+    /** The drain's observer bridge — one per node, shared by the run's drains (§7's events). */
+    private fun stagingObserver(): StagingObserverBridge =
+        StagingObserverBridge(node.id, ctx.operations.observerFor(node.id), ctx.nodeProgress)
 
     // ---------------------------------------------------------------- caller delivery
 
@@ -1088,8 +1029,7 @@ internal class TransformRun(
 
     private fun quoteTable(table: String): String = SqlIdentifiers.quote(requireTable(table))
 
-    private fun requireTable(name: String): String =
-        SqlIdentifiers.requireValidTable(name, PipelineErrorCodes.Node.STAGING_FAILED)
+    private fun requireTable(name: String): String = SqlIdentifiers.requireValidTable(name, PipelineErrorCodes.Node.STAGING_FAILED)
 
     private suspend fun countRows(quotedTable: String): Long =
         ctx.staging.withQuery("SELECT COUNT(*) FROM $quotedTable") { rs ->
@@ -1120,7 +1060,12 @@ internal class TransformRun(
 
     /** The §4.3 value cap on a gated value output (an object is capped by the gate itself). */
     private fun valueSizeCheck(gated: Any?) {
-        val bytes = CanonicalJson.write(gated).toByteArray(Charsets.UTF_8).size.toLong()
+        val bytes =
+            CanonicalJson
+                .write(gated)
+                .toByteArray(Charsets.UTF_8)
+                .size
+                .toLong()
         if (bytes > support.maxValueBytes) {
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Transform.VALUE_TOO_LARGE,
@@ -1130,12 +1075,287 @@ internal class TransformRun(
         }
     }
 
-    private fun List<ContractColumn>.toColumnSchemas(): List<ColumnSchema> =
-        map { ColumnSchema(it.name, it.type, it.precision, it.scale, nullable = it.nullable) }
-
     private companion object {
         const val BYTES_PER_KB = 1024L
         const val KB_PER_MB = 1024L
+    }
+}
+
+/** Contract columns → the canonical column schemas the drains and the gate see (§6). */
+internal fun List<ContractColumn>.toColumnSchemas(): List<ColumnSchema> =
+    map { ColumnSchema(it.name, it.type, it.precision, it.scale, nullable = it.nullable) }
+
+/** The read batch's initial capacity hint — the batch grows to the configured batch size, never past it. */
+private const val WIRE_BATCH_CAPACITY = 1_024
+
+/**
+ * One batch of a cursor, decoded and converted to the wire forms the engine sees (§6) —
+ * the row-mode drive's hot loop and the §5.4 read-backs' loader share the one conversion.
+ */
+internal fun readWireBatch(
+    rs: ResultSet,
+    columns: List<ContractColumn>,
+    batchSize: Int,
+): List<Map<String, Any?>> {
+    val schemas = columns.toColumnSchemas()
+    val batch = ArrayList<Map<String, Any?>>(batchSize.coerceAtMost(WIRE_BATCH_CAPACITY))
+    while (batch.size < batchSize && rs.next()) {
+        val row = LinkedHashMap<String, Any?>(columns.size)
+        columns.forEachIndexed { index, column ->
+            val decoded = ResultRowReader.readValue(rs, index + 1, schemas[index])
+            row[column.name] = TransformValues.wireValueOf(decoded, column.type)
+        }
+        batch += row
+    }
+    return batch
+}
+
+/**
+ * What the invariants read back (§5.4): the WRITTEN tempdb tables — never the JVM's
+ * memory of them — with the single table input read back under its contract name in row
+ * mode; the single-evaluation modes' value/caller output, which has no table, reads as
+ * the gated value itself.
+ */
+internal sealed interface InvariantSource {
+    /** Row mode: [quotedInput] is the staged input table; [inputName] its contract name. */
+    data class Row(
+        val quotedInput: String,
+        val inputName: String,
+        val inputColumns: List<ContractColumn>,
+        val outputColumns: List<ContractColumn>,
+    ) : InvariantSource
+
+    /** Table/value mode: [gated] is the caller output's rows or the gated value. */
+    data class Single(
+        val gated: Any?,
+    ) : InvariantSource
+}
+
+/**
+ * §5.4 — a TRANSFORM run's invariants-and-strict phase, one collaborator so [TransformRun]
+ * stays the driver (the record's own seam: everything that happens after the last batch).
+ * The caller-output's bounded buffer, the read-back under the `max-input-rows` bound — NO
+ * bound and no read-back at all when the template declares no invariant — the assertions
+ * through the JSONata engine on the pool, and strict's refusal. Constructed once per run;
+ * the tables §5.2 wrote and the rejects table's name cross as call-time parameters, so the
+ * write state stays [TransformRun]'s.
+ */
+internal class TransformInvariants(
+    private val node: ExecutableNode,
+    private val ctx: NodeExecutionContext,
+    private val support: TransformSupport,
+    private val resolved: ResolvedTransform,
+    private val limits: EvaluationLimits,
+) {
+    private val contract: TransformContract get() = resolved.contract
+
+    /**
+     * Row-mode caller outputs with invariants declared: the accepted/rejected halves buffered
+     * during the single pass, because no tempdb table exists to read back (§5.4). Bounded —
+     * the buffer refuses past `max-input-rows` with `invariants_too_large`.
+     */
+    private val bufferedRows = mutableListOf<Map<String, Any?>>()
+    private val bufferedRejects = mutableListOf<RejectedRow>()
+    private var buffered = false
+
+    /**
+     * The caller-output's invariants buffer (§5.4): bounded by `max-input-rows` — an output
+     * the invariants could never read back anyway fails HERE, before the heap pays for it.
+     */
+    fun buffer(gated: GatedTable) {
+        buffered = true
+        bufferedRows += gated.rows
+        bufferedRejects += gated.rejects
+        val total = bufferedRows.size + bufferedRejects.size
+        if (total > support.maxInputRows) {
+            throw TransformFailures.invariantsTooLarge(node, total.toLong(), support.maxInputRows)
+        }
+    }
+
+    /**
+     * §5.4: every declared invariant over `{ rows, rejects, inputs }`, read back from the
+     * written tables under the `max-input-rows` bound. Returns how many invariants ran.
+     */
+    @Suppress("ThrowsCount") // the bound refusal, the engine-missing refusal and each failed invariant name themselves
+    suspend fun check(
+        inputs: Map<String, Any?>,
+        source: InvariantSource,
+        rejectColumns: List<ContractColumn>,
+        writtenTables: List<String>,
+        rejectsTable: String?,
+    ): Int {
+        val invariants = resolved.invariants
+        if (invariants.isEmpty()) return 0
+        val total = readBackSize(inputs, source, writtenTables)
+        if (total > support.maxInputRows) {
+            throw TransformFailures.invariantsTooLarge(node, total, support.maxInputRows)
+        }
+        val invariantObject = invariantObjectOf(inputs, source, rejectColumns, writtenTables, rejectsTable)
+        val jsonata =
+            support.engines[ScriptLanguage.JSONATA]
+                ?: throw DatapipelinesException(
+                    code = PipelineErrorCodes.Transform.EVALUATION_FAILED,
+                    message = "No JSONata engine wired for the invariants of node '${node.id}'.",
+                    details = mapOf("node" to node.id),
+                )
+        invariants.forEach { invariant ->
+            val verdict =
+                try {
+                    support.pool.run(limits, "${node.template.key} invariant '${invariant.name}'") {
+                        jsonata.evaluate(jsonata.compile(invariant.expr), invariantObject, limits)
+                    }
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") e: Exception,
+                ) {
+                    throw TransformFailures.decorate(e, node)
+                }
+            if (verdict != true) {
+                throw DatapipelinesException(
+                    code = PipelineErrorCodes.Transform.INVARIANT_FAILED,
+                    message = "TRANSFORM node '${node.id}': invariant '${invariant.name}' is not true: ${invariant.message}",
+                    details = mapOf("node" to node.id, "invariant" to invariant.name, "message" to invariant.message),
+                )
+            }
+        }
+        return invariants.size
+    }
+
+    /** §5.4's second half: a non-empty rejects table with `strict: true` fails the node. */
+    suspend fun checkStrict(
+        rowsRejected: Long,
+        rejectsTable: String?,
+    ) {
+        val table = rejectsTable ?: return
+        if (node.strict != true || !contract.rejects || rowsRejected == 0L) return
+        val reasons =
+            ctx.staging.withQuery(
+                "SELECT ${SqlIdentifiers.quote(TransformValues.REASON_COLUMN.name)} FROM ${quoteTable(table)} LIMIT $STRICT_REASON_SAMPLE",
+            ) { rs ->
+                buildList {
+                    while (rs.next()) add(rs.getString(1))
+                }
+            }
+        throw DatapipelinesException(
+            code = PipelineErrorCodes.Transform.REJECTS_STRICT,
+            message =
+                "TRANSFORM node '${node.id}' is strict and the function rejected $rowsRejected row(s): " +
+                    reasons.joinToString("; "),
+            details =
+                mapOf(
+                    "node" to node.id,
+                    "rejected" to rowsRejected,
+                    "first_reasons" to reasons,
+                ),
+        )
+    }
+
+    /** The §5.4 bound's count: rows + rejects + table inputs, before anything is read back. */
+    private suspend fun readBackSize(
+        inputs: Map<String, Any?>,
+        source: InvariantSource,
+        writtenTables: List<String>,
+    ): Long {
+        var total = 0L
+        writtenTables.forEach { total += countRows(quoteTable(it)) }
+        when (source) {
+            is InvariantSource.Row -> {
+                if (buffered) {
+                    total += bufferedRows.size + bufferedRejects.size
+                }
+                total += countRows(source.quotedInput)
+            }
+
+            is InvariantSource.Single -> {
+                inputs.values.filterIsInstance<List<*>>().forEach { total += it.size.toLong() }
+            }
+        }
+        return total
+    }
+
+    /** Builds the invariants' `{ rows, rejects, inputs }` (§5.4). */
+    private suspend fun invariantObjectOf(
+        inputs: Map<String, Any?>,
+        source: InvariantSource,
+        rejectColumns: List<ContractColumn>,
+        writtenTables: List<String>,
+        rejectsTable: String?,
+    ): Map<String, Any?> =
+        when (source) {
+            is InvariantSource.Row -> {
+                val rows: Any
+                val rejects: Any
+                if (buffered) {
+                    rows = bufferedRows
+                    rejects = bufferedRejects.map { mapOf("row" to it.row, "reason" to it.reason) }
+                } else {
+                    rows = writtenTables.firstOrNull()?.let { loadBack(quoteTable(it), source.outputColumns) }.orEmpty()
+                    rejects = rejectsTable?.let { loadBackRejects(quoteTable(it), rejectColumns) }.orEmpty()
+                }
+                val inputRows = loadBack(source.quotedInput, source.inputColumns)
+                mapOf("rows" to rows, "rejects" to rejects, "inputs" to (inputs + mapOf(source.inputName to inputRows)))
+            }
+
+            is InvariantSource.Single -> {
+                val rows =
+                    when {
+                        writtenTables.isNotEmpty() -> {
+                            loadBack(quoteTable(writtenTables.first()), (contract.output as TransformOutput.Table).columns)
+                        }
+
+                        else -> {
+                            source.gated ?: emptyList<Any?>()
+                        }
+                    }
+                val rejects = rejectsTable?.let { loadBackRejects(quoteTable(it), rejectColumns) }.orEmpty()
+                mapOf("rows" to rows, "rejects" to rejects, "inputs" to inputs)
+            }
+        }
+
+    /** A written table read back whole as wire-shaped row maps (called only under the §5.4 bound). */
+    private suspend fun loadBack(
+        quotedTable: String,
+        columns: List<ContractColumn>,
+    ): List<Map<String, Any?>> {
+        if (columns.isEmpty()) return emptyList()
+        val selectList = columns.joinToString(", ") { SqlIdentifiers.quote(it.name) }
+        return ctx.staging.withQuery("SELECT $selectList FROM $quotedTable") { rs -> readWhole(rs, columns) }
+    }
+
+    /** The rejects table read back as `{ row, reason }` pairs — the shape the invariants see (§5.4). */
+    private suspend fun loadBackRejects(
+        quotedTable: String,
+        columns: List<ContractColumn>,
+    ): List<Map<String, Any?>> =
+        loadBack(quotedTable, columns + TransformValues.REASON_CONTRACT_COLUMN).map { staged ->
+            mapOf(
+                "row" to columns.associate { it.name to staged[it.name] },
+                "reason" to staged[TransformValues.REASON_COLUMN.name],
+            )
+        }
+
+    /** A whole cursor drained to wire-shaped row maps — the read-back loop's single concern. */
+    private fun readWhole(
+        rs: ResultSet,
+        columns: List<ContractColumn>,
+    ): List<Map<String, Any?>> =
+        buildList {
+            while (true) {
+                val batch = readWireBatch(rs, columns, support.readBatchSize)
+                if (batch.isEmpty()) break
+                addAll(batch)
+            }
+        }
+
+    private fun quoteTable(table: String): String = SqlIdentifiers.quote(requireTable(table))
+
+    private fun requireTable(name: String): String = SqlIdentifiers.requireValidTable(name, PipelineErrorCodes.Node.STAGING_FAILED)
+
+    private suspend fun countRows(quotedTable: String): Long =
+        ctx.staging.withQuery("SELECT COUNT(*) FROM $quotedTable") { rs ->
+            if (rs.next()) rs.getLong(1) else 0L
+        }
+
+    private companion object {
         const val STRICT_REASON_SAMPLE = 10
     }
 }

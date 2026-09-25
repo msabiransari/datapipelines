@@ -44,7 +44,10 @@ data class ExecutableNode(
     val parameters: Map<String, JsonNode>?,
     /** CALCULATOR nodes only: the catalog kind (§4.10). */
     val kind: String? = null,
-    /** CALCULATOR (the kind's inputs) and TRANSFORM (the contract's inputs) nodes: `$references` and literals, still as JSON (§4.10, §4.12). */
+    /**
+     * CALCULATOR (the kind's inputs) and TRANSFORM (the contract's inputs) nodes: `$references`
+     * and literals, still as JSON (§4.10, §4.12).
+     */
     val inputs: Map<String, JsonNode>? = null,
     /** CALCULATOR and value-mode TRANSFORM nodes: the Context key this node writes (§4.10, §4.12). */
     val contextKey: String? = null,
