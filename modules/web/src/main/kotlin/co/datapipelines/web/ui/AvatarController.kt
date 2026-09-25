@@ -16,6 +16,7 @@ import java.time.Instant
 import org.slf4j.LoggerFactory
 import org.springframework.http.CacheControl
 import org.springframework.http.HttpStatus
+import org.springframework.http.InvalidMediaTypeException
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
@@ -72,24 +73,42 @@ class AvatarController(
     @GetMapping("/avatar")
     @RequiredScope(Permission.PROFILE_READ)
     fun avatar(): ResponseEntity<ByteArray> {
+        val url = storedPictureUrl() ?: return NOT_FOUND
+        val image = cachedOrFetched(url) ?: return NOT_FOUND
+        return served(image)
+    }
+
+    /** The signed-in principal's own stored picture URL, or null when there is nothing to serve. */
+    private fun storedPictureUrl(): String? {
         val principal =
             SecurityContextHolder.getContext().authentication?.principal as? AuthenticatedPrincipal
-                ?: return NOT_FOUND
-        val pictureUrl =
-            userRepository.findById(principal.userId)?.profilePictureUrl?.takeIf { it.isNotBlank() }
-                ?: return NOT_FOUND
-        val uri =
-            runCatching { URI(pictureUrl) }.getOrNull()?.takeIf { it.isAbsolute }
-                ?: return refused("unparseable URL", pictureUrl)
-        if (uri.userInfo != null) return refused("userinfo component", pictureUrl)
-        val host = uri.host?.lowercase()
-        if (host == null || host !in allowedHosts) return refused("host not allowlisted", pictureUrl)
-        if (uri.scheme?.lowercase() !in SCHEMES) return refused("scheme not http(s)", pictureUrl)
+                ?: return null
+        return userRepository.findById(principal.userId)?.profilePictureUrl?.takeIf { it.isNotBlank() }
+    }
 
-        cache.get(pictureUrl)?.let { return served(it) }
-        val image = fetcher.fetch(uri) ?: return refused("fetch refused or failed", pictureUrl)
-        cache.put(pictureUrl, image)
-        return served(image)
+    /** The cached answer, or one fetch through the fence — the result lands in the cache either way. */
+    private fun cachedOrFetched(url: String): AvatarImage? {
+        cache.get(url)?.let { return it }
+        val uri = validated(url) ?: return null
+        return fetcher.fetch(uri)?.also { cache.put(url, it) }
+    }
+
+    /**
+     * The stored URL as a fetch target, or null with the reason in the log (host only — the
+     * path is user data). Every fence here is checked BEFORE any network hop.
+     */
+    private fun validated(url: String): URI? {
+        val uri = runCatching { URI(url) }.getOrNull()?.takeIf { it.isAbsolute }
+        val reason =
+            when {
+                uri == null -> "unparseable URL"
+                uri.userInfo != null -> "userinfo component"
+                uri.host?.lowercase() !in allowedHosts -> "host not allowlisted"
+                uri.scheme?.lowercase() !in SCHEMES -> "scheme not http(s)"
+                else -> null
+            }
+        if (reason != null) log.warn("event=avatar.refused reason={} host={}", reason, uri?.host)
+        return if (reason == null) uri else null
     }
 
     private fun served(image: AvatarImage): ResponseEntity<ByteArray> =
@@ -99,17 +118,6 @@ class AvatarController(
             .contentLength(image.bytes.size.toLong())
             .cacheControl(CacheControl.maxAge(BROWSER_MAX_AGE).cachePrivate())
             .body(image.bytes)
-
-    /** One refusal shape for every fence: 404, and the reason in the log (host only — the path is user data). */
-    private fun refused(
-        reason: String,
-        pictureUrl: String,
-    ): ResponseEntity<ByteArray> {
-        log.warn("event=avatar.refused reason={} host={}", reason, hostOf(pictureUrl))
-        return NOT_FOUND
-    }
-
-    private fun hostOf(pictureUrl: String): String? = runCatching { URI(pictureUrl).host }.getOrNull()
 
     companion object {
         private val log = LoggerFactory.getLogger(AvatarController::class.java)
@@ -127,6 +135,21 @@ class AvatarController(
 
         private val NOT_FOUND: ResponseEntity<ByteArray> = ResponseEntity.status(HttpStatus.NOT_FOUND).build()
     }
+}
+
+/**
+ * #197: the avatar proxy's wiring, beside the code it wires (UiConfig sat at detekt's
+ * function ceiling — the two beans this route needs went into their own configuration).
+ */
+@org.springframework.context.annotation.Configuration
+class AvatarConfiguration {
+    /** The picture-host allowlist; typo'd entries refuse startup (see [AvatarHosts]). */
+    @org.springframework.context.annotation.Bean
+    fun avatarHosts(authProperties: AuthProperties): AvatarHosts = AvatarHosts(authProperties)
+
+    /** The transport: redirects never followed, size cap on the read (see [AvatarImageFetcher]). */
+    @org.springframework.context.annotation.Bean
+    fun avatarImageFetcher(): AvatarImageFetcher = AvatarImageFetcher()
 }
 
 /**
@@ -187,22 +210,22 @@ open class AvatarImageFetcher(
         val response =
             try {
                 http.send(request, HttpResponse.BodyHandlers.ofInputStream())
-            } catch (e: Exception) {
+            } catch (e: java.io.IOException) {
                 log.info("event=avatar.fetch_failed host={} error={}", uri.host, e.javaClass.simpleName)
                 return null
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                log.info("event=avatar.fetch_failed host={} error=interrupted", uri.host)
+                return null
             }
+        return read(response)
+    }
+
+    /** Status, content type and capped read — each fence in turn, each failure a quiet null. */
+    private fun read(response: HttpResponse<InputStream>): AvatarImage? {
         val stream = response.body()
         try {
-            if (response.statusCode() !in 200..299) return null
-            val rawContentType = response.headers().firstValue("Content-Type").orElse(null) ?: return null
-            val mediaType =
-                try {
-                    MediaType.parseMediaType(rawContentType)
-                } catch (e: Exception) {
-                    log.info("event=avatar.fetch_failed host={} error=content_type", uri.host)
-                    return null
-                }
-            if (mediaType.type != "image") return null
+            val mediaType = imageType(response) ?: return null
             val bytes = readCapped(stream) ?: return null
             return AvatarImage(bytes, mediaType)
         } finally {
@@ -210,12 +233,32 @@ open class AvatarImageFetcher(
         }
     }
 
+    /** The answer's content type, provided the answer is a success carrying an `image` type. */
+    private fun imageType(response: HttpResponse<InputStream>): MediaType? {
+        if (response.statusCode() !in HTTP_SUCCESS_MIN..HTTP_SUCCESS_MAX) return null
+        val raw = response.headers().firstValue("Content-Type").orElse(null) ?: return null
+        val mediaType =
+            try {
+                MediaType.parseMediaType(raw)
+            } catch (e: InvalidMediaTypeException) {
+                log.info("event=avatar.fetch_failed error=content_type detail={}", e.message)
+                return null
+            }
+        return mediaType.takeIf { it.type == "image" }
+    }
+
     /** Reads up to [maxBytes] bytes; null once the stream runs past the cap (the declared length is not trusted). */
     private fun readCapped(stream: InputStream): ByteArray? {
-        val buffer = ByteArrayOutputStream(minOf(maxBytes, 64 * 1024))
-        val chunk = ByteArray(8 * 1024)
+        val buffer = ByteArrayOutputStream(minOf(maxBytes, BUFFER_HINT))
+        val chunk = ByteArray(READ_CHUNK)
         while (true) {
-            val read = stream.read(chunk)
+            val read =
+                try {
+                    stream.read(chunk)
+                } catch (e: java.io.IOException) {
+                    log.info("event=avatar.fetch_failed error=read detail={}", e.message)
+                    return null
+                }
             if (read < 0) return buffer.toByteArray()
             val total = buffer.size() + read
             if (total > maxBytes) return null
@@ -227,6 +270,11 @@ open class AvatarImageFetcher(
         private val log = LoggerFactory.getLogger(AvatarImageFetcher::class.java)
         private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(5)
         private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(5)
+
+        private const val HTTP_SUCCESS_MIN = 200
+        private const val HTTP_SUCCESS_MAX = 299
+        private const val READ_CHUNK = 8 * 1024
+        private const val BUFFER_HINT = 64 * 1024
     }
 }
 
@@ -246,7 +294,7 @@ class AvatarCache(
     )
 
     private val entries =
-        object : LinkedHashMap<String, Entry>(16, 0.75f, true) {
+        object : LinkedHashMap<String, Entry>(INITIAL_CAPACITY, LOAD_FACTOR, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>): Boolean = size > maxEntries
         }
 
@@ -271,5 +319,8 @@ class AvatarCache(
 
     companion object {
         const val CACHE_ADMIT_MAX_BYTES = AvatarController.CACHE_ADMIT_MAX_BYTES
+
+        private const val INITIAL_CAPACITY = 16
+        private const val LOAD_FACTOR = 0.75f
     }
 }
