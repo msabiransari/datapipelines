@@ -141,7 +141,8 @@ class ArchitectureGuardTest {
      * list is an inventory, not an endorsement. A NEW pair fails by name (a new direct read is a
      * reviewed decision, not a convenience); a pair that no longer exists fails too, so the list only
      * shrinks. References are found by class NAME on code lines — an import, a same-package use and a
-     * fully-qualified constructor parameter (two exist) are all the same reach.
+     * fully-qualified constructor parameter (two exist) are all the same reach, and a controller
+     * annotated by its qualified name (`@org.springframework.stereotype.Controller`, one exists) is one.
      *
      * A JOB is an `@Scheduled` method. It lives only in [APPROVED_SCHEDULING_FILES], and no transport
      * names a job's service or scheduler — the source half of B5; `EntryInventoryE2eTest` holds the
@@ -375,7 +376,7 @@ class ArchitectureGuardTest {
         val APPROVED_SCHEDULING_FILES =
             setOf("SweepSchedulingConfiguration.kt", "PoolReaperSchedulingConfiguration.kt", "RetentionSchedulingConfiguration.kt")
 
-        /** 99 transport files on the inventory base; a scan that finds far fewer is looking in the wrong place. */
+        /** 100 transport files on the inventory base; a scan that finds far fewer is looking in the wrong place. */
         const val TRANSPORT_FLOOR = 90
 
         val REPOSITORY_DECLARATION =
