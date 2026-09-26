@@ -1,0 +1,82 @@
+<!-- One run (§20.11) — cloned into #sch-dialog by static/js/schedules/run.js.
+
+     MESSAGES (the record's R10, §5.4): two logs, one per owner, merged ON READ. The run's own
+     trail (schedule_run_events, from §20.11) and — when the run launched an execution and the
+     reader holds execution.read — that execution's durable events (execution_events, from
+     §10.3A `?format=json`), in time order, each line labelled with its source. Nothing is
+     copied between the logs; a run that never started shows the scheduler's lines alone,
+     which is exactly the case an operator needs to read. -->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="skeletons">
+  <template id="sch-tpl-run-dialog">
+    <div class="u-backdrop" data-sch-dialog>
+      <div class="ds-card app-modal app-modal-lg sch-run-dialog" role="dialog" aria-modal="true" aria-labelledby="sch-run-title">
+        <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close" data-sch-action="close-dialog" aria-label="Close">
+          <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+        </button>
+        <h2 class="ds-title u-m0 u-mb-xs" id="sch-run-title">Run of <span class="u-mono" data-slot="schedule"></span></h2>
+        <div class="app-chips u-mb-md">
+          <span class="app-chip" data-slot="state"><i class="ds-status"></i><span data-slot="state-text"></span></span>
+          <span class="ds-badge ds-badge-default" data-slot="origin"></span>
+          <span class="ds-badge ds-badge-default u-mono" data-slot="reason" hidden></span>
+        </div>
+
+        <!-- An UNKNOWN outcome (scheduler.md §5.2/§5.3): nobody can say whether the work
+             happened, and the schedule is blocked. The recovery is named here, in order. -->
+        <section class="app-alert app-alert-warning sch-unknown" data-slot="unknown" role="status" hidden>
+          <p class="u-bold u-m0">Outcome unknown — nobody can say whether this run's work happened.</p>
+          <p class="u-m0" data-slot="unknown-reason"></p>
+          <ol class="sch-steps">
+            <li data-slot="unknown-step-execution">Open the execution and check what it wrote to its targets.</li>
+            <li>When you are satisfied nothing is half-done, unblock the schedule — it resumes from now.</li>
+          </ol>
+          <p class="u-m0 u-text-sm">Run now is deliberately not a retry here: a new execution could repeat effects that already happened.</p>
+          <div class="u-row u-gap-sm">
+            <a th:if="${canReadExecutions == true}" class="ds-button ds-button-secondary ds-button-sm" data-slot="unknown-execution" hidden>Open the execution</a>
+            <button th:if="${canAuthor == true}" data-verb="schedule-unblock" type="button"
+                    class="ds-button ds-button-secondary ds-button-sm" data-sch-action="unblock" hidden>Unblock the schedule</button>
+          </div>
+          <p class="u-m0 u-text-sm" th:if="${canAuthor != true}">An author or a workspace admin can unblock it.</p>
+        </section>
+
+        <dl class="tplx-kv sch-run-kv">
+          <dt data-slot="due-label">Due</dt><dd><time data-slot="due"></time></dd>
+          <dt>Started</dt><dd><time data-slot="started"></time></dd>
+          <dt>Finished</dt><dd><time data-slot="finished"></time></dd>
+          <dt>Took</dt><dd data-slot="duration"></dd>
+          <dt>Admission window</dt><dd><span class="u-muted">until </span><time data-slot="admit-by"></time><span data-slot="attempts"></span></dd>
+          <dt>Ran</dt><dd data-slot="prepared"></dd>
+          <dt>Execution</dt>
+          <dd>
+            <a th:if="${canReadExecutions == true}" class="u-mono" data-slot="execution" hidden></a>
+            <span data-slot="execution-none"></span>
+          </dd>
+          <dt>Schedule revision</dt><dd data-slot="revision"></dd>
+        </dl>
+
+        <details class="sch-frozen">
+          <summary>What this run was given — the frozen job and parameters</summary>
+          <pre class="app-code sch-json" data-slot="payload"></pre>
+          <pre class="app-code sch-json" data-slot="parameters"></pre>
+        </details>
+
+        <h3 class="sch-messages-h">Messages</h3>
+        <p class="u-text-sm u-muted u-m0 u-mb-xs" data-slot="messages-note"></p>
+        <div class="tplx-scroll sch-messages-scroll">
+          <table class="ds-table sch-messages">
+            <thead><tr><th>Time</th><th>Source</th><th>What</th><th>Detail</th></tr></thead>
+            <tbody data-slot="messages"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <template id="sch-tpl-message">
+    <tr data-source="">
+      <td class="u-mono u-nowrap"><time data-slot="at"></time></td>
+      <td><span class="ds-badge sch-source" data-slot="source"></span></td>
+      <td class="u-mono" data-slot="what"></td>
+      <td class="sch-message-detail" data-slot="detail"></td>
+    </tr>
+  </template>
+</th:block>
