@@ -1,4 +1,4 @@
-# Parameter engine — design record (2026-09-21, draft 5.1 — the 2026-09-26 rulings and renderer notes)
+# Parameter engine — design record (2026-09-21, draft 5.2 — the 2026-09-26 rulings, renderer notes, one signal for nothing chosen)
 
 **Updated 2026-09-25:** the owner's clarification supersedes the earlier hidden/disabled
 value rule. These states govern control interaction; every current selected value is read,
@@ -56,13 +56,13 @@ are marked **deviation** and carry their reason.
 | P23 | **Two kinds of control, both hard-coded or database-fed, and the definition says how to render** (owner 2026-09-21, third follow-up; a `FIXED` kind proposed in draft 2 was rejected). (a) **`INPUT`** — a free value the user types, **always `SINGLE`**; its initial value is either hard-coded (`default_value`) or comes from the database (a pinned template returning one row, §3.4). (b) **`SELECT`** — a value the user picks, `SINGLE` or `MULTI`; its options are either hard-coded (`source.constants`, §3.3) or come from the database (`source.template`, §3.4). SQL is for data that changes; it is never required. (c) The definition carries **`presentation`** (§3.7): a `control` hint validated against kind × cardinality × type (an `INPUT` of type `DATE` says `calendar`; a `MULTI` select says `dropdown`, `checkboxes` or `list`) and a display `format` (currency/percent for numerics, a pattern for temporal types). A renderer may honour or ignore it; the server never reads it for anything but validation and echo. |
 
 | P24 | **Addressing mirrors pipelines** (owner 2026-09-26): a set gets a UUID at creation; REST routes carry it in the path (`/api/v1/parameter-sets/{id}/…`); listing and browse are by name and `prefix`; the MCP get/update/evaluate tools take the id as `pipelines_get` does; the export carries the id and import keeps it (`PipelineImportService`'s rule), so the id is stable across environments. Names never travel in a path segment (rest-api §9.6). |
-| P25 | **`required` means a value must arrive; `default` is a hint** (owner 2026-09-26). A required parameter with no value is `required_missing` on evaluate and a `400` at every consumer. The server never substitutes a default for something the client sent as cleared. Two signals: a key **absent** from `selections` means "initialise me" and walks the selection priority (P26); an explicit **`null`** means "the user cleared it" — for a `MULTI` too (the renderer contract sends `null`, never `{}` or `[]`; the server accepts `[]` as `null` for robustness) — an error on a required parameter, an empty value that flows as `NULL` on an optional one. The first render sends `{}`; every later submission sends every key. |
-| P26 | **The selection priority**, per parameter, in topological order, `SINGLE` and `MULTI` alike (owner 2026-09-26): **1** the client's selection when it is valid against the recomputed options (a `MULTI` keeps its valid members); **2** the configured default when it is among the options (`default_value`, else the `is_default` option; for a `MULTI` the default members among the options); **3** the first option in order (for a `MULTI`, as the only member). A client value that fits none of the options walks to 2 then 3 and is flagged `reset: true`; it is never an error. An `INPUT` has no options: the client's value (against the constraints, an error when violated), else the sourced row, else `default_value`, else `null` (`required_missing` when required). Every parameter's state carries `value`, `origin` (`client` / `default` / `first` / `source` / `none`), `computed_default` (what 2-then-3 would give now) and `reset`. |
+| P25 | **`required` means a value must resolve; `default` is priority 2** (owner 2026-09-26; sharpened by the owner in the second-round review the same day). There is **no cleared state**: a key absent from `selections`, an explicit `null`, and `[]` for a `MULTI` are one signal — *nothing chosen* — and every one of them walks the selection priority (P26). The server applies a configured default whenever nothing is chosen, for `INPUT` and `SELECT` alike; this is never silent, because every response carries the resolved value and the renderer shows it (P27), so what the user sees is what the consumer receives. A required parameter is `required_missing` only when nothing resolves — no client value, no default and no options (or no sourced row) — on evaluate, and a `400` at every consumer. A deliberate "nothing" is an **option row the author adds** (a non-null sentinel such as `ALL`, handled by the author's SQL — §6.2); option values are never `NULL`. The first render sends `{}`; every later submission sends every key. |
+| P26 | **The selection priority**, per parameter, in topological order, `SINGLE` and `MULTI` alike (owner 2026-09-26): **1** the client's selection when it is valid against the recomputed options (a `MULTI` keeps its valid members); **2** the configured default when it is among the options (`default_value`, else the `is_default` option; for a `MULTI` the default members among the options); **3** the first option in order (for a `MULTI`, as the only member). A client value that fits none of the options walks to 2 then 3 and is flagged `reset: true`; it is never an error. An `INPUT` has no options: the client's value (against the constraints, an error when violated), else the sourced row, else `default_value`, else `null` (`required_missing` when required). An explicit `null`, and `[]` for a `MULTI`, is *absent* at every step — there is no cleared state (P25). Every parameter's state carries `value`, `origin` (`client` / `default` / `first` / `source` / `none`), `computed_default` (what 2-then-3 would give now) and `reset`. |
 | P27 | **The submission model** (owner 2026-09-26): the parameters endpoint is called on the first render (`{}`) and on every change to any control, and the client sends **every** parameter each time; the server re-renders the whole set. The consumer's apply/submit button goes to the consumer (pipeline execute, dashboard execute), never to the parameters endpoint. The client runs no dependency logic at all — not even "clear the dependents": a stale child walks P26 on the server. |
-| P28 | **One validator, strict, at every place a parameter value arrives** (owner 2026-09-26): a shared `ParameterValueValidator` in `modules/typesystem` beside the moved coercion — declaration (type, precision, scale, required, default, constraints, cardinality) + value → accepted typed value or a refusal — used by the business API (published endpoints, values arriving as query strings), the execution API (`POST /api/v1/pipelines/{id}/execute`), evaluate, and later dashboard execute. The coercion is strict everywhere: the BIG-number `trim()` is retired for pipelines too — a **deliberate break** recorded in rest-api's change log, the tests that asserted trimming re-pinned. Pipeline declarations gain optional `constraints` and a list `cardinality` in the same model, adopted by the dashboard round; the engine's `type` set is the pipelines' `type` set, so a consumer needs no translation. |
+| P28 | **One validator, strict, at every place a parameter value arrives** (owner 2026-09-26): a shared `ParameterValueValidator` in `modules/typesystem` beside the moved coercion — declaration (type, precision, scale, required, default, constraints, cardinality) + value → accepted typed value or a refusal; a `null` or absent value is answered as **unsupplied** — never validated, never refused — one policy for every caller (pipelines resolve it with the declaration's `default`, then `required` refuses as today; evaluate resolves it by P26) — used by the business API (published endpoints, values arriving as query strings), the execution API (`POST /api/v1/pipelines/{id}/execute`), evaluate, and later dashboard execute. The coercion is strict everywhere: the BIG-number `trim()` is retired for pipelines too — a **deliberate break** recorded in rest-api's change log, the tests that asserted trimming re-pinned. Pipeline declarations gain optional `constraints` and a list `cardinality` in the same model, adopted by the dashboard round; the engine's `type` set is the pipelines' `type` set, so a consumer needs no translation. |
 | P29 | **`MULTI` binds** (owner 2026-09-26): the list never reaches the template (P22); its **size** does, as `<name>_count`, and a library macro (`<@in_list column="region" bind="regions" chunk=500/>`) emits `(region IN (:regions__1) OR region IN (:regions__2))` with the runner binding the slices — the skill teaches the pattern. Caps, the most restrictive engines' floors: **1,000 values per `MULTI` parameter** (Oracle's per-list ceiling, which the macro clears) and **2,000 binds per statement** (SQL Server's 2,100), both refused at evaluate with an error naming the cap. |
 | P30 | **Binds resolve by namespace** (from Astra's item 3, consistent with pipeline-contract §7.2): a `:name` in selector SQL is first looked up among the set's parameters — then it must be in `depends_on`; otherwise, if it is one of §7.2's org or platform keys, it is served from the tier and needs no dependency; otherwise `bind_undeclared`. A parameter named like a tier key shadows it, exactly as a declared pipeline parameter does. `execution_id` is absent. |
-| P31 | **Bounded work and capacity** (from Astra's items 4, 8, 10): the decimal widening rule preserves integer digits too (§6.4); the constants' invariants are enforced over every database row at evaluate (§6.2); regex constraints run over a read-counting `CharSequence` with a step budget; a selector's `Statement.cancel()` fires on the deadline and the lease is returned; the semaphore is instance-wide; `max-options-per-selector` defaults to 200 and a total response budget refuses oversized answers (§11). |
+| P31 | **Bounded work and capacity** (from Astra's items 4, 8, 10): the decimal widening rule preserves integer digits too (§6.4); the constants' invariants are enforced over every database row at evaluate (§6.2); regex constraints run over a read-counting `CharSequence` with a step budget; a selector's `Statement.cancel()` fires on the deadline — best effort by the JDBC contract, so the evaluate answers `timeout` regardless and a lease whose statement has not returned is **discarded, never returned to the pool** (the datasources module's discard protocol; the pool replaces it), counted by `datapipelines.parameters.selector_cancel.failed` (§5.2 step 3, §11); the semaphore is instance-wide; `max-options-per-selector` defaults to 200 and a total response budget refuses oversized answers (§11). |
 
 ---
 
@@ -133,7 +133,11 @@ tests that asserted trimming are re-pinned to refusal and rest-api's change log 
 deliberate break. Beside it, `ParameterValueValidator` (typesystem) takes a declaration — `type`,
 `precision`, `scale`, `required`, `default`, `constraints` (§3.5's set), `cardinality` — and a wire
 value, and answers an accepted typed value or a refusal with the reason (`invalid_value_type`,
-`constraint_violation` + `details.reason`, `required_missing`). Its callers: the published
+`constraint_violation` + `details.reason`, `required_missing`). A `null` or absent value is
+**unsupplied**: the validator neither validates nor refuses it, and the caller resolves it —
+pipelines by the declaration's `default` and then the existing `required` refusal (today's
+behaviour byte for byte, which the existing tests prove), evaluate by the selection priority
+(P26). One policy, no per-caller flag (P25). Its callers: the published
 endpoints (query-string values — format strictness, decoded first), `POST /api/v1/pipelines/{id}/execute`,
 evaluate (§5), and later dashboard execute. Pipelines' `parameters` declarations (pipeline-contract
 §6.1) gain optional `constraints` and `cardinality` (`SINGLE` default, `MULTI` bound as a list
@@ -205,15 +209,15 @@ Redis (rule 3).
 
 | field | rule | refusal code (§10) |
 |---|---|---|
-| `name` | `[a-z_][a-z0-9_]*`, 1–63 (pipeline-contract §6.1's grammar, the same constant) | `parameter.validation.name_invalid` |
+| `name` | `[a-z_][a-z0-9_]*`, 1–63 (pipeline-contract §6.1's grammar, the same constant); a name ending in `_count` or `__<digits>` is **reserved** for P29's generated binds and refused | `parameter.validation.name_invalid`, `parameter.validation.name_reserved` |
 | `label` | required, 1–120 chars | `parameter.validation.label_invalid` |
 | `description` | optional, ≤ 2000 chars | `parameter.validation.description_too_long` |
 | `type` | one of `BOOLEAN`, `INTEGER`, `BIGINTEGER`, `DECIMAL`, `BIGDECIMAL`, `STRING`, `BINARY`, `DATE`, `TIME`, `TIMESTAMP` (`LogicalType` minus `NULL`) | `parameter.validation.type_invalid` |
 | `precision`, `scale` | exactly pipeline-contract §6.2 / §12.7: `precision` required for `DECIMAL`, optional (= unbounded) for `BIGDECIMAL`; `scale` required for `BIGDECIMAL` and for exact `DECIMAL` | `parameter.validation.precision_missing`, `parameter.validation.scale_missing` |
 | `kind` | `INPUT` (a value the user types; initial value hard-coded via `default_value` **or** from a database via `source.template`) or `SELECT` (a value the user picks; options hard-coded via `source.constants` **or** from a database via `source.template`) — P23 | `parameter.validation.kind_invalid` |
 | `cardinality` | `SINGLE` or `MULTI`; an `INPUT` is **always `SINGLE`** (P23a); a `SELECT` is either | `parameter.validation.cardinality_invalid` |
-| `required` | boolean (P25). A value **must arrive** for a required parameter — absent walks the priority (P26), an explicit `null`/`[]` is `required_missing`; a required parameter that resolves to nothing (no client value, no default, no options / no sourced row) is `required_missing` at evaluate, not a save error. An optional parameter cleared by the client stays empty and flows as `NULL` | — |
-| `default_value` | wire-encoded for `type`; `SINGLE` → one value, `MULTI` → array; must pass the full `ParameterValueValidator` check at save (the §12.7 `default_type_mismatch` rule AND the parameter's own constraints — `min: 0` with `default_value: -1` is refused, `default_invalid`). It is a **hint** (P25): priority 2 of P26, never applied to a value the client cleared. For an `INPUT` it is the hard-coded initial value and the fallback when a template source returns no row. For a `SELECT` with `constants` it must be among the option values; with a template it is checked at evaluate (the options depend on parents) and walks to priority 3 when absent from them | `parameter.validation.default_type_mismatch`, `parameter.validation.default_invalid`, `parameter.validation.default_not_an_option` |
+| `required` | boolean (P25). A required parameter must **resolve** to a value: absent, `null` and `[]` all walk the priority (P26), and `required_missing` is raised at evaluate only when nothing resolves — no client value, no default, no options / no sourced row — never at save. An optional parameter that resolves to nothing has `value: null`, `origin: none` and flows as `NULL` | — |
+| `default_value` | wire-encoded for `type`; `SINGLE` → one value, `MULTI` → array; must pass the full `ParameterValueValidator` check at save (the §12.7 `default_type_mismatch` rule AND the parameter's own constraints — `min: 0` with `default_value: -1` is refused, `default_invalid`). It is priority 2 of P26 (P25): applied by the server whenever nothing is chosen, and shown back by the renderer. For an `INPUT` it is the hard-coded initial value and the fallback when a template source returns no row. For a `SELECT` with `constants` it must be among the option values; with a template it is checked at evaluate (the options depend on parents) and walks to priority 3 when absent from them | `parameter.validation.default_type_mismatch`, `parameter.validation.default_invalid`, `parameter.validation.default_not_an_option` |
 | `source` | `SELECT`: required, exactly one of `constants` (§3.3) or `template` + `datasource` (§3.4). `INPUT`: optional, `template` + `datasource` only (the database-fed initial value, §3.4); `constants` is refused on an `INPUT` — its hard-coded value is `default_value` | `parameter.validation.source_missing`, `parameter.validation.source_ambiguous`, `parameter.validation.source_not_allowed` |
 | `depends_on` | parameter names in the same set; must be a **superset** of every `:bind` the source template uses that names a parameter of the set and every `ref` in the two expressions (P30: a bind naming an org/platform tier key needs no dependency; discovery is never load-bearing — P12); no self reference; the set's graph must be acyclic; a parameter may be named like a tier key and then shadows it (§7.2's precedence) | `parameter.validation.dependency_unknown`, `parameter.validation.bind_undeclared`, `parameter.validation.ref_undeclared`, `parameter.validation.dependency_cycle` |
 | `hidden_expression`, `disabled_expression` | a §7 AST or `null` (= `false`) | `parameter.validation.expression_invalid` and the §7 codes |
@@ -342,7 +346,9 @@ rendered three ways.
    `template.validation.parameter_interpolated`); every `:name` in the body resolves by P30 —
    a parameter of the set (then ∈ `depends_on`, else `bind_undeclared`), else a §7.2 org/platform
    key (served from the tier), else `bind_undeclared`; a `<name>_count` bind is the size of a
-   `MULTI` parent (P29) and follows its parameter.
+   `MULTI` parent (P29) and follows its parameter; a `<name>__<digits>` bind is the `in_list`
+   macro's own and is never written by hand — `bind_undeclared` when it is (the two suffixes are
+   reserved parameter names, §3.2).
 5. **Dry render** each selector template against a context of the parents' defaults (top-down,
    defaults where present, type-appropriate samples otherwise — templates §7.2's rule); a render
    failure is `parameter.validation.template_render_failed`.
@@ -380,8 +386,9 @@ is unchanged.
 - `selections` (P25, P27): the first render sends `{}` — every parameter **absent**, the whole set
   initialises. Every later call sends **every** parameter's current value, wire-encoded for its
   type, `MULTI` as an array: a value the user chose, the value the last response gave it, or
-  `null` when the user **cleared** it (a `MULTI` too — `[]` is accepted and treated as `null`).
-  Absent means "initialise me" and walks the priority (P26); `null` means "cleared" and does not. A key that names no parameter of the set is
+  `null` when the control is empty (a `MULTI` too — `[]` is accepted as `null`). Absent, `null`
+  and `[]` are one signal — *nothing chosen* — and every one of them walks the priority (P26);
+  there is no cleared state (P25). A key that names no parameter of the set is
   `parameter.evaluate.unknown_parameter` (400 — the whole request is refused; a client that sends
   unknown keys is wrong, not the user). A `MULTI` list longer than `max-multi-bind-values` is
   `too_many_values` on that parameter. Duplicate members in a `MULTI` are `invalid_value_type`.
@@ -401,8 +408,12 @@ is unchanged.
    completion, then evaluates itself; selector queries pass through an **instance-wide**
    `Semaphore` of `max-concurrent-selector-queries` (P31); the whole evaluate runs under
    `withTimeout(evaluate-timeout-seconds)`, and every selector statement is armed with
-   `Statement.cancel()` at the deadline, its lease returned in `finally` — the deadline bounds
-   blocking JDBC, not only the coroutine (P31).
+   `Statement.cancel()` at the deadline — best effort by the JDBC contract: the evaluate answers
+   `timeout` regardless; a statement that returned releases its lease in `finally`, and a lease
+   whose statement has not returned by the cancel is **discarded, never returned** (the
+   datasources module's discard protocol evicts it and the pool replaces it), counted by
+   `datapipelines.parameters.selector_cancel.failed` (§11) — the deadline bounds blocking JDBC,
+   not only the coroutine, and a runaway statement can never poison the pool (P31).
 4. Per parameter, in this order, on the parents' **effective** values:
    (a) `hidden` and `disabled` from the expressions — interaction flags only (P5); (b) the
    source — a `SELECT`'s options (`constants` verbatim, or the template rendered against
@@ -412,21 +423,22 @@ is unchanged.
    - `SELECT`, `SINGLE`: **1** the submitted value if it is among the options (`origin: client`);
      else **2** the configured default if among them (`default_value`, else the `is_default` row;
      `origin: default`); else **3** the first option (`origin: first`). A submitted value that
-     fits none of the options walks to 2/3 with `reset: true`. An explicit `null` is **cleared**:
-     `required_missing` when required, else `value: null`, `origin: none`. No options at all:
-     `required_missing` when required, else `null`.
+     fits none of the options walks to 2/3 with `reset: true`. An explicit `null` is absent (P25).
+     No options at all: `required_missing` (`details.reason: no_options`) when required, else
+     `value: null`, `origin: none`.
    - `SELECT`, `MULTI`: **1** the submitted members that are among the options (all of them
      valid ⇒ `origin: client`; some dropped ⇒ the survivors, `reset: true`); none surviving (or
      absent) ⇒ **2** the configured default members among the options; else **3** the first option
-     as the only member. `[]` is cleared, as above.
+     as the only member. `[]` and `null` are absent (P25); no options at all, as for `SINGLE`.
    - `INPUT`: **1** the submitted value if it passes the constraints (an error otherwise, the
      parameter then treated as absent below); absent ⇒ **2** the sourced row when the input has
      a source (`origin: source`), else `default_value` (`origin: default`); else `null`
-     (`required_missing` when required). An explicit `null` is cleared, as above.
+     (`required_missing` when required — `details.reason`: `no_default`, or `no_row` when a
+     source returned nothing). An explicit `null` is absent (P25).
    - In every case `computed_default` is what steps 2-then-3 give right now — for an `INPUT`
      the sourced row else `default_value` — so a renderer can offer "reset to computed" for a
      typed value that keeps winning after its parents changed (Astra's item 7, P26).
-   - The parameter's **effective value** for its children is its `value` — the cleared or
+   - The parameter's **effective value** for its children is its `value` — the unresolved (`origin: none`) or
      required-missing case binds `NULL` (an empty `MULTI` binds as §6.2 says), which the child's
      SQL handles; an errored `INPUT` binds its `computed_default`, so the form below stays whole.
 5. A datasource or statement failure on one selector records the datasource code on that
@@ -436,8 +448,8 @@ is unchanged.
    `parameter.evaluate.response_too_large` (the options are never truncated silently; the
    author lowers the caps or the selector's rows).
 
-Changing hidden/disabled state alone never changes a selection. Option invalidation, explicit
-clearing and validation failures follow the rules above for every parameter, hidden or not.
+Changing hidden/disabled state alone never changes a selection. Option invalidation and
+validation failures follow the rules above for every parameter, hidden or not.
 Hiding a control does not suppress its errors or remove it from the dependency graph.
 
 **The owner's three scenarios (2026-09-26), country → state → city, twenty parameters:**
@@ -473,7 +485,7 @@ first, `reset: true`, and its own children follow from that value.
 ```
 
 - `values` is the **consumer payload** (P4): one canonical wire value per parameter (arrays for
-  `MULTI`; `null` when cleared or unresolved), hidden and disabled included — the values as
+  `MULTI`; `null` when unresolved), hidden and disabled included — the values as
   chosen by the priority, so a consumer sees exactly what the form shows. A dashboard uses it
   to construct pipeline inputs, then applies any configured server-side outgoing-value
   overrides at the pipeline binding boundary (the dashboard draft §4.3); those overrides belong
@@ -496,9 +508,9 @@ first, `reset: true`, and its own children follow from that value.
 |---|---|
 | wrong wire form / not coercible / duplicate `MULTI` members | `parameter.evaluate.invalid_value_type` on the parameter |
 | constraint violated (min/max/length/pattern/scale) | `parameter.evaluate.constraint_violation`, `details.reason` names the rule |
-| required and nothing resolvable — cleared, or no default and no options / no row | `parameter.evaluate.required_missing` (`details.reason`: `cleared` / `no_default` / `no_options`) |
+| required and nothing resolvable — no client value, no default, and no options / no sourced row | `parameter.evaluate.required_missing` (`details.reason`: `no_options` / `no_default` / `no_row`) |
 | a `SELECT` value no longer among the recomputed options | **not an error** — walks the priority, `reset: true`, `origin` says which step (P13, P26) |
-| an optional parameter cleared | **not an error** — `value: null`, `origin: none`, binds `NULL` |
+| an optional parameter with nothing resolvable | **not an error** — `value: null`, `origin: none`, binds `NULL` |
 | a `MULTI` longer than `max-multi-bind-values`; a statement over `max-binds-per-statement` | `parameter.evaluate.too_many_values` / `parameter.evaluate.too_many_binds` on the parameter |
 | selector datasource unreachable / statement failed / over the option cap / rows violating the invariants | the datasource's own code, `parameter.evaluate.too_many_options`, or `parameter.evaluate.selector_rows_invalid` (`details.reason`: `duplicate_value` / `null_value` / `empty_label` / `multiple_defaults`) on that parameter |
 | a datasource no longer visible from the workspace (a grant revoked since release) | `datasource.not_found` on that parameter (re-resolved on every evaluate — P31) |
@@ -546,7 +558,15 @@ ORDER  BY state_name
   the slices; the skill teaches the pattern (the Oracle ceiling of 1,000 expressions per list is
   what it clears). Caps enforced at evaluate, each with its own code: `max-multi-bind-values`
   (default 1,000) per parameter and `max-binds-per-statement` (default 2,000 — SQL Server's
-  2,100 floor) per rendered statement, counting every expanded placeholder.
+  2,100 floor) per rendered statement, counting every expanded placeholder. The `_count` and
+  `__<digits>` suffixes are reserved parameter names (§3.2, `name_reserved`).
+- **A deliberate "nothing" (P25).** Option values are never `NULL`, so an author who wants a
+  "no filter" or "all" choice offers it as one more row with a sentinel value — a `constants`
+  entry `{ "value": "ALL", "display_value": "(All)" }`, or `UNION ALL SELECT 'ALL', '(All)',
+  TRUE` in the selector (`TRUE` in `is_default` when it should be the starting choice) — and the
+  consuming SQL handles it: `WHERE (:country = 'ALL' OR country = :country)`. The engine knows
+  nothing of the sentinel: it is one more option. The skill teaches the pattern beside
+  `in_list` (lane D).
 - **Row invariants at evaluate (P31).** Every returned row is checked after canonical
   conversion exactly as `constants` are at save: `value` non-null and unique, `display_value`
   a non-empty string, `is_default` a boolean, at most one default — a violation is
@@ -675,16 +695,22 @@ The full versioning §3.5 verb table, with the `parameter.version.*` twins of `t
 (§10): draft create (copy-on-write), draft write (hash-preconditioned, `parameter.version.conflict`),
 release, purge, discard, restore, switch, import. Release preconditions: every pinned template
 version RELEASED (`parameter.release.template_not_released`; `release_pinned_templates=true`
-cascades exactly as 142), every referenced datasource visible from the workspace. Entity status is
+cascades exactly as 142), every referenced datasource visible from the workspace. Release then
+**re-runs §4 steps 4–6** against the pinned templates' RELEASED bodies — a set validated against
+a draft whose SQL changed afterwards keeps its own `body_hash`, so §4's hash skip does not apply —
+and refuses with the step's own `parameter.validation.*` code and `details.parameter` (Astra's
+item 9). Entity status is
 derived (no `is_deleted`). `datapipelines.deployment.authoring-enabled=false` refuses authoring
 writes with `parameter.authoring.disabled`.
 
 ### 8.3 Promotion
 
 By name, like templates: export carries the set body plus the manifest of pinned template
-versions; import lands RELEASED, refuses a missing template pin with
-`parameter.import.missing_template`, and datasource names resolve per environment (portable by
-design — pipeline-contract §11). The promoter lens (auth §11A.1) applies: released and newer than
+versions; import runs §4 steps 4–6 against the **target's** datasources and templates — it
+refuses a missing template pin with `parameter.import.missing_template` (promotion order:
+templates before sets) and a target datasource whose dialect or schema fails the metadata
+execution with that step's own code — and lands RELEASED; datasource names resolve per
+environment (portable by design — pipeline-contract §11). The promoter lens (auth §11A.1) applies: released and newer than
 the target's.
 
 ### 8.4 The templates reverse arrow (new work P22 pulls in)
@@ -774,6 +800,7 @@ expectation).
 | code | HTTP | when |
 |---|---|---|
 | `parameter.validation.name_invalid` | 400 | set name fails the folder grammar (`details.reason`: `folder_required` / `grammar`) or a parameter name fails §6.1's |
+| `parameter.validation.name_reserved` | 400 | a parameter name ending in `_count` or `__<digits>` — P29's generated bind namespace (§3.2) |
 | `parameter.validation.new_root_requires_confirmation` | 400 | agent surface only; the pipelines/templates shape |
 | `parameter.validation.duplicate_name` | 409 | set name exists in the workspace (discarded included) |
 | `parameter.validation.duplicate_parameter` | 400 | two parameters share a name |
@@ -830,6 +857,12 @@ in the domain `ParametersConfig` — both literals live as named constants (MIST
 authority-aware keys and invalidation; the E2E prints the query count per evaluate instead, and
 the knob lands when the number says it must.
 
+One metric, not a key: `datapipelines.parameters.selector_cancel.failed` (the house
+`datapipelines.<module>.<thing>.<event>` shape) counts the deadlines whose `Statement.cancel()`
+did not return the statement — the lease was discarded (§5.2 step 3). The evaluator's test
+injects a real in-memory `MeterRegistry` and reads the counter (MISTAKES: a strict mock makes a
+missing call unobservable).
+
 ---
 
 ## 12. Testing requirements (every guard shown red once; the lane's handback lists each falsification)
@@ -843,11 +876,14 @@ the knob lands when the number says it must.
 | `parameters` integration (`*IntegrationTest`, Postgres container) | repository + every §3.5 lifecycle verb; hash precondition; one-draft index | as templates' |
 | `application` | reverse arrow: used-by rows and the delete guard cover a set-only pin | delete the set scanner → guard lets the delete through, test red |
 | `web` + `mcp-server` | handler/tool tests; `MatrixRowReachabilityTest`, `ReadFloorTest`, `RequiredScopeCoverageTest` green with the new rows; catalog count pins | remove `@RequiredScope` → red |
-| `typesystem` — the shared validator | `ParameterValueValidatorTest`: every declaration field × every refusal; the four call sites (published endpoint query strings, `POST …/execute`, evaluate, a dashboard-shaped consumer stub) refuse the same value with the same code; `" 12.50 "` refused everywhere — the trim's old tests re-pinned to refusal | reintroduce the trim → four reds |
-| `parameters` unit — the selection priority (P26) | the owner's three scenarios (§5.2) as fixtures over a 20-parameter fixture with a parent-that-is-a-child; absent vs `null` vs `[]` on required and optional; a stale child walks to default then first with `reset: true`; a `MULTI`'s survivors, then default members, then the first option alone; an `INPUT`'s client → sourced row → `default_value` → `required_missing`; `computed_default` on every state | flip step 2 and 3 → the fixtures name the step |
+| `typesystem` — the shared validator | `ParameterValueValidatorTest`: every declaration field × every refusal; `null`/absent answered as unsupplied, never a refusal, at every call site — pipelines' default-then-required behaviour unchanged (P28); the four call sites (published endpoint query strings, `POST …/execute`, evaluate, a dashboard-shaped consumer stub) refuse the same value with the same code; `" 12.50 "` refused everywhere — the trim's old tests re-pinned to refusal | reintroduce the trim → four reds |
+| `parameters` unit — the selection priority (P26) | the owner's three scenarios (§5.2) as fixtures over a 20-parameter fixture with a parent-that-is-a-child; absent, `null` and `[]` behave identically on required and optional (P25); the Country A → B walk — a required `state` with no options is `required_missing`/`no_options`, and switching to B resolves it to B's first state; a sentinel `ALL` row is one more option; a stale child walks to default then first with `reset: true`; a `MULTI`'s survivors, then default members, then the first option alone; an `INPUT`'s client → sourced row → `default_value` → `required_missing`; `computed_default` on every state | flip step 2 and 3 → the fixtures name the step |
 | `parameters` unit — capacity and bounds | §6.4's counterexamples (`DECIMAL(6,2)` → `(6,4)` refused, `INTEGER` → `DECIMAL(9,0)` refused, `→ (10,0)` accepted); a `pattern` past `max-regex-steps` refused within the budget (a nested-quantifier fixture, adversarial input, elapsed printed); a `MULTI` of 1,001 and a statement of 2,001 placeholders refused; a response over the budget refused; a selector whose `Statement` blocks is cancelled at the deadline and its lease returned (a latch, never a sleep) | each bound one off → green (the guard is the bound, not a coincidence) |
 | `parameters` integration — row invariants | a selector returning a duplicate value, a null value, an empty label, two defaults — each `selector_rows_invalid` with its reason; a revoked datasource grant between release and evaluate → `datasource.not_found` on the parameter | — |
-| E2E (`tests/integration-tests`) | the country → state → city cascade over a real H2/Postgres datasource through **REST and MCP** with a multi-segment name proven through the real HTTP stack (bodies and `?prefix=` only — P24): first render, parent change resets children with `reset: true`, hidden/disabled from expressions, an `INPUT` with `scale: 2` + `min: 0` refusing `12.345` and `-1`, a `MULTI` parent binding into `IN (:regions)`, a `constants` selector beside a template one, a database-fed `INPUT` (`start_date` from a one-row template depending on `country`: picked from the row when the client sends it absent, kept when the client submits a value while its `computed_default` follows the country, `required_missing` when the client clears it with `null`), every `presentation` echoed with derived defaults filled in, an unreachable datasource answering a whole form; release refused on a draft pin; `RoleWalkE2eTest` rows; `PromoterLensSweepTest` and `WorkspaceIsolationSweepTest` extended | the sweeps' non-vacuity floors |
+| `parameters` unit — reserved names (P29) | `regions_count` and `regions__1` refused as parameter names (`name_reserved`); a hand-written `:regions__1` bind `bind_undeclared` | drop the suffix check → red |
+| `parameters` unit — the cancel failure path (P31) | a stub JDBC driver whose statement ignores `cancel()` (spins; the real engines never read the interrupt — MISTAKES: a stand-in models the property under test): the deadline answers `timeout`, the lease is discarded and never returned (the pool's counts prove it), the counter reads 1; a driver that honours `cancel()` returns its lease | return the lease on timeout → the pool-count assertion red |
+| `parameters` integration — release and import revalidation (§8.2, §8.3) | a set saved against a draft template whose SQL then changed: release refuses with the step's code; import into a target missing the pin refuses `missing_template`; a target datasource lacking the column refuses `selector_columns_invalid` | skip steps 4–6 at release → red |
+| E2E (`tests/integration-tests`) | the country → state → city cascade over a real H2/Postgres datasource through **REST and MCP** with a multi-segment name proven through the real HTTP stack (bodies and `?prefix=` only — P24): first render, parent change resets children with `reset: true`, hidden/disabled from expressions, an `INPUT` with `scale: 2` + `min: 0` refusing `12.345` and `-1`, a `MULTI` parent binding into `IN (:regions)`, a `constants` selector beside a template one, a database-fed `INPUT` (`start_date` from a one-row template depending on `country`: picked from the row when the client sends it absent, kept when the client submits a value while its `computed_default` follows the country, the client's `null` on a required `INPUT` with no default is `required_missing`/`no_default`, and on a `SELECT` with options resolves to the default else first — never an error), every `presentation` echoed with derived defaults filled in, an unreachable datasource answering a whole form; release refused on a draft pin; `RoleWalkE2eTest` rows; `PromoterLensSweepTest` and `WorkspaceIsolationSweepTest` extended | the sweeps' non-vacuity floors |
 | drift | `ParameterErrorCodesSpecDriftTest`, `ScopeMatrixSpecDriftTest`, `ParametersConfigKeysSpecDriftTest`, `SkillDistributionTest`, `verifyModuleDependencies`, `ArchitectureGuardTest` | add a code to the doc → red until the constant exists |
 | coverage | the module floors the conventions plugin sets (Kover) | — |
 
@@ -890,9 +926,14 @@ Not built here; kept so the contract round starts from the owner's list, not fro
 reference renderer lands with dashboards (#10, P21); the hosting application implements the
 host side.
 
-1. **Clearing.** When the user clears a dropdown (or a multi-select), the client sends `null`
-   for that parameter — never `{}`, never `[]`. The server treats `[]` as `null` (§5.1) so a
-   renderer that slips is not punished, but the contract says `null`.
+1. **An empty control.** When the user empties a dropdown, a multi-select or an input, the
+   client sends `null` for that parameter — never `{}`, never `[]` (the server accepts `[]` as
+   `null` so a renderer that slips is not punished, but the contract says `null`). There is no
+   cleared state (P25): the server walks the priority and the response carries the resolved
+   value, which the renderer shows — a dropdown with options never renders blank after a round
+   trip, and an empty options list renders the control disabled with its `required_missing`
+   error beneath it. A deliberate "nothing" is an option row the author adds (§6.2's sentinel),
+   rendered like any other.
 2. **Rendering a `MULTI` with no hint.** When a definition carries no `presentation.control`, a
    renderer picks the derived default (§3.7: `dropdown`). On the AUTHORING side, the agent must
    **ask the person** whether a multi-selection is a dropdown, checkboxes or a list before
@@ -935,7 +976,7 @@ host side.
 
 | lane | scope | depends on |
 |---|---|---|
-| **A** (first, alone) | §2.1 `graph` move + §2.3 coercion extraction **made strict** (the trim retired — the one behaviour change, recorded as a deliberate break in rest-api's change log with the re-pinned tests) + `ParameterValueValidator` in `typesystem` wired into the two existing places (published endpoints, `POST …/execute`) + the pipeline declaration's optional `constraints`/`cardinality` (declared, not yet consumed) + the §2.4 table rows + `settings.gradle.kts`. Full gate. | — |
+| **A** (first, alone) | §2.1 `graph` move + §2.3 coercion extraction **made strict** (the trim retired — the one behaviour change, recorded as a deliberate break in rest-api's change log with the re-pinned tests) + `ParameterValueValidator` in `typesystem` wired into the two existing places (published endpoints, `POST …/execute`) with one null policy — unsupplied, the caller resolves (P28) + the pipeline declaration's optional `constraints` (enforced from lane A through the validator at both places) and `cardinality` (`MULTI` refused at save until the dashboard round) + the §2.4 table rows + `settings.gradle.kts`. Full gate. | — |
 | **B** | `parameters` model, validator, expression AST, `Dag` build, repository + lifecycle + migration, `ParameterErrorCodes` + §13.20 + drift test, config keys | A |
 | **C** | `SelectorRunner` (template render, binds, list expansion, metadata check, caps), `ParameterEvaluator` (coroutines, the instance-wide semaphore, the deadline with `Statement.cancel()`, the P26 selection priority, the row invariants, the caps) | B |
 | **D** | surfaces: six MCP tools by id + catalog pins + the rendered manual's `parameters` area (242a's `DocSet`, not `skillArtifacts`) + the `in_list` macro in the skill and the ask-before-creating-a-MULTI-without-a-hint rule (§13a.2); REST routes by id; the nine permission rows (§9.3) with auth.md §7.6 + `RoleWalkE2eTest`; the reverse arrow in `application` (§8.4); promotion; E2E cascade | C |
@@ -951,6 +992,7 @@ on every handback).
 
 | date | version | change |
 |---|---|---|
+| 2026-09-26 | draft 5.2 | The second-round review (Astra's five items) answered with the owner's rulings. **No cleared state** (P25 amended): absent, `null` and `[]` are one signal — nothing chosen — and walk the priority; the server applies a default whenever nothing is chosen (never silent — the response carries the resolved value); `required_missing` only when nothing resolves (`no_options` / `no_default` / `no_row`); a deliberate "nothing" is an option row with a non-null sentinel (§6.2, the skill teaches it). One validator null policy — unsupplied, the caller resolves (P28, §2.3, lane A). Reserved names `_count` / `__<digits>` (`name_reserved`, §3.2, §4, §10). Release re-runs §4 steps 4–6 against released bodies; import runs them against the target (§8.2, §8.3). The cancel failure path: a lease whose statement ignored `cancel()` is discarded, never returned, counted by `datapipelines.parameters.selector_cancel.failed` (P31, §5.2, §11). §5.1–§5.4, §13a.1, §12 and §15 follow. `skillArtifacts` does not occur in this record (checked); §15 already names 242a's `DocSet`. |
 | 2026-09-26 | draft 5.1 | Cleared is `null` for `MULTI` too (`[]` accepted as `null`); new §13a — the renderer and host contract notes for the round after dashboards: clearing, the ask-before-a-MULTI-without-a-hint authoring rule (lane D's skill), the submit and parameter-changed hooks for the dashboard runtime, the widget's layout and location left to that round. |
 | 2026-09-26 | draft 5 | The second review answered (Astra's twelve items + the orchestrator's six of 2026-09-21) with eight rulings, P24–P31: addressing mirrors pipelines (a stable UUID, `POST /{id}/evaluate`); `required` means a value must arrive and `default` is a hint, absent vs `null`/`[]`; the selection priority client → default → first for `SINGLE`, `MULTI` and (client → sourced row → `default_value`) `INPUT`, a stale child never an error (`reset: true`, `origin`, `computed_default`); every change submits every parameter and the client runs no dependency logic (`dependents` informational too); one strict shared validator at the four places, the trim retired everywhere (a deliberate break); `MULTI` binds via `<name>_count` + the `in_list` macro with caps 1,000 per parameter and 2,000 per statement; binds resolve by namespace (parameter, else tier key); decimal widening preserves integer digits; row invariants at evaluate; a read-counting regex budget, `Statement.cancel()` at the deadline, an instance-wide semaphore, options cap 200 and a 4 MiB response budget; §13.20, V39, the tool count read at dispatch; the options cache and the scheduler/dashboard bindings named out of scope. |
 | 2026-09-25 | draft 4 | Owner corrections: hidden/disabled governs control interaction; always read and submit current selected values, including explicit client-side changes. No preservation/restoration of originally served values or hidden/disabled-based omission, ignoring or defaulting. Updated P5/P15, evaluate semantics and acceptance coverage. Dashboard state and outgoing pipeline-value overrides are independently optional server-side consumer responsibilities, linked in §13. |
