@@ -16,6 +16,7 @@ import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
 import java.security.SecureRandom
 import java.sql.DriverManager
+import java.sql.ResultSet
 import java.util.Base64
 
 /**
@@ -55,9 +56,14 @@ class WorkspaceInvitationLocalE2eTest {
     fun `the admin invites an existing local user and the first login lands them in the workspace`() {
         // The seed admin walks the forced-change path, then runs the admin half.
         val adminLogin = postLogin(ADMIN_EMAIL, SEED_PASSWORD)
-        postPasswordChange(adminLogin.sessionCookie(), adminLogin.csrfToken, SEED_PASSWORD, NEW_ADMIN_PASSWORD, NEW_ADMIN_PASSWORD)
-            .statusCode shouldBe 200
-        val admin = adminLogin.sessionCookie()
+        postPasswordChange(
+            adminLogin.sessionCookie("admin-first", userRow(ADMIN_EMAIL)),
+            adminLogin.csrfToken,
+            SEED_PASSWORD,
+            NEW_ADMIN_PASSWORD,
+            NEW_ADMIN_PASSWORD,
+        ).statusCode shouldBe 200
+        val admin = adminLogin.sessionCookie("admin", userRow(ADMIN_EMAIL))
 
         createWorkspace(admin, adminLogin.csrfToken, WORKSPACE)
 
@@ -88,7 +94,7 @@ class WorkspaceInvitationLocalE2eTest {
         // membership assertion runs AFTER the gate is released (the API refuses until then).
         val bobLogin = postLogin(BOB_EMAIL, bobOneTime)
         bobLogin.statusCode shouldBe 302
-        val bobSession = bobLogin.sessionCookie()
+        val bobSession = bobLogin.sessionCookie("bob-first", userRow(BOB_EMAIL))
         postPasswordChange(bobSession, bobLogin.csrfToken, bobOneTime, NEW_USER_PASSWORD, NEW_USER_PASSWORD)
             .statusCode shouldBe 200
 
@@ -129,7 +135,7 @@ class WorkspaceInvitationLocalE2eTest {
     @Order(2)
     fun `the create-user form's optional workspace writes the membership in the same act`() {
         val adminLogin = postLogin(ADMIN_EMAIL, NEW_ADMIN_PASSWORD)
-        val admin = adminLogin.sessionCookie()
+        val admin = adminLogin.sessionCookie("admin-second", userRow(ADMIN_EMAIL))
 
         // Carol is created WITH the optional workspace + role (113 §B.3, D22): the response
         // carries the one-time password AND the membership note.
@@ -137,7 +143,7 @@ class WorkspaceInvitationLocalE2eTest {
 
         check(carolOneTime.isNotBlank()) { "expected a one-time password, got blank" }
         val carolLogin = postLogin(CAROL_EMAIL, carolOneTime)
-        val carolSession = carolLogin.sessionCookie()
+        val carolSession = carolLogin.sessionCookie("carol-first", userRow(CAROL_EMAIL))
         postPasswordChange(carolSession, carolLogin.csrfToken, carolOneTime, NEW_USER_PASSWORD, NEW_USER_PASSWORD)
             .statusCode shouldBe 200
 
@@ -243,11 +249,51 @@ class WorkspaceInvitationLocalE2eTest {
         val location: String?,
         private val cookies: Map<String, String>,
     ) {
-        fun sessionCookie(): String = checkNotNull(cookies["dp_session"]) { "no dp_session cookie in $cookies" }
+        /**
+         * #249: a login that answers without a session must NAME its refusal — the handler's
+         * three redirects are all in [location] (`/login?error=credentials|locked|inactive`)
+         * and the status/cookies it already holds were being dropped, so the gate red could
+         * not say which refusal it was. The subject user's row state rides along at the call
+         * sites that know the email ([userRow]).
+         */
+        fun sessionCookie(
+            step: String,
+            userRow: String? = null,
+        ): String =
+            checkNotNull(cookies["dp_session"]) {
+                buildString {
+                    append("no dp_session cookie after $step login: status=$statusCode location=$location cookies=$cookies")
+                    if (userRow != null) append(" user=[$userRow]")
+                }
+            }
 
         /** The `dp_csrf` cookie IS the token (plain double-submit, auth.md §8.4). */
         val csrfToken: String get() = checkNotNull(cookies["dp_csrf"]) { "no dp_csrf cookie in $cookies" }
     }
+
+    /**
+     * #249: the row state behind a refused login — the lockout columns decide which of the
+     * three refusals it was (`credentials` needs no column, `locked` is [failed_login_count]
+     * and [locked_until], `inactive` is [is_active]). No row is itself the answer.
+     */
+    private fun userRow(email: String): String =
+        query(
+            "SELECT provider || '/' || provider_subject || ' active=' || is_active || " +
+                "' must_change=' || must_change_password || ' failed=' || failed_login_count || " +
+                "' locked_until=' || coalesce(locked_until::text, 'never') FROM users WHERE email = '$email'",
+        ) { it.getString(1) }.singleOrNull() ?: "(no row)"
+
+    private fun <T> query(
+        sql: String,
+        row: (ResultSet) -> T,
+    ): List<T> =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery(sql).use { rs ->
+                    generateSequence { if (rs.next()) row(rs) else null }.toList()
+                }
+            }
+        }
 
     /** The real browser flow: GET /login for the cookies + hidden token, then POST. */
     private fun postLogin(
@@ -311,8 +357,16 @@ class WorkspaceInvitationLocalE2eTest {
     companion object {
         /** Namespaced to THIS suite — the module's containers are shared between suites in one run. */
         private const val ADMIN_EMAIL = "invite-admin@datapipelines.test"
-        private const val BOB_EMAIL = "bob@datapipelines.test"
-        private const val CAROL_EMAIL = "carol@datapipelines.test"
+
+        /**
+         * #249: namespaced like the admin above. The generic `carol@datapipelines.test` is
+         * MailNoticesE2eTest's KEYCLOAK identity (JIT-provisioned into the same per-JVM
+         * database whenever the two suites share a fork), and a create against that row
+         * answers `409 already exists` — measured red on the pregate's one-JVM shape before
+         * this namespacing, green after. `bob@` is namespaced with it for the same reason.
+         */
+        private const val BOB_EMAIL = "invite-bob@datapipelines.test"
+        private const val CAROL_EMAIL = "invite-carol@datapipelines.test"
         private const val WORKSPACE = "invites-acme"
         private const val NEW_ADMIN_PASSWORD = "a-brand-new-admin-password"
         private const val NEW_USER_PASSWORD = "a-brand-new-user-password"

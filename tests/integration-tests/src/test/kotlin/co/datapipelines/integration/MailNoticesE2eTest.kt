@@ -12,6 +12,7 @@ import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import jakarta.mail.Folder
 import jakarta.mail.Message
+import jakarta.mail.MessagingException
 import jakarta.mail.Multipart
 import jakarta.mail.Session
 import jakarta.mail.internet.InternetAddress
@@ -27,6 +28,7 @@ import org.springframework.test.context.DynamicPropertySource
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.utility.MountableFile
+import java.io.IOException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -339,7 +341,17 @@ class MailNoticesE2eTest {
         }
     }
 
-    /** The send is asynchronous: synchronise on the box, never on a clock (up to [AWAIT]). */
+    /**
+     * The send is asynchronous: synchronise on the box, never on a clock (up to [AWAIT]).
+     *
+     * #247: the IMAP read itself counts as "not yet" when the container drops it. Under a
+     * loaded gate GreenMail has answered a poll with `* BYE … Connection dropped by server`
+     * (lane 141's finding: this helper opens a fresh connection per poll), and that
+     * exception escaping the loop turned a slow delivery into a suite red. A dropped or
+     * refused poll now costs one [POLL_MS] cycle exactly like an empty box, bounded by the
+     * same [AWAIT]; if the wait exhausts, the LAST IMAP error rides the failure message so
+     * a red names the transport instead of the assertion.
+     */
     private fun awaitMessages(
         address: String,
         expected: Int,
@@ -347,12 +359,22 @@ class MailNoticesE2eTest {
     ): List<MimeMessage> {
         val deadline = System.nanoTime() + AWAIT.toNanos()
         var found: List<MimeMessage> = emptyList()
+        var lastReadError: Exception? = null
         while (System.nanoTime() < deadline) {
-            found = messages(address).filter(filter)
+            try {
+                found = messages(address).filter(filter)
+            } catch (e: MessagingException) {
+                lastReadError = e
+            } catch (e: IOException) {
+                lastReadError = e
+            }
             if (found.size >= expected) return found
             Thread.sleep(POLL_MS)
         }
-        throw AssertionError("expected $expected message(s) in $address's box within $AWAIT, found ${found.size}")
+        throw AssertionError(
+            "expected $expected message(s) in $address's box within $AWAIT, found ${found.size}" +
+                (lastReadError?.let { "; last IMAP read error: $it" } ?: ""),
+        )
     }
 
     /** A negative needs a settled box: wait a full poll interval past the last claim, then read. */
@@ -448,6 +470,8 @@ class MailNoticesE2eTest {
         private const val SECRET_BYTES = 32
         private const val SMTP_PORT = 3025
         private const val IMAP_PORT = 3143
+
+        /** Falsification plant only — never committed. */
         private const val KEYCLOAK_PORT = 8080
         private const val MAX_HOPS = 10
         private const val POLL_MS = 250L

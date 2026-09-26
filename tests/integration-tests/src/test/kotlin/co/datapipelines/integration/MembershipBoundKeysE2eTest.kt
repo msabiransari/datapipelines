@@ -156,16 +156,18 @@ class MembershipBoundKeysE2eTest {
         // The workspace, then the admin's ENTRY into it. The re-stamped SESSION drives the
         // publishing fixture — its active workspace decides where every write lands. (No key
         // is minted at sign-in, A15 — the members create their own in the tests.)
-        createWorkspace(admin.sessionCookie(), admin.csrfToken, WS_ACME)
-        val publisher = AdminAuth(switch(admin.sessionCookie(), admin.csrfToken, WS_ACME), admin.csrfToken)
+        // The re-stamped session drives the publishing fixture and creates the two members.
+        val adminSession = admin.sessionCookie("slate-admin", userRow(ADMIN_EMAIL))
+        createWorkspace(adminSession, admin.csrfToken, WS_ACME)
+        val publisher = AdminAuth(switch(adminSession, admin.csrfToken, WS_ACME), admin.csrfToken)
 
         registerDatasource(publisher)
         createTemplate(publisher)
         createPipeline(publisher)
         publish(publisher)
 
-        val bobOneTime = createLocalUser(admin.sessionCookie(), admin.csrfToken, BOB_EMAIL, WS_ACME, "author")
-        val carolOneTime = createLocalUser(admin.sessionCookie(), admin.csrfToken, CAROL_EMAIL, WS_ACME, "author")
+        val bobOneTime = createLocalUser(adminSession, admin.csrfToken, BOB_EMAIL, WS_ACME, "author")
+        val carolOneTime = createLocalUser(adminSession, admin.csrfToken, CAROL_EMAIL, WS_ACME, "author")
         return World(WS_ACME, bobOneTime, carolOneTime).also { world = it }
     }
 
@@ -309,13 +311,10 @@ class MembershipBoundKeysE2eTest {
 
     private inline fun withAdmin(block: (AdminAuth) -> Unit) {
         val login = postLogin(ADMIN_EMAIL, ADMIN_PASSWORD)
-        if (login.location?.contains("error") == true || login.sessionCookieOrNull() == null) {
-            println("event=keybound.admin_login_failed status=${login.statusCode} location=${login.location}")
-        }
         check(login.statusCode == 302 && login.sessionCookieOrNull() != null) {
-            "admin login failed: ${login.statusCode} -> ${login.location}"
+            "admin login failed: ${login.statusCode} -> ${login.location} user=[${userRow(ADMIN_EMAIL)}]"
         }
-        block(AdminAuth(login.sessionCookie(), login.csrfToken))
+        block(AdminAuth(login.sessionCookie("admin", userRow(ADMIN_EMAIL)), login.csrfToken))
     }
 
     /**
@@ -335,20 +334,17 @@ class MembershipBoundKeysE2eTest {
         val csrf: String
         if (settled) {
             val login = postLogin(email, MEMBER_PASSWORD)
-            if (login.sessionCookieOrNull() == null) diagnose("settled", login)
             login.statusCode shouldBe 302
-            session = login.sessionCookie()
+            session = login.sessionCookie("settled re-entry", userRow(email))
             csrf = login.csrfToken
         } else {
             val first = postLogin(email, oneTime)
-            if (first.sessionCookieOrNull() == null) diagnose("first", first)
             first.statusCode shouldBe 302
-            postPasswordChange(first.sessionCookie(), first.csrfToken, oneTime, MEMBER_PASSWORD, MEMBER_PASSWORD)
+            postPasswordChange(first.sessionCookie("first", userRow(email)), first.csrfToken, oneTime, MEMBER_PASSWORD, MEMBER_PASSWORD)
                 .statusCode shouldBe 200
             val clean = postLogin(email, MEMBER_PASSWORD)
-            if (clean.sessionCookieOrNull() == null) diagnose("clean", clean)
             clean.statusCode shouldBe 302
-            session = clean.sessionCookie()
+            session = clean.sessionCookie("clean", userRow(email))
             csrf = clean.csrfToken
         }
         val created =
@@ -635,7 +631,23 @@ class MembershipBoundKeysE2eTest {
         val location: String?,
         private val cookies: Map<String, String>,
     ) {
-        fun sessionCookie(): String = checkNotNull(sessionCookieOrNull()) { "no dp_session cookie in $cookies" }
+        /**
+         * #221: a login that answers without a session must NAME its refusal — the handler's
+         * three redirects are all in [location] (`/login?error=credentials|locked|inactive`)
+         * and the status/cookies it already holds were being dropped (the old `diagnose`
+         * printed them to stdout only, which the next cycle's XML overwrote). The subject
+         * user's row state rides along at the call sites that know the email ([userRow]).
+         */
+        fun sessionCookie(
+            step: String,
+            userRow: String? = null,
+        ): String =
+            checkNotNull(sessionCookieOrNull()) {
+                buildString {
+                    append("no dp_session cookie after $step login: status=$statusCode location=$location cookies=$cookies")
+                    if (userRow != null) append(" user=[$userRow]")
+                }
+            }
 
         fun sessionCookieOrNull(): String? = cookies["dp_session"]
 
@@ -643,13 +655,17 @@ class MembershipBoundKeysE2eTest {
         val csrfToken: String get() = checkNotNull(cookies["dp_csrf"]) { "no dp_csrf cookie in $cookies" }
     }
 
-    /** A refused login's one-line tell — the redirect location names the refusal. */
-    private fun diagnose(
-        step: String,
-        response: LoginResponse,
-    ) {
-        println("event=keybound.login_failed step=$step status=${response.statusCode} location=${response.location}")
-    }
+    /**
+     * #221: the row state behind a refused login — the lockout columns decide which of the
+     * three refusals it was (`credentials` needs no column, `locked` is [failed_login_count]
+     * and [locked_until], `inactive` is [is_active]). No row is itself the answer.
+     */
+    private fun userRow(email: String): String =
+        query(
+            "SELECT provider || '/' || provider_subject || ' active=' || is_active || " +
+                "' must_change=' || must_change_password || ' failed=' || failed_login_count || " +
+                "' locked_until=' || coalesce(locked_until::text, 'never') FROM users WHERE email = '$email'",
+        ) { it.getString(1) }.singleOrNull() ?: "(no row)"
 
     private fun <T> query(
         sql: String,
