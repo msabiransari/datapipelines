@@ -1837,7 +1837,7 @@ Returns datasource metadata as JSON, with the password field redacted. Workspace
 
 Returns the agent skill's `SKILL.md`, content-type `text/markdown` — the same bytes the
 deployment serves at `GET /skill.md` and the same file the repository holds at
-`.agents/skills/datapipelines/SKILL.md` (§15). `datapipelines://docs/skill/{reference}`
+`modules/mcp-server/src/main/resources/skill/core.md`, the manual's core rendered at boot (§15). `datapipelines://docs/skill/{reference}`
 returns one file of `references/` by name, with or without the `.md` suffix
 (`…/skill/templates` and `…/skill/templates.md` are the same resource); an unknown name is
 `RESOURCE_NOT_FOUND` like any other unknown URI. `{reference}` is a NAME, never a path — it

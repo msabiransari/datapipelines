@@ -377,7 +377,7 @@ Dual addressing was considered and rejected. It breaks nothing, but it is a perm
 | `modules/web/src/main/resources/templates/templates/editor.html:133-134` | release / draft-discard URLs |
 | `modules/web/src/main/resources/templates/pipelines/editor.html:187` | `'/templates/' + enc(id) + '/editor'` → `'/templates/editor?name=' + enc(id)` |
 | `modules/web/src/main/resources/templates/partials/pipeline-node-sql.html:11` | same link, server-rendered |
-| `.agents/skills/datapipelines/SKILL.md` | the API the skill teaches agents |
+| `modules/mcp-server/src/main/resources/skill/core.md` | the API the manual teaches agents (rendered at boot, #242) |
 | `docs/rest-api.md` §8 | routes rewritten, both GET shapes documented |
 | `docs/rest-api.md` line 3 + change log | status **v1.4 → v2.0**, with a change-log row naming the break, the measurement behind it, and the zero-caller finding |
 | `docs/ui-screens.md` §196 | cites `PUT /api/v1/templates/{id}` |
@@ -505,7 +505,7 @@ paths), by `pipelines_list`, and by its UUID URL, which is how it is opened and 
 
 §4.1 says what a name MAY be. This says what it SHOULD be, and it is written for the agent,
 because the agent is who names things here — pipelines are authored over MCP, not in the UI.
-It is restated verbatim in `.agents/skills/datapipelines/SKILL.md`.
+It is restated verbatim in `modules/mcp-server/src/main/resources/skill/core.md` (the manual's core, #242).
 
 ### 15.1 Workspace = who may see and run. Root segment = who owns.
 

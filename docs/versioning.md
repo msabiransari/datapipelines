@@ -1162,7 +1162,7 @@ The immutability KDoc blocks on both repositories are rewritten to the §3.1 dis
 
 ## 12. The Agent-Facing Skill Must Land With the Code
 
-`.agents/skills/datapipelines/SKILL.md` is what an agent reads before it touches this
+`modules/mcp-server/src/main/resources/skill/core.md` (served as `/skill.md`, #242) is what an agent reads before it touches this
 product. It is not documentation about the system — it is the system's instructions to its
 own callers, and MCP agents are the primary authoring surface here (contract §2; the
 editor is a viewer/executor). **A lifecycle change that reaches the API without reaching the
