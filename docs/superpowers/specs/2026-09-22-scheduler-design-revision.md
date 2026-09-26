@@ -10,7 +10,8 @@ the body disagree, the body wins.
 **Date:** 2026-09-22 (draft); ratified 2026-09-25. **Delivery:** [GitHub issue #9](https://github.com/msabiransari/datapipelines/issues/9), in the slices of §9.4.
 **Supersedes:** the implementation details in the [September 7 design](2026-09-07-scheduler-design.md).
 **Shipped by slice 1:** the scheduler core (module, tables, dispatcher, occurrences, runs and their
-trail, the system identity, the pipeline executor adapter, REST). The Schedules UI, bindings,
+trail, the system identity, the pipeline executor adapter, REST); what implementing it found wrong
+in this text is corrected in place and listed in §12 (C1–C4). The Schedules UI, bindings,
 notifications, the application credential and background runs are later slices (§9.4); a statement
 below about one of those describes that slice's contract, not slice 1's runtime.
 **Distribution:** contributor design material; not packaged as product documentation.
@@ -793,7 +794,9 @@ required.
 Migration **V38** (A17: numbers are allocated at merge time; V36 = 7e, V37 = keys v2 were the
 last on the base, and no open lane claims V38). V15 is the lake registry. Historical prompt 092
 and its old paths/counts are superseded by this revision and the current repository working
-agreements. DDL authority is metadata-db §4; this is the logical shape:
+agreements. DDL authority is metadata-db §4; this is the logical shape. The JSON columns below
+are named logically; stored, each carries metadata-db's `_json` suffix (`payload_json`,
+`parameters_json`, `prepared_json`, `details_json`) **(C2)**:
 
 - `schedules`: workspace, hierarchical name, concurrency `revision`, registered `executor_id`,
   `payload_schema_version`, opaque JSON `payload`, literal `parameters` JSON (R7 — executor
@@ -819,7 +822,10 @@ agreements. DDL authority is metadata-db §4; this is the logical shape:
   Unique `(schedule_id, scheduled_at)` for cron/catch-up occurrences; unique
   `(schedule_id, requested_by, idempotency_key)` for Run now; a partial unique index allowing at
   most one active (`queued` / `starting` / `running`) run per schedule.
-- `schedule_run_events` (§5.4, R10): append-only (an UPDATE trigger refuses any change), keyed
+- `schedule_run_events` (§5.4, R10): append-only **by construction** — the repository holds no
+  UPDATE or DELETE statement for it, and a source guard (`ScheduleTrailAppendOnlyTest`) keeps it
+  so; migrations emit no triggers (metadata-db's house rule), so the draft's refusing trigger is
+  not built **(C1)**. Keyed
   `(run_id, seq)` with `seq` monotonic per run (drawn from `schedule_runs.trail_seq` under the
   run row's lock), `kind`, `reason`, `at`, the `worker`, small `details` JSON (execution
   reference, retry number, summary counts); retained with the run's history. The pipeline's events
@@ -849,8 +855,8 @@ agreements. DDL authority is metadata-db §4; this is the logical shape:
 | `failed` | `execution_failed` | Execution `FAILED` (a node failure or the execution timeout) |
 | `cancelled` | `cancelled` | Execution `ABORTED`, abort reason `cancelled` |
 | `aborted` | `shutdown` (`client_disconnect` for completeness) | Execution `ABORTED` by the shutdown drain |
-| `unknown` | `instance_lost`, `start_unconfirmed`, `start_failed` | `ABORTED` / `pipeline.execution.instance_lost` (A5); a claim whose execution never appeared (§2.1); a `start` that threw. **Blocks the schedule.** A later real terminal is an update about the same run |
-| `not_started` | `capacity`, `pointer_null`, `target_not_found`, `parameters_invalid`, `version_changed`, `workspace_inactive`, `authority_refused`, `record_unwritable` | Definitively never started (§2 item 3). The executor's refusals may ask to block (all but `capacity` and `record_unwritable` do) |
+| `unknown` | `instance_lost`, `start_unconfirmed`, `start_failed`, `execution_missing` | `ABORTED` / `pipeline.execution.instance_lost` (A5); a claim whose execution never appeared (§2.1); a `start` that threw; a `running` run whose execution record the reconciler can no longer find (execution rows are never deleted, so nobody can explain it) **(C3)**. **Blocks the schedule.** A later real terminal is an update about the same run |
+| `not_started` | `capacity`, `executor_unavailable`, `pointer_null`, `target_not_found`, `payload_invalid`, `parameters_invalid`, `version_changed`, `workspace_inactive`, `authority_refused`, `start_refused`, `record_unwritable` | Definitively never started (§2 item 3). `executor_unavailable` is the scheduler's (no executor registered under the run's id); `payload_invalid` (the saved payload no longer parses) and `start_refused` (the launch path refused before recording the execution) are the pipeline executor's **(C3)**. Everything blocks except `capacity`, `record_unwritable`, `workspace_inactive` and `version_changed` — the last two because nothing about the schedule is wrong: a reactivated workspace is handled as an outage (§3), and a draft edited between preparation and launch is re-prepared by the next occurrence **(C4)** |
 | `skipped` | `missed`, `overlap`, `schedule_paused`, `schedule_blocked`, `schedule_deleted` | By policy; never attempted. `missed` rows may summarize a range |
 
 The trail's kinds: `recorded` (occurrence or manual request, with its origin), `capacity_retry`,
@@ -1365,3 +1371,15 @@ parameters.
 **Superseded §9.6 defaults**: RELEASED-only (R5 follows the pointer, drafts included); the name
 grammar moving to `typesystem` (the lane brief allows `scheduler → pipeline-contract` for the
 published grammar, A2); per-event notification toggles and scheduler mail defaults (slice 4's).
+
+## 12. Corrections found while implementing slice 1 (2026-09-25)
+
+Implementation measured the ratified text against the repository; these are corrected in place
+above, marked **(C#)**, and repeated here so a reader of the ratification diff finds them.
+
+| # | Was | Is | Why |
+|---|---|---|---|
+| C1 | `schedule_run_events` refused changes with an UPDATE trigger | Append-only by construction: no UPDATE/DELETE statement for it exists, and `ScheduleTrailAppendOnlyTest` scans the module's sources to keep it so | The repository's migrations emit no triggers (a Flyway guard enforces it); the construction plus the guard give the same property without one |
+| C2 | JSON columns named `payload`, `parameters`, `prepared`, `details` | `payload_json`, `parameters_json`, `prepared_json`, `details_json` | metadata-db's naming rule for JSONB columns, enforced by the migration guard |
+| C3 | §7.1 listed eight `not_started` and three `unknown` reasons | Eleven and four: `executor_unavailable`, `payload_invalid`, `start_refused`, `execution_missing` added | Each is a path the code has to answer and the table had no row for |
+| C4 | "all but `capacity` and `record_unwritable`" block | Also `workspace_inactive` and `version_changed` do not block | Blocking would make a person unblock a schedule that has nothing wrong with it |
