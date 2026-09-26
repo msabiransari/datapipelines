@@ -156,16 +156,18 @@ class MembershipBoundKeysE2eTest {
         // The workspace, then the admin's ENTRY into it. The re-stamped SESSION drives the
         // publishing fixture — its active workspace decides where every write lands. (No key
         // is minted at sign-in, A15 — the members create their own in the tests.)
-        createWorkspace(admin.sessionCookie("slate-admin", userRow(ADMIN_EMAIL)), admin.csrfToken, WS_ACME)
-        val publisher = AdminAuth(switch(admin.sessionCookie("slate-admin", userRow(ADMIN_EMAIL)), admin.csrfToken, WS_ACME), admin.csrfToken)
+        // The re-stamped session drives the publishing fixture and creates the two members.
+        val adminSession = admin.sessionCookie("slate-admin", userRow(ADMIN_EMAIL))
+        createWorkspace(adminSession, admin.csrfToken, WS_ACME)
+        val publisher = AdminAuth(switch(adminSession, admin.csrfToken, WS_ACME), admin.csrfToken)
 
         registerDatasource(publisher)
         createTemplate(publisher)
         createPipeline(publisher)
         publish(publisher)
 
-        val bobOneTime = createLocalUser(admin.sessionCookie("slate-admin", userRow(ADMIN_EMAIL)), admin.csrfToken, BOB_EMAIL, WS_ACME, "author")
-        val carolOneTime = createLocalUser(admin.sessionCookie("slate-admin", userRow(ADMIN_EMAIL)), admin.csrfToken, CAROL_EMAIL, WS_ACME, "author")
+        val bobOneTime = createLocalUser(adminSession, admin.csrfToken, BOB_EMAIL, WS_ACME, "author")
+        val carolOneTime = createLocalUser(adminSession, admin.csrfToken, CAROL_EMAIL, WS_ACME, "author")
         return World(WS_ACME, bobOneTime, carolOneTime).also { world = it }
     }
 
@@ -660,18 +662,16 @@ class MembershipBoundKeysE2eTest {
      */
     private fun userRow(email: String): String =
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-            connection
-                .prepareStatement(
-                    "SELECT provider || '/' || provider_subject || ' active=' || is_active || " +
-                        "' must_change=' || must_change_password || ' failed=' || failed_login_count || " +
-                        "' locked_until=' || coalesce(locked_until::text, 'never') FROM users WHERE email = ?",
-                )
-                .use { ps ->
-                    ps.setString(1, email)
-                    ps.executeQuery().use { rs ->
-                        if (rs.next()) rs.getString(1) else "(no row)"
-                    }
+            val sql =
+                "SELECT provider || '/' || provider_subject || ' active=' || is_active || " +
+                    "' must_change=' || must_change_password || ' failed=' || failed_login_count || " +
+                    "' locked_until=' || coalesce(locked_until::text, 'never') FROM users WHERE email = ?"
+            connection.prepareStatement(sql).use { ps ->
+                ps.setString(1, email)
+                ps.executeQuery().use { rs ->
+                    if (rs.next()) rs.getString(1) else "(no row)"
                 }
+            }
         }
 
     private fun <T> query(
