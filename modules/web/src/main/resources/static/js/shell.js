@@ -156,8 +156,11 @@
  *     combobox keyboard (↑/↓ move the ACTIVE row — focus stays in the input;
  *     Enter clicks it; Esc returns), and the two-copies rule: topbar + drawer
  *     roots are told apart by data-search-* hooks, the active row's id is
- *     reserved and document-unique, and ⌘K drives whichever copy is displayed
- *     (between 768 and 1100px neither is, and the chord does nothing).
+ *     reserved and document-unique, and ⌘K drives whichever copy is displayed.
+ *     #159: in the 768–1099 band neither is — the layout renders ONE entry
+ *     button there (#app-search-band); opening it reveals the topbar copy in
+ *     place (one class on the bar — no third copy of the control), and the
+ *     chord drives that button, so the band has search by button and by chord.
  *
  * Testability: the module exports the pure halves for `node --test`
  * (modules/web/src/test/js/shell.test.mjs); init() is idempotent and installs
@@ -798,8 +801,9 @@
   /* The control a global shortcut should drive: the copy that is actually displayed.
      offsetParent is null exactly when the element (or an ancestor) is display:none —
      the topbar copy below 1100px, the drawer copy above 768px, and — the gap between
-     those breakpoints — neither, where the shell renders no search control at all and
-     ⌘K does nothing. */
+     those breakpoints — neither. There (#159) the shortcut drives the band's entry
+     button instead, which reveals the topbar copy; the chord does nothing only where
+     that button is not displayed either (phone widths, the anonymous shell). */
   function visibleSearchRoot(doc) {
     var roots = searchRoots(doc);
     for (var i = 0; i < roots.length; i++) {
@@ -895,6 +899,49 @@
     for (var i = 0; i < roots.length; i++) setSearchOpen(roots[i], false);
   }
 
+  /* ---- #159: the 768–1099 band's entry point ----
+
+     Between the topbar copy's hide (below 1100px) and the drawer copy's (above 767.98px)
+     neither palette is displayed, so the band had no search at all and ⌘K had no control
+     to drive. The layout renders ONE button there (#app-search-band); OPENING it puts the
+     open class on the bar, which reveals the TOPBAR copy in place and stands the button
+     down — no third copy of the control: same ids, same fetch, same palette. Pure over a
+     `doc`, like every state helper above, for shell.test.mjs. */
+
+  var BAND_OPEN_CLASS = "app-search-band-open";
+  var BAND_TOGGLE_ID = "app-search-band";
+
+  function setSearchBandOpen(doc, open) {
+    var bar = doc.querySelector(".app-topbar");
+    if (!bar) return false;
+    bar.classList.toggle(BAND_OPEN_CLASS, open);
+    return true;
+  }
+
+  function searchBandOpen(doc) {
+    var bar = doc.querySelector(".app-topbar");
+    return !!(bar && bar.classList.contains(BAND_OPEN_CLASS));
+  }
+
+  /* The entry button takes the whole arrangement down again: the palette closes (if it
+     was still open) and the bar returns to the button, which receives focus — the
+     drawer's return-to-opener rule. */
+  function closeSearchBand(doc) {
+    var root = doc.querySelector(".app-topbar [data-search-root]");
+    if (root) setSearchOpen(root, false);
+    setSearchBandOpen(doc, false);
+    var button = doc.getElementById(BAND_TOGGLE_ID);
+    if (button && button.focus) button.focus();
+  }
+
+  /* True when the band's arrangement is what closed paths must dismantle: the bar is
+     open AND the topbar root is the one whose palette is showing. */
+  function searchBandActive(doc) {
+    if (!searchBandOpen(doc)) return false;
+    var root = doc.querySelector(".app-topbar [data-search-root]");
+    return !!(root && searchOpen(root));
+  }
+
   /* ---- the avatar menu ---- */
 
   function menuItems(menu) {
@@ -971,8 +1018,11 @@
       markEntrance(window, doc.getElementById(MAIN_ID));
       /* 161: a BOOSTED navigation closes the search palette too — Enter on a row (or
          any click on one) navigates through the rail's boost, and the palette the row
-         lives in must not hang over the screen it just opened. */
+         lives in must not hang over the screen it just opened. #159: the band's
+         revealed search stands down with it, so the next screen's bar carries the
+         entry button again. */
       closeAllSearchPalettes(doc);
+      setSearchBandOpen(doc, false);
       /* 110 §A: a BOOSTED navigation closes the drawer — the same one-shot that
          decides the entrance decides the close, so a background partial settling
          while the drawer is open cannot slam it shut. setRailOpen's no-change
@@ -1135,6 +1185,23 @@
       for (var i = 0; i < roots.length; i++) {
         if (searchOpen(roots[i]) && !roots[i].contains(evt.target)) setSearchOpen(roots[i], false);
       }
+      /* #159: the band's revealed search stands down when a click lands outside it —
+         the same outside-click contract the palettes keep. */
+      if (searchBandActive(doc) && !doc.querySelector(".app-topbar [data-search-root]").contains(evt.target)) {
+        setSearchBandOpen(doc, false);
+      }
+    });
+
+    /* #159 — the band's entry button: reveal the topbar copy in place (the class the
+       band's media rule waits for) and focus it; the focusin listener above opens the
+       palette. Closing is the palette's own close paths: Escape, an outside click, the
+       chord, or a boosted navigation. */
+    doc.body.addEventListener("click", function (evt) {
+      if (evt.target.closest && evt.target.closest("#" + BAND_TOGGLE_ID)) {
+        setSearchBandOpen(doc, true);
+        var bandInput = doc.getElementById("app-search-input");
+        if (bandInput && bandInput.focus) bandInput.focus();
+      }
     });
 
     /* 188 (#188) — the two layout-level behaviours that used to be `on*=` attributes,
@@ -1198,11 +1265,25 @@
          way: the field's placeholder has promised this chord since 079. */
       if ((evt.metaKey || evt.ctrlKey) && (evt.key === "k" || evt.key === "K")) {
         var shortcutRoot = visibleSearchRoot(doc);
-        if (!shortcutRoot) return;
+        if (!shortcutRoot) {
+          /* #159: in the 768–1099 band no palette copy is displayed; the chord drives
+             the band's entry button — the same open path a click takes. Where the button
+             is not displayed either (the anonymous shell, phone widths), the chord still
+             does nothing, exactly as before. */
+          var bandEntry = doc.getElementById(BAND_TOGGLE_ID);
+          if (bandEntry && bandEntry.offsetParent !== null) {
+            evt.preventDefault();
+            bandEntry.click();
+          }
+          return;
+        }
         evt.preventDefault();
         var shortcutInput = searchPart(shortcutRoot, "input");
         if (searchOpen(shortcutRoot)) {
           setSearchOpen(shortcutRoot, false);
+          /* #159: the chord closing the revealed band search returns the bar to the
+             entry button, with focus on it — the drawer's return-to-opener rule. */
+          if (searchBandOpen(doc)) closeSearchBand(doc);
         } else {
           if (shortcutInput && shortcutInput.focus) shortcutInput.focus();
           setSearchOpen(shortcutRoot, true);
@@ -1210,12 +1291,18 @@
         return;
       }
       /* 161: the palette is the top layer when open — Escape closes it before the
-         drawer (110 §A) and the avatar menu get their turns, and focus returns to the
-         input (the WAI-ARIA combobox contract). */
+          drawer (110 §A) and the avatar menu get their turns, and focus returns to the
+          input (the WAI-ARIA combobox contract). */
       if (evt.key === "Escape") {
         var paletteRoot = openSearchRoot(doc);
         if (paletteRoot) {
           setSearchOpen(paletteRoot, false);
+          /* #159: the band's revealed search stands down with its palette, and focus
+             returns to the control that remains — the entry button. */
+          if (searchBandOpen(doc)) {
+            closeSearchBand(doc);
+            return;
+          }
           var paletteInput = searchPart(paletteRoot, "input");
           if (paletteInput && paletteInput.focus) paletteInput.focus();
           return;
@@ -1354,6 +1441,12 @@
     closeAllSearchPalettes: closeAllSearchPalettes,
     SEARCH_ACTIVE_ID: SEARCH_ACTIVE_ID,
     SEARCH_OPEN_CLASS: SEARCH_OPEN_CLASS,
+    setSearchBandOpen: setSearchBandOpen,
+    searchBandOpen: searchBandOpen,
+    closeSearchBand: closeSearchBand,
+    searchBandActive: searchBandActive,
+    BAND_OPEN_CLASS: BAND_OPEN_CLASS,
+    BAND_TOGGLE_ID: BAND_TOGGLE_ID,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api; // node --test
   if (typeof window !== "undefined") {

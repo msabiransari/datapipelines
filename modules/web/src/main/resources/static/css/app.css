@@ -1182,6 +1182,35 @@ button.app-busy::after {
   }
 }
 
+/* #159 — the band's search entry point. Between the topbar copy's hide (the rule above)
+   and the drawer copy's (above 767.98px) neither palette is displayed, so the band had no
+   search at all and ⌘K had no control to drive. The button sits where the search sits
+   (margin-left: auto) and is hidden at every width by its base rule — only the band's
+   media rule lights it, the same "hidden by CSS, never by JS" contract as .app-rail-open.
+   When shell.js puts the open class on the bar, the TOPBAR copy is revealed in place and
+   the button stands down — no third copy of the control (same ids, same fetch).
+   Every selector is prefixed .app-topbar so the base hide outranks .app-icon-button's
+   own `display: grid` (0,2,0 over 0,1,0 — order-independent, unlike a same-specificity
+   later rule). */
+.app-topbar .app-search-band-toggle {
+  display: none;
+  margin-left: auto;
+}
+
+@media (min-width: 768px) and (max-width: 1099.98px) {
+  .app-topbar .app-search-band-toggle {
+    display: grid;
+  }
+
+  .app-topbar.app-search-band-open .app-search-band-toggle {
+    display: none;
+  }
+
+  .app-topbar.app-search-band-open .app-search {
+    display: flex;
+  }
+}
+
 /* #237 — the other side of that rule. From 1100 up the whole crumb shows (group / page) and,
    when the bar is short of width, the SEARCH yields it: the page's name is what the bar is
    read for, and a search box can lose part of its placeholder. Without this the search held

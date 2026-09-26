@@ -1,6 +1,8 @@
 package co.datapipelines.browser
 
 import com.microsoft.playwright.Page
+import io.kotest.matchers.booleans.shouldBeFalse
+import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -62,6 +64,26 @@ class HeaderSearchBrowserTest : BrowserSuite() {
         page.waitForURL("**/editor")
         page.url() shouldContain "/editor"
         page.waitForFunction("() => document.getElementById('app-search-palette').hidden === true")
+    }
+
+    /**
+     * #159 — the desktop contract the band entry point must not disturb: at ≥1100px the
+     * band button is display:none (it exists ONLY in the 768–1099 band), the topbar copy
+     * is the displayed one, and the chord still drives it directly.
+     */
+    @Test
+    fun `at desktop width the band entry point does not exist and the topbar copy keeps the chord`() {
+        startTrace()
+        signedIn("hdrchk")
+        page.setViewportSize(1440, 900)
+        page.navigate("$baseUrl/dashboard")
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+
+        page.locator("#app-search-band").isVisible().shouldBeFalse()
+        page.locator("#app-search-input").isVisible().shouldBeTrue()
+
+        page.keyboard().press("Control+k")
+        page.waitForFunction("() => document.getElementById('app-search-input').getAttribute('aria-expanded') === 'true'")
     }
 
     // ------------------------------------------------------------------ fixtures

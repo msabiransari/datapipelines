@@ -173,6 +173,105 @@ class MobileShellBrowserTest : BrowserSuite() {
     }
 
     /**
+     * #159 — the 768–1099 band's search entry point. On the base the band had NO search:
+     * the topbar copy hides below 1100px and the drawer copy above 767px, so ⌘K had no
+     * control to drive (this test is red there at the first assertion — the button does
+     * not exist). The entry button opens THE SAME palette (the topbar copy's ids, revealed
+     * in place; no third copy of the control), a query fetches /partials/search over it,
+     * Escape stands the button back up with focus on it, and the chord drives the same
+     * entry point.
+     */
+    @Test
+    fun `in the 768-1099 band the search button opens the palette and the chord does too`() {
+        startTrace()
+        signedIn("band")
+        val fixture = seededPipeline("band")
+        page.setViewportSize(1024, 768)
+        page.navigate("$baseUrl/dashboard")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+
+        // The entry point exists ONLY in the band: displayed here; neither palette copy is.
+        page.locator("#app-search-band").isVisible().shouldBeTrue()
+        page.locator("#app-search-input").isVisible().shouldBeFalse()
+        page.locator("#app-search-drawer-input").isVisible().shouldBeFalse()
+
+        // The button opens THE SAME palette — the topbar copy, revealed in place.
+        page.locator("#app-search-band").click()
+        page.waitForFunction("() => document.getElementById('app-search-input').getAttribute('aria-expanded') === 'true'")
+        page.locator("#app-search-input").isVisible().shouldBeTrue()
+        page.locator("#app-search-band").isVisible().shouldBeFalse()
+
+        // A query fetches /partials/search over the revealed copy.
+        page.locator("#app-search-input").fill(fixture)
+        val firstOption = page.locator("#app-search-results [role='option']").first()
+        firstOption.waitFor()
+        firstOption.getAttribute("href") shouldContain "/editor"
+
+        // Escape stands the button back up — and focus returns to it, the drawer's
+        // return-to-opener rule.
+        page.keyboard().press("Escape")
+        page.waitForFunction("() => document.getElementById('app-search-palette').hidden === true")
+        page.locator("#app-search-band").isVisible().shouldBeTrue()
+        activeElementIs("#app-search-band").shouldBeTrue()
+
+        // The chord drives the same entry point in the band, and the query finds the
+        // fixture through it — both entries reach the ONE control.
+        page.keyboard().press("Control+k")
+        page.waitForFunction("() => document.getElementById('app-search-input').getAttribute('aria-expanded') === 'true'")
+        page.locator("#app-search-input").fill(fixture)
+        page.locator("#app-search-results [role='option']").first().waitFor()
+    }
+
+    /**
+     * #159's testing follow-up — the drawer copy's palette had NO browser arm at phone
+     * width (the suffixed `-drawer-` ids were exercised only by `node --test`): open the
+     * drawer, type, walk to the hit, Enter — the row's boosted navigation lands on the
+     * editor with the drawer closed behind it.
+     */
+    @Test
+    fun `the drawer's search copy finds a pipeline and Enter opens it at phone width`() {
+        startTrace()
+        signedIn("drws")
+        val fixture = seededPipeline("drws")
+        page.setViewportSize(390, 844)
+        page.navigate("$baseUrl/dashboard")
+        page.waitForLoadState(LoadState.NETWORKIDLE)
+
+        page.locator("#rail-open").click()
+        page.locator("html.rail-open").waitFor()
+        waitForDrawerOpen()
+
+        val input = page.locator("#app-search-drawer-input")
+        input.isVisible().shouldBeTrue()
+        input.fill(fixture)
+        val firstOption = page.locator("#app-search-drawer-results [role='option']").first()
+        firstOption.waitFor()
+        firstOption.getAttribute("href") shouldContain "/editor"
+
+        page.keyboard().press("ArrowDown")
+        page.waitForFunction(
+            "() => document.querySelector('#app-search-drawer-results [role=option][aria-selected=true]') !== null",
+        )
+        page.keyboard().press("Enter")
+        page.waitForURL("**/editor")
+        // The boosted settle closed the drawer (and the palette) behind the navigation.
+        waitForDrawerClosed()
+        page.url() shouldContain "/editor"
+    }
+
+    /** Seeds ONE pipeline through the page's own session (the 106 fixture pattern) and returns its name. */
+    private fun seededPipeline(slug: String): String {
+        val fixture = slug + generatedPassword("f").take(8).lowercase()
+        postJson(
+            "/api/v1/pipelines",
+            """{"name":"test/$fixture","display_name":"$fixture","description":"#159 search fixture",""" +
+                """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
+                """"inputs":{"date":"${'$'}current_date","fiscal_start":"${'$'}org_fiscal_start_date"}}]}""",
+        )
+        return fixture
+    }
+
+    /**
      * 110 §D.4 — the handback's screenshot set: dashboard, pipelines (drawer closed and
      * open), executions detail, the datasources register modal, and one editor with its
      * §C band — at 390 light and dark, plus the 768 dashboard. These come from THIS

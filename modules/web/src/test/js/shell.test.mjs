@@ -1232,3 +1232,80 @@ test("closeAllSearchPalettes closes every open copy at once", () => {
   assert.equal(shell.searchOpen(a.root), false);
   assert.equal(shell.searchOpen(b.root), false);
 });
+
+// #159 — the 768–1099 band's entry point. One class on the bar reveals the topbar copy
+// (no third copy of the control); the close paths dismantle palette + class together and
+// hand focus back to the entry button. Pure halves here; the media rule and the wiring
+// are falsified at the browser arms (MobileShellBrowserTest's band case).
+// ---------------------------------------------------------------------------
+
+/** A doc double with the bar, the topbar search root and the entry button. */
+function mkBandDoc({ buttonDisplayed = true } = {}) {
+  const barClasses = new Set();
+  const bar = {
+    classList: {
+      toggle: (c, on) => (on ? barClasses.add(c) : barClasses.delete(c)),
+      contains: (c) => barClasses.has(c),
+    },
+  };
+  const topbar = mkSearchRoot(true, 0);
+  const button = { offsetParent: buttonDisplayed ? {} : null, focused: false };
+  button.focus = () => {
+    button.focused = true;
+  };
+  return {
+    barClasses,
+    topbar,
+    button,
+    querySelector: (sel) =>
+      sel === ".app-topbar" ? bar : sel === ".app-topbar [data-search-root]" ? topbar.root : null,
+    getElementById: (id) => (id === "app-search-band" ? button : null),
+  };
+}
+
+test("setSearchBandOpen toggles the band class on the bar, and reads back", () => {
+  const shell = loadShell();
+  const doc = mkBandDoc();
+
+  assert.equal(shell.searchBandOpen(doc), false);
+  assert.equal(shell.setSearchBandOpen(doc, true), true);
+  assert.equal(shell.searchBandOpen(doc), true);
+  assert.equal(doc.barClasses.has(shell.BAND_OPEN_CLASS), true);
+
+  shell.setSearchBandOpen(doc, false);
+  assert.equal(shell.searchBandOpen(doc), false);
+  assert.equal(doc.barClasses.has(shell.BAND_OPEN_CLASS), false);
+
+  // No bar (the anonymous shell): the class write is refused, not thrown.
+  assert.equal(shell.setSearchBandOpen({ querySelector: () => null }, true), false);
+});
+
+test("searchBandActive is true only while the bar is open AND the topbar palette is showing", () => {
+  const shell = loadShell();
+  const doc = mkBandDoc();
+
+  // Class on but palette closed: not active — nothing the close paths must dismantle.
+  shell.setSearchBandOpen(doc, true);
+  assert.equal(shell.searchBandActive(doc), false);
+
+  shell.setSearchOpen(doc.topbar.root, true);
+  assert.equal(shell.searchBandActive(doc), true);
+
+  shell.setSearchBandOpen(doc, false);
+  shell.setSearchOpen(doc.topbar.root, true);
+  assert.equal(shell.searchBandActive(doc), false);
+});
+
+test("closeSearchBand closes the topbar palette, stands the bar down, and focuses the button", () => {
+  const shell = loadShell();
+  const doc = mkBandDoc();
+  shell.setSearchBandOpen(doc, true);
+  shell.setSearchOpen(doc.topbar.root, true);
+  shell.setSearchActive(doc.topbar.root, null);
+
+  shell.closeSearchBand(doc);
+
+  assert.equal(shell.searchOpen(doc.topbar.root), false);
+  assert.equal(shell.searchBandOpen(doc), false);
+  assert.equal(doc.button.focused, true);
+});
