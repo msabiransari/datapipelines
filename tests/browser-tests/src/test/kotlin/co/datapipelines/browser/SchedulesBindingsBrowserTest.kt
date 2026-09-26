@@ -172,7 +172,9 @@ class SchedulesBindingsBrowserTest : SchedulesBrowserSuite() {
             page.locator("#schedule-detail .sch-runrow [data-sch-action='open-run']").first().click()
             val dlg = page.locator("#sch-dialog .sch-run-dialog")
             dlg.waitFor()
-            dlg.locator("details.sch-frozen summary").click()
+            // The resolved block sits inside the frozen-parameters <details>; open it deterministically
+            // (a summary click races the dialog's async message fill).
+            page.evaluate("() => { const d = document.querySelector('#sch-dialog details.sch-frozen'); if (d) d.open = true; }")
             dlg.locator("[data-slot='resolved']:not([hidden])").waitFor()
             shot("bindings-run-1440-$mode")
             page.keyboard().press("Escape")
