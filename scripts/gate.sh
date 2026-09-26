@@ -36,6 +36,10 @@
 #   3. scripts/vuln-scan.sh (OSV-Scanner over the committed lockfiles). It
 #      fails the gate on real findings and warns without failing when the
 #      network is unreachable (fail-soft by design).
+#   4. the docs audit (scripts/docs-audit.sh) over docs/ AND the served manual,
+#      which `:modules:mcp-server:docsExport` renders first (242a). CI runs the
+#      same pair after its build; a gate without it passed 3da4920a while CI
+#      went red on it (2026-09-26) — the stage exists so the two verdicts agree.
 #
 # The incremental pass is deliberate: it has its own failure history, and a gate
 # that only ever runs from clean never exercises the path developers use most.
@@ -287,6 +291,27 @@ elif [ "$scan" -eq "$SCAN_EXIT_OFFLINE" ]; then
 else
   fails=$((fails + 1))
   echo "  vuln-scan  EXIT=$scan  (known vulnerabilities or scan error — log: $LOGDIR/vuln-scan.log)"
+fi
+
+# ---- docs audit (the served manual exported first — 242a) --------------------
+# scripts/docs-audit.sh checks docs/ AND build/skill-docs/, which
+# `:modules:mcp-server:docsExport` renders from the tree under gate. Both
+# steps write their own log; the export's failure is its own verdict line.
+echo
+dexp=$(run "$LOGDIR/docs-export.log" :modules:mcp-server:docsExport -q)
+if [ "$dexp" -ne 0 ]; then
+  fails=$((fails + 1))
+  echo "  docs-audit  EXIT=$dexp  (docsExport failed — log: $LOGDIR/docs-export.log)"
+else
+  daudit=0
+  ./scripts/docs-audit.sh > "$LOGDIR/docs-audit.log" 2>&1 || daudit=$?
+  if [ "$daudit" -eq 0 ]; then
+    echo "  docs-audit  PASS — $(tail -n 1 "$LOGDIR/docs-audit.log")"
+  else
+    fails=$((fails + 1))
+    echo "  docs-audit  EXIT=$daudit  (log: $LOGDIR/docs-audit.log)"
+    grep -vE '^\s*$' "$LOGDIR/docs-audit.log" | tail -n 5 | sed 's/^/             /' || true
+  fi
 fi
 
 echo "--------------------------------------------------------------"

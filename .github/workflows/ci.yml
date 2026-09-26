@@ -16,7 +16,9 @@
 #         ("hermetic") design intent was dropped deliberately (025b/C1): excluding
 #         those 21 files across 7 modules would leave real unit coverage unrun, and
 #         Docker on ubuntu-latest is reliable.
-#     ./scripts/docs-audit.sh               — pure doc-structure checks, no network.
+#     ./scripts/docs-audit.sh               — doc-structure checks over docs/ AND the served
+#         manual: `:modules:mcp-server:docsExport` renders it into build/skill-docs first
+#         (offline — the build step above resolved its classpath; 242a). No network.
 #
 #   integration (ubuntu-latest, Docker available and used):
 #     ./gradlew integrationTest             — the Testcontainers E2E suite AND the
@@ -129,8 +131,10 @@ jobs:
             modules/*/build/test-results/test/*.xml
           retention-days: 7
           if-no-files-found: warn
-      - name: docs audit
-        run: ./scripts/docs-audit.sh
+      - name: docs audit (the served manual exported first — 242a)
+        run: |
+          ./gradlew :modules:mcp-server:docsExport --offline -q
+          ./scripts/docs-audit.sh
 
   integration:
     runs-on: ubuntu-latest

@@ -1115,7 +1115,7 @@ datapipelines/
 ├── scripts/
 │   ├── sync-design-system.sh   ← copies design system CSS from ../design-system-starter (§5)
 │   ├── docs-audit.sh           ← mechanical doc consistency check (§10.1); must exit 0
-│   ├── gate.sh                 ← Gate A: clean/build/build cycles + buildSrc guard tests + vuln-scan
+│   ├── gate.sh                 ← Gate A: clean/build/build cycles + buildSrc guard tests + security-assurance + vuln-scan + docs audit (242a: docsExport first)
 │   ├── install-hooks.sh        ← one-time: point git's core.hooksPath at .githooks/
 │   ├── secret-scan.sh          ← gitleaks secret scan (full history / --staged for the hook)
 │   ├── vuln-scan.sh            ← OSV-Scanner over the committed lockfiles (§10.2)
