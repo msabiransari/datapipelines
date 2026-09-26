@@ -1,0 +1,161 @@
+<!-- The schedule form — ONE component for create (§20.2) and edit (§20.5), cloned into
+     #sch-dialog by static/js/schedules/form.js. Rendered for authors only: the whole
+     skeleton sits inside the `canAuthor` guard, so a viewer's page has no form to open.
+
+     Field by field, the server stays the authority: the name grammar is
+     PipelineNameGrammar's (the ONE grammar, record A2) and is checked by §20 on save, the
+     pattern and zone by the scheduler's occurrence function, the parameters by the binder an
+     interactive run uses (R7). A refusal comes back as the catalog's message BESIDE the field
+     it names; anything that names no field is a toast.
+
+     NOT in this slice (record §6): the notification e-mail list (slice 4 — the schema has no
+     recipients yet) and any key or role assignment (R2 — a schedule fires as the system
+     identity). The version is `current`, fixed: slice 1 refuses a numeric version
+     (scheduler.md §2.1). -->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="skeletons">
+  <th:block th:if="${canAuthor == true}">
+  <template id="sch-tpl-form">
+    <div class="u-backdrop" data-sch-dialog>
+      <div class="ds-card app-modal app-modal-lg u-modal-tall sch-form-dialog" role="dialog" aria-modal="true" aria-labelledby="sch-form-title">
+        <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close" data-sch-action="close-dialog" aria-label="Close">
+          <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+        </button>
+        <h2 class="ds-title u-m0 u-mb-md" id="sch-form-title" data-slot="title">New schedule</h2>
+
+        <!-- A stale revision (§20.5's 409) is rendered here, inside the form it concerns, with
+             the one way forward: reload the current schedule, then save again. -->
+        <section class="app-alert app-alert-warning u-mb-md" data-slot="conflict" role="alert" hidden>
+          <p class="u-bold u-m0">Someone changed this schedule after you opened it.</p>
+          <p class="u-m0 u-text-sm" data-slot="conflict-text"></p>
+          <div><button type="button" class="ds-button ds-button-secondary ds-button-sm" data-sch-action="reload-form">Reload the current schedule</button></div>
+        </section>
+
+        <form class="sch-form" novalidate data-sch-form>
+          <div class="ds-field">
+            <label class="ds-field-label" for="sch-f-name">Name</label>
+            <input id="sch-f-name" name="name" type="text" class="ds-input u-full" list="sch-f-folders"
+                   autocomplete="off" spellcheck="false" maxlength="512" required
+                   placeholder="finance/daily/revenue" aria-describedby="sch-f-name-help sch-f-name-error">
+            <datalist id="sch-f-folders"></datalist>
+            <p class="ds-field-help" id="sch-f-name-help">A folder path — lower-case segments separated by <code>/</code>, at least one folder. Unique among this workspace's schedules; renaming keeps its history.</p>
+            <p class="ds-field-error" id="sch-f-name-error" data-field-error="name" hidden></p>
+          </div>
+
+          <div class="ds-field">
+            <label class="ds-field-label" for="sch-f-pipeline">Pipeline</label>
+            <input id="sch-f-pipeline" name="pipeline" type="text" class="ds-input u-full" list="sch-f-pipelines"
+                   autocomplete="off" spellcheck="false" required placeholder="Start typing a pipeline path"
+                   aria-describedby="sch-f-pipeline-help sch-f-pipeline-error">
+            <datalist id="sch-f-pipelines"></datalist>
+            <p class="ds-field-help" id="sch-f-pipeline-help" data-slot="pipeline-help">Runs the pipeline's <b>current</b> version at each occurrence — whichever version its current pointer names then.</p>
+            <p class="ds-field-error" id="sch-f-pipeline-error" data-field-error="pipeline" hidden></p>
+          </div>
+
+          <fieldset class="sch-fieldset">
+            <legend class="ds-field-label">When</legend>
+            <div class="sch-when-row">
+              <div class="ds-field">
+                <label class="ds-field-label" for="sch-f-preset">Repeats</label>
+                <select id="sch-f-preset" class="ds-input" data-cron-part="preset">
+                  <option value="hourly">Every hour</option>
+                  <option value="daily" selected>Every day</option>
+                  <option value="weekly">Every week</option>
+                  <option value="monthly">Every month</option>
+                  <option value="custom">Custom (cron)</option>
+                </select>
+              </div>
+              <div class="ds-field" data-preset-only="hourly" hidden>
+                <label class="ds-field-label" for="sch-f-minute">At minute</label>
+                <input id="sch-f-minute" type="number" min="0" max="59" step="1" value="0" class="ds-input app-input-fixed-sm" data-cron-part="minute">
+              </div>
+              <div class="ds-field" data-preset-only="weekly" hidden>
+                <label class="ds-field-label" for="sch-f-dow">On</label>
+                <select id="sch-f-dow" class="ds-input" data-cron-part="dow">
+                  <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
+                  <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
+                  <option value="0">Sunday</option>
+                </select>
+              </div>
+              <div class="ds-field" data-preset-only="monthly" hidden>
+                <label class="ds-field-label" for="sch-f-dom">On day</label>
+                <input id="sch-f-dom" type="number" min="1" max="31" step="1" value="1" class="ds-input app-input-fixed-sm" data-cron-part="dom">
+              </div>
+              <div class="ds-field" data-preset-only="daily weekly monthly">
+                <label class="ds-field-label" for="sch-f-time">At</label>
+                <input id="sch-f-time" type="time" value="06:00" step="60" class="ds-input" data-cron-part="time">
+              </div>
+            </div>
+            <div class="ds-field">
+              <label class="ds-field-label" for="sch-f-cron">Cron pattern</label>
+              <input id="sch-f-cron" name="cron" type="text" class="ds-input u-mono u-full" readonly
+                     autocomplete="off" spellcheck="false" aria-describedby="sch-f-cron-help sch-f-cron-error">
+              <p class="ds-field-help" id="sch-f-cron-help">Five fields: minute, hour, day of month, month, day of week. Runs at least five minutes apart.</p>
+              <p class="ds-field-help" data-slot="monthly-note" hidden>A month without that day is skipped.</p>
+              <p class="ds-field-error" id="sch-f-cron-error" data-field-error="cron" hidden></p>
+            </div>
+            <div class="ds-field">
+              <label class="ds-field-label" for="sch-f-timezone">Timezone</label>
+              <select id="sch-f-timezone" name="timezone" class="ds-input u-full" aria-describedby="sch-f-timezone-error">
+                <optgroup th:each="g : ${timezoneGroups}" th:attr="label=${g.region}">
+                  <option th:each="z : ${g.zones}" th:value="${z}" th:text="${z}">Europe/London</option>
+                </optgroup>
+              </select>
+              <p class="ds-field-error" id="sch-f-timezone-error" data-field-error="timezone" hidden></p>
+            </div>
+
+            <!-- §20.3 — the next five of the pattern AS TYPED, from the same function the
+                 dispatcher uses, refreshed as the pattern or the zone changes. -->
+            <div class="sch-preview" aria-live="polite">
+              <p class="ds-field-label u-m0">Next five</p>
+              <p class="u-text-sm u-muted u-m0" data-slot="preview-status"></p>
+              <ol class="sch-preview-list" data-slot="preview"></ol>
+            </div>
+          </fieldset>
+
+          <fieldset class="sch-fieldset">
+            <legend class="ds-field-label">If occurrences are missed</legend>
+            <p class="ds-field-help u-mt-xs">When no instance was running at the time — an outage or a deploy. Time spent paused or blocked is never "missed".</p>
+            <label class="sch-radio"><input type="radio" name="missed_run_policy" value="skip" checked> <span>Skip them <span class="u-muted">(default)</span></span></label>
+            <label class="sch-radio"><input type="radio" name="missed_run_policy" value="latest"> <span>Run the latest one once, if it is less than a day old</span></label>
+            <p class="ds-field-error" data-field-error="missed_run_policy" hidden></p>
+          </fieldset>
+
+          <fieldset class="sch-fieldset">
+            <legend class="ds-field-label">Parameters</legend>
+            <p class="ds-field-help u-mt-xs" data-slot="params-status">Choose a pipeline to see the parameters its current version declares.</p>
+            <div class="sch-params" data-slot="params"></div>
+            <p class="ds-field-error" data-field-error="parameters" hidden></p>
+          </fieldset>
+
+          <div class="u-row u-gap-sm u-right sch-form-actions">
+            <button type="button" class="ds-button ds-button-secondary" data-sch-action="close-dialog">Cancel</button>
+            <button th:if="${canAuthor == true}" data-verb="schedule-save" type="submit"
+                    class="ds-button ds-button-primary" data-slot="submit">Create schedule</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </template>
+
+  <!-- One declared parameter of the chosen pipeline's current version (pipeline-contract §6).
+       Blank means "not given": the declared default applies, and a required one is refused by
+       the binder beside this field. -->
+  <template id="sch-tpl-param">
+    <div class="ds-field sch-param">
+      <label class="ds-field-label">
+        <span class="u-mono" data-slot="name"></span>
+        <span class="ds-badge ds-badge-default u-mono" data-slot="type"></span>
+        <span class="ds-badge ds-badge-warning" data-slot="required" hidden>required</span>
+      </label>
+      <input type="text" class="ds-input u-full" data-param-input autocomplete="off" spellcheck="false">
+      <select class="ds-input" data-param-select hidden>
+        <option value="">— not given —</option>
+        <option value="true">true</option>
+        <option value="false">false</option>
+      </select>
+      <p class="ds-field-help" data-slot="help"></p>
+      <p class="ds-field-error" data-param-error hidden></p>
+    </div>
+  </template>
+  </th:block>
+</th:block>
