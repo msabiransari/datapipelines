@@ -290,6 +290,10 @@ class SubPipelineExecutionRunner(
         // is inherited again by every grandchild. Roots always carry one (`ExecutionStreamLauncher`,
         // `McpRecordingExecutionRunner`); the fallback only covers a request built without one.
         correlationId = ctx.correlationId ?: UUID.randomUUID(),
+        // A13: the frozen reference time is inherited like the principal and the workspace — a
+        // scheduled composition resolves its bindings (TODAY / YESTERDAY) on the parent's
+        // logical time, never on the child's own start instant.
+        reference = ctx.reference,
     )
 
     /**

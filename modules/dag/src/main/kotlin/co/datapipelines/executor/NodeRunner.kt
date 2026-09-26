@@ -122,6 +122,14 @@ data class NodeExecutionContext(
      */
     val workspaceId: UUID,
     /**
+     * The execution's frozen logical time ([ExecuteRequest.reference], #9 slice 3 / A13) —
+     * threaded from the request, inherited by a PIPELINE node's child request so the whole
+     * family resolves bindings (TODAY / YESTERDAY) against one reference. Deliberately NOT in
+     * [values] ([RunContext]): §5.1 keeps authoritative occurrence metadata outside the
+     * overridable SQL Context. Null for every direct execution.
+     */
+    val reference: ExecutionReference? = null,
+    /**
      * Which phase each node of this execution is currently inside (108) — read by the node
      * wall-clock deadline to name the phase on `pipeline.node.timeout`. Defaulted so every
      * existing construction site (four in `web`, every fixture) is unchanged.

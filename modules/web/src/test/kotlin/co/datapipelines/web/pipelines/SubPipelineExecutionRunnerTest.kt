@@ -10,6 +10,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.executor.ExecutionReference
 import co.datapipelines.executor.ExecutorConfig
 import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.InMemoryCancellationRegistry
@@ -60,6 +61,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 /**
@@ -169,6 +171,7 @@ class SubPipelineExecutionRunnerTest {
         compositionDepth: Int = 0,
         values: Map<String, Any?> = emptyMap(),
         directSink: DirectResultSink? = null,
+        reference: ExecutionReference? = null,
     ): NodeExecutionContext =
         NodeExecutionContext(
             executionId = parentExecutionId,
@@ -186,6 +189,7 @@ class SubPipelineExecutionRunnerTest {
             directSink = directSink,
             correlationId = parentCorrelationId,
             workspaceId = parentWorkspaceId,
+            reference = reference,
         )
 
     /**
@@ -299,6 +303,26 @@ class SubPipelineExecutionRunnerTest {
             // On the REQUEST, so it also reaches the child's own `execution_started` payload and is
             // inherited again by any grandchild the child spawns.
             stub.captured.single().correlationId shouldBe parentCorrelationId
+        }
+
+    /**
+     * A13 — the frozen reference time is inherited like the principal and the workspace: a
+     * scheduled composition's whole family resolves its bindings on the parent's logical time.
+     * A root that had none (every direct execution) leaves the child's null too.
+     */
+    @Test
+    fun `the child request carries the parent's frozen reference - and none when the parent had none`() =
+        runTest {
+            stubRegistry()
+            val reference = ExecutionReference(Instant.parse("2026-09-22T03:55:00Z"), ZoneId.of("America/New_York"))
+            val withReference = ExecutorStub()
+            val withoutReference = ExecutorStub()
+
+            runner(withReference).run(pipelineNode(), context(reference = reference))
+            runner(withoutReference).run(pipelineNode(), context())
+
+            withReference.captured.single().reference shouldBe reference
+            withoutReference.captured.single().reference shouldBe null
         }
 
     @Test
