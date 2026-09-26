@@ -914,17 +914,34 @@ gitleaks, trivy) install through `scan_tools_dir` in `scripts/lib/scan-tools.sh`
 
 osv-scanner's release manifest is cached beside the binary
 (`osv-scanner-<version>-<os>-<arch>.SHA256SUMS`) and the binary is
-**re-verified against it on every run**, not only at install. The three
-outcomes, each proven from a fresh worktree (lane 188's evidence):
+**re-verified against it on every run**, not only at install. Since #198 the
+manifest's own SHA-256 is **pinned in the script** beside
+`OSV_SCANNER_VERSION` (`OSV_SCANNER_SUMS_SHA256`, computed from a fresh
+download of the release page) and the manifest is checked against that pin
+before it is used — every run — closing the trust-on-first-use hole a
+compromised release page used to have: a swapped binary fails the manifest
+verify, a swapped manifest fails the pin, and either refusal is exit `2`.
+The three outcomes, each proven from a fresh worktree (lane 188's evidence):
 
 | situation | result |
 |---|---|
 | cache warm (binary + manifest present, hashes match) | the scan runs — no download at all, online or not-GitHub-only |
 | offline, cache cold | exit `200` (`skipped-offline`), with a WARNING naming the missing binary path and the release URL it would have fetched; `gate.sh` counts the skip and prints those lines |
 | cached binary does not match its manifest (corrupted, swapped) | exit `2` — both hashes printed, the binary deleted so the next online run re-installs; never a skip, never `1` |
+| cached or downloaded manifest does not match the in-repo pin (#198) | exit `2` — the pinned and actual hashes printed, the manifest deleted so the next online run re-downloads it; never a skip, never `1` |
 
 Offline with a warm cache still exits `200`: the preflight is against osv.dev,
 which the scan needs; the cache only removes the *GitHub* dependency.
+
+**Bumping osv-scanner (§10.2's procedure, #198).** One commit carries BOTH
+edits: the new `OSV_SCANNER_VERSION` and the refreshed
+`OSV_SCANNER_SUMS_SHA256`. To compute the pin: download the new release's
+`osv-scanner_SHA256SUMS` from
+`https://github.com/google/osv-scanner/releases/download/<version>/osv-scanner_SHA256SUMS`,
+run `shasum -a 256` on it, and record the value (with the date) beside the
+version. Never bump the version alone — the pin would refuse every manifest
+the new release serves, and the scan would fail as exit `2` until the pin is
+refreshed.
 
 The shared install helpers in `scripts/lib/scan-tools.sh` (download, SHA256
 verify) exit `2` on failure for **all three** scanner scripts —

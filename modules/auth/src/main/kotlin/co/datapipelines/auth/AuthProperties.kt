@@ -87,6 +87,17 @@ data class AuthProperties(
          * (`auth.login.email_verified_assumed`).
          */
         val trustEmailWithoutVerifiedClaim: Boolean = false,
+        /**
+         * `picture-hosts` (auth.md §11.1, #197): the hosts this provider's `picture` claims
+         * live on — the allowlist the avatar proxy (`GET /avatar`) may fetch from. Binds a
+         * comma-separated string to `List<String>` (empty = no fetch, the avatar falls back
+         * to initials). Measured, NOT derivable from `issuerUri`: Google issues from
+         * `accounts.google.com` but serves pictures from `lh3.googleusercontent.com`; Entra's
+         * pictures live on Microsoft Graph; a self-hosted Keycloak's pictures sit wherever
+         * its operator mapped them. The operator names the hosts the deployment trusts;
+         * entries are bare hostnames and are validated where the allowlist is built.
+         */
+        val pictureHosts: List<String> = emptyList(),
     )
 
     /**

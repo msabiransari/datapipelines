@@ -389,16 +389,27 @@ class SessionRequiredException(
         details = mapOf("operation" to operation),
     )
 
-/** Per-IP login rate limit ([Pipeline Contract §13.11], auth.md §9). */
+/**
+ * Per-IP login rate limit ([Pipeline Contract §13.11], auth.md §9). The default user message
+ * is the LOGIN damper's sentence (#232): the per-user API limiter and every other surface
+ * override it — the API surfaces with the [co.datapipelines.web.api.ApiErrorCatalog] default
+ * — so the caller is told about the limit they actually hit.
+ */
 class RateLimitExceededException(
     limitPerMinute: Int,
+    userMessage: String = LOGIN_USER_MESSAGE,
 ) : AuthException(
         AuthErrorCodes.RATE_LIMIT_EXCEEDED,
         HTTP_TOO_MANY_REQUESTS,
         "Rate limit exceeded",
-        "Too many sign-in attempts. Wait a minute and try again.",
+        userMessage,
         details = mapOf("limit" to limitPerMinute, "window" to "1m"),
-    )
+    ) {
+    companion object {
+        /** What the sign-in damper says: the caller made too many sign-in ATTEMPTS. */
+        const val LOGIN_USER_MESSAGE = "Too many sign-in attempts. Wait a minute and try again."
+    }
+}
 
 /**
  * The principal's user is deactivated (D15, roles design §3.5) — the one refusal

@@ -18,6 +18,16 @@
 # (exit 2, both hashes printed) rather than trusted for being present. Bump by
 # editing OSV_SCANNER_VERSION after verifying the new release the same way.
 #
+# The manifest is itself PINNED in-repo (#198): OSV_SCANNER_SUMS_SHA256 below
+# is the SHA-256 of osv-scanner_SHA256SUMS for the pinned version, computed
+# from a fresh download of the release page. The downloaded (or cached)
+# manifest is checked against that pin BEFORE the manifest is used to verify
+# the binary — every run, not only at install — so the old trust-on-first-use
+# hole is closed: a compromised release page that swaps the binary fails the
+# manifest verify, one that also swaps the manifest fails the pin, and either
+# way the script exits 2 printing both hashes. Refresh the pin WITH the
+# version, in one commit (DEVELOPMENT.md §10.2).
+#
 # Scope: every committed gradle.lockfile (root, modules, tests, buildSrc). The
 # lockfiles ARE the resolved dependency set — scanning them covers direct and
 # transitive artifacts exactly. gradle/verification-metadata.xml is derived from
@@ -46,10 +56,11 @@
 #       preflight classified the environment as broken (curl missing, TLS/CA
 #       failure); install-side failure of the pinned scanner (download
 #       failure, missing checksum-manifest entry, SHA256 mismatch — a
-#       tampered binary is a supply-chain failure, never a scan result);
-#       unsupported platform; or no committed lockfiles to scan. Fails the
-#       gate loudly with the cause named. (013/F1: these paths used to exit 1,
-#       colliding with "vulnerabilities found".)
+#       tampered binary is a supply-chain failure, never a scan result;
+#       #198: a manifest whose own hash does not match the in-repo pin is
+#       the same refusal); unsupported platform; or no committed lockfiles
+#       to scan. Fails the gate loudly with the cause named. (013/F1: these
+#       paths used to exit 1, colliding with "vulnerabilities found".)
 #   200 skipped: offline (fail-soft sentinel; connection-level failures only,
 #       and a curl timeout only after a retry at a longer budget — 013/F2)
 
@@ -67,6 +78,12 @@ ROOT="$PWD"
 source "$ROOT/scripts/lib/scan-tools.sh"
 
 OSV_SCANNER_VERSION="v2.5.0"   # verified latest release, 2026-08-15
+# #198 — the SHA-256 of osv-scanner_SHA256SUMS for the version above, computed
+# 2026-09-25 from a fresh download of
+#   https://github.com/google/osv-scanner/releases/download/v2.5.0/osv-scanner_SHA256SUMS
+# (cross-checked against the machine cache's copy — both hash to this value).
+# Refresh it WITH the version, in one commit (DEVELOPMENT.md §10.2).
+OSV_SCANNER_SUMS_SHA256="524e212217433dfc5445518270a1a8017b5a9a886530df0413c5e20e06a33d3a"
 TOOL_DIR="$(scan_tools_dir osv-scanner)"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')    # darwin | linux
@@ -86,11 +103,29 @@ SUMS="$BIN.SHA256SUMS"
 RELEASE_BASE="https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}"
 ASSET="osv-scanner_${os}_${arch}"
 
+# #198 — the manifest's own integrity: the cached or freshly downloaded
+# osv-scanner_SHA256SUMS must hash to the in-repo pin BEFORE it is used to
+# verify the binary. A mismatch exits 2 printing both hashes (the tooling-
+# failure status — never a verdict code) and deletes the manifest so the next
+# online run re-downloads it rather than caching a bad one.
+verify_manifest_pin() {
+  local got
+  got=$(shasum -a 256 "$SUMS" 2>/dev/null | awk '{print $1}') || true
+  if [ "$got" != "$OSV_SCANNER_SUMS_SHA256" ]; then
+    echo "vuln-scan: FAIL — osv-scanner_SHA256SUMS does not match the in-repo pin (pin=$OSV_SCANNER_SUMS_SHA256 got=$got); a swapped manifest is a supply-chain failure, not a scan result." >&2
+    rm -f "$SUMS"
+    exit 2
+  fi
+}
+
 install_osv_scanner() {
   mkdir -p "$TOOL_DIR"
   echo "vuln-scan: installing osv-scanner ${OSV_SCANNER_VERSION} (${ASSET}) into $TOOL_DIR"
   scan_tools_download vuln-scan "$RELEASE_BASE/$ASSET" "$BIN"
   scan_tools_download vuln-scan "$RELEASE_BASE/osv-scanner_SHA256SUMS" "$SUMS"
+  # The manifest is checked against the in-repo pin BEFORE it is used to
+  # verify the binary (#198): a release page that swaps BOTH cannot pass.
+  verify_manifest_pin
   # Verified BEFORE the prune: a bad download must never cost the older
   # binary the prune would otherwise leave as the fallback.
   scan_tools_verify_sha256 vuln-scan "$BIN" "$SUMS" "$ASSET"
@@ -149,8 +184,11 @@ esac
 osv_scanner_cached || install_osv_scanner
 # Every run, not only the install (#193): the cache is machine-level and long-
 # lived, so the binary is checked against the manifest cached beside it before
-# it is executed. A mismatch prints both hashes, deletes the binary and exits 2
-# (no verdict — the contract's tooling-failure code; 1 would read as findings).
+# it is executed. The manifest itself is first checked against the in-repo pin
+# (#198) — a swapped cached manifest cannot verify a swapped binary into a run.
+# A mismatch prints both hashes, deletes the binary and exits 2 (no verdict —
+# the contract's tooling-failure code; 1 would read as findings).
+verify_manifest_pin
 scan_tools_verify_sha256 vuln-scan "$BIN" "$SUMS" "$ASSET"
 
 lockfiles=()

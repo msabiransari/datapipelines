@@ -83,7 +83,14 @@ class RateLimitFilter(
         if (decision.unavailable) refuseUnavailable(request, response, decision) else refuseThrottled(request, response, decision)
     }
 
-    /** The caller spent its budget — `rate_limit.exceeded`, the code every layer shares. */
+    /**
+     * The caller spent its budget — `rate_limit.exceeded`, the code every layer shares.
+     *
+     * The USER MESSAGE is the catalog's API sentence (#232), not the shared exception's
+     * login default: this limiter meters API requests, so the caller who is told they made
+     * "too many sign-in attempts" while throttled on `/api/v1` or `/mcp` is being answered
+     * with another limiter's sentence. The login damper keeps the sign-in sentence.
+     */
     private fun refuseThrottled(
         request: HttpServletRequest,
         response: HttpServletResponse,
@@ -96,7 +103,7 @@ class RateLimitFilter(
             status = ApiErrorCatalog.statusFor(error.code).value(),
             code = error.code,
             message = "Per-user rate limit of ${decision.limit} requests per ${decision.window} exceeded.",
-            userMessage = error.userMessage,
+            userMessage = ApiErrorCatalog.userMessageFor(error.code),
             details =
                 mapOf(
                     "limit" to decision.limit,

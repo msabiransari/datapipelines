@@ -174,8 +174,13 @@ class ShellRenderTest {
         html shouldNotContain "app-search-text"
     }
 
+    /**
+     * #197 — the avatar renders through the app's OWN proxy: the `<img>` points at
+     * `/avatar`, and the stored provider URL never reaches the page HTML (that URL is what
+     * the old `img-src https:` grant existed to load — the proxy is why the grant is gone).
+     */
     @Test
-    fun `the avatar renders the OIDC picture when the users row carries one`() {
+    fun `the avatar renders the OIDC picture through the avatar proxy`() {
         val withPicture =
             engine.process(
                 "pipelines/list",
@@ -193,9 +198,11 @@ class ShellRenderTest {
             )
         // `users.profile_picture_url` IS stored (OidcSuccessHandler writes the `picture`
         // claim through UserRepository on every login) — so the avatar is the real image
-        // when there is one, and initials otherwise. No gap to record.
+        // when there is one, and initials otherwise. The URL itself stays server-side:
+        // GET /avatar serves the signed-in principal's own picture (AvatarController).
         withPicture shouldContain "class=\"app-avatar-img\""
-        withPicture shouldContain "https://pic.example/x.png"
+        withPicture shouldContain """src="/avatar""""
+        withPicture shouldNotContain "https://pic.example/x.png"
 
         val withoutPicture =
             engine.process(
@@ -210,6 +217,7 @@ class ShellRenderTest {
             )
         withoutPicture shouldContain "class=\"app-avatar-initials\""
         withoutPicture shouldContain ">MU<"
+        withoutPicture shouldNotContain """/avatar""""
     }
 
     @Test

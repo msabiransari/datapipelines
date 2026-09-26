@@ -1,10 +1,12 @@
 package co.datapipelines.auth
 
+import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -63,6 +65,8 @@ class OidcLoginIntegrationTest {
     @Autowired private lateinit var jdbc: NamedParameterJdbcTemplate
 
     @Autowired private lateinit var securityFilterChain: SecurityFilterChain
+
+    @Autowired private lateinit var authProperties: AuthProperties
 
     @Test
     fun `security headers finish before downstream work can own an asynchronous response`() {
@@ -151,6 +155,63 @@ class OidcLoginIntegrationTest {
     }
 
     private fun events(): List<String> = jdbc.jdbcTemplate.queryForList("SELECT event FROM audit_log", String::class.java)
+
+    /**
+     * #197 — the avatar CSP narrowing, over the real login. The auth slice scans only
+     * `co.datapipelines.auth` (AuthTestApplication), so `GET /avatar` itself is not routed
+     * here — the fetch-and-serve fence is proven over the real transport in web's
+     * `AvatarControllerTest`, and the browser suite's CSP collector stays the guard that
+     * every real page holds zero console violations. What THIS test proves is what only a
+     * real provider boot can:
+     *
+     * 1. the full OIDC code flow still works with `picture-hosts` configured — the new key
+     *    changes nothing about login;
+     * 2. the key binds through the real relaxed binding into the live [AuthProperties] bean
+     *    the avatar allowlist is built from;
+     * 3. a real signed-in response carries the narrowed `img-src 'self' data:` policy —
+     *    no scheme wildcard, so no host a provider URL names could ever be loaded by the
+     *    browser even before the page's `<img>` points at the app's own proxy.
+     *
+     * The cookie jar is SHARED across this class's tests (@TestInstance PER_CLASS): the
+     * sibling flow must not inherit this test's `dp_session` (a live session turns the
+     * authorization hop into a bounce to `/dashboard`), so the jar is snapshotted and
+     * restored around this test.
+     */
+    @Test
+    fun `the avatar CSP narrowing rides the real login and the picture-host allowlist binds`() {
+        val savedJar = jar.toMap()
+        val base = "http://localhost:$port"
+        try {
+            jar.clear()
+
+            // Real OIDC login → dp_session (the same three hops the sibling test proves).
+            // The kick-off 302 is a real response through the whole booted chain: the
+            // slice routes no app pages of its own (its other responses are 302s and
+            // 401s — AuthHttpBoundaryTest already proves the headers on those), and THIS
+            // one says the narrowed policy rides the live login surface.
+            val start = send("GET", "$base/oauth2/authorization/keycloak")
+            start.statusCode() shouldBe 302
+            val csp = start.headers().firstValue("Content-Security-Policy").orElse("")
+            csp shouldBe SecurityHeaders.CSP_POLICY
+            csp shouldContain "img-src 'self' data:"
+            csp shouldNotContain "https:"
+            val loginPage = send("GET", location(start))
+            loginPage.statusCode() shouldBe 200
+            val afterLogin =
+                send("POST", extractFormAction(loginPage.body()), body = "username=alice&password=alice-password&credentialId=")
+            afterLogin.statusCode() shouldBe 302
+            followUntilSession(location(afterLogin))
+            jar.containsKey("dp_session").shouldBeTrue()
+
+            // The allowlist key reached the bean the AvatarHosts allowlist is built from.
+            authProperties.oidc.providers
+                .single()
+                .pictureHosts shouldBe listOf("127.0.0.1")
+        } finally {
+            jar.clear()
+            jar.putAll(savedJar)
+        }
+    }
 
     /**
      * Follows the redirect chain back from the IdP until `dp_session` is set.
@@ -297,6 +358,9 @@ class OidcLoginIntegrationTest {
                 SharedKeycloak.issuerUri("datapipelines")
             }
             registry.add("datapipelines.auth.oidc.providers[0].display-name") { "Company SSO" }
+            // #197: the avatar proxy's allowlist — the integration test's picture is served
+            // by the in-JVM image server bound to the loopback address below.
+            registry.add("datapipelines.auth.oidc.providers[0].picture-hosts") { "127.0.0.1" }
         }
     }
 }

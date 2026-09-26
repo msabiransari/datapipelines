@@ -37,6 +37,22 @@ class SecurityHeadersTest {
         SecurityHeaders.CSP_POLICY shouldContain "object-src 'none'"
     }
 
+    /**
+     * #197 — the exact `img-src` value, pinned character for character: `'self' data:`, and
+     * nothing else — no scheme wildcard and no provider host. The OIDC picture is served by
+     * the app's own `/avatar` proxy, so the policy is a CONSTANT: it does not vary with the
+     * configured providers (which feed the proxy's fetch allowlist instead), and it must be
+     * identical whether a deployment names two providers or none. The old standing `https:`
+     * grant is asserted absent by name, so a revert of the narrowing fails here.
+     */
+    @Test
+    fun `img-src admits exactly self and data - no scheme wildcard, no provider host`() {
+        SecurityHeaders.CSP_POLICY shouldContain "img-src 'self' data:"
+        SecurityHeaders.CSP_POLICY shouldNotContain "img-src 'self' data: https:"
+        SecurityHeaders.CSP_POLICY shouldNotContain "https:"
+        headersFor("/dashboard").getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY
+    }
+
     @Test
     fun `the editor policy relaxes script-src with unsafe-eval and style-src with Cytoscape's one sheet hash - nothing else`() {
         SecurityHeaders.CSP_POLICY_EDITOR shouldContain "script-src 'self' 'unsafe-eval'; style-src 'self' 'sha256-"

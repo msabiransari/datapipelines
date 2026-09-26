@@ -368,6 +368,10 @@ class ArchitectureGuardTest {
                 "TemplatesController → TemplateRepository",
                 "TemplatesPurgeDraftTool → TemplateRepository",
                 "UserSettingsController → UserRepository",
+                // #197: the avatar proxy reads the signed-in principal's OWN row by id —
+                // the same single-row read as UserSettingsController, scoped by construction
+                // (the id comes from the principal, never from the request).
+                "AvatarController → UserRepository",
             )
 
         /** The three `@Scheduled` homes (auth.md §8.6's scheduled rows): the stale-execution sweep, the pool reaper, event retention. */

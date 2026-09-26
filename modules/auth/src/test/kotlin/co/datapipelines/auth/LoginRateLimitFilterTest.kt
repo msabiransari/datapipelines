@@ -62,6 +62,9 @@ class LoginRateLimitFilterTest {
         body["schema_version"] shouldBe 1
         val error = body["error"] as Map<*, *>
         error["code"] shouldBe "rate_limit.exceeded"
+        // #232 — THIS limiter's own sentence: the login damper talks about sign-in attempts,
+        // never about request volume (that is the API limiter's answer).
+        error["user_message"] shouldBe RateLimitExceededException.LOGIN_USER_MESSAGE
         (error["details"] as Map<*, *>)["limit"] shouldBe limit
     }
 
