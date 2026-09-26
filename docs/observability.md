@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.12 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.13 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-09-17
+**Last updated:** 2026-09-25
 
 ---
 
@@ -155,6 +155,25 @@ A promoter sees only released, not-yet-promoted pipelines and templates ([Auth �
 
 Sustained repeats every window mean the sender's promotion target is down or misconfigured: promoters see empty lists everywhere until it is back, and the promotion page shows the same code. Not an audit row.
 
+#### 3.4E The scheduler events (#9)
+
+The scheduler ([Scheduler](scheduler.md)) logs its own work under `scheduler.*`. A person's actions on a schedule are AUDIT rows ([Enums §15](enums.md#15-authauditevent--auth-audit-log-events), `schedule.*`), and every run keeps its own trail in the database — these lines are for the operator watching the instance, never the history of record. Ids only; never a payload or a parameter value.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `scheduler.started` | This instance began dispatching, once the application is ready | `threads`, `tick_seconds` |
+| INFO | `scheduler.api_mode` | `datapipelines.scheduler.enabled=false`: this instance serves the REST routes but never dispatches | — |
+| INFO | `scheduler.dispatched` | A dispatcher tick recorded something (silent otherwise) | `queued`, `catch_up`, `missed`, `overlap` — the counts of that tick |
+| INFO | `scheduler.reconciled` | A reconciler tick moved at least one run (silent otherwise) | `changed`, `watched` |
+| INFO | `scheduler.run_not_started` | A run waited out its lateness window for a capacity slot and ended `not_started` / `capacity` | `run_id`, `reason`, `attempts` |
+| WARN | `scheduler.schedule_blocked` | A schedule became blocked — an `unknown` run, or an executor refusal that asks for it; nothing fires from it until a person unblocks it | `schedule_id`, `run_id`, `reason` |
+| ERROR | `scheduler.start_failed` | The executor's launch threw — the run is `unknown` / `start_failed` and its schedule blocked, because nobody can say whether work began | `run_id`, `execution_id`, `message` |
+| ERROR | `scheduler.inspect_refused` | The system identity was refused `execution.read` in a workspace — the reconciler cannot see outcomes there, and its runs stay `running` until it can. A configuration defect: the identity's fixed set is code, not data | `workspace_id` |
+| INFO | `scheduler.admission_closed` | Shutdown: admission closed and no launch was in progress, so the execution drain may start | — |
+| WARN | `scheduler.admission_wait_expired` | Shutdown: launches were still in progress when `shutdown-wait-seconds` ran out; their runs reconcile from the execution record | `launching`, `wait_ms` |
+
+A `scheduler.schedule_blocked` needs a person. A steady `scheduler.run_not_started` means `max-concurrent-runs` is too low for this instance's schedules, or runs are too long for their cadence — `datapipelines.scheduler.capacity.retries` (§4.1) is the leading signal.
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -210,6 +229,15 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.sse.stream.duration` | timer | `close_reason` (`completed`/`failed`/`aborted`/`client_disconnect`) | Lifetime of an SSE stream. `client_disconnect` here is what feeds the disconnect-grace cancellation path (D7). |
 | `datapipelines.idempotency.cache.hits` | counter | (none) | Requests served from a stored idempotent response |
 | `datapipelines.idempotency.conflicts` | counter | (none) | `idempotency.key_reused_for_different_request` rejections |
+
+**Scheduler** (#9, [Scheduler](scheduler.md)) — the scheduler's state is watched here, not through a health component (§6.1):
+
+| Metric | Type | Tags | Description |
+|---|---|---|---|
+| `datapipelines.scheduler.occurrences` | counter | `outcome` (`queued`/`catch_up`/`missed`/`overlap`) | Occurrences the dispatcher recorded: `queued` a run, `catch_up` a run under the `latest` policy, `missed` one summary row per outage (however many occurrences it covers), `overlap` an occurrence skipped because a run was still active. A flat line while schedules exist means no instance is dispatching |
+| `datapipelines.scheduler.runs.finished` | counter | `state` (`succeeded`/`failed`/`cancelled`/`aborted`/`unknown`/`not_started`/`skipped`) | Runs reaching a final state. A run whose `unknown` is later settled by the real outcome counts once for each |
+| `datapipelines.scheduler.capacity.retries` | counter | (none) | Admissions refused for capacity and retried 30 s later (R4). Rising means `max-concurrent-runs` is saturated |
+| `datapipelines.scheduler.runs.in_flight` | gauge | (none) | Scheduled executions holding a capacity slot on this instance, at most `max-concurrent-runs` |
 
 ### 4.2 Exposure
 
@@ -285,6 +313,7 @@ Liveness probe. Returns `200 OK` with the service status. No auth required.
 
 - `version` is top-level, not a component.
 - Component keys are `snake_case` and the set is exactly these three: `database` (metadata DB connectivity), `redis` (result store / idempotency / event log connectivity), `h2_factory` (can create a staging H2 instance).
+- **No scheduler component.** db-scheduler's own indicator is disabled (`management.health.db-scheduler.enabled: false`, [Configuration §3.29](configuration.md#329-scheduler-9)): it reports `DOWN` on an API-mode instance, which never starts the scheduler, and a stalled dispatcher is not a reason to restart a pod. Watch §4.1's scheduler metrics instead.
 - **No `diskSpace` component.** Boot's default disk-space indicator is disabled: nothing in this architecture writes to local disk (logs go to stdout §3.5, staging is in-memory H2, results live in Redis), so a disk-space signal would report on something the service does not depend on — and, being `DOWN` on a full container filesystem, would restart a perfectly healthy pod.
 
 ### 6.2 `/ready`
@@ -406,6 +435,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.13 | scheduler lane 1 (#9) | New **§3.4E the scheduler events** (`scheduler.started` / `api_mode` / `dispatched` / `reconciled` / `run_not_started` / `schedule_blocked` / `start_failed` / `inspect_refused` / `admission_closed` / `admission_wait_expired`) and four scheduler metrics in §4.1 (`occurrences{outcome}`, `runs.finished{state}`, `capacity.retries`, `runs.in_flight`). §6.1: no scheduler health component — db-scheduler's indicator is disabled. `docs-audit.sh` check C does not extract `scheduler.*` yet (#252; the same gap v1.7 names for `lake.*`). |
 | 2026-09-17 | v1.12 | 158 (#121) mail connect retry | §3.4B gains `mail.send_retry` (WARN, `kind` + `attempt` + `error`): a connect-failed notice is retried in place (bounded, 3 attempts) before the claim row is marked — the retry line is per attempt, `mail.send_failed` remains the terminal one. |
 | 2026-09-17 | v1.11 | 152 R152-8 retained-owner containment (#128) | `lake.instance_owner_close_failed` now covers a nonfatal `RuntimeException` too (v1.10's catch was `SQLException`-only, and the escape crossed into the shared manager's pool loop); `lake.instance_closed` gains `retained_owner_closed` so a refused physical close is never reported as a closure. |
 | 2026-09-17 | v1.10 | 152 R152-5/6/7 ownership protocol (#128) | §3.4C gains `lake.instance_handle_exhausted` (WARN — the counted residual: every permitted close refused, no actor left) and `lake.instance_refused_duplicate_close_failed` (DEBUG — a duplicate refused at registration whose creator's close failed; still owned). `lake.instance_handles_closed`'s `in_flight` is now true by construction (the hand-off is decided in the closer's own failure transition). |

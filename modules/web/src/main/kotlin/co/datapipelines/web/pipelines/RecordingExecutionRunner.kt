@@ -113,10 +113,21 @@ class RecordingExecutionRunner(
 ) {
     private val log = LoggerFactory.getLogger(RecordingExecutionRunner::class.java)
 
+    /**
+     * Runs [request] to completion under [trigger].
+     *
+     * [failClosed] and [onRecorded] are the scheduled path's (#9, scheduler design revision §2.1,
+     * A14): with [failClosed] an unwritable RUNNING row stops the run before its first node
+     * ([co.datapipelines.web.sse.ExecutionRecordUnwritableException]), and [onRecorded] learns the
+     * id the moment that row exists — which is when the scheduler may say "started". Every other
+     * caller leaves both at their defaults and records exactly as before.
+     */
     suspend fun run(
         request: ExecuteRequest,
         workspaceId: UUID,
         trigger: ExecutionTrigger,
+        failClosed: Boolean = false,
+        onRecorded: (UUID) -> Unit = {},
     ): ExecutionResult {
         val emitter =
             WebEventEmitter(
@@ -137,6 +148,8 @@ class RecordingExecutionRunner(
                 eventRepository = eventRepository,
                 executionRepository = executionRepository,
                 persistenceDispatcher = persistenceDispatcher,
+                failClosedOnRecord = failClosed,
+                onRecorded = onRecorded,
             )
         val result =
             (executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId))

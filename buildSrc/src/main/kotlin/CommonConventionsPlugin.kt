@@ -422,6 +422,8 @@ class CommonConventionsPlugin : Plugin<Project> {
             ":modules:datasources" to 94,
             ":modules:staging" to 93,
             ":modules:auth" to 95,
+            // #9 scheduler lane 1: measured baseline 93.4 on the module's first Kover run, minus 2, floored.
+            ":modules:scheduler" to 91,
             // 056: measured baseline 86.1 on the module's first Kover run, minus 2, floored.
             // 083 §D: re-measured at 96.9 after the three JDBC classes here got direct tests —
             // they were exercised only by the WEB module's suite, so this module earned no

@@ -6,6 +6,7 @@ import co.datapipelines.auth.ApiKeyMissingException
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.executor.ExecutionRecord
+import co.datapipelines.executor.ExecutionTrigger
 import org.springframework.security.core.context.SecurityContextHolder
 
 /**
@@ -45,13 +46,23 @@ fun ExecutionRecord.visibleTo(principal: AuthenticatedPrincipal): Boolean =
         // that identity in `executed_by` and are its own — no other key and no person shares it.
         // Runs a key served BEFORE V34 carry its creator instead; `ExecutionVisibility` reads the
         // serve audit for those, which needs a repository and cannot live in this pure extension.
-        principal.isEndpointKey -> isOwnRunOf(principal.userId, byKeyIdentity = true)
+        principal.isEndpointKey -> {
+            isOwnRunOf(principal.userId, byKeyIdentity = true)
+        }
 
         // D11: "own" is `ExecutionRecord.isOwnRunOf` — executed by this user AND not through an
         // endpoint key (an endpoint's run belongs to the endpoint, and lists for admins only).
         // `execution.read_all` (#215 — the workspace admin's, the super admin's) sees every run
         // in the workspace. The promoter is refused `execution.read` by the matrix before this.
-        else -> isOwnRunOf(principal.userId) || principal.holds(Permission.EXECUTION_READ_ALL)
+        // #9 R3: a SCHEDULED run is attributed to its schedule and visible to every member whose
+        // role reaches the read the route declared (`execution.read`, or `execution.result.read`
+        // on the result) — the record was already read in the caller's workspace, so the
+        // workspace is the boundary. Visibility only: cancelling one still needs `cancel_all`.
+        else -> {
+            isOwnRunOf(principal.userId) ||
+                principal.holds(Permission.EXECUTION_READ_ALL) ||
+                (triggeredVia == ExecutionTrigger.SCHEDULE && principal.holds(Permission.EXECUTION_READ))
+        }
     }
 
 /**

@@ -92,10 +92,30 @@ class WebEventEmitter(
     private val executionRepository: ExecutionRepository,
     private val persistenceDispatcher: CoroutineDispatcher,
     /**
+     * #9 A14 — the scheduled path's FAIL-CLOSED rule (scheduler design revision §2.1). When true, a
+     * `pipeline_executions` RUNNING row that cannot be written stops the execution before its
+     * first node: [emit] of `execution_started` throws [ExecutionRecordUnwritableException] into
+     * the executor, which unwinds before staging is even created. That is what lets the scheduler
+     * treat "no execution row" as "no node ran". False (every interactive surface): the insert
+     * failure is logged and the run goes on, exactly as §10's never-throw policy says.
+     */
+    private val failClosedOnRecord: Boolean = false,
+    /**
+     * #9 — invoked with the execution id once its RUNNING row is durably written (after
+     * [onExecutionStarted], which runs BEFORE persistence). The scheduler's adapter waits on it to
+     * report "started" only for a recorded execution. A failing hook is logged, never thrown.
+     */
+    private val onRecorded: (UUID) -> Unit = {},
+    /**
      * Invoked with the executor-minted execution id the moment `execution_started` is persisted —
      * the first point any code outside the executor learns it. The execute launcher uses this to
      * rebind the idempotency reservation (which had to be claimed *before* the id existed) onto the
      * real id; see `ExecutionStreamLauncher`.
+     *
+     * Keep it the LAST parameter: callers pass it as a trailing lambda, and Kotlin binds a trailing
+     * lambda to whichever function-typed parameter is last. #9 once appended [onRecorded] after it,
+     * which silently moved the launcher's stream registration after persistence — the live stream
+     * lost `execution_started` (`WebEventEmitterTest` pins the order now).
      */
     private val onExecutionStarted: (UUID) -> Unit = {},
 ) : EventEmitter {
@@ -156,7 +176,14 @@ class WebEventEmitter(
     ) {
         // The execution row must exist before any event row: execution_events.execution_id is a
         // foreign key onto pipeline_executions (metadata-db §4.7).
-        if (event is ExecutionStarted) createExecutionRow(event)
+        if (event is ExecutionStarted) {
+            val recorded = createExecutionRow(event)
+            if (!recorded && failClosedOnRecord) throw ExecutionRecordUnwritableException(event.executionId)
+            if (recorded) {
+                runCatching { onRecorded(event.executionId) }
+                    .onFailure { log.warn("onRecorded hook failed for execution {}.", event.executionId, it) }
+            }
+        }
 
         runCatching {
             eventRepository.append(
@@ -177,7 +204,8 @@ class WebEventEmitter(
         completeExecutionRow(event)
     }
 
-    private fun createExecutionRow(event: ExecutionStarted) {
+    /** Inserts the RUNNING row; false when the insert failed (logged either way). */
+    private fun createExecutionRow(event: ExecutionStarted): Boolean =
         runCatching {
             executionRepository.create(
                 ExecutionRecord(
@@ -197,7 +225,7 @@ class WebEventEmitter(
                 ),
             )
         }.onFailure { log.error("pipeline_executions row for execution {} not created.", event.executionId, it) }
-    }
+            .isSuccess
 
     /**
      * The single terminal UPDATE (metadata-db §4.6).
@@ -291,3 +319,12 @@ class WebEventEmitter(
     private fun ExecutionEvent.isTerminalOnTheWire(): Boolean =
         this is PipelineCompleted || this is PipelineFailed || this is ExecutionAborted || this is DataReady
 }
+
+/**
+ * #9 A14: a scheduled execution's RUNNING row could not be written, so it stops before its first
+ * node (the scheduler then records the run `not_started` / `record_unwritable` — no row, no node).
+ * Thrown only by an emitter built with `failClosedOnRecord = true`.
+ */
+class ExecutionRecordUnwritableException(
+    val executionId: UUID,
+) : IllegalStateException("The execution record of $executionId could not be written; the scheduled run stops before its first node.")

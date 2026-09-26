@@ -129,7 +129,7 @@ class PipelineExecutor(
         return if (request.rootExecutionId != null) {
             runExecution(executionId, request)
         } else {
-            executionSlots.withSlot(request.userId) { runExecution(executionId, request) }
+            executionSlots.withSlot(request.userId, request.slotLease) { runExecution(executionId, request) }
         }
     }
 

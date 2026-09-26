@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.34 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
+**Status:** v2.35 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-09-24
+**Last updated:** 2026-09-26
 
 ---
 
@@ -1498,7 +1498,7 @@ result is unexpired):
 | `correlation_id` | uuid \| null | The caller-supplied correlation id |
 | `executed_by` | uuid | The user the run belongs to (D11, 177): the session's user, or a key's OWNER. Was `triggered_by` until 2026-09-20 — renamed, not re-derived; every row kept its actor |
 | `executed_by_key_kind` | string \| null | Which KIND of credential started it when a key did — `user` \| `endpoint` \| `server` ([enums §18A](enums.md#18a-executedbykeykind--which-kind-of-credential-started-an-execution)); `null` for a signed-in session. An `endpoint` run is nobody's OWN: it lists for workspace admins only, and for the endpoint key itself (§19) |
-| `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` \| `ENDPOINT` |
+| `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` \| `ENDPOINT` \| `SCHEDULE` (#9 — a schedule fired it; `executed_by` is then the system identity, [Auth §4.5](auth.md#45-the-system-service-account-r7)) |
 | `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child |
 | `result_size_bytes` | int \| null | Size of the materialized caller result |
 | `parent_execution_id` | uuid \| null | The execution whose PIPELINE node spawned this one; null for a root ([§10.2](#102-get-execution-metadata)) |
@@ -1506,6 +1506,8 @@ result is unexpired):
 | `root_execution_id` | uuid | The family's top ancestor; equals `execution_id` for a root |
 
 Ownership (roles design D11, ratified 2026-09-20 — [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) `execution.read`): a **workspace admin** (or super admin — `execution.read_all`) reads every execution in the workspace, optionally pipeline-narrowed; a **viewer** or **author** reads only their OWN runs — `executed_by = self` and not started through an endpoint key; a **promoter** is refused the list, the read, the result and the replay by role (`403 auth.role_required`) before any row is consulted. The filter is SQL, so the page is cut after it and `has_more` is honest. Another member's execution is `404 result.execution_not_found` on the single reads, never 403 ([Auth §11A.1](auth.md#11a1-the-404-rule)).
+
+**Scheduled runs (#9, ruling R3).** An execution a schedule fired (`triggered_via = SCHEDULE`) is nobody's own — it ran as the system identity — so it is visible to **every member whose role reaches `execution.read`**, on this list and on §10.2, §10.3, §10.3A and the result read. It lifts visibility, never ownership: cancelling one (§10.4) still needs `execution.cancel_all`. The UI's execution lists and MCP's `executions_list` still list own runs only (#250 decides them).
 
 ### 10.2 Get execution metadata
 
@@ -1535,7 +1537,7 @@ Returns the execution record (without rows — use §7 for result data):
     "result_size_bytes": 48213,
     "executed_by": "user-uuid",           // D11: the run's user — the session's, or the key's OWNER
     "executed_by_key_kind": null,         // "user" | "endpoint" | "server" when a key started it; null for a session
-    "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE" | "ENDPOINT",
+    "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE" | "ENDPOINT" | "SCHEDULE",
 
     "parent_execution_id": "exec-uuid",   // the execution whose PIPELINE node spawned this one; null for a root
     "parent_node_id": "run_leaf",         // that node's id; null for a root
@@ -1556,6 +1558,25 @@ Accept: text/event-stream
 Re-emits the SSE event stream from the Redis event log, in original order with original timestamps — `node_progress` samples included, each with the `observed_at` it was taken at (§6.4.9). Useful for debugging pipelines after the fact.
 
 Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410 result.expired`. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour. The replay is also the answer to "I was not attached (or left early) while it ran": the live stream's delivery guarantee runs only to a connected consumer (§10.4), and everything else is read back from here.
+
+### 10.3A Durable event record (JSON)
+
+```
+GET /executions/{execution_id}/events?format=json&after=0&limit=200
+```
+
+The execution's **durable** event record — the `execution_events` rows ([Metadata DB §4.7](metadata-db.md#47-execution_events)) — as JSON, for as long as they are retained (`datapipelines.executions.event-retention-days`, 7 days past completion by default), within §10.3's hour or after it (#9; the scheduler design revision's §5.4). It is how a scheduled run's messages are read: nobody was attached to its stream. `format=json` selects it; without it the route is §10.3's replay, unchanged.
+
+Paged by `event_id`, oldest first: `after` (default `0`) is the last `event_id` you hold, `limit` 1–500 (default 200). Response `data`:
+
+| Field | Type | Description |
+|---|---|---|
+| `execution_id` | uuid | The execution |
+| `events` | array | `{event_id, event, timestamp, data}` — `event` is the §6.4 event type, `data` its payload as it was persisted |
+| `next_after` | int \| null | The `event_id` to pass as `after` for the next page; null on an empty page |
+| `has_more` | bool | Another page exists |
+
+Visibility and refusals are the metadata read's (§10.2, §10.1's ownership and R3 paragraph; session-only, like every execution read since keys v2). A completed execution whose rows the retention job has removed answers `410 result.expired` with `details.reason = event_record_expired`; its metadata stays readable at §10.2. A running execution with no rows yet answers an empty page.
 
 ### 10.4 Cancel execution
 
@@ -2210,10 +2231,105 @@ and bound only while a budget stands behind it (`max-requests` > 0).
 
 ---
 
+## 20. Schedules
+
+A **schedule** runs a registered executor's job — in v1 the `pipeline` executor, which runs a pipeline — at the occurrences of a five-field cron in an IANA timezone (#9; behaviour in [Scheduler](scheduler.md), the one owner of these semantics). Schedules are not versioned artifacts: no draft, no release, never promoted. Every route is under `/api/v1/schedules`, works in the caller's active workspace, and is **session-only in slice 1** — every key kind is refused here by §3.2's confinement (an application credential is a later slice). Permissions are [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)'s `schedule.*` rows: every member reads; authors, workspace admins and super admins create, edit, pause/resume/unblock, delete and Run now. A schedule fires as the **system identity**, never as its creator — a creator later demoted to viewer, or removed, does not stop it. Errors are [Pipeline Contract §13.19](pipeline-contract.md#1319-schedules)'s `schedule.*` codes; an id from another workspace (or one the promoter lens hides) is `404 schedule.not_found`.
+
+**The schedule object** (every response that returns a schedule; the `ETag` header carries `"<revision>"`):
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | uuid | The schedule |
+| `name` | string | A folder path, `finance/daily/revenue` — the pipeline/template name grammar, unique among the workspace's live schedules; rename/move keeps the id and the history |
+| `revision` | int | Starts at 1; every edit, pause, resume, unblock and delete a person makes bumps it (a block the scheduler sets does not) |
+| `executor` | string | The registered executor (`pipeline`) |
+| `payload_schema_version` | int | The executor's payload schema version (1) |
+| `payload` | object | The executor's payload. For `pipeline`: `{"pipeline": "<name>", "version": "current"}` — `current` follows the pipeline's current-version pointer at each run, drafts included; nothing else is accepted in v1 |
+| `parameters` | object | Literal values for the pipeline's declared parameters, validated by the binder an interactive run uses |
+| `target_ref` | string | The executor's reference to what it runs (`pipeline:<name>`) |
+| `cron` | string | Five fields, Unix style (`minute hour day-of-month month day-of-week`) |
+| `timezone` | string | IANA region id (`America/New_York`) |
+| `missed_run_policy` | string | `skip` (default) \| `latest` |
+| `enabled` | bool | `false` while paused |
+| `condition` | string | `enabled` \| `paused` \| `blocked` — blocked wins |
+| `blocked` | object \| null | `{reason, at, run_id}` while blocked (`run_unknown`, or an executor refusal such as `pointer_null`) |
+| `next_due_at` | timestamp \| null | The next occurrence the dispatcher will record; ignored while paused or blocked (resume and unblock recompute it from now) |
+| `created_by`, `updated_by` | uuid | People |
+| `created_at`, `updated_at` | timestamp | |
+
+**The run object** (§20.10–§20.12):
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | uuid | The run |
+| `schedule_id` | uuid | Its schedule |
+| `origin` | string | `cron` \| `catch_up` \| `manual` |
+| `scheduled_at` | timestamp \| null | The occurrence (UTC); null for a manual run |
+| `reference_at`, `reference_timezone` | timestamp, string | The run's frozen reference time — the occurrence for cron and catch-up runs, the accepted request time for a manual one |
+| `admit_by` | timestamp | The end of its admission window (`datapipelines.scheduler.lateness-seconds`) |
+| `schedule_revision` | int | The revision it was recorded under |
+| `state`, `reason` | string, string \| null | [Scheduler §5](scheduler.md#5-runs-states-and-reasons) |
+| `execution_id` | uuid \| null | The execution it launched (read it at §10.2, its messages at §10.3A); null when none was |
+| `prepared` | object \| null | The executor's frozen snapshot — for `pipeline`, `{pipeline_id, version, body_sha256}` |
+| `requested_by` | uuid \| null | The person who pressed Run now |
+| `attempts` | int | Capacity retries |
+| `created_at`, `claimed_at`, `started_at`, `finished_at` | timestamp | Lifecycle; the last three null until they happen |
+
+### 20.1 List schedules
+
+`GET /schedules?prefix=finance&offset=0&limit=50` — `schedule.read`. The workspace's live schedules by name, `prefix` narrowing to a folder's subtree — a folder path of 1–9 segments with no trailing `/` (`finance`, `finance/daily`; anything else is `400 schedule.validation.request_invalid`, `details.field = prefix`); the §4.3 page envelope. A promoter sees only schedules whose target the promoter lens admits.
+
+### 20.2 Create a schedule
+
+`POST /schedules` — `schedule.create`. Body: `name`, `payload`, `cron`, `timezone` (required); `executor` (default `pipeline`), `parameters` (default `{}`), `missed_run_policy` (default `skip`). Optional `Idempotency-Key`, held durably: a replay of the same request answers `200` with the original schedule; a replay with a different body is `409 idempotency.key_reused_for_different_request`. `201` with the schedule and its `ETag`. Refusals: the `schedule.validation.*` family, `409 schedule.name_taken`, `409 schedule.limit.per_workspace`, and a parameter refusal exactly as an interactive run's (§13.4).
+
+### 20.3 Preview a pattern
+
+`GET /schedules/preview?cron=30%202%20*%20*%20*&timezone=America/New_York&count=5` — `schedule.read`. The next `count` (1–20, default 5) occurrences of a pattern before any save, from the same function the dispatcher uses: `{cron, timezone, occurrences: [{at, local, offset}]}` — `at` the UTC instant, `local` the wall-clock time, `offset` the zone offset then in force. The DST rule shows here: a time inside a spring-forward gap runs at the transition, a time inside a fall-back overlap runs once, at its first pass.
+
+### 20.4 Get a schedule
+
+`GET /schedules/{id}` — `schedule.read`. The schedule, `ETag: "<revision>"`.
+
+### 20.5 Edit a schedule
+
+`PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule). A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
+
+### 20.6 Delete a schedule
+
+`DELETE /schedules/{id}` with `If-Match` — `schedule.delete`. `204`. A soft delete: the schedule disappears from every read and records no more occurrences, a run still queued ends `skipped` / `schedule_deleted` when its turn comes, its history and any running execution stay, and its name is free again.
+
+### 20.7 Pause and resume
+
+`POST /schedules/{id}/pause`, `POST /schedules/{id}/resume` — `schedule.pause`; both idempotent, both return the schedule. Occurrences due while paused are not missed and are not caught up: resume recomputes from now. Resume never clears a block.
+
+### 20.8 Unblock
+
+`POST /schedules/{id}/unblock` — `schedule.pause`. A schedule blocks when a run's outcome is `unknown` (nobody can say whether its work happened) or an executor refusal asks for it (the pipeline has no current version, the parameters no longer bind, …). Unblock re-validates the saved payload and parameters first — a refusal there is the same `400` a save would get — then clears the block, recomputes `next_due_at` from now and writes an `unblocked` row on the blocking run's trail. `409 schedule.not_blocked` when it is not blocked.
+
+### 20.9 Upcoming occurrences
+
+`GET /schedules/{id}/upcoming?count=5` — `schedule.read`. As §20.3, for the saved schedule.
+
+### 20.10 List runs
+
+`GET /schedules/{id}/runs?offset=0&limit=50` — `schedule.read`. Its runs, newest first, the §4.3 page envelope. A deleted schedule's runs are not reachable here (its id is `404`); their executions stay readable at §10.
+
+### 20.11 Get a run
+
+`GET /schedules/{id}/runs/{run_id}` — `schedule.read`. The run plus its frozen `payload` and `parameters` and its `trail`: `[{seq, kind, reason, at, worker, details}]`, append-only, `seq` 1, 2, 3, … The execution's own events are not duplicated here — read them at §10.3A with the run's `execution_id`.
+
+### 20.12 Run now
+
+`POST /schedules/{id}/run` — `schedule.run`. Records a manual run (`origin = manual`, `requested_by` = you) and answers `202` with it; it then runs like any other — as the system identity, through the same capacity and admission. Allowed on a paused schedule; refused on a blocked one (`409 schedule.blocked`) and while one of its runs is queued, starting or running (`409 schedule.run.overlap`). Optional `Idempotency-Key`, durable: the same key answers `200` with the original run.
+
+---
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v2.35 | scheduler lane 1 (#9) — numbered after origin/main's v2.34 (197/232) | Additive. **New §20 Schedules** — list, create (durable `Idempotency-Key`), preview, get (`ETag` = revision), edit and delete (`If-Match`), pause/resume, unblock, upcoming, runs, one run with its trail, Run now (`202`); session-only in slice 1. **New §10.3A** — `GET /executions/{id}/events?format=json`, the durable event record paged by `event_id`, `410 result.expired` (`event_record_expired`) past retention. §10.1/§10.2: `triggered_via` gains `SCHEDULE`; a scheduled run is visible to every member with `execution.read` (R3), on the REST list and the single reads. |
 | 2026-09-25 | v2.32 | 7e (#7) the semantic link | Additive. **§5.10: the release response carries `warnings`** — `[]` when clean, one `pipeline.release.template_needs_review` `{code, message, template, version}` per pinned version citing a retired learned fact; never a refusal. **§8.1/§8.4: a transform accepts `implements`** (outside `body_hash`; inherited when an update omits it; lands on a released version without a draft; `400 template.implements_unresolved` / `template.blocks_not_allowed`). **§8.2/§8.3/§8.5: every projection carries `needs_review`**, a transform's `implements` and, when marked, `retired_facts`; **§8.5 gains `implements={fact_id}`**. §8.8: import keeps only the ids that resolve in the importing workspace (owner ruling 2026-09-25). **§9.7A: rules under `definitions` carry `implemented_by`.** Status caught up (it read v2.30 after v2.31's row). |
 | 2026-09-24 | v2.31 | 224 (#224) demo API | New **§19.8**: the demo family seeding publishes every seeded demo pipeline under `/demo/…` (the name-to-path mapping table), mints one configured `api_caller` key (`demo-public-key`) bound to all of them, and the demo-data page renders the same plaintext; the serve path's per-key request budget (`datapipelines.endpoints.key-request-budget`, 60/60, `429 rate_limit.exceeded` + `Retry-After`, per instance, every `api_caller` key; the lake endpoint's gate). §19.7 drops "per-endpoint rate limits" — a per-KEY budget now exists. |
 

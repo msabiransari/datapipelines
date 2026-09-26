@@ -357,7 +357,7 @@ class PipelineExecutorTest {
                 val result = h.executor.execute(request)
 
                 result.status shouldBe ExecutionStatus.SUCCESS
-                coVerify(exactly = 0) { slots.withSlot(any(), any()) }
+                coVerify(exactly = 0) { slots.withSlot(any(), any(), any()) }
             }
         }
 

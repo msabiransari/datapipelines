@@ -91,6 +91,13 @@ data class ExecuteRequest(
      * request (a PIPELINE node) inherits its parent's.
      */
     val executedByKeyKind: ExecutedByKeyKind? = null,
+    /**
+     * #9 R4: the slot pair the caller already holds ([ExecutionSlots.acquire]) — the scheduler takes
+     * capacity BEFORE it claims a run's start, and the execution runs under exactly that lease
+     * instead of taking a second pair. Null (every other caller): the executor acquires as before.
+     * Released when the execution ends, however it ends.
+     */
+    val slotLease: SlotLease? = null,
 )
 
 /**

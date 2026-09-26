@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.27 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.28 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-25
@@ -302,7 +302,7 @@ CREATE TABLE pipeline_executions (
     parameters_json     JSONB       NOT NULL DEFAULT '{}', -- the FULLY RESOLVED Context (see below)
     executed_by         UUID        NOT NULL REFERENCES users(id), -- the run's user: the session's, or who the key ACTS AS — the member for an MCP key, the key's own identity for an endpoint/server key since V34 (was triggered_by; renamed by V30, D11)
     executed_by_key_kind TEXT,                       -- 'user' | 'endpoint' | 'server' when a key started it; NULL = a signed-in session (V30)
-    triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP' | 'PIPELINE' | 'ENDPOINT'
+    triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP' | 'PIPELINE' | 'ENDPOINT' | 'SCHEDULE'
     correlation_id      UUID,
     started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at        TIMESTAMPTZ,
@@ -317,7 +317,7 @@ CREATE TABLE pipeline_executions (
     root_execution_id   UUID        NOT NULL,        -- top ancestor; equals execution_id for roots — backfilled = own id (V3)
     heartbeat_at        TIMESTAMPTZ,                 -- the owning instance's liveness stamp while RUNNING; NULL on a pre-V21 row (V21, §8.3)
     CONSTRAINT chk_status CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED')),
-    CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE', 'ENDPOINT')),  -- 'PIPELINE' added by V3, 'ENDPOINT' by V11
+    CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE', 'ENDPOINT', 'SCHEDULE')),  -- 'PIPELINE' added by V3, 'ENDPOINT' by V11, 'SCHEDULE' by V38
     CONSTRAINT chk_executions_executed_by_key_kind CHECK (executed_by_key_kind IS NULL OR executed_by_key_kind IN ('user', 'endpoint', 'server')),  -- V30
     CONSTRAINT fk_executions_pipeline_version
         FOREIGN KEY (pipeline_id, pipeline_version)
@@ -339,7 +339,7 @@ CREATE INDEX idx_executions_heartbeat ON pipeline_executions(heartbeat_at)    --
 - **`fk_executions_pipeline_version` is the point of this table's integrity.** `pipeline_version` is a snapshot of the version executed, and without the composite FK it was a free-floating integer — nothing stopped an execution from recording a version that was never stored, and the "which JSON actually ran?" question had no reliable answer. The target is `pipeline_versions`' primary key `(pipeline_id, version)`.
 - The single-column `pipeline_id REFERENCES pipelines(id)` is retained alongside it. It is *implied* by the composite FK (every `pipeline_versions` row has a valid `pipeline_id`), and is kept for ERD clarity and because it is the constraint that survives if `pipeline_versions` is ever partitioned.
 - **Delete interaction:** `pipelines` uses soft delete, so this does not arise in normal operation — but a *hard* `DELETE FROM pipelines` now fails while any execution references one of its versions. The `ON DELETE CASCADE` from `pipelines` to `pipeline_versions` cannot fire, because the composite FK is `ON DELETE RESTRICT` (default). This is the correct outcome: execution history must not be silently erasable.
-- `status` values are [`ExecutionStatus`](enums.md#10-executionstatus--whole-pipeline-execution-outcome); `triggered_via` values are [`ExecutionTrigger`](enums.md#18-executiontrigger--how-execution-was-initiated). Both CHECK constraints list only the shipped values — adding `SCHEDULED`/`WEBHOOK` later is a migration, deliberately (V3 added `PIPELINE` exactly that way).
+- `status` values are [`ExecutionStatus`](enums.md#10-executionstatus--whole-pipeline-execution-outcome); `triggered_via` values are [`ExecutionTrigger`](enums.md#18-executiontrigger--how-execution-was-initiated). Both CHECK constraints list only the shipped values — adding a trigger (`WEBHOOK`) later is a migration, deliberately (V3 added `PIPELINE`, V11 `ENDPOINT` and V38 `SCHEDULE` exactly that way). A `SCHEDULE` execution's `executed_by` is the system identity and its attribution — the schedule, and a Run now's person — is the scheduler's own [`schedule_runs`](#423-schedule_runs) row, joined by `execution_id` ([scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) §4).
 - **`parameters_json` holds the FULLY RESOLVED Context, and its name is historical (072).** The row is inserted with the request's `parameters` object as sent, and the terminal UPDATE replaces it with what the nodes actually saw: org configuration (`org_*`), the platform keys (`current_date`, `current_timestamp`, `execution_id`), the declared parameters after defaulting, the execute-time inputs and every `CALCULATOR` node's output ([Calculators design §0.5](superpowers/specs/2026-09-04-calculators-design.md), [DAG Executor §7.3](dag-executor.md#73-the-context-snapshot--pipeline_executionsparameters_json)). The name predates calculators and org config, when parameters WERE the whole Context; it is not renamed because a rename costs a migration and a re-read of every consumer, and this note costs a line. Without the snapshot a completed execution cannot answer "which fiscal quarter did this run report on?" — the caller's parameters do not contain it, and the configuration that produced it may since have changed.
 - **Lineage columns (V3).** A PIPELINE node's child execution records `parent_execution_id` + `parent_node_id` (NULL for roots); `root_execution_id` is the top ancestor. The migration backfills `root_execution_id = execution_id` for pre-existing rows and sets it NOT NULL from then on — one indexed query (`idx_executions_root`) returns the whole family and cancellation keys off it, with no NULL special-case anywhere. The repository binds `root_execution_id` as the record's own `execution_id` when the caller leaves it null, so roots never have to repeat their id.
 - **No `result_delivery` column.** Under D9 there is exactly one delivery path (every caller result is materialized in Redis and read through the cursor), so the old `'inline' | 'claim_check'` discriminator describes a fork that no longer exists. `result_row_count` and `result_size_bytes` remain as history/observability facts — they describe a result that is very likely already expired, and they are **not** a claim that the result is still retrievable. Retrievability is a Redis TTL question ([§9](#9-what-is-not-in-this-database)).
@@ -883,6 +883,144 @@ CREATE INDEX idx_learned_facts_supersedes ON learned_facts (supersedes) WHERE su
 - **Deletes.** `(template_id, version)` cascades — a purged draft (versioning §5.4's hard delete) and an entity purge take their citations; `fact_id` does not — the product never deletes a fact (datasource delete is soft, §4.10), so a manual hard delete of a cited fact is refused rather than silently orphaning a transform's claim.
 - **Export, import, promotion** carry the ids on the version's payload; an import stores only the ids that resolve in the IMPORTING workspace and drops the rest without refusing (owner ruling 2026-09-25): `learned_facts` is environment-local (§5A), so a cross-deployment promotion lands with no citations, and a same-workspace round trip is lossless.
 
+### 4.22 `schedules`
+
+**A schedule** (V38, #9; the [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) §7, [Scheduler](scheduler.md)). Workspace-scoped, named by the pipeline path grammar, pipeline-AGNOSTIC: the job is an executor id plus opaque JSON the executor validated at save (record §5) — nothing pipeline-shaped is a column.
+
+```sql
+CREATE TABLE schedules (
+    id                      UUID        PRIMARY KEY,
+    workspace_id            UUID        NOT NULL REFERENCES workspaces(id),
+    name                    TEXT        NOT NULL,       -- the pipeline path grammar (checked in code)
+    revision                INT         NOT NULL DEFAULT 1,  -- the ETag / If-Match value; not a releasable version
+    executor_id             TEXT        NOT NULL,       -- 'pipeline' in slice 1 — an allowlisted registry id
+    payload_schema_version  INT         NOT NULL,
+    payload_json            JSONB       NOT NULL,       -- opaque; the executor validates it
+    parameters_json         JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- literal inputs (R7), opaque here
+    target_ref              TEXT        NOT NULL,       -- the executor's generic reference (B15): 'pipeline:<name>'
+    cron                    TEXT        NOT NULL,       -- five-field Unix
+    timezone                TEXT        NOT NULL,       -- an IANA region id
+    missed_run_policy       TEXT        NOT NULL DEFAULT 'skip',
+    enabled                 BOOLEAN     NOT NULL DEFAULT TRUE,
+    blocked_reason          TEXT,
+    blocked_at              TIMESTAMPTZ,
+    blocked_run_id          UUID,                       -- the run whose outcome blocked it
+    next_due_at             TIMESTAMPTZ,
+    created_by              UUID        NOT NULL REFERENCES users(id),
+    updated_by              UUID        NOT NULL REFERENCES users(id),
+    idempotency_key         TEXT,                       -- a create's Idempotency-Key (L1) …
+    idempotency_hash        TEXT,                       -- … and the hash of the request it named
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at              TIMESTAMPTZ,
+    deleted_by              UUID        REFERENCES users(id),
+    CONSTRAINT chk_schedules_missed_run_policy CHECK (missed_run_policy IN ('skip', 'latest')),
+    CONSTRAINT chk_schedules_blocked CHECK ((blocked_reason IS NULL) = (blocked_at IS NULL)),
+    CONSTRAINT chk_schedules_idempotency CHECK ((idempotency_key IS NULL) = (idempotency_hash IS NULL)),
+    CONSTRAINT chk_schedules_revision CHECK (revision >= 1)
+);
+
+CREATE UNIQUE INDEX uq_schedules_workspace_name_live ON schedules (workspace_id, name) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_schedules_create_idempotency ON schedules (workspace_id, created_by, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+CREATE INDEX idx_schedules_due ON schedules (next_due_at) WHERE enabled AND blocked_at IS NULL AND deleted_at IS NULL;
+CREATE INDEX idx_schedules_target ON schedules (workspace_id, target_ref) WHERE deleted_at IS NULL;
+```
+
+**Notes:**
+- **Soft delete** (`deleted_at`, D-9.6/B17), not §2's `is_deleted` flag: the name is unique among LIVE schedules only (the partial index), so a deleted schedule keeps its runs and their trail and its name is free again. A deleted schedule is absent from every read.
+- **`enabled` and `blocked_*` are independent operational controls** (record §1.1): pause flips `enabled`; an `unknown` run or a blocking refusal sets the block; resume never clears a block (unblock does).
+- **`next_due_at` is written only by the ONE occurrence function** (record §3.2) — at create, at the dispatcher's advance, and when resume, unblock or a cron/timezone edit recompute it from now.
+- **The dispatcher's scan** is `idx_schedules_due` joined to the workspace row (a deleted or DEACTIVATED workspace is not dispatched), locked `FOR UPDATE SKIP LOCKED`.
+
+### 4.23 `schedule_runs`
+
+**One run** — an occurrence (`cron`, `catch_up`) or a manual request (`manual`) — with its frozen context and its state (V38; record §7, §7.1).
+
+```sql
+CREATE TABLE schedule_runs (
+    id                      UUID        PRIMARY KEY,
+    schedule_id             UUID        REFERENCES schedules(id),       -- NULL only for slice 6's ad-hoc runs
+    workspace_id            UUID        NOT NULL REFERENCES workspaces(id),
+    origin                  TEXT        NOT NULL,       -- 'cron' | 'catch_up' | 'manual'
+    scheduled_at            TIMESTAMPTZ,                -- the UTC occurrence; NULL for a manual run
+    reference_at            TIMESTAMPTZ NOT NULL,       -- the frozen time context (record §5.1)
+    reference_timezone      TEXT        NOT NULL,
+    admit_by                TIMESTAMPTZ NOT NULL,       -- the lateness window's end
+    schedule_revision       INT,
+    executor_id             TEXT        NOT NULL,
+    payload_schema_version  INT         NOT NULL,
+    payload_json            JSONB       NOT NULL,       -- frozen copies of the schedule's
+    parameters_json         JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    prepared_json           JSONB,                      -- the executor-owned snapshot (R5), set IN the claim
+    actor_user_id           UUID        NOT NULL REFERENCES users(id),  -- the system identity (R2)
+    requested_by            UUID        REFERENCES users(id),           -- a manual run's person
+    execution_id            UUID,                       -- opaque execution reference, minted at the claim; no FK
+    state                   TEXT        NOT NULL,       -- R6's table (record §7.1)
+    reason                  TEXT,
+    worker                  TEXT,
+    attempts                INT         NOT NULL DEFAULT 0,  -- capacity retries (R4)
+    idempotency_key         TEXT,                       -- a Run now's Idempotency-Key (L1) …
+    idempotency_hash        TEXT,
+    trail_seq               INT         NOT NULL DEFAULT 0,  -- the last seq of this run's trail
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claimed_at              TIMESTAMPTZ,
+    started_at              TIMESTAMPTZ,
+    finished_at             TIMESTAMPTZ,
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_schedule_runs_origin CHECK (origin IN ('cron', 'catch_up', 'manual')),
+    CONSTRAINT chk_schedule_runs_state CHECK (state IN ('queued', 'starting', 'running', 'succeeded', 'failed',
+        'cancelled', 'aborted', 'unknown', 'not_started', 'skipped')),
+    CONSTRAINT chk_schedule_runs_occurrence CHECK ((origin = 'manual') = (scheduled_at IS NULL)),
+    CONSTRAINT chk_schedule_runs_claimed CHECK (state NOT IN ('starting', 'running') OR execution_id IS NOT NULL),
+    CONSTRAINT chk_schedule_runs_idempotency CHECK ((idempotency_key IS NULL) = (idempotency_hash IS NULL)),
+    CONSTRAINT uq_schedule_runs_occurrence UNIQUE (schedule_id, scheduled_at)
+);
+
+CREATE UNIQUE INDEX uq_schedule_runs_manual_idempotency ON schedule_runs (schedule_id, requested_by, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX uq_schedule_runs_one_active ON schedule_runs (schedule_id) WHERE state IN ('queued', 'starting', 'running');
+CREATE INDEX idx_schedule_runs_schedule ON schedule_runs (schedule_id, created_at DESC);
+CREATE INDEX idx_schedule_runs_open ON schedule_runs (updated_at) WHERE state IN ('starting', 'running', 'unknown');
+CREATE INDEX idx_schedule_runs_execution ON schedule_runs (execution_id) WHERE execution_id IS NOT NULL;
+```
+
+**Notes:**
+- **One occurrence, one row** — `uq_schedule_runs_occurrence` is the dispatcher's `ON CONFLICT ON CONSTRAINT … DO NOTHING` arbiter; manual rows (`scheduled_at` NULL) never conflict with it.
+- **At most one active run per schedule** — `uq_schedule_runs_one_active` is the database's second line under the overlap guard every run-inserting path decides under the schedule row's lock (record §3).
+- **The start claim** is the one conditional UPDATE `queued → starting` that also records `execution_id` and `prepared_json` — `chk_schedule_runs_claimed` makes "a claimed run names its execution" a database fact.
+- **`execution_id` has no FK** on purpose: it is minted BEFORE the execution exists (the fail-closed rule, record §2.1), and it is an opaque reference to whichever executor ran it.
+- **`prepared_json`** is the executor's snapshot — for the pipeline executor `{pipeline_id, pipeline, version, version_status, body_sha256}` (R5: a DRAFT is mutable under its number, so the body's hash names what ran). The scheduler stores it and never reads it.
+
+### 4.24 `schedule_run_events`
+
+**A run's trail** (V38; R10, record §5.4) — one row per transition, append-only.
+
+```sql
+CREATE TABLE schedule_run_events (
+    run_id       UUID        NOT NULL REFERENCES schedule_runs(id),
+    seq          INT         NOT NULL,       -- 1, 2, 3 … per run, from schedule_runs.trail_seq
+    kind         TEXT        NOT NULL,
+    reason       TEXT,
+    at           TIMESTAMPTZ NOT NULL,
+    worker       TEXT,
+    details_json JSONB       NOT NULL DEFAULT '{}'::jsonb,  -- the execution reference, a retry number, a summary's counts
+    PRIMARY KEY (run_id, seq),
+    CONSTRAINT chk_schedule_run_events_kind CHECK (kind IN ('recorded', 'capacity_retry', 'claimed',
+        'execution_started', 'not_started', 'skipped', 'finished', 'unknown', 'updated_after_unknown', 'unblocked')),
+    CONSTRAINT chk_schedule_run_events_seq CHECK (seq >= 1)
+);
+```
+
+**Notes:**
+- **Append-only by construction**, not by a trigger (§2: this schema has none): the one INSERT in `ScheduleRunRepository.appendTrail` draws `seq` from `schedule_runs.trail_seq` in the same statement, and no code path updates or deletes a row — `ScheduleTrailAppendOnlyTest` scans the sources. Like §2's other immutable tables it carries no `updated_at`.
+- **No copy of the pipeline's events.** The execution's own events stay in [`execution_events`](#47-execution_events); `schedule_runs.execution_id` is the join a merged Messages read uses (record §5.4).
+- **Retention** follows the run's history: slice 1 deletes neither (a retention policy for runs and their trail is a later slice's, with the notification outbox).
+
+### 4.25 `scheduled_tasks`
+
+**db-scheduler's own queue** (V38) — the library's EXACT PostgreSQL DDL at 16.12.0 (`db-scheduler/src/test/resources/postgresql_tables.sql`, tag `v16.12.0`), copied verbatim with its three indexes. The library owns the shape and every write; this schema only creates it. Its `task_data` is JSON (never Java serialization, record §2.2), and the scheduler writes at most a run id there. Rows: one per recurring task (`schedule-dispatcher`, `schedule-reconciler`) and one per enqueued run (`schedule-run`, instance id = the run id), removed when that run's task completes.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -954,6 +1092,23 @@ CREATE INDEX idx_learned_facts_supersedes ON learned_facts (supersedes) WHERE su
 | `pipeline_check_runs` | `idx_pipeline_check_runs_latest` | explicit | The latest run per `(pipeline_id, version, check_id)` — the release gate's and the UI's only read ([§4.20](#420-pipeline_check_runs)) |
 | `template_implements` | `template_implements_pkey` | via PK | `(template_id, version, fact_id)` — one version's citations (the `needs_review` join on read) |
 | `template_implements` | `idx_template_implements_fact` | explicit | V36 (7e): the reverse arrow — every version citing one fact (`implemented_by`, the `implements=` filter) ([§4.21](#421-template_implements)) |
+| `schedules` | `schedules_pkey` | via PK | Lookup by id |
+| `schedules` | `uq_schedules_workspace_name_live` | explicit (partial, unique) | V38 (#9): a LIVE schedule's name is unique per workspace; a soft-deleted one frees it ([§4.22](#422-schedules)) |
+| `schedules` | `uq_schedules_create_idempotency` | explicit (partial, unique) | V38: one schedule per (workspace, creator, Idempotency-Key) — the durable create replay (L1) |
+| `schedules` | `idx_schedules_due` | explicit (partial) | V38: the dispatcher's due scan — only enabled, unblocked, live rows, so a paused fleet costs nothing |
+| `schedules` | `idx_schedules_target` | explicit (partial) | V38: "which schedules run this target?" (B15) without parsing a payload |
+| `schedule_runs` | `schedule_runs_pkey` | via PK | Lookup by id — the run task's data is the id |
+| `schedule_runs` | `uq_schedule_runs_occurrence` | via UNIQUE | V38: one row per (schedule, occurrence) — the dispatcher's `ON CONFLICT` arbiter ([§4.23](#423-schedule_runs)) |
+| `schedule_runs` | `uq_schedule_runs_manual_idempotency` | explicit (partial, unique) | V38: one Run now per (schedule, requester, Idempotency-Key) (L1) |
+| `schedule_runs` | `uq_schedule_runs_one_active` | explicit (partial, unique) | V38: at most one queued/starting/running run per schedule — the durable overlap guard |
+| `schedule_runs` | `idx_schedule_runs_schedule` | explicit | V38: a schedule's history, newest first |
+| `schedule_runs` | `idx_schedule_runs_open` | explicit (partial) | V38: the reconciler's worklist (starting, running, unknown) |
+| `schedule_runs` | `idx_schedule_runs_execution` | explicit (partial) | V38: the run of an execution — the Messages join |
+| `schedule_run_events` | `schedule_run_events_pkey` | via PK | `(run_id, seq)` — a run's trail in order, its only access path |
+| `scheduled_tasks` | `scheduled_tasks_pkey` | via PK | db-scheduler's `(task_name, task_instance)` ([§4.25](#425-scheduled_tasks)) |
+| `scheduled_tasks` | `execution_time_idx` | explicit | db-scheduler's own: due tasks by time (its DDL, verbatim) |
+| `scheduled_tasks` | `last_heartbeat_idx` | explicit | db-scheduler's own: dead-execution detection |
+| `scheduled_tasks` | `priority_execution_time_idx` | explicit | db-scheduler's own: priority polling (priority is off; the index is the library's) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1002,6 +1157,10 @@ table and the test's expected-table list in the same commit.
 | `mail_sends` | derived | MailSend | — | — | The claim rows behind the notices THIS deployment sent about ITS users (§4.19) — a record of local sends, not authored, and meaningless beside another environment's `users` |
 | `pipeline_check_runs` | derived | CheckRun | — | `(pipeline, version, check_id)` | Produced by THIS deployment's server running the checks a pipeline body declares (§4.20): the observed value is only truthful against this environment's datasource data, which is the whole point of a check. The runs of a promoted pipeline are re-produced by the target's own runs, never transferred |
 | `lake_tables` | environment-local | LakeTable | — | — | Rows point at an environment-local [`datasources`](#410-datasources) row and at bucket locations whose credentials never leave the deployment; the registry is rebuilt on the target from its own manifest import, exactly as the datasource itself is re-registered there |
+| `schedules` | environment-local | Schedule | — | — | Schedules are NEVER promoted (the owner's decision, scheduler design revision §1.1): operational configuration of THIS deployment, created directly, with no artifact lifecycle |
+| `schedule_runs` | derived | ScheduleRun | — | — | The runs THIS deployment's scheduler recorded; their executions are this environment's own |
+| `schedule_run_events` | derived | ScheduleRunEvent | — | — | Each run's local trail — produced, never authored |
+| `scheduled_tasks` | derived | ScheduledTask | — | — | db-scheduler's queue of this deployment's pending tasks; library-owned, never transferred |
 | `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
 
 ---
@@ -1266,6 +1425,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.28 | V38 (scheduler lane 1, #9) | New **§4.22 `schedules`**, **§4.23 `schedule_runs`**, **§4.24 `schedule_run_events`** and **§4.25 `scheduled_tasks`** (the [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) §7): the schedules (soft delete with a live-name partial unique index, independent `enabled`/`blocked_*`, the create Idempotency-Key and its hash — L1), their runs (R6's ten states, the frozen context, the executor-owned `prepared_json`, one row per occurrence, one Run now per key, AT MOST ONE ACTIVE RUN per schedule as a partial unique index), the runs' append-only trail (by construction — no trigger, §2), and db-scheduler 16.12.0's own table verbatim. `pipeline_executions.chk_triggered_via` gains `SCHEDULE`. §5 gains the eighteen indexes; §5A classifies `schedules` environment-local (never promoted) and the other three derived. Twenty-five tables. |
 | 2026-09-25 | v1.27 | V37 (keys v2, #233) | **Every key is a robot member of one workspace** (record §10 A13–A19). §4.2 `api_keys`: the `user` kind is renamed `mcp` (A19 — kind is the transport) and `DEFAULT 'mcp'` follows; `role` is the role CHOSEN at creation — `author\|promoter\|workspace_admin` on `mcp` (A13/A14), the transport roles unchanged; `chk_api_keys_kind` is replaced for the rename, `chk_api_keys_role` is replaced — every role-bearing arm spells `role IS NOT NULL` because `role = …` is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN, and the first draft's missing `IS NOT NULL` on the `mcp` arm ADMITTED a live NULL-role row (measured; fixed before merge); `minted_at_login` and its per-`(user, workspace)` unique index are DROPPED (A15 — the login mint is gone), and V37 CONVERTS every live `user`-kind row — the login-minted and the pre-R3 on-demand ones (V31 left the latter `minted_at_login = FALSE`; a row the final CHECK would refuse must not survive): an owner's membership `author\|promoter\|workspace_admin` → identity-backed key with that role, a viewer or membership-less owner → REVOKED, never guessed (B4, NOTICE counts); `created_by` keeps the human creator, whose removal revokes the key (A17/B6). New `uq_api_keys_live_workspace_name` — a live key's NAME is unique per workspace (A18; duplicates disambiguated by the migration, all but the newest gaining the key id's tail). `pipeline_executions.executed_by_key_kind`'s CHECK widens to admit `'mcp'` beside `'user'` for history. §5 index inventory swaps `api_keys_one_live_user_key` for `uq_api_keys_live_workspace_name`. A20 (the 233c correction): the conversion reads the owner's MEMBERSHIP, never `users.is_active` — an inactive owner's key converts and is then refused at request time until the owner is reactivated. |
 | 2026-09-25 | v1.26 | V36 (7e, #7) | New **§4.21 `template_implements`** — the WORKSPACE facts a transform version cites as implementing (transform-nodes design §2.3): PK `(template_id, version, fact_id)`, the composite FK to `template_versions` ON DELETE CASCADE (a purged draft takes its citations), the FK to `learned_facts` with NO cascade (facts are retired, never deleted), `idx_template_implements_fact` for the reverse arrow. Outside `body_hash`; `needs_review` computed on read, never stored. `learned_facts` gains the partial `idx_learned_facts_supersedes` (a retired fact's successor). §4.9's "nothing references a `template_versions` row by FK" note corrected; §5 gains the three indexes; §5A classifies the table promotable (carried on the version, resolvable ids kept on import — owner ruling 2026-09-25); the ERD gains both edges. Twenty-one tables. V37 is left unused — lane 233b's keys-v2 migration renumbered to V37 at the 233c base refresh (Flyway refuses a lower number after V36 has run). |
 | 2026-09-24 | v1.25 | V34 (215b, #215) | Key identities and key roles ([Auth §4.7](auth.md#47-key-identities), [§7.5](auth.md#75-key-roles)). §4.1 `users` gains `kind` (`human` \| `service` \| `system`, CHECK'd; the System row is set to `system`). §4.2 `api_keys` gains `created_by` (backfilled from `user_id`, NOT NULL, FK to `users`) and `role` with `chk_api_keys_role` — `api_caller` on every endpoint key, `promotion_receiver` on every server key, NULL on the MCP key; each non-null arm is spelled `role IS NOT NULL AND role = …`, because the record's `role = …` alone is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN. V34 creates one `service` identity per existing endpoint/server key (inactive for a revoked key), repoints the key's `user_id` to it, and refuses to run unless the three counts agree; `scopes` is DROPPED (PK8). New `idx_api_keys_created_by`. `pipeline_executions.executed_by`'s comment names the identity for endpoint/server-key runs; past rows are not rewritten. Down path is in the migration header (lossy by design). |

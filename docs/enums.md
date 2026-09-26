@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.19 (living document — updated as enums evolve)
+**Status:** v1.20 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -473,6 +473,18 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `mail.sent` | The transport accepted a notice — the welcome / password-reset mail to a user or the "New user" notice to sys-ops. `details` carries `kind` (`welcome` \| `password_reset` \| `new_user`), `to`, `act_id` (the `mail_sends` claim's act) and `message_id` (the `Message-ID` it went out under). NEVER the body, NEVER the one-time password — the password exists in exactly one place, the message body handed to the transport |
 | `mail.failed` | The transport refused or failed a notice. `details` carries `kind`, `to`, `act_id` and `error` (the exception's class and message — a relay's refusal line, never a body). The `mail_sends` row carries the same error; the admin screen shows it |
 
+**Schedule audit events** (same `audit_log` table; emitted by the schedule REST routes, [REST API §20](rest-api.md#20-schedules), all session-only in slice 1 — #9). A person's acts only: what a schedule does when it FIRES is its runs' trail ([Metadata DB §4.24](metadata-db.md#424-schedule_run_events)), not an audit row, because nobody acted.
+
+| Value | Trigger |
+|---|---|
+| `schedule.created` | A schedule was created (an idempotent replay writes no second row). `details` carries `schedule_id`, `name`, `revision` — never the payload or the parameters |
+| `schedule.updated` | A schedule was edited (rename/move included). Same `details` |
+| `schedule.paused` | Paused. Same `details` (an already-paused schedule's pause still writes one — the act happened) |
+| `schedule.resumed` | Resumed. Same `details` |
+| `schedule.unblocked` | A block was cleared after the saved payload re-validated. Same `details` |
+| `schedule.deleted` | Soft-deleted. `details` carries `schedule_id` |
+| `schedule.run_requested` | Run now recorded a manual run (a replay writes no second row). `details` carries `schedule_id`, `run_id` |
+
 ---
 
 ## 16. Error Code Domains (prefix catalog)
@@ -480,7 +492,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 **Source:** [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) — the ONLY catalog of concrete error codes. This section registers domains; deliberately no code list here, so there is exactly one place a code can drift from.
 **Used by:** every spec that defines error codes.
 
-Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `datasource.table_not_found`, `datasource.table_forbidden`, `template.not_found`, the bare `template.*` block and citation codes (`template.contract_invalid`, …, `template.implements_unresolved` — about the version's own content, 7b/7e), `rate_limit.exceeded`, `rate_limit.unavailable`, every `semantics.*` code — a learned fact has no sub-entity — and `mcp.doc_not_found`). Additive-only — never reused, never renamed.
+Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `datasource.table_not_found`, `datasource.table_forbidden`, `template.not_found`, the bare `template.*` block and citation codes (`template.contract_invalid`, …, `template.implements_unresolved` — about the version's own content, 7b/7e), `rate_limit.exceeded`, `rate_limit.unavailable`, every `semantics.*` code — a learned fact has no sub-entity — `mcp.doc_not_found`, and the schedule's own states: `schedule.not_found`, `schedule.name_taken`, `schedule.revision_conflict`, `schedule.blocked`, `schedule.not_blocked`). Additive-only — never reused, never renamed.
 
 | Domain | Description | Catalog section |
 |---|---|---|
@@ -504,6 +516,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `template.version.*` | Template draft/release lifecycle | pipeline-contract §13.9 (defined in [Versioning](versioning.md)) |
 | `semantics.*` | The learned semantic layer: recording, evidence, duplicate and drift refusals | pipeline-contract §13.15 (defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md)) |
 | `mcp.*` | The MCP surface's own refusals (the resource surface's not-found is the JSON-RPC protocol's, not a code) | pipeline-contract §13.16 (defined in [MCP §6.2](mcp-server.md#62-tool-definitions)) |
+| `schedule.*` (incl. `schedule.validation.*`, `schedule.run.*`, `schedule.limit.*`) | Schedule save-time validation, state conflicts and not-found (#9) — never raised while a schedule fires; a run that could not start is a `not_started` run (§24) | pipeline-contract §13.19 (defined in [Scheduler](scheduler.md)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
 
@@ -545,7 +558,8 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `MCP` | MCP tool invocation (agent) |
 | `PIPELINE` | Spawned by a parent execution's PIPELINE node (pipeline composition; metadata-db §4.6 lineage columns link the family) |
 | `ENDPOINT` | A published endpoint served a `GET` request on the published tree (074; re-rooted to `/api/<category>/<version>/<path…>` by 172). The execution runs in-process as the endpoint's workspace, `executed_by` is the key's owner with `executed_by_key_kind = endpoint` (§18A — the run lists for admins only, D11), and the serve's audit row carries the key id |
-| `SCHEDULED` | (Future) Cron-triggered execution |
+| `SCHEDULE` | A schedule fired it (#9, V38) — a cron occurrence, a `latest` catch-up or a Run now. `executed_by` is the system identity, `executed_by_key_kind` is null, and the run is visible to every member with `execution.read` (R3); the schedule's run (`schedule_runs.execution_id`) links back to it |
+| `SCHEDULED` | **Never shipped — superseded by `SCHEDULE` (#9) before any row carried it.** The old future placeholder, kept here only because this document never removes a value; no CHECK admits it |
 | `WEBHOOK` | (Future) External webhook trigger |
 
 > **Declaration reality (2026-08-10).** Declared in the `dag` module, for the same layering reason as `ExecutionStatus` (§10) and `SseEventType` (§11): the executor owns the execution repository that persists `pipeline_executions.trigger`, and it sits below `web`. This document, [rest-api](rest-api.md) and [metadata-db](metadata-db.md) remain the wire authorities.
@@ -626,6 +640,77 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 
 ---
 
+## 22. `MissedRunPolicy` — what a schedule does about occurrences it missed (#9)
+
+**Source:** [Scheduler §4](scheduler.md#4-missed-occurrences-overlap-and-run-now); the `chk_schedules_missed_run_policy` CHECK of [Metadata DB §4.22](metadata-db.md#422-schedules); the Kotlin enum is `MissedRunPolicy` (scheduler `ScheduleModel.kt`).
+**Used by:** scheduler, rest-api §20.
+
+| Value | Meaning |
+|---|---|
+| `skip` | The default. Occurrences missed during an outage are recorded as ONE `skipped` / `missed` summary run; the next future occurrence runs |
+| `latest` | The latest missed occurrence runs once (`origin = catch_up`) if it is at most `catch-up-max-age-seconds` old; the earlier ones are summarized as missed |
+
+**Closed.** Paused and blocked time is never "missed" under either policy — resume and unblock recompute from now.
+
+---
+
+## 23. `RunOrigin` — why a schedule run exists (#9)
+
+**Source:** [Metadata DB §4.23](metadata-db.md#423-schedule_runs) (`chk_schedule_runs_origin`); the Kotlin enum is `RunOrigin`.
+**Used by:** scheduler, rest-api §20.
+
+| Value | Meaning |
+|---|---|
+| `cron` | An occurrence of the schedule's pattern, recorded by the dispatcher; `scheduled_at` is the occurrence |
+| `catch_up` | The `latest` policy's one run for an outage; keeps the missed occurrence's `scheduled_at` |
+| `manual` | Run now; `scheduled_at` is null, `requested_by` names the person |
+
+---
+
+## 24. `RunState` — a schedule run's state (#9)
+
+**Source:** [Scheduler §5](scheduler.md#5-runs-states-and-reasons) (states and every reason); [Metadata DB §4.23](metadata-db.md#423-schedule_runs) (`chk_schedule_runs_state`); the Kotlin enum is `RunState`.
+**Used by:** scheduler, web (the pipeline executor maps execution terminals onto it), rest-api §20.
+
+| Value | Meaning |
+|---|---|
+| `queued` | Recorded, waiting for admission |
+| `starting` | The start claim is committed; the launch is in progress |
+| `running` | The execution's record exists |
+| `succeeded` | The execution succeeded |
+| `failed` | The execution failed |
+| `cancelled` | Someone cancelled the execution |
+| `aborted` | The execution was aborted — an instance shutdown |
+| `unknown` | Nobody can say whether its work happened. **Blocks the schedule** |
+| `not_started` | Definitively never started (capacity, a refusal before launch) |
+| `skipped` | Never attempted, by policy (missed, overlap, paused, blocked, deleted) |
+
+`queued`, `starting` and `running` are ACTIVE — at most one per schedule. The run's `reason` column carries the why; the reasons are strings the scheduler and the executor define (Scheduler §5), not a closed enum.
+
+---
+
+## 25. `TrailKind` — one row of a run's trail (#9)
+
+**Source:** [Metadata DB §4.24](metadata-db.md#424-schedule_run_events) (`chk_schedule_run_events_kind`); the Kotlin enum is `TrailKind`.
+**Used by:** scheduler, rest-api §20.11.
+
+| Value | Meaning |
+|---|---|
+| `recorded` | The run was recorded — an occurrence, a catch-up or a Run now |
+| `capacity_retry` | No capacity slot; retried 30 s later |
+| `claimed` | The start claim committed; `details.execution_id` is the minted reference |
+| `execution_started` | The execution's record exists |
+| `not_started` | Definitively not started; `reason` says why |
+| `skipped` | Skipped by policy |
+| `finished` | A terminal outcome, read from the execution |
+| `unknown` | The outcome is unknown; the schedule blocks |
+| `updated_after_unknown` | A real terminal arrived after `unknown` — the same run, updated; the block stays |
+| `unblocked` | A person unblocked the schedule this run had blocked |
+
+**Append-only.** A trail row is never changed or removed; the run row is the projection of its latest row.
+
+---
+
 ## Cross-Reference: Where Each Enum Is Authored
 
 | Enum | Authoring spec | Consuming specs |
@@ -655,6 +740,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 | `LearnedFactKind` | [learned-semantic-layer design §4](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) (§19 here is the wire table) | datasources, metadata-db (the V25 CHECK), mcp-server, rest-api |
 | `CheckRunVerdict` | pipeline-contract (`ReleaseCheckGate.kt`; §20 here is the wire table) | metadata-db (the V28 CHECK), application, mcp-server, rest-api, the UI |
 | `CheckRunVia` | pipeline-contract (`ReleaseCheckGate.kt`; §21 here is the wire table) | metadata-db (the V28 CHECK), application, mcp-server, rest-api, the UI |
+| `MissedRunPolicy`, `RunOrigin`, `RunState`, `TrailKind` | [scheduler.md](scheduler.md) (`scheduler` declares them; §22–§25 here are the wire tables) | metadata-db (the V38 CHECKs), rest-api §20 |
 
 ---
 
@@ -677,6 +763,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.20 | scheduler lane 1 (#9) | §18 gains **`SCHEDULE`** (V38); the never-shipped `SCHEDULED` placeholder is marked superseded (kept — this document never removes a value). §15 gains the seven **schedule audit events** (`schedule.created` … `schedule.run_requested`). §16 registers the `schedule.*` domain (pipeline-contract §13.19). New **§22 `MissedRunPolicy`**, **§23 `RunOrigin`**, **§24 `RunState`**, **§25 `TrailKind`**. |
 | 2026-09-25 | v1.19 | 7e (#7) the semantic link | §16: the `pipeline.release.*` row names its one WARNING code (`pipeline.release.template_needs_review`, in the release response's `warnings`, never an error), and the two-segment list names the bare `template.*` block/citation codes (7b's, and 7e's `template.implements_unresolved`). No enum value added, removed or renamed. |
 | 2026-09-24 | v1.18 | 215b (#215) key identities, key roles | **§8 `Scope` is replaced by §8 `UserKind`** (`human` / `service` / `system`, V34) and new **§8D `KeyRole`** (`api_caller`, `promotion_receiver`) — scopes were removed (PK8). §8A's kinds restated as where a credential may be presented, the role as what it may do; §8B is one axis. §15's `auth.scope.denied` keeps its name, now for every authorization refusal; §16/§17 name `auth.permission.undeclared`. Cross-reference rows for the two new enums. |
 | 2026-09-24 | v1.17 | 215a (#215) the permission catalog | **§8B `Permission` is the catalog**: the seven coarse values (`view` … `super_admin`) are replaced by the 65 `<functionality>.<permission>` values of auth §7.6, which is now their single authority — this section points there instead of restating them. §8 and §8C name the new code homes (`RolePermissions`, the permission key-scope table). Status caught up with the change log (it read v1.15 while the rows had reached v1.16). |

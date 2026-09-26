@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.30 (revised — see Change Log)
+**Status:** v1.32 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-25
@@ -1363,6 +1363,29 @@ checks are §12.13's ten `pipeline.validation.transform_…` rows.
 | `pipeline.transform.rejects_strict` | 500 | `strict: true` and the rejects table is non-empty; carries the count and the first ten reasons (record §5.4). |
 | `transform.js.unavailable` | 400 | a `javascript` template is refused at save until round two's engine ships (record §4.4; 503 at boot). |
 
+### 13.19 Schedules
+
+The scheduler's refusals (#9; [Scheduler](scheduler.md), the scheduler design revision's §5). Two families, like the rest of §13: `schedule.validation.*` is the caller's request (400 — `details.field` names the field), and the bare `schedule.*` codes are a state the schedule is in (409), except the two not-found rows. Nothing here is raised while a schedule FIRES: a run the scheduler could not start is a `not_started` run with a reason on its trail ([Scheduler §5](scheduler.md#5-runs-states-and-reasons)), never an error response. A Run-now replay with a different body answers §13.11's `idempotency.key_reused_for_different_request`, and a pipeline's parameter refusals are exactly an interactive run's (§13.4). Landed with the constants — the catalog's `PipelineErrorCodes.Schedule` and the scheduler's own `ScheduleErrorCodes`, pinned equal by `SchedulerUnitTest` — and their `ApiErrorCatalog` rows.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `schedule.not_found` | 404 | no live schedule with that id in the caller's workspace — a deleted schedule is absent, never "deleted" |
+| `schedule.run.not_found` | 404 | no run with that id under that schedule |
+| `schedule.name_taken` | 409 | another live schedule of the workspace holds the name |
+| `schedule.revision_conflict` | 409 | `If-Match` named a revision that is no longer current — someone changed the schedule since it was read; `details.current_revision` |
+| `schedule.run.overlap` | 409 | Run now while a run of the schedule is queued, starting or running (one run in flight per schedule) |
+| `schedule.blocked` | 409 | Run now against a blocked schedule; `details.blocked_reason` — unblock first (resume never clears a block) |
+| `schedule.not_blocked` | 409 | unblock on a schedule that is not blocked |
+| `schedule.limit.per_workspace` | 409 | the workspace already holds `datapipelines.scheduler.max-schedules-per-workspace` live schedules |
+| `schedule.validation.request_invalid` | 400 | a missing or ill-typed request field |
+| `schedule.validation.name_invalid` | 400 | the name breaks the folder-path grammar pipelines and templates use |
+| `schedule.validation.cron_invalid` | 400 | not a five-field Unix cron — a seconds field, the disabled pattern `-` and an out-of-range field are all this |
+| `schedule.validation.timezone_invalid` | 400 | not an IANA region id (`Europe/Berlin`); a fixed offset such as `+02:00` is refused too |
+| `schedule.validation.interval_too_short` | 400 | two consecutive occurrences closer than `datapipelines.scheduler.min-interval-seconds` |
+| `schedule.validation.executor_unknown` | 400 | no executor is registered under that id (v1 registers `pipeline`) |
+| `schedule.validation.payload_invalid` | 400 | the executor refused the payload — for `pipeline`: an unknown field, no pipeline name, a `version` other than `"current"` (`latest` is refused by name), or a pipeline with no current version to follow; `details.reason` names which — or the payload or parameters exceed 16 KiB or 8 levels |
+| `schedule.validation.target_not_found` | 400 | the payload names a pipeline the workspace does not hold, or its current version has no stored body |
+
 ---
 
 ## 14. Pipeline Lifecycle Operations
@@ -1603,6 +1626,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.32 | scheduler lane 1 (#9) — numbered after origin/main's v1.31 (232) | New **§13.19 Schedules**: sixteen `schedule.*` codes — `schedule.not_found` / `schedule.run.not_found` (404), the 409 state family (`name_taken`, `revision_conflict`, `run.overlap`, `blocked`, `not_blocked`, `limit.per_workspace`) and the 400 `schedule.validation.*` family (`request_invalid`, `name_invalid`, `cron_invalid`, `timezone_invalid`, `interval_too_short`, `executor_unknown`, `payload_invalid`, `target_not_found`). None is raised while a schedule fires. Landed with `ScheduleErrorCodes` and their `ApiErrorCatalog` rows. |
 | 2026-09-25 | v1.31 | 232 (#232) the limiter's own sentence | §13.11's `rate_limit.exceeded` row now states WHICH user message answers on which surface: the catalog default (the request-volume sentence) for every API surface, the sign-in sentence only from the login damper. Code, status and `details` unchanged; no new code, no catalog row count change. |
 | 2026-09-25 | v1.30 | 7e (#7) the semantic link | §13.9 gains `template.implements_unresolved` (400 — an `implements` entry that is not a WORKSPACE `definition`/`exclusion`/`preference` fact visible from the writing workspace; not-found semantics) and the `template.blocks_not_allowed` row names `implements` beside the three blocks. §13.13 gains `pipeline.release.template_needs_review` with HTTP `—`: a WARNING in the release response's new `warnings` array, never an error status (the §13.6 type-mapping shape; `ApiErrorCatalog.NEVER_RETURNED_LIVE`). §14's release row names the response's `warnings`. Landed in the same commit as the constants, the catalog rows and the drift counts (§13 row count 202 → 204). |
 | 2026-09-24 | v1.29 | 7c (#7) the TRANSFORM node | `NodeType` gains `TRANSFORM` (§4.6 lists six). §4.12: the node — a pinned `jsonata`/`javascript` template evaluated as a pure function over staged data, `inputs`/`output`/`strict` conforming to the pinned contract (R3–R5), the implicit-optional-input rule for a value-mode `context_key`, and R4's one-reader rule for object keys. §4.7: the `rejects` companion of a tempdb output; §7.2: object keys persist as jsonb and read as TRANSFORM-only; §9.1: a `row`/`table`-mode TRANSFORM may be the caller node. §12.13 gains the ten `pipeline.validation.transform_*` rows (the §13 row count and §12 code count move in the same commit as the constants) and §13.18 the `pipeline.transform.*` execution-time family plus `transform.js.unavailable` — 7b's privately declared constants unified here and deleted. |

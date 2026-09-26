@@ -52,6 +52,7 @@ datapipelines/
 │   ├── staging/                         # [Staging spec]
 │   ├── dag/                             # [DAG Executor spec]
 │   ├── auth/                            # [Auth spec]
+│   ├── scheduler/                       # [Scheduler reference] — durable occurrences, #9 (§5.16)
 │   ├── application/                     # cross-aggregate use cases (§5.13)
 │   ├── mcp-server/                      # [MCP Server spec]
 │   ├── web/                             # REST API, SSE, Thymeleaf UI
@@ -74,6 +75,7 @@ datapipelines/
 | `staging` | [staging.md](staging.md) | H2 lifecycle, staging interface, type-aware batch inserts. | — (tempdb is per-execution, never persisted) |
 | `dag` | [dag-executor.md](dag-executor.md) | DAG data structure, executor (coroutines), node runner, SSE event emitter interface, Redis-backed result store. | `ExecutionRepository` → `pipeline_executions`; `ExecutionEventRepository` → `execution_events`; Redis keys for results / idempotency / cancel flags |
 | `auth` | [auth.md](auth.md) | Users, workspaces + membership (resolution, provisioning, CRUD/member rules — 019's recorded placement: the workspace is an identity concept, membership-checked on every authenticated request exactly like `users`), API keys, JWT sessions, scopes, audit log. | `UserRepository` → `users`; `WorkspaceRepository` → `workspaces`, `workspace_members` (metadata-db §4.11/§4.12); `ApiKeyRepository` → `api_keys`; `AuditLogger` → `audit_log` |
+| `scheduler` | [scheduler.md](scheduler.md) | The pipeline-agnostic scheduler (#9): schedules, their occurrence function, the one dispatcher over db-scheduler, runs and their append-only trail, the generic executor port, capacity admission and reconciliation. Knows no pipeline semantics — the executor adapter lives in `web` (§5.16). | `ScheduleRepository` → `schedules`; `ScheduleRunRepository` → `schedule_runs`, `schedule_run_events`; db-scheduler owns `scheduled_tasks` (created by `app`'s V38) |
 | `application` | (this spec, §5.13) | **Cross-aggregate use cases** — the ones that need more than one domain module and so belong to none of them. Sits below `web` and `mcp-server` so both surfaces share one implementation (ARCH-AUDIT-2026-08 S4, ruling R6). | — (delegates to the owning modules' repositories) |
 | `mcp-server` | [mcp-server.md](mcp-server.md) | MCP transport (Streamable HTTP), tool/resource/prompt definitions. Thin adapter over the same services the REST layer uses. | — (delegates to the owning modules' repositories) |
 | `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. | — (delegates); Redis keys for the post-completion SSE event log and per-user rate-limit counters |
@@ -113,9 +115,9 @@ layer 2
 └───────────────────┘
 
 layer 3
-┌──────────────┐
-│  templates   │  ← typesystem, pipeline-contract, scripting
-└──────────────┘
+┌──────────────┐ ┌─────────────┐
+│  templates   │ │  scheduler  │  templates ← typesystem, pipeline-contract, scripting
+└──────────────┘ └─────────────┘  scheduler ← typesystem, pipeline-contract (the name grammar only)
 
 layer 4
 ┌──────────────┐
@@ -138,7 +140,7 @@ layer 6
 layer 7
 ┌──────────────┐
 │     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
-│              │    datasources, staging, dag, auth, application, mcp-server
+│              │    datasources, staging, dag, auth, application, mcp-server, scheduler
 │              │    (declared explicitly, not transitively)
 └──────────────┘
 
@@ -169,10 +171,11 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `datasources` | `typesystem` |
 | `staging` | `typesystem` |
 | `auth` | `typesystem` |
+| `scheduler` | `typesystem`, `pipeline-contract` |
 | `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting` |
 | `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app` |
@@ -181,6 +184,7 @@ Notes on the shape (explanatory, not additional rules):
 
 - The table is acyclic by construction, so "no cycles" needs no separate rule — Gradle enforces it anyway.
 - `calculators`' row is the shortest one in the table on purpose (072, calculators design §0.4/C12). A calculator kind is a **pure function of its inputs**; a row that admitted `datasources` or `dag` would make that a hope rather than a fact, and the executor's freedom to evaluate a kind anywhere, in any order, rests on it. Adding an entry to that row is the edit a reviewer must refuse.
+- `scheduler` lists `pipeline-contract` for exactly ONE thing, the published `PipelineNameGrammar` (a schedule is named like a pipeline — scheduler design revision §6, A2); its `SchedulerBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge. It lists no `dag`, `auth` or `application`: the executor adapter, the capacity lease and the system principal live on `web`'s side of its port.
 - `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
@@ -634,6 +638,26 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Why it is its own module.** The engine evaluates UNTRUSTED script bodies as pure functions of their JSON input (transform design D-T4). That is safe because the module cannot reach anything else: one internal edge, an I/O-refusing source guard (`ScriptingPurityTest`), and resource bounds that are measured, not believed (`JsonataBreachTest` writes `build/reports/jsonata-breach.md`, and dag-executor.md's honest-bounds table is pasted from it). It deliberately does **not** depend on `pipeline-contract`: modes, contracts, error codes and the Context are callers' concerns (7b/7c), and an engine that knew them would be an engine nobody could sandbox.
 
 **Tests:** the conformance suite parameterised over every engine (`ScriptEngineConformanceTest`), the breach suite with its three-way outcome record (`JsonataBreachTest`), the 32-thread determinism proof, the pool contract, the §5.3 type-gate table (42 cases), `CanonicalJsonTest`, and `ScriptingPurityTest`.
+
+### 5.16 `scheduler`
+
+**Dependencies (internal):** `typesystem`, `pipeline-contract` (the name grammar only — §4.2 note).
+
+**Dependencies (external):**
+- `com.github.kagkarlsson:db-scheduler-spring-boot-starter` (pinned, 16.12.0 at introduction; brings `db-scheduler` core and `db-scheduler-spring-common` at the same version) — the durable queue, cluster-wide picking and dead-task detection; Apache-2.0. Its Java-serialization default is replaced by the JSON serializer (scheduler design revision §2.2, A8), and its health indicator is disabled (the record §7.2).
+- `spring-boot-starter-jdbc`, `io.micrometer:micrometer-core`, Jackson (all BOM-managed).
+
+**Public API:**
+- `ScheduleService` — the management use cases REST calls (create, edit, pause/resume/unblock, delete, Run now, reads, preview). The only scheduler type a transport may name.
+- `JobExecutor` (+ `JobExecutors`) — the executor port: validate, prepare, start, inspect, lens; standardized outcomes, no error-code parsing
+- `CapacityGate` / `CapacityLease` — the acquire-before-claim port (R4); `web` implements it over `dag`'s `ExecutionSlots`
+- `OccurrenceFunction` — the ONE occurrence computation (the record §3.2) the dispatcher and the preview share
+- `SchedulerProperties` — `datapipelines.scheduler.*` ([Configuration §3.29](configuration.md#329-scheduler-9))
+- the jobs `ScheduleDispatcher`, `ScheduledRunWorker`, `RunReconciler` — declared as db-scheduler tasks by the module's own `SchedulerAutoConfiguration`; no transport may name them (`ArchitectureGuardTest`, B5)
+
+**Why it is its own module.** The scheduler must stay pipeline-agnostic (the owner's boundary, record §5): timing, occurrence identity, admission and the run trail are generic, and a report executor is expected to plug into the same port. A module with no `dag`/`application`/`auth` edge makes that a build fact; the fake executor in its own suite proves it at runtime.
+
+**Tests:** the occurrence function (DST gap/fold against the measured A9 case, month/year boundaries, the min-interval guard); the repositories and the dispatcher/worker/reconciler against a real Postgres with a controlled clock (`ManualScheduler`, `SettableClock`) — two instances, one occurrence, one launch; the crash windows; capacity retries; the two spike proofs; `SchedulerBoundaryTest`.
 
 ## 6. Version Catalog
 
@@ -1165,6 +1189,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | #9 scheduler lane 1 | scheduler-1 | New module `scheduler` (§5.16): the pipeline-agnostic scheduler core over db-scheduler 16.12.0 (the catalog's one new version, two library aliases). §3, §3.1, §4.1 and §4.2 gain the row (`scheduler` → `typesystem`, `pipeline-contract` for the name grammar alone); `web` gains `scheduler`. The root build's allowed-dependency map and `COVERAGE_FLOORS` carry the module; its `gradle.lockfile` and the db-scheduler verification entries ship in the same commit. The scheduler's beans come from the module's own `@AutoConfiguration` (§8.2 — the second module to use it, after `mcp-server`), so no db-scheduler type leaves the module. |
 | 2026-09-23 | 7b (#7) | lane 7b — the template model | §4.2: `templates` and `application` gain `scripting` (transform bodies parse and evaluate through its seam — never through Freemarker), and `web` gains it for the EngineConfiguration pool bean (the fence's "templates and application, nothing else" was written before the bean's home was known; the diagram and the map moved with the table, and the #214 check proves they cannot drift). §5.3's dependency line and the §4.1 `←` lists updated in the same commits. |
 | 2026-09-23 | #214 | lane 7b (#7) | **§4.1 redrawn from §4.2** — the old diagram predated `calculators` and `scripting` entirely, omitted the two test modules, and its `mcp-server` annotation dropped the `calculators`, `dag` and `auth` edges; the redraw renders every module and every edge as a per-layer `←` list. **The drift is now mechanical:** `verifyModuleDependencies` also parses the §4.2 table and fails when it and the root build's `allowedInternalDependencies` disagree in either direction, and when a table module is absent from the §4.1 diagram; a sibling `verifyVerificationMetadataDocs` check keeps hand-written comments out of `gradle/verification-metadata.xml` (their home is DEVELOPMENT.md §6.3's hand-verified table, which the same check cross-references). Both are wired into `check`. |
 | 2026-09-23 | 7a (#7) | #7 lane 7a — the script engine | New layer-0 module `scripting` (§5.15): the `ScriptEngine` seam with the JSONata engine (`com.dashjoin:jsonata` 0.9.10 — the catalog's one new version + library), the evaluation pool, the type gate, and canonical JSON; the transform design's §4.1/§4.5/§5.3/§5.5 as a library with no product surface. §3, §3.1 and §4.2 gain the row (`scripting` → `typesystem`, the calculators shape); the root build's allowed-dependency map and `COVERAGE_FLOORS` (measured 91.4 − 2) carry the module. Its `gradle.lockfile` and the jsonata verification entries ship in the same commit. |

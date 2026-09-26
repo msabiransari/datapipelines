@@ -96,8 +96,11 @@ class ScopeMatrixSpecDriftTest {
     ): String = "`${permission.wire}` × $column: doc '$docCell', code ${if (codeHolds) "holds" else "lacks"}"
 
     private companion object {
-        /** The record's 64 + `template.evaluate` (7b) + keys v2's two (#233 A14), re-derived. */
-        const val PERMISSION_COUNT = 67
+        /**
+         * The record's 64 + `template.evaluate` (7b) + keys v2's two (#233 A14) + the scheduler's six
+         * (#9: `schedule.read`, `.create`, `.update`, `.pause`, `.delete`, `.run`), re-derived.
+         */
+        const val PERMISSION_COUNT = 73
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

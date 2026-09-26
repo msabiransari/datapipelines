@@ -61,7 +61,7 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
 
     @Test
     fun `every registration the running application holds has an inventory row - and every row a registration`() {
-        val runtime = servlets() + filters() + securityChain() + handlerMappings() + scheduledTasks()
+        val runtime = servlets() + filters() + securityChain() + handlerMappings() + scheduledTasks() + schedulerTasks()
         val documented = inventory.filter { it.family in IN_CONTEXT_FAMILIES }
 
         val counts = runtime.groupingBy { it.family }.eachCount()
@@ -83,6 +83,7 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
         counts.getOrDefault("security-chain", 0) shouldBeGreaterThanOrEqual SECURITY_CHAIN_FLOOR
         counts.getOrDefault("handler-mapping", 0) shouldBeGreaterThanOrEqual HANDLER_MAPPING_FLOOR
         counts.getOrDefault("scheduled", 0) shouldBeGreaterThanOrEqual SCHEDULED_FLOOR
+        counts.getOrDefault("scheduler-task", 0) shouldBeGreaterThanOrEqual SCHEDULER_TASK_FLOOR
     }
 
     @Test
@@ -118,14 +119,19 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
 
     @Test
     fun `no scheduled job is reachable from a request - B5`() {
-        val jobs = inventory.filter { it.family == "scheduled" }
+        val jobs = inventory.filter { it.family == "scheduled" || it.family == "scheduler-task" }
         withClue("scheduled rows that say 'reachable from a request: yes' — a job is not an entry point (B5)") {
             jobs.filter { it.reachable }.map { it.key }.shouldBeEmpty()
         }
         val handlerTypes = handlerBeanTypes()
         val reachable = scheduledTargets().filter { target -> handlerTypes.any { it.isAssignableFrom(target) } }
         withClue("@Scheduled targets that are also request handlers") { reachable.map { it.name }.shouldBeEmpty() }
-        jobs.size shouldBeGreaterThanOrEqual SCHEDULED_FLOOR
+        // #9: a db-scheduler task bean is a job too — never a request handler.
+        val taskBeans = beansOf(SCHEDULER_TASK).values.map { it.javaClass }
+        withClue("db-scheduler task beans that are also request handlers") {
+            taskBeans.filter { task -> handlerTypes.any { it.isAssignableFrom(task) } }.map { it.name }.shouldBeEmpty()
+        }
+        jobs.size shouldBeGreaterThanOrEqual SCHEDULED_FLOOR + SCHEDULER_TASK_FLOOR
     }
 
     /**
@@ -286,6 +292,31 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
             val qualified = runnable.toString()
             val name = qualified.substringBeforeLast('.').substringAfterLast('.') + "#" + qualified.substringAfterLast('.')
             Entry("scheduled", name, trigger.first, trigger.second)
+        }
+
+    /**
+     * #9 — every db-scheduler `Task` bean the context holds (the scheduler's jobs), as
+     * `scheduler-task | <task name> | recurring|one-time | <schedule>`. Read by reflection: the
+     * library's types are not on this module's compile classpath (they stay behind `modules/scheduler`).
+     */
+    private fun schedulerTasks(): List<Entry> =
+        beansOf(SCHEDULER_TASK).values.map { task ->
+            val name = SCHEDULER_TASK.getMethod("getName").invoke(task) as String
+            if (RECURRING_TASK.isInstance(task)) {
+                // The library exposes neither a recurring task's schedule nor a FixedDelay's duration;
+                // both are private fields. A schedule of another shape renders as itself (and so
+                // fails the comparison until its row is written).
+                val schedule = RECURRING_TASK.getDeclaredField("schedule").apply { isAccessible = true }.get(task)
+                val rendered =
+                    if (FIXED_DELAY.isInstance(schedule)) {
+                        "every " + FIXED_DELAY.getDeclaredField("duration").apply { isAccessible = true }.get(schedule)
+                    } else {
+                        schedule.toString()
+                    }
+                Entry("scheduler-task", name, "recurring", rendered)
+            } else {
+                Entry("scheduler-task", name, "one-time", "one instance per recorded run")
+            }
         }
 
     /** `(the task's runnable, (trigger kind, trigger rendering))` for every `@Scheduled` task the holders registered. */
@@ -524,7 +555,7 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
 
     private companion object {
         /** The families read off this context, and the two read off the packaged process. */
-        val IN_CONTEXT_FAMILIES = listOf("servlet", "filter", "security-chain", "handler-mapping", "scheduled")
+        val IN_CONTEXT_FAMILIES = listOf("servlet", "filter", "security-chain", "handler-mapping", "scheduled", "scheduler-task")
         val PROCESS_FAMILIES = listOf("port", "actuator")
 
         const val LOG_TAIL = 4000
@@ -540,6 +571,9 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
         const val SECURITY_CHAIN_FLOOR = 15
         const val HANDLER_MAPPING_FLOOR = 3
         const val SCHEDULED_FLOOR = 3
+
+        /** #9 — the dispatcher, the reconciler and the run task. */
+        const val SCHEDULER_TASK_FLOOR = 3
         const val HANDLER_FLOOR = 180
 
         /** The application port and the management port — nothing else may listen. */
@@ -565,5 +599,8 @@ class EntryInventoryE2eTest : EntryAssuranceE2eBase() {
         val TASK: Class<*> = Class.forName("org.springframework.scheduling.config.Task")
         val INTERVAL_TASK: Class<*> = Class.forName("org.springframework.scheduling.config.IntervalTask")
         val CRON_TASK: Class<*> = Class.forName("org.springframework.scheduling.config.CronTask")
+        val SCHEDULER_TASK: Class<*> = Class.forName("com.github.kagkarlsson.scheduler.task.Task")
+        val RECURRING_TASK: Class<*> = Class.forName("com.github.kagkarlsson.scheduler.task.helper.RecurringTask")
+        val FIXED_DELAY: Class<*> = Class.forName("com.github.kagkarlsson.scheduler.task.schedule.FixedDelay")
     }
 }

@@ -44,6 +44,12 @@ import co.datapipelines.auth.Permission.PROMOTION_INVENTORY_READ
 import co.datapipelines.auth.Permission.PROMOTION_PROMOTE
 import co.datapipelines.auth.Permission.PROMOTION_PUSH
 import co.datapipelines.auth.Permission.PROMOTION_READ
+import co.datapipelines.auth.Permission.SCHEDULE_CREATE
+import co.datapipelines.auth.Permission.SCHEDULE_DELETE
+import co.datapipelines.auth.Permission.SCHEDULE_PAUSE
+import co.datapipelines.auth.Permission.SCHEDULE_READ
+import co.datapipelines.auth.Permission.SCHEDULE_RUN
+import co.datapipelines.auth.Permission.SCHEDULE_UPDATE
 import co.datapipelines.auth.Permission.SEMANTIC_READ
 import co.datapipelines.auth.Permission.SEMANTIC_RECORD
 import co.datapipelines.auth.Permission.SEMANTIC_RETIRE
@@ -98,6 +104,8 @@ object RolePermissions {
             EXECUTION_READ,
             EXECUTION_RESULT_READ,
             EXECUTION_CANCEL,
+            // #9 R8: every member reads schedules — list, detail, upcoming, runs and their trail.
+            SCHEDULE_READ,
             DATASOURCE_READ,
             DATASOURCE_INTROSPECT,
             DATASOURCE_TEST,
@@ -144,6 +152,12 @@ object RolePermissions {
                 PROMOTION_READ,
                 MCP_KEY_CREATE,
                 MCP_KEY_REVOKE_OWN,
+                // #9 R8/L2: authors manage schedules — create, edit, pause/resume/unblock, delete, Run now.
+                SCHEDULE_CREATE,
+                SCHEDULE_UPDATE,
+                SCHEDULE_PAUSE,
+                SCHEDULE_DELETE,
+                SCHEDULE_RUN,
             )
 
     /**
@@ -164,6 +178,8 @@ object RolePermissions {
             DOCS_READ,
             PROMOTION_READ,
             PROMOTION_PROMOTE,
+            // #9 R8: the promoter reads schedules through the LENS — those whose target the lens admits.
+            SCHEDULE_READ,
             MCP_KEY_OWN,
             MCP_KEY_CREATE,
             MCP_KEY_REVOKE_OWN,
@@ -209,6 +225,17 @@ object RolePermissions {
      * holds them through the [KeyRole.PROMOTION_RECEIVER] column.
      */
     val FENCED: Set<Permission> = setOf(PROMOTION_INVENTORY_READ, PROMOTION_PUSH)
+
+    /**
+     * **The system identity's FIXED set** (#9 R2, scheduler design revision §4): what a schedule
+     * fires with — execute a pipeline, read the pipeline version it pins, read the execution the
+     * reconciler watches — in ANY workspace, and nothing else. Not a role and not a column of
+     * auth.md §7.6: no member holds it, no key carries it, the role walk never sees it. It is
+     * answered through [PermissionResolver.holdsAsSystemActor] — the seam's system arm — so a
+     * test context can prove a widened set is caught (`SystemActorPrincipalTest`). A later executor
+     * (reports) adds its own permission here with that executor.
+     */
+    val SYSTEM_ACTOR: Set<Permission> = setOf(PIPELINE_EXECUTE, PIPELINE_READ, EXECUTION_READ)
 
     /** D7: a super admin holds every permission in every workspace — except the [FENCED] ones, which are nobody's. */
     val SUPER_ADMIN: Set<Permission> = Permission.entries.toSet() - FENCED

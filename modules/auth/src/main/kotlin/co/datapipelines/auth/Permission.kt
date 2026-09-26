@@ -52,6 +52,15 @@ enum class Permission(
     EXECUTION_CANCEL("execution.cancel"),
     EXECUTION_CANCEL_ALL("execution.cancel_all"),
 
+    // Schedules (#9, scheduler design revision §4, R8, L2). Pause, resume and unblock share one
+    // permission (operational controls); Run now is its own (L2, the granularity rule).
+    SCHEDULE_READ("schedule.read"),
+    SCHEDULE_CREATE("schedule.create"),
+    SCHEDULE_UPDATE("schedule.update"),
+    SCHEDULE_PAUSE("schedule.pause"),
+    SCHEDULE_DELETE("schedule.delete"),
+    SCHEDULE_RUN("schedule.run"),
+
     // §2.3 — datasources and the lake catalog
     DATASOURCE_READ("datasource.read"),
     DATASOURCE_INTROSPECT("datasource.introspect"),

@@ -136,6 +136,9 @@ class FlywayMigrationIntegrationTest {
                 // robot-member matrix (A13/A14) and the live `(workspace_id, name)` uniqueness (A18).
                 // Renumbered V37 → V37 at the 233c base refresh (V36 landed first).
                 "37|keys v2 robot members|true",
+                // #9 scheduler lane 1 — schedules, schedule_runs, schedule_run_events (append-only by
+                // trigger), db-scheduler 16.12.0's own scheduled_tasks, and SCHEDULE in chk_triggered_via.
+                "38|scheduler core|true",
             )
     }
 
@@ -392,6 +395,51 @@ class FlywayMigrationIntegrationTest {
                 "CREATE INDEX idx_learned_facts_supersedes ON public.learned_facts USING btree (supersedes) " +
                     "WHERE (supersedes IS NOT NULL)",
                 "CREATE INDEX idx_template_implements_fact ON public.template_implements USING btree (fact_id)",
+            )
+    }
+
+    /**
+     * #9 (V38) — the scheduler's schema, read from the SHIPPED database: the CHECK lists that R6's
+     * table and the trail kinds live in, the partial one-active index (the durable overlap guard) and
+     * SCHEDULE joining the trigger CHECK. The trail is append-only by construction, not by a
+     * trigger (this schema has none — `emits no triggers` below). Behaviour is the scheduler
+     * module's own suites; this pins that production Flyway builds the same thing they run on.
+     */
+    @Test
+    fun `V38 creates the scheduler's tables with R6's states, the overlap guard and SCHEDULE`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint" +
+                " WHERE conname IN ('chk_schedule_runs_state', 'chk_triggered_via', 'chk_schedules_missed_run_policy') ORDER BY conname",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_schedule_runs_state|CHECK ((state = ANY (ARRAY['queued'::text, 'starting'::text, 'running'::text, " +
+                    "'succeeded'::text, 'failed'::text, 'cancelled'::text, 'aborted'::text, 'unknown'::text, " +
+                    "'not_started'::text, 'skipped'::text])))",
+                "chk_schedules_missed_run_policy|CHECK ((missed_run_policy = ANY (ARRAY['skip'::text, 'latest'::text])))",
+                "chk_triggered_via|CHECK ((triggered_via = ANY (ARRAY['UI'::text, 'REST'::text, 'MCP'::text, " +
+                    "'PIPELINE'::text, 'ENDPOINT'::text, 'SCHEDULE'::text])))",
+            )
+        query(
+            "SELECT pg_get_indexdef(indexrelid) FROM pg_index WHERE indexrelid = 'uq_schedule_runs_one_active'::regclass",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE UNIQUE INDEX uq_schedule_runs_one_active ON public.schedule_runs USING btree (schedule_id) " +
+                    "WHERE (state = ANY (ARRAY['queued'::text, 'starting'::text, 'running'::text]))",
+            )
+        columnsOf("scheduled_tasks") shouldContainExactlyInAnyOrder
+            listOf(
+                "consecutive_failures",
+                "execution_time",
+                "last_failure",
+                "last_heartbeat",
+                "last_success",
+                "picked",
+                "picked_by",
+                "priority",
+                "task_data",
+                "task_instance",
+                "task_name",
+                "version",
             )
     }
 
@@ -804,7 +852,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the twenty-one tables of metadata-db §4`() {
+    fun `creates exactly the twenty-five tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -830,6 +878,11 @@ class FlywayMigrationIntegrationTest {
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
                 "mail_sends",
+                // #9 (V38) — the scheduler: db-scheduler's queue, the schedules, their runs and the runs' trail.
+                "scheduled_tasks",
+                "schedule_run_events",
+                "schedule_runs",
+                "schedules",
                 // 140 (V28) — the release check run history.
                 "pipeline_check_runs",
                 "pipeline_executions",
@@ -926,6 +979,28 @@ class FlywayMigrationIntegrationTest {
                 "published_endpoints.idx_published_endpoints_workspace",
                 "published_endpoints.published_endpoints_path_pattern_key",
                 "published_endpoints.published_endpoints_pkey",
+                // #9 (V38) — db-scheduler's own three indexes (its DDL, verbatim) and its PK.
+                "scheduled_tasks.execution_time_idx",
+                "scheduled_tasks.last_heartbeat_idx",
+                "scheduled_tasks.priority_execution_time_idx",
+                "scheduled_tasks.scheduled_tasks_pkey",
+                // #9 (V38) — the trail's PK (run_id, seq) is its one access path.
+                "schedule_run_events.schedule_run_events_pkey",
+                // #9 (V38) — a schedule's history, the reconciler's worklist, the execution join,
+                // the three uniquenesses (occurrence, Run now key, one active run) and the PK.
+                "schedule_runs.idx_schedule_runs_execution",
+                "schedule_runs.idx_schedule_runs_open",
+                "schedule_runs.idx_schedule_runs_schedule",
+                "schedule_runs.schedule_runs_pkey",
+                "schedule_runs.uq_schedule_runs_manual_idempotency",
+                "schedule_runs.uq_schedule_runs_occurrence",
+                "schedule_runs.uq_schedule_runs_one_active",
+                // #9 (V38) — the dispatcher's due scan, the target lookup (B15), live-name and create-key uniqueness.
+                "schedules.idx_schedules_due",
+                "schedules.idx_schedules_target",
+                "schedules.schedules_pkey",
+                "schedules.uq_schedules_create_idempotency",
+                "schedules.uq_schedules_workspace_name_live",
                 // 7e (V36) — the reverse arrow (which versions cite this fact) and the PK.
                 "template_implements.idx_template_implements_fact",
                 "template_implements.template_implements_pkey",
@@ -965,6 +1040,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
+    @Suppress("LongMethod") // the assertion IS the list: every named CHECK of metadata-db §4, sorted
     fun `creates exactly the named CHECK constraints of metadata-db §4`() {
         val checks =
             query(
@@ -1024,6 +1100,19 @@ class FlywayMigrationIntegrationTest {
                 // 102 (V20): the write-surface stamps — 'session' | 'api_key' | 'mcp', both
                 // columns, the ruling's CHECK so a key id can never drift back in as a value.
                 "chk_pipeline_versions_via",
+                // #9 (V38) — the trail's, the runs' and the schedules' CHECKs (metadata-db §4.22–§4.24),
+                // sorted as pg_constraint sorts them (the `_` is not a first-level sort key).
+                "chk_schedule_run_events_kind",
+                "chk_schedule_run_events_seq",
+                "chk_schedule_runs_claimed",
+                "chk_schedule_runs_idempotency",
+                "chk_schedule_runs_occurrence",
+                "chk_schedule_runs_origin",
+                "chk_schedule_runs_state",
+                "chk_schedules_blocked",
+                "chk_schedules_idempotency",
+                "chk_schedules_missed_run_policy",
+                "chk_schedules_revision",
                 "chk_status",
                 "chk_template_type",
                 "chk_template_versions_discard_stamps",
