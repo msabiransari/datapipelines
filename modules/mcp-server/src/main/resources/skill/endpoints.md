@@ -78,8 +78,8 @@ endpoint stops the URL answering and leaves the pipeline untouched.
 ## Common mistakes and references
 
 Treating a `202` as a failure and retrying into a second execution; publishing before the
-pipeline is released (an endpoint serves the released version only); asking for a key you
-could mint yourself — ask an admin instead.
+pipeline is released (an endpoint serves the released version only); trying to mint a key
+yourself — there is no tool for it; ask an admin.
 
 - **`endpoints-tools`** — the area's tools, generated from their shipped descriptions.
 - **`executions`** — the runs an endpoint's key started, and the result cursor.
