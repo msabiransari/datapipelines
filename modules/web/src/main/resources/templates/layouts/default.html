@@ -71,6 +71,9 @@
        belong to the editor and docs surfaces (090's fence excludes both); the fix is
        identical — hoist the link here — and the round is told so. */-->
   <link th:href="@{/css/template-tree.css}" rel="stylesheet">
+  <!-- #9 slice 2 — the Schedules page's own rules (its explorer rides template-tree.css
+       above). Head-loaded for 090's reason: /schedules is a boosted route. -->
+  <link th:href="@{/css/schedules.css}" rel="stylesheet">
   <!-- 079 §A — the rail's collapsed state, applied BEFORE the first paint.
 
        Until 188 this was the ONE inline script in the layout — the round's only
@@ -268,6 +271,12 @@
            data-nav-group="Operate" data-nav-label="Executions"
            th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'active' : null"
            th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/executions')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#clock"></use></svg><span class="app-rail-label">Executions</span></a>
+        <!-- #9 slice 2 (ui-screens §4.20): every member reads schedules — the promoter through
+             the lens — so the item is drawn for every role, like Pipelines. -->
+        <a th:href="@{/schedules}" class="app-nav-link" data-nav-section="/schedules"
+           data-nav-group="Operate" data-nav-label="Schedules"
+           th:classappend="${currentPath != null and #strings.startsWith(currentPath, '/schedules')} ? 'active' : null"
+           th:attr="aria-current=${currentPath != null and #strings.startsWith(currentPath, '/schedules')} ? 'page' : null"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#calendar-clock"></use></svg><span class="app-rail-label">Schedules</span></a>
         <!-- 079 §C / T139: the API section. The owner's "I don't see any API menu"
              was literally true — published endpoints, keys and the MCP connection
              had no screen at all. /api-console, not /api/**: that prefix is the

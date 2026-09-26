@@ -1,0 +1,101 @@
+<!-- The Schedules explorer's skeletons (ui-screens.md §4.20) — cloned by
+     static/js/schedules/explorer.js, filled with textContent.
+
+     The tree wears the pipelines/templates tree's classes and ARIA exactly
+     (partials/pipeline-tree-level.html): one stylesheet dresses all three trees and
+     template-explorer.js's keyboard layer works on it unchanged — it finds the pane by
+     `data-explorer-pane` and the rows by role. What differs is where the rows come from:
+     each level is §20.1 read BY PREFIX (the folder's subtree) and its direct sub-folders are
+     derived from the names, because §20 has no folder-aggregating browse mode (the brief's
+     "folders from the names"; the per-workspace cap bounds the list — scheduler.md §3).
+
+     Folders are virtual (template-hierarchy §3.1): no folder verb, no empty folder. -->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="skeletons">
+  <template id="sch-tpl-folder">
+    <li class="tpl-node" role="none">
+      <details class="tpl-folder">
+        <summary class="tpl-summary" role="treeitem" aria-expanded="false">
+          <svg class="ds-icon ds-icon-xs tpl-chevron" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#chevron-right"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder"></use></svg>
+          <svg class="ds-icon ds-icon-sm tpl-row-icon tpl-icon-folder-open" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#folder-open"></use></svg>
+          <span class="tpl-label" data-slot="label"></span>
+          <span class="ds-badge ds-badge-default tpl-count" data-slot="count"></span>
+        </summary>
+        <!-- Replaced by the folder's level on its first open (a §20.1 read by prefix). -->
+        <div class="tpl-level tpl-level-pending" role="group" aria-busy="true">
+          <span class="ds-spinner" aria-hidden="true"></span>
+        </div>
+      </details>
+    </li>
+  </template>
+
+  <template id="sch-tpl-leaf">
+    <li class="tpl-node" role="none">
+      <!-- A leaf SELECTS (its detail fills #schedule-detail); Enter follows data-editor-url,
+           which for a schedule is this page's own deep link. -->
+      <button type="button" class="tpl-leaf" role="treeitem" aria-selected="false">
+        <svg class="ds-icon ds-icon-sm tpl-row-icon" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#calendar-clock"></use></svg>
+        <span class="tpl-label" data-slot="label"></span>
+        <span class="ds-badge" data-slot="condition" hidden></span>
+      </button>
+    </li>
+  </template>
+
+  <template id="sch-tpl-result">
+    <li role="none">
+      <button type="button" class="tpl-result" role="option" aria-selected="false">
+        <span class="tpl-path" data-slot="path"></span>
+        <span class="ds-badge" data-slot="condition" hidden></span>
+      </button>
+    </li>
+  </template>
+
+  <!-- Nothing exists yet: two copies, by role (§5.1 — the create action only for someone who
+       may create). A promoter reads through the lens, so its copy says what it can see. -->
+  <template id="sch-tpl-empty">
+    <div class="ds-empty" data-empty="none">
+      <p class="ds-empty-title">No schedules yet</p>
+      <th:block th:if="${canAuthor == true}">
+        <p class="ds-empty-description">
+          A schedule runs a pipeline at the times you choose — hourly, daily, weekly, monthly or
+          on any cron pattern — in the timezone you pick. Give it a folder path like
+          <code>finance/daily/revenue</code>; folders appear here on their own.
+        </p>
+        <div class="ds-empty-actions">
+          <button th:if="${canAuthor == true}" data-verb="schedule-create" type="button"
+                  class="ds-button ds-button-primary ds-button-sm" data-sch-action="create">New schedule</button>
+        </div>
+      </th:block>
+      <p class="ds-empty-description" th:if="${canAuthor != true and canPromote == true}">
+        You read schedules through the promotion lens: only schedules of released pipelines
+        appear here. None does yet.
+      </p>
+      <p class="ds-empty-description" th:if="${canAuthor != true and canPromote != true}">
+        Authors and workspace admins create schedules. When one exists in this workspace it
+        appears here, with when it runs next and what its runs did.
+      </p>
+    </div>
+  </template>
+
+  <template id="sch-tpl-no-match">
+    <div class="ds-empty" data-empty="no-match">
+      <p class="ds-empty-title" data-slot="title">No schedules match your search</p>
+      <div class="ds-empty-actions">
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm" data-sch-action="clear-search">Clear search</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- A read that failed: the REST envelope's user message, its code and correlation id (the
+       id is what a person quotes in a support request — §5.1 Error rendering), and a retry. -->
+  <template id="sch-tpl-error">
+    <div class="ds-empty" data-empty="error" role="alert">
+      <p class="ds-empty-title" data-slot="title">Schedules could not be loaded</p>
+      <p class="ds-empty-description" data-slot="message"></p>
+      <p class="u-text-xs u-muted u-mono" data-slot="reference"></p>
+      <div class="ds-empty-actions">
+        <button type="button" class="ds-button ds-button-secondary ds-button-sm" data-sch-action="retry">Try again</button>
+      </div>
+    </div>
+  </template>
+</th:block>

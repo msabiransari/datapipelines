@@ -48,6 +48,9 @@ object AppNav {
             Item("/templates", "Templates", BUILD),
             Item("/datasources", "Datasources", BUILD),
             Item("/executions", "Executions", OPERATE),
+            // #9 slice 2: every member reads schedules (`schedule.read`), so unlike Executions
+            // the item is drawn for every role — a promoter reads through the lens.
+            Item("/schedules", "Schedules", OPERATE),
             Item("/api-console", "API", OPERATE),
             Item("/promotion", "Promotion", OPERATE),
             Item("/workspaces", "Workspaces", ORGANISATION),
