@@ -13,6 +13,10 @@ dependencies {
     // its TypeGate (transform-nodes design §5). Declared like the others — module-structure
     // §4.2's table and the root map carry the same row.
     implementation(project(":modules:scripting"))
+    // #194 (parameter-engine record P17): the `Dag<T>` primitive moved, byte-identical and in the
+    // same package, to its own leaf module so the parameter engine can use it without depending on
+    // the executor. The executor's two importers are unchanged; only this edge is new.
+    implementation(project(":modules:graph"))
 
     implementation(libs.kotlinx.coroutines.core)
     // Redis: result store, idempotency keys, cancellation flags. One of exactly

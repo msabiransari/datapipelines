@@ -413,6 +413,8 @@ class CommonConventionsPlugin : Plugin<Project> {
          */
         val COVERAGE_FLOORS: Map<String, Int> = mapOf(
             ":modules:typesystem" to 96,
+            // #194: measured baseline 100.0 on the module's first Kover run (DagTest moved with Dag.kt), minus 2.
+            ":modules:graph" to 98,
             // 072: measured baseline 95.9 on the module's first Kover run, minus 2, floored.
             ":modules:calculators" to 93,
             // 7a: measured baseline 91.4 on the module's first Kover run, minus 2, floored.

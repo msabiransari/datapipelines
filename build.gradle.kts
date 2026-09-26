@@ -133,6 +133,11 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // (§5.3) and the egress encoding rule over. A second entry here would give a script
     // engine a route to I/O that the purity test and the breach suite do not fence.
     ":modules:scripting" to setOf(":modules:typesystem"),
+    // #194 (parameter-engine record P17, §2.1) — layer 0 beside typesystem: the generic `Dag<T>`
+    // primitive, moved out of `dag` so the parameter engine can build a graph without inheriting
+    // the executor's dependency set. Stdlib only; an entry here is a reason to stop and ask why a
+    // graph needs it.
+    ":modules:graph" to emptySet(),
     ":modules:pipeline-contract" to setOf(":modules:typesystem", ":modules:calculators"),
     ":modules:templates" to setOf(":modules:typesystem", ":modules:pipeline-contract", ":modules:scripting"),
     ":modules:datasources" to setOf(":modules:typesystem"),
@@ -154,6 +159,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         // 7c (#7) — the TRANSFORM node's executor: evaluations run through 7a's pool and the
         // type gate, both scripting. The dag-executor.md layering table moves with this row.
         ":modules:scripting",
+        // #194 — `Dag<T>` now lives in `graph` (same package); the executor builds its DAGs from it.
+        ":modules:graph",
     ),
     // The cross-aggregate use-case layer (056/R6): below `web` and `mcp-server`, above the
     // domain modules. `templates` and `datasources` are allowed here for slices B/C's moves
