@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.DecimalNode
 import com.fasterxml.jackson.databind.node.MissingNode
 import com.fasterxml.jackson.databind.node.NullNode
+import com.fasterxml.jackson.databind.node.TextNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.nulls.shouldBeNull
@@ -115,6 +116,28 @@ class ParameterValueValidatorTest {
         accepted(narrow, "-9999.99") shouldBe BigDecimal("-9999.99")
         refused(narrow, "99999.5").reason shouldBe "precision"
         refused(narrow, "1e5").reason shouldBe "precision"
+    }
+
+    @Test
+    fun `an exponent near Int_MAX cannot overflow the precision arithmetic - the 194a security pass's finding 2`() {
+        // precision() - scale() overflowed Int for scale() = -2147483647, so the values with the most
+        // digits were the ones accepted; the arithmetic is Long now.
+        val ten2 = ParameterDeclaration(LogicalType.BIGDECIMAL, precision = 10, scale = 2)
+        refused(ten2, "\"1e2147483647\"").reason shouldBe "precision"
+        refused(ten2, "\"123e2147483645\"").reason shouldBe "precision"
+        refused(ten2, "\"1e999999999\"").reason shouldBe "precision"
+        refused(ten2, "\"1e-2147483647\"").reason shouldBe "scale"
+    }
+
+    @Test
+    fun `a bound with a huge exponent renders in a refusal without materialising its digits`() {
+        // renderCoerced used the plain wire spelling; for 1e2147483647 that is an OutOfMemoryError while
+        // building the message (the 194a security pass, observation 1).
+        val declaration =
+            ParameterDeclaration(LogicalType.BIGDECIMAL, constraints = ParameterConstraints(min = TextNode("1e2147483647")))
+        val refusal = refused(declaration, "\"5\"")
+        refusal.reason shouldBe "min"
+        refusal.message shouldContain "1E+2147483647"
     }
 
     @Test

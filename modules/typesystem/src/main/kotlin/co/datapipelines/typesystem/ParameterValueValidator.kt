@@ -134,8 +134,10 @@ class ParameterValueValidator(
             return violation("scale", "$shape takes at most $scale decimal place(s); got $places — nothing is rounded")
         }
         val precision = declaration.precision ?: return null
-        val integerDigits = if (stripped.signum() == 0) 0 else maxOf(0, stripped.precision() - stripped.scale())
-        if (integerDigits > precision - scale) {
+        // In Long: scale() can be -2147483647, and precision() - scale() in Int overflowed to accept
+        // exactly the values with the most digits (the 194a security pass, finding 2).
+        val integerDigits = if (stripped.signum() == 0) 0L else maxOf(0L, stripped.precision().toLong() - stripped.scale().toLong())
+        if (integerDigits > (precision - scale).toLong()) {
             return violation("precision", "$shape holds at most ${precision - scale} integer digit(s); got $integerDigits")
         }
         return null

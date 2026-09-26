@@ -1,6 +1,7 @@
 package co.datapipelines.typesystem
 
 import com.fasterxml.jackson.databind.JsonNode
+import java.math.BigDecimal
 import java.util.regex.Pattern
 
 /** A declaration's constraints in typed form: bounds coerced to the parameter's own type, the pattern compiled. */
@@ -158,8 +159,17 @@ internal fun compareCoerced(
     b: Any,
 ): Int = (a as Comparable<Any>).compareTo(b)
 
-/** A coerced value back in its wire spelling, bounded for a message. */
+/**
+ * A coerced value back in a message-safe spelling, bounded for a message. A [BigDecimal] renders
+ * through `toString()` (scientific past a few places), never the plain wire spelling: an author's
+ * bound of `1e2147483647` would otherwise be an `OutOfMemoryError` while building the refusal (the
+ * 194a security pass, observation 1).
+ */
 internal fun renderCoerced(
     type: LogicalType,
     value: Any,
-): String = ParameterWireEncoder.encode(type, value).asText().truncateForError()
+): String =
+    when (value) {
+        is BigDecimal -> value.toString().truncateForError()
+        else -> ParameterWireEncoder.encode(type, value).asText().truncateForError()
+    }

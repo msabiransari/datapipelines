@@ -16,7 +16,10 @@ import java.util.regex.PatternSyntaxException
  * possessive `a+ +` from any scanner. It cannot refuse every catastrophic pattern: `(a+)+b` uses
  * none of those and still backtracks exponentially. So every match also runs over a
  * [ReadBudgetCharSequence] that throws once the engine has read the input more than the budget
- * allows — the bound holds whatever the pattern is, which the static scan alone never could.
+ * allows — the bound holds whatever the pattern is, which the static scan alone never could. A
+ * pattern whose recursion outruns the thread's stack before the budget (an alternation inside a
+ * repetition, `(a|b)*`, after a few thousand characters) is refused the same way: [matches] catches
+ * the overflow at the matcher and reports it as the budget, so no `Error` reaches a caller.
  *
  * ## Anchoring
  *
@@ -58,7 +61,15 @@ internal object PatternGuard {
         pattern: Pattern,
         text: String,
         budget: Long,
-    ): Boolean = pattern.matcher(ReadBudgetCharSequence(text, budget)).matches()
+    ): Boolean =
+        try {
+            pattern.matcher(ReadBudgetCharSequence(text, budget)).matches()
+        } catch (overflow: StackOverflowError) {
+            // An alternation inside a repetition (`(a|b)*`) recurses once per iteration in java.util.regex
+            // and outruns the thread's stack thousands of reads before the budget (the 194a security pass,
+            // finding 1). The frames have unwound and the matcher holds nothing: it is the budget refusal.
+            throw BudgetExceeded(overflow)
+        }
 
     /**
      * The first forbidden construct in [source], named, or null. Escapes (`\x`, `\Q…\E`) and
@@ -86,6 +97,14 @@ internal object PatternGuard {
 
                     next == 'k' && source.getOrNull(i + 2) == '<' -> {
                         return "a named backreference (\\k<…>)"
+                    }
+
+                    // `\p{L}` / `\P{Alpha}`: the braces are the property's name, not a quantifier — read
+                    // past the closing brace so a following `+` is the ordinary quantifier it is.
+                    (next == 'p' || next == 'P') && source.getOrNull(i + 2) == '{' -> {
+                        val end = source.indexOf('}', i + 2)
+                        i = if (end < 0) source.length else end + 1
+                        continue
                     }
                 }
                 i += 2
@@ -137,7 +156,9 @@ internal object PatternGuard {
     private val INLINE_FLAGS = Regex("^([a-zA-Z-]+)[):]")
 
     /** Thrown past the budget; carries no stack — it is a verdict, not a defect. */
-    class BudgetExceeded : RuntimeException("regex read budget exceeded", null, false, false)
+    class BudgetExceeded(
+        cause: Throwable? = null,
+    ) : RuntimeException("regex read budget exceeded", cause, false, false)
 }
 
 /**

@@ -124,7 +124,40 @@ class PatternGuardTest {
         short.shouldBeInstanceOf<ParameterValueOutcome.Refused>().refusal.reason shouldBe "pattern_budget"
     }
 
+    @Test
+    fun `an alternation inside a repetition that outruns the stack before the budget is refused as the budget - never an Error`() {
+        // `(a|b)*` recurses once per iteration in java.util.regex: on a 512 KiB stack it overflows after a
+        // few thousand characters, thousands of reads before the 100,000-read budget (the 194a security
+        // pass, finding 1). The guard must report it as the budget refusal; an Error escaping the matcher
+        // is a 500 on every surface and a schedule run retried forever.
+        val declaration = ParameterDeclaration(LogicalType.STRING, constraints = ParameterConstraints(pattern = "(a|b)*"))
+        val outcome = onSmallStack { ParameterValueValidator().validate(declaration, TextNode("a".repeat(STACK_RUN))) }
+        val refusal = outcome.shouldBeInstanceOf<ParameterValueOutcome.Refused>().refusal
+        refusal.rule shouldBe ParameterValueRule.CONSTRAINT_VIOLATION
+        refusal.reason shouldBe "pattern_budget"
+    }
+
+    @Test
+    fun `a Unicode property class is read as the parser reads it - not as a possessive quantifier`() {
+        listOf("\\p{L}+", "\\P{Alpha}+", "[\\p{L}\\p{N}]+", "\\p{IsLatin}{2,}").forEach { pattern ->
+            withClue(pattern) { PatternGuard.unsafeConstruct(pattern).shouldBeNull() }
+        }
+    }
+
+    /** Runs [block] on a thread with a small stack; an Error that escaped the guard fails the test here. */
+    private fun <T> onSmallStack(block: () -> T): T {
+        var result: Result<T>? = null
+        val thread = Thread(null, { result = runCatching(block) }, "pattern-guard-small-stack", SMALL_STACK_BYTES)
+        thread.start()
+        thread.join()
+        return checkNotNull(result) { "the small-stack thread produced no result" }.getOrThrow()
+    }
+
     private companion object {
+        /** Enough characters to overflow a 512 KiB stack under `(a|b)*` (measured: ~3,500 reads suffice). */
+        const val STACK_RUN = 10_000
+        const val SMALL_STACK_BYTES = 512L * 1024
+
         /** Long enough that the unbudgeted match needs millions of reads (5.1M), short enough to finish in tens of ms. */
         const val ADVERSARIAL_RUN = 20
         const val VACUITY_FACTOR = 10L
