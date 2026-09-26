@@ -18,7 +18,13 @@
        "provisioning mode on this server" footnote and the dead join section go here (114). -->
   <section th:if="${canCreate}" class="app-reading u-mb-xl">
     <h2 class="ds-title u-mb-md">Create a workspace</h2>
-    <form th:action="@{/workspaces/create}" method="post" class="u-row-md u-wrap">
+    <!-- #170: a FULL navigation, like the switch form below. Creating a workspace changes
+         the SHELL — the rail's switcher lists it (`workspaceOptions` is filled by
+         UiWorkspaceAdvice on every full render, and the rail is outside #app-main) — and
+         a boosted swap replaces only #app-main, so the switcher kept the options rendered
+         before the workspace existed until a manual reload. 097 §2.1's PRG row: a
+         page-route mutation whose success changes the shell navigates in full. -->
+    <form th:action="@{/workspaces/create}" method="post" class="u-row-md u-wrap" hx-boost="false">
       <input type="text" name="name" class="ds-input app-input-raised app-input-fixed-sm" placeholder="team-etl" required>
       <input type="text" name="displayName" class="ds-input app-input-raised app-input-fixed-md" placeholder="Display name (optional)">
       <button type="submit" data-verb="workspace-create" class="ds-button ds-button-primary">Create</button>
