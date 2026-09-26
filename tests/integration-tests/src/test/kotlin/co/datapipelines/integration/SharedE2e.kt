@@ -13,6 +13,7 @@ import software.amazon.awssdk.services.s3.S3Configuration
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier
 import java.net.URI
 import java.sql.DriverManager
+import java.sql.SQLException
 
 /**
  * ONE Postgres, ONE Redis and (round 141) ONE MinIO for this module's whole test JVM — the singleton
@@ -258,9 +259,46 @@ internal object E2eClean {
                             generateSequence { if (rows.next()) rows.getString(1) else null }.toList()
                         }
                 check(tables.isNotEmpty()) { "No public tables found — has a context (and Flyway) run yet?" }
-                statement.execute("TRUNCATE ${tables.joinToString(", ") { "\"$it\"" }} CASCADE")
+                // The application's jobs tick when the context boots — the moment a suite's first
+                // test reaches here — and the key-retention purge (233c) locks several tables per
+                // statement. A TRUNCATE over every table takes AccessExclusive on each in list
+                // order; two multi-table statements locking in different orders can deadlock, and
+                // Postgres picks a victim (40P01) — the walk's TRUNCATE, once, in 8f0a23a7's gate.
+                // The purge's next tick is its retry; this is ours.
+                retryingDeadlockVictim {
+                    statement.execute("TRUNCATE ${tables.joinToString(", ") { "\"$it\"" }} CASCADE")
+                }
                 statement.execute(DEFAULT_WORKSPACE)
             }
         }
     }
 }
+
+/**
+ * Runs [block] again when Postgres ends it as a deadlock victim — SQLSTATE `40P01`, the one
+ * failure a statement that races the application's background jobs earns through no fault of
+ * its own. Any other failure propagates on the first throw; the last attempt's deadlock
+ * propagates too. Test infrastructure only: production code has no TRUNCATE to protect.
+ */
+internal fun <T> retryingDeadlockVictim(
+    attempts: Int = DEADLOCK_RETRY_ATTEMPTS,
+    pauseMillis: Long = DEADLOCK_RETRY_PAUSE_MILLIS,
+    block: () -> T,
+): T {
+    require(attempts >= 1) { "attempts must be >= 1" }
+    var attempt = 1
+    while (true) {
+        try {
+            return block()
+        } catch (e: SQLException) {
+            if (e.sqlState != DEADLOCK_DETECTED || attempt == attempts) throw e
+            attempt += 1
+            Thread.sleep(pauseMillis)
+        }
+    }
+}
+
+/** Postgres's SQLSTATE for "deadlock detected" (Class 40 — Transaction Rollback). */
+private const val DEADLOCK_DETECTED = "40P01"
+private const val DEADLOCK_RETRY_ATTEMPTS = 5
+private const val DEADLOCK_RETRY_PAUSE_MILLIS = 250L

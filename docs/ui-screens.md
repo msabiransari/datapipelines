@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.72
+**Status:** v1.73
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-25 (7e)
@@ -259,23 +259,18 @@ nav packs to the top; the free space below it is deliberate.
   of the app renders — the inventory is [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative).
 
 **The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold),
-the search field **palette** (161), the light/dark toggle, the **MCP-key chip** (179), and the
-avatar menu.
+the search field **palette** (161), the light/dark toggle, and the avatar menu. The **MCP-key
+chip** (179) sat between the toggle and the menu until keys v2 (233, A15) retired it — see below.
 
-- **The MCP-key chip** (179, D16 — ruling 7; show-once since #213): the caller's ONE
-  login-minted `user` key in the ACTIVE workspace, right side beside the user menu — the
-  `dpk_…` prefix (12 characters), a **Copy** button, and **delete-to-rotate**. Three states:
-  **copyable** — the key's one sealed copy is unread; Copy FETCHES the secret from
-  `GET /partials/mcp-key/secret` (shell.js → clipboard): the secret is never in the page, and
-  the first fetch destroys the server-held copy in the same act that serves it. **copied** —
-  the chip re-renders WITHOUT a reload (`GET /partials/mcp-key/chip`, swapped in by the copy
-  handler) with no Copy button, and the prefix's title says "Copied already — delete it and
-  sign in again to get a new key you can copy"; a reload changes nothing, the clear is
-  server-side. **none** — after a delete (or before the next sign-in mints) the chip reads
-  "No MCP key here — one is minted when you next sign in or switch workspace". The chip links
-  to `/api-console`'s MCP card for the connection JSON. Every role may do all three verbs on
-  their OWN key (`mcp_key.own`), so the chip's guard is the key's existence
-  (`mcpKey != null`), not a role.
+- **The MCP-key chip is retired** (keys v2 — 233, A15, 2026-09-25). 179 (D16, ruling 7) put
+  the caller's one login-minted `user` key in the top bar with Copy and delete-to-rotate, and
+  #213 made the copy show-once. Keys v2 retired the login mint: every key, `mcp` included, is
+  created on the Keys page (§4.19) by a member whose role allows it, with the role the creator
+  may give, and its plaintext is shown once at creation. The chip's template, its two verbs
+  (`mcp-key-copy`, `mcp-key-delete`), `GET /partials/mcp-key/chip` and the shell's copy handler
+  are gone; `GET /partials/mcp-key/secret` (`mcp_key.own`) survives for the V37-migrated keys'
+  sealed copies with no page element calling it — #248 decides its fate. `/settings/api-keys`
+  (§4.10) points at the Keys page.
 
 - **The breadcrumb** is server-rendered from `AppNav.crumbFor(currentPath)` and re-derived
   client-side after a boosted swap from the active rail link's own `data-nav-group` /
@@ -1086,18 +1081,18 @@ For anything that must outlive the TTL, the answer is not a longer TTL: write it
 
 ### 4.10 API Keys — the pointer (091; repointed 179)
 
-**This screen is a pointer.** 179 split the keys in two (D16/D17): YOUR MCP key is minted at
-sign-in and lives in the top bar (§4.3e) — copy it ONCE from the chip (the first copy is the
-last, #213), delete there to rotate — and the
-workspace's API keys (the `endpoint` kind) are the workspace admin's `/api-keys` page (§4.19).
-This screen says exactly that, reads no keys at all, and links to `/api-keys` only for the roles
-that hold `api_key.read`.
+**This screen is a pointer.** 179 split the keys in two (D16/D17) and pointed here at the
+top-bar chip; keys v2 (233, A15) retired the chip and the login mint, so since 2026-09-25 every
+key — MCP keys with the role the creator may give, endpoint and server keys — is created on the
+Keys page (§4.19), its plaintext shown once at creation, revoked there to rotate. This screen
+says exactly that, reads no keys at all, and links to `/api-keys` only for the roles that reach
+it.
 
 | Attribute | Value |
 |---|---|
 | URL | `GET /settings/api-keys` |
 | Auth required | Yes — any authenticated principal (the key VERBS live on §4.19 and §4.3e — [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
-| Purpose | Point at the top bar (your MCP key) and §4.19 (the workspace's API keys) |
+| Purpose | Point at the Keys page (§4.19) — every key is created there since keys v2 retired the top-bar chip |
 | Design primitives | `.ds-card`, `.app-empty`, `.ds-button` |
 | JS | None |
 | htmx | No |
@@ -1665,6 +1660,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.73 | 233 landing (#233, #248) the chip's retirement recorded | §3.4: the top bar's inventory no longer lists the MCP-key chip; the chip bullet becomes its retirement record (keys v2 A15 — every key created on the Keys page, plaintext once at creation; `GET /partials/mcp-key/secret` survives for the V37-migrated sealed copies with no caller, #248). §4.10: `/settings/api-keys` points at the Keys page, not the top bar. The two chip browser tests, the shell's dead copy handler and the screenshot tool's chip wait left with it. |
 | 2026-09-25 | v1.72 | 7e (#7) the semantic link | §4.3d **the Release dialog warns on a `needs_review` pin**: one row per pinned template version citing a retired learned fact ("cites a retired fact: … — superseded by …"), above the confirm, never blocking it — the same port read the REST release's `warnings` come from. §4.6: 7d's `needs_review` marker is now computed (the tree/search rows' own flag, the detail's working version, the editor's displayed version, the node card's pin read). No new verb, no new route. |
 | 2026-09-25 | v1.71 | 7d (#7) the transform UI | **§4.7a (new): the transform face** — four textarea panes over a `jsonata`/`javascript` template (losslessly pretty-printed blocks), editable only on the working draft for an author; **Save draft** (`POST /partials/templates/transform-face/save`, `template.update` — 7b's deserializer, validator and draft service under the draft's hash; refusals name their pane) and **Run suite** (`…/run-suite`, `template.evaluate` — the panes as typed, owner ruling 2026-09-25: the gate's verdict plus a per-case list with the first difference's path, both sides and every invariant); `GET /partials/templates/transform-face` for the version select. §4.3e gains the face's two verbs. **§4.6:** the four types in the filter and the create modal, the modal's Contract/Invariants/Tests field prefilled with the record's example, the transform detail's Mode and Inputs, the `needs_review` marker behind 7e's flag. **§4.4:** the TRANSFORM node card (its accent and glyph, the language resolved from the pin, inputs → output, rejects + strict) and its Details rows. The `readOnly` rule's home is `TemplateSourceModel` (moved from `fillSource`, unchanged). |
 | 2026-09-24 | v1.70 | 215c (#215) after the key model | **§4.19 describes the Keys page and dialog as slice (b) built them**: the role column is fixed by the kind (`api caller` / `promotion receiver`), with nothing left for a slice to offer, since each kind carries exactly one role (record §3.1, A1); the Acts-as cell renders "<key name> (API key)"; the New API key dialog is one card per kind, each naming its fixed role and its create permission (`api_key.create` for workspace admins and super admins, `server_key.create` for super admins only), with no role field and no admin role. The record's §6(c) is marked delivered. No screen, route or verb changed. |

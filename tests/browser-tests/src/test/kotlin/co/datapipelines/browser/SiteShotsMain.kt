@@ -920,7 +920,10 @@ object SiteShotsMain {
             // same pixels, and "agent-2026-09-04" in a table cell would differ tomorrow.
             mintKeyIfAbsent("reporting-endpoint", kind = "endpoint", binding = DEMO_ENDPOINT_PATH)
             page.navigate("$baseUrl/dashboard")
-            waitFor("#app-mcpkey")
+            // Keys v2 (233, A15) retired the top-bar chip this shot framed (`#app-mcpkey`); the
+            // top bar is what remains to wait for. The shot and its alt text are stale until the
+            // #244 retake reframes them on the Keys page.
+            waitFor(".app-topbar")
             refuseVisibleSecret()
             shoot("keys.png", clipHeight = 176.0)
         }

@@ -461,9 +461,9 @@
 
           <div class="app-menu-sep"></div>
           <a th:href="@{/settings}" role="menuitem" hx-boost="true"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#settings"></use></svg>Settings</a>
-          <!-- 179 (D17): the menu's key link leads to the API keys page, a workspace
-               admin's screen — rendered only for the roles that hold MANAGE_API_KEYS.
-               Everyone's own MCP key lives in the top bar beside this menu. -->
+          <!-- 179 (D17): the menu's key link leads to the Keys page, rendered for the roles
+               that reach it. Keys v2 (233, A15) retired the top-bar chip: every key, a member's
+               own MCP keys included, is created and revoked on that page. -->
           <a th:if="${navApiKeys == true}" th:href="@{/api-keys}" role="menuitem" hx-boost="true"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#key"></use></svg>API keys</a>
           <!-- 127 §C: one "Report a problem" for the whole app — the bug form, in a NEW tab
                (external, never boosted), the URL read off the same SitePages constant the site

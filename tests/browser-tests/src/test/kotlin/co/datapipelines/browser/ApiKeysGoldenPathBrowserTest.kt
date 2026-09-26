@@ -6,13 +6,14 @@ import com.microsoft.playwright.options.AriaRole
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
-import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
 
 /**
- * Golden path 8 of the release checklist: API keys — since 179 (D16/D17) split in two:
- * the workspace's API keys on `/api-keys` (a workspace admin's), and the user's own MCP key
- * in the top bar (minted at sign-in, delete-to-rotate).
+ * Golden path 8 of the release checklist: API keys — since 179 (D16/D17) the workspace's keys on
+ * `/api-keys`. Keys v2 (233, A15) retired the login-minted MCP key and its top-bar chip: every
+ * key, `mcp` included, is created on this page, so the chip's leg of the path (prefix, copy,
+ * delete-to-rotate) left with it — the `user` kind the form once refused is `mcp` now, offered
+ * with the role the creator may give.
  *
  * The property that matters most for release confidence is ONCE-NESS: the plaintext of an
  * admin-minted key appears in exactly ONE render (`#keyCreated`) and never again — a reload
@@ -126,57 +127,19 @@ class ApiKeysGoldenPathBrowserTest : BrowserSuite() {
     }
 
     @Test
-    fun `the top bar carries the login-minted MCP key - prefix, copy, delete-to-rotate`() {
-        startTrace()
-        val user = loginReadyUser()
-
-        // The sign-in (and the workspace switch inside createWorkspace) minted the key:
-        // the chip shows its prefix, Copy, and the rotate verb — no ceremony, no page.
-        page.waitForSelector("#app-mcpkey")
-        val prefix = page.locator("#app-mcpkey .app-mcpkey-prefix").textContent()
-        prefix shouldStartWith "dpk_"
-        page.waitForSelector("[data-mcp-copy]")
-
-        // The copy endpoint serves the OPENED secret, and only to the owner's session.
-        val secret =
-            page
-                .request()
-                .get("$baseUrl/partials/mcp-key/secret")
-                .text()
-        secret shouldStartWith prefix.removeSuffix("…")
-        secret.length shouldBe 65
-
-        // Delete-to-rotate: the chip swaps to the no-key note, and the next sign-in mints
-        // a NEW id — the prefix visibly changes.
-        page.onDialog { it.accept() }
-        page.waitForResponse("**/partials/mcp-key") {
-            page.locator("[data-verb=mcp-key-delete]").click()
-        }
-        page.waitForSelector("text=sign in")
-        page.locator("[data-mcp-copy]").count() shouldBe 0
-
-        // A NEW login, not the live session: the mint is the login hook's, so the browser
-        // must actually cross the sign-in boundary again.
-        page.context().clearCookies()
-        login(user.email, user.oneTimePassword)
-        page.waitForURL("**/dashboard")
-        val rotated = page.locator("#app-mcpkey .app-mcpkey-prefix").textContent()
-        rotated shouldStartWith "dpk_"
-        (rotated != prefix) shouldBe true
-    }
-
-    @Test
-    fun `the old settings screen points at the top bar and the admin page`() {
+    fun `the old settings screen points at the Keys page`() {
         startTrace()
         loginReadyUser()
 
         page.navigate("$baseUrl/settings/api-keys")
         page.waitForURL("**/settings/api-keys")
 
-        // 091 reduced it to a link; 179 repointed it. Two key tables would be two answers
-        // to one question.
+        // 091 reduced it to a link; 179 repointed it at the chip; keys v2 at the Keys page. Two
+        // key tables would be two answers to one question.
         page.content() shouldNotContain "id=\"keys-table\""
-        page.content() shouldContain "top bar"
+        page.content() shouldContain "Keys page"
+        // The old pointer's sentence, not the words "top bar" — the layout's own comments name the bar.
+        page.content() shouldNotContain "MCP key is in the top bar"
         page.click("text=Manage API keys")
         page.waitForURL("**/api-keys")
         page.waitForSelector("#keys-table")

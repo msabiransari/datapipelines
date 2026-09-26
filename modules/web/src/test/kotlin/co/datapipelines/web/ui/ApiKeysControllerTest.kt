@@ -80,7 +80,9 @@ class ApiKeysControllerTest {
             )
 
         html shouldContain "/api-console"
-        html shouldContain "top bar"
+        // Keys v2 (233, A15) retired the top-bar chip: the pointer points at the Keys page now.
+        html shouldContain "Keys page"
+        html shouldNotContain "MCP key is in the top bar"
         // …and the admin page's link renders for the roles that hold MANAGE_API_KEYS
         // (withRoles defaults to the fullest set), never a table or form here.
         html shouldContain "href=\"/api-keys\""

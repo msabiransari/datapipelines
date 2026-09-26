@@ -1137,41 +1137,6 @@
       }
     });
 
-    /* 179 (D16) — the top bar's MCP-key Copy. The secret is NOT in the page: the click
-       fetches it from its own one-purpose endpoint (VIEW_OWN_MCP_KEY — the caller's own
-       login-minted key in the active workspace, opened from its sealed store), puts it on
-       the clipboard and toasts the outcome. The fetch carries the layout's CSRF header
-       contract like every mutating call — a GET needs no token, so none is sent. A 4xx
-       (the key was rotated in another tab — or copied already, #213) is a toast, not a
-       silent no-op.
-
-       #213 (show-once): the successful fetch destroyed the server's copyable copy in the
-       same act that served it, so the chip is re-rendered from the server right after the
-       clipboard write — Copy disappears without a reload. The swap reuses the rotate flow's
-       fragment and target; the server, not this handler, decides the chip has no Copy. */
-    doc.body.addEventListener("click", function (evt) {
-      var copy = evt.target.closest && evt.target.closest("[data-mcp-copy]");
-      if (!copy) return;
-      evt.preventDefault();
-      var url = copy.getAttribute("data-mcp-copy");
-      if (!url || !window.fetch) return;
-      var toast = window.DpToast;
-      window.fetch(url, { headers: { "Accept": "text/plain" }, credentials: "same-origin" })
-        .then(function (res) {
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          return res.text();
-        })
-        .then(function (secret) {
-          return navigator.clipboard.writeText(secret).then(function () {
-            if (toast) toast.show("success", "MCP key copied", "The full key is on your clipboard — this was the one copy; rotate for a new one.");
-            if (window.htmx) window.htmx.ajax("GET", "/partials/mcp-key/chip", { target: "#app-mcpkey", swap: "outerHTML" });
-          });
-        })
-        .catch(function () {
-          if (toast) toast.show("danger", "Copy failed", "The key could not be read — it may have been rotated or copied already. Reload and try again.");
-        });
-    });
-
     /* 188 (#188) — the two layout-level behaviours that used to be `on*=` attributes,
        now data attributes read here: an enforced CSP with no 'unsafe-inline' refuses
        every inline handler, and a handler in markup is a handler no test reads.

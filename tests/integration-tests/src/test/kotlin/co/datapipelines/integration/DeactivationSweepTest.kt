@@ -768,7 +768,15 @@ class DeactivationSweepTest {
             }
             seeded = true
             E2eClean.beforeSeeding()
+            // ONE transaction, committed at the end. Three seeds are INACTIVE `service` identities,
+            // and until their key rows land they are exactly what `KeyRetentionPurge` deletes: an
+            // inactive service identity nothing references. The purge's first tick fires when the
+            // context boots — the moment this runs — and under a loaded gate it deleted
+            // DEAD_OWNER_IDENTITY between the identity insert and the key batch (FK 23503 on
+            // 8f0a23a7's gate, both cycles). Production never shows that state: issuance writes
+            // the identity and its key together, and an identity turns inactive only afterwards.
             DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
+                connection.autoCommit = false
                 connection.createStatement().use { statement ->
                     statement.execute(
                         "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
@@ -836,6 +844,7 @@ class DeactivationSweepTest {
                             "('/dsweep-live', '${CONTROL_ENDPOINT_KEY.id}', '$WS_LIVE', '$LIVE_USER')",
                     )
                 }
+                connection.commit()
             }
             // The registry snapshot may predate the fixture (contexts are cached across suites).
             val registry = context.getBean("endpointRegistry")
