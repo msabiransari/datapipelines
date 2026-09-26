@@ -377,6 +377,18 @@
            request, so an empty box never claims to have matched nothing. The palette
            and its results container carry the ids the input's aria-controls names;
            the drawer's copy uses suffixed ids. -->
+      <!-- #159 — the search entry point for the 768–1099px band. There the topbar copy is
+           hidden (the 1099.98px rule) and the drawer copy is (its base rule), so neither
+           palette was displayed and ⌘K had no control to drive. This button exists ONLY in
+           that band — hidden at every width by its base rule and lit by the band's media
+           rule, the same "hidden by CSS, never by JS" contract as #rail-open. It opens THE
+           SAME palette: shell.js puts the open class on the bar, which reveals the topbar
+           copy in place and stands the button down — no third copy of the control (same
+           ids, same fetch). The chord drives it too (shell.js). -->
+      <button type="button" id="app-search-band" class="app-icon-button app-search-band-toggle"
+              aria-label="Search pipelines, templates and executions" aria-controls="app-search-input">
+        <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#search"></use></svg>
+      </button>
       <div class="app-search" data-search-root>
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#search"></use></svg>
         <input id="app-search-input" type="search" name="q" class="app-search-field" role="combobox"
