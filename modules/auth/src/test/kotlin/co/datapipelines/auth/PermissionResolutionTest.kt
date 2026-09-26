@@ -17,9 +17,10 @@ import java.util.UUID
  * tests and [RoleMatrixTest] prove the WHAT unchanged. What only this class can see is the wiring:
  * that [WorkspaceContext.permits], [RolePermissions.holds] and both member branches of
  * [AuthenticatedPrincipal.holds] consult the INSTALLED resolver with the right workspace — so a
- * synthetic grant installed by a test context reaches every one of them — that a key role does not
- * (its column is the matrix's, read at admission), and that closing the installation puts the
- * production resolver back.
+ * synthetic grant installed by a test context reaches every one of them — that a TRANSPORT key
+ * role does not (the matrix reads `api_caller` / `promotion_receiver` from the table at admission;
+ * an `mcp` key's member role asks the seam since #239, as the sessions do — both asserted below),
+ * and that closing the installation puts the production resolver back.
  *
  * The expectation for the production resolver is the doc's columns ([RoleMatrixDoc]), never
  * [RolePermissions]: a resolver checked against the table it reads would agree with itself.
@@ -77,7 +78,7 @@ class PermissionResolutionTest {
     }
 
     @Test
-    fun `a key role is read from its column - the installed resolver is never asked`() {
+    fun `a transport key role is read from its column - the installed resolver is never asked`() {
         val asked = mutableListOf<Asked>()
         PermissionResolution.install(Grant(Permission.PIPELINE_DELETE, asked))
         val caller =
@@ -87,6 +88,32 @@ class PermissionResolutionTest {
         caller.holds(Permission.ENDPOINT_SERVE) shouldBe true
         caller.holds(Permission.PIPELINE_DELETE) shouldBe false
         asked.shouldBeEmpty()
+    }
+
+    /**
+     * #239 — the matrix's `mcp` arm asks the INSTALLED resolver, with the key's pinned workspace
+     * named: the isolated-permission witness (record §7.1) can only isolate a tool if the grant,
+     * not the role column, answers. Falsified by reverting the arm to the direct table read —
+     * `asked` would come back empty.
+     */
+    @Test
+    fun `the matrix's mcp member-role arm asks the installed resolver - with the key's workspace named`() {
+        val asked = mutableListOf<Asked>()
+        PermissionResolution.install(Grant(Permission.PIPELINE_DELETE, asked))
+        val workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.VIEWER)
+        val key =
+            session(workspace)
+                .copy(authMethod = AuthMethod.API_KEY, keyId = "dpk_TEST", keyKind = ApiKeyKind.MCP, keyRole = KeyRole.AUTHOR)
+
+        ScopeMatrix.allowed(key, Permission.PIPELINE_DELETE, workspace) shouldBe ScopeMatrix.Decision.Allowed
+        val refusal = ScopeMatrix.allowed(key, Permission.PIPELINE_CREATE, workspace) as ScopeMatrix.Decision.Refused
+        refusal.code shouldBe AuthErrorCodes.ROLE_REQUIRED
+
+        asked.map { it.workspaceId to it.permission } shouldContainExactly
+            listOf(
+                workspaceId to Permission.PIPELINE_DELETE,
+                workspaceId to Permission.PIPELINE_CREATE,
+            )
     }
 
     @Test

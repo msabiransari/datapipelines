@@ -13,7 +13,12 @@ package co.datapipelines.auth
  *   MEMBER roles chosen at creation (`author`, `promoter`, `workspace_admin`), for the other
  *   kinds their transport role (`api_caller`, `promotion_receiver`) — and nothing else
  *   (record §3.2): the key role IS the answer. There is no derivation from a membership and
- *   no cap; never a super admin's authority (B1).
+ *   no cap; never a super admin's authority (B1). Since #239 an `mcp` key's member role is
+ *   ANSWERED through the installed [PermissionResolver] — the same question a session's
+ *   `holds` asks, the production resolver reading the same member column, so no observable
+ *   answer changed — which is what lets the isolated-permission witness isolate a tool again
+ *   (`PermissionSeamE2eTest`). The two transport roles are read from the table directly;
+ *   the record's "separate wire tests use actual persisted roles" stays true for them.
  *
  * `ScopeMatrixSpecDriftTest` asserts the catalog and every role column (member and key) against
  * auth.md §7.6 in both directions; `RequiredScopeCoverageTest` that every handler declares a
@@ -57,9 +62,12 @@ object ScopeMatrix {
      *
      * - A principal with a [KeyRole] (every key since keys v2 — an `mcp` key of the chosen
      *   member role, an `endpoint` key, a server key's promotion peer — the config-value peer
-     *   included) is judged by that role's column alone. No workspace is needed
-     *   to answer it: the promotion receiver takes a batch for any workspace (B6), and an
-     *   `endpoint` key's pinned workspace was judged live when its credential became a principal.
+     *   included) is judged by that role's column. For the two TRANSPORT roles the column is
+     *   read directly, and no workspace is needed to answer it: the promotion receiver takes a
+     *   batch for any workspace (B6), and an `endpoint` key's pinned workspace was judged live
+     *   when its credential became a principal. An `mcp` key's MEMBER role asks the installed
+     *   [PermissionResolver] with the key's pinned workspace (#239) — the same call a session's
+     *   `holds` makes, the production resolver answering the same member column.
      * - Every other principal is judged by its [context]'s role — a session's membership (or a
      *   super admin's D7 authority).
      *
@@ -106,8 +114,20 @@ object ScopeMatrix {
         context: WorkspaceContext?,
     ): Decision {
         // A key that acts as its own identity (record §3.2): its key role is the whole answer.
+        // An `mcp` key's MEMBER role is asked of the installed resolver (#239) — the same call a
+        // session's `holds` makes, so the isolated-permission witness isolates a tool; the
+        // production resolver reads the same member column. The two transport roles keep the
+        // direct read: the record's B4 wire-truth sentence stays true for them, and
+        // [PermissionResolver]'s KDoc says why one decision must not split across two paths.
         principal.keyRole?.let { role ->
-            if (permission in RolePermissions.of(role)) return Decision.Allowed
+            val memberRole = role.asMemberRole()
+            val held =
+                if (memberRole == null) {
+                    permission in RolePermissions.of(role)
+                } else {
+                    PermissionResolution.resolver.holds(context?.id, memberRole, false, permission)
+                }
+            if (held) return Decision.Allowed
             return roleRefusal(AuthErrorCodes.ROLE_REQUIRED, operationName, permission, role.wire, context?.name)
         }
         // A promotion principal ALWAYS carries the promotion_receiver role (the filter stamps it on

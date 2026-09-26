@@ -249,6 +249,13 @@ request header/configuration switch, and is checked absent from the packaged pro
 production implementation; the synthetic implementation lives in test sources; a jar-scan test
 proves no second implementation is packaged; a Spring profile or property never selects it.
 Separate wire tests use actual persisted roles and real credential resolution without this seam.
+**Amended (#239, 2026-09-25):** an `mcp` key's member-role admission is decided through this seam
+too — `ScopeMatrix.allowed` asks the installed resolver with the key's pinned workspace and member
+role, the production implementation answering the member column, so no observable answer changed —
+and the isolated-permission witness covers the MCP tool surface again (`PermissionSeamE2eTest`'s
+tool leg, red on the pre-#239 matrix). The two transport key-role columns (`api_caller`,
+`promotion_receiver`) are NOT behind it: the matrix reads them from the role table at admission,
+and the sentence above — separate wire tests use actual persisted roles — stays true for them.
 
 This catches a delete route incorrectly requiring create even when today's roles hold both.
 Roles are not ordered privilege levels: author and promoter are incomparable. No numeric rank,

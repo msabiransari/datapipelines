@@ -203,7 +203,9 @@ data class AuthenticatedPrincipal(
      * Both member branches ask the installed [PermissionResolver] (security-assurance record §7.1,
      * B4): the instance one with no role (the table answers [superAdmin] for every instance
      * permission), the workspace one through [WorkspaceContext.permits]. A key role is read from
-     * the table, as `ScopeMatrix` reads it at admission ([PermissionResolver]'s KDoc says why).
+     * the table HERE — this answers a service's question, not a surface admission; at the surface
+     * `ScopeMatrix` routes an `mcp` key's member role through the seam (#239) and reads the two
+     * transport roles directly ([PermissionResolver]'s KDoc says why).
      */
     fun holds(permission: Permission): Boolean =
         when {
