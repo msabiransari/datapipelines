@@ -1,11 +1,20 @@
-# Scheduler revision: durable occurrences, scheduler keys and REST-backed UI
+# Scheduler revision: durable occurrences, a system identity and REST-backed UI
 
-**Status:** draft for Fable review; not locked for implementation or normative.
-**Date:** 2026-09-22. **Delivery:** [GitHub issue #9](https://github.com/msabiransari/datapipelines/issues/9).
+**Status:** RATIFIED 2026-09-25 (scheduler lane 1, #9). Normative for implementation. The owner's
+rulings of 2026-09-25 (§10, R1–R11) are normative; the pre-implementation review's corrections
+§9.1 A1–A19 are folded into the body, each place marked **(A#)**; the rulings are cited **(R#)**;
+the four decisions the owner took when lane 1 asked (§11, L1–L4) are cited **(L#)**, and the review's
+§9.6 defaults this record adopts where no ruling speaks are cited **(D-9.6)**. §4's scheduler-key
+model is **withdrawn** (R2) and replaced by the system identity. Where §9 (kept as history) and
+the body disagree, the body wins.
+**Date:** 2026-09-22 (draft); ratified 2026-09-25. **Delivery:** [GitHub issue #9](https://github.com/msabiransari/datapipelines/issues/9), in the slices of §9.4.
 **Supersedes:** the implementation details in the [September 7 design](2026-09-07-scheduler-design.md).
-**Not shipped:** this document changes no runtime behavior, supported key kinds, calculator catalog or API.
+**Shipped by slice 1:** the scheduler core (module, tables, dispatcher, occurrences, runs and their
+trail, the system identity, the pipeline executor adapter, REST). The Schedules UI, bindings,
+notifications, the application credential and background runs are later slices (§9.4); a statement
+below about one of those describes that slice's contract, not slice 1's runtime.
 **Distribution:** contributor design material; not packaged as product documentation.
-**Review:** pre-implementation findings recorded in §9 (2026-09-23); open items, not decisions.
+**Review:** pre-implementation findings recorded in §9 (2026-09-23), answered by §10 and §11.
 
 The owner asked to resolve the exactly-once claim, introduce scheduler keys with associated
 roles, stop schedules when their key is removed, use REST and a UI whose operations call
@@ -15,7 +24,7 @@ dedicated module and Schedules page, hierarchical names, modification by authors
 independently created reusable scheduler keys, association counts for scheduler and API
 keys, and following the selected pipeline version rather than routinely changing version pins.
 
-Latest owner decisions, incorporated for Fable's review:
+Owner decisions of 2026-09-22, kept by the ratification:
 
 - The symbolic version value is **`current`**, not `latest`.
 - Schedules have no draft/released/discarded lifecycle and are **never promoted**. They are
@@ -27,15 +36,20 @@ Latest owner decisions, incorporated for Fable's review:
   Pipeline version selection, keyword interpretation and parameter semantics belong to the
   pipeline execution layer, not to the scheduler module.
 
-Those directions are requirements. Detailed recommendations below (including the keyword
-wire format and application authentication model) remain subject to review. Fable reviews
-this draft before the owner locks it for implementation; this is not a dispatch brief.
+Those directions are requirements. Two of the owner's earlier requests are superseded by the
+2026-09-25 rulings: **scheduler keys** (independently created, reusable, with associated roles
+and association counts) are replaced by one system identity (R2, §4), and the per-key
+**association counts** go with them (§4.3 withdrawn; the API-key binding count remains a slice 5
+item). The keyword wire format (§5.2) is slice 3's contract and the application credential
+(§6, B7) slice 5's; both remain subject to that slice's review.
 
 ## 1. What remains from the ratified design
 
 - Use db-scheduler with the existing PostgreSQL service, rather than build a timer/lease engine.
-  `16.12.0` was the version researched on September 7, not a current dependency assertion.
-  Verify the supported stable version, license, starter compatibility and APIs at implementation.
+  **`16.12.0`** (core, `db-scheduler-spring-boot-starter`, `db-scheduler-spring-common`), verified
+  the current release on 2026-09-25 against `repo1.maven.org` metadata (latest = release =
+  16.12.0, published 2026-05-29; the search index still says 15.6.0 and is stale), Apache-2.0,
+  starter built against Spring Boot 3.5.14 (ours: 3.5.16). Pinned exactly in the catalog.
 - Schedules are workspace-scoped entities in folders, separate from pipeline definitions.
 - Delegate payload validation to its executor at save and admission. The pipeline executor
   accepts `version: "current"`; optional exact numeric versions remain a proposal (§3.1).
@@ -45,12 +59,21 @@ this draft before the owner locks it for implementation; this is not a dispatch 
 - Default missed-run policy is `skip`; optional catch-up runs one missed occurrence, not an
   unbounded backlog. Section 3 narrows this to work that has never started.
 - Skip overlap for the same schedule; do not accumulate concurrent runs of it.
-- One application image with scheduler mode `both | api | worker`, default `both`.
-  This is deployment configuration, not an authorization role. API mode does not dispatch
-  scheduled work; it does not silently remove existing synchronous execution routes.
-- First release includes the complete Schedules UI and REST surface, plus background runs.
-- Lifecycle email notifications are in the first delivery (§6.1). Reports, standalone email
-  jobs, automatic pipeline retries/backoff and bulk backfill remain out. Schedule promotion
+- One application image. Whether an instance DISPATCHES is deployment configuration
+  (`datapipelines.scheduler.enabled`, default `true`), not an authorization role **(A19)**. An
+  instance with it `false` is an API-mode instance: it keeps db-scheduler's `Scheduler` bean —
+  which is also the client its REST calls enqueue through — but supplies a no-op
+  `DbSchedulerStarter`, so it never polls, dispatches, claims or reconciles; its REST surface and
+  the existing synchronous execution routes are unchanged. A worker-only instance (dispatch
+  without serving) is a deployment topology, not a scheduler mode, and is out of scope. The
+  loops by role: the dispatcher, the occurrence worker and the reconciler run only where
+  `enabled`; the existing sweeper, pool reaper and event retention run on every replica as
+  today (they are idempotent — the sweeper's KDoc says why).
+- The feature's first release includes the complete Schedules UI and REST surface, delivered in
+  the slices of §9.4: slice 1 the core and REST, slice 2 the UI, slice 3 bindings, slice 4
+  notifications, slice 5 the application credential, slice 6 background runs **(B13)**.
+- Lifecycle email notifications are in the first release (§6.1, slice 4). Reports, standalone
+  email jobs, automatic pipeline retries/backoff and bulk backfill remain out. Schedule promotion
   is explicitly not part of the model, rather than merely deferred.
 
 Do not reserve report/email enum values with unsupported behavior. Add future job kinds with
@@ -64,29 +87,44 @@ same REST contract used by the UI and external applications. It has no artifact 
 release/discard/restore workflow, promotion package or promotion endpoint. The numeric
 `revision` is solely optimistic concurrency/audit metadata, not a releasable schedule version.
 
-Proposal: store `enabled` (manual pause/resume) and `blocked_reason`/`blocked_at` separately.
-Display **Enabled**, **Paused** or **Blocked** as an operational condition, not a content
-status; blocked takes display precedence and can coexist with manual pause. Resuming a
-paused schedule cannot clear an unresolved block. An unblock/resume must revalidate the
-key and executor payload. Run outcomes such as running/failed/unknown still belong to
-individual occurrences; they are not a lifecycle of the schedule definition.
+`schedules` stores `enabled` (manual pause/resume) and `blocked_reason`/`blocked_at`
+separately. Display **Enabled**, **Paused** or **Blocked** as an operational condition, not a
+content status; blocked takes display precedence and can coexist with manual pause. Resuming a
+paused schedule cannot clear an unresolved block: that is its own verb, **unblock**
+(`POST /api/v1/schedules/{id}/unblock`, `schedule.pause`), which revalidates the executor
+payload through the adapter (§5.3) before it clears the block, records who cleared it on the
+trail of the run that caused the block (`schedules.blocked_run_id`), and recomputes
+`next_due_at` from now (occurrences due while
+blocked are not missed, D-9.6). There is no key to revalidate (R2). Run outcomes such as
+running/failed/unknown still belong to individual occurrences; they are not a lifecycle of the
+schedule definition.
 
-## 2. Guarantee: one occurrence record, at most one automatic launch attempt
+## 2. Guarantee: one occurrence record, at most one automatic launch that may have begun work
 
 Remove the promise of end-to-end exactly-once execution. A scheduler cannot atomically commit
 both a remote datasource write and its own success record. Example: a pipeline commits an
 INSERT, then its worker dies before recording success. Replaying it may duplicate rows.
 
-Recommended first-version guarantee:
+The guarantee **(R6)**:
 
-1. Each cron occurrence has one durable identity: `(schedule_id, scheduled_at_utc)`.
-2. Duplicate engine deliveries cannot create a second occurrence or automatically launch the
-   same occurrence again after its durable start claim.
-3. A run with an uncertain execution/side-effect outcome is visible and is not automatically
-   retried, even when catch-up is enabled.
-4. Manual recovery is explicit and audited. It is never presented as proof that no previous
-   external writes occurred. Exactly-once destination effects require destination idempotency
-   or transactions designed by that pipeline.
+1. Each cron occurrence has one durable identity: `(schedule_id, scheduled_at)` (UTC), unique in
+   `schedule_runs`.
+2. Duplicate engine deliveries cannot create a second occurrence, and **at most one automatic
+   launch that may have begun work** exists per occurrence: the launch is guarded by a durable
+   start claim (`queued → starting`, a conditional UPDATE), and nothing re-launches a claimed run.
+3. A run is **definitively not started** — and may therefore be retried within its lateness
+   window, or recorded `not_started` / `skipped` without doubt — only in these cases: capacity was refused
+   before the claim (R4); the executor's preparation refused it (a null pointer, a missing
+   target, invalid parameters, an inactive workspace, the system identity's authority); the
+   schedule was paused, blocked or deleted before the claim; or the executor's `start` returned
+   "not started" because no execution record could be written, which by the fail-closed rule
+   below (A14) means no node ran.
+4. A run with an uncertain execution/side-effect outcome is `unknown`, is visible, blocks its
+   schedule, and is not automatically retried, even when catch-up is enabled.
+5. Manual recovery is explicit and recorded — unblock (§1.1) names the person on the trail of
+   the run that caused the block. It is never presented as proof that no
+   previous external writes occurred. Exactly-once destination effects require destination
+   idempotency or transactions designed by that pipeline.
 
 This deliberately trades automatic completion after some crashes for protection against
 silent replay. It does not mean every scheduled occurrence executes successfully.
@@ -95,26 +133,40 @@ silent replay. It does not mean every scheduled occurrence executes successfully
 
 Use PostgreSQL transactions for occurrence insertion, schedule-level overlap admission and
 the queued-to-starting claim. Do not hold a database transaction across the pipeline's runtime.
-Workers must acquire execution capacity before claiming a start; capacity waits are not
-evidence that the pipeline has begun. Save a stable execution correlation/id before launch
-and reconcile against the existing execution record during recovery.
+Workers acquire execution capacity **before** claiming a start (R4): the executor's slot
+admission is reject-not-queue and throws before `execution_started` — no row, no event, no node
+(A6) — so a refusal is a definitive "never started"; `ExecutionSlots` gains an
+acquire-before-claim lease so the slot the worker takes is the slot the execution runs under.
+The worker mints the execution reference (a UUID) and records it in the claim, **before** launch;
+the pipeline executor starts under exactly that id (`ExecuteRequest.executionId`), so recovery
+reconciles against the existing execution record by it.
+
+**Fail closed at launch (A14).** On the scheduled path the adapter's `start` returns "started"
+only once the execution's `RUNNING` row is durably written, and aborts the execution before its
+first node when that row cannot be written (today's interactive emitter logs the failed insert
+and runs on — correct for an interactive stream, wrong here). "No execution row" therefore
+proves "no node ran" for a scheduled run.
 
 | Durable state / evidence | Recovery |
 |---|---|
-| Queued, no start claim | Safe to re-evaluate authorization, timing and overlap policy; no pipeline has been admitted to start. |
-| Starting claim committed, execution not yet visible | Ambiguous admission boundary; do not automatically launch again. An acknowledged run can be lost here by design. |
-| Execution running, heartbeat lost | Request cancellation and reconcile; absence of heartbeat does not prove that the old worker stopped. |
-| Execution terminal with a persisted outcome | Reconcile schedule history from it; do not rerun the pipeline merely to repair scheduler bookkeeping. |
+| `queued`, no start claim | Safe to re-evaluate authorization, timing and overlap policy; no pipeline has been admitted to start. A revived occurrence task simply runs the admission again. |
+| `starting` claim committed, execution not yet visible | Ambiguous admission boundary; never launch again. When the claiming worker's occurrence task is revived (its heartbeat stopped) or the reconciler finds the claim older than the start grace (db-scheduler's dead-execution window, six heartbeats — 3 min at the defaults) with no execution record, the run becomes `unknown` / `start_unconfirmed` and blocks; an execution that appears later under the recorded reference is an update about the same run. |
+| Execution running, heartbeat lost | The existing sweeper marks it `ABORTED` / `pipeline.execution.instance_lost` after three missed execution heartbeats (≈45 s) even for a live but stalled worker **(A5)**; the reconciler maps that to `unknown` (R6) and blocks. Absence of heartbeat does not prove that the old worker stopped. |
+| Execution terminal with a persisted outcome | Reconcile schedule history from it (R6's table, §7.1); do not rerun the pipeline merely to repair scheduler bookkeeping. `ExecutionRepository.complete()` has no `status = 'RUNNING'` guard, so a live worker can later overwrite `ABORTED/instance_lost` with `SUCCESS` or `FAILED` (A5): the reconciler keeps watching an `unknown` run's execution for 24 h and records a later real terminal as an update about the same run (its state follows; the schedule stays blocked until a person unblocks it). |
 | No conclusive terminal outcome | Mark `unknown`, block future starts of this schedule pending resolution, retain evidence. |
 
 Blocking on an uncertain run prevents a future occurrence from overlapping a possibly live
 old worker. Resuming requires an authorized person to resolve the incident after verifying
-the previous worker has stopped and examining destination effects. This does not claim
-that a database lease can fence writes at every external system.
+the previous worker has stopped and examining destination effects (unblock, §1.1). This does
+not claim that a database lease can fence writes at every external system.
 
-If launch cannot join the admission transaction, explicitly test the gap rather than
-claiming the transactions are shared. Internal persistence retries are acceptable only
-when they cannot call pipeline execution a second time.
+**Transaction participation (R1 spike 1).** The dispatcher inserts an occurrence and enqueues its
+one-time task with `scheduleIfNotExists` in ONE `metadataTransactionManager` transaction: the
+starter wraps the metadata `DataSource` in `TransactionAwareDataSourceProxy`, so the client's
+statement joins the transaction. Proven, not assumed: a rolled-back transaction leaves neither
+the run row nor a `scheduled_tasks` row, beside a committed control (§8). The launch itself does
+not join a transaction — it is a separate step after the committed claim, and the claim is what
+makes a second call to pipeline execution impossible.
 
 ### 2.2 Library behavior that needs explicit integration
 
@@ -125,35 +177,84 @@ transaction. Override/reconcile these behaviors for our admission policy; librar
 alone do not supply the product guarantee or a history row for every overlapping tick.
 [db-scheduler documentation, consulted 2026-09-22](https://github.com/kagkarlsson/db-scheduler).
 
-Prove the chosen adapter records overlap/missed intervals without an unbounded replay loop.
-A missed-range summary may compact a long outage; do not fabricate individual executions.
-The precise recurring-task versus short dispatcher/one-time-task implementation remains a
-bounded integration spike, not a reason to write our own scheduling engine.
+The engine is **one dispatcher** (R1) — db-scheduler supplies the durable queue, cluster-wide
+picking and dead-task detection, and none of its per-schedule timing:
+
+- **Tasks.** Three, all owned by `modules/scheduler`: the recurring `schedule-dispatcher` and
+  `schedule-reconciler` (fixed delay, `datapipelines.scheduler.tick-interval-seconds`; a recurring
+  task has one instance cluster-wide, so a tick never runs twice at once), and the one-time
+  `schedule-run` whose instance id and data are the run id. No cron string lives in `task_data`;
+  `schedules` is the only source of timing.
+- **Serialization (A8).** The starter's default is Java serialization
+  (`DbSchedulerConfigurationSupport.SPRING_JAVA_SERIALIZER`; core's `SchedulerBuilder` too) — an
+  unsafe-deserialization surface and a rename hazard. The scheduler supplies the JSON serializer
+  through the starter's `DbSchedulerCustomizer`, task data is only a run id string, and a test
+  fails if the configured serializer is ever the Java one.
+- **Threads (A19).** The starter defaults to 10; ours come from `datapipelines.scheduler.threads`
+  (default 2). No task holds a thread for a pipeline's runtime: the occurrence task starts the
+  execution asynchronously and returns.
+- **Retry and revival.** A one-time task that throws is retried by the library after 5 min, and a
+  dead execution (heartbeat stopped) is revived. Both are safe by construction: the occurrence
+  handler's claim is a conditional UPDATE, so a retried or revived delivery of a claimed run
+  launches nothing (it records `unknown` / `start_unconfirmed` for a claim with no execution,
+  §2.1). Business outcomes never surface as a thrown exception: capacity waits reschedule the
+  task explicitly; refusals complete it.
+- **Recurring semantics.** Irrelevant here: the dispatcher and reconciler are fixed-delay
+  housekeeping; a schedule's own next time is computed by the ONE occurrence function (§3.2),
+  never by `CronSchedule.getNextExecutionTime` from completion time.
+
+Overlap and missed intervals are recorded without a replay loop: a dispatcher tick records at
+most one run for the latest due occurrence and at most one **missed-range summary** row for
+everything before it (§3), however long the outage. Individual executions are never
+fabricated.
 
 ## 3. Missed occurrences, overlap and manual runs
 
-- **Normal delay:** a poll slightly after the due instant is normal. Define and expose an
-  allowed-lateness policy so default `skip` does not skip every occurrence. Exact default
-  and capacity-wait treatment must be chosen from the engine spike before implementation.
-- **Skip:** occurrences outside the accepted lateness window are recorded as missed/skipped;
-  the next future occurrence remains scheduled.
-- **Run now catch-up:** select only the latest eligible missed, never-started occurrence.
-  Keep its original scheduled instant and timezone as its identity/reference time. Mark it
-  as catch-up; do not invent a new `now()` identity to bypass deduplication.
-- **No overlap:** atomically admit at most one active run of a schedule across instances.
-  Due occurrences while it is active are skipped, including manually requested runs.
-  Unknown prior work blocks admission rather than clearing this guard.
-- **Run now button:** creates an explicit manual run with its own idempotency key; it is not
-  catch-up or retry. Pass the saved executor payload and assigned scheduler identity. Freeze request time
-  in the schedule's timezone for its date reference.
+- **Normal delay and the lateness window:** a poll slightly after the due instant is normal. A
+  run may be admitted until its `admit_by` instant: the occurrence instant plus
+  `datapipelines.scheduler.lateness-seconds` (default 600, i.e. 10 min — D-9.6/B10; one
+  instance-wide value, no per-schedule override in v1). A catch-up or manual run's window opens
+  when it is recorded. A capacity refusal retries within the window (every 30 s, counted by the
+  `datapipelines.scheduler.capacity.retries` metric, R4); beyond it the run is `not_started` /
+  `capacity`.
+- **Skip** (`missed_run_policy = skip`, the default): an occurrence the dispatcher first sees
+  beyond its window is recorded `skipped` / `missed`; the next future occurrence remains
+  scheduled. Everything due before the latest occurrence of a tick is compacted into ONE
+  `skipped` / `missed` summary row (keyed by the first missed instant, `details` carrying the
+  count and the last instant).
+- **Latest catch-up** (`missed_run_policy = latest`; the draft's `run_now` value is renamed so it
+  cannot be confused with the Run now button, D-9.6/B10): the latest missed, never-started
+  occurrence is queued as `origin = catch_up` when it is at most
+  `datapipelines.scheduler.catch-up-max-age-seconds` old (default 86 400, 24 h); earlier ones are
+  summarized as missed. It keeps its original scheduled instant and timezone as its
+  identity/reference time; no new `now()` identity bypasses deduplication.
+- **Paused, blocked, edited:** occurrences due while a schedule is paused or blocked are not
+  missed and are not caught up — resume and unblock recompute `next_due_at` from now; so does an
+  edit of the cron or timezone (old-pattern occurrences are not missed) (D-9.6/B10). A schedule in
+  a DEACTIVATED workspace is not dispatched (its occurrences are not recorded); on reactivation
+  the stale `next_due_at` is handled as an outage (summary + policy), which is honest: the
+  workspace was down.
+- **No overlap:** at most one active (`queued`, `starting`, `running`) run per schedule across
+  instances — a partial unique index on `schedule_runs`, and every insertion path holds the
+  schedule row's lock. A due occurrence while one is active is recorded `skipped` / `overlap`.
+  **Run now while a run is active answers `409 schedule.run.overlap`** rather than recording a
+  skip (D-9.6/B10). Unknown prior work blocks the schedule rather than clearing this guard.
+- **Run now button:** creates an explicit manual run (`origin = manual`, `requested_by` = the
+  person) with its own optional `Idempotency-Key`, durable in Postgres **(L1, A15)**; it is not
+  catch-up or retry. It passes the saved executor payload and fires under the system identity
+  (R2). Its reference time is the accepted request time in the schedule's timezone. It is
+  allowed on a paused schedule (a person asked for it) and refused on a blocked one
+  (`409 schedule.blocked`). Its permission is `schedule.run` **(L2)**.
 - **Rerun an uncertain/failed occurrence:** deferred as an automatic feature. A future explicit
   replay must link to the original occurrence and preserve its input/time snapshot. The UI
   must explain that a new execution may repeat effects.
-
-For DST, occurrence identities are UTC instants and display includes local offset. The
-parser's gap/repeated-hour behavior must be measured, documented and identical in preview
-and firing. Do not claim that timezone support alone settles the once-or-twice local-hour
-policy. This remains an explicit review item.
+- **Guards (B18, L4):** a cron whose consecutive local occurrences come closer together than
+  `datapipelines.scheduler.min-interval-seconds` (default 300) anywhere in the 14 days after the
+  save instant is refused at save (`schedule.validation.interval_too_short`; the horizon covers
+  every weekday twice — an exotic pattern whose only tight pair straddles a month end beyond it
+  is not caught, and the per-workspace cap below still bounds it), and a workspace holds at most
+  `datapipelines.scheduler.max-schedules-per-workspace` live schedules (default 100;
+  `schedule.limit.per_workspace`).
 
 ### 3.1 Pipeline executor contract: `current`; snapshot each run
 
@@ -171,139 +272,136 @@ can even point to a draft. Ordinary no-version execute uses the working version,
 also be a draft. Neither path may be assumed to mean “newest release.”
 
 `current` follows that selected pointer and respects deliberate rollback/promotion switches
-of the **pipeline**, without promoting schedules. The recommended pipeline executor policy
-for this first background-job adapter remains RELEASED-only: refuse a null, discarded or
-DRAFT target; never silently fall back to another version. The development DRAFT-pointer
-case is still a policy for Fable/owner review, not settled by renaming the selector. Enforce
-any such restriction in the pipeline adapter, never in the scheduler. Existing ordinary
-no-version execution and published endpoints retain their documented behavior.
+of the **pipeline**, without promoting schedules. **It follows the pointer wherever it points,
+drafts included (R5)** — the owner chose D63 consistency over the review's RELEASED-only
+recommendation (B8). Because a DRAFT is mutable under its version number and
+`pipeline_executions` records no body hash (A18), the adapter's prepared snapshot records the
+fired version number AND the SHA-256 of the version body read at fire time, so a run's history
+stays reproducible. A NULL pointer is refused at admission (`not_started` / `pointer_null`, the
+schedule blocks); `latest` is refused at save; exact numeric versions are not accepted in v1
+(the payload's `version` must be the string `"current"`). The adapter never silently falls back
+to another version. Existing ordinary no-version execution and published endpoints retain
+their documented behavior.
 
 Pipeline adapter responsibilities:
 
-1. During admission preparation, resolve `current` once, capture the immutable version and
-   resolve/validate the pipeline parameter payload. Do not launch with a missing version.
-2. Persist the selected version and typed inputs in the executor-owned prepared execution
-   record before a launch claim can dispatch it. The scheduler persists only its opaque
-   preparation/execution reference. Later releases, pointer changes and schedule edits
-   cannot change an admitted run. History shows the requested selector and actual version.
-3. If no eligible release exists or required parameters changed incompatibly, record a
-   pre-start error through the generic executor result, with an actionable block reason;
-   the scheduler blocks the schedule and notifies its recipients.
-   Never silently run the old version or drop invalid inputs. Resume is an explicit action.
-4. Catch-up resolves the selected release at admission, not a reconstructed historical
-   release, but keeps the original occurrence's reference time. Show both facts in history.
-5. Coordinate selection with concurrent version lifecycle operations, and use the existing
-   explicit-version execution/validation boundary. Dependencies retain their established
-   versioning rules; selecting a root release does not invent transitive dependency pins.
+1. At save, validate the payload shape (`{"pipeline": "<name>", "version": "current"}`, nothing
+   else), that the named pipeline exists in the schedule's workspace, and the schedule's literal
+   `parameters` against the declared parameters of the version `current` names at save — the
+   same binder an interactive run uses (R7). It returns a generic `target_ref`
+   (`pipeline:<name>`, B15) the scheduler stores in an indexed column so "which schedules run this
+   pipeline?" is answerable without the scheduler learning pipeline semantics.
+2. During admission preparation, resolve `current` once, re-validate the parameters against that
+   version's declaration, and freeze the snapshot `{pipeline_id, version, body_sha256}` on the
+   run row (`schedule_runs.prepared`, an executor-owned JSON the scheduler stores and never
+   reads). Preparation executes nothing. Later releases, pointer changes and schedule edits
+   cannot change an admitted run; a retried admission reuses a saved snapshot.
+3. If no eligible version exists or the parameters no longer bind, return a pre-start refusal
+   through the port's standardized outcome with an actionable block reason; the scheduler
+   records the run `not_started` and blocks the schedule (notification is slice 4). Never
+   silently run the old version or drop invalid inputs. Unblock is an explicit action.
+4. Catch-up resolves `current` at admission, not a reconstructed historical version, but keeps
+   the original occurrence's reference time. History shows both.
+5. Launch under the snapshot's version by the existing explicit-version path
+   (`PipelineService.findExecutable(id, version)`); a body whose hash no longer matches the
+   snapshot (a draft edited between preparation and launch) is refused `not_started` /
+   `version_changed`. Dependencies retain their established versioning rules; selecting a root
+   version does not invent transitive dependency pins.
 
-## 4. Scheduler keys and authorization
+### 3.2 The occurrence function and the DST rule (R1, B9)
 
-Owner direction: introduce scheduler keys, associate a role, assign a key to a schedule,
-and stop the schedule if that key is removed. Recommended concrete model:
+Occurrence identities are UTC instants and display includes the local offset. ONE function
+computes them, and both the dispatcher and the preview call it — the library's
+`CronSchedule.getNextExecutionTime` is never used for timing, because it anchors on completion
+time and carries the library's DST behaviour (§9.3). The function:
 
-- A dedicated `scheduler` credential kind, pinned to one workspace; do not reuse a
-  login-minted user/MCP key, endpoint key or promotion key.
-- A schedule holds a non-null `scheduler_key_id`. Workers resolve the credential record
-  internally, not by storing/replaying its plaintext secret in task payloads.
-- Create named scheduler keys independently on the Keys page, then select one in one or
-  more schedules. An unused key is valid. Do not require a new key for every schedule.
-  An optional inline “Create key” action uses the same REST operation as the Keys page.
-  Show every bound schedule and the revocation impact before revoking a shared key.
-- Associate an execution-role ceiling chosen from existing roles, not free-form permissions.
-  Proposed allowed roles are viewer or author, default viewer: viewers already may execute
-  pipelines. A viewer role does **not** make a pipeline's datasource writes read-only.
-- Recommended first version remains issuer-bound: effective authority is the intersection
-  of the key's role ceiling, its issuer's current workspace authority, the schedule binding
-  and the worker-only execution capability. Compare matrix permissions, not numeric role ranks.
-- Issuer demotion cannot leave stronger authority behind; later promotion does not raise the
-  key's ceiling. User/workspace deactivation, membership removal, expiration or revocation
-  blocks new starts. An independent service-account identity is a separate design option,
-  not silently introduced here.
-- Scheduler keys authorize executing their bound jobs only; executor-specific target and
-  version restrictions are enforced by the executor adapter. These keys cannot create
-  schedules, author/release content, manage keys, promote or call arbitrary REST operations.
-  Reject this kind on ordinary public authentication paths unless explicitly designed later.
-- The browser uses the human's session plus normal CSRF protection. Selecting a key id is
-  not authentication: REST must verify authority to assign it and its workspace/bindings.
+1. **Parses** the five-field pattern with the library's own `CronSchedule` in `CronStyle.UNIX`
+   (so a six-field pattern is refused for free: "expects one of [5]"; the library's disabled
+   pattern `-` is refused explicitly).
+2. **Matches fields on the local clock**: it asks the parsed pattern for its next matching
+   instant in a fixed UTC frame, which yields the next matching LOCAL date-time with no zone
+   rules applied.
+3. **Converts** each local date-time into the schedule's IANA zone by **our DST rule**:
+   - a local time that falls in a **gap** (spring forward) runs at the first valid instant after
+     the gap — the transition instant — because a daily job that silently skips a day is a
+     missing day of loaded data;
+   - a local time that falls in an **overlap** (fall back) runs **once**, at its first pass (the
+     earlier offset), for every pattern;
+   - several local times that map to one instant (e.g. `*/15 2 * * *` across a whole gap) yield
+     one occurrence.
+4. **Is measured** against A9's case (§9.3) in its unit suite: `30 2 * * *` in America/New_York
+   runs at 03:00 EDT (07:00Z) on 2026-03-08 where the library skips the day; `30 1 * * *` runs
+   once on 2026-11-01; `*/30 1 * * *` runs twice that morning (01:00 and 01:30 EDT) where the
+   library runs four times.
 
-This extends the current [key model](../../auth.md); it is not current runtime behavior.
-Creation of a dedicated scheduler key is a proposed new operation, not a blanket grant to
-mint other key kinds. Owner decision: no sixth human workspace role for scheduling;
-the key kind restricts its execution capability; the existing roles decide human actions.
+## 4. The system identity and authorization (R2, R3, R8 — replaces the scheduler-key model)
 
-**Authentication is not encryption.** Encryption protects a stored secret; possession and
-verification of a credential authenticate a caller; authorization decides what it may do.
-An in-process worker need not decrypt a bearer token and authenticate to its own REST API.
-Recommendation: an internal-only scheduler key is a revocable authorization record with
-identity, issuer, role ceiling and bindings, without a usable bearer secret. It still needs
-an explicitly constructed trusted execution principal, live authorization checks and audit
-attribution. Its id alone never authenticates an external caller. If the unified key schema
-currently requires secret material, adapt that model explicitly rather than minting unused
-copyable secrets. An independently deployed remote worker would need its own authenticated
-transport; “inside a container” does not make an exposed endpoint trusted.
+**Withdrawn (R2, 2026-09-25):** the draft's scheduler keys — a `scheduler` credential kind, a
+schedule's `scheduler_key_id`, keys created on the Keys page, issuer-bound authority with a role
+ceiling, key revocation blocking bound schedules (§4.1), the key action matrix (§4.2) and the
+per-key association counts (§4.3). The review's A1, A10 and A11 described that model and are moot
+(§9.1). Nothing below mints, stores or checks a key.
 
-### 4.1 Removal and running work
+**Schedules fire under the system identity.** It is the existing **system service account**
+(`UserService.provisionSystemActor()`, auth.md §4.5): one `users` row (`kind = system`,
+`provider = system`, an address under the reserved `.invalid` TLD), provisioned at boot, which
+promotion, the retention job and the stale-execution sweeper already stamp their writes with. No
+new identity, no key row, no bearer secret. (R2's "per-instance" means per deployment: one row
+serves every replica, and every replica's worker fires under it.) It is **never a member** of any workspace and can
+**never authenticate**: no OIDC provider may be named `system`, the local-password paths refuse
+it, it has no `api_keys` row, and a session token presented for it is refused like a deactivated
+account's (§8's security evidence proves each).
 
-Removal means durable revocation with history retained. Atomically revoke the key, block
-all bound schedules and cancel their unstarted work. Serialize revocation and final launch
-admission against the same authorization state; do not rely on a cached key lookup for
-admission. A metadata-database failure refuses a new start.
+**Its authority is a fixed set, answered through the seam.** A scheduled launch is built with an
+`AuthenticatedPrincipal` for that row (`AuthMethod.SYSTEM`) whose workspace context is the
+schedule's workspace, marked as the system actor's. Its permission questions go to
+`PermissionResolver`'s **system arm** — the resolver knows the ACTOR, not a role — which holds
+exactly `pipeline.execute`, `pipeline.read` and `execution.read` (the launch, the pinned
+version's read, the reconciler's execution read) in any workspace, and nothing else. `ScopeMatrix`
+and `AuthenticatedPrincipal.holds` do not special-case it: they reach the arm through the
+context. The set is fixed in code (`RolePermissions.SYSTEM_ACTOR`), not a role column of auth.md
+§7.6, so `RoleWalkE2eTest` never sees it; a unit test pins the set exactly and goes red when a
+test resolver grants one more. It "executes pipelines — and later reports — and nothing more":
+a later executor adds its own permission to the set with that executor.
 
-If admission won the race first, work is already admitted: request cancellation of running
-executions and recheck at dispatch/node boundaries as appropriate. Revocation is not a
-rollback of effects already committed or a guarantee that every driver interrupts instantly.
-Show cancellation progress and retain uncertain outcomes. Never resume automatically with
-some other key, and never auto-mint a replacement for a revoked scheduler key.
+**Attribution.** A scheduled execution records `executed_by` = the system actor,
+`executed_by_key_kind` = NULL and `triggered_via = SCHEDULE`; the schedule, its creator and (for
+Run now) the requesting person are recorded on the `schedule_runs` row, which is the
+attribution. `ExecutedByKeyKind` gains nothing: there is no key.
 
-Assigning a replacement key requires an authorized edit and explicit resume. Rotation
-changes authorization without rewriting historical key/issuer attribution. Permission
-restoration or user reactivation should not silently re-enable blocked schedules.
+**Run visibility (R3).** A scheduled run is visible to every member of its workspace whose role
+reaches `execution.read` (metadata, events) / `execution.result.read` (the result) — the
+pipeline's own reach. D11's own-only rule stays for interactive runs: `ExecutionVisibility` and
+the own-runs listing gain one schedule-attributed branch (`triggered_via = SCHEDULE`) and nothing
+else. A scheduled run is nobody's "own" run, so cancelling one needs `execution.cancel_all`.
 
-### 4.2 Proposed action matrix (requires owner review)
+**Roles (R8, L2).**
 
-| Action | Viewer | Author | Promoter | Workspace admin | Super admin |
-|---|---|---|---|---|---|
-| Read schedule metadata | yes | yes | no | yes | yes |
-| Read run details/results | own | own | no | workspace | workspace |
-| Create scheduler key | no | own, execution ceiling only | no | workspace | workspace |
-| Create schedule using an authorized existing key | no | own | no | workspace | workspace |
-| Edit / pause / resume / delete schedule; Run now | no | own | no | workspace | workspace |
-| Revoke scheduler key | no | own | no | workspace | workspace |
-| Assign/reuse a key, including replacement | no | own authorized key | no | workspace | workspace |
-| Resolve an unknown run and unblock | no | own, after reconciliation | no | workspace | workspace |
+| Action | viewer | author | promoter | ws_admin | super_admin | Permission |
+|---|---|---|---|---|---|---|
+| Create a schedule | ✗ | ✓ | ✗ | ✓ | ✓ | `schedule.create` |
+| Edit a schedule | ✗ | ✓ | ✗ | ✓ | ✓ | `schedule.update` |
+| Pause, resume, unblock | ✗ | ✓ | ✗ | ✓ | ✓ | `schedule.pause` |
+| Delete a schedule | ✗ | ✓ | ✗ | ✓ | ✓ | `schedule.delete` |
+| Run now | ✗ | ✓ | ✗ | ✓ | ✓ | `schedule.run` (L2) |
+| List, detail, upcoming, preview, runs, a run's trail | ✓ | ✓ | lens | ✓ | ✓ | `schedule.read` |
+| A run's execution, its events and result | own + scheduled | own + scheduled | ✗ | ✓ | ✓ | `execution.read`, `execution.result.read` (R3) |
+| A schedule FIRES | — | — | — | — | — | the system identity's fixed set |
 
-“Own” is based on durable issuer/ownership attribution; assigning a key must not grant
-access to another person's results. Record creator, requesting actor (for manual runs),
-credential issuer, key id and effective role distinctly. Keep existing executor capacity
-and own-result visibility rules. Final REST operation names, key caps and row reachability
-must land together with ScopeMatrix, auth §7.6 and RoleWalk expectations at implementation.
-This table adds no runtime permission by itself.
+The promoter **lens** on `schedule.read` shows the schedules whose target pipeline the lens
+admits (released objects newer than the promotion target's, #178), decided by the adapter over
+`target_ref`. **A creator demoted to viewer keeps their schedules RUNNING** — the system identity
+fires them — but can no longer manage them; this is intended (R8, B6), and a test says so. The
+execution-role ceiling selector is dropped (R8). Viewers see a schedule's payload and parameters
+(B14): R3 already shows every member the scheduled runs' resolved parameters, so hiding them on
+the schedule would protect nothing. The notification recipient list (slice 4) is decided with
+that slice.
 
-The owner has settled the role floor: only authors and admins may modify schedules, never
-viewers or promoters. Author ownership restrictions above are still a recommendation, not
-an owner decision. Cross-author/team editing and sharing another issuer's key need an
-explicit delegation policy before delivery; naming something `finance/...` does not grant
-that team exclusive access or permission to impersonate another key's issuer.
-
-### 4.3 Key association counts
-
-On the shared Keys page, scheduler keys show **Used by N schedules**, linking to their
-authorized usage list. Count current non-deleted associations, including paused/blocked
-schedules; optionally show enabled count separately. Zero is useful, not an error. Retained
-historical run attribution does not keep the current association count inflated.
-
-Apply the same discoverability to API keys (the existing `endpoint` kind): show **N endpoint
-bindings**, with linked paths. The current row model already reads bound paths through
-`EndpointKeyBindingRepository`; do not create a second source of binding truth. A path
-prefix can cover multiple routes and a more-specific binding can override it, so a binding
-count is not a count of effective accessible APIs or request traffic. Label it precisely.
-API keys do not become valid scheduler credentials as a side effect of these UI statistics.
-
-Counts and drill-downs are workspace- and visibility-scoped, served by REST, and computed
-in batches rather than a query per key. No hidden schedule/path may leak through a total.
-Association counts are distinct from optional usage telemetry such as last execution or
-request counts. Revocation confirmation explains the affected resources; it does not
-delete schedules or endpoints. Existing API-key creation/revocation roles remain unchanged.
+**No MCP tools** (owner, 2026-09-22) and **no key reaches the schedules REST surface** in slice 1:
+keys v2 confines an `mcp` key to `/mcp` and an `endpoint` key to the published tree, so the
+routes are session-only until slice 5's application credential (B7) lands. Isolation is per
+workspace (R9): a schedule names only its own workspace's pipelines, and every read is
+workspace-scoped in its SQL.
 
 ## 5. Pipeline-agnostic scheduler; executor-owned parameter resolution
 
@@ -314,16 +412,17 @@ behavior in this design specifies the first adapter, not responsibilities of sch
 
 | Component | Responsibility |
 |---|---|
-| Scheduler | Timing, occurrence identity, opaque payload snapshot, trusted time/identity context, overlap/admission coordination, operational controls, generic job outcomes and notifications |
+| Scheduler | Timing, occurrence identity, opaque payload snapshot, trusted time/identity context, overlap/admission coordination, capacity admission, operational controls, the run trail, generic job outcomes and (slice 4) notifications |
 | Pipeline executor adapter | Target authorization, pipeline/version lookup, keyword/calculator evaluation, type validation, prepared execution snapshot, launch/cancel and outcome reconciliation |
 | UI / REST composition layer | Pipeline-specific form options and previews through the adapter; schedule management through the generic scheduler service |
 
-Recommend a small registered executor port, with only the pipeline adapter in the first
-delivery. The scheduler recognizes an allowlisted executor identifier and payload schema
-version, not arbitrary class names, URLs, code or future unsupported job types. Generic
-payload size/depth limits and executor registration checks stay in scheduler core;
-domain validation is delegated, not omitted. Do not log opaque payloads: “opaque” does not
-mean non-sensitive, safe to render, or trusted.
+A small registered executor port (`JobExecutor`, §5.3), with only the pipeline adapter in the
+first delivery (executor id `pipeline`, payload schema version 1). The scheduler recognizes an
+allowlisted executor identifier and payload schema version, not arbitrary class names, URLs,
+code or future unsupported job types. Generic payload size/depth limits (16 KiB, depth 8) and
+executor registration checks stay in scheduler core; domain validation is delegated, not
+omitted. Do not log opaque payloads: “opaque” does not mean non-sensitive, safe to render, or
+trusted. `scheduled_tasks` rows carry run ids only — never a payload, parameters or a body.
 
 ### 5.1 Frozen execution context supplied by the scheduler
 
@@ -334,10 +433,20 @@ mean non-sensitive, safe to render, or trusted.
 | `reference_timezone` | Schedule's captured IANA timezone; execution-layer org fallback for unscheduled runs |
 | `started_at` | Actual execution start instant, recorded later, independent of the logical reference |
 
-Persist the frozen occurrence context, original payload, schedule revision and key/actor
-attribution. Pass trusted context separately from client payload; the client cannot replace
+Persist the frozen occurrence context, original payload, parameters, schedule revision and
+actor attribution (the system identity, the schedule, and a manual run's requesting person) on
+the run row. Pass trusted context separately from client payload; the client cannot replace
 the schedule's time, workspace, identity or occurrence id by embedding matching fields.
 The pipeline execution layer derives its dates and propagates context to composed children.
+
+**Slice 1 records the context; slice 3 carries it (A13).** There is no carrier yet: every child
+execution mints its own start instant and its own `current_date` (`SubPipelineExecutionRunner`),
+and `ExecuteRequest` has no reference-time field. Slice 1 therefore freezes `scheduled_at`,
+`reference_at` and `reference_timezone` on the run row and hands them to the adapter, and the
+pipeline sees exactly what an interactive run sees: `$current_date` is the org-timezone date at
+the ACTUAL start. A late or catch-up run can thus see two "todays" — the bound TODAY (slice 3,
+schedule timezone, logical time) and the pipeline's own `$current_date`. Slice 3 adds the
+`ExecuteRequest` / `NodeExecutionContext` field that carries the reference to children.
 
 Example: a New York run due September 22 at 23:55 starts September 23 at 00:05.
 Its logical Today is September 22 and Yesterday is September 21. A fresh manual Run now on
@@ -400,25 +509,38 @@ pipeline input/calculator semantics, not scheduler algorithms.
 
 ### 5.3 Preparation and execution through a narrow port
 
-Proposed operations are validation/preview, prepare, start, inspect and cancel; exact
-interface signatures remain for implementation review. At save, delegate domain validation
-to the chosen adapter without resolving away `current` or dates for all future runs.
-Preview delegates too and is illustrative, not a version reservation.
+The port (`JobExecutor`, in `modules/scheduler`) has five operations; their outcomes are
+standardized values, and the scheduler never parses an executor's error-code strings to decide
+policy:
 
-At admission, preparation validates live execution authority, resolves the version/inputs
-and durably freezes an executor-owned execution snapshot. It returns an opaque prepared
-reference tied to the occurrence id. Preparation is idempotent for that occurrence and
-must not execute pipeline nodes or perform datasource side effects. The scheduler persists
-the reference and atomically claims the one launch attempt (§2), then dispatches it through
-the port; live authority is checked again at launch. Preparation retries reuse the saved
-snapshot. They must not reinterpret `current` or TODAY after a snapshot exists.
+| Operation | When | Returns |
+|---|---|---|
+| `validate(workspace, payload, parameters)` | save, and unblock | valid with a `target_ref`, or a refusal (an existing catalogued error the surface renders) |
+| `prepare(admission)` | admission, before the claim | a prepared snapshot (opaque JSON), or not-started with a reason and whether to block |
+| `start(launch)` | after the committed claim | started (the execution reference recorded at the claim), or not-started with a reason and whether to block; anything else is thrown and recorded `unknown` |
+| `inspect(workspace, references)` | the reconciler, in batches | per reference: running, finished (a run state + reason per R6's table), or absent |
+| `lensAdmits(lens, targetRefs)` | the promoter's `schedule.read` | which targets the caller's lens admits |
 
-If preparation and scheduler claim cannot share a transaction, prove recovery across both
-boundaries: recover a prepared reference by occurrence id, safely abandon unclaimed orphan
-preparations, and never auto-relaunch a claimed start. The port exposes a standardized
-failure/outcome and whether configuration requires blocking, plus execution correlation;
-the scheduler does not parse pipeline error-code strings to decide business policy.
-Scheduler key/workspace checks and executor target authorization both remain mandatory.
+At save, domain validation is delegated to the adapter without resolving away `current` for
+all future runs. The preview is the scheduler's own occurrence function (§3.2) and needs no
+adapter.
+
+At admission the scheduler first acquires capacity (R4), then asks the adapter to prepare:
+preparation checks the system identity's live authority through the seam (§4), resolves the
+version and binds the parameters, and returns the snapshot. It executes no node and touches no
+datasource. The scheduler writes the snapshot and the minted execution reference IN the claim
+UPDATE (`queued → starting`), so a snapshot exists exactly when a claim does and there is no
+orphan preparation to abandon: a crash before the claim leaves a `queued` run whose next
+delivery prepares again (against the pointer as it is then — nothing was admitted), and a crash
+after it leaves a `starting` run that is never re-launched (§2.1). The adapter then starts the
+execution through the existing explicit-version path and the same authorization it asks at
+preparation; live authority is checked again at launch.
+
+The adapter lives in `web` (A3), beside the runner it reuses: `web/pipelines/RecordingExecutionRunner`
+("run to completion in-process, record the row and the events"; trigger is a parameter), with a
+fail-closed emitter for the scheduled path (A14). No second pipeline runner is created. The
+system identity's authority and executor target authorization both remain mandatory; there is
+no key check (R2).
 
 This moves responsibility, not guarantees: immutable admitted inputs, version history,
 conservative unknown recovery and no automatic replay still apply. Results and actual
@@ -453,10 +575,14 @@ the execution row itself outlives its events. Requirements:
 - **The durable record is readable for its whole retention.** The execution detail page
   already renders the durable rows as node-operation history (`ExecutionDetailController`);
   `GET /api/v1/executions/{id}/events` replays only the Redis copy and answers
-  `410 result.expired` after the hour (rest-api.md §6.8). The first delivery makes the REST
-  read answer the durable rows as JSON (paged by `event_id`, `execution.read`) once the
-  Redis log is gone; the pipeline's own events stay in `execution_events`, written by the
-  pipeline as today, untouched by the scheduler.
+  `410 result.expired` after the hour (rest-api.md §10.3). Slice 1 adds the durable read on
+  the same route: `GET /api/v1/executions/{id}/events?format=json` answers the durable rows as
+  a JSON page (ordered by `event_id`, `after` + `limit` ≤ 500, `execution.read` with the same
+  visibility as the metadata read, session-only like it) for as long as they are retained —
+  within the hour too — and `410 result.expired` (reason `event_record_expired`) once the
+  retention job has removed them; without `format=json` the route is the SSE replay, unchanged.
+  The pipeline's own events stay in `execution_events`, written by the pipeline as today,
+  untouched by the scheduler.
 - The record holds exactly what the wire carries: the existing wire redaction applies
   (no secrets, no result rows, no bearer material); resolved parameter values appear as
   they do on the wire today. Retention and the executor's access rules are those of the
@@ -481,62 +607,89 @@ The UI uses REST for every schedule operation; there are no scheduler MCP tools.
 Existing MCP functionality elsewhere in Datapipelines remains in scope for those features.
 
 The page shell may remain server-rendered. Listing, details, form options, cron preview,
-creation, edits, pause/resume, key selection/revocation, Run now and run history all use
-authenticated REST contracts. Do not add a parallel htmx-partial mutation/service route.
-Human browser calls use the existing session authentication and CSRF mechanism.
+creation, edits, pause/resume, Run now and run history all use authenticated REST contracts.
+Do not add a parallel htmx-partial mutation/service route. Human browser calls use the
+existing session authentication and CSRF mechanism.
 
-Proposed routes: schedules CRUD, preview, pause/resume, run-now and runs under
-`/api/v1/schedules`; one-time background admission under the pipeline REST resource.
-Schedule mutations use a revision/ETag to prevent stale overwrites. Create, Run now and async
-admission require a workspace/caller-scoped idempotency token to survive application/browser
-retries; replaying a token with a different request is refused. Scheduled and
-manual run origin is stored explicitly, independent of the execution trigger enum.
+**The routes (slice 1)**, each landing with its auth.md §7.6 row, its `RoleWalkE2eTest`
+expectation and its §13 codes in the same commit (AGENTS.md):
 
-**Applications are first-class REST clients.** Organizations may expose scheduling to
-their customers through their own applications; creation is not restricted to interactive
-browser sessions. All schedules are created directly, not imported through promotion.
-The application's schedule-management credential is separate from the worker's scheduler
-key. Scheduler keys remain execution-only and never authenticate schedule CRUD requests.
+| Route | Permission | Contract |
+|---|---|---|
+| `GET /api/v1/schedules` | `schedule.read` | The workspace's live schedules, `prefix` / `offset` / `limit`; the promoter lens applies |
+| `POST /api/v1/schedules` | `schedule.create` | Create; optional `Idempotency-Key` (L1) |
+| `GET /api/v1/schedules/preview` | `schedule.read` | `cron`, `timezone`, `count` ≤ 20: the next occurrences from the ONE function (§3.2), with offsets — the form's preview before a save |
+| `GET /api/v1/schedules/{id}` | `schedule.read` | Detail; `ETag` = the revision |
+| `PUT /api/v1/schedules/{id}` | `schedule.update` | Edit (rename/move included); `If-Match` required |
+| `DELETE /api/v1/schedules/{id}` | `schedule.delete` | Soft delete; `If-Match` required |
+| `POST /api/v1/schedules/{id}/pause` | `schedule.pause` | Pause |
+| `POST /api/v1/schedules/{id}/resume` | `schedule.pause` | Resume (never clears a block) |
+| `POST /api/v1/schedules/{id}/unblock` | `schedule.pause` | Clear a block after revalidation (§1.1) |
+| `POST /api/v1/schedules/{id}/run` | `schedule.run` | Run now; optional `Idempotency-Key` (L1, L2) |
+| `GET /api/v1/schedules/{id}/upcoming` | `schedule.read` | The saved schedule's next `count` ≤ 20 occurrences |
+| `GET /api/v1/schedules/{id}/runs` | `schedule.read` | Its runs, newest first, with `execution_id` |
+| `GET /api/v1/schedules/{id}/runs/{runId}` | `schedule.read` | One run with its trail (`schedule_run_events`) |
+| `GET /api/v1/executions/{id}/events?format=json` | `execution.read` | The durable execution record (§5.4) |
 
-Before implementation, specify the supported machine authentication contract and its
-ScopeMatrix rows. The existing `endpoint`/“API key” only grants its published endpoint
-bindings; it must not silently gain management access. Prefer a workspace-scoped,
-least-privilege management credential mapped to existing author/admin authority, without
-adding a human role. Whether an existing credential kind can safely express this or a
-separate application credential is required remains an explicit auth-design review item;
-REST support is required, not deferred by leaving the credential unspecified.
+Schedule mutations carry the revision: `GET` answers it as the `ETag`, `PUT` and `DELETE`
+require it in `If-Match` and a stale one is `409 schedule.revision_conflict`. Create and Run now
+accept an optional `Idempotency-Key` held **durably in Postgres** (L1, A15: the Redis
+`IdempotencyStore` is lost on a Redis restart, deployment.md §4.2.1): a unique
+`(workspace, creator, key)` on `schedules` and `(schedule, requester, key)` on `schedule_runs`,
+each with a hash of the request; a replay with the same request answers the original, a replay
+with a different one is refused `idempotency.key_reused_for_different_request`. Scheduled and
+manual run origin is stored explicitly (`schedule_runs.origin`), independent of the execution
+trigger enum. One-time background admission under the pipeline REST resource is slice 6 (B13).
+
+**Applications are first-class REST clients** — in slice 5. Organizations may expose scheduling
+to their customers through their own applications; creation is not restricted to interactive
+browser sessions. All schedules are created directly, not imported through promotion. Slice 1's
+routes are **session-only** (§4): keys v2 confines an `mcp` key to `/mcp` and an `endpoint` key
+to the published tree, and no existing kind is a least-privilege management credential (A11).
+Slice 5 specifies the application credential (B7) and its ScopeMatrix rows; the §9.6
+reconciliation's option — a pre-created key role holding the `schedule.*` permissions, offered
+to API keys — is its starting point. The existing `endpoint` key only grants its published
+endpoint bindings and does not silently gain management access.
 
 Recommend server-to-server integration: the organization's application authenticates its
 customer, verifies customer ownership and uses its management credential from the backend.
-Never expose a shared organization credential in a client browser. Datapipelines still
-enforces workspace, owner/delegation and authorized scheduler-key assignment on every call;
-a caller-supplied customer id or folder prefix is not proof of tenant authority. A shared
-application principal may otherwise see all schedules it owns, so external customer
-isolation and actor attribution must be defined and tested, not assumed from naming.
-Direct end-customer credentials would require an explicit delegated-identity design.
+Never expose a shared organization credential in a client browser. Datapipelines enforces the
+workspace on every call; a caller-supplied customer id or folder prefix is not proof of tenant
+authority. **Isolation is per workspace (R9)**: external-customer isolation is not a v1
+acceptance line; a delegation design, if ever, is a later record. Direct end-customer
+credentials would require an explicit delegated-identity design.
 
-UI scope is complete in the first delivery: a dedicated **Schedules** page listing all
-schedules the caller may see in the active workspace, folder explorer/search, registered
-executor job form, presets/custom cron, timezone, next five occurrences including offset,
-notification email list,
-assigned reusable key and role, pause/resume, blocked reason, run history and execution links.
-Show due time separately from actual start. Unknown outcomes require clear recovery actions.
-Use the existing visual system, empty/loading/error states and light/dark validation.
-The pipeline job form supplies `current` (optional numeric pin), pipeline-owned parameter
-bindings and executor preview details. These are UI/adapter capabilities, not knowledge
+UI scope (slice 2): a dedicated **Schedules** page listing all schedules the caller may see in
+the active workspace, folder explorer/search, registered executor job form, presets/custom
+cron, timezone, next five occurrences including offset, notification email list (slice 4),
+pause/resume/unblock, blocked reason, run history with the merged Messages pane (§5.4) and
+execution links. Show due time separately from actual start. Unknown outcomes require clear
+recovery actions. Use the existing visual system, empty/loading/error states and light/dark
+validation. The pipeline job form supplies `current`, pipeline-owned parameter values (slice
+3 adds bindings) and executor preview details. These are UI/adapter capabilities, not knowledge
 compiled into scheduler core. Do not show schedule draft/release/promotion controls.
 
-Use exactly the established pipeline/template hierarchical-name validator and browsing
-conventions, e.g. `finance/daily/revenue`, unique within the workspace. Rename/move preserves
-schedule identity, run history and key bindings. Folders organize work; they are not a new
-namespace or security boundary. Hide editing controls for viewers/promoters, and enforce
-the same author/admin restriction server-side; hiding a button is not authorization.
+Use exactly the established pipeline/template hierarchical-name validator
+(`PipelineNameGrammar`, the published object — `scheduler → pipeline-contract` is allowed for
+it, A2) and browsing conventions, e.g. `finance/daily/revenue`, unique among the workspace's
+live schedules. Rename/move preserves schedule identity and run history. Folders organize work;
+they are not a new namespace or security boundary. Hide editing controls for viewers/promoters,
+and enforce the same author/admin restriction server-side; hiding a button is not
+authorization.
 
-The parameter-set engine is not yet bound to pipelines; the pipeline adapter should use
-the declared pipeline inputs and shared calculator functions. Do not make scheduler core
-depend on it, or make delivery depend on the entire new parameter UI engine.
+The parameter-set engine is not yet bound to pipelines; the pipeline adapter uses the declared
+pipeline inputs (R7: literal values per schedule, validated as an interactive run's are; the
+engine plugs in later as another value source). Scheduler core does not depend on it, and
+delivery does not depend on the parameter UI engine.
 
 ### 6.1 Lifecycle notification emails
+
+**Slice 4 (R11).** Slice 1 sends no mail and stores no recipient list; the requirement below
+stands as the owner's (R11), and the review's B12 defaults — per-event toggles defaulting to
+failed, unknown and blocked; scheduler mail off unless explicitly enabled; an empty
+recipient-domain allowlist under the development posture; links built from the configured base
+URL, never the request host (#207) — are slice 4's to rule on. Slice 1's run trail is where
+slice 4's outbox events will attach (§5.4).
 
 Owner requirement (2026-09-22, reconfirmed 2026-09-25): a list-of-email-addresses field per
 schedule, stored with the schedule, with a notice on every status change of the job —
@@ -553,10 +706,10 @@ receives all four event types initially. Per-event toggles can follow if needed.
 This mapping of “stop” is a recommendation for review. A normal run produces start and
 one conclusive terminal event; failure uses error rather than a redundant stop email.
 Unknown may be followed by a reconciled outcome, explicitly labelled as an update about
-the same run. Do not fabricate a start for a run that failed before launch. Schedule pause,
-key revocation and ordinary skipped ticks are control/skip events, not evidence a job
-stopped. Send a separate schedule-level “Schedule blocked” notice on an actual transition
-to blocked (including key removal), so future work cannot silently cease; do not resend on
+the same run. Do not fabricate a start for a run that failed before launch. Schedule pause
+and ordinary skipped ticks are control/skip events, not evidence a job stopped. Send a
+separate schedule-level “Schedule blocked” notice on an actual transition to blocked (an
+unknown run, a pre-start refusal that blocks), so future work cannot silently cease; do not resend on
 every poll. Whether ordinary manual pause/resume also sends mail remains optional.
 
 - Validate and deduplicate recipient mailboxes server-side; reject header injection and
@@ -574,8 +727,7 @@ every poll. Whether ordinary manual pause/resume also sends mail remains optiona
   unique `(event_id, recipient)` delivery identity. Execution-state reconciliation must
   recover missed scheduler transitions and enqueue their events, not rerun the job.
   Snapshot recipients when the event is created; historical events are not redirected to
-  a newly added address. Revocation blocks pipeline launches, not already-authorized minimal
-  lifecycle notices. Deployment security restrictions still apply at actual delivery.
+  a newly added address. Deployment security restrictions still apply at actual delivery.
 - Send asynchronously through the existing configured SMTP transport, with bounded retries
   and visible pending/accepted/failed/uncertain delivery state. Email failure never changes
   the pipeline outcome or retries the pipeline. Mail disabled/unconfigured is prominently
@@ -597,170 +749,269 @@ kind contract if needed; do not duplicate SMTP settings or reuse account-notice 
 Add `modules/scheduler` as a library within the existing application image, not a separate
 service or deployment requirement. It owns schedule domain/services, repositories, the
 db-scheduler adapter, occurrence/recovery policies, the generic executor port, opaque payload
-storage and notification outbox/dispatch. It does **not** own pipeline parameter binding,
-keyword evaluation or version resolution. Keep db-scheduler types behind its boundary.
+storage and (slice 4) the notification outbox/dispatch. It does **not** own pipeline parameter
+binding, keyword evaluation or version resolution. db-scheduler types stay behind its boundary:
+the module's own `@AutoConfiguration` declares its three tasks, the serializer customizer, its
+repositories and services; no other module imports a `com.github.kagkarlsson` type.
+
+**Dependencies (A2, A4).** module-structure §4.2 gains the row `scheduler | typesystem,
+pipeline-contract` and `web`'s row gains `scheduler` (the same table is
+`allowedInternalDependencies` in the root build; an unlisted edge fails the build).
+`pipeline-contract` is allowed for exactly one thing — the published `PipelineNameGrammar` —
+and a scheduler-module test fails on any other `co.datapipelines.pipeline` import, so the
+"no pipeline semantics in the scheduler" boundary is enforced, not hoped. The scheduler takes
+no `auth`, `dag`, `application` or `calculators` edge: the system principal, the capacity lease
+and the executor live on the adapter's side of the port.
 
 Keep integration seams in their established homes:
 
-- `web`: thin REST controllers and the Schedules/Keys UI; every scheduler operation calls REST.
-- `auth`: key kinds, role ceilings, liveness and permission matrix; no scheduler-specific
-  authorization fork. Do not make auth depend on scheduler repositories to populate a UI count.
-- `calculators`: reusable pure functions used by the pipeline execution input resolver;
-  scheduler has no dependency on this module.
-- Pipeline execution/application layer: owns `current`, keyword/binding resolution,
-  prepared execution snapshots and existing execution authorization/lifecycle APIs. The
-  adapter invokes this layer; do not create a second pipeline runner.
-- `app`: composition/configuration and Flyway migrations under the existing convention.
-  A notification adapter reuses the shared mail transport; scheduler-specific templates and
-  event policy belong with the scheduler, not in the account-notice dispatcher.
+- `web`: thin REST controllers (and, slice 2, the Schedules UI); every scheduler operation calls
+  REST. The pipeline executor adapter, the capacity gate over `ExecutionSlots` and the scheduler
+  wiring live in `web` — its `config` package is the composition root (**A3**: `app` depends only
+  on `web` and holds `main()`, configuration and the migrations, no wiring).
+- `auth`: the system principal, the `PermissionResolver` system arm, the `schedule.*`
+  permissions and their role columns; no scheduler-specific authorization fork. auth does not
+  depend on scheduler.
+- `dag`: `ExecutionSlots`' acquire-before-claim lease (R4, A6) and the `SCHEDULE` trigger.
+- `calculators`: reusable pure functions used by the pipeline execution input resolver (slice
+  3); scheduler has no dependency on this module.
+- Pipeline execution/application layer: owns `current`, keyword/binding resolution, prepared
+  execution snapshots and existing execution authorization/lifecycle APIs. The adapter invokes
+  this layer; no second pipeline runner is created.
+- `app`: Flyway migrations (V38). A notification adapter (slice 4) reuses the shared mail
+  transport; scheduler-specific templates and event policy belong with the scheduler, not in
+  the account-notice dispatcher.
 
-Recommended wiring: scheduler defines a generic executor port; the composition-layer
-pipeline adapter implements it and depends on the existing application/execution services.
-Keep the adapter outside `modules/scheduler` (in `app`, or a thin adapter module if needed).
-Scheduler must not depend on `application`, `pipeline-contract`, `dag` or `calculators`;
-it may use shared infrastructure/auth contracts without learning pipeline semantics.
-Pipeline execution must not depend on scheduler just to understand keywords: time context
-and input-resolution contracts belong on the execution/shared side and the adapter maps
-the scheduler's generic context to them. Add dependency guards and prove the scheduler can
-be tested with a fake non-pipeline executor. No second production job type is required.
+Pipeline execution does not depend on scheduler to understand keywords: time context and
+input-resolution contracts belong on the execution/shared side and the adapter maps the
+scheduler's generic context to them. A **fake non-pipeline executor** in the scheduler module's
+own suite proves the scheduler works without pipeline classes. No second production job type is
+required.
 
 ## 7. Persistence and implementation corrections
 
-Migration number: allocate the next available number when implemented. V15 is already the
-lake registry and must not be reused. Historical prompt 092 and its old paths/counts are
-superseded by this revision and the current repository working agreements.
+Migration **V38** (A17: numbers are allocated at merge time; V36 = 7e, V37 = keys v2 were the
+last on the base, and no open lane claims V38). V15 is the lake registry. Historical prompt 092
+and its old paths/counts are superseded by this revision and the current repository working
+agreements. DDL authority is metadata-db §4; this is the logical shape:
 
-Logical schema, not executable DDL:
+- `schedules`: workspace, hierarchical name, concurrency `revision`, registered `executor_id`,
+  `payload_schema_version`, opaque JSON `payload`, literal `parameters` JSON (R7 — executor
+  inputs, opaque to the scheduler, validated by the executor), the executor's `target_ref`
+  (B15, indexed), `cron` + `timezone`, `missed_run_policy` (`skip` | `latest`), `enabled`,
+  `blocked_reason` / `blocked_at` / `blocked_run_id`, `next_due_at`, `created_by`, `updated_by`,
+  the create idempotency key + request hash (L1), timestamps, and **soft delete** (`deleted_at`,
+  `deleted_by`, D-9.6/B17): the name is unique among LIVE schedules of a workspace (a partial
+  unique index), a deleted schedule keeps its runs and their trail, and its name can be reused.
+  No notification column in slice 1 (slice 4). No pipeline/version-specific columns or lifecycle
+  status; no artifact-version table, release metadata or promotion schema. Payloads and
+  parameters follow the existing sensitive-input storage/access/retention rules.
+- `schedule_runs`: id, `schedule_id` (NULL only for slice 6's ad-hoc runs), workspace, `origin`
+  (`cron` | `catch_up` | `manual`), `scheduled_at` (the UTC occurrence; NULL for a manual run),
+  the frozen context (`reference_at`, `reference_timezone`), `admit_by` (the lateness window's
+  end), `schedule_revision`, the frozen `executor_id` / `payload_schema_version` / `payload` /
+  `parameters`, the executor-owned `prepared` snapshot (R5: `{pipeline_id, version,
+  body_sha256}` for the pipeline executor — stored, never read, by the scheduler), actor
+  attribution (`actor_user_id` = the system identity; `requested_by` = a manual run's person),
+  the opaque `execution_id` reference (minted at the claim), `state` + `reason` (§7.1), `worker`,
+  capacity `attempts`, the Run now idempotency key + request hash (L1), `trail_seq`, and
+  lifecycle timestamps (`created_at`, `claimed_at`, `started_at`, `finished_at`, `updated_at`).
+  Unique `(schedule_id, scheduled_at)` for cron/catch-up occurrences; unique
+  `(schedule_id, requested_by, idempotency_key)` for Run now; a partial unique index allowing at
+  most one active (`queued` / `starting` / `running`) run per schedule.
+- `schedule_run_events` (§5.4, R10): append-only (an UPDATE trigger refuses any change), keyed
+  `(run_id, seq)` with `seq` monotonic per run (drawn from `schedule_runs.trail_seq` under the
+  run row's lock), `kind`, `reason`, `at`, the `worker`, small `details` JSON (execution
+  reference, retry number, summary counts); retained with the run's history. The pipeline's events
+  stay in `execution_events` (metadata-db §4.7) and are not duplicated; `schedule_runs.execution_id`
+  is the join the merged read uses. Slice 4's notification kinds widen the kind CHECK then.
+- `scheduled_tasks`: library-owned, created by V38 from db-scheduler 16.12.0's exact PostgreSQL
+  DDL (`db-scheduler/src/test/resources/postgresql_tables.sql` at tag `v16.12.0`, copied verbatim
+  with its three indexes).
+- `pipeline_executions.triggered_via` gains `SCHEDULE` (the CHECK is widened in V38). The old
+  `SCHEDULED` future placeholder in enums.md §18 is replaced by it, and versioning.md §3.4's
+  "records a refused run" line is corrected to "records a `not_started` run and blocks" (A16).
+  No key-kind attribution is added (R2).
+- Notification events/deliveries: slice 4 (durable event identity, run or schedule-transition
+  identity, recipient snapshot, sequence, payload metadata, attempt state, retry timing and
+  Message-ID; retention with execution history; never delete queued deliveries silently).
 
-- `schedules`: workspace, hierarchical name, concurrency revision, registered executor id,
-  payload schema version, opaque JSON payload, notification email list, cron/timezone,
-  missed-run policy, key FK, creator, enabled flag, blocked reason/time, timestamps and
-  next due time. No pipeline/version/parameter-specific columns or lifecycle status.
-  Name unique within workspace; deletion retains run history. No schedule artifact-version
-  table, release metadata or promotion schema. Payloads follow existing sensitive-input
-  storage/access/retention rules, not a public free-form metadata field.
-- `schedule_runs`: id, optional schedule FK (null for ad-hoc), origin, original UTC due
-  time, schedule revision, frozen opaque payload/time context, key/actor attribution,
-  opaque preparation/execution reference, state, reason, worker/admission token and
-  lifecycle timestamps. The pipeline executor stores actual version and resolved inputs
-  in its own execution records, not additional scheduler-owned columns.
-- Unique `(schedule_id, scheduled_at)` for cron/catch-up occurrences; separate uniqueness
-  for manual idempotency tokens. Null schedule ids cannot deduplicate ad-hoc requests.
-- Proposed run states: queued, starting, running, succeeded, failed, aborted, skipped,
-  unknown. Recovery is recorded as an event/metadata, not a misleading successful reclaim.
-- `scheduled_tasks`: library-owned shape, created through our Flyway migration from the
-  exact selected library version's PostgreSQL DDL.
-- Key/auth schema changes: the scheduler kind, associated role/binding, lifecycle and
-  attribution fields must be specified with the key implementation, not guessed here.
-- Notification events/deliveries: durable event identity, run or schedule-transition identity,
-  recipient snapshot, sequence, payload metadata, attempt state, retry timing and Message-ID.
-  Define retention with execution history; never delete queued deliveries silently.
-- `schedule_run_events` (§5.4): append-only, `run_id` FK, monotonic `seq` per run, `kind`,
-  `reason`, `at`, worker/instance, small `details` JSON (execution reference, retry number,
-  notification event id); never updated; retained with the run's history. The pipeline's
-  events stay in `execution_events` (metadata-db §4.7) and are not duplicated;
-  `schedule_runs.execution_id` is the join the merged read uses.
+### 7.1 Run states — the normative mapping (R6)
 
-Use `SCHEDULE` as the proposed execution-trigger spelling consistently; reconcile the old
-`SCHEDULED` future placeholder when code/enums/DDL land together. Add scheduler key-kind
-execution attribution at the same time. Preserve origin distinctions for manual/cron runs.
+`state` + `reason`; the run row is the projection of the latest trail row.
 
-One service coordinates schedule/task persistence using proven transaction participation.
-Avoid duplicated authorization/execution logic: REST calls the application service;
-trusted worker dispatch goes through the same execution authorization and lifecycle path
-without requiring a browser or streaming consumer. Do not bypass permissions merely
-because a launch is internal.
+| State | Reason(s) | Meaning / source |
+|---|---|---|
+| `queued` | — | Recorded and enqueued; no start claim |
+| `starting` | — | The start claim is committed (execution reference recorded); the launch is in progress |
+| `running` | — | The execution's `RUNNING` row exists (the adapter's `start` confirmed it) |
+| `succeeded` | — | Execution `SUCCESS` |
+| `failed` | `execution_failed` | Execution `FAILED` (a node failure or the execution timeout) |
+| `cancelled` | `cancelled` | Execution `ABORTED`, abort reason `cancelled` |
+| `aborted` | `shutdown` (`client_disconnect` for completeness) | Execution `ABORTED` by the shutdown drain |
+| `unknown` | `instance_lost`, `start_unconfirmed`, `start_failed` | `ABORTED` / `pipeline.execution.instance_lost` (A5); a claim whose execution never appeared (§2.1); a `start` that threw. **Blocks the schedule.** A later real terminal is an update about the same run |
+| `not_started` | `capacity`, `pointer_null`, `target_not_found`, `parameters_invalid`, `version_changed`, `workspace_inactive`, `authority_refused`, `record_unwritable` | Definitively never started (§2 item 3). The executor's refusals may ask to block (all but `capacity` and `record_unwritable` do) |
+| `skipped` | `missed`, `overlap`, `schedule_paused`, `schedule_blocked`, `schedule_deleted` | By policy; never attempted. `missed` rows may summarize a range |
 
-Operational settings retained as proposals: two worker threads, 10-second polling,
-30-second heartbeats, six missed heartbeats, 60-second shutdown wait. Detection includes
-polling and reconciliation delay; heartbeat × count is not a strict recovery deadline.
-Configuration keys and health/metrics enter their normative catalogs with implementation.
+The trail's kinds: `recorded` (occurrence or manual request, with its origin), `capacity_retry`,
+`claimed`, `execution_started`, `not_started`, `skipped`, `finished` (a terminal reconciled
+from the execution), `unknown`, `updated_after_unknown`, `unblocked`.
 
-## 8. Acceptance and unresolved decisions
+### 7.2 Services, configuration and shutdown
 
-Required evidence before describing the scheduler as complete:
+One service coordinates schedule/task persistence using proven transaction participation (§2.1,
+spike 1). REST calls the schedule service; the dispatcher, occurrence worker and reconciler are
+JOBS no transport names (security-assurance B5 — `ArchitectureGuardTest`'s job list names
+them). Trusted worker dispatch goes through the same execution authorization and lifecycle
+path, without requiring a browser or streaming consumer; it does not bypass permissions merely
+because a launch is internal (§4).
 
-- Two instances deliver duplicate callbacks for the same due instant: one occurrence and
-  at most one admitted launch. Do not rely on an uncontrolled race or assert fair picking.
-- Use an accelerated internal trigger/controlled clock for frequent tests; public cron
-  remains five-field/minute precision. Test that seconds syntax is refused publicly.
-- Crash before claim, after claim/before launch, during work, after remote commit and before
-  success bookkeeping. Assert conservative recovery and no automatic repeated effects.
-- Lose heartbeat while an old worker remains alive: unknown blocks subsequent admission.
-- Key revocation versus admission race, queued cancellation, running cancellation, expiry,
-  role loss, removed membership, deactivated workspace, rebinding and explicit resume.
-- Key ids, plaintext absence, key-kind rejection on ordinary APIs, action matrix/own-result
-  visibility and CSRF tested through the real REST/UI paths.
-- Delayed start across midnight, catch-up, month/year boundaries, DST gap/overlap, calendar
-  yesterday and frozen context inherited by a child pipeline.
-- Skip versus latest-only catch-up, overlap across workers, capacity pressure, repeated
-  Run now requests and pause/edit/delete races.
-- Browser flow: create → preview → assign key → run → history → revoke key → blocked.
-  Verify all operations use REST and permissions are enforced there.
-- Create one scheduler key, reuse it on multiple schedules, verify counts include paused
-  schedules, revoke once and observe all affected schedules blocked. API-key association
-  counts correctly describe prefix bindings, not requests or presumed effective routes.
-- Follow-release schedule picks a new release without an edit, respects the selected
-  pointer policy, rejects a draft/null target, and stores the actual version. Concurrent
-  release/edit and incompatible input changes cannot silently alter an admitted run.
-- The pipeline adapter accepts `version: "current"` and rejects `"latest"`; scheduler
-  round-trips the payload without interpreting either value. Exact numeric versions, if
-  retained, are validated by the adapter. Test a deliberate pointer rollback as well as
-  a new release, and prove no-version direct execution keeps its existing behavior.
-- Fixed STRING `TODAY` stays literal; Today/Yesterday presets produce DATE values from the
-  frozen schedule-zone reference, validated against the selected pipeline version.
-- Direct and scheduled pipeline execution use the same keyword/input resolver. A fake
-  non-pipeline executor proves scheduler timing, notifications and recovery work without
-  pipeline classes, keyword knowledge or pipeline-shaped database columns.
-- Crash during preparation, after its snapshot but before scheduler claim, and after claim:
-  recover by occurrence id without changing the snapshot or replaying admitted execution.
-- Rename/move a schedule without losing its history or bindings; direct viewer/promoter
-  REST mutations fail even if a caller constructs requests outside the UI.
-- UI and authenticated application REST both create immediately usable schedules, with no
-  release step. No schedule promotion endpoint/package or artifact-version state exists.
-  Pausing and blocking remain independent operational controls; resume cannot bypass a block.
-- Application create retries create one schedule; changed payload under the same idempotency
-  token is refused. Test unauthorized workspace/customer access, key assignment, payload
-  visibility and revocation. A scheduler key cannot call management REST. Prove the selected
-  machine-auth path without a browser session and without widening endpoint-key authority.
-- Real SMTP test sink: start, success, cancellation, failure, pre-start refusal, unknown and
-  reconciliation; multiple recipients; blocked-key notice; disabled mail; transient and
-  ambiguous send failures. Duplicate recovery callbacks enqueue one event; mail trouble
-  never reruns a job. Verify recipient/content isolation and outbox crash recovery.
-- API-mode instance does not dispatch tasks; worker instance does. Source/target evidence
-  proves actual pipeline effects, not only scheduler history rows.
+**Budget of a scheduled run (A12, L3).** Scheduled runs keep the instance's execution timeout
+(`datapipelines.executor.execution-timeout-seconds`, 600) and ask for the maximum result TTL
+(`datapipelines.result.ttl-max-seconds`, 3600). A scheduled pipeline's durable output
+is its targets (a datasource or lake write); a caller result is inspection material that expires
+within the hour. A background budget is slice 6's.
 
-- A scheduled run of a pipeline leaves the same `execution_events` rows as an interactive run
-  of the same pipeline (count and kinds), with no SSE client attached, and a complete
-  `schedule_run_events` trail; the run detail merges both in time order with a source label;
-  a run refused before launch shows its scheduler trail alone; the durable execution rows are
-  readable through REST after the Redis hour and until the retention cutoff.
+**Configuration** (configuration.md §3, `datapipelines.scheduler.*`; the draft's "two worker
+threads, 10-second polling, 30-second heartbeats, six missed heartbeats" stand, the 60 s
+shutdown wait does not — A7):
 
-### 8.1 Fable review before implementation lock
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | This instance dispatches (false = API mode, §1) |
+| `threads` | `2` | db-scheduler worker threads (A19) |
+| `polling-interval-seconds` | `10` | db-scheduler's poll for due tasks |
+| `heartbeat-interval-seconds` | `30` | db-scheduler's execution heartbeat; a task is dead after six missed |
+| `tick-interval-seconds` | `10` | The dispatcher's and the reconciler's fixed delay |
+| `max-concurrent-runs` | `4` | Scheduled executions in flight per instance (R4); the system identity's slot budget |
+| `lateness-seconds` | `600` | The admission window (§3) |
+| `catch-up-max-age-seconds` | `86400` | The `latest` policy's reach (§3) |
+| `shutdown-wait-seconds` | `5` | How long shutdown waits for in-flight launches, and db-scheduler's `shutdown-max-wait` |
+| `min-interval-seconds` | `300` | B18 guard (L4) |
+| `max-schedules-per-workspace` | `100` | B18 guard (L4) |
 
-Review these unresolved details, without reopening the explicit owner decisions above:
+**Shutdown order (A7, R1 spike 2).** `ExecutionDrainLifecycle` cancels every local execution on
+SIGTERM (`ABORTED`, reason `shutdown`). The starter's `Scheduler` bean stops only through its
+`destroyMethod`, which runs AFTER every lifecycle bean — so left alone it would keep picking work
+while the drain cancels it. The scheduler therefore has its own `SmartLifecycle` at a HIGHER
+phase than the drain: it stops admitting (new claims are refused and their tasks rescheduled, so
+a queued run is never lost), pauses db-scheduler's polling, and waits up to
+`shutdown-wait-seconds` for in-flight launches to reach "started" — only then does the drain
+cancel, and a run launched in that window ends `aborted` / `shutdown`, never lost. The drain
+keeps its place above the web server's graceful shutdown (`DEFAULT_PHASE - 1024`). Every bound
+is under Spring's 30 s per-phase timeout and the drain's 20 s flush. A deploy therefore aborts
+in-flight scheduled runs: the outcome is conclusive (`aborted` / `shutdown`), nothing blocks,
+and under `skip` that occurrence simply does not run again (B11 — accepted in v1 with a clear
+history row; `stop_grace_period` in the compose file is a deployment follow-up tracked on #9,
+because the drain's 20 s can overrun Docker's 10 s default and a SIGKILL there leaves
+`instance_lost` results, which become `unknown` and block).
 
-1. **Executor boundary:** generic port, preparation/claim transaction boundaries, orphan
-   recovery, dependency guards and executor-owned history. No pipeline semantics in scheduler.
-2. **Authorization:** issuer-bound versus independent execution identity, role ceilings,
-   cross-author key/schedule delegation, application management credential, tenant isolation
-   and the proposed action matrix. No new human role; application REST is required.
-3. **Pipeline input contract:** exact binding syntax, shared keyword resolution, numeric-pin
-   option, the development DRAFT-pointer policy for `current`, frozen logical time and
-   existing Context compatibility. `current` is decided; `latest` is not a competing mode.
-4. **Operations:** no-replay guarantee, unknown recovery/unblock procedure, lateness and DST
-   behavior, block-versus-pause presentation, notification stop semantics and mail recovery.
-5. **Delivery proof:** library adapter/transaction integration and the acceptance scenarios
-   above, including application-only creation and no schedule release/promotion lifecycle.
+**Health and metrics.** db-scheduler's own health indicator is disabled
+(`management.health.db-scheduler.enabled: false`): it reports DOWN until the scheduler starts,
+which an API-mode instance never does, and a dispatcher stall must not restart a pod. The
+scheduler's state is visible through metrics (observability.md): occurrences recorded by
+outcome, runs finished by state, capacity retries (R4), and in-flight scheduled runs.
 
-After Fable review, incorporate findings and obtain the owner's implementation lock.
-Do not treat this draft, or the superseded prompt 092, as approval to start implementation.
+## 8. Acceptance
 
-Current product auth, calculator and execution documents remain authoritative for shipped
-behavior. Add new keys, kinds, roles/operations, routes and error codes to their catalogs
-only in the same commits as their implementations and drift guards.
+Required evidence before describing the scheduler as complete. Each line names the slice that
+owes it; **[1]** is slice 1's core subset (the brief's A.8), proven by tests in the lane that
+delivers it.
+
+- **[1]** Two instances deliver duplicate callbacks for the same due instant: one occurrence and
+  at most one admitted launch — with a controlled clock (`ManualScheduler` / `SettableClock`,
+  which ship in db-scheduler's main jar), never an uncontrolled race or an assertion of fair
+  picking.
+- **[1]** Public cron is five-field, minute precision: seconds syntax is refused publicly.
+- **[1]** Crash before claim, after claim/before launch, during work, after remote commit and
+  before success bookkeeping: conservative recovery, no automatic repeated effects.
+- **[1]** Lose the execution heartbeat while an old worker remains alive: `unknown` blocks
+  subsequent admission, and a later real terminal updates the same run.
+- **[1]** The two spike proofs of R1: `scheduleIfNotExists` participates in a
+  `metadataTransactionManager` transaction (a rolled-back transaction leaves no task, a
+  committed control leaves one); a run mid-launch on SIGTERM ends `aborted`, never lost.
+- **[1]** DST gap/overlap and month/year boundaries against the occurrence function, with A9's
+  measured case; delayed start across midnight; skip versus latest-only catch-up; overlap across
+  workers; capacity pressure (retry within the window, `not_started` beyond it).
+- **[1]** A fake non-pipeline executor proves scheduler timing and recovery without pipeline
+  classes or pipeline-shaped columns; a run refused before launch has a trail and no execution.
+- **[1]** A scheduled run of a pipeline leaves the same `execution_events` rows as an interactive
+  run of the same pipeline (count and kinds), with no SSE client attached, and a complete
+  `schedule_run_events` trail; the durable execution rows are readable through REST after the
+  Redis hour and until the retention cutoff.
+- **[1]** The pipeline adapter accepts `version: "current"` and rejects `"latest"`; the scheduler
+  round-trips the payload without interpreting either value; a follow-the-pointer schedule picks
+  a new version without an edit (drafts included, R5), records the fired version and body hash,
+  blocks on a NULL pointer; literal parameters are validated as an interactive run's are.
+- **[1]** The system identity holds exactly its fixed set (a test resolver granting one more turns
+  the unit test red), cannot authenticate over REST or `/mcp`, has no key row; its runs are
+  visible to the workspace's members by role (R3), a creator demoted to viewer keeps their
+  schedules running (R8), and the §7.6 rows are walked by `RoleWalkE2eTest`.
+- **[1]** Rename/move a schedule without losing its history; direct viewer/promoter REST
+  mutations fail even if a caller constructs requests outside the UI; create and Run now retries
+  under one idempotency key act once, and a changed request under the same key is refused.
+- **[1]** Pausing and blocking remain independent operational controls; resume cannot bypass a
+  block; unblock revalidates. No schedule promotion endpoint/package or artifact-version state
+  exists.
+- **[1]** An API-mode instance does not dispatch tasks; a worker instance does. The migration
+  applies up and down on a copy of the demo database.
+- **[2]** Browser flow: create → preview → run → history (merged Messages pane, source labels) →
+  blocked → unblock. All operations use REST and permissions are enforced there; CSRF through the
+  real UI path.
+- **[3]** Fixed STRING `TODAY` stays literal; Today/Yesterday presets produce DATE values from the
+  frozen schedule-zone reference, validated against the selected pipeline version; the frozen
+  context is inherited by a child pipeline; direct and scheduled execution share one resolver.
+- **[4]** Real SMTP test sink: start, success, cancellation, failure, pre-start refusal, unknown
+  and reconciliation; multiple recipients; the blocked notice; disabled mail; transient and
+  ambiguous send failures. Duplicate recovery callbacks enqueue one event; mail trouble never
+  reruns a job. Recipient/content isolation and outbox crash recovery.
+- **[5]** The application credential: an application creates immediately usable schedules without
+  a browser session and without widening endpoint-key authority; unauthorized workspace access
+  is refused.
+- **[6]** Background runs (B13).
+- Source/target evidence proves actual pipeline effects, not only scheduler history rows (every
+  slice that runs a pipeline).
+
+The draft's key-shaped acceptance lines (revocation races, key ids and plaintext absence,
+key-kind rejection, key reuse and association counts) are withdrawn with §4's model (R2).
+
+### 8.1 Review before implementation lock — done
+
+The Fable review the draft waited for happened as §9 (2026-09-23), the owner answered its
+blockers as §10 (2026-09-25), and lane 1 asked the owner the four questions the rulings left open
+(§11). This record was ratified on those answers. Current product auth, calculator and execution
+documents remain authoritative for shipped behavior; new keys, roles/permissions, routes and
+error codes enter their catalogs only in the same commits as their implementations and drift
+guards.
 
 ## 9. Pre-implementation review findings (2026-09-23)
+
+**Kept as history (ratification, 2026-09-25).** §9.1's corrections are folded into the body as
+follows; §9.2's decisions are answered by §10 and §11; §9.6's defaults are adopted where §10 and
+§11 are silent, each cited **(D-9.6)** in the body. Where this section and the body disagree, the
+body wins.
+
+| Item | Where it is folded, or why it is moot |
+|---|---|
+| A1 | **Moot (R2).** The Keys-page minting it corrected belonged to §4's withdrawn scheduler-key model; no schedule verb mints a key. |
+| A2 | §6, §6.2 — `scheduler → pipeline-contract` is allowed for the published `PipelineNameGrammar` only, and a module test refuses any other pipeline import. |
+| A3 | §5.3, §6.2 — the adapter lives in `web` beside `RecordingExecutionRunner`; `web/config` is the composition root. |
+| A4 | §6.2 — the module-structure §4.2 row and `allowedInternalDependencies`. |
+| A5 | §2.1, §7.1 — `ABORTED` / `instance_lost` maps to `unknown` (blocks); a later real terminal is an update about the same run. |
+| A6 | §2.1 — the slot refusal precedes `execution_started`, so it is a definitive "never started"; R4 adds the acquire-before-claim lease so capacity is taken before the claim. |
+| A7 | §7.2 — the scheduler's own lifecycle stops admitting before the drain; the 60 s wait is removed; B11 accepted for v1. |
+| A8 | §2.2 — the JSON serializer, with a test that fails on the Java one. |
+| A9 | §3.2 — measured, and replaced by our rule (R1). |
+| A10 | **Moot (R2).** `key_hash`, the `dpk_` prefix and `AuthCache`'s key TTL concerned a scheduler key that does not exist; admission reads the schedule row under its lock and asks the system identity's fixed set, and no cached key lookup is involved. |
+| A11 | **Answered by §10 (R2, R9) and §11.** No existing credential fits an application: slice 1's routes are session-only and the application credential is slice 5 (B7). |
+| A12 | §7.2 — the existing timeout and the maximum result TTL (L3). |
+| A13 | §5.1 — slice 1 records the frozen context; slice 3 carries it to children. |
+| A14 | §2.1 — the scheduled path fails closed when the `RUNNING` row cannot be written. |
+| A15 | §3, §6 — idempotency is durable in Postgres (L1). |
+| A16 | §7 — `SCHEDULE` replaces the `SCHEDULED` placeholder; versioning §3.4 is corrected. |
+| A17 | **Answered.** The number is allocated at merge time; on lane 1's base it is V38 (§7). |
+| A18 | §3.1 — answered by R5: the prepared snapshot records the fired version and the body hash. |
+| A19 | §1, §2.2, §7.2 — the `threads` key; API mode keeps the client with a no-op starter; the loops by role. |
 
 Recorded so they are not lost. **Nothing in this section is a decision**; recommendations are
 labelled as such. Checked against main at `be0305b3` (v0.0.1rc) and against the db-scheduler
@@ -1065,7 +1316,7 @@ question, comes after #215.
   §9.1 item against main after #215 merges, before the spec is fixed.
 - **The proposed order predates #215.** "After 7b, beside 7c" becomes "after #215".
 
-## 10. Owner rulings of 2026-09-25 (answers to §9.2 / §9.6; normative once ratified)
+## 10. Owner rulings of 2026-09-25 (answers to §9.2 / §9.6; NORMATIVE — ratified 2026-09-25)
 
 Taken in the orchestrator session on 2026-09-25 with the review's recommendations in hand;
 the store note `notes/2026-09-25-scheduler-rulings.md` carries the consequences in full.
@@ -1088,3 +1339,29 @@ Sequencing: keys v2 (#233) lands first (the identity kinds and role catalog the 
 rides on); then lane 1 = this record's amendment (§9.1's A1–A19 folded in, this section made
 normative) + migration + the system identity + dispatcher/occurrences/reconciler with the two
 spike proofs of R1; §9.4's slices follow once lane 1 freezes the contract.
+
+## 11. Lane 1's questions and the adopted defaults (2026-09-25)
+
+Four decisions §10 left open changed the schema or the API, so lane 1 asked the owner before
+ratifying. The answers are normative.
+
+| # | Question | Ruling |
+|---|---|---|
+| L1 | Where the Create and Run now idempotency token lives (the draft's §6 and A15 said Postgres; the lane brief said the Redis `IdempotencyStore`) | **Durable in Postgres**: an optional `Idempotency-Key`, a unique column per `(workspace, creator)` on `schedules` and per `(schedule, requester)` on `schedule_runs`, with the request's hash; the Redis store is not used. |
+| L2 | Which permission Run now declares (the brief listed four new permissions) | **A fifth, `schedule.run`** (author, workspace admin, super admin), by the catalog's granularity rule; unblock rides `schedule.pause`. |
+| L3 | The result TTL and timeout of a scheduled run (A12) | **The existing limits, documented**: the instance's execution timeout and the maximum result TTL; no scheduler-specific keys and no executor change in slice 1. |
+| L4 | The review's B18 guards | **In slice 1, configurable**: `min-interval-seconds` (300) and `max-schedules-per-workspace` (100), each with its error code. |
+
+**Adopted without a separate ruling (D-9.6)** — §9.6 listed them as "defaults to write in unless
+the owner objects", §10 overrode none of them, and the lane brief assumed them: the 10-minute
+lateness window; occurrences due while paused or blocked are not missed and resume/unblock
+recompute from now; the catch-up value `latest` with a 24 h reach; Run now during an active run
+answers 409; the DST rule (a gap runs just after it, a fold runs once); soft delete with a
+partial unique name index; the indexed target reference (B15), which also carries the promoter
+lens; deploys abort in-flight scheduled runs with a clear history row (B11). Viewers see a
+schedule's parameters (B14), because R3 already shows every member the scheduled runs' resolved
+parameters.
+
+**Superseded §9.6 defaults**: RELEASED-only (R5 follows the pointer, drafts included); the name
+grammar moving to `typesystem` (the lane brief allows `scheduler → pipeline-contract` for the
+published grammar, A2); per-event notification toggles and scheduler mail defaults (slice 4's).
