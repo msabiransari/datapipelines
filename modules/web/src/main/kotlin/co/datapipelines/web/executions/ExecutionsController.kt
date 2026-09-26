@@ -172,14 +172,17 @@ class ExecutionsController(
     fun events(
         @PathVariable id: UUID,
     ): SseEmitter {
-        val workspaceId = currentPrincipal().requireWorkspace().id
+        val principal = currentPrincipal()
+        val workspaceId = principal.requireWorkspace().id
         val record =
-            executions.findById(workspaceId, id)?.takeIf { it.visibleTo(currentPrincipal()) }
+            executions.findById(workspaceId, id)?.takeIf { it.visibleTo(principal) }
                 ?: throw ApiErrors.executionNotFound(id.toString())
         if (!streamer.hasLog(record.executionId)) {
             throw ApiErrors.resultExpired(id.toString())
         }
-        return streamer.replay(record.executionId)
+        // #230 (P4): the replay carries its subscriber — every chunk it serves is re-judged
+        // against the subscriber's CURRENT authority, not the open-time check above.
+        return streamer.replay(record.executionId, principal)
     }
 
     /**

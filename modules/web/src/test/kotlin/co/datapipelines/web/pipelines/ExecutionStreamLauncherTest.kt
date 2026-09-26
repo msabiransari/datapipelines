@@ -83,6 +83,7 @@ class ExecutionStreamLauncherTest {
             streams = registry,
             eventLog = mockk(relaxed = true),
             streamer = streamer,
+            authority = mockk(relaxed = true),
             eventRepository = mockk(relaxed = true),
             executionRepository = mockk(relaxed = true),
             launcher =
@@ -184,7 +185,7 @@ class ExecutionStreamLauncherTest {
         val followEmitter =
             org.springframework.web.servlet.mvc.method.annotation
                 .SseEmitter(0L)
-        every { streamer.follow(executionId) } returns followEmitter
+        every { streamer.follow(executionId, any()) } returns followEmitter
 
         val result = launcher { error("must not start a fresh execution") }.launch(launchRequest(key = "key-1"))
 

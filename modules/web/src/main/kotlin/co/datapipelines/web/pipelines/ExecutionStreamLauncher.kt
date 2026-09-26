@@ -137,6 +137,12 @@ class ExecutionStreamLauncher(
     private val streams: ExecutionStreamRegistry,
     private val eventLog: SseEventLog,
     private val streamer: SseLogStreamer,
+    /**
+     * #230 (P4): the subscriber re-judgement both stream shapes share — the live stream asks it
+     * before every write (via the [ExecutionStream] it registers), the idempotent-retry follow
+     * hands it the subscriber at attach.
+     */
+    private val authority: co.datapipelines.web.sse.ExecutionStreamAuthority,
     private val eventRepository: ExecutionEventRepository,
     private val executionRepository: ExecutionRepository,
     /** The cross-aggregate decision: resolve, bind, reserve (056/D6). */
@@ -175,7 +181,7 @@ class ExecutionStreamLauncher(
         // Parameter binding and the reservation are the launcher's, in that order: a rejected
         // parameter is a 400 with no execution, no reservation and no stream.
         return when (val decision = launcher.decide(request.toLaunch())) {
-            is LaunchDecision.Attach -> attachToOriginal(decision.executionId)
+            is LaunchDecision.Attach -> attachToOriginal(decision.executionId, request.principal)
             is LaunchDecision.Start -> startFresh(request, decision.executionId)
         }
     }
@@ -184,9 +190,13 @@ class ExecutionStreamLauncher(
      * §3.5 — "a retried request with the same key returns the original execution instead of
      * re-executing". The original's events are served from the Redis log; if the original is still
      * running the stream follows it live. A log that has already expired (> 1h, §10.3) is the same
-     * `410` the replay endpoint gives.
+     * `410` the replay endpoint gives. The retry's own principal rides along (#230, P4): the
+     * follow re-judges THIS subscriber before every event it serves.
      */
-    private fun attachToOriginal(executionId: UUID): SseEmitter {
+    private fun attachToOriginal(
+        executionId: UUID,
+        principal: AuthenticatedPrincipal,
+    ): SseEmitter {
         if (!streamer.hasLog(executionId)) {
             throw ApiException(
                 PipelineErrorCodes.Result.EXPIRED,
@@ -195,7 +205,7 @@ class ExecutionStreamLauncher(
                 mapOf("execution_id" to executionId.toString(), "reason" to "event_log_expired"),
             )
         }
-        return streamer.follow(executionId)
+        return streamer.follow(executionId, principal)
     }
 
     private fun startFresh(
@@ -239,7 +249,18 @@ class ExecutionStreamLauncher(
         request: ExecuteLaunch,
         sse: SseEmitter,
     ) {
-        streams.register(ExecutionStream(executionId, request.principal.userId, sse, mapper))
+        // The stream carries its subscriber and the authority guard (#230, P4): every event and
+        // heartbeat it serves is re-judged against the subscriber's CURRENT authority.
+        streams.register(
+            ExecutionStream(
+                executionId,
+                request.principal.userId,
+                sse,
+                mapper,
+                subscriber = request.principal,
+                authority = authority,
+            ),
+        )
     }
 
     private suspend fun runExecution(

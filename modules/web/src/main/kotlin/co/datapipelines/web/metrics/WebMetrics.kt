@@ -28,11 +28,22 @@ class WebMetrics(
     /** One stream's lifetime, tagged by how it ended. */
     fun streamClosed(stream: ExecutionStream) {
         val reason =
-            when (stream.terminalKind) {
-                "pipeline_completed" -> REASON_COMPLETED
-                "pipeline_failed" -> REASON_FAILED
-                "execution_aborted" -> REASON_ABORTED
-                else -> REASON_CLIENT_DISCONNECT
+            when {
+                // #230 (P4) — decided BEFORE the terminal question: a revoked stream was cut by
+                // policy with no terminal event of its own, and counting it as a client
+                // disconnect would feed D7's cancellation story a subscriber it never had.
+                stream.isRevoked -> {
+                    REASON_REVOKED
+                }
+
+                else -> {
+                    when (stream.terminalKind) {
+                        "pipeline_completed" -> REASON_COMPLETED
+                        "pipeline_failed" -> REASON_FAILED
+                        "execution_aborted" -> REASON_ABORTED
+                        else -> REASON_CLIENT_DISCONNECT
+                    }
+                }
             }
         registry
             .timer(SSE_STREAM_DURATION, "close_reason", reason)
@@ -68,6 +79,9 @@ class WebMetrics(
         const val REASON_FAILED = "failed"
         const val REASON_ABORTED = "aborted"
         const val REASON_CLIENT_DISCONNECT = "client_disconnect"
+
+        /** #230 (P4): the stream was cut because its subscriber's authority was revoked. */
+        const val REASON_REVOKED = "revoked"
 
         const val OUTCOME_HIT = "hit"
         const val OUTCOME_EXPIRED = "expired"

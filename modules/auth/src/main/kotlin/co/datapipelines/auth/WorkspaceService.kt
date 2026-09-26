@@ -139,7 +139,7 @@ open class WorkspaceService(
         claimName: String?,
     ): WorkspaceContext? {
         claimName?.let { claimed -> contextFor(principal, claimed)?.let { return it } }
-        activeMemberships(principal.userId).firstOrNull()?.let { return context(it) }
+        activeMemberships(principal.userId).firstOrNull()?.let { return context(principal, it) }
         // D-R8: a super admin with no membership at all still has somewhere to be — the first
         // active workspace on the instance. Without it the one principal who can fix an empty
         // deployment is the one principal who cannot act in it.
@@ -860,6 +860,23 @@ open class WorkspaceService(
 
     private fun context(membership: WorkspaceMembership): WorkspaceContext =
         WorkspaceContext(membership.workspaceId, membership.workspaceName, membership.role)
+
+    /**
+     * The context a resolved membership yields, for THIS principal. #216: a super admin is a
+     * super admin in EVERY branch of [resolveForSession] — the fallback builds the same
+     * super-admin-aware context the claim branch's `contextFor` does (`superAdmin = true`,
+     * `implicit` per the explicit membership), so a stale claim cannot demote the instance
+     * authority to the membership's role.
+     */
+    private fun context(
+        principal: AuthenticatedPrincipal,
+        membership: WorkspaceMembership,
+    ): WorkspaceContext =
+        if (principal.isSuperAdmin) {
+            WorkspaceContext.superAdminOver(membership.workspaceId, membership.workspaceName, membership.role)
+        } else {
+            context(membership)
+        }
 
     /**
      * An INSTANCE permission (#215, [RolePermissions.INSTANCE]): a super admin's, judged without
