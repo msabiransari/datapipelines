@@ -1,4 +1,4 @@
-# Parameter engine — design record (2026-09-21, draft 5 — the 2026-09-26 rulings)
+# Parameter engine — design record (2026-09-21, draft 5.1 — the 2026-09-26 rulings and renderer notes)
 
 **Updated 2026-09-25:** the owner's clarification supersedes the earlier hidden/disabled
 value rule. These states govern control interaction; every current selected value is read,
@@ -56,7 +56,7 @@ are marked **deviation** and carry their reason.
 | P23 | **Two kinds of control, both hard-coded or database-fed, and the definition says how to render** (owner 2026-09-21, third follow-up; a `FIXED` kind proposed in draft 2 was rejected). (a) **`INPUT`** — a free value the user types, **always `SINGLE`**; its initial value is either hard-coded (`default_value`) or comes from the database (a pinned template returning one row, §3.4). (b) **`SELECT`** — a value the user picks, `SINGLE` or `MULTI`; its options are either hard-coded (`source.constants`, §3.3) or come from the database (`source.template`, §3.4). SQL is for data that changes; it is never required. (c) The definition carries **`presentation`** (§3.7): a `control` hint validated against kind × cardinality × type (an `INPUT` of type `DATE` says `calendar`; a `MULTI` select says `dropdown`, `checkboxes` or `list`) and a display `format` (currency/percent for numerics, a pattern for temporal types). A renderer may honour or ignore it; the server never reads it for anything but validation and echo. |
 
 | P24 | **Addressing mirrors pipelines** (owner 2026-09-26): a set gets a UUID at creation; REST routes carry it in the path (`/api/v1/parameter-sets/{id}/…`); listing and browse are by name and `prefix`; the MCP get/update/evaluate tools take the id as `pipelines_get` does; the export carries the id and import keeps it (`PipelineImportService`'s rule), so the id is stable across environments. Names never travel in a path segment (rest-api §9.6). |
-| P25 | **`required` means a value must arrive; `default` is a hint** (owner 2026-09-26). A required parameter with no value is `required_missing` on evaluate and a `400` at every consumer. The server never substitutes a default for something the client sent as cleared. Two signals: a key **absent** from `selections` means "initialise me" and walks the selection priority (P26); an explicit **`null`** (or `[]` for a `MULTI`) means "the user cleared it" — an error on a required parameter, an empty value that flows as `NULL` on an optional one. The first render sends `{}`; every later submission sends every key. |
+| P25 | **`required` means a value must arrive; `default` is a hint** (owner 2026-09-26). A required parameter with no value is `required_missing` on evaluate and a `400` at every consumer. The server never substitutes a default for something the client sent as cleared. Two signals: a key **absent** from `selections` means "initialise me" and walks the selection priority (P26); an explicit **`null`** means "the user cleared it" — for a `MULTI` too (the renderer contract sends `null`, never `{}` or `[]`; the server accepts `[]` as `null` for robustness) — an error on a required parameter, an empty value that flows as `NULL` on an optional one. The first render sends `{}`; every later submission sends every key. |
 | P26 | **The selection priority**, per parameter, in topological order, `SINGLE` and `MULTI` alike (owner 2026-09-26): **1** the client's selection when it is valid against the recomputed options (a `MULTI` keeps its valid members); **2** the configured default when it is among the options (`default_value`, else the `is_default` option; for a `MULTI` the default members among the options); **3** the first option in order (for a `MULTI`, as the only member). A client value that fits none of the options walks to 2 then 3 and is flagged `reset: true`; it is never an error. An `INPUT` has no options: the client's value (against the constraints, an error when violated), else the sourced row, else `default_value`, else `null` (`required_missing` when required). Every parameter's state carries `value`, `origin` (`client` / `default` / `first` / `source` / `none`), `computed_default` (what 2-then-3 would give now) and `reset`. |
 | P27 | **The submission model** (owner 2026-09-26): the parameters endpoint is called on the first render (`{}`) and on every change to any control, and the client sends **every** parameter each time; the server re-renders the whole set. The consumer's apply/submit button goes to the consumer (pipeline execute, dashboard execute), never to the parameters endpoint. The client runs no dependency logic at all — not even "clear the dependents": a stale child walks P26 on the server. |
 | P28 | **One validator, strict, at every place a parameter value arrives** (owner 2026-09-26): a shared `ParameterValueValidator` in `modules/typesystem` beside the moved coercion — declaration (type, precision, scale, required, default, constraints, cardinality) + value → accepted typed value or a refusal — used by the business API (published endpoints, values arriving as query strings), the execution API (`POST /api/v1/pipelines/{id}/execute`), evaluate, and later dashboard execute. The coercion is strict everywhere: the BIG-number `trim()` is retired for pipelines too — a **deliberate break** recorded in rest-api's change log, the tests that asserted trimming re-pinned. Pipeline declarations gain optional `constraints` and a list `cardinality` in the same model, adopted by the dashboard round; the engine's `type` set is the pipelines' `type` set, so a consumer needs no translation. |
@@ -380,8 +380,8 @@ is unchanged.
 - `selections` (P25, P27): the first render sends `{}` — every parameter **absent**, the whole set
   initialises. Every later call sends **every** parameter's current value, wire-encoded for its
   type, `MULTI` as an array: a value the user chose, the value the last response gave it, or
-  `null` / `[]` when the user **cleared** it. Absent means "initialise me" and walks the priority
-  (P26); `null`/`[]` means "cleared" and does not. A key that names no parameter of the set is
+  `null` when the user **cleared** it (a `MULTI` too — `[]` is accepted and treated as `null`).
+  Absent means "initialise me" and walks the priority (P26); `null` means "cleared" and does not. A key that names no parameter of the set is
   `parameter.evaluate.unknown_parameter` (400 — the whole request is refused; a client that sends
   unknown keys is wrong, not the user). A `MULTI` list longer than `max-multi-bind-values` is
   `too_many_values` on that parameter. Duplicate members in a `MULTI` are `invalid_value_type`.
@@ -884,6 +884,35 @@ module runs with `-Pdp.test.forks.e2e=1` once before handback (MISTAKES: fork-co
 
 ---
 
+## 13a. The renderer and host contract — notes for the round after dashboards (owner, 2026-09-26)
+
+Not built here; kept so the contract round starts from the owner's list, not from memory. The
+reference renderer lands with dashboards (#10, P21); the hosting application implements the
+host side.
+
+1. **Clearing.** When the user clears a dropdown (or a multi-select), the client sends `null`
+   for that parameter — never `{}`, never `[]`. The server treats `[]` as `null` (§5.1) so a
+   renderer that slips is not punished, but the contract says `null`.
+2. **Rendering a `MULTI` with no hint.** When a definition carries no `presentation.control`, a
+   renderer picks the derived default (§3.7: `dropdown`). On the AUTHORING side, the agent must
+   **ask the person** whether a multi-selection is a dropdown, checkboxes or a list before
+   creating it without a hint — a rule of the agent manual's `parameters` area (lane D writes it),
+   the same shape as `confirm_new_root`.
+3. **The submit hook.** The renderer exposes a "submit" event (the apply button, or whatever
+   control the host chooses) so the dashboard runtime can take the current `values` (§5.3), send
+   them to the consumer (dashboard execute) and refresh the dashboard. The parameters endpoint
+   is never the target of this event (P27).
+4. **The parent-changed hook.** The renderer exposes a "parameter changed" event (any control:
+   input, dropdown, checkbox, radio) so the dashboard runtime can submit every parameter to
+   evaluate (P27) and re-render the parameter widget from the response — the whole set, with
+   `reset`/`origin`/`computed_default` driving what the renderer shows.
+5. **Layout and location.** The dashboard defines where the parameter widget sits (layout,
+   position, collapse); the hosting application renders it there. The contract for that — the
+   widget's slot, sizing and the events above — is written **after the dashboard
+   implementation**, when the two sides exist to test against.
+
+---
+
 ## 14. Open items (the lane confirms; none blocks dispatch)
 
 1. The exact HTTP status for `parameter.evaluate.timeout` per rest-api §4's existing mapping of
@@ -909,7 +938,7 @@ module runs with `-Pdp.test.forks.e2e=1` once before handback (MISTAKES: fork-co
 | **A** (first, alone) | §2.1 `graph` move + §2.3 coercion extraction **made strict** (the trim retired — the one behaviour change, recorded as a deliberate break in rest-api's change log with the re-pinned tests) + `ParameterValueValidator` in `typesystem` wired into the two existing places (published endpoints, `POST …/execute`) + the pipeline declaration's optional `constraints`/`cardinality` (declared, not yet consumed) + the §2.4 table rows + `settings.gradle.kts`. Full gate. | — |
 | **B** | `parameters` model, validator, expression AST, `Dag` build, repository + lifecycle + migration, `ParameterErrorCodes` + §13.20 + drift test, config keys | A |
 | **C** | `SelectorRunner` (template render, binds, list expansion, metadata check, caps), `ParameterEvaluator` (coroutines, the instance-wide semaphore, the deadline with `Statement.cancel()`, the P26 selection priority, the row invariants, the caps) | B |
-| **D** | surfaces: six MCP tools by id + catalog pins + the rendered manual's `parameters` area (242a's `DocSet`, not `skillArtifacts`) + the `in_list` macro in the skill; REST routes by id; the nine permission rows (§9.3) with auth.md §7.6 + `RoleWalkE2eTest`; the reverse arrow in `application` (§8.4); promotion; E2E cascade | C |
+| **D** | surfaces: six MCP tools by id + catalog pins + the rendered manual's `parameters` area (242a's `DocSet`, not `skillArtifacts`) + the `in_list` macro in the skill and the ask-before-creating-a-MULTI-without-a-hint rule (§13a.2); REST routes by id; the nine permission rows (§9.3) with auth.md §7.6 + `RoleWalkE2eTest`; the reverse arrow in `application` (§8.4); promotion; E2E cascade | C |
 
 B and C may run in parallel only after A has frozen the module layout and B has frozen the
 model (`ParameterDefinition` + `ParameterErrorCodes`); D is serial after C. Each lane prompt
@@ -922,6 +951,7 @@ on every handback).
 
 | date | version | change |
 |---|---|---|
+| 2026-09-26 | draft 5.1 | Cleared is `null` for `MULTI` too (`[]` accepted as `null`); new §13a — the renderer and host contract notes for the round after dashboards: clearing, the ask-before-a-MULTI-without-a-hint authoring rule (lane D's skill), the submit and parameter-changed hooks for the dashboard runtime, the widget's layout and location left to that round. |
 | 2026-09-26 | draft 5 | The second review answered (Astra's twelve items + the orchestrator's six of 2026-09-21) with eight rulings, P24–P31: addressing mirrors pipelines (a stable UUID, `POST /{id}/evaluate`); `required` means a value must arrive and `default` is a hint, absent vs `null`/`[]`; the selection priority client → default → first for `SINGLE`, `MULTI` and (client → sourced row → `default_value`) `INPUT`, a stale child never an error (`reset: true`, `origin`, `computed_default`); every change submits every parameter and the client runs no dependency logic (`dependents` informational too); one strict shared validator at the four places, the trim retired everywhere (a deliberate break); `MULTI` binds via `<name>_count` + the `in_list` macro with caps 1,000 per parameter and 2,000 per statement; binds resolve by namespace (parameter, else tier key); decimal widening preserves integer digits; row invariants at evaluate; a read-counting regex budget, `Statement.cancel()` at the deadline, an instance-wide semaphore, options cap 200 and a 4 MiB response budget; §13.20, V39, the tool count read at dispatch; the options cache and the scheduler/dashboard bindings named out of scope. |
 | 2026-09-25 | draft 4 | Owner corrections: hidden/disabled governs control interaction; always read and submit current selected values, including explicit client-side changes. No preservation/restoration of originally served values or hidden/disabled-based omission, ignoring or defaulting. Updated P5/P15, evaluate semantics and acceptance coverage. Dashboard state and outgoing pipeline-value overrides are independently optional server-side consumer responsibilities, linked in §13. |
 | 2026-09-21 | draft 1 | Recovered from the owner's Codex conversation of the same day; four follow-up decisions (P18–P21) and the template-backed selector ruling (P22) added; every code fact re-verified on `b34bdddf`. |
