@@ -67,7 +67,7 @@ class ScheduleBindingsE2eTest {
 
     @Test
     @Order(1)
-    fun `a schedule with TODAY and YESTERDAY bindings fires late and resolves the logical day`() {
+    fun `the bound schedule fires late, on the occurrence the test made due`() {
         seedAuthRows()
         createAndReleasePipeline(CHILD_NAME, childBody())
         createAndReleasePipeline(PARENT_NAME, parentBody())
@@ -109,13 +109,20 @@ class ScheduleBindingsE2eTest {
             listOf("catch_up", "cron").contains(run["origin"].asText()) shouldBe true
         }
 
-        // The frozen reference is 23:45 on day D; the actual start is on D+1.
-        val reference = Instant.parse(run["reference_at"].asText())
-        val logicalDay = LocalDate.ofInstant(reference, NY_ZONE)
+        // The frozen reference is late on day D; the actual start is on D+1 — the brief's scenario,
+        // whatever wall-clock moment the suite runs at.
+        logicalDay = LocalDate.ofInstant(Instant.parse(run["reference_at"].asText()), NY_ZONE)
         val startDay = LocalDate.ofInstant(Instant.parse(run["started_at"].asText()), NY_ZONE)
         withClue("the scenario is the one the brief names: frozen on D, started on D+1") {
             startDay shouldBe logicalDay.plusDays(1)
         }
+        finishedRun = run
+    }
+
+    @Test
+    @Order(2)
+    fun `the run resolved TODAY to the logical day, carried it to the child, and kept the literal`() {
+        val run = finishedRun.shouldNotBeNull()
 
         // The snapshot shows what the run executed with: TODAY = D, YESTERDAY = D−1, and the
         // literal STRING "TODAY" untouched.
@@ -343,6 +350,8 @@ class ScheduleBindingsE2eTest {
         private val VIEWER_SESSION get() = E2eSession.jwt(JWT_SECRET, VIEWER_ID, "bind-viewer@e2e.test", WORKSPACE)
 
         private var scheduleId: String = ""
+        private var finishedRun: JsonNode? = null
+        private var logicalDay: LocalDate = LocalDate.now()
 
         private val postgres get() = SharedE2e.postgres
         private val redis get() = SharedE2e.redis
