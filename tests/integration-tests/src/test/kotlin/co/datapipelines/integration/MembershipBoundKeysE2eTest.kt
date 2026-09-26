@@ -661,18 +661,11 @@ class MembershipBoundKeysE2eTest {
      * and [locked_until], `inactive` is [is_active]). No row is itself the answer.
      */
     private fun userRow(email: String): String =
-        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-            val sql =
-                "SELECT provider || '/' || provider_subject || ' active=' || is_active || " +
-                    "' must_change=' || must_change_password || ' failed=' || failed_login_count || " +
-                    "' locked_until=' || coalesce(locked_until::text, 'never') FROM users WHERE email = ?"
-            connection.prepareStatement(sql).use { ps ->
-                ps.setString(1, email)
-                ps.executeQuery().use { rs ->
-                    if (rs.next()) rs.getString(1) else "(no row)"
-                }
-            }
-        }
+        query(
+            "SELECT provider || '/' || provider_subject || ' active=' || is_active || " +
+                "' must_change=' || must_change_password || ' failed=' || failed_login_count || " +
+                "' locked_until=' || coalesce(locked_until::text, 'never') FROM users WHERE email = '$email'",
+        ) { it.getString(1) }.singleOrNull() ?: "(no row)"
 
     private fun <T> query(
         sql: String,
