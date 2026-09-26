@@ -32,12 +32,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  *    event writes — so an empty registry means the bookkeeping flushed, and the bound means a
  *    wedged execution delays the SIGKILL deadline rather than hanging shutdown forever.
  *
- * The default [SmartLifecycle.getPhase] (`DEFAULT_PHASE`, the maximum) is load-bearing: lifecycle
- * beans stop highest-phase-first, so this drain stops **before** the web server's own
- * graceful-shutdown lifecycle (`DEFAULT_PHASE - 1024`) — SSE clients are still connected while
- * their terminal events are emitted — and before any singleton's `destroyMethod`, which is where
+ * The phase, [PHASE] (`DEFAULT_PHASE - 1`), is load-bearing in both directions: lifecycle beans
+ * stop highest-phase-first, so this drain stops **before** the web server's own graceful-shutdown
+ * lifecycle (`DEFAULT_PHASE - 1024`) — SSE clients are still connected while their terminal events
+ * are emitted — and before any singleton's `destroyMethod`, which is where
  * `executionScope.close()` runs. `cancelAllLocal()` therefore strictly precedes the scope's
- * `job.cancel()`, the ordering M1 was missing.
+ * `job.cancel()`, the ordering M1 was missing. And it stops **after** the scheduler's admission
+ * gate (#9, `SchedulerAdmission`, at `DEFAULT_PHASE`): the gate closes, pauses db-scheduler and
+ * waits for in-flight scheduled launches to reach their execution record, and only then does this
+ * drain cancel — so a scheduled run mid-launch at SIGTERM ends `ABORTED` / `shutdown` (reconciled
+ * `aborted`), never lost (scheduler design revision §7.2, A7; `SchedulerShutdownOrderE2eTest`).
+ * Until #9 this sat at `DEFAULT_PHASE` itself; one below keeps every ordering above intact.
  *
  * The flush timeout is a code constant, not a configuration key: it must stay under Spring's
  * per-phase lifecycle timeout (`spring.lifecycle.timeout-per-shutdown-phase`, framework default
@@ -57,6 +62,9 @@ class ExecutionDrainLifecycle(
     }
 
     override fun isRunning(): Boolean = running.get()
+
+    /** One below the scheduler's admission gate, far above the web server's graceful shutdown — see the class KDoc. */
+    override fun getPhase(): Int = PHASE
 
     override fun stop() {
         // Step 1 — BEFORE anything is cancelled (see the class KDoc; the order is the contract).
@@ -91,6 +99,9 @@ class ExecutionDrainLifecycle(
     }
 
     companion object {
+        /** `DEFAULT_PHASE - 1`: after the scheduler's admission gate, before everything else (class KDoc). */
+        const val PHASE: Int = SmartLifecycle.DEFAULT_PHASE - 1
+
         /**
          * 20s — comfortably under the lifecycle processor's 30s per-phase default (see the class
          * KDoc). A normal cancel flushes in well under a second; this bound exists for the wedge.

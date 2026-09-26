@@ -249,8 +249,13 @@ class ApiErrorCatalogSpecDriftTest {
          * §13.13 gains `pipeline.release.template_needs_review` with HTTP `—` (a warning in the
          * release response, listed in NEVER_RETURNED_LIVE like the §13.6 type-mapping warnings),
          * landed in the SAME commit as their constants. Re-derived from the document's own parse.
+         *
+         * 205 → 221 with #9 (the scheduler): the new §13.19's sixteen `schedule.*` rows (two
+         * 404s with explicit catalog rows, the 409 `schedule.` and 400 `schedule.validation.`
+         * family defaults), landed in the SAME commit as `ScheduleErrorCodes`. Re-derived from
+         * the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 205
+        const val SECTION_13_ROW_COUNT = 221
 
         /**
          * §12's distinct validation codes.

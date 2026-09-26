@@ -59,7 +59,13 @@ class ExecutionsController(
     /** §10.2 — the ONE metadata projection, shared with the business-path paging read (A16). */
     private val metadata: ExecutionMetadataProjection =
         ExecutionMetadataProjection(pipelines, resultStore, resultUrls),
+    /** §10.3A (#9) — the durable event record's paged read; null only in module-slice wiring. */
+    private val eventRecords: co.datapipelines.executor.ExecutionEventRepository? = null,
 ) {
+    private val jsonMapper =
+        com.fasterxml.jackson.databind
+            .ObjectMapper()
+
     /**
      * §10.1 — the listing. Filters are evaluated **in SQL** by the repository (gate C, B4): the
      * page is cut after filtering, so `has_more` and page fullness are honest. `total` remains the
@@ -87,7 +93,8 @@ class ExecutionsController(
             if (principal.holds(Permission.EXECUTION_READ_ALL)) {
                 executions.findAll(workspaceId, pipelineId, wanted, startedAfter, startedBefore, limit = size + 1, offset = page)
             } else {
-                executions.findByUser(
+                // #9 R3: the member's own runs AND the workspace's scheduled runs.
+                executions.findVisible(
                     workspaceId,
                     principal.userId,
                     pipelineId,
@@ -175,6 +182,57 @@ class ExecutionsController(
         return streamer.replay(record.executionId)
     }
 
+    /**
+     * §10.3A (#9, scheduler design revision §5.4) — the DURABLE event record as JSON, for as long
+     * as `execution_events` retains it (7 days past completion by default), within the Redis hour
+     * or after it. Paged by `event_id` (`after` + `limit` ≤ [MAX_EVENTS_PAGE]); the same visibility
+     * and the same session-only rule as the metadata read. Distinguished from the SSE replay above
+     * by `format=json` — a params condition Spring ranks above the plain route — so the replay's
+     * contract is unchanged. `410 result.expired` (reason `event_record_expired`) once the
+     * retention job removed the rows of a completed execution.
+     */
+    @GetMapping("/{id}/events", params = ["format=json"], produces = [MediaType.APPLICATION_JSON_VALUE])
+    @RequiredScope(Permission.EXECUTION_READ)
+    fun durableEvents(
+        @PathVariable id: UUID,
+        @RequestParam(required = false) after: Int?,
+        @RequestParam(required = false) limit: Int?,
+    ): ApiResponse<Map<String, Any?>> {
+        val principal = currentPrincipal()
+        requireSession(principal)
+        val workspaceId = principal.requireWorkspace().id
+        val record =
+            executions.findById(workspaceId, id)?.takeIf { visibility.visible(it, principal, id) }
+                ?: throw ApiErrors.executionNotFound(id.toString())
+        val size = (limit ?: DEFAULT_EVENTS_PAGE).coerceIn(1, MAX_EVENTS_PAGE)
+        val from = (after ?: 0).coerceAtLeast(0)
+        val page = eventRecords?.findPage(record.executionId, from, size + 1).orEmpty()
+        if (page.isEmpty() && from == 0 && record.completedAt != null) {
+            throw co.datapipelines.web.api.ApiException(
+                PipelineErrorCodes.Result.EXPIRED,
+                "The durable event record of execution '$id' has passed its retention; its metadata remains at GET /executions/{id}.",
+                mapOf("execution_id" to id.toString(), "reason" to "event_record_expired"),
+            )
+        }
+        val items =
+            page.take(size).map {
+                linkedMapOf(
+                    "event_id" to it.eventId,
+                    "event" to it.eventType,
+                    "timestamp" to it.timestamp.toString(),
+                    "data" to jsonMapper.readTree(it.payloadJson),
+                )
+            }
+        return ApiResponse.of(
+            mapOf(
+                "execution_id" to id.toString(),
+                "events" to items,
+                "next_after" to items.lastOrNull()?.get("event_id"),
+                "has_more" to (page.size > size),
+            ),
+        )
+    }
+
     /** §7.2 — the result cursor. `format=json` pages through the envelope; `csv` streams. */
     @GetMapping("/{id}/result")
     @RequiredScope(Permission.EXECUTION_RESULT_READ)
@@ -220,5 +278,9 @@ class ExecutionsController(
     private companion object {
         /** Reflected client input is bounded before it reaches an error message. */
         const val MAX_ECHOED_VALUE_CHARS = 32
+
+        /** §10.3A — the durable read's page size bounds. */
+        const val DEFAULT_EVENTS_PAGE = 200
+        const val MAX_EVENTS_PAGE = 500
     }
 }

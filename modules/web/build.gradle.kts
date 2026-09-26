@@ -16,6 +16,9 @@ dependencies {
     implementation(project(":modules:auth"))
     implementation(project(":modules:application"))
     implementation(project(":modules:mcp-server"))
+    // #9: the schedules REST surface, the pipeline executor adapter and the scheduler's ports'
+    // implementations (web/config is the composition root — scheduler design revision §6.2, A3).
+    implementation(project(":modules:scheduler"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.actuator)

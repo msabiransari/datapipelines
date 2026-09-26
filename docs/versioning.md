@@ -1,9 +1,9 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.12 — 172: the published-endpoint row of the serving table follows R-EP5's URL shape
+**Status:** v1.14 — #9: a schedule is a pointer-following dependent (§3.4)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
-**Last updated:** 2026-09-11
+**Last updated:** 2026-09-25
 
 ---
 
@@ -171,7 +171,7 @@ draft-dominance that the table itself overrides.
 ### 3.4 `current_version` is sticky and event-driven (D60)
 
 `current_version` is the version every **pointer-following dependent** runs — published
-endpoints, promotion, schedules (092), dashboards later. It is **sticky**: it no longer
+endpoints, promotion, schedules (#9 — a schedule's `version: "current"` follows it, drafts included), dashboards later. It is **sticky**: it no longer
 means "the latest RELEASED version" as a derived fact. It moves ONLY on these events, and
 when it moves it picks the **highest-numbered ELIGIBLE live version**:
 
@@ -198,8 +198,9 @@ hardened postures is the only thing it can name.
 
 **NULL pointer.** A published endpoint answers `endpoint.pipeline_not_released` at serve
 time — the endpoint row is not deleted, and an entity whose status is DISCARDED answers
-the same refusal rather than a 404; a schedule (092) records a refused run; promotion has
-nothing to push.
+the same refusal rather than a 404; a schedule (#9) records a `not_started` run
+(reason `pointer_null`) and blocks until a person unblocks it ([Scheduler §5](scheduler.md#5-runs-states-and-reasons));
+promotion has nothing to push.
 
 **A draft pointer (D63, 2026-09-09).** Under the development posture the pointer may name a
 DRAFT (the D60 fallback, or a manual switch), and a published endpoint **serves it** — the
@@ -1330,6 +1331,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.14 | scheduler lane 1 (#9) | §3.4: the schedule dependent is #9's (was "092"), follows the pointer wherever it points, drafts included (R5); a NULL pointer makes a schedule record a `not_started` / `pointer_null` run and **block** — "records a refused run" was the draft's wording (scheduler design revision A16). |
 | 2026-09-21 | v1.13 | 178 (#178) | §10.2's rule is now also the **promoter lens** ([Auth §11A.1](auth.md#11a1-the-404-rule)): computed once per request (`PromotableView`) for pipelines AND templates — the template arm stated for the first time — and read by the promotion page and by every promoter read alike; the push path's root guard decides "not newer" from the same object (a same-hash root at a higher number is refused `promotion.not_newer` with "same content", where the page already hid it). The 2026-09-20 verb ownership corrected in the lifecycle-verbs block: release and switch are the author's (D8), promote the promoter's. |
 | 2026-09-19 | v1.12 | 172 (#172) | The serving table's published-endpoint row follows the re-rooted URL shape (R-EP5, `/api/<category>/<version>/<path…>`); the rule — the endpoint serves whatever the pointer names — is unchanged. |
 | 2026-09-15 | v1.11 | 142 release cascade | §5.3 precondition 2 gains **the cascade**: `release(releasePinnedTemplates = true)` — REST `?release_pinned_templates=true`, the dialog's checked-by-default consent group — releases every DRAFT template version the draft body pins in the SAME metadata transaction as the pipeline flip, templates first, through the new `TemplateReleaser` port (`pipeline-contract`, implemented in `web` over `TemplateReleaseService.releasePinned` so the direct and cascaded verbs share one implementation); any refusal rolls everything back. Audit: one `template.version.released` per cascaded template with `cascade_from_pipeline_id` / `cascade_from_version`, then `pipeline.version.released` with `templates_released`. The default is the pre-142 refusal byte for byte; its details gain `pins_not_released`. DISCARDED / MISSING pins stay unreleasable; promotion receive unexposed (§10); no MCP tool releases anything. §3.5.2 gains the `{R,D} release(releasePinnedTemplates)` row (excluded from the model replay like the template-twin rows; `ReleaseCascadeE2eTest` owns it). |

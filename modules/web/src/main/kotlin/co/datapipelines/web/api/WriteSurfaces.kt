@@ -17,6 +17,11 @@ import co.datapipelines.pipeline.WriteSurface
 fun AuthenticatedPrincipal.writeSurface(): WriteSurface =
     when (authMethod) {
         AuthMethod.OIDC -> WriteSurface.SESSION
+
         AuthMethod.API_KEY -> WriteSurface.API_KEY
+
         AuthMethod.PROMOTION -> WriteSurface.SESSION
+
+        // #9: the system identity writes no pipeline or template; the mapping only keeps the `when` exhaustive.
+        AuthMethod.SYSTEM -> WriteSurface.SESSION
     }

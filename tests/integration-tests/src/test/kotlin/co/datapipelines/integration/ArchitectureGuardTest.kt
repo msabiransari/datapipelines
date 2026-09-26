@@ -345,6 +345,9 @@ class ArchitectureGuardTest {
                 "ExecutionDetailPartialController → ExecutionRepository",
                 "ExecutionHistoryController → PipelineRepository",
                 "ExecutionTools → ExecutionRepository",
+                // #9 §10.3A — the durable event record: one keyed page read by execution id, AFTER the
+                // same workspace-scoped metadata read and visibility check as `get` (the McpResourceReader twin).
+                "ExecutionsController → ExecutionEventRepository",
                 "ExecutionsController → ExecutionRepository",
                 "ExecutionsController → PipelineRepository",
                 "ExecutionsGetResultTool → ExecutionRepository",
@@ -389,10 +392,18 @@ class ArchitectureGuardTest {
                 "^import (org\\.springframework\\.jdbc\\.|javax\\.sql\\.DataSource|" +
                     "java\\.sql\\.(Connection|DriverManager|Statement|PreparedStatement|ResultSet))",
             )
+
+        /**
+         * The jobs no transport may name (B5): the three `@Scheduled` services and schedulers, and —
+         * #9 — the scheduler's db-scheduler jobs (dispatcher, run worker, reconciler), their task
+         * factory and the admission gate. A transport reaches the scheduler through
+         * `ScheduleService` only, which is deliberately NOT in this list.
+         */
         val JOB_SERVICE =
             Regex(
                 "\\b(StaleExecutionSweeper|ExecutionEventRetention|reapRetiredPools|StaleExecutionSweepScheduler|" +
-                    "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler)\\b",
+                    "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|" +
+                    "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|SchedulerTasks|SchedulerAdmission)\\b",
             )
     }
 }

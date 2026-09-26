@@ -1381,4 +1381,59 @@ object PipelineErrorCodes {
          */
         const val JS_UNAVAILABLE = "transform.js.unavailable"
     }
+
+    /**
+     * §13.19 (#9) — the scheduler's refusals, the catalog's copy. `modules/scheduler` raises them
+     * through its own `ScheduleErrorCodes` (its boundary admits nothing of this module but the name
+     * grammar); `SchedulerUnitTest` pins that set equal to this one, so the two cannot drift.
+     */
+    object Schedule {
+        /** 404 — no live schedule with that id in the caller's workspace. */
+        const val NOT_FOUND = "schedule.not_found"
+
+        /** 404 — no run with that id under that schedule. */
+        const val RUN_NOT_FOUND = "schedule.run.not_found"
+
+        /** 409 — another live schedule of the workspace holds the name. */
+        const val NAME_TAKEN = "schedule.name_taken"
+
+        /** 409 — `If-Match` named a revision that is no longer current. */
+        const val REVISION_CONFLICT = "schedule.revision_conflict"
+
+        /** 409 — Run now while a run of the schedule is queued, starting or running. */
+        const val RUN_OVERLAP = "schedule.run.overlap"
+
+        /** 409 — Run now against a blocked schedule. */
+        const val BLOCKED = "schedule.blocked"
+
+        /** 409 — unblock on a schedule that is not blocked. */
+        const val NOT_BLOCKED = "schedule.not_blocked"
+
+        /** 409 — the workspace already holds `max-schedules-per-workspace` live schedules. */
+        const val LIMIT_PER_WORKSPACE = "schedule.limit.per_workspace"
+
+        /** 400 — a missing or ill-typed request field. */
+        const val REQUEST_INVALID = "schedule.validation.request_invalid"
+
+        /** 400 — the name breaks the folder-path grammar. */
+        const val NAME_INVALID = "schedule.validation.name_invalid"
+
+        /** 400 — not a five-field Unix cron. */
+        const val CRON_INVALID = "schedule.validation.cron_invalid"
+
+        /** 400 — not an IANA region id. */
+        const val TIMEZONE_INVALID = "schedule.validation.timezone_invalid"
+
+        /** 400 — two consecutive occurrences closer than `min-interval-seconds`. */
+        const val INTERVAL_TOO_SHORT = "schedule.validation.interval_too_short"
+
+        /** 400 — no executor is registered under that id. */
+        const val EXECUTOR_UNKNOWN = "schedule.validation.executor_unknown"
+
+        /** 400 — the executor refused the payload, or it breaks the size/depth limits. */
+        const val PAYLOAD_INVALID = "schedule.validation.payload_invalid"
+
+        /** 400 — the payload names a target the workspace does not hold. */
+        const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
+    }
 }

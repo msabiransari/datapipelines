@@ -23,6 +23,11 @@ import java.util.UUID
  * `fun interface`: a Kotlin lambda cannot implement it, so every implementation is a named class
  * file the jar scan can count.
  *
+ * ## The system arm (#9)
+ * [holdsAsSystemActor] answers for the one principal that is not a member at all: the system
+ * identity schedules fire under (R2). It sits beside [holds] so the seam stays the ONE place a
+ * permission decision is made — #239's "the resolver knows the actor" shape.
+ *
  * ## What is not behind it
  * The two KEY-role columns (`api_caller`, `promotion_receiver`): `ScopeMatrix.allowed` reads them
  * straight from [RolePermissions] at admission, and routing only [AuthenticatedPrincipal.holds]'s
@@ -37,6 +42,25 @@ interface PermissionResolver {
         superAdmin: Boolean,
         permission: Permission,
     ): Boolean
+
+    /**
+     * **The system arm** (#9 R2, scheduler design revision §4): does the SYSTEM IDENTITY hold
+     * [permission] in [workspaceId]? The resolver knows the actor here, not a role — the system
+     * identity is never a member and holds no role; its answer is the fixed
+     * [RolePermissions.SYSTEM_ACTOR] set, the same in every workspace. A [WorkspaceContext] marked
+     * [WorkspaceContext.systemActor] asks this arm and never [holds], so `ScopeMatrix` and
+     * `AuthenticatedPrincipal.holds` reach it without a special case of their own.
+     *
+     * A default body rather than an abstract member, so a test resolver that substitutes a
+     * synthetic MEMBER grant keeps the production answer here — and a test resolver that
+     * overrides THIS (granting one more permission) is how `SystemActorPrincipalTest` proves the
+     * fixed set is pinned. Production has one resolver, [RolePermissionsResolver], which does not
+     * override it (`PackagedResolverTest`).
+     */
+    fun holdsAsSystemActor(
+        workspaceId: UUID?,
+        permission: Permission,
+    ): Boolean = permission in RolePermissions.SYSTEM_ACTOR
 }
 
 /**

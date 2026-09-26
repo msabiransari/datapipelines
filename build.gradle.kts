@@ -138,6 +138,12 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ":modules:datasources" to setOf(":modules:typesystem"),
     ":modules:staging" to setOf(":modules:typesystem"),
     ":modules:auth" to setOf(":modules:typesystem"),
+    // #9 scheduler — the durable occurrence engine (scheduler design revision §6.2). Pipeline-agnostic
+    // by construction: `pipeline-contract` is allowed for the published name grammar alone (A2), and
+    // the module's own SchedulerBoundaryTest refuses every other pipeline import. No `dag`, `auth`
+    // or `application` edge: the executor, the capacity lease and the system principal sit on the
+    // adapter's side of the port, in `web`.
+    ":modules:scheduler" to setOf(":modules:typesystem", ":modules:pipeline-contract"),
     ":modules:dag" to setOf(
         ":modules:typesystem",
         ":modules:calculators",
@@ -184,6 +190,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:auth",
         ":modules:application",
         ":modules:mcp-server",
+        // #9 — the schedules REST surface and the scheduler's composition root (web/config, A3).
+        ":modules:scheduler",
     ),
     ":modules:app" to setOf(":modules:web"),
     ":tests:integration-tests" to setOf(":modules:app"),

@@ -23,7 +23,8 @@ import org.springframework.web.util.pattern.PathPatternParser
  * administration is `user.manage`; a dialog fetched by a verb's route floors at that verb's
  * permission; the self reads are the self rows; everything else a signed-in person may read is
  * one of the every-role reads (`pipeline.read`, `template.read`, `datasource.read`,
- * `endpoint.read`, `semantic.read` — the same five cells, the lens aside).
+ * `endpoint.read`, `semantic.read`, and since #9 `schedule.read` — the same five cells, the lens
+ * aside).
  *
  * A family refuses every permission outside its set: `pipeline.read` on an executions GET would
  * admit the promoter to runs the record says it may not see; `execution.read` on a pipelines GET
@@ -216,6 +217,8 @@ class ReadFloorTest {
                     Permission.DATASOURCE_READ,
                     Permission.ENDPOINT_READ,
                     Permission.SEMANTIC_READ,
+                    // #9 (R8): every member reads schedules, the promoter through the lens — the same row shape.
+                    Permission.SCHEDULE_READ,
                 ),
             matches = { true },
         ),

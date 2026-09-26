@@ -108,6 +108,13 @@ class WorkspaceResolutionFilter(
                 // and a `DP-Workspace` header would be meaningless rather than dangerous. The
                 // branch is explicit so the exhaustive `when` keeps forcing this decision.
             }
+
+            AuthMethod.SYSTEM -> {
+                // #9 R2: the system identity is built in-process for one scheduled launch and never
+                // by a filter, so a request carrying it is a defect somewhere upstream. Fail closed.
+                authErrorWriter.write(request, response, SessionInvalidException("The system identity never acts through a request"))
+                return
+            }
         }
         filterChain.doFilter(request, response)
     }

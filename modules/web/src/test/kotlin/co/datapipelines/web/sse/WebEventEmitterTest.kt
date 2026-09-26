@@ -332,6 +332,109 @@ class WebEventEmitterTest {
             hooked shouldBe executionId
         }
 
+    /**
+     * The launcher's trailing lambda registers the live stream, and `execution_started` must reach
+     * that stream — so the lambda has to be the hook that runs BEFORE the stream lookup. #9 once
+     * appended another function-typed parameter after it; Kotlin bound the launcher's lambda to the
+     * new one, which runs after persistence, and every live stream silently lost its first event.
+     * Falsified: moving `onRecorded` back after `onExecutionStarted` turns this red.
+     */
+    @Test
+    fun `a trailing lambda is the started hook - a stream it registers receives execution_started itself`() =
+        runTest {
+            every { executionRepository.create(any()) } answers { firstArg() }
+            every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } just runs
+            every { eventLog.append(any(), any()) } just runs
+            val sse = mockk<org.springframework.web.servlet.mvc.method.annotation.SseEmitter>(relaxed = true)
+            // The payload carries java.time values; production's mapper has the module, so this one does too.
+            val mapper =
+                com.fasterxml.jackson.databind.json.JsonMapper
+                    .builder()
+                    .findAndAddModules()
+                    .build()
+            val withHook =
+                WebEventEmitter(
+                    ExecutionContext(pipelineId, 3, userId, correlationId, ExecutionTrigger.REST, "{}", workspaceId),
+                    null,
+                    registry,
+                    eventLog,
+                    eventRepository,
+                    executionRepository,
+                    Dispatchers.Default,
+                ) { registry.register(ExecutionStream(it, userId, sse, mapper)) }
+
+            withHook.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
+
+            verify(exactly = 1) { sse.send(any<org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEventBuilder>()) }
+        }
+
+    @Test
+    fun `the started hook runs before persistence, the recorded hook only after the row exists`() =
+        runTest {
+            val order = mutableListOf<String>()
+            every { executionRepository.create(any()) } answers {
+                order += "insert"
+                firstArg()
+            }
+            every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } just runs
+            every { eventLog.append(any(), any()) } just runs
+
+            hookedEmitter(onRecorded = { order += "recorded" }, onStarted = { order += "started" })
+                .emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
+
+            order shouldBe listOf("started", "insert", "recorded")
+        }
+
+    @Test
+    fun `fail closed - an unwritable RUNNING row stops the scheduled execution before any event row (A14)`() =
+        runTest {
+            every { executionRepository.create(any()) } throws RuntimeException("db down")
+            every { eventLog.append(any(), any()) } just runs
+            var recorded = false
+
+            val thrown =
+                runCatching {
+                    hookedEmitter(failClosed = true, onRecorded = { recorded = true })
+                        .emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
+                }.exceptionOrNull()
+
+            (thrown is ExecutionRecordUnwritableException) shouldBe true
+            (thrown as ExecutionRecordUnwritableException).executionId shouldBe executionId
+            recorded shouldBe false
+            verify(exactly = 0) { eventRepository.append(any<UUID>(), any(), any(), any(), any()) }
+        }
+
+    @Test
+    fun `without fail closed the same failure is swallowed and the recorded hook stays silent`() =
+        runTest {
+            every { executionRepository.create(any()) } throws RuntimeException("db down")
+            every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } throws RuntimeException("db down")
+            every { eventLog.append(any(), any()) } just runs
+            var recorded = false
+
+            hookedEmitter(onRecorded = { recorded = true }).emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
+
+            recorded shouldBe false
+        }
+
+    private fun hookedEmitter(
+        failClosed: Boolean = false,
+        onRecorded: (UUID) -> Unit = {},
+        onStarted: (UUID) -> Unit = {},
+    ): WebEventEmitter =
+        WebEventEmitter(
+            context = ExecutionContext(pipelineId, 3, userId, correlationId, ExecutionTrigger.SCHEDULE, "{}", workspaceId),
+            stream = null,
+            streams = registry,
+            eventLog = eventLog,
+            eventRepository = eventRepository,
+            executionRepository = executionRepository,
+            persistenceDispatcher = Dispatchers.Default,
+            failClosedOnRecord = failClosed,
+            onRecorded = onRecorded,
+            onExecutionStarted = onStarted,
+        )
+
     private companion object {
         val NOW: Instant = Instant.parse("2026-08-05T14:30:00Z")
     }

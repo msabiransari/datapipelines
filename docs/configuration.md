@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.27 (single source of truth for every config key)
+**Status:** v1.31 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-09-17
+**Last updated:** 2026-09-25
 
 ---
 
@@ -473,6 +473,26 @@ The budgets every script evaluation runs under — the save/release test suite o
 | `datapipelines.transform.max-string-bytes` | `1048576` | Cap on a single string in any returned row (the same §4.3 code, with the row number) |
 | `datapipelines.transform.max-depth` | `100` | Expression depth bound — time catches recursion, depth catches nesting (the engine's measured bounds, dag-executor §5.3) |
 
+### 3.29 Scheduler (#9)
+
+The scheduler's knobs ([Scheduler](scheduler.md)). Every instance serves the schedule REST routes; `enabled` decides whether THIS instance also dispatches. The library underneath (db-scheduler) reads its own `db-scheduler.*` prefix, and `application.yml` feeds it from these keys (§5) — the library's own defaults (ten threads, a 30-minute shutdown wait) never apply, and `db-scheduler.*` is not an operator surface. Each bound below is enforced when the keys bind: a value outside it refuses startup, naming the key.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.scheduler.enabled` | `true` | This instance dispatches. `false` is **API mode**: schedules can be created, edited and Run now recorded here, but nothing fires from this instance — another instance with `true` runs them. Run at least one dispatching instance, or nothing ever fires |
+| `datapipelines.scheduler.threads` | `2` | Worker threads. A run task holds one only while it admits and launches a run, never for the pipeline's runtime. ≥ 1 |
+| `datapipelines.scheduler.polling-interval-seconds` | `10` | How often due tasks are polled. ≥ 1 |
+| `datapipelines.scheduler.heartbeat-interval-seconds` | `30` | A running task's heartbeat; a task whose instance misses six in a row is revived elsewhere, and a run claimed longer ago than six heartbeats with no execution becomes `unknown`. ≥ 1 |
+| `datapipelines.scheduler.tick-interval-seconds` | `10` | The dispatcher's and the reconciler's fixed delay — how late past its due instant an occurrence is recorded, at worst. ≥ 1 |
+| `datapipelines.scheduler.max-concurrent-runs` | `4` | Scheduled executions in flight on this instance at once. A run that finds no slot retries every 30 s within its lateness window, then ends `not_started` / `capacity`. ≥ 1 |
+| `datapipelines.scheduler.lateness-seconds` | `600` | The admission window: how long after its occurrence (after its recording, for a catch-up or manual run) a run may still start. 1–86 400 |
+| `datapipelines.scheduler.catch-up-max-age-seconds` | `86400` | How old the latest missed occurrence may be for `missed_run_policy: latest` to still run it once. 1–604 800 |
+| `datapipelines.scheduler.shutdown-wait-seconds` | `5` | On shutdown, how long to wait for launches in progress to reach "started" before the executions are drained; also the library's shutdown wait. 1–15 — Spring's per-phase stop timeout is 30 s and the execution drain needs its own 20 s |
+| `datapipelines.scheduler.min-interval-seconds` | `300` | A cron whose consecutive occurrences come closer than this (in the 14 days after the save) is refused, `schedule.validation.interval_too_short`. ≥ 60 |
+| `datapipelines.scheduler.max-schedules-per-workspace` | `100` | Live schedules per workspace; one more is `schedule.limit.per_workspace`. ≥ 1 |
+
+Scheduled runs keep the instance's execution timeout (`datapipelines.executor.execution-timeout-seconds`) and ask for the maximum result TTL (`datapipelines.result.ttl-max-seconds`); there is no scheduler-specific budget in v1. One Spring Boot key is set with them: `management.health.db-scheduler.enabled: false` — the library's health indicator reports DOWN on an API-mode instance (it never starts there), and a dispatcher stall must not restart a pod; watch the scheduler's metrics instead ([Observability §4](observability.md#4-metrics)).
+
 ---
 
 ## 4. Precedence
@@ -532,6 +552,8 @@ management:                      # §3.14 — actuator on the management port ON
         include: "health"        # never "" and never exclude:"*" — see §3.14
   health:
     diskspace:
+      enabled: false
+    db-scheduler:                  # §3.29 — the scheduler is observed through its metrics
       enabled: false
 
 datapipelines:
@@ -719,6 +741,29 @@ datapipelines:
     max-value-bytes: ${DATAPIPELINES_TRANSFORM_MAX_VALUE_BYTES:1048576}
     max-string-bytes: ${DATAPIPELINES_TRANSFORM_MAX_STRING_BYTES:1048576}
     max-depth: ${DATAPIPELINES_TRANSFORM_MAX_DEPTH:100}
+  scheduler:
+    enabled: ${DATAPIPELINES_SCHEDULER_ENABLED:true}
+    threads: ${DATAPIPELINES_SCHEDULER_THREADS:2}
+    polling-interval-seconds: ${DATAPIPELINES_SCHEDULER_POLLING_INTERVAL_SECONDS:10}
+    heartbeat-interval-seconds: ${DATAPIPELINES_SCHEDULER_HEARTBEAT_INTERVAL_SECONDS:30}
+    tick-interval-seconds: ${DATAPIPELINES_SCHEDULER_TICK_INTERVAL_SECONDS:10}
+    max-concurrent-runs: ${DATAPIPELINES_SCHEDULER_MAX_CONCURRENT_RUNS:4}
+    lateness-seconds: ${DATAPIPELINES_SCHEDULER_LATENESS_SECONDS:600}
+    catch-up-max-age-seconds: ${DATAPIPELINES_SCHEDULER_CATCH_UP_MAX_AGE_SECONDS:86400}
+    shutdown-wait-seconds: ${DATAPIPELINES_SCHEDULER_SHUTDOWN_WAIT_SECONDS:5}
+    min-interval-seconds: ${DATAPIPELINES_SCHEDULER_MIN_INTERVAL_SECONDS:300}
+    max-schedules-per-workspace: ${DATAPIPELINES_SCHEDULER_MAX_SCHEDULES_PER_WORKSPACE:100}
+
+# The scheduler's library reads its own prefix; every value comes from datapipelines.scheduler.*
+# above (§3.29). Framework wiring, not an operator surface.
+db-scheduler:
+  threads: ${datapipelines.scheduler.threads}
+  polling-interval: ${datapipelines.scheduler.polling-interval-seconds}s
+  heartbeat-interval: ${datapipelines.scheduler.heartbeat-interval-seconds}s
+  missed-heartbeats-limit: 6
+  shutdown-max-wait: ${datapipelines.scheduler.shutdown-wait-seconds}s
+  table-name: scheduled_tasks
+  immediate-execution-enabled: true
 ```
 
 > **Note:** OIDC provider config is in the app's own YAML namespace (`datapipelines.auth.oidc.providers`), NOT in Spring Security's native `spring.security.oauth2.client.*` namespace. Our `OidcConfig` bean reads this list and builds `ClientRegistration` objects programmatically. See [Auth spec §5.2](auth.md#52-clientregistration-bean-built-at-startup).
@@ -819,6 +864,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.31 | scheduler lane 1 (#9) — numbered after origin/main's v1.30 (197) | New **§3.29 Scheduler**: the eleven `datapipelines.scheduler.*` keys (dispatch on/off — API mode, threads, polling, heartbeat, tick, max concurrent runs, lateness, catch-up reach, shutdown wait, the two save guards) with their bounds, enforced at binding; `management.health.db-scheduler.enabled: false`. §5 template gains the `scheduler:` block and the top-level `db-scheduler:` wiring fed from it. Status caught up (it read v1.27 after v1.29's row; main's v1.30 row is 197's). |
 | 2026-09-24 | v1.29 | 224 (#224) | §3.18 gains `datapipelines.bootstrap.demo-api-key` (committed default, blank = off, changed = rotation) and §3.22 the `datapipelines.endpoints.key-request-budget.*` pair (window 60 s, 60 requests, `0` = off); §7 gains the demo-key shape/hardened check and the budget bounds check (checks 28 and 29). The demo key and its page section are rest-api §19's worked example. |
 | 2026-09-23 | v1.28 | 7b (#7) | New **§3.28 Transform evaluation**: the nine `datapipelines.transform.*` budgets (evaluate/suite timeouts, pool size/queue, abandon grace, the input/output caps, max depth) behind the transform test suite, `templates_evaluate` and the evaluate route; §7 gains the transform bounds check (check 27: evaluate ≤ suite, grace ≥ 1, pool-queue ≥ pool-size, the caps ≥ 1). §5 template block appended after `mail` (the whole `datapipelines:` tree, as every append). |
 | 2026-09-21 | v1.27 | 186 in-process datasource containment (#186) | §3.26 gains `datapipelines.datasources.file-roots` (default **empty** = no file-backed in-process datasource is registrable by anyone; each root must be an existing directory at boot). §3.17's `member-datasources-enabled` default flips to **`false`**, matching the shipped posture (`deploy/env/defaults.env` has shipped `false` since the workspaces round) — a documented default must match the shipped posture, and the drift guards now pin all three to the same value. §3.17's row also states the flag-independent rule: in-process engines (H2 `mem:`/`file:`, DuckDB, SQLite) are super-admin-only regardless. |

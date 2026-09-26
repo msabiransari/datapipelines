@@ -11,7 +11,18 @@ import java.util.UUID
  * system states its intent explicitly — a promotion peer must not be mistaken for an agent's
  * key at a rule written for one of them.
  */
-enum class AuthMethod { OIDC, API_KEY, PROMOTION }
+enum class AuthMethod {
+    OIDC,
+    API_KEY,
+    PROMOTION,
+
+    /**
+     * #9 R2: the SYSTEM IDENTITY firing a schedule — built in-process by
+     * [SystemActorPrincipals.forWorkspace], never by a filter. No request can carry it: the row it
+     * names has no key and no password, and a session for it is refused ("not a person").
+     */
+    SYSTEM,
+}
 
 /**
  * How a SESSION was established (RFC 8176 `amr` values): [PWD] by a local password, [OIDC]

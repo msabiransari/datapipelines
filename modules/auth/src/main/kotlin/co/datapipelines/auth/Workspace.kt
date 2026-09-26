@@ -79,6 +79,13 @@ data class WorkspaceContext(
     val role: WorkspaceRole = WorkspaceRole.VIEWER,
     val superAdmin: Boolean = false,
     val implicit: Boolean = false,
+    /**
+     * #9 R2: this context is the SYSTEM IDENTITY's, built for one scheduled launch — not a
+     * membership. [permits] then asks the resolver's system arm ([PermissionResolver.holdsAsSystemActor])
+     * and [role] is never consulted. LAST and defaulting false, so every existing construction
+     * is a member's.
+     */
+    val systemActor: Boolean = false,
 ) {
     /** D7 — this action is being taken by a super admin outside their own memberships. */
     val actingViaSuperAdmin: Boolean get() = implicit
@@ -87,18 +94,32 @@ data class WorkspaceContext(
      * Does a principal in this context hold [permission]? The matrix's one question, asked of the
      * installed [PermissionResolver] with this workspace named (security-assurance record §7.1, B4).
      */
-    fun permits(permission: Permission): Boolean = PermissionResolution.resolver.holds(id, role, superAdmin, permission)
+    fun permits(permission: Permission): Boolean =
+        if (systemActor) {
+            PermissionResolution.resolver.holdsAsSystemActor(id, permission)
+        } else {
+            PermissionResolution.resolver.holds(id, role, superAdmin, permission)
+        }
 
     /**
      * The ROLE this context was judged as — a refusal's `held` detail (#215 A.6): `super_admin`
      * for a super admin, else the membership's wire (`viewer` … `workspace_admin`). Informative
      * only: no code compares it, every decision asks [permits].
      */
-    val heldRole: String get() = if (superAdmin) SUPER_ADMIN_WIRE else role.wire
+    val heldRole: String
+        get() =
+            when {
+                systemActor -> SYSTEM_ACTOR_WIRE
+                superAdmin -> SUPER_ADMIN_WIRE
+                else -> role.wire
+            }
 
     companion object {
         /** [heldRole]'s token for the instance super admin — the fifth column of auth.md §7.6. */
         const val SUPER_ADMIN_WIRE = "super_admin"
+
+        /** [heldRole]'s token for the system identity (#9 R2) — informative, like every `held` detail; not a role. */
+        const val SYSTEM_ACTOR_WIRE = "system"
 
         /** The context a super admin runs in inside a workspace: their explicit [role] if any, [implicit] otherwise. */
         fun superAdminOver(

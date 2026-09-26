@@ -142,6 +142,8 @@ class PipelineErrorCodesSpecDriftTest {
                 "pipeline.check.",
                 // 7c (#7) — the TRANSFORM node's execution-time family (§13.18).
                 "pipeline.transform.",
+                // #9 — the scheduler's refusals (§13.19).
+                "schedule.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")
@@ -196,6 +198,14 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Template.IMPLEMENTS_UNRESOLVED,
                 PipelineErrorCodes.Limits.RATE_LIMIT_EXCEEDED,
                 PipelineErrorCodes.Limits.RATE_LIMIT_UNAVAILABLE,
+                // #9 — a schedule IS the entity (like `template.not_found`): its not-found, name,
+                // revision and block states are properties of the schedule named, with no entity
+                // dimension under it. A run's own refusals keep three segments (`schedule.run.*`).
+                PipelineErrorCodes.Schedule.NOT_FOUND,
+                PipelineErrorCodes.Schedule.NAME_TAKEN,
+                PipelineErrorCodes.Schedule.REVISION_CONFLICT,
+                PipelineErrorCodes.Schedule.BLOCKED,
+                PipelineErrorCodes.Schedule.NOT_BLOCKED,
                 PipelineErrorCodes.Result.EXECUTION_NOT_FOUND,
                 PipelineErrorCodes.Result.EXECUTION_INCOMPLETE,
                 PipelineErrorCodes.Result.EXECUTION_FAILED,

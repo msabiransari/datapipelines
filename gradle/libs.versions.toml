@@ -183,6 +183,15 @@ jsoup = "1.23.2"
 # review: small upstream project (99 stars, 17 open issues, last push 2026-07-08 at
 # dispatch) — recorded on purpose in modules/scripting/README.md too.
 jsonata = "0.9.10"
+# db-scheduler — the scheduler's durable queue (scheduler design revision §1/§2.2, #9 lane 1).
+# Maven Central <release>16.12.0</release> for db-scheduler AND
+# db-scheduler-spring-boot-starter, verified against repo1.maven.org maven-metadata.xml on
+# 2026-09-25 (lastUpdated 20260529; the search index's 15.6.0 is stale). Apache-2.0; the
+# GitHub Advisory API lists 0 advisories for the artifact (2026-09-25); upstream active
+# (last push 2026-09-21). The starter is built against Spring Boot 3.5.14 (ours 3.5.16) and
+# pulls db-scheduler-spring-common at the same version. Its Java-serialization default is
+# overridden in modules/scheduler (record §2.2, A8).
+db-scheduler = "16.12.0"
 
 [libraries]
 # --- Spring Boot starters (version from the BOM) -----------------------------
@@ -274,6 +283,11 @@ jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
 # --- Transform script engine (#7 lane 7a; NOT BOM-managed) --------------------
 # Rationale and bus-factor note are at the `jsonata` version pin.
 jsonata = { module = "com.dashjoin:jsonata", version.ref = "jsonata" }
+
+# --- Scheduling (#9; NOT BOM-managed) ------------------------------------------
+# Rationale at the `db-scheduler` version pin. Only modules/scheduler declares them.
+db-scheduler = { module = "com.github.kagkarlsson:db-scheduler", version.ref = "db-scheduler" }
+db-scheduler-spring-boot-starter = { module = "com.github.kagkarlsson:db-scheduler-spring-boot-starter", version.ref = "db-scheduler" }
 
 # --- Metrics / logging (BOM-managed) -----------------------------------------
 micrometer-core = { module = "io.micrometer:micrometer-core" }

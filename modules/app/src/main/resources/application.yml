@@ -123,6 +123,12 @@ management:
     # a disk-space signal would restart a perfectly healthy pod.
     diskspace:
       enabled: false
+    # #9 (scheduler design revision §7.2): db-scheduler's own health indicator reports DOWN until
+    # the scheduler starts — which an API-mode instance never does — and a dispatcher stall must
+    # not restart a pod. Spring Boot's own framework key; the scheduler is observed through its
+    # metrics instead (observability.md §4.1).
+    db-scheduler:
+      enabled: false
 
 datapipelines:
   redis:
@@ -484,3 +490,33 @@ datapipelines:
     max-value-bytes: ${DATAPIPELINES_TRANSFORM_MAX_VALUE_BYTES:1048576}
     max-string-bytes: ${DATAPIPELINES_TRANSFORM_MAX_STRING_BYTES:1048576}
     max-depth: ${DATAPIPELINES_TRANSFORM_MAX_DEPTH:100}
+  # The scheduler (#9; configuration.md §3.29, scheduler design revision §7.2). Appended after the
+  # whole datapipelines: tree (the reparenting lesson — MISTAKES.md).
+  scheduler:
+    # This instance dispatches; false = API mode (REST works, nothing fires from here).
+    enabled: ${DATAPIPELINES_SCHEDULER_ENABLED:true}
+    threads: ${DATAPIPELINES_SCHEDULER_THREADS:2}
+    polling-interval-seconds: ${DATAPIPELINES_SCHEDULER_POLLING_INTERVAL_SECONDS:10}
+    heartbeat-interval-seconds: ${DATAPIPELINES_SCHEDULER_HEARTBEAT_INTERVAL_SECONDS:30}
+    tick-interval-seconds: ${DATAPIPELINES_SCHEDULER_TICK_INTERVAL_SECONDS:10}
+    max-concurrent-runs: ${DATAPIPELINES_SCHEDULER_MAX_CONCURRENT_RUNS:4}
+    lateness-seconds: ${DATAPIPELINES_SCHEDULER_LATENESS_SECONDS:600}
+    catch-up-max-age-seconds: ${DATAPIPELINES_SCHEDULER_CATCH_UP_MAX_AGE_SECONDS:86400}
+    shutdown-wait-seconds: ${DATAPIPELINES_SCHEDULER_SHUTDOWN_WAIT_SECONDS:5}
+    min-interval-seconds: ${DATAPIPELINES_SCHEDULER_MIN_INTERVAL_SECONDS:300}
+    max-schedules-per-workspace: ${DATAPIPELINES_SCHEDULER_MAX_SCHEDULES_PER_WORKSPACE:100}
+
+# db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
+# (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a
+# 30-minute shutdown wait — A19) never apply. The starter's start gate is replaced by the scheduler
+# module's own (it never starts in API mode), so `delay-startup-until-context-ready` is moot.
+db-scheduler:
+  threads: ${datapipelines.scheduler.threads}
+  polling-interval: ${datapipelines.scheduler.polling-interval-seconds}s
+  heartbeat-interval: ${datapipelines.scheduler.heartbeat-interval-seconds}s
+  # The record's "six missed heartbeats" (§7.2), fixed — SchedulerProperties.MISSED_HEARTBEATS_LIMIT.
+  missed-heartbeats-limit: 6
+  shutdown-max-wait: ${datapipelines.scheduler.shutdown-wait-seconds}s
+  table-name: scheduled_tasks
+  # A run task recorded by Run now executes on this instance without waiting for the next poll.
+  immediate-execution-enabled: true

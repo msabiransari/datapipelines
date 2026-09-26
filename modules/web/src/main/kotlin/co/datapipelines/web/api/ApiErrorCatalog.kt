@@ -96,6 +96,11 @@ object ApiErrorCatalog {
             // one of its codes is a 400, so 400 is the honest default; the publish-time and
             // resolution-time refusals each name their own status in EXCEPTIONS below.
             "endpoint." to HttpStatus.BAD_REQUEST,
+            // #9 §13.19 — the scheduler's save-time validation: every one is the caller's request, 400.
+            "schedule.validation." to HttpStatus.BAD_REQUEST,
+            // #9 §13.19 — the rest of the family is a state conflict (a taken name, a stale
+            // revision, an overlap, a block, the per-workspace cap); the two 404s are EXCEPTIONS.
+            "schedule." to HttpStatus.CONFLICT,
         )
 
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
@@ -104,6 +109,9 @@ object ApiErrorCatalog {
             // 091 §13.7: the one `auth.api_key.` code that is not 401. The credential is fine;
             // the ISSUANCE BODY named an expiry that is not usable, which is a 400.
             co.datapipelines.auth.AuthErrorCodes.API_KEY_EXPIRY_INVALID to HttpStatus.BAD_REQUEST,
+            // #9 §13.19 — a schedule or run the caller's workspace does not hold (or the lens hides).
+            co.datapipelines.scheduler.ScheduleErrorCodes.NOT_FOUND to HttpStatus.NOT_FOUND,
+            co.datapipelines.scheduler.ScheduleErrorCodes.RUN_NOT_FOUND to HttpStatus.NOT_FOUND,
             // §12's duplicate_name row documents HTTP 409 ("mapped from the UNIQUE constraint").
             PipelineErrorCodes.Validation.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Import.VERSION_CONFLICT to HttpStatus.CONFLICT,
@@ -385,6 +393,10 @@ object ApiErrorCatalog {
             // author. The publish-time refusals carry their own overrides below.
             "endpoint.request." to "The request to this endpoint isn't valid. Every problem with it is listed in the error details.",
             "endpoint." to "This published endpoint couldn't serve the request.",
+            // #9 — the schedule families: validation names the field in its details; the rest
+            // is a state the schedule is in, which the message and details spell out.
+            "schedule.validation." to "This schedule isn't valid yet. Check the reported field and try again.",
+            "schedule." to "This schedule can't do that right now. The details say why.",
         )
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =

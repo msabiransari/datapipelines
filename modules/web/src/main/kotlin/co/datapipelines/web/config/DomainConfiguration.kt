@@ -393,8 +393,8 @@ class DomainConfiguration {
      * counts of a workspace, by kind. Auth cannot query these tables (module-structure §4.2),
      * so the aggregation layer answers — `countAll` for pipelines, the active-page listing
      * without its LIMIT for templates (no count API exists and the templates module's write
-     * window is T23-only), and the registry's rows filtered to the workspace for bound
-     * datasources. Counts are bounded by what a workspace owns; exact beats a UNION across
+     * window is T23-only), the registry's rows filtered to the workspace for bound
+     * datasources, and the live schedules (#9). Counts are bounded by what a workspace owns; exact beats a UNION across
      * three modules' private schemas.
      */
     @Bean
@@ -402,10 +402,17 @@ class DomainConfiguration {
         pipelines: PipelineRepository,
         templates: TemplateRepository,
         datasources: DatasourceRegistry,
+        // #9: a live schedule is workspace content — deleting its workspace under it would strand a
+        // job that fires into a deleted workspace. Lazy: the scheduler's beans come later.
+        schedules: org.springframework.beans.factory.ObjectProvider<co.datapipelines.scheduler.ScheduleService>,
     ): WorkspaceContentCheck =
         WorkspaceContentCheck { workspaceId ->
             buildMap {
                 pipelines.countAll(workspaceId).takeIf { it > 0 }?.let { put("pipelines", it) }
+                schedules.ifAvailable
+                    ?.countLive(workspaceId)
+                    ?.takeIf { it > 0 }
+                    ?.let { put("schedules", it) }
                 templates.list(workspaceId, offset = 0, limit = UNBOUNDED).takeIf { it.isNotEmpty() }?.let { put("templates", it.size) }
                 datasources
                     .list()

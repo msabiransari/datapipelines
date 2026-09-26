@@ -214,6 +214,8 @@ object AuthErrorCodes {
             "endpoint." to "1314-published-endpoints",
             "semantics." to "1315-learned-semantics",
             "mcp." to "1316-mcp-surface",
+            // #9 — the scheduler's refusals (validation, state, not-found).
+            "schedule." to "1319-schedules",
         )
 }
 

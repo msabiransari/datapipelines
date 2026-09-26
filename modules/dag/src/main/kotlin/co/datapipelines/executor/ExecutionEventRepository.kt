@@ -86,6 +86,29 @@ class ExecutionEventRepository(
             MAPPER,
         )
 
+    /**
+     * One PAGE of an execution's durable events, in sequence order, strictly after [afterEventId]
+     * — `GET /api/v1/executions/{id}/events?format=json` (rest-api §10.3A, scheduler design
+     * revision §5.4): the durable record readable for its whole retention, after the Redis hour.
+     * The same UNIQUE-constraint index serves the range.
+     */
+    fun findPage(
+        executionId: UUID,
+        afterEventId: Int,
+        limit: Int,
+    ): List<ExecutionEventRecord> =
+        jdbc.query(
+            """
+            SELECT execution_id, event_id, event_type, timestamp, payload_json::TEXT AS payload_json
+              FROM execution_events
+             WHERE execution_id = :executionId AND event_id > :after
+             ORDER BY event_id
+             LIMIT :limit
+            """.trimIndent(),
+            mapOf("executionId" to executionId, "after" to afterEventId, "limit" to limit),
+            MAPPER,
+        )
+
     /** The highest sequence number stored for [executionId], or 0 when it has no events yet. */
     fun lastEventId(executionId: UUID): Int =
         jdbc.queryForObject(

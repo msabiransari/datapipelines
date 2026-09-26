@@ -22,6 +22,14 @@ enum class ExecutionTrigger {
      * carries the key id — which is what lets an endpoint key read its own result and no other.
      */
     ENDPOINT,
+
+    /**
+     * A schedule fired (#9, scheduler design revision §4, §7). `executed_by` is the SYSTEM identity
+     * (R2) and `executed_by_key_kind` is NULL; the schedule and any requesting person are on the
+     * scheduler's own `schedule_runs` row, which is the attribution. Visible to every member whose
+     * role reaches `execution.read` (R3) — [ExecutionRepository.findByUser]'s scheduled arm.
+     */
+    SCHEDULE,
 }
 
 /**
@@ -384,6 +392,41 @@ class ExecutionRepository(
     }
 
     /**
+     * #9 R3 — the runs a member WITHOUT `execution.read_all` may see: their OWN runs
+     * ([findByUser]'s predicate) **plus every scheduled run of the workspace**
+     * ([SCHEDULED_RUN_PREDICATE]) — a scheduled run is attributed to its schedule and visible to
+     * every member whose role reaches `execution.read`. The REST listing (`GET /api/v1/executions`)
+     * reads this; the surfaces not yet ruled on (the UI's lists, MCP's `executions_list`) keep
+     * [findByUser], so a scheduled run never takes a page slot a later visibility filter drops.
+     */
+    @Suppress("LongParameterList")
+    fun findVisible(
+        workspaceId: UUID,
+        userId: UUID,
+        pipelineId: UUID? = null,
+        status: ExecutionStatus? = null,
+        startedAfter: Instant? = null,
+        startedBefore: Instant? = null,
+        limit: Int = DEFAULT_PAGE,
+        offset: Int = 0,
+    ): List<ExecutionRecord> {
+        val (where, params) =
+            filteredQuery(
+                "($OWN_RUN_PREDICATE OR $SCHEDULED_RUN_PREDICATE) AND $WORKSPACE_PREDICATE",
+                mapOf("userId" to userId, "workspaceId" to workspaceId),
+                pipelineId,
+                status,
+                startedAfter,
+                startedBefore,
+            )
+        return jdbc.query(
+            "$SELECT_COLUMNS $where ORDER BY started_at DESC LIMIT :limit OFFSET :offset",
+            params + mapOf("limit" to limit, "offset" to offset),
+            MAPPER,
+        )
+    }
+
+    /**
      * Every execution **in [workspaceId]**, newest first — the **admin** listing behind
      * `GET /executions` (rest-api §10.1) when the principal holds `admin` and is therefore not
      * confined to their own runs (auth §7.6). Deliberately a separate method rather than a
@@ -536,6 +579,14 @@ class ExecutionRepository(
          */
         const val OWN_RUN_PREDICATE =
             "executed_by = :userId AND (executed_by_key_kind IS NULL OR executed_by_key_kind <> 'endpoint')"
+
+        /**
+         * #9 R3 — a SCHEDULED run is visible to every member whose role reaches `execution.read`,
+         * not only to its executor (the system identity, who reads nothing). The Kotlin twin is the
+         * schedule branch of `ExecutionRecord.visibleTo` (web). It lifts visibility, never
+         * ownership: cancelling a scheduled run still needs `execution.cancel_all`.
+         */
+        const val SCHEDULED_RUN_PREDICATE = "triggered_via = 'SCHEDULE'"
 
         /** The one place the crash sweep's error envelope is written (F2). */
         val INSTANCE_LOST_JSON = """{"code":"${PipelineErrorCodes.Execution.INSTANCE_LOST}"}"""
