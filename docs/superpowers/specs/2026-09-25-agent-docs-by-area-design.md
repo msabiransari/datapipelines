@@ -1,6 +1,6 @@
 # Agent documentation by functional area, served by the application
 
-**Status:** draft with the owner's §9 rulings taken (2026-09-25); RATIFIED by lane 242a's first commit.
+**Status:** RATIFIED (2026-09-25, by lane 242a; owner's §9 rulings taken 2026-09-25).
 GitHub #242; the first slice, the handshake cap, is #241.
 **Direction (owner, 2026-09-25):** the documentation an agent reads is served by the application,
 assembled from what the application already knows; no static skill is kept in the repository as a
