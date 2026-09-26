@@ -28,8 +28,11 @@
       </div>
       <div class="app-card-b app-card-b-flush">
         <div class="app-identity">
+          <!-- #197: the picture loads through the app's own /avatar proxy (the CSP's img-src is
+               'self' data:); the stored provider URL never reaches the page — the same tag the
+               shell's avatar menu uses (layouts/default.html). -->
           <img th:if="${user?.profilePictureUrl != null}" class="app-identity-avatar"
-               th:src="${user.profilePictureUrl}" alt="" referrerpolicy="no-referrer">
+               th:src="@{/avatar}" alt="" referrerpolicy="no-referrer">
           <span th:if="${user?.profilePictureUrl == null}" class="app-identity-avatar app-identity-initials"
                 th:text="${user?.displayName != null} ? ${#strings.toUpperCase(#strings.substring(user.displayName, 0, user.displayName.length() >= 2 ? 2 : 1))} : '?'">MS</span>
           <div class="app-identity-text">
