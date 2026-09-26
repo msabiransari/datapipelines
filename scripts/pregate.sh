@@ -108,11 +108,18 @@ GUARDS[":modules:auth"]="co.datapipelines.auth.ScopeMatrixSpecDriftTest co.datap
 GUARDS[":modules:pipeline-contract"]="co.datapipelines.pipeline.PipelineErrorCodesSpecDriftTest"
 GUARDS[":modules:mcp-server"]="co.datapipelines.mcp.SkillDistributionTest co.datapipelines.mcp.McpToolSurfaceSpecDriftTest"
 GUARDS[":modules:app"]="co.datapipelines.config.OrgConfigKeysSpecDriftTest co.datapipelines.config.ConfigValidatorCheckCountTest"
+# 242a's merge gate went red on the datasources doc-drift guard its pregate never ran (the lane
+# had repointed paths the checklist parses); 242b adds it so a docs lane sees it here.
+GUARDS[":modules:datasources"]="co.datapipelines.datasources.DialectChecklistDriftTest"
 GUARDS[":modules:web"]="co.datapipelines.web.api.ApiErrorCatalogSpecDriftTest co.datapipelines.web.api.RequiredScopeCoverageTest co.datapipelines.web.api.RequiredScopeKonsistTest co.datapipelines.web.api.MutatingHandlerScopeFloorTest co.datapipelines.web.api.PublicRouteWalkerTest co.datapipelines.web.api.MatrixRowReachabilityTest co.datapipelines.web.api.ReadFloorTest co.datapipelines.web.ui.site.SiteRouteFloorTest co.datapipelines.web.ui.site.SiteSeoMetaTest co.datapipelines.web.ui.site.SiteKeywordCoverageTest co.datapipelines.web.ui.site.SiteHandTypedCountsGuardTest co.datapipelines.web.ui.site.SiteClaimCitationTest co.datapipelines.web.ui.DocsLinkRewriteTest"
 # 217a's architecture rule lives in the integration module and a lane rarely touches it, so the
 # changed-classes stage never runs it; a new transport→repository pair then surfaces at the merge
 # gate (7d, 2026-09-25). A source scan: no containers, seconds.
-GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest"
+# 242b adds the entry-inventory pair: both parse auth.md's §8.6.2 rows against the RUNNING app,
+# and 242a's merge gate went red on them for a doc-row wording its pregate never executed.
+# They boot the shared containers, so they are the expensive end of this stage — still cheaper
+# than a full gate cycle.
+GUARDS[":tests:integration-tests"]="co.datapipelines.integration.ArchitectureGuardTest co.datapipelines.integration.EntryInventoryE2eTest co.datapipelines.integration.PublicContractE2eTest"
 args=()
 for m in "${!GUARDS[@]}"; do
   args+=("$m:test")
