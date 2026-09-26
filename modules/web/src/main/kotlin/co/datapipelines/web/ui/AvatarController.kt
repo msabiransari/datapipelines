@@ -22,6 +22,8 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 /**
  * The avatar proxy (#197): `GET /avatar` serves the SIGNED-IN principal's own OIDC picture,
@@ -47,15 +49,19 @@ import java.time.Instant
  *   initials, exactly the no-OIDC-picture rendering. A malicious or compromised IdP can
  *   therefore point the fetch only at hosts the operator has already named.
  * - **Scheme and authority checks** — `http`/`https` only, no `userinfo` component, a host
- *   required; anything else answers 404 without a network hop.
+ *   required, and NO explicit port (#246): the allowlist entries are bare hostnames, so a
+ *   port in the URL has nothing to match and would otherwise steer the connection to any
+ *   port on a trusted host. Anything else answers 404 without a network hop.
  * - **No redirects followed** — a 3xx is a refusal, so a compliant first answer cannot be
  *   laundered through a host the allowlist never saw.
  * - **Size cap** — [MAX_BYTES] read from the body regardless of the declared
  *   `Content-Length` (which the remote server controls); a bigger body is a refusal.
- * - **Image content only** — the response's `Content-Type` must be an `image` type
- *   (`image/png`, `image/jpeg`, ...); the type is passed through verbatim, never sniffed.
- * - **Bounded time** — a few seconds of connect/request budget, so a slow provider host
- *   holds one render thread briefly, not a browser.
+ * - **Raster images only** — the response's `Content-Type` must be one of [RASTER_TYPES]
+ *   (PNG, JPEG, GIF, WebP; #246 — SVG is out, see there); the type is passed through
+ *   verbatim, never sniffed.
+ * - **Bounded time** — the whole fetch, headers AND body, completes within
+ *   [AvatarImageFetcher.BODY_DEADLINE] or is abandoned (#246), so a slow or stalled provider
+ *   host holds one request thread for at most that long, never a browser.
  *
  * A small TTL cache ([AvatarCache]) keeps a page's renders from re-fetching the provider
  * on every request, and the answer carries `Cache-Control: private` so the browser caches
@@ -104,6 +110,7 @@ class AvatarController(
                 uri == null -> "unparseable URL"
                 uri.userInfo != null -> "userinfo component"
                 uri.host?.lowercase() !in allowedHosts -> "host not allowlisted"
+                uri.port != -1 -> "port not allowed"
                 uri.scheme?.lowercase() !in SCHEMES -> "scheme not http(s)"
                 else -> null
             }
@@ -126,6 +133,16 @@ class AvatarController(
 
         /** The most bytes the proxy will read from a provider answer. */
         const val MAX_BYTES = 1 shl 20
+
+        /**
+         * The only content types served (#246), compared on type and subtype. Raster formats
+         * decode to pixels and nothing else. SVG is out: it is a DOCUMENT format that can carry
+         * script, event handlers and external references, and `/avatar` answers from this
+         * origin — `nosniff` and the CSP contain a direct navigation to it today, but a raster
+         * allowlist means the answer can never be active content whatever the headers say.
+         */
+        val RASTER_TYPES: Set<MediaType> =
+            setOf(MediaType.IMAGE_PNG, MediaType.IMAGE_JPEG, MediaType.IMAGE_GIF, MediaType("image", "webp"))
 
         /** No cached or fetched avatar is admitted above this — bounds the cache's footprint. */
         const val CACHE_ADMIT_MAX_BYTES = 256 * 1024
@@ -188,12 +205,14 @@ class AvatarImage(
 /**
  * The transport half of the avatar proxy — the fence's transport behaviors live here because
  * only a real HTTP client can hold them: redirects never followed, [AvatarController.MAX_BYTES]
- * read from the body whatever the declared `Content-Length` says, an `image` content type
- * required. Open for tests that substitute the WIRE (an in-JVM server), never the semantics.
+ * read from the body whatever the declared `Content-Length` says, one of
+ * [AvatarController.RASTER_TYPES] required, and the whole fetch bounded by [BODY_DEADLINE].
+ * Open for tests that substitute the WIRE (an in-JVM server), never the semantics.
+ * [close] stops the deadline thread (Spring infers it as the bean's destroy method).
  */
 open class AvatarImageFetcher(
     private val maxBytes: Int = AvatarController.MAX_BYTES,
-) {
+) : AutoCloseable {
     private val http: HttpClient =
         HttpClient
             .newBuilder()
@@ -201,8 +220,21 @@ open class AvatarImageFetcher(
             .connectTimeout(CONNECT_TIMEOUT)
             .build()
 
+    /**
+     * Closes a response body when its fetch's deadline passes. A read blocked on a body that
+     * stopped arriving cannot check a clock; the JDK's response stream wakes such a reader
+     * when it is closed (and cancels the exchange), so the close IS the deadline for a stall.
+     */
+    private val deadlines =
+        ScheduledThreadPoolExecutor(1) { runnable ->
+            Thread(runnable, "dp-avatar-deadline").apply { isDaemon = true }
+        }.apply { removeOnCancelPolicy = true }
+
     /** Null = refused by the fence or failed — the controller cannot tell a browser why, and does not try. */
     open fun fetch(uri: URI): AvatarImage? {
+        // One budget from here: connect and headers ([REQUEST_TIMEOUT], whose JDK timer starts
+        // before connect) and then the body, which gets whatever of it the headers left.
+        val deadline = System.nanoTime() + BODY_DEADLINE.toNanos()
         val request =
             HttpRequest
                 .newBuilder(uri)
@@ -220,22 +252,32 @@ open class AvatarImageFetcher(
                 log.info("event=avatar.fetch_failed host={} error=interrupted", uri.host)
                 return null
             }
-        return read(response)
+        return read(response, deadline)
     }
 
-    /** Status, content type and capped read — each fence in turn, each failure a quiet null. */
-    private fun read(response: HttpResponse<InputStream>): AvatarImage? {
+    override fun close() {
+        deadlines.shutdownNow()
+    }
+
+    /** Status, content type and capped, deadline-bound read — each fence in turn, each failure a quiet null. */
+    private fun read(
+        response: HttpResponse<InputStream>,
+        deadline: Long,
+    ): AvatarImage? {
         val stream = response.body()
+        val closeAtDeadline =
+            deadlines.schedule({ runCatching { stream.close() } }, deadline - System.nanoTime(), TimeUnit.NANOSECONDS)
         try {
             val mediaType = imageType(response) ?: return null
-            val bytes = readCapped(stream) ?: return null
+            val bytes = readCapped(stream, deadline) ?: return null
             return AvatarImage(bytes, mediaType)
         } finally {
+            closeAtDeadline.cancel(false)
             runCatching { stream.close() }
         }
     }
 
-    /** The answer's content type, provided the answer is a success carrying an `image` type. */
+    /** The answer's content type, provided the answer is a success carrying one of the raster types. */
     private fun imageType(response: HttpResponse<InputStream>): MediaType? {
         if (response.statusCode() !in HTTP_SUCCESS_MIN..HTTP_SUCCESS_MAX) return null
         val raw = response.headers().firstValue("Content-Type").orElse(null) ?: return null
@@ -246,21 +288,24 @@ open class AvatarImageFetcher(
                 log.info("event=avatar.fetch_failed error=content_type detail={}", e.message)
                 return null
             }
-        return mediaType.takeIf { it.type == "image" }
+        val raster = AvatarController.RASTER_TYPES.any { it.equalsTypeAndSubtype(mediaType) }
+        if (!raster) log.info("event=avatar.fetch_failed error=content_type detail={}", mediaType)
+        return mediaType.takeIf { raster }
     }
 
-    /** Reads up to [maxBytes] bytes; null once the stream runs past the cap (the declared length is not trusted). */
-    private fun readCapped(stream: InputStream): ByteArray? {
+    /**
+     * Reads up to [maxBytes] bytes before [deadline] (a [System.nanoTime] instant); null once the
+     * stream runs past the cap (the declared length is not trusted) or the deadline passes —
+     * checked before every chunk, and a read blocked past it is woken by the scheduled close.
+     */
+    private fun readCapped(
+        stream: InputStream,
+        deadline: Long,
+    ): ByteArray? {
         val buffer = ByteArrayOutputStream(minOf(maxBytes, BUFFER_HINT))
         val chunk = ByteArray(READ_CHUNK)
         while (true) {
-            val read =
-                try {
-                    stream.read(chunk)
-                } catch (e: java.io.IOException) {
-                    log.info("event=avatar.fetch_failed error=read detail={}", e.message)
-                    return null
-                }
+            val read = readChunk(stream, chunk, deadline) ?: return null
             if (read < 0) return buffer.toByteArray()
             val total = buffer.size() + read
             if (total > maxBytes) return null
@@ -268,10 +313,48 @@ open class AvatarImageFetcher(
         }
     }
 
+    /** One chunk's byte count (-1 at the end), or null — logged — once the deadline has passed or the read failed. */
+    private fun readChunk(
+        stream: InputStream,
+        chunk: ByteArray,
+        deadline: Long,
+    ): Int? {
+        if (passed(deadline)) return deadlineRefusal()
+        return try {
+            stream.read(chunk)
+        } catch (e: java.io.IOException) {
+            // A read blocked past the deadline is woken by the scheduled close with an IOException.
+            if (passed(deadline)) {
+                deadlineRefusal()
+            } else {
+                log.info("event=avatar.fetch_failed error=read detail={}", e.message)
+                null
+            }
+        }
+    }
+
+    private fun passed(deadline: Long): Boolean = System.nanoTime() - deadline >= 0
+
+    private fun deadlineRefusal(): Int? {
+        log.info("event=avatar.fetch_failed error=deadline budget_ms={}", BODY_DEADLINE.toMillis())
+        return null
+    }
+
     companion object {
         private val log = LoggerFactory.getLogger(AvatarImageFetcher::class.java)
         private val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(5)
         private val REQUEST_TIMEOUT: Duration = Duration.ofSeconds(5)
+
+        /**
+         * The budget for the WHOLE fetch — connect, headers and body (#246). [REQUEST_TIMEOUT]
+         * bounds only the time to headers; without this a provider that sends headers and
+         * then dribbles (or stops) holds a request thread until the size cap or the
+         * connection's end. 5 s = the header budget the fetch already had, now covering the
+         * body too: a real provider serves an avatar (tens of KB from a CDN) in well under a
+         * second, so the budget refuses only a host that is broken or hostile, and the page
+         * falls back to initials rather than waiting on it.
+         */
+        val BODY_DEADLINE: Duration = Duration.ofSeconds(5)
 
         private const val HTTP_SUCCESS_MIN = 200
         private const val HTTP_SUCCESS_MAX = 299
