@@ -1,10 +1,10 @@
 # Scheduler Specification
 
-**Status:** v1.0 (slice 1 of #9 — the core; the Schedules page, notifications, bindings and the application credential are later slices)
+**Status:** v1.1 (slices 1–2 of #9 — the core and the Schedules page; notifications, bindings and the application credential are later slices)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-26
 
 ---
 
@@ -166,11 +166,15 @@ The drain can need 20 seconds. A container runtime whose stop grace is shorter (
 
 Metrics ([Observability §4.1](observability.md#41-metric-naming)): `datapipelines.scheduler.occurrences{outcome}`, `datapipelines.scheduler.runs.finished{state}`, `datapipelines.scheduler.capacity.retries` and `datapipelines.scheduler.runs.in_flight`. Log events: [Observability §3.4E](observability.md#34e-the-scheduler-events-9) — `scheduler.schedule_blocked` is the one that needs a person. There is no scheduler health component: an API-mode instance never starts the scheduler, and a stalled dispatcher is not a reason to restart a pod.
 
+### 8.4 The page
+
+People manage schedules on the **Schedules** page (`/schedules`, in the rail's Operate group — [UI Screens §4.20](ui-screens.md#420-schedules), slice 2). It adds nothing to this spec: every read and every write it makes is a call to [REST §20](rest-api.md#20-schedules) with the person's session, so what the page can do is exactly what §20 and [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) allow — every member reads, authors and admins write, a hidden button is never the authority. What it shows is this spec made visible: the next five occurrences as §3's function computes them, a blocked schedule's reason (§5.2) beside **Unblock**, and a run's history with its trail and — for a reader who may read executions — the execution's own messages merged in time order (the design revision's R10). Its preview of a pattern is §20.3, the same function the dispatcher uses.
+
 ---
 
 ## 9. Not in slice 1
 
-- **The Schedules page.** Slice 1 is the REST surface; the page (list, form, history with the merged messages) is slice 2.
+- ~~**The Schedules page.**~~ Delivered by slice 2 — §8.4.
 - **Notifications** — mail on start, failure, unknown and blocked — slice 4.
 - **Parameter bindings** (values computed per run, e.g. "the day before the occurrence") — slice 3. Slice 1's parameters are literal.
 - **An application credential.** Slice 1's routes are session-only; organizations that offer scheduling to their own customers call them from a backend with a management credential in slice 5.
@@ -182,4 +186,5 @@ Metrics ([Observability §4.1](observability.md#41-metric-naming)): `datapipelin
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.1 | scheduler lane 2 (#9) | §8.4 **the page**: the Schedules page (UI Screens §4.20) is a client of REST §20 and nothing more — what it shows (the next five, the blocked reason beside Unblock, a run's merged messages) is this spec made visible. §9 records the page as delivered. |
 | 2026-09-25 | v1.0 | scheduler lane 1 (#9) | Initial spec for slice 1: occurrences and the DST rule, missed/overlap/Run now, run states and reasons with what blocks, the system identity, capacity, one dispatcher across instances, shutdown. Written from the ratified design revision and the shipped code. |

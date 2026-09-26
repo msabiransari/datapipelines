@@ -1,0 +1,235 @@
+/* The Schedules page (ui-screens.md §4.20; #9 slice 2).
+ *
+ * The explorer, the panes, the detail header, the key/value strip, the tab card and the run
+ * rows are template-tree.css's — this page wears the pipelines explorer's chrome on purpose.
+ * What is here is only what that sheet has no rule for: the blocked and unknown callouts, the
+ * run rows' due/started pair, the run dialog's Messages table with its source labels, and the
+ * schedule form's layout.
+ *
+ * Tokens only (CLAUDE.md rule 3): every colour, size, gap, radius and font is a design-system
+ * variable; `SchedulesCssTokenTest` refuses a literal colour or a raw px font size here. It
+ * loads from the layout head (ui-screens §3.0): /schedules is a boosted route. */
+
+/* ------------------------------------------------------------------ detail */
+
+.sch-busy {
+  align-self: center;
+}
+
+/* The blocked callout: the danger ACCENT on a quiet surface, not the solid danger slab — it
+   carries a sentence, a code, a time and a button, all of which must stay readable. */
+.sch-blocked {
+  display: grid;
+  gap: var(--gap-xs);
+  border: 1px solid var(--accent-danger);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.sch-blocked > p:first-child {
+  color: var(--accent-danger);
+}
+
+/* A button that reads as a link (it opens a dialog, it navigates nowhere). */
+.sch-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-primary);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* The pattern under its preset wording, on its own line — five fields wrapped mid-pattern
+   read as two patterns. */
+.sch-cron {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: var(--space-0-5, 0);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.sch-refresh {
+  margin-left: auto;
+  align-self: center;
+}
+
+/* A run row: state, origin and reason on the first line; then DUE / STARTED / TOOK as a
+   small two-column grid under them — the pair is read against each other (the record's §6),
+   so each gets a line; then the actions. The meta never shares a line with the chips: the
+   acting column is ~290px at 1440, and a third track there squeezed "due Sat, Sep 26, …" to
+   one word per line (the first screenshot). */
+.sch-runrow {
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+.sch-run-reason {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sch-run-times {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0 var(--gap-sm);
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.sch-run-times dt {
+  color: var(--text-muted);
+}
+
+.sch-run-times dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sch-runs-more {
+  padding-top: var(--gap-sm);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ dialogs */
+
+/* The run and the form need more than `.app-modal-lg`'s reading width: a messages table and
+   a two-column timing row. The gutter keeps the card inside a phone's width. */
+.sch-run-dialog,
+.sch-form-dialog {
+  max-width: min(60rem, calc(100vw - 2 * var(--gap-md)));
+}
+
+.sch-unknown {
+  display: grid;
+  gap: var(--gap-xs);
+  margin-bottom: var(--gap-md);
+}
+
+.sch-steps {
+  margin: 0;
+  padding-left: var(--gap-lg);
+}
+
+.sch-run-kv {
+  margin-bottom: var(--gap-md);
+}
+
+.sch-frozen {
+  margin-bottom: var(--gap-md);
+  font-size: var(--text-sm);
+}
+
+.sch-frozen > summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.sch-json {
+  margin: var(--gap-xs) 0 0;
+  max-height: 16rem;
+}
+
+.sch-messages-h {
+  margin: 0 0 var(--gap-xs);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.sch-messages-scroll {
+  max-height: 24rem;
+  overflow: auto;
+}
+
+.sch-messages {
+  width: 100%;
+  font-size: var(--text-xs);
+}
+
+.sch-messages td {
+  vertical-align: top;
+}
+
+.sch-message-detail {
+  min-width: 12rem;
+  overflow-wrap: anywhere;
+}
+
+.sch-source {
+  font-family: var(--font-mono);
+}
+
+/* ------------------------------------------------------------------ the form */
+
+.sch-form {
+  display: grid;
+  gap: var(--gap-md);
+}
+
+.sch-fieldset {
+  display: grid;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: var(--gap-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.sch-fieldset > legend {
+  padding: 0 var(--gap-xs);
+}
+
+.sch-when-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm) var(--gap-md);
+  align-items: flex-end;
+}
+
+.sch-when-row .ds-field {
+  margin: 0;
+}
+
+.sch-preview {
+  display: grid;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm);
+  border-radius: var(--radius-base);
+  background: var(--surface-inset);
+}
+
+.sch-preview-list {
+  margin: 0;
+  padding-left: var(--gap-lg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.sch-radio {
+  display: flex;
+  gap: var(--gap-xs);
+  align-items: baseline;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.sch-params {
+  display: grid;
+  gap: var(--gap-sm);
+}
+
+.sch-param .ds-field-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  align-items: center;
+}
+
+.sch-form-actions {
+  justify-content: flex-end;
+}
