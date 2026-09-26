@@ -87,7 +87,13 @@ class ExecutionStreamRevocationE2eTest {
 
         // P4's first half: the execution was NOT cancelled by the cut. The admin — whose
         // authority is intact — reads it to COMPLETED, not to the §6.8 disconnect abort.
-        val executionId = E2eSse.parseEvents(body, mapper).firstOrNull()?.second?.get("execution_id")?.asText()
+        val executionId =
+            E2eSse
+                .parseEvents(body, mapper)
+                .firstOrNull()
+                ?.second
+                ?.get("execution_id")
+                ?.asText()
         check(executionId != null) { "the member's stream carried no execution_id: ${body.take(400)}" }
         awaitTerminalCompleted(executionId)
     }
@@ -110,11 +116,15 @@ class ExecutionStreamRevocationE2eTest {
             when (status) {
                 // The metadata's status is the ExecutionStatus wire (§10.2): a finished run is
                 // SUCCESS — COMPLETED is the stream's close reason, not this field.
-                "SUCCESS" -> return
-                "ABORTED", "FAILED" ->
+                "SUCCESS" -> {
+                    return
+                }
+
+                "ABORTED", "FAILED" -> {
                     throw AssertionError(
                         "execution $executionId ended $status — the revocation cancelled a run it must not touch (P4)",
                     )
+                }
             }
             lastStatus = status
             Thread.sleep(TERMINAL_POLL_MILLIS)
@@ -160,7 +170,8 @@ class ExecutionStreamRevocationE2eTest {
     // ------------------------------------------------------------------ fixtures (namespaced, idempotent)
 
     private fun ensureSeeded() {
-        DriverManager.getConnection(SharedE2e.postgres.jdbcUrl, SharedE2e.postgres.username, SharedE2e.postgres.password).use { connection ->
+        val pg = SharedE2e.postgres
+        DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute(
                     """
@@ -190,6 +201,12 @@ class ExecutionStreamRevocationE2eTest {
 
     /** The datasource, the slow template and the one-node pipeline — all REST, all idempotent. */
     private fun fixtures(): String {
+        ensureDatasource()
+        ensureTemplate()
+        return ensurePipeline()
+    }
+
+    private fun ensureDatasource() {
         val existing =
             given()
                 .port(port)
@@ -198,24 +215,25 @@ class ExecutionStreamRevocationE2eTest {
                 .get("/api/v1/datasources/$DATASOURCE")
                 .then()
                 .extract()
-        if (existing.statusCode() != 200) {
-            given()
-                .port(port)
-                .contentType(ContentType.JSON)
-                .asSession(adminSession)
-                .body(
-                    """
-                    {"name": "$DATASOURCE", "display_name": "SSE230 source", "dialect": "POSTGRES",
-                     "jdbc_url": "${SharedE2e.postgres.jdbcUrl.substringBefore("?")}",
-                     "username": "${SharedE2e.postgres.username}", "password": "${SharedE2e.postgres.password}",
-                     "workspace": "$WS_NAME"}
-                    """.trimIndent(),
-                ).`when`()
-                .post("/api/v1/datasources")
-                .then()
-                .statusCode(201)
-        }
+        if (existing.statusCode() == 200) return
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(adminSession)
+            .body(
+                """
+                {"name": "$DATASOURCE", "display_name": "SSE230 source", "dialect": "POSTGRES",
+                 "jdbc_url": "${SharedE2e.postgres.jdbcUrl.substringBefore("?")}",
+                 "username": "${SharedE2e.postgres.username}", "password": "${SharedE2e.postgres.password}",
+                 "workspace": "$WS_NAME"}
+                """.trimIndent(),
+            ).`when`()
+            .post("/api/v1/datasources")
+            .then()
+            .statusCode(201)
+    }
 
+    private fun ensureTemplate() {
         val template =
             given()
                 .port(port)
@@ -230,10 +248,14 @@ class ExecutionStreamRevocationE2eTest {
                 ).`when`()
                 .post("/api/v1/templates")
                 .thenReturn()
+        // 409 is fine: a re-run finds its own fixture already there.
         if (template.statusCode() !in setOf(201, 409)) {
             throw AssertionError("Template $TEMPLATE failed (${template.statusCode()}): ${template.body().asString()}")
         }
+    }
 
+    /** Creates the pipeline (409 → already there, so fetch its id) and returns its UUID. */
+    private fun ensurePipeline(): String {
         val nodes =
             """[
               { "id": "slow_read", "type": "DQL", "source": "$DATASOURCE", "template": { "id": "$TEMPLATE", "version": 1 },

@@ -32,14 +32,18 @@ class WebMetrics(
                 // #230 (P4) — decided BEFORE the terminal question: a revoked stream was cut by
                 // policy with no terminal event of its own, and counting it as a client
                 // disconnect would feed D7's cancellation story a subscriber it never had.
-                stream.isRevoked -> REASON_REVOKED
-                else ->
+                stream.isRevoked -> {
+                    REASON_REVOKED
+                }
+
+                else -> {
                     when (stream.terminalKind) {
                         "pipeline_completed" -> REASON_COMPLETED
                         "pipeline_failed" -> REASON_FAILED
                         "execution_aborted" -> REASON_ABORTED
                         else -> REASON_CLIENT_DISCONNECT
                     }
+                }
             }
         registry
             .timer(SSE_STREAM_DURATION, "close_reason", reason)

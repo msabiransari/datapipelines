@@ -123,7 +123,8 @@ class WebSurfaceConfiguration {
         workspaceService: co.datapipelines.auth.WorkspaceService,
         userService: co.datapipelines.auth.UserService,
     ): co.datapipelines.web.sse.ExecutionStreamAuthority =
-        co.datapipelines.web.sse.ExecutionStreamAuthority(executions, principalLiveness, workspaceService, userService)
+        co.datapipelines.web.sse
+            .ExecutionStreamAuthority(executions, principalLiveness, workspaceService, userService)
 
     @Bean
     fun executionStreamRegistry(

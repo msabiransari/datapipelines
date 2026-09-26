@@ -1,11 +1,11 @@
 package co.datapipelines.web.sse
 
 import co.datapipelines.auth.ApiKeyRepository
+import co.datapipelines.auth.AuditLogger
 import co.datapipelines.auth.AuthCache
+import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.AuditLogger
-import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.LastUsedWorkspaceStore
 import co.datapipelines.auth.PrincipalLiveness
 import co.datapipelines.auth.User

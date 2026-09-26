@@ -68,6 +68,7 @@ class ExecutionStreamAuthority(
             false
         }
 
+    @Suppress("ReturnCount") // one guarded refusal per rule; a merged expression would hide which rule fired
     private fun judge(
         subscriber: AuthenticatedPrincipal,
         executionId: UUID,
