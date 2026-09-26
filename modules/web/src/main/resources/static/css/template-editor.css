@@ -189,6 +189,11 @@
   border: 1px solid var(--border-default);
   border-radius: var(--radius-base);
   background: var(--surface-secondary);
+  /* #243 — a flex item's automatic minimum is its intrinsic size, and an <input>'s
+     intrinsic size is its `size` attribute (~20 characters): the row sat at 476px in a
+     320px rail at every width, the value field cut and the remove button off-screen.
+     The zero minimum lets the flex: 1 / flex: 2 split below divide the row that exists. */
+  min-width: 0;
 }
 
 .te-context-rows .context-row input:first-of-type {
@@ -201,6 +206,8 @@
 
 .te-context-rows .context-row .ds-button {
   color: var(--accent-danger);
+  /* #243 — the remove control is the row's only way out; it never yields width. */
+  flex: none;
 }
 
 #contextJsonTextarea {
