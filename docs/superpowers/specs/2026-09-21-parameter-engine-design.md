@@ -1,4 +1,12 @@
-# Parameter engine — design record (2026-09-21, draft 3 for owner review)
+# Parameter engine — design record (2026-09-21, draft 5 — the 2026-09-26 rulings)
+
+**Updated 2026-09-25:** the owner's clarification supersedes the earlier hidden/disabled
+value rule. These states govern control interaction; every current selected value is read,
+submitted and validated normally, including explicit client-side modifications. The runtime
+does not preserve or restore originally served values. These states do not cause submitted
+values to be ignored or reset to defaults.
+Dashboard-specific server-side state and outgoing-value overrides are documented in the
+[dashboard draft §4.3](2026-09-25-dashboard-authoring-design-draft.md#43-server-side-parameter-state-and-outgoing-value-overrides).
 
 Owner's intent (2026-09-21): "populate input controls … used to feed its selection into
 charts/dashboards as parameters. We don't have dashboards or charts yet. Build an engine for
@@ -17,7 +25,7 @@ named in §0 with its reason; nothing else is new.
 
 ## 0. Decisions
 
-Rulings the owner made in conversation (P1–P17) and the six taken in the follow-ups (P18–P23; P23 was rewritten the same day when the owner rejected a `FIXED` kind).
+Rulings the owner made in conversation (P1–P17), the six taken in the follow-ups (P18–P23; P23 was rewritten the same day when the owner rejected a `FIXED` kind), and the eight of 2026-09-26 (P24–P31) that answered the second review (Astra's twelve items, `/tmp/parameter-spec-review-2026-09-26.md`, and the orchestrator's six of 2026-09-21).
 Two deviations from the conversation's wording (P8's third column, P13's invalidation outcome)
 are marked **deviation** and carry their reason.
 
@@ -27,25 +35,34 @@ are marked **deviation** and carry their reason.
 | P2 | The durable contract describes **selection semantics, not widgets**: value type × cardinality × value source × constraints. There is no per-widget catalogue. The definition also carries a **presentation block** (P23c, §3.7) — a control hint and a display format from a closed catalogue — so a renderer can pick a calendar for a date or checkboxes for a multi-select; presentation never changes meaning, binding or validation. |
 | P3 | Parameters **depend on zero or more parameters**; a change anywhere makes the client submit and the server re-evaluate. **The client is a pure renderer**: it runs no SQL and no dependency logic. |
 | P4 | Three concepts, kept apart: the **definition** (durable, MCP-authored), the **runtime state** (server-evaluated per submission), the **selection payload** (the values currently chosen). |
-| P5 | The server owns options, defaults, hidden/disabled state and validation; it re-validates every submitted value against the newly computed options on every evaluation. |
+| P5 | The server owns options, defaults, hidden/disabled state and validation; it re-validates every submitted value against the newly computed options on every evaluation. **Clarified 2026-09-25:** hidden/disabled governs control interaction; it does not freeze, discard or reset selections. Current submitted values, including explicit client-side modifications, use the same validation and resolution rules regardless of these states. |
 | P6 | Every selector option — constant or SQL-backed — is `{value, display_value, is_default}`. `display_value` is presentation text; `value` is the canonical typed value; **the server never infers one from the other**. |
-| P7 | No option marked default ⇒ the **first option in order** is the default; more than one marked ⇒ refused. Selector SQL must carry a deterministic `ORDER BY`. |
+| P7 | No option marked default ⇒ the **first option in order** is the default; more than one marked ⇒ refused. Selector SQL must carry an `ORDER BY` (the check proves the clause is present, not that the order is total; "first" is the first row the database returned). Since P26 the first option is priority 3 of the selection order. |
 | P8 | The three columns of selector SQL are `value`, `display_value`, `is_default`. **Deviation:** the conversation named the third `default`; `DEFAULT` is a reserved word in PostgreSQL, MySQL, SQL Server and Oracle and would force quoting in every dialect — `is_default` is the alias. |
 | P9 | `default_value` on a parameter is its resolved default: one typed value (SINGLE), an array (MULTI), a scalar for an input. It is separate from `options[].is_default`. |
 | P10 | **Reuse the type system.** A parameter declares one of the 10 declarable `LogicalType`s (`NULL` excluded); wire encoding is type-system §3.1; coercion is the existing strict `ParameterCoercion`, moved out of `pipeline-contract` so that pipelines and parameters share ONE implementation (§2.3). |
 | P11 | Type compatibility of a selector's `value` column: **same type ⇒ accept; explicitly listed lossless widening ⇒ accept; anything lossy, ambiguous or value-inferred ⇒ refuse.** Decided from result-set METADATA, never by inspecting rows; an author changes the outcome with an explicit `CAST`. |
 | P12 | `hidden_expression` / `disabled_expression` are server-evaluated boolean predicates stored as a **JSON expression AST** (§7). SpEL is rejected (persisted, MCP-authored expressions; restriction is configuration-and-review work; coercion/null/truthiness surprises; text-based dependency extraction; Spring-version coupling). GraalJS is rejected for this core feature (arbitrary code, isolation, discovery, implicit coercion, non-determinism, attack surface). A textual syntax may compile to the same AST later. |
-| P13 | Dependencies form ONE directed acyclic graph: `depends_on` + the binds of selector SQL + the `ref`s of expressions. Cycles (direct or indirect) and dangling references are refused at save. **Deviation** (invalidation): a SELECT whose submitted value is no longer among the recomputed options is **reset to its default and flagged `reset: true`** rather than reported as an error — a legitimate parent change causes this on every cascade, and a form full of errors the user did not cause is wrong. Errors are reserved for what the client did wrong (§5.4). |
-| P14 | Clients get both views; **`dependents` is the only functional field** ("is a change to this parameter a submit candidate?"); `depends_on` is informational (highlighting, diagrams). |
-| P15 | The client submits **the current value of every parameter in the set** — never the changed selector alone, never its subtree. The server evaluates the whole graph in topological order and returns the whole refreshed state. |
+| P13 | Dependencies form ONE directed acyclic graph: `depends_on` + the binds of selector SQL + the `ref`s of expressions. Cycles (direct or indirect) and dangling references are refused at save. Invalidation (confirmed by the owner 2026-09-26, replacing the draft-4 deviation's wording): a submitted value that is no longer among the recomputed options is **never an error** — it walks the selection priority (P26) to the configured default, else the first option, and is flagged `reset: true` with its `origin`; a legitimate parent change causes this on every cascade. Errors are reserved for what the client did wrong (§5.4). |
+| P14 | Clients get both views, **both informational** since P27 (every change is a full submission, so no client decides what to submit): `dependents` and `depends_on` serve highlighting and diagrams. |
+| P15 | The client reads and submits **the current value of every parameter in the set at submission time**, including hidden/disabled parameters and explicit host-component/client-code changes — never the changed selector alone, never its subtree, never only editable controls. It does not restore originally served values. The server evaluates the whole graph in topological order and returns the whole refreshed state. |
 | P16 | No graph library. **Reuse the house `Dag<T>`** and `kotlinx.coroutines`, following `PipelineExecutor`'s pattern (schedule every node, each awaits its parents; never wave scheduling). |
 | P17 | **Option B for placement:** the generic `Dag` primitive moves **byte-identical** into its own leaf module; the mature executor is not touched. (Owner 2026-09-21: "I don't want to touch a mature implementation which is working fine.") |
-| P18 | The persisted entity is a **parameter set**, named with the folder-path grammar pipelines and templates use, **versioned exactly like templates** (draft / release / purge / discard / restore / switch / import; promotion by name). |
+| P18 | The persisted entity is a **parameter set**, named with the folder-path grammar pipelines and templates use, **versioned exactly like templates** (draft / release / purge / discard / restore / switch / import; promotion by name). Addressed like **pipelines** (P24). |
 | P19 | Input formatting is **validation, and validation is refusal**: a value that violates a declared constraint is rejected with a per-parameter error; the server never rounds, trims or normalises what the user typed. Constraints ride on the definition so a renderer can mask input up front. |
-| P20 | Roles: **read** every role (promoter through the lens); **author** (create/update/release/purge) author + admins; **evaluate** every role that may execute a pipeline (viewer, author, admins; promoter ✗); **promote** promoter + admins. Three `RestOperation` rows (§9.3). |
+| P20 | Roles: **read** every role (promoter through the lens); **author** (create/update/release/purge) author + admins; **evaluate** every role that may execute a pipeline (viewer, author, admins; promoter ✗); **promote** promoter + admins. Expressed as per-action permission rows of the keys-v2 catalog (§9.3), never as the retired `RestOperation`/scope model. |
 | P21 | Round one ships **MCP tools + REST API, no UI**. The reference renderer lands with dashboards (#10). |
 | P22 | **Selector SQL is a pinned template**, never inline SQL: `source.template = {id, version}` (the node shape of pipeline-contract §4.1), rendered through `TemplateEngine`, parents bound as `:name`, `${parent}` refused at save, pins released before the set releases, and the templates used-by / delete-guard reverse scans extended to parameter sets (§6, §8.4). |
 | P23 | **Two kinds of control, both hard-coded or database-fed, and the definition says how to render** (owner 2026-09-21, third follow-up; a `FIXED` kind proposed in draft 2 was rejected). (a) **`INPUT`** — a free value the user types, **always `SINGLE`**; its initial value is either hard-coded (`default_value`) or comes from the database (a pinned template returning one row, §3.4). (b) **`SELECT`** — a value the user picks, `SINGLE` or `MULTI`; its options are either hard-coded (`source.constants`, §3.3) or come from the database (`source.template`, §3.4). SQL is for data that changes; it is never required. (c) The definition carries **`presentation`** (§3.7): a `control` hint validated against kind × cardinality × type (an `INPUT` of type `DATE` says `calendar`; a `MULTI` select says `dropdown`, `checkboxes` or `list`) and a display `format` (currency/percent for numerics, a pattern for temporal types). A renderer may honour or ignore it; the server never reads it for anything but validation and echo. |
+
+| P24 | **Addressing mirrors pipelines** (owner 2026-09-26): a set gets a UUID at creation; REST routes carry it in the path (`/api/v1/parameter-sets/{id}/…`); listing and browse are by name and `prefix`; the MCP get/update/evaluate tools take the id as `pipelines_get` does; the export carries the id and import keeps it (`PipelineImportService`'s rule), so the id is stable across environments. Names never travel in a path segment (rest-api §9.6). |
+| P25 | **`required` means a value must arrive; `default` is a hint** (owner 2026-09-26). A required parameter with no value is `required_missing` on evaluate and a `400` at every consumer. The server never substitutes a default for something the client sent as cleared. Two signals: a key **absent** from `selections` means "initialise me" and walks the selection priority (P26); an explicit **`null`** (or `[]` for a `MULTI`) means "the user cleared it" — an error on a required parameter, an empty value that flows as `NULL` on an optional one. The first render sends `{}`; every later submission sends every key. |
+| P26 | **The selection priority**, per parameter, in topological order, `SINGLE` and `MULTI` alike (owner 2026-09-26): **1** the client's selection when it is valid against the recomputed options (a `MULTI` keeps its valid members); **2** the configured default when it is among the options (`default_value`, else the `is_default` option; for a `MULTI` the default members among the options); **3** the first option in order (for a `MULTI`, as the only member). A client value that fits none of the options walks to 2 then 3 and is flagged `reset: true`; it is never an error. An `INPUT` has no options: the client's value (against the constraints, an error when violated), else the sourced row, else `default_value`, else `null` (`required_missing` when required). Every parameter's state carries `value`, `origin` (`client` / `default` / `first` / `source` / `none`), `computed_default` (what 2-then-3 would give now) and `reset`. |
+| P27 | **The submission model** (owner 2026-09-26): the parameters endpoint is called on the first render (`{}`) and on every change to any control, and the client sends **every** parameter each time; the server re-renders the whole set. The consumer's apply/submit button goes to the consumer (pipeline execute, dashboard execute), never to the parameters endpoint. The client runs no dependency logic at all — not even "clear the dependents": a stale child walks P26 on the server. |
+| P28 | **One validator, strict, at every place a parameter value arrives** (owner 2026-09-26): a shared `ParameterValueValidator` in `modules/typesystem` beside the moved coercion — declaration (type, precision, scale, required, default, constraints, cardinality) + value → accepted typed value or a refusal — used by the business API (published endpoints, values arriving as query strings), the execution API (`POST /api/v1/pipelines/{id}/execute`), evaluate, and later dashboard execute. The coercion is strict everywhere: the BIG-number `trim()` is retired for pipelines too — a **deliberate break** recorded in rest-api's change log, the tests that asserted trimming re-pinned. Pipeline declarations gain optional `constraints` and a list `cardinality` in the same model, adopted by the dashboard round; the engine's `type` set is the pipelines' `type` set, so a consumer needs no translation. |
+| P29 | **`MULTI` binds** (owner 2026-09-26): the list never reaches the template (P22); its **size** does, as `<name>_count`, and a library macro (`<@in_list column="region" bind="regions" chunk=500/>`) emits `(region IN (:regions__1) OR region IN (:regions__2))` with the runner binding the slices — the skill teaches the pattern. Caps, the most restrictive engines' floors: **1,000 values per `MULTI` parameter** (Oracle's per-list ceiling, which the macro clears) and **2,000 binds per statement** (SQL Server's 2,100), both refused at evaluate with an error naming the cap. |
+| P30 | **Binds resolve by namespace** (from Astra's item 3, consistent with pipeline-contract §7.2): a `:name` in selector SQL is first looked up among the set's parameters — then it must be in `depends_on`; otherwise, if it is one of §7.2's org or platform keys, it is served from the tier and needs no dependency; otherwise `bind_undeclared`. A parameter named like a tier key shadows it, exactly as a declared pipeline parameter does. `execution_id` is absent. |
+| P31 | **Bounded work and capacity** (from Astra's items 4, 8, 10): the decimal widening rule preserves integer digits too (§6.4); the constants' invariants are enforced over every database row at evaluate (§6.2); regex constraints run over a read-counting `CharSequence` with a step budget; a selector's `Statement.cancel()` fires on the deadline and the lease is returned; the semaphore is instance-wide; `max-options-per-selector` defaults to 200 and a total response budget refuses oversized answers (§11). |
 
 ---
 
@@ -109,6 +126,19 @@ runs it), `ParameterSetRepository` + lifecycle verbs, `ParameterErrorCodes`,
 them (import changes only). `ParameterWireEncoderTest` and the coercion tests move with them.
 The `Outcome.Rejected` messages are unchanged — `pipeline.execution.invalid_parameter_type`'s
 wording is asserted by existing tests.
+
+**P28 (2026-09-26): strict, and one validator.** The moved coercion loses the BIG-number
+`trim()` — a value with surrounding whitespace is refused everywhere, pipelines included; the
+tests that asserted trimming are re-pinned to refusal and rest-api's change log records the
+deliberate break. Beside it, `ParameterValueValidator` (typesystem) takes a declaration — `type`,
+`precision`, `scale`, `required`, `default`, `constraints` (§3.5's set), `cardinality` — and a wire
+value, and answers an accepted typed value or a refusal with the reason (`invalid_value_type`,
+`constraint_violation` + `details.reason`, `required_missing`). Its callers: the published
+endpoints (query-string values — format strictness, decoded first), `POST /api/v1/pipelines/{id}/execute`,
+evaluate (§5), and later dashboard execute. Pipelines' `parameters` declarations (pipeline-contract
+§6.1) gain optional `constraints` and `cardinality` (`SINGLE` default, `MULTI` bound as a list
+through the same expansion as §6.2) in the same model — declared in lane A's contract, adopted by
+the dashboard round; nothing declared today changes meaning.
 
 ### 2.4 The layering table (module-structure.md §4.2 — edited FIRST, then the root build's `allowedInternalDependencies`)
 
@@ -182,10 +212,10 @@ Redis (rule 3).
 | `precision`, `scale` | exactly pipeline-contract §6.2 / §12.7: `precision` required for `DECIMAL`, optional (= unbounded) for `BIGDECIMAL`; `scale` required for `BIGDECIMAL` and for exact `DECIMAL` | `parameter.validation.precision_missing`, `parameter.validation.scale_missing` |
 | `kind` | `INPUT` (a value the user types; initial value hard-coded via `default_value` **or** from a database via `source.template`) or `SELECT` (a value the user picks; options hard-coded via `source.constants` **or** from a database via `source.template`) — P23 | `parameter.validation.kind_invalid` |
 | `cardinality` | `SINGLE` or `MULTI`; an `INPUT` is **always `SINGLE`** (P23a); a `SELECT` is either | `parameter.validation.cardinality_invalid` |
-| `required` | boolean; a `required` parameter that resolves to no value and no options is an evaluate error (§5.4), not a save error | — |
-| `default_value` | wire-encoded for `type`; `SINGLE` → one value, `MULTI` → array; must survive the FULL coercion (§12.7's `default_type_mismatch` rule). For an `INPUT` it is the **hard-coded initial value** (P23a) and the fallback when a template source returns no row. For a `SELECT` with `constants` it must be among the option values; with a template it is checked at evaluate, not save (the options depend on parents) | `parameter.validation.default_type_mismatch`, `parameter.validation.default_not_an_option` |
+| `required` | boolean (P25). A value **must arrive** for a required parameter — absent walks the priority (P26), an explicit `null`/`[]` is `required_missing`; a required parameter that resolves to nothing (no client value, no default, no options / no sourced row) is `required_missing` at evaluate, not a save error. An optional parameter cleared by the client stays empty and flows as `NULL` | — |
+| `default_value` | wire-encoded for `type`; `SINGLE` → one value, `MULTI` → array; must pass the full `ParameterValueValidator` check at save (the §12.7 `default_type_mismatch` rule AND the parameter's own constraints — `min: 0` with `default_value: -1` is refused, `default_invalid`). It is a **hint** (P25): priority 2 of P26, never applied to a value the client cleared. For an `INPUT` it is the hard-coded initial value and the fallback when a template source returns no row. For a `SELECT` with `constants` it must be among the option values; with a template it is checked at evaluate (the options depend on parents) and walks to priority 3 when absent from them | `parameter.validation.default_type_mismatch`, `parameter.validation.default_invalid`, `parameter.validation.default_not_an_option` |
 | `source` | `SELECT`: required, exactly one of `constants` (§3.3) or `template` + `datasource` (§3.4). `INPUT`: optional, `template` + `datasource` only (the database-fed initial value, §3.4); `constants` is refused on an `INPUT` — its hard-coded value is `default_value` | `parameter.validation.source_missing`, `parameter.validation.source_ambiguous`, `parameter.validation.source_not_allowed` |
-| `depends_on` | parameter names in the same set; must be a **superset** of every `:bind` the source template uses and every `ref` in the two expressions (discovery is never load-bearing — P12); no self reference; the set's graph must be acyclic | `parameter.validation.dependency_unknown`, `parameter.validation.bind_undeclared`, `parameter.validation.ref_undeclared`, `parameter.validation.dependency_cycle` |
+| `depends_on` | parameter names in the same set; must be a **superset** of every `:bind` the source template uses that names a parameter of the set and every `ref` in the two expressions (P30: a bind naming an org/platform tier key needs no dependency; discovery is never load-bearing — P12); no self reference; the set's graph must be acyclic; a parameter may be named like a tier key and then shadows it (§7.2's precedence) | `parameter.validation.dependency_unknown`, `parameter.validation.bind_undeclared`, `parameter.validation.ref_undeclared`, `parameter.validation.dependency_cycle` |
 | `hidden_expression`, `disabled_expression` | a §7 AST or `null` (= `false`) | `parameter.validation.expression_invalid` and the §7 codes |
 | `constraints` | `INPUT` only (§3.5) | `parameter.validation.constraints_on_select` |
 | `presentation` | optional; `control` + `format` from the closed catalogues (§3.7), validated against kind × cardinality × type | `parameter.validation.presentation_invalid`, `parameter.validation.control_not_applicable`, `parameter.validation.format_invalid` |
@@ -308,9 +338,11 @@ rendered three ways.
 3. Expressions (§7): parse, cap depth/nodes, every `ref` ∈ `depends_on`, every literal coerced to
    its ref's type, cardinality rules.
 4. Template pins (§6.1): resolve `{id, version}`; `type='sql'`; dialect = datasource dialect;
-   the `${}` scan with the declared set = `depends_on` (the existing
-   `template.validation.parameter_interpolated`); every `:name` in the body ∈ `depends_on`
-   (`bind_undeclared`).
+   the `${}` scan with the declared set = `depends_on` ∪ the tier keys (the existing
+   `template.validation.parameter_interpolated`); every `:name` in the body resolves by P30 —
+   a parameter of the set (then ∈ `depends_on`, else `bind_undeclared`), else a §7.2 org/platform
+   key (served from the tier), else `bind_undeclared`; a `<name>_count` bind is the size of a
+   `MULTI` parent (P29) and follows its parameter.
 5. **Dry render** each selector template against a context of the parents' defaults (top-down,
    defaults where present, type-appropriate samples otherwise — templates §7.2's rule); a render
    failure is `parameter.validation.template_render_failed`.
@@ -333,7 +365,7 @@ is unchanged.
 
 ### 5.1 Request
 
-`POST /api/v1/parameter-sets/{name}/evaluate` (and `parameter_sets_evaluate`):
+`POST /api/v1/parameter-sets/{id}/evaluate` (and `parameter_sets_evaluate` by id):
 
 ```json
 { "version": 4,
@@ -345,83 +377,134 @@ is unchanged.
   read rule, versioning §7.1). An MCP evaluate of a draft set whose pinned DRAFT template was
   updated after the key's last `templates_render` of it is refused with
   `parameter.evaluate.template_unrendered` — the 139 gate's twin, MCP-only.
-- `selections`: **every parameter's current value** (P15), wire-encoded for its type; `MULTI` as
-  an array; `null` or an absent key = *no selection* (first render sends `{}`). A key that names
-  no parameter of the set is `parameter.evaluate.unknown_parameter` (400 — the whole request is
-  refused; a client that sends unknown keys is wrong, not the user).
+- `selections` (P25, P27): the first render sends `{}` — every parameter **absent**, the whole set
+  initialises. Every later call sends **every** parameter's current value, wire-encoded for its
+  type, `MULTI` as an array: a value the user chose, the value the last response gave it, or
+  `null` / `[]` when the user **cleared** it. Absent means "initialise me" and walks the priority
+  (P26); `null`/`[]` means "cleared" and does not. A key that names no parameter of the set is
+  `parameter.evaluate.unknown_parameter` (400 — the whole request is refused; a client that sends
+  unknown keys is wrong, not the user). A `MULTI` list longer than `max-multi-bind-values` is
+  `too_many_values` on that parameter. Duplicate members in a `MULTI` are `invalid_value_type`.
+- Every parameter's current value is read and submitted, hidden/disabled included, and explicit
+  host-component or client-code changes with them: the flags never authorise omitting a value or
+  substituting the originally served one.
+- There is no `reset` list and no client dependency logic (P27): the server re-renders the whole
+  set on every call, and a child whose value no longer fits walks the priority on the server.
 
 ### 5.2 Algorithm
 
-1. Coerce every supplied selection through `ParameterCoercion` for its type; a wire-form failure
-   is recorded on that parameter (`invalid_value_type`) and treated as *no selection* for the
+1. Every supplied selection passes `ParameterValueValidator` (P28) for its declaration; a wire-form
+   failure is recorded on that parameter (`invalid_value_type`) and treated as *absent* for the
    cascade, so the rest of the form still answers.
 2. Build the `Dag` (from the stored, validated definition — never re-validated here).
 3. Launch one coroutine per parameter (P16, the executor's pattern): each awaits its parents'
-   completion, then evaluates itself; selector queries pass through a `Semaphore` of
-   `max-concurrent-selector-queries`; the whole evaluate runs under `withTimeout(evaluate-timeout-seconds)`.
-4. Per parameter, in this order: (a) `hidden` and `disabled` from the expressions over the
-   parents' **resolved** values; (b) the source — a `SELECT`'s options (`constants` verbatim, or
-   the template rendered against `{parents' resolved values} ∪ org tier ∪ platform tier` and
-   run, §6.3) or an `INPUT`'s database-fed initial value (the template run the same way, at most
-   one row); (c) the value:
-   - hidden or disabled ⇒ **server-owned** — the submission is ignored, the value is the default
-     (P5; a hidden parameter still binds for its children and still appears in `values`);
-   - `SELECT`: the submitted value(s) if every one is among the options, else the default
-     (`is_default` row, else first row; `default_value` when among the options takes precedence)
-     with `reset: true` (P13) — a `MULTI` keeps the surviving members and resets only when none survive;
-   - `INPUT`: the submitted value if it passes the constraints (an error otherwise, the initial
-     value used for the cascade); **no submitted value** ⇒ the **initial value** — the template's
-     one row when the input has a source, else `default_value`. A client that wants a
-     database-fed input refreshed after a parent change submits `null` for it; the server is
-     stateless and never overrides a value the user typed (the `SELECT` rule, mirrored);
-   - `required` and still no value (and, for `SELECT`, no options) ⇒ `required_missing`.
+   completion, then evaluates itself; selector queries pass through an **instance-wide**
+   `Semaphore` of `max-concurrent-selector-queries` (P31); the whole evaluate runs under
+   `withTimeout(evaluate-timeout-seconds)`, and every selector statement is armed with
+   `Statement.cancel()` at the deadline, its lease returned in `finally` — the deadline bounds
+   blocking JDBC, not only the coroutine (P31).
+4. Per parameter, in this order, on the parents' **effective** values:
+   (a) `hidden` and `disabled` from the expressions — interaction flags only (P5); (b) the
+   source — a `SELECT`'s options (`constants` verbatim, or the template rendered against
+   `{parents' effective values} ∪ {<name>_count per MULTI parent} ∪ org tier ∪ platform tier`
+   and run, §6.3; every returned row checked against the constants' invariants, §6.2) or an
+   `INPUT`'s sourced row (at most one); (c) **the value, by the selection priority (P26)**:
+   - `SELECT`, `SINGLE`: **1** the submitted value if it is among the options (`origin: client`);
+     else **2** the configured default if among them (`default_value`, else the `is_default` row;
+     `origin: default`); else **3** the first option (`origin: first`). A submitted value that
+     fits none of the options walks to 2/3 with `reset: true`. An explicit `null` is **cleared**:
+     `required_missing` when required, else `value: null`, `origin: none`. No options at all:
+     `required_missing` when required, else `null`.
+   - `SELECT`, `MULTI`: **1** the submitted members that are among the options (all of them
+     valid ⇒ `origin: client`; some dropped ⇒ the survivors, `reset: true`); none surviving (or
+     absent) ⇒ **2** the configured default members among the options; else **3** the first option
+     as the only member. `[]` is cleared, as above.
+   - `INPUT`: **1** the submitted value if it passes the constraints (an error otherwise, the
+     parameter then treated as absent below); absent ⇒ **2** the sourced row when the input has
+     a source (`origin: source`), else `default_value` (`origin: default`); else `null`
+     (`required_missing` when required). An explicit `null` is cleared, as above.
+   - In every case `computed_default` is what steps 2-then-3 give right now — for an `INPUT`
+     the sourced row else `default_value` — so a renderer can offer "reset to computed" for a
+     typed value that keeps winning after its parents changed (Astra's item 7, P26).
+   - The parameter's **effective value** for its children is its `value` — the cleared or
+     required-missing case binds `NULL` (an empty `MULTI` binds as §6.2 says), which the child's
+     SQL handles; an errored `INPUT` binds its `computed_default`, so the form below stays whole.
 5. A datasource or statement failure on one selector records the datasource code on that
-   parameter, its options are empty, and its dependents evaluate against *no selection* — the
-   response is always whole. A deadline hit fails the whole request with
-   `parameter.evaluate.timeout` (one answer, never a half-form).
+   parameter, its options are empty, and its dependents evaluate against `NULL` — the response
+   is always whole. A deadline hit fails the whole request with `parameter.evaluate.timeout`
+   (one answer, never a half-form). A response over `max-evaluate-response-bytes` is
+   `parameter.evaluate.response_too_large` (the options are never truncated silently; the
+   author lowers the caps or the selector's rows).
+
+Changing hidden/disabled state alone never changes a selection. Option invalidation, explicit
+clearing and validation failures follow the rules above for every parameter, hidden or not.
+Hiding a control does not suppress its errors or remove it from the dependency graph.
+
+**The owner's three scenarios (2026-09-26), country → state → city, twenty parameters:**
+(a) nothing passed — every parameter absent; country picks its default else first, its states
+are pulled, state picks its default if among them else first, cities follow; the client gets a
+fully chosen form and submits it back unchanged on the next change. (b) three of twenty passed
+— the three are validated where they sit; below each, children compute their options from the
+accepted value and pick by priority; a child that is also a parent is evaluated once, after its
+parents and before its children; the seventeen absent ones pick by priority. (c) all passed and
+a child no longer fits (New Jersey under Canada) — no error: the child walks to its default else
+first, `reset: true`, and its own children follow from that value.
 
 ### 5.3 Response
 
 ```json
-{ "name": "acme/sales/region_filters", "version": 4, "valid": true,
+{ "id": "3f2a…", "name": "acme/sales/region_filters", "version": 4, "valid": true,
   "org": { "currency_symbol": "$", "currency_name": "USD" },
   "values": { "country": "USA", "state": "NY", "city": "New York", "min_order_amount": 250.00 },
   "parameters": [
     { …the §3.2 definition…,
       "dependents": ["state", "city"],
-      "state": { "value": "USA", "hidden": false, "disabled": false, "reset": false,
+      "state": { "value": "USA", "origin": "client", "computed_default": "USA", "reset": false,
+                 "hidden": false, "disabled": false,
                  "options": [ { "value": "USA", "display_value": "United States", "is_default": true }, … ],
                  "errors": [] } },
     { …"name": "state"…, "dependents": ["city"],
-      "state": { "value": "NY", "hidden": false, "disabled": false, "reset": false, "options": [ … ], "errors": [] } },
+      "state": { "value": "NY", "origin": "first", "computed_default": "NY", "reset": true,
+                 "hidden": false, "disabled": false, "options": [ … ], "errors": [] } },
     { …"name": "min_order_amount"…, "dependents": [],
-      "state": { "value": 250.00, "hidden": false, "disabled": false, "reset": false, "options": null,
-                 "errors": [] } }
+      "state": { "value": 250.00, "origin": "client", "computed_default": 0, "reset": false,
+                 "hidden": false, "disabled": false, "options": null, "errors": [] } }
   ] }
 ```
 
 - `values` is the **consumer payload** (P4): one canonical wire value per parameter (arrays for
-  `MULTI`; `null` when none), hidden and disabled included. It is what a future dashboard hands
-  to a pipeline's `parameters`.
-- `parameters[]` carries the full definition (a renderer is stateless — P3) — with `presentation`
-  always present, derived defaults filled in (§3.7) — plus `dependents` (P14) and `state`.
-  `options` is `null` for `INPUT`. `errors[]` entries are `{code, message, details}` in the
-  house envelope shape.
-- `valid` = no parameter has an error. A renderer that submits to a consumer should refuse while
-  `valid` is false; the server does not remember anything between calls.
+  `MULTI`; `null` when cleared or unresolved), hidden and disabled included — the values as
+  chosen by the priority, so a consumer sees exactly what the form shows. A dashboard uses it
+  to construct pipeline inputs, then applies any configured server-side outgoing-value
+  overrides at the pipeline binding boundary (the dashboard draft §4.3); those overrides belong
+  to the consumer, not this evaluator.
+- `parameters[]` carries the full definition (a renderer is stateless — P3), `presentation`
+  always present with derived defaults (§3.7), `dependents` and `depends_on` (both
+  informational, P14), and `state`: `value`, `origin` (`client` / `default` / `first` / `source` /
+  `none`), `computed_default`, `reset`, `hidden`, `disabled`, `options` (`null` for `INPUT`),
+  `errors[]` in the house envelope shape. Options are echoed **once**, in `state.options`; a
+  `constants` source is not repeated in the definition's echo.
+- `valid` = no parameter has an error. A consumer **refuses** while `valid` is false and validates
+  the outgoing values again with the shared validator (P28); the server remembers nothing
+  between calls. On the first render a required `INPUT` with no default is `required_missing`
+  and `valid: false` — expected until the user types, and a renderer shows it as pending, not as
+  a fault.
 
 ### 5.4 What is an error and what is not
 
 | situation | outcome |
 |---|---|
-| wrong wire form / not coercible | `parameter.evaluate.invalid_value_type` on the parameter |
+| wrong wire form / not coercible / duplicate `MULTI` members | `parameter.evaluate.invalid_value_type` on the parameter |
 | constraint violated (min/max/length/pattern/scale) | `parameter.evaluate.constraint_violation`, `details.reason` names the rule |
-| required, nothing resolvable | `parameter.evaluate.required_missing` |
-| SELECT value not among recomputed options | **not an error** — `reset: true`, default applied (P13) |
-| submitted value for a hidden/disabled parameter | **not an error** — ignored (P5) |
-| selector datasource unreachable / statement failed / over the option cap | the datasource's own code, or `parameter.evaluate.too_many_options`, on that parameter |
+| required and nothing resolvable — cleared, or no default and no options / no row | `parameter.evaluate.required_missing` (`details.reason`: `cleared` / `no_default` / `no_options`) |
+| a `SELECT` value no longer among the recomputed options | **not an error** — walks the priority, `reset: true`, `origin` says which step (P13, P26) |
+| an optional parameter cleared | **not an error** — `value: null`, `origin: none`, binds `NULL` |
+| a `MULTI` longer than `max-multi-bind-values`; a statement over `max-binds-per-statement` | `parameter.evaluate.too_many_values` / `parameter.evaluate.too_many_binds` on the parameter |
+| selector datasource unreachable / statement failed / over the option cap / rows violating the invariants | the datasource's own code, `parameter.evaluate.too_many_options`, or `parameter.evaluate.selector_rows_invalid` (`details.reason`: `duplicate_value` / `null_value` / `empty_label` / `multiple_defaults`) on that parameter |
+| a datasource no longer visible from the workspace (a grant revoked since release) | `datasource.not_found` on that parameter (re-resolved on every evaluate — P31) |
 | unknown key in `selections` | whole request `parameter.evaluate.unknown_parameter` (400) |
 | an `INPUT`'s source template returned two or more rows | `parameter.evaluate.input_source_multiple_rows` on the parameter; `default_value` used |
+| the response over `max-evaluate-response-bytes` | whole request `parameter.evaluate.response_too_large` |
 | deadline | whole request `parameter.evaluate.timeout` (504-class in the house mapping the lane confirms in rest-api §4) |
 
 ---
@@ -456,10 +539,28 @@ ORDER  BY state_name
   array is flattened to match) and the lane pins that with a test against the pinned jar, the
   `NamedParameterTranslationTest` way. An empty `MULTI` selection binds as an empty list, which
   the runner turns into `IN (NULL)` — no rows — rather than a syntax error.
+- **Large lists (P29).** The list itself never reaches the template; its size does, as
+  `:regions_count` (an `INTEGER` bind, one per `MULTI` parent, named `<name>_count`). The
+  library macro `<@in_list column="region" bind="regions" chunk=500/>` renders
+  `(region IN (:regions__1) OR region IN (:regions__2))` for a list of 1,000 and the runner binds
+  the slices; the skill teaches the pattern (the Oracle ceiling of 1,000 expressions per list is
+  what it clears). Caps enforced at evaluate, each with its own code: `max-multi-bind-values`
+  (default 1,000) per parameter and `max-binds-per-statement` (default 2,000 — SQL Server's
+  2,100 floor) per rendered statement, counting every expanded placeholder.
+- **Row invariants at evaluate (P31).** Every returned row is checked after canonical
+  conversion exactly as `constants` are at save: `value` non-null and unique, `display_value`
+  a non-empty string, `is_default` a boolean, at most one default — a violation is
+  `selector_rows_invalid` on the parameter (the two-row save check proves the shape, never
+  the invariants). `value` and `display_value` are capped at `max-option-value-chars` /
+  `max-option-label-chars` (§11).
 - The org tier and platform tier keys of pipeline-contract §7.2 are in the render context
-  (`:org_currency_symbol`, `:current_date`, …); `execution_id` is absent (there is none).
+  (`:org_currency_symbol`, `:current_date`, …) and need no `depends_on` entry (P30: a bind
+  resolves first against the set's parameters, then against the tiers); `execution_id` is
+  absent (there is none). A parameter named like a tier key shadows it, §7.2's precedence.
 - `ORDER BY` is required (P7); the check is textual on the **rendered** SQL, after the
   `SqlStatementClassifier` gate (single `SELECT`/`WITH`, read-only — the same gate `sql_probe` runs).
+  It proves a clause is present, not that the order is total: the author supplies the
+  tie-breaker, and "the first option" is the first row the database returned.
 - Row cap: `max-options-per-selector` (§11); the runner uses `maxRows = cap + 1` and refuses on
   overflow (`too_many_options`) — options are never truncated silently. Statement timeout: the
   datasource's `query_timeout_seconds`, clamped to `selector-query-timeout-seconds`.
@@ -487,19 +588,25 @@ names the extra column).
 typed value and the schema through `ResultRowReader.schemaOf(rs.metaData, dialect)`. Every
 selector query is an audit-visible read on the datasource exactly as a `datasources_preview_rows` is.
 
-### 6.4 Type compatibility of `value` (P11)
+### 6.4 Type compatibility of `value` (P11, P31)
 
-Compared from the result-set **metadata** (`ColumnSchema.type`, `precision`, `scale`), never from rows:
+Compared from the result-set **metadata** (`ColumnSchema.type`, `precision`, `scale`), never from rows.
+"Identical" means the full descriptor — type, precision and scale. A widening must preserve **both**
+the fractional digits and the integer digits: for `DECIMAL(p,s) → (P,S)`, `S ≥ s` **and**
+`P − S ≥ p − s` (Astra's counterexample: `DECIMAL(6,2)` → `BIGDECIMAL(6,4)` satisfies `P ≥ p, S ≥ s`
+and cannot hold `9999.99`). Every value read is then validated against the declared descriptor
+by the shared validator (P28), so a metadata mismatch the driver under-reports still refuses.
 
 | selector column type → declared parameter type | outcome |
 |---|---|
-| identical | accept |
-| `INTEGER` → `BIGINTEGER`, `DECIMAL`, `BIGDECIMAL` | accept (widening) |
-| `BIGINTEGER` → `BIGDECIMAL` | accept |
-| `DECIMAL(p,s)` (exact, scale present) → `BIGDECIMAL(P,S)` with `P ≥ p`, `S ≥ s` (or `P` unbounded) | accept |
+| identical descriptor | accept |
+| `INTEGER` → `BIGINTEGER` | accept |
+| `INTEGER` → `DECIMAL(P,S)` / `BIGDECIMAL(P,S)` | accept only when `P − S ≥ 10` (Int32's digits), or `P` unbounded |
+| `BIGINTEGER` → `BIGDECIMAL` | accept only with `P` unbounded |
+| `DECIMAL(p,s)` (exact) → `DECIMAL(P,S)` / `BIGDECIMAL(P,S)` | accept when `S ≥ s` and `P − S ≥ p − s`, or `P` unbounded with `S ≥ s` |
 | `DECIMAL` with **omitted scale** (approximate source) → any exact declared type | **refuse** — the source is a float; the author casts |
 | `STRING` → `DATE`/`TIME`/`TIMESTAMP`/numeric | **refuse** — parsing text by inspecting rows is exactly the guess P11 forbids |
-| `TIMESTAMP` → `DATE`, `BIGINTEGER` → `INTEGER`, `BIGDECIMAL` → `DECIMAL` | **refuse** — lossy |
+| `TIMESTAMP` → `DATE`, `BIGINTEGER` → `INTEGER`, `BIGDECIMAL` → `DECIMAL`, any narrowing of `P − S` or `S` | **refuse** — lossy |
 | `NULL` (all-null column, type-system §8.1) | **refuse** — `selector_value_type_mismatch` with `details.hint = "CAST the column"` |
 | anything else | **refuse** |
 
@@ -552,7 +659,7 @@ literal := {"literal": <wire value for the ref's type>}
 
 ## 8. Persistence, lifecycle, promotion, the reverse arrow
 
-### 8.1 Tables (next free `V__` migration in `modules/app`; V31 is the latest on main)
+### 8.1 Tables (the next free `V__` migration in `modules/app` at dispatch — V38 is main's latest on 2026-09-26, so V39 unless a lane claims it first; the id column is the UUID P24 addresses)
 
 `parameter_sets` = the `templates` table's shape: `id UUID PK`, `workspace_id`, `name` (UNIQUE per
 workspace), `display_name`, `description`, `current_version INTEGER NULL` (the sticky pointer,
@@ -606,46 +713,63 @@ read of the datasources it touches and is visible as such.
 
 ## 9. Surfaces and roles
 
-### 9.1 MCP tools (`McpToolCatalog.NAMES` 41 → **47**; every pinned count moves in the same commit: `McpServerWiringTest`, `DatasourcesCreateRemovedTest`, `ScopeMatrixSpecDriftTest`, `McpServerAutoConfiguration`'s KDoc, mcp-server.md §6, the skill's `tools.md`)
+### 9.1 MCP tools (the count read from the tree at dispatch — `McpToolCatalog.NAMES` + 6; every pinned count moves in the same commit: `McpServerWiringTest`, `DatasourcesCreateRemovedTest`, `ScopeMatrixSpecDriftTest`, `McpServerAutoConfiguration`'s KDoc, mcp-server.md, the rendered manual's structure guard from 242a)
 
-| tool | mutating | min scope | min permission | what |
-|---|---|---|---|---|
-| `parameter_sets_list` | no | READ | VIEW | prefix listing, the pipelines/templates shape; promoter lens |
-| `parameter_sets_get` | no | READ | VIEW | working version + `upgrade_available` per pinned template |
-| `parameter_sets_create` | yes | AUTHOR | AUTHOR | §3 body; `confirm_new_root` |
-| `parameter_sets_update` | yes | AUTHOR | AUTHOR | hash-preconditioned draft write |
-| `parameter_sets_evaluate` | no | EXECUTE | EXECUTE | §5 |
-| `parameter_sets_purge_draft` | yes | AUTHOR | AUTHOR | versioning §5.4 |
+Addressing is the pipelines' (P24): `list` by name/prefix, everything else by the set's **id**.
+
+| tool | mutating | permission (§9.3) | what |
+|---|---|---|---|
+| `parameter_sets_list` | no | `parameter_set.read` | prefix listing by name, the pipelines/templates shape; promoter lens; each row carries the id |
+| `parameter_sets_get` | no | `parameter_set.read` | by id: the working version + `upgrade_available` per pinned template |
+| `parameter_sets_create` | yes | `parameter_set.create` | §3 body; `confirm_new_root`; answers the new id |
+| `parameter_sets_update` | yes | `parameter_set.update` | by id; hash-preconditioned draft write |
+| `parameter_sets_evaluate` | no | `parameter_set.evaluate` | by id; §5 |
+| `parameter_sets_purge_draft` | yes | `parameter_set.version.manage` | by id; versioning §5.4 |
 
 Release, discard, restore, switch and promotion are REST/UI verbs for pipelines and templates
 today (no `templates_release` tool exists); parameter sets follow — no MCP release tool in round one.
 
-### 9.2 REST (`/api/v1/parameter-sets`, mirroring the templates routes in rest-api.md)
+### 9.2 REST (`/api/v1/parameter-sets`, mirroring the **pipelines** routes — P24)
 
-`GET /` (list), `POST /` (create), `GET /{name}` (working version), `PUT /{name}` (draft write),
-`GET /{name}/versions`, `POST /{name}/release`, `DELETE /{name}/draft` (purge),
-`POST /{name}/versions/{v}/discard`, `.../restore`, `.../switch`, `GET /{name}/export`,
-`POST /import`, **`POST /{name}/evaluate`**. Envelopes and codes per rest-api §4.
+`POST /` (create; answers the id), `GET /?prefix=` (list / one tree level by name), `GET /{id}`
+(working version), `PUT /{id}` (draft write, hash precondition), `GET /{id}/versions`,
+`GET /{id}/versions/{v}`, `POST /{id}/release`, `POST /{id}/draft/discard` (purge the draft),
+`POST /{id}/versions/{v}/discard`, `POST /{id}/versions/{v}/restore`, `DELETE /{id}/versions/{v}`
+(purge a version), `POST /{id}/current` (switch), `DELETE /{id}` (the entity purge),
+`GET /{id}/export`, `POST /import` (keeps the exported id — `PipelineImportService`'s rule),
+**`POST /{id}/evaluate`**. A multi-segment name is proven through the real HTTP stack in the E2E
+(it appears only in bodies and `?prefix=`). Envelopes and codes per rest-api §4.
 
-### 9.3 Roles (AGENTS.md §4.9 — each row lands with its handler, its `ScopeMatrix` entries, its auth.md §7.6 row and its `RoleWalkE2eTest` expectation in ONE commit)
+### 9.3 Roles — per-action permission rows of the keys-v2 catalog (auth.md §7.6; AGENTS.md: each row lands with its handler, its `RolePermissions` entries, its §7.6 row and its `RoleWalkE2eTest` expectation in ONE commit)
 
-| operation | endpoints / tools | viewer | author | promoter | ws_admin | super_admin | `RestOperation` |
-|---|---|---|---|---|---|---|---|
-| Read parameter sets | `GET` under `/api/v1/parameter-sets`; `parameter_sets_list/get` | ✓ | ✓ | lens | ✓ | ✓ | `READ_RESOURCES` (existing row; its endpoints cell gains the routes) |
-| Author parameter sets | `POST`/`PUT`/`DELETE` under `/api/v1/parameter-sets`, `/import`; `parameter_sets_create/update/purge_draft` | ✗ | ✓ | ✗ | ✓ | ✓ | **`MUTATE_PARAMETER_SETS`** `(Scope.AUTHOR, Permission.AUTHOR)` — new |
-| Evaluate | `POST /api/v1/parameter-sets/{name}/evaluate`; `parameter_sets_evaluate` | ✓ | ✓ | ✗ | ✓ | ✓ | **`EVALUATE_PARAMETER_SET`** `(Scope.EXECUTE, Permission.EXECUTE)` — new |
-| Release / switch | `POST /{name}/release`, `.../switch` | ✗ | ✓ | ✗ | ✓ | ✓ | `RELEASE_VERSION`, `SWITCH_SERVED_VERSION` (existing rows, endpoints cells extended) |
-| Promote | the promotion page's parameter-set rows | ✗ | page | ✓ | ✓ | ✓ | `PROMOTE_VERSION`, `PROMOTION_READ` (existing) |
+The template rows are the mould (`template.read` … `template.switch_version`, `template.evaluate`);
+no `RestOperation`, no key scope — the retired model is not recreated (Astra's item 2).
 
-Key scope for evaluate is `execute` — a `read`-scoped key may list a set but not run its
-selectors (the same asymmetry auth §7.6 states for pipelines). `MatrixRowReachabilityTest`
-requires each new row to be declared by a handler; `ReadFloorTest` requires every `GET` to declare
-the lowest admitting row; `RequiredScopeCoverageTest` / `RequiredScopeKonsistTest` require
-`@RequiredScope` on every handler.
+| permission | routes / tools | viewer | author | promoter | ws_admin | super_admin | mcp:author | mcp:promoter | mcp:ws_admin |
+|---|---|---|---|---|---|---|---|---|---|
+| `parameter_set.read` | every `GET`; `parameter_sets_list`, `parameter_sets_get` | ✓ | ✓ | lens | ✓ | ✓ | ✓ | lens | ✓ |
+| `parameter_set.create` | `POST /`; `parameter_sets_create` | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `parameter_set.update` | `PUT /{id}`; `parameter_sets_update` | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `parameter_set.version.manage` | draft/version discard, restore, purge; `parameter_sets_purge_draft` | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `parameter_set.delete` | `DELETE /{id}` | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `parameter_set.import` | `POST /import` | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `parameter_set.release` | `POST /{id}/release` | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `parameter_set.switch_version` | `POST /{id}/current` | ✗ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `parameter_set.evaluate` | `POST /{id}/evaluate`; `parameter_sets_evaluate` | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | ✗ | ✓ |
+
+Promotion rides the existing `promotion.read` / `promotion.promote` rows (the promotion page
+gains parameter-set rows, by name, the export carrying the id). The two transport key roles
+(`api_caller`, `promotion_receiver`) hold no row: an `endpoint` or `server` key never reaches
+`/api/v1/parameter-sets` (`ScopeInterceptor.reachableBy`). The guards: `ScopeMatrixSpecDriftTest`
+(the catalog and every column against §7.6), `MatrixRowReachabilityTest` (each row declared by a
+handler), `ReadFloorTest` (every `GET` on its lowest admitting row), `RequiredScopeCoverageTest` /
+`RequiredScopeKonsistTest` (`@RequiredScope` on every handler), `PermissionSeamE2eTest` (the
+isolated-permission witness reaches the nine new pairs), `RoleWalkE2eTest` (the doc row is the
+expectation).
 
 ---
 
-## 10. Error codes — pipeline-contract.md **§13.16 Parameter sets** (new section; `ParameterErrorCodes` in `modules/parameters`; a `ParameterErrorCodesSpecDriftTest` parses §13.16 the way `PipelineErrorCodesSpecDriftTest` parses §13; the skill's `references/error-codes.md` gains the family and `:modules:mcp-server:skillArtifacts` runs in the same commit — `SkillDistributionTest`)
+## 10. Error codes — pipeline-contract.md **§13.20 Parameter sets** (new section — §13.16 is the MCP surface and §13.19 schedules, Astra's item 12; `ParameterErrorCodes` in `modules/parameters`; a `ParameterErrorCodesSpecDriftTest` parses §13.20 the way `PipelineErrorCodesSpecDriftTest` parses §13; the skill's `references/error-codes.md` gains the family and `:modules:mcp-server:skillArtifacts` runs in the same commit — `SkillDistributionTest`)
 
 | code | HTTP | when |
 |---|---|---|
@@ -662,7 +786,10 @@ the lowest admitting row; `RequiredScopeCoverageTest` / `RequiredScopeKonsistTes
 | `parameter.validation.template_not_found`, `template_version_not_found`, `template_type_mismatch`, `template_dialect_mismatch`, `template_render_failed` | 400 | §4 steps 4–5 (the §12.6 twins) |
 | `parameter.validation.datasource_not_found`, `datasource_unreachable` | 400 | §3.4, §4 step 6 |
 | `parameter.validation.selector_columns_invalid`, `selector_value_type_mismatch`, `selector_order_by_missing` | 400 | §6 |
+| `parameter.validation.default_invalid` | 400 | a default (hard-coded, a marked option, a sourced row at save's dry run) fails the parameter's own constraints — `min: 0` with `default_value: -1` (P25, Astra's item 5) |
 | `parameter.evaluate.unknown_parameter` | 400 | §5.1 — a whole-request refusal (the caller's error) |
+| `parameter.evaluate.too_many_values`, `too_many_binds`, `selector_rows_invalid` | inline, on the parameter | §5.1 (a `MULTI` over `max-multi-bind-values`), §6.2 (a statement over `max-binds-per-statement`; a row violating the option invariants — `details.reason`) |
+| `parameter.evaluate.response_too_large` | 413 | §5.2 step 5 — a whole-request refusal over `max-evaluate-response-bytes` |
 | `parameter.evaluate.invalid_value_type`, `constraint_violation`, `required_missing`, `too_many_options`, `input_source_multiple_rows`, `selector_value_type_mismatch` | 200 (in `errors[]`) | §5.4 — per-parameter, the request itself succeeds |
 | `parameter.evaluate.template_unrendered` | 400 | MCP-only, §5.1 |
 | `parameter.evaluate.timeout` | 504 (house mapping confirmed by the lane against rest-api §4) | §5.2 step 5 |
@@ -677,22 +804,31 @@ the lowest admitting row; `RequiredScopeCoverageTest` / `RequiredScopeKonsistTes
 
 ---
 
-## 11. Configuration (`datapipelines.parameters.*`, configuration.md §3 gains the block; `ParametersConfigKeysSpecDriftTest` the way the other `*ConfigKeysSpecDriftTest`s pin theirs; `ConfigValidatorCheckCountTest`'s count moves)
+## 11. Configuration (`datapipelines.parameters.*`, configuration.md §3 gains the block; `ParametersConfigKeysSpecDriftTest` the way the other `*ConfigKeysSpecDriftTest`s pin theirs; `ConfigValidatorCheckCountTest` bumps)
 
 | key | default (proposed; the lane may tune, the key is the contract) | bounds |
 |---|---|---|
 | `max-parameters-per-set` | 64 | 1–256 |
-| `max-options-per-selector` | 1000 | 1–10000 |
+| `max-options-per-selector` | **200** (was 1000 — the response budget below is the real lever; P31) | 1–10000 |
+| `max-multi-bind-values` | 1000 (P29 — Oracle's per-list floor, cleared by the macro) | 1–1000 |
+| `max-binds-per-statement` | 2000 (P29 — SQL Server's 2,100 floor, every expanded placeholder counted) | 1–2000 |
+| `max-option-value-chars` | 1024 | 1–65536 |
+| `max-option-label-chars` | 256 | 1–4096 |
 | `max-input-length` | 4096 | 1–65536 |
 | `max-expression-depth` | 16 | 1–64 |
 | `max-expression-nodes` | 128 | 1–1024 |
+| `max-regex-steps` | 100000 (P31 — the read budget of the counting `CharSequence` a `pattern` runs over; past it the match is refused as `constraint_violation`, `details.reason = "pattern_budget"`) | 1000–10000000 |
 | `evaluate-timeout-seconds` | 30 | 1–300 |
 | `selector-query-timeout-seconds` | 10 | 1–`evaluate-timeout-seconds` |
-| `max-concurrent-selector-queries` | 4 | 1–32 |
+| `max-concurrent-selector-queries` | 4 (instance-wide — one semaphore per process, like the execution slots) | 1–32 |
+| `max-evaluate-response-bytes` | 4194304 (4 MiB; P31 — `response_too_large` over it, never a truncated form) | 65536–67108864 |
 
 Bound to `ParametersProperties` (`@ConfigurationProperties`, module-structure §8.3) and mirrored
 in the domain `ParametersConfig` — both literals live as named constants (MISTAKES: the
-`mapOf(… to 180)` detekt trap), and `ConfigValidator` checks the bounds.
+`mapOf(… to 180)` detekt trap), and `ConfigValidator` checks the bounds. `selector-cache-ttl-seconds`
+(the 2026-09-21 review's fix 3) is **not** in round one: an options cache would need
+authority-aware keys and invalidation; the E2E prints the query count per evaluate instead, and
+the knob lands when the number says it must.
 
 ---
 
@@ -702,14 +838,26 @@ in the domain `ParametersConfig` — both literals live as named constants (MIST
 |---|---|---|
 | `graph` | `DagTest` runs unchanged from its new home | the rename commit alone — `git diff -M` 100% |
 | `typesystem` | coercion/encoder tests moved; `pipeline-contract` still green | flip one coercion rule, both modules red |
-| `parameters` unit | validator (every §10 validation code reached by a fixture), expression parser + evaluator (every op, both cardinalities, null/empty rules, caps), type-compatibility table (§6.4, every row), reset semantics, hidden/disabled ownership, `MULTI` list expansion (against the pinned spring-jdbc, incl. the empty list) | one fixture per row; delete the rule → its fixture red |
+| `parameters` unit | validator (every §10 validation code reached by a fixture), expression parser + evaluator (every op, both cardinalities, null/empty rules, caps), type-compatibility table (§6.4, every row), reset semantics, hidden/disabled selection retention and validation, `MULTI` list expansion (against the pinned spring-jdbc, incl. the empty list) | one fixture per row; delete the rule → its fixture red |
 | `parameters` unit — evaluator concurrency | two independent selectors run concurrently (measured with a latch, never a sleep — MISTAKES "synchronise on the event"); a child never starts before its parent completes; the semaphore bounds in-flight queries; the deadline fails the whole request | remove the await → the ordering test red |
 | `parameters` integration (`*IntegrationTest`, Postgres container) | repository + every §3.5 lifecycle verb; hash precondition; one-draft index | as templates' |
 | `application` | reverse arrow: used-by rows and the delete guard cover a set-only pin | delete the set scanner → guard lets the delete through, test red |
 | `web` + `mcp-server` | handler/tool tests; `MatrixRowReachabilityTest`, `ReadFloorTest`, `RequiredScopeCoverageTest` green with the new rows; catalog count pins | remove `@RequiredScope` → red |
-| E2E (`tests/integration-tests`) | the country → state → city cascade over a real H2/Postgres datasource through **REST and MCP**: first render, parent change resets children with `reset: true`, hidden/disabled from expressions, an `INPUT` with `scale: 2` + `min: 0` refusing `12.345` and `-1`, a `MULTI` parent binding into `IN (:regions)`, a `constants` selector beside a template one, a database-fed `INPUT` (`start_date` from a one-row template depending on `country`, refreshed when the client submits `null` for it, kept when it submits a value), every `presentation` echoed with derived defaults filled in, an unreachable datasource answering a whole form; release refused on a draft pin; `RoleWalkE2eTest` rows; `PromoterLensSweepTest` and `WorkspaceIsolationSweepTest` extended | the sweeps' non-vacuity floors |
+| `typesystem` — the shared validator | `ParameterValueValidatorTest`: every declaration field × every refusal; the four call sites (published endpoint query strings, `POST …/execute`, evaluate, a dashboard-shaped consumer stub) refuse the same value with the same code; `" 12.50 "` refused everywhere — the trim's old tests re-pinned to refusal | reintroduce the trim → four reds |
+| `parameters` unit — the selection priority (P26) | the owner's three scenarios (§5.2) as fixtures over a 20-parameter fixture with a parent-that-is-a-child; absent vs `null` vs `[]` on required and optional; a stale child walks to default then first with `reset: true`; a `MULTI`'s survivors, then default members, then the first option alone; an `INPUT`'s client → sourced row → `default_value` → `required_missing`; `computed_default` on every state | flip step 2 and 3 → the fixtures name the step |
+| `parameters` unit — capacity and bounds | §6.4's counterexamples (`DECIMAL(6,2)` → `(6,4)` refused, `INTEGER` → `DECIMAL(9,0)` refused, `→ (10,0)` accepted); a `pattern` past `max-regex-steps` refused within the budget (a nested-quantifier fixture, adversarial input, elapsed printed); a `MULTI` of 1,001 and a statement of 2,001 placeholders refused; a response over the budget refused; a selector whose `Statement` blocks is cancelled at the deadline and its lease returned (a latch, never a sleep) | each bound one off → green (the guard is the bound, not a coincidence) |
+| `parameters` integration — row invariants | a selector returning a duplicate value, a null value, an empty label, two defaults — each `selector_rows_invalid` with its reason; a revoked datasource grant between release and evaluate → `datasource.not_found` on the parameter | — |
+| E2E (`tests/integration-tests`) | the country → state → city cascade over a real H2/Postgres datasource through **REST and MCP** with a multi-segment name proven through the real HTTP stack (bodies and `?prefix=` only — P24): first render, parent change resets children with `reset: true`, hidden/disabled from expressions, an `INPUT` with `scale: 2` + `min: 0` refusing `12.345` and `-1`, a `MULTI` parent binding into `IN (:regions)`, a `constants` selector beside a template one, a database-fed `INPUT` (`start_date` from a one-row template depending on `country`: picked from the row when the client sends it absent, kept when the client submits a value while its `computed_default` follows the country, `required_missing` when the client clears it with `null`), every `presentation` echoed with derived defaults filled in, an unreachable datasource answering a whole form; release refused on a draft pin; `RoleWalkE2eTest` rows; `PromoterLensSweepTest` and `WorkspaceIsolationSweepTest` extended | the sweeps' non-vacuity floors |
 | drift | `ParameterErrorCodesSpecDriftTest`, `ScopeMatrixSpecDriftTest`, `ParametersConfigKeysSpecDriftTest`, `SkillDistributionTest`, `verifyModuleDependencies`, `ArchitectureGuardTest` | add a code to the doc → red until the constant exists |
 | coverage | the module floors the conventions plugin sets (Kover) | — |
+
+The hidden/disabled cases must include non-default valid selections for both `INPUT` and
+`SELECT`, including `MULTI`: each survives submission and binds into dependent parameters.
+Toggle only hidden/disabled state and prove the value is unchanged. Invalid submissions
+still follow the ordinary validation/reset rules. Exercise these cases through REST and
+MCP as well as the evaluator, so a transport cannot silently omit non-editable values.
+Also change a hidden/disabled parameter explicitly in client code and prove the new current
+value is submitted and evaluated rather than replaced with the originally served value.
 
 Every gate runs through `scripts/gate.sh` on the merge SHA (memory: gate every merge); the E2E
 module runs with `-Pdp.test.forks.e2e=1` once before handback (MISTAKES: fork-count blind spot).
@@ -722,7 +870,10 @@ module runs with `-Pdp.test.forks.e2e=1` once before handback (MISTAKES: fork-co
 |---|---|
 | Any UI page (list, editor, reference renderer) | dashboards (#10) or its own issue |
 | Dashboards, charts | #10 |
-| Binding a parameter set to a pipeline's `parameters` / an endpoint's inputs (`parameter.in_use` is reserved for it) | the consumer design |
+| Binding a parameter set to a pipeline's `parameters` / an endpoint's inputs (`parameter.in_use` is reserved for it) | the consumer design — with the one contract change it needs named here: pipeline parameters are scalar today, so a `MULTI` selection binds to nothing until the pipeline declaration's list `cardinality` (P28) is adopted; a values map is never passed through as-is |
+| A scheduled consumer of a parameter set: the default-time origin (occurrence time vs actual start), the timezone, a frozen resolved-value snapshot | the scheduler's later slice (scheduler revision §5, §6 — slice 1 uses literal pipeline inputs, unchanged by this engine) |
+| A selector options cache (`selector-cache-ttl-seconds`) | when the E2E's printed query count says so; authority-aware keys and invalidation are its price |
+| Server-side dashboard hide/show and enable/disable overrides, and outgoing parameter-value overrides before pipeline execution | [dashboard draft §4.3](2026-09-25-dashboard-authoring-design-draft.md#43-server-side-parameter-state-and-outgoing-value-overrides); the parameter engine remains decoupled |
 | A textual expression syntax compiling to §7's AST; GraalJS | a later design; the AST is the contract either way |
 | Partial / patch submissions (transport-level, semantics unchanged) | only if payload size becomes a measured problem |
 | Option search, typeahead, pagination | when a selector exceeds the cap in practice |
@@ -741,8 +892,13 @@ module runs with `-Pdp.test.forks.e2e=1` once before handback (MISTAKES: fork-co
    runner's gate or a second classifier call is needed — reuse `SqlStatementClassifier` either way.
 3. `TemplateRef`'s package (templates vs pipeline-contract) decides whether `parameters` declares
    `pipeline-contract` at all; the §2.4 row allows it, the build file lists it only if compiled against.
-4. The V-number: the next free one at merge time (V31 is main's latest; in-flight lanes may claim
-   numbers first).
+4. The V-number: the next free one at merge time (V38 is main's latest on 2026-09-26; in-flight
+   lanes may claim numbers first).
+5. The MCP tool count and every pinned literal: read from the tree at dispatch, never from this
+   record (Astra's item 12).
+6. Whether the published-endpoint place (query-string values) needs a decoding step before the
+   shared validator or the validator accepts the string forms directly — the lane reads
+   `EndpointServeController` and says which.
 
 ---
 
@@ -750,10 +906,10 @@ module runs with `-Pdp.test.forks.e2e=1` once before handback (MISTAKES: fork-co
 
 | lane | scope | depends on |
 |---|---|---|
-| **A** (first, alone) | §2.1 `graph` move + §2.3 coercion extraction + the §2.4 table rows + `settings.gradle.kts`. Pure refactor, zero behaviour change, full gate. | — |
-| **B** | `parameters` model, validator, expression AST, `Dag` build, repository + lifecycle + migration, `ParameterErrorCodes` + §13.16 + drift test, config keys | A |
-| **C** | `SelectorRunner` (template render, binds, list expansion, metadata check, caps), `ParameterEvaluator` (coroutines, semaphore, deadline, reset/hidden/disabled semantics) | B |
-| **D** | surfaces: six MCP tools + catalog pins + skill docs + `skillArtifacts`; REST routes; the three matrix rows (§9.3) with auth.md §7.6 + `RoleWalkE2eTest`; the reverse arrow in `application` (§8.4); promotion; E2E cascade | C |
+| **A** (first, alone) | §2.1 `graph` move + §2.3 coercion extraction **made strict** (the trim retired — the one behaviour change, recorded as a deliberate break in rest-api's change log with the re-pinned tests) + `ParameterValueValidator` in `typesystem` wired into the two existing places (published endpoints, `POST …/execute`) + the pipeline declaration's optional `constraints`/`cardinality` (declared, not yet consumed) + the §2.4 table rows + `settings.gradle.kts`. Full gate. | — |
+| **B** | `parameters` model, validator, expression AST, `Dag` build, repository + lifecycle + migration, `ParameterErrorCodes` + §13.20 + drift test, config keys | A |
+| **C** | `SelectorRunner` (template render, binds, list expansion, metadata check, caps), `ParameterEvaluator` (coroutines, the instance-wide semaphore, the deadline with `Statement.cancel()`, the P26 selection priority, the row invariants, the caps) | B |
+| **D** | surfaces: six MCP tools by id + catalog pins + the rendered manual's `parameters` area (242a's `DocSet`, not `skillArtifacts`) + the `in_list` macro in the skill; REST routes by id; the nine permission rows (§9.3) with auth.md §7.6 + `RoleWalkE2eTest`; the reverse arrow in `application` (§8.4); promotion; E2E cascade | C |
 
 B and C may run in parallel only after A has frozen the module layout and B has frozen the
 model (`ParameterDefinition` + `ParameterErrorCodes`); D is serial after C. Each lane prompt
@@ -766,6 +922,8 @@ on every handback).
 
 | date | version | change |
 |---|---|---|
+| 2026-09-26 | draft 5 | The second review answered (Astra's twelve items + the orchestrator's six of 2026-09-21) with eight rulings, P24–P31: addressing mirrors pipelines (a stable UUID, `POST /{id}/evaluate`); `required` means a value must arrive and `default` is a hint, absent vs `null`/`[]`; the selection priority client → default → first for `SINGLE`, `MULTI` and (client → sourced row → `default_value`) `INPUT`, a stale child never an error (`reset: true`, `origin`, `computed_default`); every change submits every parameter and the client runs no dependency logic (`dependents` informational too); one strict shared validator at the four places, the trim retired everywhere (a deliberate break); `MULTI` binds via `<name>_count` + the `in_list` macro with caps 1,000 per parameter and 2,000 per statement; binds resolve by namespace (parameter, else tier key); decimal widening preserves integer digits; row invariants at evaluate; a read-counting regex budget, `Statement.cancel()` at the deadline, an instance-wide semaphore, options cap 200 and a 4 MiB response budget; §13.20, V39, the tool count read at dispatch; the options cache and the scheduler/dashboard bindings named out of scope. |
+| 2026-09-25 | draft 4 | Owner corrections: hidden/disabled governs control interaction; always read and submit current selected values, including explicit client-side changes. No preservation/restoration of originally served values or hidden/disabled-based omission, ignoring or defaulting. Updated P5/P15, evaluate semantics and acceptance coverage. Dashboard state and outgoing pipeline-value overrides are independently optional server-side consumer responsibilities, linked in §13. |
 | 2026-09-21 | draft 1 | Recovered from the owner's Codex conversation of the same day; four follow-up decisions (P18–P21) and the template-backed selector ruling (P22) added; every code fact re-verified on `b34bdddf`. |
 | 2026-09-21 | draft 3 | P23 rewritten after the owner rejected `FIXED`: two kinds only — `INPUT` (always `SINGLE`; initial value hard-coded or from a one-row template, §3.4/§6.2a) and `SELECT` (`SINGLE`/`MULTI`; options hard-coded or from a template); `format` grows into a `presentation` block (§3.7: `control` per kind × cardinality × type, `format` incl. temporal patterns) echoed with derived defaults; the `inputs` map, step 0 and the seven `FIXED` codes are gone; `input_source_multiple_rows` added; §13 records the rejection. |
 | 2026-09-21 | draft 2 | P23 — hard-coded values both ways: §3.3 states that `constants` is the default way to populate a selector and SQL is optional; new `kind: FIXED` (§3.7) with the evaluate request's `inputs` map (§5.1), step 0 of the algorithm (§5.2), the response shape (§5.3), five whole-request codes (§5.4, §10) and two save-time codes; the E2E row (§12) covers both. |
