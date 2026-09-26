@@ -130,8 +130,15 @@ read by a model.
    budgets, the HTTP twin over the set, the guards of §5, today's narrative moved into the
    module unchanged in substance (the split is 242b), aliases, the plugin per §9's ruling, the
    fresh-session proof.
-3. **242b — the narrative by area:** the playbook and the core split into the area guides and
-   references of §3.2; the core shrunk to orientation + rules + index; the reading path re-proven.
+3. **242b — the narrative by area:** DELIVERED 2026-09-26 (lane 242b). The core shrunk to
+   orientation + the universal rules + the area index (6,353 chars, inside the 8,000-char
+   working bound, whole-document again); the playbook split into the `pipelines` guide's
+   workflow plus per-topic references (`pipelines-learning`, `pipelines-dag`,
+   `pipelines-numbers`, `pipelines-verification`, `pipelines-engine-quirks`,
+   `pipelines-do-dont`); `connecting` became the `datasources` guide's workflow with
+   `datasources-semantics` as a reference; seven area guides total (O5's `executions`
+   included); the reading path re-proven on the dp242 stack (a four-node pipeline under 12k
+   tokens of documentation).
 4. Scheduling, reporting and dashboards areas: by the lanes that ship those capabilities.
 
 ## 8. Acceptance (the record's own)

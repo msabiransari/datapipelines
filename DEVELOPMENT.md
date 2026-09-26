@@ -833,11 +833,24 @@ The manual an agent reads is not a file in the repo any more — it is **rendere
 (`DocRenderer`, `modules/mcp-server/src/main/kotlin/co/datapipelines/mcp/docs/`) from three
 inputs, then served over MCP tools, MCP resources and plain HTTP (`/skill.md`). To edit it:
 
-- **Narrative prose** lives in `modules/mcp-server/src/main/resources/skill/*.md` (flat names:
-  `core.md`, `pipelines-authoring.md`, …). Each file carries exactly three front-matter keys —
-  `area`, `layer`, `purpose`. Prose that quotes a configuration value writes a
-  `${placeholder}` (e.g. `${execution_timeout_seconds}`); the typed `DocContext` supplies it,
-  and an unknown key fails the render.
+- **Narrative prose** lives in `modules/mcp-server/src/main/resources/skill/*.md` (flat names —
+  the file is the document's name plus `.md`; three layers): the core (`core` — orientation,
+  the universal rules stated ONCE, the area index; bounded at 8,000 characters), one area guide
+  per functional area (`pipelines`, `executions`, `templates`, `transforms`, `datasources`,
+  the lake guide, `endpoints`), and per-topic references (`<area>-<topic>`) holding the
+  judgment each guide points at. Each file carries exactly three front-matter keys — `area`,
+  `layer`, `purpose`. **A rule lives in one document**: an area guide cites the core's rule by
+  name instead of restating it (the same sentence in two documents is a defect). Prose that
+  quotes a configuration value writes a `${placeholder}` (e.g. `${execution_timeout_seconds}`);
+  the typed `DocContext` supplies it, and an unknown key fails the render. The reserved areas
+  (`scheduling`, `reporting`, `dashboards`) are not named in any document until the lane that
+  ships the capability adds the area — a guard fails the build otherwise.
+- **How to add an area** (the lane that ships the capability follows this): add the enum value
+  to `DocArea` with its tool-prefix mapping in the same commit as the first tool; write the
+  guide (`<area>.md`, `layer: guide`, concepts / workflow / prerequisites / common mistakes /
+  its references with "open when"); list it in the core's area index with one "open this
+  when…" line; add the area to `docs_list`'s schema description and mcp-server.md §3.2's
+  catalog. The reserved-name guard stops refusing the name the moment the area exists.
 - **Catalog content is generated, never typed**: the per-area tools references, the error-code
   reference and the calculator catalog are rendered from `McpToolCatalog`, `PipelineErrorCodes`
   and `CalculatorRegistry` — editing those means changing the catalog, not the docs.

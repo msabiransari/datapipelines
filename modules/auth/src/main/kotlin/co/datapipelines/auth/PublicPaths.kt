@@ -210,21 +210,21 @@ object PublicPaths {
                 "One packaged spec per slug, rendered from the jar or raw at its .md twin (173); the same text is public on GitHub.",
                 "073",
             ),
-            // 095: the agent skill, raw. `/skill.md` and `/skill/<reference>.md` serve the
-            // Markdown packaged in the jar — SkillController reads no principal, resolves no
-            // workspace and touches no datastore, and the identical text is public in the
-            // AGPL repository on GitHub. It is the MANUAL: a key would mean an agent cannot
+            // 095: the agent manual, raw. `/skill.md` and `/skill/<name>.md` serve the
+            // document set rendered at boot (DocRenderer) from the resources packaged in
+            // this jar — SkillController reads no principal, resolves no workspace and
+            // touches no datastore. It is the MANUAL: a key would mean an agent cannot
             // learn to use its key correctly until after it has one. This is the delivery
-            // for clients that speak no MCP — one curl into .agents/skills/ and the agent has
-            // the manual for the version this deployment actually runs.
+            // for clients that speak no MCP — one curl and the agent has the manual for
+            // the version this deployment actually runs.
             PublicPath(
                 "/skill.md",
-                "The agent skill's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key.",
+                "The agent manual's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key.",
                 "095",
             ),
             PublicPath(
                 "/skill/*",
-                "The skill's reference files, packaged in the jar and identical to the public AGPL repository's text.",
+                "The manual's guides and references, rendered at boot from resources packaged in this jar.",
                 "095",
             ),
             // 073: crawler infrastructure. robots.txt is a static file; sitemap.xml is

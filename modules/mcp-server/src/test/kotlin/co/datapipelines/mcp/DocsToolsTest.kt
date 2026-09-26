@@ -78,7 +78,7 @@ class DocsToolsTest {
         core["area"] shouldBe "core"
         core["layer"] shouldBe "core"
         (core["chars"] as Int).shouldBeGreaterThan(1000)
-        core["over_budget"] shouldBe true // the core (the old SKILL.md) is over budget until 242b shrinks it
+        core["over_budget"] shouldBe false // 242b shrunk the core inside the budget; it serves whole again
         (core["sections"] as List<*>).size.shouldBeGreaterThan(2)
     }
 
@@ -169,7 +169,9 @@ class DocsToolsTest {
         (answer["markdown"] as String).length shouldBeGreaterThan 0
 
         // Page through the whole document from each section id, following `next` when the
-        // section itself was split; the walk terminates and covers every section.
+        // section itself was split; the walk terminates and covers every section. The bound is
+        // a termination guard, not a design number: the error-code reference's parts grow with
+        // the catalog (scheduler codes pushed the fixture's walk past 50 in 242b's tree).
         var answers = 0
         for (section in doc.sections) {
             var cursor: String? = section.id
@@ -181,7 +183,7 @@ class DocsToolsTest {
                 answers += 1
                 cursor = part["next"] as String?
                 steps += 1
-                steps shouldBeLessThanOrEqual 50
+                steps shouldBeLessThanOrEqual 200
             }
         }
         answers shouldBeGreaterThan doc.sections.size

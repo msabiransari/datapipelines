@@ -72,6 +72,8 @@ class SkillControllerTest {
     fun `the old names answer with their successors' bytes`() {
         // The one-release aliases (record §4, ruling O4) — `connecting` is what the previous
         // delivery's map taught, and the bytes must be the successor's, not a second copy.
+        // 242b: `connecting`'s content became the datasources area guide, and the playbook
+        // alias answers with the pipelines guide.
         val viaOld =
             mvc
                 .perform(get("/skill/connecting.md"))
@@ -79,7 +81,15 @@ class SkillControllerTest {
                 .andReturn()
                 .response
                 .getContentAsString(Charsets.UTF_8)
-        viaOld shouldBe docSet.get("datasources-connecting").markdown
+        viaOld shouldBe docSet.get("datasources").markdown
+        val viaPlaybook =
+            mvc
+                .perform(get("/skill/authoring-playbook.md"))
+                .andExpect(status().isOk)
+                .andReturn()
+                .response
+                .getContentAsString(Charsets.UTF_8)
+        viaPlaybook shouldBe docSet.get("pipelines").markdown
     }
 
     @Test

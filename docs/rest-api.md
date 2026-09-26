@@ -1635,8 +1635,8 @@ The manual an agent reads for THIS deployment, unauthenticated and `text/markdow
 no secret, and requiring a key would mean an agent cannot learn to use its key correctly until
 after it has one (mcp-server.md §15). `/skill.md` is the operating core
 (`core`); `/skill/{name}.md` serves any document of the rendered set by its flat name
-(`pipelines-authoring`, `core-error-codes`, … — `docs_list` over MCP is the catalog). The
-one-release aliases of the previous delivery's names (`skill`, `authoring-playbook`,
+(`pipelines`, `pipelines-dag`, `core-error-codes`, … — `docs_list` over MCP is the catalog).
+The one-release aliases of the previous deliveries' names (`skill`, `authoring-playbook`,
 `connecting`, …) answer with their successors' bytes; an unknown name is a `404` in the §4.2
 envelope with `details.reason: "skill_reference_not_found"`. The bytes are the same rendered
 `DocSet` the MCP tools and resources serve ([mcp-server.md §15](mcp-server.md#15-the-manual-how-an-agent-learns-this-server)).

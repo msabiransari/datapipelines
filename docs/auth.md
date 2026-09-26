@@ -1162,8 +1162,8 @@ Two things are deliberately **not** rows in this table:
 | `/explore` | Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal. | 145 |
 | `/docs` | The in-product spec index: packaged Markdown, no principal, no datastore, already public in the AGPL repo. | 073 |
 | `/docs/*` | One packaged spec per slug, rendered from the jar or raw at its .md twin (173); the same text is public on GitHub. | 073 |
-| `/skill.md` | The agent skill's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | 095 |
-| `/skill/*` | The skill's reference files, packaged in the jar and identical to the public AGPL repository's text. | 095 |
+| `/skill.md` | The agent manual's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | 095 |
+| `/skill/*` | The manual's guides and references, rendered at boot from resources packaged in this jar. | 095 |
 | `/robots.txt` | Crawler infrastructure: a document that is meaningless unless it is readable without a login. | 073 |
 | `/sitemap.xml` | Generated from the page registry and packaged doc slugs; a sitemap behind auth indexes nothing. | 073 |
 | `/llms.txt` | The llms.txt index, generated from the page registry and the docs catalog; an agent index behind auth indexes nothing. | 173 |
@@ -1303,8 +1303,8 @@ Handler methods are not listed here: §7.6 is their reviewed table (B3 — one t
 | `/explore` | Site v3 directory, generated from the page registry and the packaged docs catalog; no datastore, no principal. | `GET /explore SiteHubController#explore` | `/explore` | 200 | no principal · no write · generated from the page registry and the docs catalog | refused |
 | `/docs` | The in-product spec index: packaged Markdown, no principal, no datastore, already public in the AGPL repo. | `GET /docs DocsController#index` | `/docs` | 200 | no principal · no write · packaged Markdown | refused |
 | `/docs/*` | One packaged spec per slug, rendered from the jar or raw at its .md twin (173); the same text is public on GitHub. | `GET /docs/{slug} DocsController#doc` `GET /docs/{slug} DocsController#markdown` `GET /docs/{slug}.md DocsController#markdown` | `/docs/auth` | 200 | no principal · no write · packaged Markdown | refused |
-| `/skill.md` | The agent skill's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | `GET /skill.md SkillController#skill` | `/skill.md` | 200 | no principal · no write · the packaged skill | refused |
-| `/skill/*` | The skill's reference files, packaged in the jar and identical to the public AGPL repository's text. | `GET /skill/{name}.md SkillController#reference` | `/skill/endpoints.md` | 200 | no principal · no write · the packaged skill | refused |
+| `/skill.md` | The agent manual's core, raw: it is the MANUAL, so requiring a key would gate learning how to use the key. | `GET /skill.md SkillController#skill` | `/skill.md` | 200 | no principal · no write · the rendered manual | refused |
+| `/skill/*` | The manual's guides and references, rendered at boot from resources packaged in this jar. | `GET /skill/{name}.md SkillController#reference` | `/skill/endpoints.md` | 200 | no principal · no write · the rendered manual | refused |
 | `/robots.txt` | Crawler infrastructure: a document that is meaningless unless it is readable without a login. | `resources` | `/robots.txt` | 200 | no principal · no write · static file | refused |
 | `/sitemap.xml` | Generated from the page registry and packaged doc slugs; a sitemap behind auth indexes nothing. | `GET /sitemap.xml SitemapController#sitemap` | `/sitemap.xml` | 200 | no principal · no write · generated from the registries | refused |
 | `/llms.txt` | The llms.txt index, generated from the page registry and the docs catalog; an agent index behind auth indexes nothing. | `GET /llms.txt LlmsTxtController#index` | `/llms.txt` | 200 | no principal · no write · generated from the registries | refused |

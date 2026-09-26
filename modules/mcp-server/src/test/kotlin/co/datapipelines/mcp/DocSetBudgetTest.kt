@@ -61,6 +61,21 @@ class DocSetBudgetTest {
         }
     }
 
+    /**
+     * 242b — the core is an ORIENTATION document: the record's working bound for it is
+     * 8,000 characters (the acceptance itself is the fresh-session reading path, measured in
+     * the lane's proof, not here); this pin is the cheap every-build form of the same
+     * discipline. The 242a core was 31,672 chars and section-served; 242b shrunk it to the
+     * rules and the area index. A capability that cannot fit without growing the core past
+     * the bound belongs in an area guide or a new area (record P2).
+     */
+    @Test
+    fun `the core stays within its 8000-character orientation bound`() {
+        withClue("the core is ${docSet.core.chars} chars — past the 8,000-character orientation bound") {
+            docSet.core.chars shouldBeLessThanOrEqual CORE_BOUND_CHARS
+        }
+    }
+
     private fun offenderLines(lines: List<String>): List<Int> {
         var inFence = false
         return lines
@@ -85,5 +100,8 @@ class DocSetBudgetTest {
 
     private companion object {
         const val MAX_LINE_CHARS = 200
+
+        /** 242b — the core's orientation bound (the record's working number for the split). */
+        const val CORE_BOUND_CHARS = 8_000
     }
 }

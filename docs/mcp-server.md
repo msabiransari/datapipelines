@@ -2115,15 +2115,23 @@ eight lines of workspace context — and not one word about how to author. The s
 existed only as a file in the repository. It is now served by the application itself.
 
 **The source.** The document set rendered at boot (`DocRenderer`, `co.datapipelines.mcp.docs`):
-the narrative resources packaged in the jar — `skill/core.md` (the operating core: core
-concepts, the naming grammar and `confirm_new_root`, the golden path, execution semantics,
-promotion, error handling, best practices, and an index of the documents) plus one guide or
-reference per remaining topic (`skill/pipelines-authoring.md`, `skill/templates.md`, …) — and
-the generated documents (the per-area tools references, the error codes, the calculator
-catalog). The core is named `core`; `skill` is its one-release alias. Configuration values the
-prose quotes (`${execution_timeout_seconds}`, the timeout budgets) are typed placeholders
-substituted from the boot configuration, so the manual a deployment serves is the manual it
-runs. There is exactly one home; everything below is derived from it.
+the narrative resources packaged in the jar — `skill/core.md` (since 242b: the orientation
+document — what the product is, how the manual is retrieved, the universal rules stated once
+(workspace boundaries, key and role, humans register datasources, draft and release, parameter
+safety, error recovery, naming), and the area index), the seven area guides — `pipelines`,
+`executions`, `templates`, `transforms`, `datasources`, the lake guide, `endpoints`; the file
+is the flat name plus `.md` — with concepts, workflow, prerequisites, common mistakes, and
+each guide's own list of its references with "open when"; and the per-topic references the
+judgment lives in (`skill/pipelines-learning.md`, `skill/pipelines-dag.md`,
+`skill/pipelines-verification.md`, `skill/datasources-semantics.md`,
+`skill/transforms-contracts.md`, …) — plus the generated documents (the per-area tools
+references, the error codes, the calculator catalog). The core is named `core`; `skill` is its
+one-release alias, and the previous delivery's names (`authoring-playbook`, `connecting`, …)
+answer with their successors' bytes — since 242b the first two answer with the `pipelines` and
+`datasources` guides. Configuration values the prose quotes (`${execution_timeout_seconds}`,
+the timeout budgets) are typed placeholders substituted from the boot configuration, so the
+manual a deployment serves is the manual it runs. There is exactly one home; everything below
+is derived from it.
 
 **Delivery 1 — the handshake (push).** `initialize`'s `instructions` (§5.1) is the operating
 core distilled, RANKED for a client that cuts it (#241): the workspace scope; then the learning
@@ -2222,16 +2230,19 @@ set to `build/skill-docs/` for `scripts/docs-audit.sh` (its checks A–C run ove
 files) and for a human who wants to read what the server serves without booting it.
 
 **The guards**, each able to go red: the core ≤ 400 lines with prose no line folding past the
-readable column; `instructions` within 1,843 characters and bytes, every phrase an agent must
-see inside the first 2,048 characters, its rules in their ranked order and equal to the
-Delivery 1 block above; every tool description ≤ 2,048 characters; every tool exactly once in
-its area's tools reference with its shipped description and catalogued permission; every §13
-code exactly once in the rendered error-code reference; every node type in the node-types
-narrative and every calculator kind in the catalog; golden tests pinning each narrative
-document's rendered text (a changed placeholder turns them red); no demo content anywhere in
-the rendered set; documents and sections within the 24,000-character response budget; the two
-resource URIs read, list and 404 correctly; `GET /skill.md` 200 `text/markdown` anonymous and
-`GET /skill/nope.md` 404 in the envelope; the audit green over the exported set.
+readable column, and within its 8,000-character orientation bound (242b); `instructions`
+within 1,843 characters and bytes, every phrase an agent must see inside the first 2,048
+characters, its rules in their ranked order and equal to the Delivery 1 block above; every
+tool description ≤ 2,048 characters; every tool exactly once in its area's tools reference
+with its shipped description and catalogued permission; every §13 code exactly once in the
+rendered error-code reference; every node type in the node-types narrative and every
+calculator kind in the catalog; no reserved area name (`scheduling`, `reporting`,
+`dashboards`) appearing in any served document until the lane that ships it adds the area
+(242b); golden tests pinning each narrative document's rendered text (a changed placeholder
+turns them red); no demo content anywhere in the rendered set; documents and sections within
+the 24,000-character response budget; the two resource URIs read, list and 404 correctly;
+`GET /skill.md` 200 `text/markdown` anonymous and `GET /skill/nope.md` 404 in the envelope;
+the audit green over the exported set.
 
 ---
 
@@ -2239,6 +2250,7 @@ resource URIs read, list and 404 correctly; `GET /skill.md` 200 `text/markdown` 
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.52 | 242b (#242) the narrative by area | **§15 rewritten (the source, the guards)** — the narrative split by functional area: `core.md` is the orientation document (product, retrieval, the universal rules stated once, the area index — 6,353 chars, inside the new 8,000-character bound, whole-document again); seven area guides (`pipelines`, `executions`, `templates`, `transforms`, `datasources`, `lake`, `endpoints` — concepts, workflow, prerequisites, common mistakes, their references with "open when"; O5's `executions` area got its guide); the playbook's judgment split into per-topic references (`pipelines-learning`, `pipelines-dag`, `pipelines-numbers`, `pipelines-verification`, `pipelines-engine-quirks`, `pipelines-do-dont`, `templates-calculators`, `transforms-contracts`, `transforms-evaluation`, `datasources-semantics`), all within the 24,000-character budget. `connecting`'s content became the datasources guide's workflow; `authoring-playbook` and `connecting` now answer with the `pipelines` and `datasources` guides (the record §4 alias contract; one release). New guards: no reserved area name in any served document; the core's 8,000-character pin. No tool surface change: **42 stays 42**, permissions unchanged. |
 | 2026-09-25 | v1.51 | 242a (#242) the manual rendered at boot | **§15 rewritten** — the manual is no longer a repo file but a document set rendered at boot (`DocRenderer`) from narrative resources in the jar (`modules/mcp-server/src/main/resources/skill/`), the boot configuration (typed `${placeholders}` — the timeout budgets the prose quotes) and the catalogs. **§6.2.40 `docs_list`**: optional `area` filter; without it the core plus one entry per area with the area's other documents nested; entries carry `area`, `layer`, `chars`, `over_budget`, `sections` and nested `references`. **§6.2.41 `docs_get`**: optional `section` (by-section read), whole-document answers within the **24,000-character** response budget (`details.reason: document_over_budget` otherwise, section list attached), `next` continuations for split sections, and the one-release **aliases** (`skill`, `authoring-playbook`, `connecting`, `dp-lake`, `error-codes`, `naming`, `node-types`, `pipeline-schema`, `tools`) answering with the successors' bytes. Per-area tools references (`<area>-tools`), `core-error-codes` (generated from the §13 projection) and `pipelines-calculators` join the set as generated documents; `.agents/skills/datapipelines/` and its build tasks (`skillToolsDoc`, `pluginSkillCopy`, `skillArtifacts`) are gone; `docsExport` renders the set to `build/skill-docs/` for the audit. `datapipelines://docs/skill/{name}` and `GET /skill/{name}.md` serve the set by flat name; the plugin is a pointer (§15 Delivery 4). No tool added or removed: **42 stays 42**, permissions unchanged (`docs.read`). |
 | 2026-09-25 | v1.50 | keys v2 (#233) | **§1/§2/§3/§4/§11: the MCP key is a robot member** — created on the Keys page with a role chosen under the subset rule (A13–A15), acting as its own identity with that member role; the login mint, the top-bar chip and the PK4 cap are gone, and a role refusal is `auth.role_required` (`details.held` = the key's role). The `user` kind is renamed `mcp` (A19). §6.2 descriptions that still described pre-v2 access rewritten: `endpoints_create` (an unbound endpoint is served to no one — never "user keys with the execute scope"), `executions_list`/`executions_get`/`executions_get_result` (the key acts as its role; `execution.read_all` lifts own-only), `semantics_retire` (`datasource.manage` decides the cross-workspace retire — not "a workspace admin"). `references/tools.md` regenerated from the shipped surface. |
 | 2026-09-25 | v1.49 | 241 (#241) the handshake under the client cap | No tool, schema or permission change (42 stays 42). **§5.1 `instructions` rewritten for what a client SHOWS**: Claude Code cuts server instructions and each tool description at 2,048 characters by default (`CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH`, read from the 2.1.283 runtime); the handshake was 3,157 characters with the learning path from character 2,687, so a default session never saw it. Now 1,783 characters / 1,791 bytes, ranked: workspace scope, the learning path (`docs_get` skill → `authoring-playbook` → `docs_list`, the HTTP twin), the draft rule, names + `confirm_new_root`, humans register datasources, three recoveries. The stale "datasources are bound or global" clause (global is gone since D-R7) is corrected to "exactly the datasources granted to this workspace". **§15 Delivery 1** carries the served text verbatim, pinned to the file by `SkillDistributionTest`; the 4096-byte cap is replaced by `McpClientCapTest` (1,843 characters and bytes, the required phrases inside the first 2,048 characters, the ranked order, every tool description ≤ 2,048). SKILL.md's Core concepts gains the one dropped fact it lacked (name uniqueness per workspace, datasource names per server). |
