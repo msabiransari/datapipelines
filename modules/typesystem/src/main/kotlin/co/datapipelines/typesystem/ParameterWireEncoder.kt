@@ -1,6 +1,5 @@
-package co.datapipelines.pipeline
+package co.datapipelines.typesystem
 
-import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.BooleanNode
 import com.fasterxml.jackson.databind.node.DecimalNode

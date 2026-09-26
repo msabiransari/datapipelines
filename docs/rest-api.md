@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.35 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
+**Status:** v2.36 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-26
@@ -2091,7 +2091,9 @@ at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carrie
 - a repeated key is `endpoint.request.parameter_repeated`, as is a query key that also came from
   the path (the URL decides, not the query string);
 - a required parameter with no value is `pipeline.execution.parameter_required`, and a value that
-  is not its declared type is `pipeline.execution.invalid_parameter_type` — the existing codes;
+  is not its declared type is `pipeline.execution.invalid_parameter_type` — the existing codes.
+  Nothing is trimmed: `?amount=%2012.50%20` is refused exactly as the execute body refuses
+  `" 12.50 "` (the v2.36 break, #194);
 - a value over 4 KB is `endpoint.request.value_too_large`.
 
 Headers: `DP-Result-TTL-Seconds` (§7.4's clamp) and `DP-Result-Page-Rows` (R-EP4, clamped to
@@ -2331,6 +2333,7 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v2.36 | 194a (#194) parameter engine lane A | **Deliberate break — parameter values are no longer trimmed.** Until now a `BIGINTEGER`/`BIGDECIMAL` value with surrounding whitespace was trimmed before parsing (`" 12.50 "` bound as `12.50`) on every surface that binds pipeline parameters — `POST /pipelines/{id}/execute` (§6.1), `pipelines_execute`, release checks, schedules — and a published endpoint (§19.3) additionally trimmed its `INTEGER`, `DECIMAL` and `BOOLEAN` query values (`?limit=%2010`). Every one of those is now `400 pipeline.execution.invalid_parameter_type` with the coercion's existing wording (at an endpoint, inside `endpoint.request.invalid`). The parameter engine's rule (P19/P28): the server never trims, rounds or normalises what the caller sent, and every place a parameter value arrives shares one strict coercion, now in `typesystem`. A caller that sent padded values must send them unpadded. Headers (`DP-Result-TTL-Seconds`, `DP-Result-Page-Rows`, `Accept`) are unchanged. |
 | 2026-09-26 | v2.35 | scheduler lane 1 (#9) — numbered after origin/main's v2.34 (197/232) | Additive. **New §20 Schedules** — list, create (durable `Idempotency-Key`), preview, get (`ETag` = revision), edit and delete (`If-Match`), pause/resume, unblock, upcoming, runs, one run with its trail, Run now (`202`); session-only in slice 1. **New §10.3A** — `GET /executions/{id}/events?format=json`, the durable event record paged by `event_id`, `410 result.expired` (`event_record_expired`) past retention. §10.1/§10.2: `triggered_via` gains `SCHEDULE`; a scheduled run is visible to every member with `execution.read` (R3), on the REST list and the single reads. |
 | 2026-09-25 | v2.32 | 7e (#7) the semantic link | Additive. **§5.10: the release response carries `warnings`** — `[]` when clean, one `pipeline.release.template_needs_review` `{code, message, template, version}` per pinned version citing a retired learned fact; never a refusal. **§8.1/§8.4: a transform accepts `implements`** (outside `body_hash`; inherited when an update omits it; lands on a released version without a draft; `400 template.implements_unresolved` / `template.blocks_not_allowed`). **§8.2/§8.3/§8.5: every projection carries `needs_review`**, a transform's `implements` and, when marked, `retired_facts`; **§8.5 gains `implements={fact_id}`**. §8.8: import keeps only the ids that resolve in the importing workspace (owner ruling 2026-09-25). **§9.7A: rules under `definitions` carry `implemented_by`.** Status caught up (it read v2.30 after v2.31's row). |
 | 2026-09-24 | v2.31 | 224 (#224) demo API | New **§19.8**: the demo family seeding publishes every seeded demo pipeline under `/demo/…` (the name-to-path mapping table), mints one configured `api_caller` key (`demo-public-key`) bound to all of them, and the demo-data page renders the same plaintext; the serve path's per-key request budget (`datapipelines.endpoints.key-request-budget`, 60/60, `429 rate_limit.exceeded` + `Retry-After`, per instance, every `api_caller` key; the lake endpoint's gate). §19.7 drops "per-endpoint rate limits" — a per-KEY budget now exists. |

@@ -1,6 +1,5 @@
-package co.datapipelines.pipeline
+package co.datapipelines.typesystem
 
-import co.datapipelines.typesystem.LogicalType
 import com.fasterxml.jackson.databind.JsonNode
 import java.math.BigDecimal
 import java.math.BigInteger
@@ -29,10 +28,22 @@ import java.util.Base64
  *    cannot: the client's zone is not in the request.
  *  - A loose `DATE`/`TIME`. Exact ISO 8601 only, so `01/02/2026` never gets read as either
  *    the first of February or the second of January depending on locale.
+ *  - A **padded** value. Nothing is trimmed: `" 12.50 "` for `BIGDECIMAL` is refused like any
+ *    other malformed text (parameter-engine record P19/P28 — the server never normalises what
+ *    the caller sent). The BIG-number paths used to `trim()`; retiring that was a deliberate
+ *    break of 2026-09-26 (#194, rest-api's change log).
  *
- * Every rejection is `pipeline.execution.invalid_parameter_type` (§13.3).
+ * Every rejection is `pipeline.execution.invalid_parameter_type` (§13.3) where a pipeline is the
+ * caller; the reason strings are the contract every caller reports verbatim.
+ *
+ * ## Why it lives in `typesystem` (#194, parameter-engine record P10)
+ *
+ * It moved here from `pipeline-contract` — and became public — so that pipeline parameters and
+ * the parameter engine share ONE implementation of the §6.3 wire encoding: the engine sits
+ * beside `pipeline-contract`, not above it, and a second copy is how two surfaces start
+ * accepting different values.
  */
-internal object ParameterCoercion {
+object ParameterCoercion {
     /** Successfully coerced value, or the reason it was rejected. */
     sealed interface Outcome {
         data class Coerced(
@@ -87,7 +98,7 @@ internal object ParameterCoercion {
 
     private fun bigInteger(node: JsonNode): Outcome {
         if (!node.isTextual) return wrongForm(LogicalType.BIGINTEGER, node, "a JSON string")
-        val parsed = runCatching { BigInteger(node.asText().trim()) }.getOrNull()
+        val parsed = runCatching { BigInteger(node.asText()) }.getOrNull()
         return when {
             parsed == null -> Outcome.Rejected("BIGINTEGER value is not an integer: '${node.asText().truncateForError()}'")
             parsed.bitLength() >= Long.SIZE_BITS -> Outcome.Rejected("BIGINTEGER is int64; value is out of range")
@@ -97,7 +108,7 @@ internal object ParameterCoercion {
 
     private fun bigDecimal(node: JsonNode): Outcome {
         if (!node.isTextual) return wrongForm(LogicalType.BIGDECIMAL, node, "a JSON string")
-        val parsed = runCatching { BigDecimal(node.asText().trim()) }.getOrNull()
+        val parsed = runCatching { BigDecimal(node.asText()) }.getOrNull()
         return parsed?.let(::ok)
             ?: Outcome.Rejected("BIGDECIMAL value is not a number: '${node.asText().truncateForError()}'")
     }

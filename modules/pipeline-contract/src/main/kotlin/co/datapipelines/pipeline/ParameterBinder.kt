@@ -2,6 +2,7 @@ package co.datapipelines.pipeline
 
 import co.datapipelines.calculators.CalculatorInput
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterCoercion
 import com.fasterxml.jackson.databind.JsonNode
 import java.math.BigDecimal
 import java.math.BigInteger

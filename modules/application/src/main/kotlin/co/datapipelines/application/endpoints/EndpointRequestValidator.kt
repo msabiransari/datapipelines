@@ -35,7 +35,7 @@ import java.math.BigDecimal
  *
  * ## Lifting text into the declared type's wire form
  *
- * A URL carries only text; [co.datapipelines.pipeline.ParameterCoercion] judges JSON, and for
+ * A URL carries only text; [co.datapipelines.typesystem.ParameterCoercion] judges JSON, and for
  * `INTEGER`/`DECIMAL`/`BOOLEAN` it requires a JSON number or boolean, not a string. So this class
  * lifts each raw string into the wire shape its declared type expects and then hands the result
  * to [ParameterBinder], which stays the single authority on whether a value is acceptable.
@@ -229,9 +229,13 @@ class EndpointRequestValidator(
     /**
      * The raw text as the wire form [type] expects, or null when it cannot be one.
      *
+     * Nothing is trimmed (#194, a deliberate break of 2026-09-26): `?amount=%2012.50%20` is
+     * refused with `invalid_parameter_type`, exactly as the execute body refuses `" 12.50 "` —
+     * the server never normalises what the caller sent (parameter-engine record P19/P28).
+     *
      * Only the three types whose wire form is NOT a JSON string need lifting; everything else is
      * textual on the wire already (§6.3), so it passes through and
-     * [co.datapipelines.pipeline.ParameterCoercion] judges its shape — dates, timestamps, base64
+     * [co.datapipelines.typesystem.ParameterCoercion] judges its shape — dates, timestamps, base64
      * and the big numerics all keep their existing, tested messages.
      */
     private fun lift(
@@ -239,13 +243,13 @@ class EndpointRequestValidator(
         raw: String,
     ): JsonNode? =
         when (type) {
-            LogicalType.INTEGER -> raw.trim().toLongOrNull()?.let { LongNode(it) }
+            LogicalType.INTEGER -> raw.toLongOrNull()?.let { LongNode(it) }
 
-            LogicalType.DECIMAL -> runCatching { DecimalNode(BigDecimal(raw.trim())) }.getOrNull()
+            LogicalType.DECIMAL -> runCatching { DecimalNode(BigDecimal(raw)) }.getOrNull()
 
             // Strictly "true"/"false": Kotlin's toBooleanStrictOrNull, not toBoolean, because the
             // latter maps every other string to false — a `?dry_run=yes` would run for real.
-            LogicalType.BOOLEAN -> raw.trim().toBooleanStrictOrNull()?.let { BooleanNode.valueOf(it) }
+            LogicalType.BOOLEAN -> raw.toBooleanStrictOrNull()?.let { BooleanNode.valueOf(it) }
 
             else -> TextNode(raw)
         }

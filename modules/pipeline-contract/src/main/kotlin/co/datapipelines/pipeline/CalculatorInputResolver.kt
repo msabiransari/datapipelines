@@ -3,6 +3,7 @@ package co.datapipelines.pipeline
 import co.datapipelines.calculators.CalculatorEvaluationException
 import co.datapipelines.calculators.CalculatorInput
 import co.datapipelines.calculators.CalculatorKind
+import co.datapipelines.typesystem.ParameterCoercion
 import com.fasterxml.jackson.databind.JsonNode
 import java.math.BigDecimal
 

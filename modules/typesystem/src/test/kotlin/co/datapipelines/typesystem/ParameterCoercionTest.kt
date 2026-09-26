@@ -1,6 +1,7 @@
-package co.datapipelines.pipeline
+package co.datapipelines.typesystem
 
-import co.datapipelines.typesystem.LogicalType
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -134,18 +135,39 @@ class ParameterCoercionTest {
     }
 
     @Test
+    fun `a BIG numeric with surrounding whitespace is refused - nothing is trimmed (#194)`() {
+        // Parameter-engine record P19/P28, a deliberate break of 2026-09-26: the BIG-number paths
+        // used to `trim()` before parsing, so " 12.50 " bound as 12.50 while every other type
+        // refused padding. Strict everywhere now; the refusal keeps the existing wording.
+        listOf("\" 12.50 \"", "\"12.50 \"", "\" 12.50\"", "\"12.50\\n\"", "\"\\t12.50\"").forEach {
+            rejected(LogicalType.BIGDECIMAL, it)
+        }
+        listOf("\" 12 \"", "\"12 \"", "\" 12\"").forEach { rejected(LogicalType.BIGINTEGER, it) }
+
+        val decimal = ParameterCoercion.coerce(LogicalType.BIGDECIMAL, parseJson("\" 12.50 \""))
+        decimal.shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
+        decimal.reason shouldBe "BIGDECIMAL value is not a number: ' 12.50 '"
+        val integer = ParameterCoercion.coerce(LogicalType.BIGINTEGER, parseJson("\" 12 \""))
+        integer.shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
+        integer.reason shouldBe "BIGINTEGER value is not an integer: ' 12 '"
+    }
+
+    @Test
     fun `a rejection reason never echoes an unbounded inbound value (CF-2)`() {
-        val outcome = ParameterCoercion.coerce(LogicalType.DATE, Fixtures.json("\"${"x".repeat(500)}\""))
+        val outcome = ParameterCoercion.coerce(LogicalType.DATE, parseJson("\"${"x".repeat(500)}\""))
 
         outcome.shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
         outcome.reason.contains("x".repeat(MAX_REFLECTED_VALUE_LENGTH + 1)) shouldBe false
     }
 
+    /** Parsed with a default mapper — `pipeline-contract`'s `Fixtures.json` did the same before the move (#194). */
+    private fun parseJson(text: String): JsonNode = ObjectMapper().readTree(text)
+
     private fun coerced(
         type: LogicalType,
         json: String,
     ): Any {
-        val outcome = ParameterCoercion.coerce(type, Fixtures.json(json))
+        val outcome = ParameterCoercion.coerce(type, parseJson(json))
         outcome.shouldBeInstanceOf<ParameterCoercion.Outcome.Coerced>()
         return outcome.value
     }
@@ -156,7 +178,7 @@ class ParameterCoercionTest {
     ) {
         withClue("$type must reject $json") {
             ParameterCoercion
-                .coerce(type, Fixtures.json(json))
+                .coerce(type, parseJson(json))
                 .shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
         }
     }

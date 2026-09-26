@@ -2,6 +2,7 @@ package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterCoercion
 
 /**
  * pipeline-contract §12.7 — parameter declarations.

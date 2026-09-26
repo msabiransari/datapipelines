@@ -165,6 +165,39 @@ class EndpointRequestValidatorTest {
     }
 
     @Test
+    fun `a padded query value is refused, never trimmed (#194)`() {
+        // A deliberate break of 2026-09-26 (rest-api change log): the lift used to `trim()` the
+        // three number/boolean types and the BIG numerics trimmed inside the coercion, so
+        // `?amount=%2012.50%20` ran as 12.50. Strict everywhere now, one code per defect.
+        val outcome =
+            typed(
+                "n" to Parameter(LogicalType.INTEGER),
+                "d" to Parameter(LogicalType.DECIMAL, precision = 12, scale = 2),
+                "b" to Parameter(LogicalType.BOOLEAN),
+                "bi" to Parameter(LogicalType.BIGINTEGER),
+                "bd" to Parameter(LogicalType.BIGDECIMAL, precision = 12, scale = 2),
+            ).validate(
+                request(
+                    pathVariables = emptyMap(),
+                    query =
+                        mapOf(
+                            "n" to listOf(" 42"),
+                            "d" to listOf(" 12.50 "),
+                            "b" to listOf("true "),
+                            "bi" to listOf("12 "),
+                            "bd" to listOf(" 12.50 "),
+                        ),
+                ),
+            )
+
+        val invalid = outcome.shouldBeInstanceOf<EndpointRequestValidator.Outcome.Invalid>()
+        withClue("defects: ${invalid.defects}") {
+            invalid.defects.map { it.parameter to it.code } shouldContainExactlyInAnyOrder
+                listOf("n", "d", "b", "bi", "bd").map { it to PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE }
+        }
+    }
+
+    @Test
     fun `a boolean takes only true or false — never a truthy-looking string`() {
         // Kotlin's `toBoolean` maps every other string to FALSE, so a `?dry_run=yes` would run
         // for real while the caller believed it had asked for a dry run.

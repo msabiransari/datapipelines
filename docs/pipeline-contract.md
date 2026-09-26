@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.32 (revised — see Change Log)
+**Status:** v1.33 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-25
@@ -575,6 +575,7 @@ This is the **symmetric contract**: data flows in and out of the pipeline using 
 - `TIMESTAMP` parameter values MUST carry an explicit offset or `Z`; a zone-less timestamp string is rejected — the server never guesses the client's timezone.
 - `DATE`/`TIME` values must be exact ISO 8601 (`YYYY-MM-DD`, `HH:MM:SS[.ffffff]`). The fractional part, when present, is 1–6 digits — sub-microsecond input is rejected, not silently truncated (2026-08-08: strictness applies on ingress exactly as on egress; leniency here would make §3.5's exact egress a silent transformation).
 - `BINARY` parameter values must be PADDED standard base64 (RFC 4648 §4, length ≡ 0 mod 4) — the same alphabet and padding §3.5 mandates on egress; unpadded input is rejected (2026-08-08).
+- Nothing is trimmed: a value with surrounding whitespace — `" 12.50 "` for `BIGDECIMAL`, `" 12 "` for `BIGINTEGER` — is `pipeline.execution.invalid_parameter_type`. Until 2026-09-26 the two BIG types were trimmed before parsing (and a published endpoint trimmed its `INTEGER`/`DECIMAL`/`BOOLEAN` query values too); that tolerance was retired as a deliberate break ([REST API change log v2.36](rest-api.md#appendix-a-change-log), #194). The coercion lives in `typesystem` since then, shared with the parameter engine ([Type System §3.1](type-system.md#31-wire-encoding-summary)).
 
 ---
 
@@ -1626,6 +1627,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.33 | 194a (#194) parameter engine lane A | §6.3: **nothing is trimmed** — a `BIGINTEGER`/`BIGDECIMAL` value with surrounding whitespace is `pipeline.execution.invalid_parameter_type`; the two BIG types were trimmed before parsing until today, a deliberate break recorded in REST API v2.36. `ParameterCoercion` and `ParameterWireEncoder` moved to `typesystem` (made public) so the parameter engine shares the one implementation; the rejection wording is unchanged. |
 | 2026-09-26 | v1.32 | scheduler lane 1 (#9) — numbered after origin/main's v1.31 (232) | New **§13.19 Schedules**: sixteen `schedule.*` codes — `schedule.not_found` / `schedule.run.not_found` (404), the 409 state family (`name_taken`, `revision_conflict`, `run.overlap`, `blocked`, `not_blocked`, `limit.per_workspace`) and the 400 `schedule.validation.*` family (`request_invalid`, `name_invalid`, `cron_invalid`, `timezone_invalid`, `interval_too_short`, `executor_unknown`, `payload_invalid`, `target_not_found`). None is raised while a schedule fires. Landed with `ScheduleErrorCodes` and their `ApiErrorCatalog` rows. |
 | 2026-09-25 | v1.31 | 232 (#232) the limiter's own sentence | §13.11's `rate_limit.exceeded` row now states WHICH user message answers on which surface: the catalog default (the request-volume sentence) for every API surface, the sign-in sentence only from the login damper. Code, status and `details` unchanged; no new code, no catalog row count change. |
 | 2026-09-25 | v1.30 | 7e (#7) the semantic link | §13.9 gains `template.implements_unresolved` (400 — an `implements` entry that is not a WORKSPACE `definition`/`exclusion`/`preference` fact visible from the writing workspace; not-found semantics) and the `template.blocks_not_allowed` row names `implements` beside the three blocks. §13.13 gains `pipeline.release.template_needs_review` with HTTP `—`: a WARNING in the release response's new `warnings` array, never an error status (the §13.6 type-mapping shape; `ApiErrorCatalog.NEVER_RETURNED_LIVE`). §14's release row names the response's `warnings`. Landed in the same commit as the constants, the catalog rows and the drift counts (§13 row count 202 → 204). |
