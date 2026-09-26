@@ -22,6 +22,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
@@ -266,7 +267,16 @@ open class AvatarImageFetcher(
     ): AvatarImage? {
         val stream = response.body()
         val closeAtDeadline =
-            deadlines.schedule({ runCatching { stream.close() } }, deadline - System.nanoTime(), TimeUnit.NANOSECONDS)
+            try {
+                deadlines.schedule({ runCatching { stream.close() } }, deadline - System.nanoTime(), TimeUnit.NANOSECONDS)
+            } catch (e: RejectedExecutionException) {
+                // The fetcher is closed — the context is shutting down with this request in
+                // flight — so no deadline can be armed. A read with no deadline is the defect
+                // this class exists to prevent: refuse quietly, and let the stream go.
+                runCatching { stream.close() }
+                log.info("event=avatar.fetch_failed error=closed detail={}", e.javaClass.simpleName)
+                return null
+            }
         try {
             val mediaType = imageType(response) ?: return null
             val bytes = readCapped(stream, deadline) ?: return null

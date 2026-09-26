@@ -10,6 +10,7 @@ import com.sun.net.httpserver.HttpServer
 import io.kotest.assertions.withClue
 import io.kotest.matchers.comparables.shouldBeGreaterThanOrEqualTo
 import io.kotest.matchers.comparables.shouldBeLessThan
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -136,6 +137,26 @@ class AvatarControllerTest {
 
     /** The in-JVM server's real address, port included — where a provider genuinely answers. */
     private fun serverUrl(path: String): String = "http://127.0.0.1:${server.address.port}$path"
+
+    /**
+     * The shutdown window (246's security pass, observation a): a fetcher that has been
+     * closed — the context shutting down with this request in flight — can arm no deadline.
+     * Before the fix the scheduler's refusal escaped `read()` as an exception (a 500 and one
+     * unclosed connection); now it is one more quiet refusal, after the request went out.
+     */
+    @Test
+    fun `a closed fetcher refuses the request in flight instead of throwing`() {
+        authenticate()
+        every { userRepository.findById(userId) } returns userWith(url("/ok"))
+        val closed = LoopbackFetcher().also { it.close() }
+        val shuttingDown = AvatarController(userRepository, AvatarHosts(authProperties), closed)
+
+        shuttingDown.avatar().statusCode.value() shouldBe 404
+        // The refusal is the READ's, after the request went out (a validation refusal would
+        // leave the server untouched); the JDK client may resend an idempotent GET once after
+        // the early close, so the count is a floor, not an exact one.
+        hitCount("/ok") shouldBeGreaterThanOrEqual 1
+    }
 
     /**
      * The production fetcher with the wire moved: a portless URI (the only kind the fence
