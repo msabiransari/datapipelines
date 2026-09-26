@@ -563,7 +563,7 @@ datapipelines:
           issuer-uri: https://accounts.google.com
           display-name: "Sign in with Google"
           # #197 — hosts the avatar proxy may fetch; empty = no fetch (avatars render initials)
-          picture-hosts: ${DATAPIPELINES_AUTH_GOOGLE_PICTURE_HOSTS:}
+          picture-hosts: ${DATAPIPELINES_AUTH_GOOGLE_PICTURE_HOSTS:lh3.googleusercontent.com}
         - name: microsoft
           client-id: ${MICROSOFT_CLIENT_ID:}
           client-secret: ${MICROSOFT_CLIENT_SECRET:}
