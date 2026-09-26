@@ -1,6 +1,6 @@
 # Scheduler Specification
 
-**Status:** v1.1 (slices 1–2 of #9 — the core and the Schedules page; notifications, bindings and the application credential are later slices)
+**Status:** v1.2 (slices 1–3 of #9 — the core, the Schedules page, and the bindings; notifications and the application credential are later slices)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
@@ -10,7 +10,7 @@
 
 ## 1. Purpose
 
-A **schedule** runs a job at the occurrences of a cron pattern in a timezone. In v1 the one job is a **pipeline run**: the schedule names a pipeline, follows its current version and passes literal parameter values. This spec defines:
+A **schedule** runs a job at the occurrences of a cron pattern in a timezone. In v1 the one job is a **pipeline run**: the schedule names a pipeline, follows its current version and passes literal parameter values, plus — since slice 3 — optional per-parameter bindings that resolve on the run's frozen reference time (§2.2). This spec defines:
 
 - when a schedule fires, including across daylight-saving changes (§3);
 - what happens to occurrences missed while no instance was dispatching, while a run was still going, or while the schedule was paused (§4);
@@ -41,9 +41,29 @@ A schedule is **not** a versioned artifact. It has no draft or release, is never
 { "pipeline": "finance/daily/revenue", "version": "current" }
 ```
 
-Nothing else is accepted in v1. `current` follows the pipeline's **current-version pointer** at each run ([Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) — wherever a person points it, including at a draft under the development posture. `latest` is refused by name (it is not a selector), and so is a version number. Each run freezes what it actually ran — `{pipeline_id, version, body_sha256}` — before it launches, so a later release, switch or draft edit never changes a run that was already admitted. If the draft is edited between that freeze and the launch, the run is refused `not_started` / `version_changed` rather than run on a body nobody reviewed.
+Since slice 3 the payload may also carry the optional, additive `parameter_bindings` object (§2.2) — `current` and the pipeline name are still the only required keys, and `latest` is refused by name. `current` follows the pipeline's **current-version pointer** at each run ([Versioning §3.4](versioning.md#34-current_version-is-sticky-and-event-driven-d60)) — wherever a person points it, including at a draft under the development posture. `latest` is refused by name (it is not a selector), and so is a version number. Each run freezes what it actually ran — `{pipeline_id, version, body_sha256}` and, since slice 3, `resolved_parameters` — before it launches, so a later release, switch or draft edit never changes a run that was already admitted. If the draft is edited between that freeze and the launch, the run is refused `not_started` / `version_changed` rather than run on a body nobody reviewed.
 
 A schedule's **parameters** are literal values for the pipeline's declared parameters, checked by the same binder an interactive run uses — at save, again at unblock, and again when each run is prepared. A value that no longer binds (the pipeline's parameters changed) refuses the run and blocks the schedule; it is never silently dropped.
+
+### 2.2 Bindings: TODAY and YESTERDAY
+
+A binding computes ONE parameter's value per run, on the run's **frozen reference time** — the schedule's own logical occurrence time in its timezone, frozen on the run row when it was recorded (never the actual start: a run due 23:55 that starts 00:05 the next day still resolves TODAY to the day it was due for):
+
+| Binding | Value each run gets |
+|---|---|
+| `{"source": "keyword", "name": "TODAY"}` | The schedule's timezone date on the run's reference time — the same derivation `$current_date` uses, on the frozen instant instead of the actual start |
+| `{"source": "keyword", "name": "YESTERDAY"}` | The calendar day before TODAY — a calendar day, never 24 hours, so DST's 25-hour fall-back day is one `YESTERDAY` like any other |
+| `{"source": "literal", "value": …}` | The value as given, checked by the binder like any literal |
+
+The rules an operator can rely on:
+
+- **Keywords are an exact allowlist** — `TODAY` and `YESTERDAY`, uppercase — matched only inside an explicit `{"source": "keyword"}` binding. A literal STRING `"TODAY"` in `parameters` reaches the pipeline as the string; nothing is ever scanned for magic words.
+- **One source per parameter.** The same name in `parameters` and `parameter_bindings` is refused (`400 schedule.validation.binding_conflict`); there is no precedence rule to wonder about.
+- **A binding must fit the version.** A bound name the pipeline's current version does not declare, or declares as anything but `DATE`, is refused at save (`400 schedule.validation.binding_invalid` with a `reason`) and — if it stopped fitting after the save — refuses the run `not_started` / `parameters_invalid` and blocks, exactly like a literal that no longer binds.
+- **The run's time is not a client field.** A `reference`, `reference_at` or `reference_timezone` key inside the payload or a binding is refused `400 schedule.validation.payload_invalid`; the reference time is minted by the scheduler and frozen on the run.
+- **A bound run executes as the system identity exactly as a literal one** — resolution changes VALUES, never the principal (§6).
+
+Each run's detail shows `prepared.resolved_parameters` — the literal map the execution actually launched with, bindings already resolved to dates — beside the frozen `parameters` the schedule holds. A keyword binding is checked structurally at save (the keyword exists, the type fits) and resolved fresh at every run, so a schedule saved on Friday resolves each day's value when it fires.
 
 ---
 
@@ -176,7 +196,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 - ~~**The Schedules page.**~~ Delivered by slice 2 — §8.4.
 - **Notifications** — mail on start, failure, unknown and blocked — slice 4.
-- **Parameter bindings** (values computed per run, e.g. "the day before the occurrence") — slice 3. Slice 1's parameters are literal.
+- ~~**Parameter bindings** (values computed per run, e.g. "the day before the occurrence").~~ Delivered by slice 3 — §2.2.
 - **An application credential.** Slice 1's routes are session-only; organizations that offer scheduling to their own customers call them from a backend with a management credential in slice 5.
 - **Background one-time runs** of a pipeline — slice 6.
 
@@ -186,5 +206,6 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.2 | scheduler lane 3 (#9) | §2.1: the payload's optional additive `parameter_bindings` key and the snapshot's `resolved_parameters`. New **§2.2 Bindings**: the two keywords on the frozen reference time (the schedule's zone, its logical occurrence day — not the actual start), the calendar-day YESTERDAY, the exact allowlist, the one-source rule, binding fit and blocking, and what the run detail shows. §9 records bindings as delivered. |
 | 2026-09-26 | v1.1 | scheduler lane 2 (#9) | §8.4 **the page**: the Schedules page (UI Screens §4.20) is a client of REST §20 and nothing more — what it shows (the next five, the blocked reason beside Unblock, a run's merged messages) is this spec made visible. §9 records the page as delivered. |
 | 2026-09-25 | v1.0 | scheduler lane 1 (#9) | Initial spec for slice 1: occurrences and the DST rule, missed/overlap/Run now, run states and reasons with what blocks, the system identity, capacity, one dispatcher across instances, shutdown. Written from the ratified design revision and the shipped code. |
