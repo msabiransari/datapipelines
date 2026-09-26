@@ -24,11 +24,15 @@ import java.util.UUID
  * file the jar scan can count.
  *
  * ## What is not behind it
- * The two KEY-role columns (`api_caller`, `promotion_receiver`): `ScopeMatrix.allowed` reads them
- * straight from [RolePermissions] at admission, and routing only [AuthenticatedPrincipal.holds]'s
+ * The two TRANSPORT key-role columns (`api_caller`, `promotion_receiver`): `ScopeMatrix.allowed`
+ * reads them straight from [RolePermissions] at admission — the record's "separate wire tests use
+ * actual persisted roles" stays true for them — and routing only [AuthenticatedPrincipal.holds]'s
  * half through the seam would split one decision across two paths. Nor `ScopeMatrix`'s
  * no-workspace carve-out for a super admin's instance permissions (#113), which reads the user
- * row, not a role. Both are the matrix's, which this seam does not change.
+ * row, not a role. Both are the matrix's, which this seam does not change. An `mcp` key's MEMBER
+ * role IS behind it since #239: the matrix asks the resolver with the key's pinned workspace,
+ * exactly as a session's `holds` does. [AuthenticatedPrincipal.holds]'s key-role arm still reads
+ * the table — it answers a service's question, not a surface admission.
  */
 interface PermissionResolver {
     fun holds(
