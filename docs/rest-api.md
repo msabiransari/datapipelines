@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.35 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
+**Status:** v2.36 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-26
@@ -2246,7 +2246,7 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 | `revision` | int | Starts at 1; every edit, pause, resume, unblock and delete a person makes bumps it (a block the scheduler sets does not) |
 | `executor` | string | The registered executor (`pipeline`) |
 | `payload_schema_version` | int | The executor's payload schema version (1) |
-| `payload` | object | The executor's payload. For `pipeline`: `{"pipeline": "<name>", "version": "current"}` — `current` follows the pipeline's current-version pointer at each run, drafts included; nothing else is accepted in v1 |
+| `payload` | object | The executor's payload. For `pipeline`: `{"pipeline": "<name>", "version": "current"}` — `current` follows the pipeline's current-version pointer at each run, drafts included; nothing else is accepted in v1. Since slice 3 the payload MAY also carry the optional, additive `parameter_bindings` object (§20.2) |
 | `parameters` | object | Literal values for the pipeline's declared parameters, validated by the binder an interactive run uses |
 | `target_ref` | string | The executor's reference to what it runs (`pipeline:<name>`) |
 | `cron` | string | Five fields, Unix style (`minute hour day-of-month month day-of-week`) |
@@ -2272,7 +2272,7 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 | `schedule_revision` | int | The revision it was recorded under |
 | `state`, `reason` | string, string \| null | [Scheduler §5](scheduler.md#5-runs-states-and-reasons) |
 | `execution_id` | uuid \| null | The execution it launched (read it at §10.2, its messages at §10.3A); null when none was |
-| `prepared` | object \| null | The executor's frozen snapshot — for `pipeline`, `{pipeline_id, version, body_sha256}` |
+| `prepared` | object \| null | The executor's frozen snapshot — for `pipeline`, `{pipeline_id, version, body_sha256}` plus `resolved_parameters` (slice 3): the literal map the run actually executed with, bindings included |
 | `requested_by` | uuid \| null | The person who pressed Run now |
 | `attempts` | int | Capacity retries |
 | `created_at`, `claimed_at`, `started_at`, `finished_at` | timestamp | Lifecycle; the last three null until they happen |
@@ -2285,6 +2285,19 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 `POST /schedules` — `schedule.create`. Body: `name`, `payload`, `cron`, `timezone` (required); `executor` (default `pipeline`), `parameters` (default `{}`), `missed_run_policy` (default `skip`). Optional `Idempotency-Key`, held durably: a replay of the same request answers `200` with the original schedule; a replay with a different body is `409 idempotency.key_reused_for_different_request`. `201` with the schedule and its `ETag`. Refusals: the `schedule.validation.*` family, `409 schedule.name_taken`, `409 schedule.limit.per_workspace`, and a parameter refusal exactly as an interactive run's (§13.4).
 
+**`payload.parameter_bindings`** (#9 slice 3) — an optional, ADDITIVE key of payload schema 1. One binding per declared `DATE` parameter:
+
+```json
+{"pipeline": "<name>", "version": "current",
+ "parameter_bindings": {
+   "as_of_date":    {"source": "keyword", "name": "TODAY"},
+   "previous_date": {"source": "keyword", "name": "YESTERDAY"},
+   "label":         {"source": "literal", "value": "TODAY"}
+ }}
+```
+
+Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and are matched ONLY inside an explicit `{"source": "keyword"}` binding, never by scanning strings: a literal STRING `"TODAY"` in `parameters` reaches the pipeline as the string. Each run resolves its bindings on the run's frozen reference time (§20.11's `reference_at`/`reference_timezone`) — the SCHEDULE'S timezone and its logical occurrence time, not the run's actual start: a run due 23:55 that starts 00:05 the next day still resolves `TODAY` to the day it was due for (`YESTERDAY` is a calendar day before, not 24 hours). A keyword binding is validated structurally at save; a keyword with no reference at run time is `binding_invalid`/`no_reference`. Refusals: a bound name the version does not declare, or that is not `DATE` (`400 schedule.validation.binding_invalid`, `details.reason` `unknown_parameter` / `type_mismatch` / `unknown_keyword` / `unknown_source` / `literal_invalid`); the same name in `parameters` and `parameter_bindings` (`400 schedule.validation.binding_conflict` — give it one source; there is no precedence rule). A `reference`, `reference_at` or `reference_timezone` key inside the payload or a binding is `400 schedule.validation.payload_invalid` (`details.reason` `unknown_field`): the run's time is the scheduler's frozen context, never a client field.
+
 ### 20.3 Preview a pattern
 
 `GET /schedules/preview?cron=30%202%20*%20*%20*&timezone=America/New_York&count=5` — `schedule.read`. The next `count` (1–20, default 5) occurrences of a pattern before any save, from the same function the dispatcher uses: `{cron, timezone, occurrences: [{at, local, offset}]}` — `at` the UTC instant, `local` the wall-clock time, `offset` the zone offset then in force. The DST rule shows here: a time inside a spring-forward gap runs at the transition, a time inside a fall-back overlap runs once, at its first pass.
@@ -2295,7 +2308,7 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 ### 20.5 Edit a schedule
 
-`PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule). A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
+`PUT /schedules/{id}` with `If-Match: "<revision>"` — `schedule.update`. Body as §20.2 (the whole schedule), `parameter_bindings` included — replacing the saved bindings wholesale, like every other body field. A stale revision is `409 schedule.revision_conflict` (`details.current_revision`); a missing `If-Match` is refused as on §5.5. Changing the cron or timezone recomputes `next_due_at` from now — occurrences of the old pattern are not "missed". Runs already recorded keep the revision they were recorded under.
 
 ### 20.6 Delete a schedule
 
@@ -2319,7 +2332,7 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 ### 20.11 Get a run
 
-`GET /schedules/{id}/runs/{run_id}` — `schedule.read`. The run plus its frozen `payload` and `parameters` and its `trail`: `[{seq, kind, reason, at, worker, details}]`, append-only, `seq` 1, 2, 3, … The execution's own events are not duplicated here — read them at §10.3A with the run's `execution_id`.
+`GET /schedules/{id}/runs/{run_id}` — `schedule.read`. The run plus its frozen `payload` and `parameters` and its `trail`: `[{seq, kind, reason, at, worker, details}]`, append-only, `seq` 1, 2, 3, … The execution's own events are not duplicated here — read them at §10.3A with the run's `execution_id`. When the run was prepared, `prepared.resolved_parameters` (slice 3) is the literal map — bindings already resolved to dates — that the execution was launched with; the frozen `parameters` stay exactly what the schedule holds.
 
 ### 20.12 Run now
 
@@ -2331,6 +2344,7 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v2.36 | scheduler lane 3 (#9) — numbered after origin/main's v2.35 (197/232) | Additive. **§20.2: `payload.parameter_bindings`** — an optional, additive key of payload schema 1: one binding per declared `DATE` parameter, `{"source": "keyword", "name": "TODAY"\|"YESTERDAY"}` or `{"source": "literal", "value": …}`; keywords matched only inside an explicit binding (a literal STRING `TODAY` stays the string); each run resolves on its frozen reference — the schedule's timezone, its logical occurrence time, not the actual start. New §13.19 codes `schedule.validation.binding_invalid` (400, `details.reason`/`details.parameter`) and `schedule.validation.binding_conflict` (400); a `reference*` key in the payload or a binding is `payload_invalid`. **§20.11/§20's run object: `prepared.resolved_parameters`** — the literal map the run executed with. §20.5 documents that an edit replaces the bindings wholesale. |
 | 2026-09-26 | v2.35 | scheduler lane 1 (#9) — numbered after origin/main's v2.34 (197/232) | Additive. **New §20 Schedules** — list, create (durable `Idempotency-Key`), preview, get (`ETag` = revision), edit and delete (`If-Match`), pause/resume, unblock, upcoming, runs, one run with its trail, Run now (`202`); session-only in slice 1. **New §10.3A** — `GET /executions/{id}/events?format=json`, the durable event record paged by `event_id`, `410 result.expired` (`event_record_expired`) past retention. §10.1/§10.2: `triggered_via` gains `SCHEDULE`; a scheduled run is visible to every member with `execution.read` (R3), on the REST list and the single reads. |
 | 2026-09-25 | v2.32 | 7e (#7) the semantic link | Additive. **§5.10: the release response carries `warnings`** — `[]` when clean, one `pipeline.release.template_needs_review` `{code, message, template, version}` per pinned version citing a retired learned fact; never a refusal. **§8.1/§8.4: a transform accepts `implements`** (outside `body_hash`; inherited when an update omits it; lands on a released version without a draft; `400 template.implements_unresolved` / `template.blocks_not_allowed`). **§8.2/§8.3/§8.5: every projection carries `needs_review`**, a transform's `implements` and, when marked, `retired_facts`; **§8.5 gains `implements={fact_id}`**. §8.8: import keeps only the ids that resolve in the importing workspace (owner ruling 2026-09-25). **§9.7A: rules under `definitions` carry `implemented_by`.** Status caught up (it read v2.30 after v2.31's row). |
 | 2026-09-24 | v2.31 | 224 (#224) demo API | New **§19.8**: the demo family seeding publishes every seeded demo pipeline under `/demo/…` (the name-to-path mapping table), mints one configured `api_caller` key (`demo-public-key`) bound to all of them, and the demo-data page renders the same plaintext; the serve path's per-key request budget (`datapipelines.endpoints.key-request-budget`, 60/60, `429 rate_limit.exceeded` + `Retry-After`, per instance, every `api_caller` key; the lake endpoint's gate). §19.7 drops "per-endpoint rate limits" — a per-KEY budget now exists. |
