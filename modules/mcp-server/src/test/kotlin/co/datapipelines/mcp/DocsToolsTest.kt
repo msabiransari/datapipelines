@@ -5,12 +5,15 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.mcp.docs.DocSet
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.ints.shouldBeGreaterThan
+import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.mockk
@@ -19,17 +22,20 @@ import org.junit.jupiter.api.Test
 import java.util.UUID
 
 /**
- * `docs_list` / `docs_get` (mcp-server.md §6.2.40–41) — 120/R3, the skill as tools.
+ * `docs_list` / `docs_get` (mcp-server.md §6.2.40–41) — 120/R3, the manual as tools; the
+ * by-area, by-section shape of the 242a record §4.
  *
- * The two properties that make the ruling hold are the ones asserted here: the catalog is the
- * skill's own map (`skill` first, then every reference in the map's order, with its purposes),
- * and a `docs_get` returns the SAME BYTES a `resources/read` of the same name serves — the two
- * surfaces cannot drift because both read [SkillDocs], and this suite proves it on every name
- * rather than on one sample.
+ * The properties asserted here: the top-level list is the routing table (the core first, one
+ * entry per area, nothing invisible); a document over the response budget refuses the
+ * whole-document form with its sections attached; the section form pages with `next`; the
+ * one-release aliases answer with the NEW name; and a `docs_get` returns the SAME BYTES a
+ * `resources/read` of the same name serves — the two surfaces cannot drift because both read
+ * the [DocSet], and this suite proves it on every name rather than on one sample.
  */
 class DocsToolsTest {
-    private val list = DocsListTool()
-    private val get = DocsGetTool()
+    private val docSet = DocSetTestSupport.renderedDocSet()
+    private val list = DocsListTool { docSet }
+    private val get = DocsGetTool { docSet }
     private val ctx = McpFixtures.ctx()
 
     private val pipelines = mockk<PipelineRepository>()
@@ -48,43 +54,65 @@ class DocsToolsTest {
             // docs_get IS, and it has a recording sink below.
             mockk<co.datapipelines.auth.AuditEventSink>(relaxed = true),
             McpFixtures.EVERYTHING_LENS,
+            docSet,
         )
 
     @Test
-    fun `docs_list is skill first then the reference map in its own order, with its purposes`() {
+    @Suppress("UNCHECKED_CAST")
+    fun `docs_list without area is the core first, then one entry per area, nothing invisible`() {
         @Suppress("UNCHECKED_CAST")
         val entries = list.call(McpArguments(emptyMap()), ctx) as List<Map<String, Any?>>
 
-        // The count is the map plus the core; the order is the map's own, `skill` first —
-        // asserted from SkillDocs' parse of the packaged SKILL.md, never a transcribed copy.
-        entries.map { it["name"] } shouldContainExactly
-            SkillDocs.catalog.map { it.name }
-        entries.size shouldBe SkillDocs.references.size + 1
-        entries.first()["name"] shouldBe "skill"
-        entries.forEach { entry ->
-            entry["title"] shouldBe SkillDocs.catalog.first { it.name == entry["name"] }.title
-            entry["purpose"] shouldBe SkillDocs.catalog.first { it.name == entry["name"] }.purpose
-        }
+        entries.first()["name"] shouldBe DocSet.CORE_NAME
+        // Eight areas, one entry point each; every document reachable: top-level entries plus
+        // their nested references cover the whole set exactly.
+        val topLevel = entries.map { it["name"] as String }
+        topLevel.size shouldBe docSet.areas.size
+        val reachable =
+            topLevel +
+                entries.flatMap { entry -> (entry["references"] as List<Map<String, Any?>>).map { it["name"] as String } }
+        reachable.sorted() shouldBe docSet.docs.map { it.name }.sorted()
+        reachable.toSet().size shouldBe docSet.docs.size
+        // Each entry declares its area, layer, size, budget flag and sections.
+        val core = entries.first()
+        core["area"] shouldBe "core"
+        core["layer"] shouldBe "core"
+        (core["chars"] as Int).shouldBeGreaterThan(1000)
+        core["over_budget"] shouldBe true // the core (the old SKILL.md) is over budget until 242b shrinks it
+        (core["sections"] as List<*>).size.shouldBeGreaterThan(2)
     }
 
     @Test
-    fun `the catalog cannot drift from the packaged files - a map line and a file answer to each other`() {
-        // SkillDocs.catalog throws at load when the two disagree; SkillDistributionTest asserts
-        // the same agreement in the build. Here: the load happened, and both directions match.
-        SkillDocs.catalog
-            .drop(1)
-            .map { it.name }
-            .toSet() shouldBe SkillDocs.references.keys
+    @Suppress("UNCHECKED_CAST")
+    fun `docs_list with area returns that area's documents flat`() {
+        @Suppress("UNCHECKED_CAST")
+        val entries = list.call(McpArguments(mapOf("area" to "pipelines")), ctx) as List<Map<String, Any?>>
+        entries.map { it["area"] } shouldContainExactly List(entries.size) { "pipelines" }
+        entries.map { it["name"] } shouldContainExactly docSet.byArea(co.datapipelines.mcp.docs.DocArea.PIPELINES).map { it.name }
     }
+
+    @Test
+    fun `an unknown area is refused with the known areas attached`() {
+        val failure =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                list.call(McpArguments(mapOf("area" to "weather")), ctx)
+            }
+        failure.code shouldBe PipelineErrorCodes.Mcp.DOC_NOT_FOUND
+        failure.details["reason"] shouldBe "unknown_area"
+        @Suppress("UNCHECKED_CAST")
+        (failure.details["known_areas"] as List<String>).shouldContain("endpoints")
+    }
+
+    private fun List<*>.shouldContain(item: String): Boolean = contains(item)
 
     @Test
     fun `docs_get of every name returns the bytes the resource read of the same name serves`() {
-        SkillDocs.catalog.forEach { entry ->
+        docSet.docs.forEach { doc ->
             val uri =
-                if (entry.name == SkillDocs.SKILL_NAME) {
+                if (doc === docSet.core) {
                     McpResourceUri.skill()
                 } else {
-                    McpResourceUri.skillReference(entry.name)
+                    McpResourceUri.skillReference(doc.name)
                 }
             val resourceText =
                 resourceReader
@@ -94,14 +122,99 @@ class DocsToolsTest {
                     .shouldBeInstanceOf<McpSchema.TextResourceContents>()
                     .text()
 
-            @Suppress("UNCHECKED_CAST")
-            val payload = get.call(McpArguments(mapOf("name" to entry.name)), ctx) as Map<String, Any?>
-            withClue("docs_get {\"name\": \"${entry.name}\"} disagrees with resources/read $uri") {
-                payload["markdown"] shouldBe resourceText
-                payload["name"] shouldBe entry.name
-                payload["title"] shouldBe entry.title
+            if (doc.overBudget) {
+                // Over-budget documents refuse the whole form on the TOOL (the budget is the
+                // tools' contract); the resource still serves whole — its URI carries no
+                // section segment, so the section form has no shape there (record §4, O3).
+                val failure =
+                    shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                        get.call(McpArguments(mapOf("name" to doc.name)), ctx)
+                    }
+                failure.details["reason"] shouldBe "document_over_budget"
+            } else {
+                @Suppress("UNCHECKED_CAST")
+                val payload = get.call(McpArguments(mapOf("name" to doc.name)), ctx) as Map<String, Any?>
+                withClue("docs_get {\"name\": \"${doc.name}\"} disagrees with resources/read $uri") {
+                    payload["markdown"] shouldBe resourceText
+                }
+                payload["name"] shouldBe doc.name
+                payload["title"] shouldBe doc.title
             }
         }
+    }
+
+    @Test
+    fun `a whole-document call on an over-budget document is refused with the section list`() {
+        val overBudget = docSet.docs.first { it.overBudget }
+        val failure =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                get.call(McpArguments(mapOf("name" to overBudget.name)), ctx)
+            }
+        failure.code shouldBe PipelineErrorCodes.Mcp.DOC_NOT_FOUND
+        failure.details["reason"] shouldBe "document_over_budget"
+        @Suppress("UNCHECKED_CAST")
+        val sections = failure.details["sections"] as List<Map<String, Any?>>
+        sections.map { it["id"] } shouldContainExactly overBudget.sections.map { it.id }
+    }
+
+    @Test
+    fun `the section form serves one section and pages over an over-budget one`() {
+        val doc = docSet.docs.first { it.overBudget }
+        val first = doc.sections.first()
+
+        @Suppress("UNCHECKED_CAST")
+        val answer = get.call(McpArguments(mapOf("name" to doc.name, "section" to first.id)), ctx) as Map<String, Any?>
+        answer["name"] shouldBe doc.name
+        answer["section"] shouldBe first.id
+        (answer["markdown"] as String).length shouldBeGreaterThan 0
+
+        // Page through the whole document from each section id, following `next` when the
+        // section itself was split; the walk terminates and covers every section.
+        var answers = 0
+        for (section in doc.sections) {
+            var cursor: String? = section.id
+            var steps = 0
+            while (cursor != null) {
+                @Suppress("UNCHECKED_CAST")
+                val part = get.call(McpArguments(mapOf("name" to doc.name, "section" to cursor)), ctx) as Map<String, Any?>
+                (part["markdown"] as String).length shouldBeGreaterThan 0
+                answers += 1
+                cursor = part["next"] as String?
+                steps += 1
+                steps shouldBeLessThanOrEqual 50
+            }
+        }
+        answers shouldBeGreaterThan doc.sections.size
+    }
+
+    @Test
+    fun `an alias answers with the new name and the same bytes`() {
+        @Suppress("UNCHECKED_CAST")
+        val viaAlias = get.call(McpArguments(mapOf("name" to "naming")), ctx) as Map<String, Any?>
+        viaAlias["name"] shouldBe "pipelines-naming"
+        viaAlias["title"] shouldBe docSet.get("pipelines-naming").title
+
+        @Suppress("UNCHECKED_CAST")
+        val viaNewName = get.call(McpArguments(mapOf("name" to "pipelines-naming")), ctx) as Map<String, Any?>
+        viaAlias["markdown"] shouldBe viaNewName["markdown"]
+
+        // The core's alias answers through the section form too: `skill` is what the
+        // handshake still says, and its sections are how the over-budget core is read.
+        @Suppress("UNCHECKED_CAST")
+        val viaSkill =
+            get.call(
+                McpArguments(
+                    mapOf(
+                        "name" to "skill",
+                        "section" to
+                            docSet.core.sections
+                                .first()
+                                .id,
+                    ),
+                ),
+                ctx,
+            ) as Map<String, Any?>
+        viaSkill["name"] shouldBe DocSet.CORE_NAME
     }
 
     @Test
@@ -112,7 +225,18 @@ class DocsToolsTest {
             }
 
         failure.code shouldBe PipelineErrorCodes.Mcp.DOC_NOT_FOUND
-        failure.details["known_docs"] shouldBe SkillDocs.catalog.map { it.name }
+        failure.details["known_docs"] shouldBe docSet.docs.map { it.name }
+    }
+
+    @Test
+    fun `an unknown section is refused with the known sections attached`() {
+        val failure =
+            shouldThrow<co.datapipelines.typesystem.DatapipelinesException> {
+                get.call(McpArguments(mapOf("name" to "templates", "section" to "nope")), ctx)
+            }
+        failure.details["reason"] shouldBe "unknown_section"
+        @Suppress("UNCHECKED_CAST")
+        (failure.details["known_sections"] as List<String>) shouldBe docSet.get("templates").sections.map { it.id }
     }
 
     @Test
@@ -128,9 +252,10 @@ class DocsToolsTest {
         // A REAL recording sink, never a strict mock: the contract is "the call is recorded",
         // and a strict double passes precisely when the call is missing (MISTAKES).
         val sink = RecordingAuditSink()
-        val dispatcher = McpToolDispatcher(DocsTools.all(), sink)
+        val dispatcher = McpToolDispatcher(DocsTools.all({ docSet }), sink)
 
-        val result = dispatcher.call(McpFixtures.request("docs_get", mapOf("name" to "skill")), ctx)
+        // A within-budget document, so the answer is content and not the over-budget refusal.
+        val result = dispatcher.call(McpFixtures.request("docs_get", mapOf("name" to "templates")), ctx)
 
         result.isError shouldBe false
         val row = sink.rows.single { it.event == "mcp.tool.called" }
@@ -152,7 +277,6 @@ class DocsToolsTest {
         val details: Map<String, Any?>,
     )
 
-    /** The in-memory [AuditEventSink] that records instead of mocking — the effect is the assertion. */
     private class RecordingAuditSink : AuditEventSink {
         val rows = mutableListOf<AuditRow>()
 
@@ -164,7 +288,7 @@ class DocsToolsTest {
             userAgent: String?,
             details: Map<String, Any?>,
         ) {
-            rows += AuditRow(event, userId, keyId, details)
+            rows.add(AuditRow(event, userId, keyId, details))
         }
     }
 }

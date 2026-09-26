@@ -1,0 +1,398 @@
+
+# datapipelines
+
+## What this product is
+
+A self-hosted server that executes **declarative JSON pipelines** — DAGs of templated-SQL
+nodes — against heterogeneous databases, staging intermediate results in a per-execution
+in-memory H2, and returning results through a uniform Redis-backed cursor. It is
+**MCP-native**: LLM agents author and execute pipelines as first-class clients alongside a
+REST API and a browser UI. Metadata lives in Postgres (Flyway); results/events in Redis.
+
+## Core concepts
+
+**Pipeline** — a JSON document: `schema_version`, `name` (machine name, and a **folder
+path** — see *Folders* below; unique in its workspace, like a template's, while a datasource
+name is unique across the server), `display_name`, `description`, `parameters` (typed input
+map), and `nodes` (the DAG). `id`, `version`, `owner`, timestamps are server-assigned on create.
+
+**Versioning** — **everything you author is a DRAFT, always.** Create lands v1 as a DRAFT
+(`status: "DRAFT"`, `current_version: null`) and it is immediately executable; every later
+save is draft-first too: the first save after a release opens a DRAFT (copy-on-write), later
+saves overwrite that one draft in place. DRAFT → RELEASED is a human step, with no
+exception — including on creation. A save whose body is identical to the released one is a
+no-op — nothing opens, no version number burns, and the response says `status: "RELEASED"`
+with no draft pointer; that is success, not an error. Your updates are NOT published until
+a human releases the draft from the UI — **leave the draft for a human to release** (by
+design, D4; there is no release tool and that absence is deliberate). Version RETIREMENT is
+human too (101): a human may **discard** a released version (reversible — restore brings it
+back), **purge** a draft (irreversible — the row and its executions go), or **switch** the
+pointer a pipeline's dependents run; there are no tools for those either, by the same rule.
+Pipeline nodes pin template versions immutably; updating a template does not change
+existing pipelines until you update the node reference. Drafts are executable — running
+your own draft is the expected test loop.
+
+**In SQL, write `:name`, never `${name}`, for a declared parameter.** Bound values are
+never parsed as SQL — that is the whole point: a `STRING` caller value cannot alter the
+statement, while the interpolated form puts it inside the SQL string. Pipeline save refuses
+the old form with `template.validation.parameter_interpolated`. `${}` stays for
+**structure** — table names, dynamic `IN` lists, `ORDER BY` fragments — which you keep safe
+yourself (never interpolate a caller-supplied value there). Bound values need no quoting:
+`BETWEEN :start_date AND :end_date`, not `BETWEEN DATE ':start_date' AND …`.
+
+**Dialects** — eight: POSTGRES, ORACLE, MSSQL, MYSQL, H2, DUCKDB, SQLITE, LAKE. Templates are
+dialect-specific; a node's template dialect must match what its `source` can execute. `LAKE`
+is object storage read in place — see `lake`.
+
+## Folders — how you NAME a pipeline or a template
+
+Pipelines and templates share one naming grammar and one organising convention. The name IS
+the path; there is no folder object anywhere.
+
+**Grammar (both kinds).** 2–10 `/`-separated segments, each starting `[a-z0-9]` and
+continuing `[a-z0-9_.-]`, ≤ 64 chars per segment, ≤ 200 total. Lower-case only, no `@`, no
+backslash, no `.`/`..` segments, no leading/trailing/double slash.
+
+**A folder is REQUIRED.** `active_users` is refused; `test/active_users` is accepted. The
+refusal is `pipeline.validation.name_invalid` / `template.validation.id_invalid` with
+`details.reason: "folder_required"` — that is how you tell "you forgot the folder" from "you
+used a bad character" (`reason: "grammar"`). The root holds folders only, and there is no
+rename (§4.5), so a name minted at the root would be stuck there forever — which is the whole
+reason the rule exists.
+
+**`test/` is the scratch folder.** Experiments, spikes and throwaways go to `test/…` — never
+to a new root and never (it is impossible now) to the root itself. No folder is reserved and
+none is auto-created: a folder exists exactly when something is named under it.
+
+**Workspace = who may see and run. Root segment = who owns.** The workspace is the isolation
+boundary — membership decides who can read and execute. The root segment is an organising
+claim, not a permission: putting a pipeline under `finance/` grants nobody anything.
+
+**Your key is pinned to one workspace and can do at most what its issuer can do there;
+nothing from another workspace exists for you.** A name or id you did not get from a listing
+is not-found, never "forbidden" — so guessing tells you nothing, and a listing is the only
+truth about what is there.
+
+**Shape: `<owner>/<area>/<asset>`.** 2–4 levels is typical.
+
+- **A pipeline and the templates it uses share a prefix.** That is the whole payoff — one
+  prefix query shows an area's work whichever kind you browse.
+- **Shared macros live under `<owner>/lib/`** (`acme/lib/metrics.sql`), beside their owner,
+  not at the root.
+- **Scratch lives under `test/`** (`test/scratch`, `test/od_matrix_spike`).
+
+**List the roots FIRST, and ask before minting a new one.** Before you create anything:
+
+```
+pipelines_list  {"prefix": ""}     → the roots, each with a count
+templates_list  {"prefix": ""}     → the same, for templates
+pipelines_list  {"prefix": "acme"} → one level down: sub-folders + the pipelines directly there
+```
+
+Reuse an existing root. If none fits, **ask the human** — a new root is a claim about how the
+workspace is organised, and there is no rename to take it back. Never mint a root silently.
+
+**`prefix` browses; `q` searches.** `prefix` returns ONE level (`{prefix, folders, pipelines |templates, total,
+has_more}`) — direct sub-folders with counts, plus that level's own leaves. `q` is a flat substring search across
+full paths. Use `prefix` to learn the shape, `q` to find a thing you can already half-name.
+
+## The golden path (authoring a new pipeline)
+
+**SQL when SQL can; a transform when the shape is nested, the logic is per-row, or SQL cannot say it** — `transforms`.
+
+0. **Pick the folder.** `pipelines_list {"prefix": ""}` and `templates_list {"prefix": ""}`
+   to see which roots this workspace already uses, then drill in with `{"prefix": "<root>"}`.
+   Reuse a root. **A new root is refused until you confirm it: ask the person first, then pass
+   `confirm_new_root: true` on the FIRST create of either kind** — `pipelines_create` and
+   `templates_create` answer `pipeline.validation.new_root_requires_confirmation` /
+   `template.validation.new_root_requires_confirmation` with `details.existing_roots`. `test/`
+   never needs it. Everything you create below goes under this prefix — it cannot be moved later.
+1. **Learn before you assume.** You know nothing about a datasource until you have read it —
+   not its time zone, not its units, not whether a table is a sample or a census, not what a coded
+   value means. `datasources_list` is your first call and your first read: for every granted datasource
+   it carries the description, the dialect and the `facts` earlier sessions recorded (window,
+   sampling, units) — read them before you touch a table. Then, for EVERY datasource the pipeline
+   will touch: `datasources_get_schemas` → `datasources_get_tables(namespace)` → `datasources_get_columns(table,
+   namespace)` for every table the SQL will read — a LOOKUP is a table the SQL reads, and so is
+   a table a template you PIN reads; `_get_columns` and `_get_table_stats` on each, before the
+   first `templates_create` — each with its reported `namespace` array →
+   `datasources_get_table_stats` → `sql_probe` a few rows and the distinct values of every column you
+   will filter, group or join by. A lake listing's `partition_column: null` means no registered
+   partition column, not one file or no data skipping (`lake`). Descriptions and `remarks`
+   are one input, written by a person; **the columns and the rows are the ground truth** — never
+   write SQL against a column, a unit, a time zone or a sample rate you have not seen. Write what
+   you learned into the pipeline's description. `pipelines-authoring` §1 is the full procedure.
+
+   **Read the `facts` that arrive with the listings, before you probe.** `datasources_list` carries
+   the datasource-wide learned facts (its time window, whether it is a sample), `_get_tables` each
+   table's (grain, caveats), `_get_columns` each column's (units, time zones, what a coded value
+   means, joins) — what earlier sessions recorded, each with its `trust` and evidence. `observed` or
+   `verified` with evidence saves you the probe; `stale` or `needs_review` is a warning, not a truth —
+   re-verify it. `definitions` on the listing are rules earlier pipelines chose — read them before
+   you choose yours, and reuse or supersede, never re-choose. Then find the transform that implements the
+   rule — its `implemented_by`, or `templates_list {"implements": "<fact id>"}` — and reuse it before writing
+   your own. `datasources_get` is the same facts for one datasource — the refresh after you `semantics_record`.
+
+   **Record what you learned, with the query that showed it.** After you have established a
+   fact about the data that introspection could not tell you — a unit, a time zone, a sample
+   rate, a grain, what a coded value means, a join that holds — call `semantics_record` with
+   the probe you ran; when you re-verified a stale fact, record the superseding one. Never
+   record what introspection already returns (types, keys, comments).
+
+   Before your first `templates_create`, state — in your reasoning or your reply — which of
+   these calls you made for EACH datasource and EACH table the SQL reads; a table you did
+   not `_get_columns` and `_get_table_stats` is a table you may not read. The server checks
+   this: a `pipelines_create` naming a table you never `_get_columns`'d is refused
+   `pipeline.validation.table_not_learned` — the refusal lists the calls that clear it.
+1½. **Probe before you write.** Call `datasources_get_table_stats` on every table the SQL will touch (row
+   estimate, indexes, per-column bounds — catalog estimates, never a scan; probe for the exact bound), then
+   `sql_probe` the exact SELECT with representative parameters and read `plan.scan` and `wall_ms` — a `seq` plan
+   on a large table is the timeout you would meet in step 5, found while it is still cheap. A probe that settles a
+   question about the DATA is a fact: record it (step 1) so the next session skips the probe. Then, before the
+   first template, write the calculation down: each quantity's population, window, unit, grain and sampling
+   weight, and why the quantities you will add, compare or rank are the same kind of thing — a sampled count is
+   weighted BEFORE it meets a census count in a total or a ranking, precision is kept until the output, and every
+   group's observed support is shown beside its estimate (`pipelines-authoring` §4). Only then write
+   the template.
+2. **Write the template.** `templates_create` with `dialect` matching the source, a
+   Freemarker body, and a `description` that names every parameter the body expects
+   (the description is the only discoverability mechanism for parameters). Before
+   `templates_create` of a lookup or reference table — zones, calendars, stations, code lists —
+   `templates_list {"q": "<table>"}` and PIN what exists; a narrowed variant (a region dropped,
+   a year fixed) is a `WHERE` in the consumer or a parameter, not a new template. **To change a
+   draft template, read its `body_hash` with `templates_get` and call `templates_update`** (the
+   body and the hash; the dialect is inherited) — it writes the DRAFT the same way
+   `pipelines_update` writes a pipeline's. `templates_purge_draft` is for a template that should
+   not exist, not for editing one, and it is refused once a pipeline pins the template.
+3. **Preview the SQL.** `templates_render` with a representative context — save-time validation is parse-only, so
+   this is your check that the SQL is actually what you meant. This is mandatory before step 4 for anything
+   non-trivial — including one you create after the pipeline exists; the run is not its render. Every template the
+   pipeline pins — the tempdb ones included: `templates_render` checks what the Freemarker emits; `sql_probe
+   {"name": "tempdb"}` prepares the emitted statement on an empty engine and answers `validation_status` —
+   `executed` validated it, `incomplete` means H2 stopped at a missing staged table and checked NOTHING after it
+   (finish with a `VALUES` restatement or the node's real run, playbook §3); neither is the execution, and none of
+   the three replaces another.
+4. **Create the pipeline.** `pipelines_create` with `parameters` declared (types +
+   required/defaults — remember `DECIMAL` needs `precision`; `required: true` and
+   `default` are exclusive — a parameter with a default is optional by definition), nodes
+   referencing the template `{id, version}`, `depends_on` wiring, and `output` blocks for
+   staging/write-back. Save-time validation dry-renders every template against the
+   declared parameters and rejects anything that would not run. **Every node carries a
+   `description`** — one sentence: what it ships and at what grain (`one row per region and day
+   class`). **The pipeline's `description` is a document, not a paragraph:** sections separated by
+   blank lines, each opening with its label on its own line, in this order — **Question** (the
+   question in the person's words and the answer's grain, one row per …), **Window and door** (the
+   period and the parameters that set it), **Sources and grain** (each datasource and table, its
+   grain, sample vs census, time zone and units), **Interpretation** (every rule chosen —
+   thresholds, exclusions, tie-breaks — and which are recorded definitions), **Verification** (the
+   numbered recipe of the cross-check queries you ran — purpose, datasource, parameter values, SQL,
+   observed result, comparison — so a human re-runs them before releasing), **Caveats**. Short
+   paragraphs (`pipelines-authoring` §5). **Create lands v1 as a DRAFT** — executable
+   immediately, `current_version` null, the response carrying the `draft` pointer with the
+   `body_hash` for your next write.
+5. **Iterate on the DRAFT, run it, then write checks.** `pipelines_update` (requires the
+   `expected_hash` you read — see Best practices) writes the DRAFT: the first update opens it,
+   later updates overwrite it, so iterating never piles up versions. `pipelines_execute` with no
+   `version` runs the **working version** — your draft when one exists, else the latest release — so
+   testing your own work needs no version argument at all. A draft whose pinned template was
+   updated after its last render is refused (`pipeline.execution.template_unrendered`) — render, then run.
+   **Then verify — three strategies, two of them checks (`pipelines-authoring` §5).**
+   A fixed-baseline drift check (literals for the baseline window, `expected` the value you measured there, the baseline named in the
+   check's `name`) and a parameterized invariant check (binds the pipeline's parameters AND an expectation that holds for every input —
+   never a changing parameter beside a fixed expected total) are `checks[]` entries: one datasource, one statement, one value or row
+   count. The third strategy — independent output reconciliation — lives in the numbered Verification recipe, never in `checks[]`:
+   no check reads the pipeline's output; a source assertion that fits the check shape links in the recipe by check-id. Independent
+   means derived again from the QUESTION and the source facts (weights, denominators, window), never a re-run of your own formula;
+   it covers every requested dimension and the vulnerable rows — the rank cutoff, the sparsest and the absent groups — compared at
+   the declared precision; one winner's combined total proves neither the ranking nor its breakdown. Then `pipelines_run_checks`: the server's `observed`
+   is the only observed value there is; the release gate binds the declared DEFAULTS — a parameterized check proves the default window,
+   a fixed-literal baseline check its own named baseline. **Then stop**: leave the draft for a human to release from the UI — never
+   claim your change is live; no tool you have releases anything.
+6. **Read the result.** Inline first page + `total_rows` + `has_more` + `ttl_seconds`; page the
+   remainder with `executions_get_result` (`offset`/`limit`) **within the TTL** — afterwards it
+   is gone (`result.expired`). **A client can truncate a large tool result:** more rows than you
+   can see, or a truncation notice? Page the rows and reason over what the server returned,
+   never over a partial view.
+
+## Execution semantics agents must know
+
+- `pipelines_execute` is a **single blocking call** — it returns only when the execution
+  reaches a terminal state (`SUCCESS` / `FAILED` / `ABORTED`) or the execution timeout
+  (default 600 s) aborts it. There are no progress notifications in v1; the final result
+  carries `node_stats` (per-node status, durations, row counts, errors) — the authoritative
+  per-node record. A 3-minute pipeline is one 3-minute tool call.
+- **Drafts are executable, and a draft run is not a release** — the expected test loop; history marks it (`draft_run`) and it never counts as validation for release.
+- **Cancellation:** `executions_cancel` cancels a RUNNING execution your own MCP calls
+  started — the same-credential rule: `triggered_via` MCP, your user, and an audit row
+  pairing THIS key with the execution's correlation id (an execution started over REST,
+  the UI, or another key of the same user is refused, and the refusal says which rule
+  fired). Cancellation is requested, not awaited: poll `executions_get` for the terminal
+  `ABORTED`. For anything the rule refuses, ask the person to cancel it in the UI — your key has no REST road.
+- **Abandoned calls** run to completion — `/mcp` has no disconnect callback; cancel with `executions_cancel` or let the timeout handle it.
+- **Idempotency:** REST execute accepts `Idempotency-Key`; the MCP tool has none — unsure a call landed? Check `executions_list` before refiring.
+- **Zero-caller pipelines** return stats with no rows — that is a valid design, not a
+  failure.
+- `/mcp` and `/api/v1` share a per-user rate limiter — back off on `429`.
+
+## Promotion is not yours to trigger
+
+Moving released content from one deployment to another (dev → uat → prod) is **promotion**,
+and it is a **human action from the UI, deliberately**. There is no MCP tool for it, no
+schedule that runs it, and no REST endpoint you can call: the promotion route accepts only a
+`server`-kind key one deployment holds for another, presented as `DP-Promotion-Key` — never
+your API key, never a session (a server key presented as an ordinary `DP-API-Key` is refused
+everywhere, this surface included). This is a design decision, not a gap — a release reaching
+production is a decision a person makes.
+
+- **Never offer to promote, and never claim you did.** If asked, say what promotion is and
+  point at the Promotion screen in the UI.
+- **A "hotfix on prod" is not a thing here.** A receiver deployment refuses every authoring
+  write with `pipeline.authoring.disabled` / `template.authoring.disabled` — that refusal is
+  the system working; the fix is a new release in the authoring environment, promoted like
+  any other change. If you meet that code, you are pointed at the wrong deployment.
+- **What you CAN do is make a release promotable**: author, render, execute the draft, and
+  tell the human it is ready to release. Release itself is also theirs.
+
+## Error handling
+
+Every failure is structured — REST envelopes and MCP tool results (`isError: true`)
+carry the same catalogued codes. The registry of record is pipeline-contract.md §13, and
+`core-error-codes` lists the codes you will meet most often with the response each
+one calls for.
+
+Rule of thumb: validation errors are your bug — fix the document, don't retry.
+Reachability and TTL errors are the world's state — probe, then retry once.
+
+## When an execution fails
+
+`executions_get` (and `pipelines_execute`'s own failure result) carries the FULL
+failure record in `error` — the same object the UI shows and `error_json` stores. Read it in this order:
+
+1. `error.code` — the catalogued code (`core-error-codes` says what to do with it).
+2. `error.exception.caused_by` — the ROOT CAUSE IS THE **LAST** ENTRY of the chain
+   (the wire is outermost-first). Quote `class` + `message` from that entry.
+3. `error.sql` — the rendered SQL in `:name` form, exactly as it failed
+   (bound values are never in it; they are in the execution's `parameters`).
+
+`error.node` names the datasource, dialect and pinned template; `error.correlation_id`
+is the one field that joins this failure to the server log — QUOTE IT whenever you
+escalate to a human. On this server `error-detail=full` (the default), the exception
+chain and stack frames travel with the error; a deployment may set `structured`, in which
+case `error.exception` and `error.sql` are absent and you have the code, message, node
+context and correlation id to work with.
+
+## Best practices (trouble-free authoring)
+
+**Read `pipelines-authoring` before building or updating anything with more than two nodes** — the
+judgment between the golden path's steps: the question's grain, the lookups and display names, aggregating at the
+source while preserving keys and aggregate semantics (§4), indexing staged tables, lake pruning, `depends_on`, the
+three timeout budgets and when a scan may be partitioned, the measurement contract (population, units, weights,
+precision, ties, support), the three verification strategies, the numbered verification recipe, stopping at the
+draft. Its Do/Don't table is one screen; each row is a mistake an agent made here.
+
+1. **Render before you create.** `templates_render` with representative values catches
+   wrong SQL, bad interpolation, and dialect drift before a pipeline exists.
+2. **Test the datasource first.** `datasources_test` is cheap and settles connectivity and credentials at once.
+2½. **Learned facts are shared memory — keep them honest.** A fact you record with
+   `evidence_sql` is `observed`; without it, only `asserted` — except a `definition`, `exclusion`
+   or `preference`, which is a choice and lands `asserted` until a person confirms it. Two facts
+   of one kind on the same column are both served, flagged `conflict` — a reader decides, the
+   store never picks. To correct one, record the replacement with `supersedes` (the old one
+   retires as `superseded`); `semantics_retire` alone is for a fact that is simply wrong. **`refs`
+   names every table the `fact` text names, spelled as the catalog spells it** — a catalog table
+   the text names exactly and `refs` omit is ADDED for you (`refs_added` in the response), a
+   near-miss is refused with the nearest name (`semantics.ref_mismatch`) — and a DATASOURCE-scope
+   fact is table-wide: "in Q4 only A and B carry rows" is a pipeline description's job, not a
+   fact's. A DATASOURCE fact is visible to every workspace the datasource is granted to; a
+   `definition`, `exclusion` or `preference` (WORKSPACE scope) stays in yours — and a rule the
+   question leaves to you (what counts as rainy, active, late) is a `definition`; rule 13 says
+   when to record one and when to reuse one. A `definition` that spans datasources carries no
+   `refs` — record it once, against the datasource the question is mostly about.
+3. **Pin versions deliberately.** Nodes pin template versions; bump via `pipelines_update` only after re-rendering the new version.
+4. **Carry the hash you read.** `pipelines_update` and `templates_update` require
+   `expected_hash` — the `body_hash` from `pipelines_get`/`templates_get` or your previous
+   update's result. `pipelines_get` (and `templates_get`) default to the **working
+   version** — the draft when unreleased edits exist, else the latest released — and say
+   which `version`/`status` they returned, so you always edit the newest content. The hash
+   is the protocol that keeps two writers (you and a human, two sessions, two tabs) from
+   silently overwriting each other; a blind retry after a 409 is how an agent destroys a
+   human's edit. Read → edit → write with the hash you read.
+5. **One caller node, or zero.** Two caller nodes fail validation; use a tempdb node + a projection node instead of two outputs.
+6. **Stage with tempdb.** Multi-node pipelines chain through `output: tempdb` tables —
+   downstream nodes read them with `source: "tempdb"`. Keep table names lower_snake_case
+   (H2 lower-folds unquoted identifiers).
+7. **Declare parameters honestly.** Required flags with no default make the pipeline
+   refuse a bare execute; that is the contract working, not a bug — ask the user for values.
+8. **Bind values, never interpolate them.** A declared parameter appears in SQL as
+   `:name` (bound, never parsed as SQL); `${}` is for structural SQL only. A `:name`
+   with no declared parameter fails at execution with
+   `pipeline.node.sql_parameter_missing` — name a declared parameter or interpolate
+   structure.
+9. **Page results immediately.** Read all pages within `ttl_seconds`; long-running work between pages risks `result.expired`.
+10. **Never put secrets in templates or descriptions.** Credentials live on the
+   datasource entity (AES-GCM encrypted at rest). SQL bodies are visible to anyone with `read`.
+11. **Respect the rate limiter** — batch listing calls, don't hammer `/mcp`.
+12. **When debugging a failure**, follow the `debug_failed_execution` prompt flow:
+    `executions_get` → failing node's `node_stats` + error → `pipelines_get` →
+    `templates_get` → `templates_render` with the failed run's parameters → propose a fix.
+13. **Parameters wear the question's vocabulary; technical inputs are derived.** A question that names a
+    period — "2024", "Q3", "last month", "2023 to 2024" — gets that period's parameter (`year`, `quarter`,
+    `base_year`/`comp_year`, an anchor date), and the calculator or in-dialect date math derives the bounds;
+    two raw dates are an INPUT to a template, never the door of a pipeline. The server enforces that: a
+    raw-date door is refused until you pass `door_acknowledged: true` — which you do only when the question
+    truly fixes two dates; passing it to silence the refusal is the miss it exists to catch. A relative
+    phrase's door is an anchor date — `$current_date` for a live one; for a fixed dataset, the data's last
+    date for a "this period" phrase but **the day AFTER the data's last date for a "last N periods"
+    phrase** — those kinds resolve the complete periods before the one CONTAINING the anchor (data ends
+    2026-06-30: "last quarter" anchors `2026-07-01` → 2026-04-01..2026-06-30; `2026-06-30` → Q1). **Any
+    relative time phrase in the question — "last", "this", "to date", "trailing", "N ago" — is resolved by
+    reading `calculators_list`:** each kind lists the everyday phrases it answers; pick the kind whose
+    phrases match the question's words, and when two kinds both fit, ask the person which one. A CALCULATOR
+    node writes the technical inputs into the execution Context for downstream SQL to bind
+    ([calculators.md](../../docs/calculators.md)); the catalog's `outputs` says which keys. Write the
+    interpretation you chose into the pipeline's `description` in the question's own words, and
+    name the window the same way in every template's `description`. The calculator's `context_key` is already
+    an optional execute input — never also declare it as a parameter (`pipeline.validation.calculator_output_collision`).
+    When the question leaves a threshold or a rule to you — what counts as rainy, active, churned, late —
+    write the rule you chose into the description AND record it as a `definition` fact on the workspace, with
+    the probe that showed the distribution you chose over; before choosing, read the listing's facts — a
+    `definition` an earlier pipeline recorded is the one to reuse, so two pipelines in one workspace never
+    answer "rainy" two ways.
+13½. **A number you did not measure is not a number.** Row counts, sample rates and windows come from
+    `datasources_get_table_stats`, a probe, or a metadata table — never estimated. **A claim about the DATA is a
+    probe you ran or a registry line you read:** stats describe registered partitions, not all physical layout
+    or actual bytes skipped; confirm pruning from execution evidence. A column's values over the WHOLE table from a
+    whole-table probe, never a lookup or a description; "census, not sample" from a reconciled count or an
+    `asserted` record. **And a cause is a claim too:** the REASON for a number you noticed is named only after the
+    probe that shows it, and never names a mechanism — "the generator", "the feed" — you have not seen. That
+    includes the PLATFORM: a tool behaving unexpectedly is reported as what you observed and what you did —
+    never name the server's mechanism, which you cannot see. **Report from the output you read:** a direction, a unit,
+    the time period, a sample size in your reply is reconciled against the actual result rows before you write it
+    — the rows outrank the story you remember. **And a description carries data facts and the interpretation you
+    chose — never claims about your own process:** "validated", "reproduced", "checked" go in your reply — a
+    description outlives the validation, and it is an exemplar the next agent copies. When the data cannot reveal
+    a fact you depend on (a sample rate no table states, a time zone no type states): write the assumption into
+    the pipeline's `description`, `semantics_record` it WITHOUT evidence so it lands as `asserted` for a human to
+    verify — that record, not your reply, is what the next session finds — and say in the reply which facts you
+    derived and which you assumed. An assumption that moves the answer by an order of magnitude: stop and ask
+    first.
+14. **Engine quirks** — a `:bind` inside an H2 GROUP BY, DECIMAL ÷ DECIMAL in H2, H2's
+    `C1…` `VALUES` columns, `rows` on MySQL/DuckDB, the one-datasource wall for source
+    nodes and probes: `pipelines-authoring` §6, read it before your first
+    tempdb node.
+
+## References — open one when you need it
+
+- **`pipelines-schema`** — writing or reading a pipeline body.
+- **`pipelines-node-types`** — wiring the DAG.
+- **`pipelines-authoring`** — building anything non-trivial.
+- **`templates`** — writing SQL: templates, library imports, CALCULATOR nodes.
+- **`pipelines-calculators`** — every calculator kind, generated from the server's registry.
+- **`transforms`** — a transform template (JSONata), its contract/invariants/tests, `templates_evaluate`, `implements`.
+- **`pipelines-naming`** — choosing where a new pipeline or template lives.
+- **`datasources-connecting`** — a first call, a role or credential refusal, no MCP transport.
+- **`lake`** — the data is Parquet or Iceberg on S3, not in a database.
+- **`endpoints`** — a released read-only pipeline answering a plain HTTP GET.
+- **`core-error-codes`** — a tool answered `isError: true`; every catalogued code, its status and the server's message.
+- **`<area>-tools`** — each area's MCP tools, generated from the server's catalog: `core-tools`,
+  `pipelines-tools`, `executions-tools`, `templates-tools`, `transforms-tools`, `datasources-tools`, `lake-tools`, `endpoints-tools`.

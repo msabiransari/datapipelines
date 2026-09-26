@@ -225,6 +225,12 @@ class WebsiteFactsGuardTest {
                 templateService = mockk<co.datapipelines.templates.TemplateService>(),
                 templateEvaluateService = mockk<co.datapipelines.application.templates.TemplateEvaluateService>(),
                 templateDrafts = mockk<co.datapipelines.templates.TemplateDraftService>(),
+                docSet =
+                    mockk<org.springframework.beans.factory.ObjectProvider<co.datapipelines.mcp.docs.DocSet>>().also {
+                        every { it.getObject() } returns
+                            co.datapipelines.mcp.docs
+                                .DocSet(emptyList())
+                    },
             ).size
     }
 

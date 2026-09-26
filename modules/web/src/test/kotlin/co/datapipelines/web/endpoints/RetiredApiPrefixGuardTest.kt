@@ -38,7 +38,7 @@ class RetiredApiPrefixGuardTest {
         check(files.any { it.extension == "kt" }) { "no Kotlin sources in the sweep" }
         check(files.any { it.extension == "html" }) { "no templates in the sweep" }
         check(files.any { it.path.contains("/docs/") }) { "no docs in the sweep" }
-        check(files.any { it.path.contains("/.agents/skills/") }) { "the skill is not in the sweep" }
+        check(files.any { it.path.contains("/resources/skill/") }) { "the served manual's resources are not in the sweep" }
     }
 
     private fun sweptFiles(): List<File> {
@@ -63,8 +63,11 @@ class RetiredApiPrefixGuardTest {
     private companion object {
         const val RETIRED_PREFIX = "/api/" + "x"
 
-        /** Everything that states or serves a URL: code, docs, templates, config, the skill. */
-        val SWEPT_DIRS = listOf("modules", "docs", ".agents/skills", "deploy", "scripts", "tests", "plugins")
+        /**
+         * Everything that states or serves a URL: code, docs, templates, config, the manual
+         * (the resources under modules/mcp-server since 242a, no longer .agents/skills).
+         */
+        val SWEPT_DIRS = listOf("modules", "docs", "deploy", "scripts", "tests", "plugins")
         val SWEPT_EXTENSIONS = setOf("kt", "kts", "md", "html", "yml", "yaml", "sql", "sh")
 
         /**

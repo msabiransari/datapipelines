@@ -101,7 +101,7 @@ class McpServerWiringTest {
             // 118 — the three learned-semantics tools, appended after the lake tools.
             SemanticsTools.all(datasources, semantics, introspector, McpFixtures.EVERYTHING_LENS) +
             // 120 — the two docs tools, appended after the semantics tools.
-            DocsTools.all() +
+            DocsTools.all { DocSetTestSupport.minimalDocSet() } +
             // 140 — the release-check run, appended after the docs tools.
             listOf(PipelineRunChecksTool(service, mockk()))
     }
@@ -137,6 +137,7 @@ class McpServerWiringTest {
                     datasources,
                     executions,
                     McpFixtures.EVERYTHING_LENS,
+                    docSet = DocSetTestSupport.minimalDocSet(),
                 ),
                 McpResourceReader(
                     McpFixtures.pipelineService(pipelines),
@@ -146,6 +147,7 @@ class McpServerWiringTest {
                     events,
                     auditLogger,
                     McpFixtures.EVERYTHING_LENS,
+                    DocSetTestSupport.minimalDocSet(),
                 ),
                 version = "1.0.0",
             )
@@ -216,7 +218,11 @@ class McpServerWiringTest {
                 // only entity row an empty instance has.
                 (listed.result() as McpSchema.ListResourcesResult).resources().map { it.uri() } shouldBe
                     listOf(McpResourceUri.skill()) +
-                    SkillDocs.references.keys.map { McpResourceUri.skillReference(it) } +
+                    DocSetTestSupport
+                        .minimalDocSet()
+                        .docs
+                        .filter { it.name != "core" }
+                        .map { McpResourceUri.skillReference(it.name) } +
                     listOf("datapipelines://datasources")
             },
             { (listed.result() as McpSchema.ListResourcesResult).nextCursor() shouldBe null },
@@ -252,6 +258,7 @@ class McpServerWiringTest {
             datasources,
             executions,
             McpFixtures.EVERYTHING_LENS,
+            docSet = DocSetTestSupport.minimalDocSet(),
         )
 
     private fun reader() =
@@ -263,6 +270,7 @@ class McpServerWiringTest {
             events,
             auditLogger,
             McpFixtures.EVERYTHING_LENS,
+            DocSetTestSupport.minimalDocSet(),
         )
 
     private fun context(): McpTransportContext =

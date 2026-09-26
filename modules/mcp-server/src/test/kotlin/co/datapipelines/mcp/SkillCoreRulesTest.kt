@@ -25,7 +25,13 @@ import org.junit.jupiter.api.Test
  * reversible edit: every assertion here went red, and green again on restore.
  */
 class SkillCoreRulesTest {
-    private val lines = SpecFiles.read(SpecFiles.SKILL_PATH).lines()
+    private val lines =
+        SpecFiles
+            .read(SpecFiles.SKILL_CORE_RESOURCE)
+            .let { text ->
+                // strip the front matter — the rules hold against the SERVED body
+                if (text.startsWith("---\n")) text.substring(text.indexOf("\n---", 4) + 5) else text
+            }.lines()
 
     @Test
     fun `rule 13 resolves relative phrases through calculators_list and names no kind`() {
@@ -44,7 +50,7 @@ class SkillCoreRulesTest {
         val offenders =
             (CalculatorRegistry.NAMES + QUARTER_BOUNDS).mapNotNull { name ->
                 val found = block.firstOrNull { wordBounded(it.second, name) }
-                found?.let { "SKILL.md:${it.first}: kind name `$name` in rule 13" }
+                found?.let { "core.md:${it.first}: kind name `$name` in rule 13" }
             }
         withClue("rule 13 names calculator kinds — the skill teaches the lookup, never the list") {
             offenders.shouldBeEmpty()

@@ -33,6 +33,12 @@
 # and the audit then demands the catalog rows. Exempted docs are printed on
 # every run so the debt stays visible rather than silent.
 #
+# 242a: the SERVED manual is an input too — `:modules:mcp-server:docsExport` renders
+# the document set the deployment serves into build/skill-docs/, and checks A–C run
+# over those files the same as the spec set (the manual is agent-facing prose; it
+# drifts like any doc). A missing or empty directory is a failure, not a skip: run
+# the export first.
+#
 # Born 2026-08-07 (SPEC-REVIEW-2026-08 Phase 3). Baseline: exit 0 on the
 # v1.1–v1.3 spec set; self-test: scripts/docs-audit.sh --self-test doctors a
 # temp copy and must exit 1.
@@ -48,6 +54,13 @@ if [[ "${1:-}" == "--self-test" ]]; then
   cp deploy/*.yml deploy/secrets.env.example "$tmp/deploy/"
   cp deploy/env/*.env "$tmp/deploy/env/"
   cp deploy/sample-data/*.sh "$tmp/deploy/sample-data/"
+  # The rendered-manual input: the self-test copy has no build, so seed the same
+  # shape docsExport produces (one stub document + the index) — a defect planted in
+  # build/skill-docs must fail exactly like one in docs/.
+  mkdir -p "$tmp/build/skill-docs"
+  printf -- '---\narea: core\nlayer: core\npurpose: stub.\n---\n\n# Stub export\n\nCites `pipeline.validation.nonexistent_code` when doctored.\n' \
+    > "$tmp/build/skill-docs/stub.md"
+  printf -- '# index\n' > "$tmp/build/skill-docs/index.md"
   # Introduce one defect per check class. The heading first CLOSES staging.md's Change
   # Log section (the doc's last section): checks C and D exempt Change Log lines, so
   # defects appended bare at EOF were placebo — the self-test passed on A and B alone
@@ -75,6 +88,14 @@ python3 - <<'PY'
 import re, sys, glob, os
 
 DOCS = sorted(glob.glob("docs/*.md")) + ["DEVELOPMENT.md"]
+# 242a — the rendered manual (docsExport's output) joins the A–C scan set. A missing
+# or empty export is a failure with the fix in the message, never a silent skip.
+RENDERED_DIR = "build/skill-docs"
+RENDERED = sorted(glob.glob(RENDERED_DIR + "/*.md"))
+if not RENDERED:
+    print("docs-audit: " + RENDERED_DIR + "/ is missing or empty — run ./gradlew :modules:mcp-server:docsExport first")
+    sys.exit(1)
+DOCS += RENDERED
 # This script IS the catalogue of forbidden spellings, so it names every one of them;
 # and the spec review is the historical record of the old ones.
 EXEMPT_HISTORY = {"docs/SPEC-REVIEW-2026-08.md", "scripts/docs-audit.sh"}

@@ -10,11 +10,15 @@ import java.io.File
 object SpecFiles {
     const val MCP_SPEC_PATH: String = "docs/mcp-server.md"
 
-    /** The agent-facing skill (094): the surface's own instructions, which drift like any doc. */
-    const val SKILL_PATH: String = ".agents/skills/datapipelines/SKILL.md"
+    /**
+     * The served manual's narrative core (242a): a packaged resource of `mcp-server`, read in
+     * the repo tree. The SERVED text is its body — front matter stripped, placeholders
+     * substituted by [co.datapipelines.mcp.docs.DocRenderer].
+     */
+    const val SKILL_CORE_RESOURCE: String = "modules/mcp-server/src/main/resources/skill/core.md"
 
-    /** The skill DIRECTORY (095): `SKILL.md` plus `references/` — packaged, served and copied whole. */
-    const val SKILL_DIR: String = ".agents/skills/datapipelines"
+    /** The narrative resources' directory in the repo tree (242a; the golden expectations mirror it). */
+    const val SKILL_RESOURCES: String = "modules/mcp-server/src/main/resources/skill"
 
     /** Public since 095: the doc renderer and the packaging guards address files by repo path too. */
     val root: File by lazy {

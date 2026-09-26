@@ -140,7 +140,7 @@ class NewRootConfirmationTest {
         // The schema description is what a tool caller reads mid-call; the SKILL is what it reads
         // BEFORE choosing a folder, which is the only moment the advice can still save a round
         // trip. Both have to say it, so both are asserted.
-        val skill = SpecFiles.read(SpecFiles.SKILL_PATH)
+        val skill = SpecFiles.read(SpecFiles.SKILL_CORE_RESOURCE)
 
         assertAll(
             { skill shouldContain "confirm_new_root" },

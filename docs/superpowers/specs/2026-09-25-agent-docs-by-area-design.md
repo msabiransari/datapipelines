@@ -1,6 +1,6 @@
 # Agent documentation by functional area, served by the application
 
-**Status:** draft with the owner's §9 rulings taken (2026-09-25); RATIFIED by lane 242a's first commit.
+**Status:** RATIFIED (2026-09-25, by lane 242a; owner's §9 rulings taken 2026-09-25).
 GitHub #242; the first slice, the handshake cap, is #241.
 **Direction (owner, 2026-09-25):** the documentation an agent reads is served by the application,
 assembled from what the application already knows; no static skill is kept in the repository as a
@@ -125,10 +125,11 @@ read by a model.
 ## 7. Sequencing
 
 1. **#241** — the handshake under the cap (its own lane; no dependency on the rest).
-2. **242a — the render-at-boot document set:** `DocSet`/`DocRenderer`, the generators, the area
-   catalog, `docs_list(area)` + `docs_get(section)` + budgets, the HTTP twin over the set, the
-   guards of §5, today's narrative moved into the module unchanged in substance (the split is
-   242b), aliases, the plugin per §9's ruling, the fresh-session proof.
+2. **242a — the render-at-boot document set:** DELIVERED 2026-09-25 (lane 242a). `DocSet`/
+   `DocRenderer`, the generators, the area catalog, `docs_list(area)` + `docs_get(section)` +
+   budgets, the HTTP twin over the set, the guards of §5, today's narrative moved into the
+   module unchanged in substance (the split is 242b), aliases, the plugin per §9's ruling, the
+   fresh-session proof.
 3. **242b — the narrative by area:** the playbook and the core split into the area guides and
    references of §3.2; the core shrunk to orientation + rules + index; the reading path re-proven.
 4. Scheduling, reporting and dashboards areas: by the lanes that ship those capabilities.

@@ -1,6 +1,6 @@
 {
   "name": "datapipelines",
-  "description": "Author, run and debug declarative SQL pipelines on a datapipelines.co deployment. Ships the datapipelines agent skill and connects Claude Code to your deployment's MCP server.",
+  "description": "Connects Claude Code to a datapipelines.co deployment's MCP server and points the agent at the manual that deployment serves.",
   "homepage": "https://datapipelines.co",
   "repository": "https://github.com/msabiransari/datapipelines",
   "license": "AGPL-3.0-only",

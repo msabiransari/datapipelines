@@ -46,6 +46,7 @@ class McpResourceReaderTest {
             events,
             auditSink,
             McpFixtures.EVERYTHING_LENS,
+            DocSetTestSupport.renderedDocSet(),
         )
 
     private fun contents(uri: String): McpSchema.TextResourceContents =
@@ -73,14 +74,16 @@ class McpResourceReaderTest {
 
         assertAll(
             { core.mimeType() shouldBe McpResourceCatalog.MIME_MARKDOWN },
-            // The BYTES, not a rendering of them: this is the same file the checkout holds and
-            // the same one `GET /skill.md` serves.
-            { core.text() shouldBe SkillDocs.skill },
-            { core.text() shouldContain "name: datapipelines" },
+            // The BYTES, not a rendering of them: the same rendered document the tools serve
+            // and `GET /skill.md` returns.
+            { core.text() shouldBe DocSetTestSupport.renderedDocSet().core.markdown },
+            { core.text() shouldContain "# datapipelines" },
             { reference.mimeType() shouldBe McpResourceCatalog.MIME_MARKDOWN },
-            { reference.text() shouldBe SkillDocs.references.getValue("templates") },
-            // The file name someone copies out of the map works too.
+            { reference.text() shouldBe DocSetTestSupport.renderedDocSet().get("templates").markdown },
+            // The `.md` form someone copies out of a URL works too, and an alias of the
+            // previous delivery resolves to its successor.
             { contents(McpResourceUri.skillReference("templates.md")).text() shouldBe reference.text() },
+            { contents(McpResourceUri.skillReference("skill")).text() shouldBe core.text() },
             // Reading the manual touches no repository — it is workspace-independent content.
             { verify(exactly = 0) { pipelines.findById(any(), any()) } },
         )
@@ -323,6 +326,7 @@ class McpResourceReaderTest {
                 executions,
                 McpFixtures.EVERYTHING_LENS,
                 Clock.fixed(Instant.parse("2026-08-09T12:00:00Z"), ZoneOffset.UTC),
+                docSet = DocSetTestSupport.minimalDocSet(),
             )
         val templateUris =
             catalog

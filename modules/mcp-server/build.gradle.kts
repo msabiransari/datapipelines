@@ -57,73 +57,47 @@ dependencies {
 }
 
 // ---------------------------------------------------------------------------
-// 095 — the skill leaves the repo. One source (.agents/skills/datapipelines/),
-// four deliveries: the connect-time handshake, the MCP resource, the HTTP URL,
-// and the Claude Code plugin. Everything below serves the last three.
+// 242a — the manual is RENDERED, not copied (docs/superpowers/specs/
+// 2026-09-25-agent-docs-by-area-design.md, ratified). The narrative resources
+// live in src/main/resources/skill/ (packaged by the standard processResources)
+// and the DocRenderer assembles the served set from them plus the catalogs at
+// boot. The build-time tasks that mirrored .agents/skills/datapipelines/ — the
+// skill copy, skillToolsDoc, pluginSkillCopy, skillArtifacts — are gone with
+// the directory they mirrored: the plugin is a pointer now, and the per-area
+// tools references are rendered from the live catalog at boot.
+//
+// docsExport renders the SAME set a build-time harness (see below) and writes
+// it to <repo>/build/skill-docs/ for scripts/docs-audit.sh (checks A–C run
+// over the exported files) and for a human who wants to read what the server
+// serves without booting it.
 // ---------------------------------------------------------------------------
 
-// The skill ships IN THE JAR, so a deployment serves the manual it actually runs
-// (the same structural argument 033 made for docs/*.md in the web jar).
-//
-// READ THIS BEFORE MOVING IT. `web`'s processResources packages root `docs/*.md` and
-// `DocsCatalog` FAILS FAST at init on any packaged doc with no declared group — a
-// docs-only commit broke main on 2026-09-01 for exactly that reason. The skill is
-// therefore packaged into its OWN classpath directory, `skill/`, never under `docs/`:
-// `DocsCatalog`'s `classpath*:docs/*.md` scan cannot see it, and no grouping decision
-// is owed. `SkillPackagingTest` asserts the packaged bytes equal the repo file for
-// SKILL.md and every reference.
-//
-// It is packaged HERE and not in `web` because `mcp-server` is the module that must
-// read it (the `datapipelines://docs/skill` resource) and `mcp-server` must not depend
-// on `web` (§5.8). `web` depends on `mcp-server`, so one packaging block serves both
-// surfaces; two would be two copies to drift apart.
-tasks.named<ProcessResources>("processResources") {
-    from(rootProject.layout.projectDirectory.dir(".agents/skills/datapipelines")) {
-        into("skill")
-        include("SKILL.md", "references/*.md")
+val docsExportDir = rootProject.layout.buildDirectory.dir("skill-docs")
+
+/**
+ * The export runs the renderer outside Spring. It reuses the test source set's
+ * `SkillDocsExportMain` (beside `SkillToolsDocMain`, which it replaces), which needs the real
+ * tool instances with mocked collaborators — `RealShippedTools` is test-source-set machinery,
+ * the SiteExportMain precedent. It ALSO needs `web`'s `ApiErrorDocCatalog` (the DocErrorCatalog
+ * port's implementation, which lives with ApiErrorCatalog in `web`): the classpath below adds
+ * web's classes at EXECUTION time only. No project dependency is declared — `mcp-server` does
+ * not compile against `web` (module-structure §5.8); the main loads the class reflectively and
+ * fails loudly when it is absent, and this task declares the dependency that guarantees it.
+ */
+tasks.register<JavaExec>("docsExport") {
+    group = "documentation"
+    description = "Renders the served document set to build/skill-docs/ for the docs audit and human reading."
+    dependsOn("testClasses", ":modules:web:classes")
+    mainClass.set("co.datapipelines.mcp.SkillDocsExportMainKt")
+    // web's main OUTPUT only (the ApiErrorDocCatalog classes) — no configuration resolution,
+    // which Gradle 9 forbids across projects at execution time. Everything the catalog's own
+    // imports need (spring-web, jackson, auth) is already on this module's test classpath.
+    classpath =
+        sourceSets["test"].runtimeClasspath +
+            project(":modules:web").sourceSets["main"].output
+    doFirst {
+        args(docsExportDir.get().asFile.absolutePath)
+        docsExportDir.get().asFile.deleteRecursively()
+        docsExportDir.get().asFile.mkdirs()
     }
-}
-
-/** The skill directory in the repo — the ONE source every delivery copies from. */
-val skillSource = rootProject.layout.projectDirectory.dir(".agents/skills/datapipelines")
-
-// §B — references/tools.md is RENDERED from McpToolCatalog + each tool's definition,
-// never typed. See SkillToolsDoc's KDoc for why (three hand-typed tool counts were
-// stale simultaneously). The committed file is this task's output — committed so a raw
-// checkout and the plugin are complete without running a build — and
-// SkillToolsDocDriftTest fails when the two disagree.
-tasks.register<JavaExec>("skillToolsDoc") {
-    group = "documentation"
-    description = "Renders .agents/skills/datapipelines/references/tools.md from the shipped MCP tool catalog."
-    dependsOn("testClasses")
-    mainClass.set("co.datapipelines.mcp.SkillToolsDocMainKt")
-    classpath = sourceSets["test"].runtimeClasspath
-    // Resolved in doFirst: a Provider passed through vararg `args` stringifies instead
-    // of unwrapping (the same footgun web's websiteExport documents).
-    val out = rootProject.layout.projectDirectory.file(".agents/skills/datapipelines/references/tools.md")
-    doFirst { args(out.asFile.absolutePath) }
-}
-
-// §C4 — the Claude Code plugin's skill directory is a COPY, not a symlink: a
-// marketplace is fetched with git, and a symlink pointing out of the plugin directory
-// is a broken install (the plugin docs' own rule — "outside marketplace: skipped").
-// PluginSkillCopyDriftTest fails when the copy is not byte-identical to the source.
-tasks.register<Copy>("pluginSkillCopy") {
-    group = "documentation"
-    description = "Copies the skill into plugins/datapipelines/skills/datapipelines (the Claude Code plugin)."
-    dependsOn("skillToolsDoc")
-    val target = rootProject.layout.projectDirectory.dir("plugins/datapipelines/skills/datapipelines")
-    // Wipe first. A Copy ADDS and never removes, so a file deleted from the skill would
-    // survive in the plugin forever — and the drift test would still pass, because it
-    // compares the files that exist on both sides (measured, 2026-09-04, 073 §F).
-    doFirst { target.asFile.deleteRecursively() }
-    from(skillSource) { include("SKILL.md", "references/*.md") }
-    into(target)
-}
-
-/** Regenerates every derived copy of the skill — run this after editing SKILL.md. */
-tasks.register("skillArtifacts") {
-    group = "documentation"
-    description = "Renders references/tools.md and refreshes the plugin's copy of the skill."
-    dependsOn("skillToolsDoc", "pluginSkillCopy")
 }

@@ -75,8 +75,8 @@ New to the project? Read in this order: **type-system → pipeline-contract → 
 | [TEST-GAP-2026-09.md](TEST-GAP-2026-09.md) | Behaviour-coverage and browser-suite gap audit (2026-09): backfill tiers and the golden-path backlog — findings record, proposed not ratified |
 | [semantic-layer-research.md](semantic-layer-research.md) | Research brief (pre-spec) on semantic layers for agent-facing data — input to a future `semantic-layer.md`, not a commitment |
 | [../DEVELOPMENT.md](../DEVELOPMENT.md) | Developer setup: local infra, OIDC setup, build/run/test, git workflow |
-| [../.agents/skills/datapipelines/](../.agents/skills/datapipelines/) | The agent skill — `SKILL.md` (the operating core) + `references/`. Its `references/tools.md` is GENERATED from the tool catalog (`./gradlew :modules:mcp-server:skillArtifacts`), and every derived copy is drift-tested. Not a spec: it tells an AGENT how to use the product, while these docs define what the product is |
-| [../plugins/datapipelines/](../plugins/datapipelines/) | The Claude Code plugin — the same skill plus the MCP server entry, installed with `/plugin marketplace add msabiransari/datapipelines`. Its `skills/` directory is a build-time copy of the skill, never a second source |
+| `modules/mcp-server/src/main/resources/skill/` | The agent manual's narrative resources — flat-named documents with `area`/`layer`/`purpose` front matter, rendered at boot and served over MCP and `GET /skill.md` (mcp-server.md §15). The tools references, error codes and calculator catalog are GENERATED from the catalogs; a deliberate prose change regenerates the golden expectations. Not a spec: it tells an AGENT how to use the product, while these docs define what the product is |
+| [../plugins/datapipelines/](../plugins/datapipelines/) | The Claude Code plugin — the MCP server entry plus a under-20-line POINTER skill that says to read the deployment's own manual (`docs_get skill`); no content is mirrored. Installed with `/plugin marketplace add msabiransari/datapipelines` |
 
 ## House rules (cross-cutting)
 

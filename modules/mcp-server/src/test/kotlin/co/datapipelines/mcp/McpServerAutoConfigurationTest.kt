@@ -130,6 +130,11 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun executorConfig(): ExecutorConfig = ExecutorConfig()
 
+        // 242a — the served manual's §13 port (`web`'s DocsConfiguration declares the real
+        // implementation in the assembled application). The set renders from the packaged
+        // resources and the fixture rows.
+        @Bean fun docErrorCatalog(): co.datapipelines.mcp.docs.DocErrorCatalog = DocSetTestSupport.FixtureDocErrorCatalog()
+
         @Bean fun pipelineValidator(): PipelineValidator = mockk()
 
         // 056: the pipeline tools take the SERVICE, which `web`'s PipelineLifecycleConfiguration
