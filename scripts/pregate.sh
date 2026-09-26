@@ -9,7 +9,7 @@
 # exactly those in a few minutes so the full gate runs once.
 #
 # Five stages, each its own bare gradle invocation writing to a log FILE (no pipes —
-# DEVELOPMENT.md §9.4): (1) lint over the whole tree; (2) the UNFILTERED test task of
+# DEVELOPMENT.md §9.4): (1) lint + the four root audits over the whole tree; (2) the UNFILTERED test task of
 # every `modules/*` module the diff touched; (2b) for the two `tests/*` modules, ONLY the
 # test classes the diff changed or added (their build file changed → the whole module),
 # with the zero-test guard skipped — the E2E and browser suites are the expensive part of
@@ -48,9 +48,13 @@ echo " logs: $LOGDIR"
 echo "=============================================================="
 
 # --- 1. lint, whole tree --------------------------------------------------------
-lint=$(run "$LOGDIR/1-lint.log" ktlintCheck detekt --continue)
-echo "  1 lint (ktlintCheck detekt, whole tree)          EXIT=$lint"
-[ "$lint" -ne 0 ] && grep -E 'ktlint|detekt|\.kt:[0-9]+' "$LOGDIR/1-lint.log" | grep -vE '^> Task|UP-TO-DATE' | head -20 | sed 's/^/      /'
+# The four ROOT audits ride with lint: they hang off every module's `check`, so the gate's
+# `build` reaches them before any test — a config key bound in application.yml without its
+# compose pass-through (197, 2026-09-26) passed a lane's lint + tests and killed the gate
+# at its first task. A targeted run never executes them; this stage does.
+lint=$(run "$LOGDIR/1-lint.log" ktlintCheck detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs --continue)
+echo "  1 lint + root audits (ktlintCheck detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs)  EXIT=$lint"
+[ "$lint" -ne 0 ] && grep -E 'ktlint|detekt|\.kt:[0-9]+|audit:|^\s+[0-9]+ |verifyModule|verifyVerification|What went wrong' "$LOGDIR/1-lint.log" | grep -vE '^> Task|UP-TO-DATE' | head -24 | sed 's/^/      /'
 
 # --- 2. unfiltered tests of the touched modules ---------------------------------
 if [ -n "$touched" ]; then

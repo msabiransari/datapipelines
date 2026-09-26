@@ -702,7 +702,9 @@ recount) for the verdict. Filtered runs are for iterating; the gate is unfiltere
 
 **The pre-gate (before the first full gate).** `./scripts/pregate.sh [base]` runs, in a few
 minutes, exactly what a targeted test run cannot see and the full gate keeps finding two or
-three runs late: (1) `ktlintCheck detekt` over the whole tree; (2) the **unfiltered** `test` task
+three runs late: (1) `ktlintCheck detekt` plus the four root audits (`composeEnvAudit`,
+`composeArgvSecretsAudit`, `verifyModuleDependencies`, `verifyVerificationMetadataDocs` — they hang
+off every module's `check`, so the gate's `build` reaches them before any test); (2) the **unfiltered** `test` task
 of every module the diff touched (so `verifyTestsExecuted` stays meaningful); (3) the
 cross-cutting guard classes, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
