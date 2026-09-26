@@ -55,8 +55,13 @@ class WorkspaceInvitationLocalE2eTest {
     fun `the admin invites an existing local user and the first login lands them in the workspace`() {
         // The seed admin walks the forced-change path, then runs the admin half.
         val adminLogin = postLogin(ADMIN_EMAIL, SEED_PASSWORD)
-        postPasswordChange(adminLogin.sessionCookie("admin-first", userRow(ADMIN_EMAIL)), adminLogin.csrfToken, SEED_PASSWORD, NEW_ADMIN_PASSWORD, NEW_ADMIN_PASSWORD)
-            .statusCode shouldBe 200
+        postPasswordChange(
+            adminLogin.sessionCookie("admin-first", userRow(ADMIN_EMAIL)),
+            adminLogin.csrfToken,
+            SEED_PASSWORD,
+            NEW_ADMIN_PASSWORD,
+            NEW_ADMIN_PASSWORD,
+        ).statusCode shouldBe 200
         val admin = adminLogin.sessionCookie("admin", userRow(ADMIN_EMAIL))
 
         createWorkspace(admin, adminLogin.csrfToken, WORKSPACE)
@@ -272,18 +277,16 @@ class WorkspaceInvitationLocalE2eTest {
      */
     private fun userRow(email: String): String =
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
-            connection
-                .prepareStatement(
-                    "SELECT provider || '/' || provider_subject || ' active=' || is_active || " +
-                        "' must_change=' || must_change_password || ' failed=' || failed_login_count || " +
-                        "' locked_until=' || coalesce(locked_until::text, 'never') FROM users WHERE email = ?",
-                )
-                .use { ps ->
-                    ps.setString(1, email)
-                    ps.executeQuery().use { rs ->
-                        if (rs.next()) rs.getString(1) else "(no row)"
-                    }
+            val sql =
+                "SELECT provider || '/' || provider_subject || ' active=' || is_active || " +
+                    "' must_change=' || must_change_password || ' failed=' || failed_login_count || " +
+                    "' locked_until=' || coalesce(locked_until::text, 'never') FROM users WHERE email = ?"
+            connection.prepareStatement(sql).use { ps ->
+                ps.setString(1, email)
+                ps.executeQuery().use { rs ->
+                    if (rs.next()) rs.getString(1) else "(no row)"
                 }
+            }
         }
 
     /** The real browser flow: GET /login for the cookies + hidden token, then POST. */
@@ -348,8 +351,16 @@ class WorkspaceInvitationLocalE2eTest {
     companion object {
         /** Namespaced to THIS suite — the module's containers are shared between suites in one run. */
         private const val ADMIN_EMAIL = "invite-admin@datapipelines.test"
-        private const val BOB_EMAIL = "bob@datapipelines.test"
-        private const val CAROL_EMAIL = "carol@datapipelines.test"
+
+        /**
+         * #249: namespaced like the admin above. The generic `carol@datapipelines.test` is
+         * MailNoticesE2eTest's KEYCLOAK identity (JIT-provisioned into the same per-JVM
+         * database whenever the two suites share a fork), and a create against that row
+         * answers `409 already exists` — measured red on the pregate's one-JVM shape before
+         * this namespacing, green after. `bob@` is namespaced with it for the same reason.
+         */
+        private const val BOB_EMAIL = "invite-bob@datapipelines.test"
+        private const val CAROL_EMAIL = "invite-carol@datapipelines.test"
         private const val WORKSPACE = "invites-acme"
         private const val NEW_ADMIN_PASSWORD = "a-brand-new-admin-password"
         private const val NEW_USER_PASSWORD = "a-brand-new-user-password"
