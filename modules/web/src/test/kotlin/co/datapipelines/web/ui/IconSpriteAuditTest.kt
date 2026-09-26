@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.assertions.withClue
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
+import java.security.MessageDigest
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 
 /**
@@ -81,6 +84,33 @@ class IconSpriteAuditTest {
                     }
             }
         }
+
+    /**
+     * The sprite's WHOLE-FILE hash matches the manifest's — the sibling of
+     * `VendoredHtmxAuditTest`'s assertion. Commit 127 added a glyph and refreshed the
+     * per-icon map but not this hash, and nothing noticed for three weeks (the schedules lane
+     * found `32f090…` recorded against `c63e02…` on disk): the three set comparisons below
+     * see symbols, never bytes. This one sees bytes.
+     */
+    @Test
+    fun `the manifest's whole-file hash matches the vendored sprite`() {
+        val manifest =
+            resolver
+                .getResource("classpath:static/vendor/design-system/vendor-manifest.json")
+                .inputStream
+                .readBytes()
+                .decodeToString()
+        manifest shouldContain "\"lucide-sprite\""
+        val declared =
+            Regex("\"lucide-sprite\"\\s*:\\s*\\{[^}]*?\"sha256\"\\s*:\\s*\"([0-9a-f]{64})\"")
+                .find(manifest)
+                ?.groupValues
+                ?.get(1)
+        withClue("the lucide-sprite block declares a whole-file sha256") { (declared != null) shouldBe true }
+        val bytes = resolver.getResource("classpath:static/vendor/icons/lucide-sprite.svg").inputStream.readBytes()
+        val actual = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        actual shouldBe declared
+    }
 
     @Test
     fun `the sweep is non-vacuous - templates, JS sources and a real sprite`() {
