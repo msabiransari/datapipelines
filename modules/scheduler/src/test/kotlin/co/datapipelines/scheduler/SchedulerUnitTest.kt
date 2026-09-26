@@ -14,7 +14,7 @@ import java.time.Duration
 /** The scheduler's small contracts: code spellings, property bounds, the API-mode start gate, the executor allowlist. */
 class SchedulerUnitTest {
     @Test
-    fun `the codes are the catalog's - the idempotency row spelled identically, the sixteen §13-19 codes the same set`() {
+    fun `the codes are the catalog's - the idempotency row spelled identically, the eighteen §13-19 codes the same set`() {
         ScheduleErrorCodes.IDEMPOTENCY_KEY_REUSED shouldBe PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED
         // The catalog's copy (§13.19) and the scheduler's are the same sixteen codes (read by reflection).
         val catalog =

@@ -10,10 +10,12 @@ import co.datapipelines.auth.WorkspaceRepository
 import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRecord
+import co.datapipelines.executor.ExecutionReference
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.application.pipelines.PipelineInputResolver
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -35,6 +37,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.TextNode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
@@ -43,6 +46,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.slf4j.LoggerFactory
 import java.time.Duration
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -53,10 +59,18 @@ import kotlin.coroutines.cancellation.CancellationException
  * (A3: `web/config` is the composition root), and it never creates a second pipeline runner.
  *
  * ## The payload (schema version 1)
- * `{"pipeline": "<name>", "version": "current"}` — nothing else. `current` follows the pipeline's
- * sticky pointer wherever it points, drafts included (R5); `latest` is refused at save, and exact
- * numeric versions are not accepted in v1. The schedule's literal `parameters` (R7) are bound by
- * the SAME binder an interactive run uses, so a refusal is exactly an interactive run's.
+ * `{"pipeline": "<name>", "version": "current"}` — plus, since slice 3, the OPTIONAL additive
+ * `parameter_bindings` object (design revision §5.2): `{"<parameter>": {"source": "keyword",
+ * "name": "TODAY"|"YESTERDAY"} | {"source": "literal", "value": <wire value>}}`. It stays schema
+ * version 1 — the record's own wire sketch shows the binding key under schema 1, and an
+ * additive key breaks no stored payload. `current` follows the pipeline's sticky pointer
+ * wherever it points, drafts included (R5); `latest` is refused at save, and exact numeric
+ * versions are not accepted in v1. The schedule's literal `parameters` (R7) and every resolved
+ * binding are bound by the SAME binder an interactive run uses, so a refusal is exactly an
+ * interactive run's — resolution ([PipelineInputResolver]) runs BEFORE the binder, and the same
+ * name in `parameters` and `parameter_bindings` is the ambiguity refusal, never a precedence.
+ * A `reference*` key inside the payload or a binding is refused here: the run's time is the
+ * scheduler's frozen context, never a client field (§5.1).
  *
  * ## Authority (R2)
  * Every admission and launch acts as the system identity ([SystemActorPrincipals]) in the
@@ -89,6 +103,9 @@ class PipelineJobExecutor(
     override val id: String = EXECUTOR_ID
     override val payloadSchemaVersion: Int = PAYLOAD_SCHEMA_VERSION
 
+    /** Stateless: one shared resolver for save-time structure and run-time resolution (§5.2). */
+    private val resolver = PipelineInputResolver()
+
     // ---------------------------------------------------------------------------- save
 
     override fun validate(
@@ -117,8 +134,16 @@ class PipelineJobExecutor(
                     "Pipeline '$name' version $version has no stored body.",
                     mapOf("pipeline" to name, "version" to version),
                 )
-        // R7: the interactive run's binder — its catalogued refusal is the save's refusal.
-        bind(executable.pipeline, parameters)
+        val literals = parametersOf(parameters)
+        val bindings = parseBindings(payload)
+        // §5.2: structure first — the resolver's refusals are the save's refusals, exactly as a
+        // direct execution's would be. A save has no reference time yet, so keyword bindings are
+        // checked structurally and bound with a placeholder DATE (below) that is never persisted.
+        resolver.checkStructure(declaredTypes(executable.pipeline), literals, bindings)?.let { throw bindingRefusal(it) }
+        // R7: the interactive run's binder over the literals, each literal binding's value and a
+        // placeholder DATE per keyword binding (so a required bound parameter passes) — its
+        // catalogued refusal is the save's refusal.
+        bind(executable.pipeline, saveParameters(literals, bindings))
         return TARGET_PREFIX + record.name
     }
 
@@ -147,8 +172,32 @@ class PipelineJobExecutor(
         val executable =
             pipelineService.findExecutable(workspace.id, ReadLens.Everything, record, version)
                 ?: return refused(TARGET_NOT_FOUND, block = true, "Pipeline '$name' version $version has no stored body.")
+        val bindings =
+            try {
+                parseBindings(admission.payload)
+            } catch (e: ScheduleException) {
+                return refused(PAYLOAD_INVALID, block = true, e.message ?: "invalid payload")
+            }
+        // §5.2: resolve the bindings against the run's FROZEN reference (the schedule's zone, its
+        // logical occurrence time — not the actual start) and the CURRENT version's declarations.
+        // A binding that no longer fits — the parameter removed or retyped after save — is this
+        // refusal, naming the binding in the message.
+        val reference = referenceOf(admission)
+        if (reference == null) {
+            return refused(
+                PARAMETERS_INVALID,
+                block = true,
+                "The run's reference timezone '${admission.referenceTimezone}' is not a zone this instance knows.",
+            )
+        }
+        val resolved =
+            when (val result = resolver.resolve(declaredTypes(executable.pipeline), parametersOf(admission.parameters), bindings, reference)) {
+                is PipelineInputResolver.Result.Refused ->
+                    return refused(PARAMETERS_INVALID, block = true, "[${result.refusal.parameter}] ${result.refusal.message}")
+                is PipelineInputResolver.Result.Resolved -> result.parameters
+            }
         try {
-            bind(executable.pipeline, admission.parameters)
+            bind(executable.pipeline, resolved)
         } catch (e: DatapipelinesException) {
             return refused(PARAMETERS_INVALID, block = true, "${e.code}: ${e.message}")
         }
@@ -160,6 +209,9 @@ class PipelineJobExecutor(
                 put("version_status", detail.status.name)
                 // R5: a DRAFT is mutable under its number, so the body's hash is what identifies what ran.
                 put("body_sha256", detail.bodyHash)
+                // The literal map that actually executes (slice 3): stored, never read, by the
+                // scheduler; `start` reads it back to build exactly this request.
+                replace(RESOLVED_PARAMETERS, nodeOf(resolved))
             }
         return Preparation.Prepared(snapshot)
     }
@@ -188,6 +240,15 @@ class PipelineJobExecutor(
         val executable =
             pipelineService.findExecutable(workspace.id, ReadLens.Everything, record, version)
                 ?: return notStarted(TARGET_NOT_FOUND, block = true, "Pipeline '${record.name}' v$version has no stored body.")
+        val reference =
+            referenceOf(admission)
+                ?: return notStarted(
+                    PARAMETERS_INVALID,
+                    block = true,
+                    "The run's reference timezone '${admission.referenceTimezone}' is not a zone this instance knows.",
+                )
+        val frozenParameters =
+            launch.snapshot.path(RESOLVED_PARAMETERS).takeIf { it.isObject }?.properties()?.associate { it.key to it.value }
         val request =
             ExecuteRequest(
                 pipelineId = pipelineId,
@@ -195,13 +256,17 @@ class PipelineJobExecutor(
                 pipeline = executable.pipeline,
                 userId = principal.userId,
                 workspaceId = workspace.id,
-                parameters = parametersOf(admission.parameters),
+                // The map frozen at preparation (R5): what was resolved then is what executes now.
+                parameters = frozenParameters ?: parametersOf(admission.parameters),
                 // A12/L3: a scheduled run's caller result is inspection material — keep it for the maximum.
                 resultTtlSeconds = executorConfig.result.ttlMaxSeconds,
                 correlationId = admission.runId,
                 triggeredVia = ExecutionTrigger.SCHEDULE,
                 executionId = launch.executionId,
                 slotLease = (launch.capacity as? SlotCapacityLease)?.slot,
+                // A13: the frozen reference travels with the execution — and, through the child
+                // request, with every pipeline it composes.
+                reference = reference,
             )
         return launchAndAwaitRecord(request, workspace.id)
     }
@@ -346,18 +411,109 @@ class PipelineJobExecutor(
 
     private fun bind(
         pipeline: Pipeline,
-        parameters: JsonNode,
+        parameters: Map<String, JsonNode>,
     ) {
         ParameterBinder(
             pipeline.parameters,
             pipeline.calculatorOutputs(),
             pipeline.calculatorOutputGroups(),
             pipeline.transformOutputKeys(),
-        ).bindOrThrow(parametersOf(parameters))
+        ).bindOrThrow(parameters)
     }
 
     private fun parametersOf(parameters: JsonNode): Map<String, JsonNode> =
         if (parameters.isObject) parameters.properties().associate { it.key to it.value } else emptyMap()
+
+    /**
+     * The payload's `parameter_bindings` entries, ENVELOPE-checked (the payload schema's job —
+     * the resolver owns only the binding semantics): each value must be an object holding
+     * `source` and its one payload key (`name` or `value`) and nothing else — a `reference`,
+     * `reference_at` or `reference_timezone` key, past or future wire shape, is an unknown field
+     * here (§5.1: the client cannot replace the schedule's time by embedding matching fields).
+     * Empty when the payload carries no bindings.
+     */
+    @Suppress("ThrowsCount")
+    private fun parseBindings(payload: JsonNode): Map<String, JsonNode> {
+        if (!payload.has(BINDINGS_FIELD)) return emptyMap()
+        val bindings = payload.path(BINDINGS_FIELD)
+        if (!bindings.isObject) {
+            throw payloadInvalid(BINDINGS_NOT_AN_OBJECT, "The payload's `parameter_bindings` must be a JSON object of bindings.")
+        }
+        return bindings.properties().associate { (name, node) ->
+            if (!node.isObject) throw payloadInvalid(BINDINGS_NOT_AN_OBJECT, "The binding for '$name' must be a JSON object.")
+            val keys = node.fieldNames().asSequence().toSet()
+            if (!keys.contains(PipelineInputResolver.BINDING_SOURCE)) {
+                throw payloadInvalid(BINDINGS_SOURCE_MISSING, "The binding for '$name' names no `source`.")
+            }
+            val unknown = keys - setOf(PipelineInputResolver.BINDING_SOURCE, PipelineInputResolver.BINDING_NAME, PipelineInputResolver.BINDING_VALUE)
+            if (unknown.isNotEmpty()) {
+                throw payloadInvalid(
+                    "unknown_field",
+                    "Unknown field(s) in the '$name' binding: ${unknown.joinToString()}. A binding carries `source` and its one payload key.",
+                )
+            }
+            name to node
+        }
+    }
+
+    /** The version's declared parameters by name, as their wire type spellings. */
+    private fun declaredTypes(pipeline: Pipeline): Map<String, String> = pipeline.parameters.mapValues { it.value.type.wire }
+
+    /** The resolver's refusal as the catalogued save-time code a surface renders (§13.19). */
+    private fun bindingRefusal(refusal: PipelineInputResolver.Refusal): ScheduleException =
+        when (refusal) {
+            is PipelineInputResolver.Refusal.Conflict ->
+                ScheduleException(
+                    ScheduleErrorCodes.BINDING_CONFLICT,
+                    refusal.message,
+                    mapOf("parameter" to refusal.parameter),
+                )
+            is PipelineInputResolver.Refusal.Invalid ->
+                ScheduleException(
+                    ScheduleErrorCodes.BINDING_INVALID,
+                    refusal.message,
+                    mapOf("reason" to refusal.reason.wire, "parameter" to refusal.parameter),
+                )
+        }
+
+    /**
+     * The map the save binds: the literals, each literal binding's value, and a placeholder DATE
+     * per keyword binding (today, UTC) so a required bound parameter passes the binder — the
+     * placeholder is never persisted; each run resolves its own.
+     */
+    private fun saveParameters(
+        literals: Map<String, JsonNode>,
+        bindings: Map<String, JsonNode>,
+    ): Map<String, JsonNode> {
+        if (bindings.isEmpty()) return literals
+        val placeholder = TextNode(LocalDate.now(ZoneOffset.UTC).toString())
+        val out = LinkedHashMap<String, JsonNode>(literals)
+        bindings.forEach { (name, node) ->
+            out[name] =
+                if (node.path(PipelineInputResolver.BINDING_SOURCE).asText() == PipelineInputResolver.SOURCE_KEYWORD) {
+                    placeholder
+                } else {
+                    requireNotNull(node.get(PipelineInputResolver.BINDING_VALUE))
+                }
+        }
+        return out
+    }
+
+    /** The run's frozen reference, or null when the frozen timezone is one this instance cannot name. */
+    private fun referenceOf(admission: Admission): ExecutionReference? =
+        try {
+            ExecutionReference(admission.referenceAt, ZoneId.of(admission.referenceTimezone))
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            null
+        }
+
+    private fun nodeOf(values: Map<String, JsonNode>): JsonNode {
+        val node = mapper.createObjectNode()
+        values.forEach { (name, value) -> node.replace(name, value) }
+        return node
+    }
 
     /**
      * The payload's pipeline, DISCARDED entities included: a pipeline whose every version was discarded
@@ -397,11 +553,22 @@ class PipelineJobExecutor(
         const val EXECUTOR_ID = "pipeline"
         const val PAYLOAD_SCHEMA_VERSION = 1
 
+        /** The payload's optional additive bindings key (design revision §5.2, slice 3). */
+        const val BINDINGS_FIELD = "parameter_bindings"
+
+        /** The prepared snapshot's key for the literal map that actually executed. */
+        const val RESOLVED_PARAMETERS = "resolved_parameters"
+
+        private const val BINDINGS_NOT_AN_OBJECT = "bindings_not_an_object"
+        private const val BINDINGS_SOURCE_MISSING = "bindings_source_missing"
+
         /** `schedules.target_ref` for a pipeline (B15). */
         const val TARGET_PREFIX = "pipeline:"
 
         const val VERSION_CURRENT = "current"
-        private val PAYLOAD_FIELDS = setOf("pipeline", "version")
+
+        /** Schema version 1's fields — the binding key is OPTIONAL and ADDITIVE (see the class KDoc). */
+        private val PAYLOAD_FIELDS = setOf("pipeline", "version", BINDINGS_FIELD)
 
         /** Reasons this executor reports (record §7.1). */
         const val POINTER_NULL = "pointer_null"

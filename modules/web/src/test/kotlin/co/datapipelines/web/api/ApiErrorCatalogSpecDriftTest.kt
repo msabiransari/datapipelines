@@ -254,8 +254,15 @@ class ApiErrorCatalogSpecDriftTest {
          * 404s with explicit catalog rows, the 409 `schedule.` and 400 `schedule.validation.`
          * family defaults), landed in the SAME commit as `ScheduleErrorCodes`. Re-derived from
          * the document's own parse.
+         *
+         * 221 → 223 with #9 slice 3 (the bindings): §13.19 gains
+         * `schedule.validation.binding_invalid` and `schedule.validation.binding_conflict`
+         * (400 — the `schedule.validation.` family default, so no explicit catalog row), landed
+         * in the SAME commit as their `ScheduleErrorCodes` constants, the catalog's mirror in
+         * `PipelineErrorCodes.Schedule` and the adapter that raises them. Re-derived from the
+         * document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 221
+        const val SECTION_13_ROW_COUNT = 223
 
         /**
          * §12's distinct validation codes.
