@@ -1,4 +1,4 @@
-# Parameter engine — design record (2026-09-21, draft 5.2 — the 2026-09-26 rulings, renderer notes, one signal for nothing chosen)
+# Parameter engine — design record (2026-09-21, draft 5.3 — the 2026-09-26 rulings, renderer notes, one signal for nothing chosen, the selector bulkhead)
 
 **Updated 2026-09-25:** the owner's clarification supersedes the earlier hidden/disabled
 value rule. These states govern control interaction; every current selected value is read,
@@ -62,7 +62,7 @@ are marked **deviation** and carry their reason.
 | P28 | **One validator, strict, at every place a parameter value arrives** (owner 2026-09-26): a shared `ParameterValueValidator` in `modules/typesystem` beside the moved coercion — declaration (type, precision, scale, required, default, constraints, cardinality) + value → accepted typed value or a refusal; a `null` or absent value is answered as **unsupplied** — never validated, never refused — one policy for every caller (pipelines resolve it with the declaration's `default`, then `required` refuses as today; evaluate resolves it by P26) — used by the business API (published endpoints, values arriving as query strings), the execution API (`POST /api/v1/pipelines/{id}/execute`), evaluate, and later dashboard execute. The coercion is strict everywhere: the BIG-number `trim()` is retired for pipelines too — a **deliberate break** recorded in rest-api's change log, the tests that asserted trimming re-pinned. Pipeline declarations gain optional `constraints` and a list `cardinality` in the same model, adopted by the dashboard round; the engine's `type` set is the pipelines' `type` set, so a consumer needs no translation. |
 | P29 | **`MULTI` binds** (owner 2026-09-26): the list never reaches the template (P22); its **size** does, as `<name>_count`, and a library macro (`<@in_list column="region" bind="regions" chunk=500/>`) emits `(region IN (:regions__1) OR region IN (:regions__2))` with the runner binding the slices — the skill teaches the pattern. Caps, the most restrictive engines' floors: **1,000 values per `MULTI` parameter** (Oracle's per-list ceiling, which the macro clears) and **2,000 binds per statement** (SQL Server's 2,100), both refused at evaluate with an error naming the cap. |
 | P30 | **Binds resolve by namespace** (from Astra's item 3, consistent with pipeline-contract §7.2): a `:name` in selector SQL is first looked up among the set's parameters — then it must be in `depends_on`; otherwise, if it is one of §7.2's org or platform keys, it is served from the tier and needs no dependency; otherwise `bind_undeclared`. A parameter named like a tier key shadows it, exactly as a declared pipeline parameter does. `execution_id` is absent. |
-| P31 | **Bounded work and capacity** (from Astra's items 4, 8, 10): the decimal widening rule preserves integer digits too (§6.4); the constants' invariants are enforced over every database row at evaluate (§6.2); regex constraints run over a read-counting `CharSequence` with a step budget; a selector's `Statement.cancel()` fires on the deadline — best effort by the JDBC contract, so the evaluate answers `timeout` regardless and a lease whose statement has not returned is **discarded, never returned to the pool** (the datasources module's discard protocol; the pool replaces it), counted by `datapipelines.parameters.selector_cancel.failed` (§5.2 step 3, §11); the semaphore is instance-wide; `max-options-per-selector` defaults to 200 and a total response budget refuses oversized answers (§11). |
+| P31 | **Bounded work and capacity** (from Astra's items 4, 8, 10): the decimal widening rule preserves integer digits too (§6.4); the constants' invariants are enforced over every database row at evaluate (§6.2); regex constraints run over a read-counting `CharSequence` with a step budget; selector statements run on a **bulkhead** — `SelectorPool`, the `ScriptEvaluationPool` shape (§5.2 step 3): at most `max-concurrent-selector-queries` run, each worker thread owns its slot until the driver call actually ends (abandoned workers included, so timeouts cannot accumulate workers), the evaluate's deadline is a `withTimeout` on the AWAIT — it fires whether or not the worker returns, since cooperative cancellation reaches no JDBC driver — and on the deadline the runner fires `Statement.cancel()` (best effort), asks the pool to **discard** the lease (`ConnectionPool.discard`, new in `modules/datasources`, §2.5 — HikariCP's `evictConnection`; never returned to the pool), counts the abandonment (`parameters.selectors.abandoned`, §11) and answers `timeout`; a saturated bulkhead refuses within the deadline (`selectors_saturated`), never hangs; the pool is one per process; `max-options-per-selector` defaults to 200 and a total response budget refuses oversized answers (§11). |
 
 ---
 
@@ -162,6 +162,25 @@ repository (module-structure §3.1 rule 1) and `kotlinx-coroutines-core` for the
 Redis (rule 3).
 
 ---
+
+### 2.5 `modules/datasources` — one new operation, `ConnectionPool.discard` (lane C)
+
+The cancel failure path (P31, §5.2 step 3) needs a per-lease discard the module does not have
+(Astra's third-round item 1, verified on `c99a0d46`): `ConnectionLease` is `internal` and closes
+its connection with `use` (`ConnectionLease.kt:31`), and `ConnectionPool`
+(`pooling/ConnectionPoolManager.kt:25`) offers `leaseConnection()`, a whole-pool `softEvict()` and
+`close()` — nothing for one connection. Lane C adds `fun discard(connection: Connection)` to
+`ConnectionPool`: "this connection must never return to the pool". Every pool kind is
+HikariCP-backed (`ConnectionPoolManager` builds `HikariConnectionPool`s at :431/:437/:442;
+`H2InProcessPool` wraps one at :79; the lake pool is HikariCP over `LakeInstanceDataSource`
+duplicates), so the one implementation is `HikariDataSource.evictConnection(connection)` —
+HikariCP 6.3.3's contract, read from the pinned sources jar: on a connection that has not been
+closed "the eviction is immediate" — the physical connection is closed on the pool's close
+executor, the borrower's later `close()` has nothing to return, and the pool refills to
+`minimumIdle`. `SelectorRunner` leases through a sibling of `ConnectionLease.lease` that hands
+the runner the connection AND its discard handle (the block-shaped `lease` stays for every other
+caller). Guarded by a datasources integration test against the Postgres container (§12). The
+layering table (§2.4) already lets `parameters` depend on `datasources`.
 
 ## 3. The parameter set
 
@@ -405,15 +424,27 @@ is unchanged.
    cascade, so the rest of the form still answers.
 2. Build the `Dag` (from the stored, validated definition — never re-validated here).
 3. Launch one coroutine per parameter (P16, the executor's pattern): each awaits its parents'
-   completion, then evaluates itself; selector queries pass through an **instance-wide**
-   `Semaphore` of `max-concurrent-selector-queries` (P31); the whole evaluate runs under
-   `withTimeout(evaluate-timeout-seconds)`, and every selector statement is armed with
-   `Statement.cancel()` at the deadline — best effort by the JDBC contract: the evaluate answers
-   `timeout` regardless; a statement that returned releases its lease in `finally`, and a lease
-   whose statement has not returned by the cancel is **discarded, never returned** (the
-   datasources module's discard protocol evicts it and the pool replaces it), counted by
-   `datapipelines.parameters.selector_cancel.failed` (§11) — the deadline bounds blocking JDBC,
-   not only the coroutine, and a runaway statement can never poison the pool (P31).
+   completion, then evaluates itself; selector statements run on the **`SelectorPool` bulkhead** (P31) — the
+   `ScriptEvaluationPool` shape from `modules/scripting`, whose KDoc is the contract: at most
+   `max-concurrent-selector-queries` statements RUN and at most `max-waiting-selector-queries`
+   more wait; each admitted statement runs on its own worker thread, and it is that THREAD that
+   returns the slot when the driver call actually ends — an abandoned worker keeps its slot, so
+   at most `size` JDBC workers exist at any moment, abandoned ones included, and repeated
+   timeouts cannot accumulate workers; a caller waits for a slot at most the evaluate's
+   remaining deadline, then its parameter is `selectors_saturated` (a fast, typed refusal —
+   never a form hung behind someone else's query). The whole evaluate runs under
+   `withTimeout(evaluate-timeout-seconds)` on the coroutine that AWAITS the worker's future —
+   never on the worker: it fires whether or not the worker returns, because cancellation is
+   cooperative and no JDBC driver reads it. On the deadline the runner fires
+   `Statement.cancel()` (best effort by the JDBC contract), asks the pool to **discard** the
+   lease (`ConnectionPool.discard`, §2.5 — HikariCP evicts and closes the physical connection at
+   once; it is never returned), increments the pool's `abandoned` counter
+   (`parameters.selectors.abandoned`, §11), logs one ERROR naming the set, the parameter and the
+   datasource, and answers `parameter.evaluate.timeout` without waiting; the worker's thread
+   ends when the driver returns (a closed socket usually makes it return promptly) and only
+   then frees its slot. A statement that returned in time releases its lease in `finally`. The
+   deadline bounds the RESPONSE, the bulkhead bounds the WORKERS, the discard bounds the POOL —
+   three independent guarantees, none resting on the driver's cooperation (P31).
 4. Per parameter, in this order, on the parents' **effective** values:
    (a) `hidden` and `disabled` from the expressions — interaction flags only (P5); (b) the
    source — a `SELECT`'s options (`constants` verbatim, or the template rendered against
@@ -795,7 +826,7 @@ expectation).
 
 ---
 
-## 10. Error codes — pipeline-contract.md **§13.20 Parameter sets** (new section — §13.16 is the MCP surface and §13.19 schedules, Astra's item 12; `ParameterErrorCodes` in `modules/parameters`; a `ParameterErrorCodesSpecDriftTest` parses §13.20 the way `PipelineErrorCodesSpecDriftTest` parses §13; the skill's `references/error-codes.md` gains the family and `:modules:mcp-server:skillArtifacts` runs in the same commit — `SkillDistributionTest`)
+## 10. Error codes — pipeline-contract.md **§13.20 Parameter sets** (new section — §13.16 is the MCP surface and §13.19 schedules, Astra's item 12; `ParameterErrorCodes` in `modules/parameters`; a `ParameterErrorCodesSpecDriftTest` parses §13.20 the way `PipelineErrorCodesSpecDriftTest` parses §13; the manual's `core-error-codes` page (`DocSet.kt`'s `error-codes` alias — the skill has had no `references/error-codes.md` since 242a) must show the family, verified through `docs_get`, with `:modules:mcp-server:docsExport` and `DocSetGoldenTest` in the same commit when a golden twin changes)
 
 | code | HTTP | when |
 |---|---|---|
@@ -820,6 +851,7 @@ expectation).
 | `parameter.evaluate.invalid_value_type`, `constraint_violation`, `required_missing`, `too_many_options`, `input_source_multiple_rows`, `selector_value_type_mismatch` | 200 (in `errors[]`) | §5.4 — per-parameter, the request itself succeeds |
 | `parameter.evaluate.template_unrendered` | 400 | MCP-only, §5.1 |
 | `parameter.evaluate.timeout` | 504 (house mapping confirmed by the lane against rest-api §4) | §5.2 step 5 |
+| `parameter.evaluate.selectors_saturated` | 200 (in `errors[]`, on the parameter) | §5.2 step 3 — the `SelectorPool` had no slot within the evaluate's deadline; the response stays whole, `valid: false`; a consumer that surfaces it uses rest-api §4's concurrency-limit shape (429 with `Retry-After`) |
 | `parameter.not_found` | 404 | name (or name+version) unknown, hidden by the lens, or discarded on a read/mutate path |
 | `parameter.in_use` | 409 | reserved for the future consumer binding (§13); **not declared in round one** — listed so the family's shape is complete |
 | `parameter.version.conflict`, `not_draft`, `not_released`, `not_discarded`, `last_release`, `not_eligible`, `confirm_mismatch` | 409 / 400 | the `template.version.*` twins, same meanings |
@@ -847,7 +879,8 @@ expectation).
 | `max-regex-steps` | 100000 (P31 — the read budget of the counting `CharSequence` a `pattern` runs over; past it the match is refused as `constraint_violation`, `details.reason = "pattern_budget"`) | 1000–10000000 |
 | `evaluate-timeout-seconds` | 30 | 1–300 |
 | `selector-query-timeout-seconds` | 10 | 1–`evaluate-timeout-seconds` |
-| `max-concurrent-selector-queries` | 4 (instance-wide — one semaphore per process, like the execution slots) | 1–32 |
+| `max-concurrent-selector-queries` | 4 (the `SelectorPool` bulkhead's size — statements RUNNING, abandoned workers included; one pool per process, like the script pool) | 1–32 |
+| `max-waiting-selector-queries` | 64 (the bulkhead's queue twin — admitted beyond the running ones; past it `selectors_saturated` at once, the script pool's 4/64 reading) | 0–1024 |
 | `max-evaluate-response-bytes` | 4194304 (4 MiB; P31 — `response_too_large` over it, never a truncated form) | 65536–67108864 |
 
 Bound to `ParametersProperties` (`@ConfigurationProperties`, module-structure §8.3) and mirrored
@@ -857,11 +890,12 @@ in the domain `ParametersConfig` — both literals live as named constants (MIST
 authority-aware keys and invalidation; the E2E prints the query count per evaluate instead, and
 the knob lands when the number says it must.
 
-One metric, not a key: `datapipelines.parameters.selector_cancel.failed` (the house
-`datapipelines.<module>.<thing>.<event>` shape) counts the deadlines whose `Statement.cancel()`
-did not return the statement — the lease was discarded (§5.2 step 3). The evaluator's test
-injects a real in-memory `MeterRegistry` and reads the counter (MISTAKES: a strict mock makes a
-missing call unobservable).
+One metric, not a key: `parameters.selectors.abandoned` — a gauge over the pool's `LongAdder`, the
+sibling of `transform.evaluations.abandoned` (`TransformConfiguration`'s gauge shape;
+`modules/scripting` has no Micrometer and neither will `parameters` — the web configuration
+scrapes it). It counts selector statements abandoned at the deadline (§5.2 step 3). The pool's
+test reads the adder; the web test reads a real `SimpleMeterRegistry` (MISTAKES: a strict mock
+makes a missing call unobservable).
 
 ---
 
@@ -872,7 +906,7 @@ missing call unobservable).
 | `graph` | `DagTest` runs unchanged from its new home | the rename commit alone — `git diff -M` 100% |
 | `typesystem` | coercion/encoder tests moved; `pipeline-contract` still green | flip one coercion rule, both modules red |
 | `parameters` unit | validator (every §10 validation code reached by a fixture), expression parser + evaluator (every op, both cardinalities, null/empty rules, caps), type-compatibility table (§6.4, every row), reset semantics, hidden/disabled selection retention and validation, `MULTI` list expansion (against the pinned spring-jdbc, incl. the empty list) | one fixture per row; delete the rule → its fixture red |
-| `parameters` unit — evaluator concurrency | two independent selectors run concurrently (measured with a latch, never a sleep — MISTAKES "synchronise on the event"); a child never starts before its parent completes; the semaphore bounds in-flight queries; the deadline fails the whole request | remove the await → the ordering test red |
+| `parameters` unit — evaluator concurrency | two independent selectors run concurrently (measured with a latch, never a sleep — MISTAKES "synchronise on the event"); a child never starts before its parent completes; the bulkhead bounds RUNNING statements (a latch-held fifth statement waits; the fifth slot never opens while four spin); the deadline fails the whole request | remove the await → the ordering test red |
 | `parameters` integration (`*IntegrationTest`, Postgres container) | repository + every §3.5 lifecycle verb; hash precondition; one-draft index | as templates' |
 | `application` | reverse arrow: used-by rows and the delete guard cover a set-only pin | delete the set scanner → guard lets the delete through, test red |
 | `web` + `mcp-server` | handler/tool tests; `MatrixRowReachabilityTest`, `ReadFloorTest`, `RequiredScopeCoverageTest` green with the new rows; catalog count pins | remove `@RequiredScope` → red |
@@ -881,7 +915,8 @@ missing call unobservable).
 | `parameters` unit — capacity and bounds | §6.4's counterexamples (`DECIMAL(6,2)` → `(6,4)` refused, `INTEGER` → `DECIMAL(9,0)` refused, `→ (10,0)` accepted); a `pattern` past `max-regex-steps` refused within the budget (a nested-quantifier fixture, adversarial input, elapsed printed); a `MULTI` of 1,001 and a statement of 2,001 placeholders refused; a response over the budget refused; a selector whose `Statement` blocks is cancelled at the deadline and its lease returned (a latch, never a sleep) | each bound one off → green (the guard is the bound, not a coincidence) |
 | `parameters` integration — row invariants | a selector returning a duplicate value, a null value, an empty label, two defaults — each `selector_rows_invalid` with its reason; a revoked datasource grant between release and evaluate → `datasource.not_found` on the parameter | — |
 | `parameters` unit — reserved names (P29) | `regions_count` and `regions__1` refused as parameter names (`name_reserved`); a hand-written `:regions__1` bind `bind_undeclared` | drop the suffix check → red |
-| `parameters` unit — the cancel failure path (P31) | a stub JDBC driver whose statement ignores `cancel()` (spins; the real engines never read the interrupt — MISTAKES: a stand-in models the property under test): the deadline answers `timeout`, the lease is discarded and never returned (the pool's counts prove it), the counter reads 1; a driver that honours `cancel()` returns its lease | return the lease on timeout → the pool-count assertion red |
+| `parameters` unit — the bulkhead and the cancel failure path (P31, §2.5) | `SelectorPoolTest`, the `ScriptEvaluationPool` suite's twin: a stub JDBC driver whose statement ignores `cancel()` (spins on a flag, never an interruptible wait — MISTAKES: a stand-in models the property under test, and a falsification must go red on the assertion the fix changes): the deadline answers `timeout` without waiting; the worker keeps its slot until the stub returns (`abandonedWorkersAlive()` = 1, the running count unchanged); `ConnectionPool.discard` was called with that connection (a recording pool fake); `abandoned` reads 1; with every slot abandoned the next statement is `selectors_saturated` within the deadline, never hung; a driver that honours `cancel()` returns its lease normally | release the slot at abandonment → the live-count assertion red (the 7a lesson); skip the discard → the recording fake red |
+| `datasources` integration — `ConnectionPool.discard` (§2.5) | against the Postgres container: a connection running `pg_sleep` on another thread is discarded; `HikariPoolMXBean.totalConnections` drops and refills to `minimumIdle`; the sleeping thread ends with a connection error; nothing returns to the pool | replace `evictConnection` with a no-op → the total-connections assertion red |
 | `parameters` integration — release and import revalidation (§8.2, §8.3) | a set saved against a draft template whose SQL then changed: release refuses with the step's code; import into a target missing the pin refuses `missing_template`; a target datasource lacking the column refuses `selector_columns_invalid` | skip steps 4–6 at release → red |
 | E2E (`tests/integration-tests`) | the country → state → city cascade over a real H2/Postgres datasource through **REST and MCP** with a multi-segment name proven through the real HTTP stack (bodies and `?prefix=` only — P24): first render, parent change resets children with `reset: true`, hidden/disabled from expressions, an `INPUT` with `scale: 2` + `min: 0` refusing `12.345` and `-1`, a `MULTI` parent binding into `IN (:regions)`, a `constants` selector beside a template one, a database-fed `INPUT` (`start_date` from a one-row template depending on `country`: picked from the row when the client sends it absent, kept when the client submits a value while its `computed_default` follows the country, the client's `null` on a required `INPUT` with no default is `required_missing`/`no_default`, and on a `SELECT` with options resolves to the default else first — never an error), every `presentation` echoed with derived defaults filled in, an unreachable datasource answering a whole form; release refused on a draft pin; `RoleWalkE2eTest` rows; `PromoterLensSweepTest` and `WorkspaceIsolationSweepTest` extended | the sweeps' non-vacuity floors |
 | drift | `ParameterErrorCodesSpecDriftTest`, `ScopeMatrixSpecDriftTest`, `ParametersConfigKeysSpecDriftTest`, `SkillDistributionTest`, `verifyModuleDependencies`, `ArchitectureGuardTest` | add a code to the doc → red until the constant exists |
@@ -931,8 +966,9 @@ host side.
    `null` so a renderer that slips is not punished, but the contract says `null`). There is no
    cleared state (P25): the server walks the priority and the response carries the resolved
    value, which the renderer shows — a dropdown with options never renders blank after a round
-   trip, and an empty options list renders the control disabled with its `required_missing`
-   error beneath it. A deliberate "nothing" is an option row the author adds (§6.2's sentinel),
+   trip, and an empty options list renders the control disabled, with whatever errors the server
+   returned beneath it — `required_missing` when the parameter is required, none when it is
+   optional (§5.4): the renderer displays the server's errors and invents none. A deliberate "nothing" is an option row the author adds (§6.2's sentinel),
    rendered like any other.
 2. **Rendering a `MULTI` with no hint.** When a definition carries no `presentation.control`, a
    renderer picks the derived default (§3.7: `dropdown`). On the AUTHORING side, the agent must
@@ -978,7 +1014,7 @@ host side.
 |---|---|---|
 | **A** (first, alone) | §2.1 `graph` move + §2.3 coercion extraction **made strict** (the trim retired — the one behaviour change, recorded as a deliberate break in rest-api's change log with the re-pinned tests) + `ParameterValueValidator` in `typesystem` wired into the two existing places (published endpoints, `POST …/execute`) with one null policy — unsupplied, the caller resolves (P28) + the pipeline declaration's optional `constraints` (enforced from lane A through the validator at both places) and `cardinality` (`MULTI` refused at save until the dashboard round) + the §2.4 table rows + `settings.gradle.kts`. Full gate. | — |
 | **B** | `parameters` model, validator, expression AST, `Dag` build, repository + lifecycle + migration, `ParameterErrorCodes` + §13.20 + drift test, config keys | A |
-| **C** | `SelectorRunner` (template render, binds, list expansion, metadata check, caps), `ParameterEvaluator` (coroutines, the instance-wide semaphore, the deadline with `Statement.cancel()`, the P26 selection priority, the row invariants, the caps) | B |
+| **C** | `SelectorRunner` (template render, binds, list expansion, metadata check, caps), `ParameterEvaluator` (coroutines, the `SelectorPool` bulkhead — the `ScriptEvaluationPool` shape — the deadline on the await with `Statement.cancel()` + discard at abandonment, the P26 selection priority, the row invariants, the caps) + `ConnectionPool.discard` in `modules/datasources` (§2.5 — lane C's one edit outside `parameters`, with its container test) | B |
 | **D** | surfaces: six MCP tools by id + catalog pins + the rendered manual's `parameters` area (242a's `DocSet`, not `skillArtifacts`) + the `in_list` macro in the skill and the ask-before-creating-a-MULTI-without-a-hint rule (§13a.2); REST routes by id; the nine permission rows (§9.3) with auth.md §7.6 + `RoleWalkE2eTest`; the reverse arrow in `application` (§8.4); promotion; E2E cascade | C |
 
 B and C may run in parallel only after A has frozen the module layout and B has frozen the
@@ -992,7 +1028,8 @@ on every handback).
 
 | date | version | change |
 |---|---|---|
-| 2026-09-26 | draft 5.2 | The second-round review (Astra's five items) answered with the owner's rulings. **No cleared state** (P25 amended): absent, `null` and `[]` are one signal — nothing chosen — and walk the priority; the server applies a default whenever nothing is chosen (never silent — the response carries the resolved value); `required_missing` only when nothing resolves (`no_options` / `no_default` / `no_row`); a deliberate "nothing" is an option row with a non-null sentinel (§6.2, the skill teaches it). One validator null policy — unsupplied, the caller resolves (P28, §2.3, lane A). Reserved names `_count` / `__<digits>` (`name_reserved`, §3.2, §4, §10). Release re-runs §4 steps 4–6 against released bodies; import runs them against the target (§8.2, §8.3). The cancel failure path: a lease whose statement ignored `cancel()` is discarded, never returned, counted by `datapipelines.parameters.selector_cancel.failed` (P31, §5.2, §11). §5.1–§5.4, §13a.1, §12 and §15 follow. `skillArtifacts` does not occur in this record (checked); §15 already names 242a's `DocSet`. |
+| 2026-09-26 | draft 5.3 | Astra's third round (three items). (1) The cancel failure path named a discard protocol `modules/datasources` does not have: new §2.5 assigns `ConnectionPool.discard(connection)` to lane C (HikariCP 6.3.3's `evictConnection`, every pool kind is HikariCP-backed, container test); §5.2 step 3 rewritten around a `SelectorPool` bulkhead — the `ScriptEvaluationPool` shape — where the worker THREAD owns its slot until the driver returns (abandoned workers counted against the bound), the deadline is a `withTimeout` on the await and never on the worker, saturation is `selectors_saturated` within the deadline (§10, 200 inline; 429 shape when surfaced), `max-waiting-selector-queries` joins §11, the metric becomes the gauge `parameters.selectors.abandoned` (the sibling of `transform.evaluations.abandoned`); P31, §12 and lane C's row follow. (2) The §10 header still required `skillArtifacts` and a `references/error-codes.md` that no longer exists: now `core-error-codes` via `docs_get`, `docsExport` + `DocSetGoldenTest`; the 5.2 row's claim corrected in place. (3) §13a.1: an empty selector shows the errors the server returned — `required_missing` only when required. |
+| 2026-09-26 | draft 5.2 | The second-round review (Astra's five items) answered with the owner's rulings. **No cleared state** (P25 amended): absent, `null` and `[]` are one signal — nothing chosen — and walk the priority; the server applies a default whenever nothing is chosen (never silent — the response carries the resolved value); `required_missing` only when nothing resolves (`no_options` / `no_default` / `no_row`); a deliberate "nothing" is an option row with a non-null sentinel (§6.2, the skill teaches it). One validator null policy — unsupplied, the caller resolves (P28, §2.3, lane A). Reserved names `_count` / `__<digits>` (`name_reserved`, §3.2, §4, §10). Release re-runs §4 steps 4–6 against released bodies; import runs them against the target (§8.2, §8.3). The cancel failure path: a lease whose statement ignored `cancel()` is discarded, never returned, counted by `datapipelines.parameters.selector_cancel.failed` (P31, §5.2, §11). §5.1–§5.4, §13a.1, §12 and §15 follow. ~~`skillArtifacts` does not occur in this record (checked)~~ — wrong, corrected in 5.3: it sat in the §10 header past the visible cut of a grepped line; §15 already names 242a's `DocSet`. |
 | 2026-09-26 | draft 5.1 | Cleared is `null` for `MULTI` too (`[]` accepted as `null`); new §13a — the renderer and host contract notes for the round after dashboards: clearing, the ask-before-a-MULTI-without-a-hint authoring rule (lane D's skill), the submit and parameter-changed hooks for the dashboard runtime, the widget's layout and location left to that round. |
 | 2026-09-26 | draft 5 | The second review answered (Astra's twelve items + the orchestrator's six of 2026-09-21) with eight rulings, P24–P31: addressing mirrors pipelines (a stable UUID, `POST /{id}/evaluate`); `required` means a value must arrive and `default` is a hint, absent vs `null`/`[]`; the selection priority client → default → first for `SINGLE`, `MULTI` and (client → sourced row → `default_value`) `INPUT`, a stale child never an error (`reset: true`, `origin`, `computed_default`); every change submits every parameter and the client runs no dependency logic (`dependents` informational too); one strict shared validator at the four places, the trim retired everywhere (a deliberate break); `MULTI` binds via `<name>_count` + the `in_list` macro with caps 1,000 per parameter and 2,000 per statement; binds resolve by namespace (parameter, else tier key); decimal widening preserves integer digits; row invariants at evaluate; a read-counting regex budget, `Statement.cancel()` at the deadline, an instance-wide semaphore, options cap 200 and a 4 MiB response budget; §13.20, V39, the tool count read at dispatch; the options cache and the scheduler/dashboard bindings named out of scope. |
 | 2026-09-25 | draft 4 | Owner corrections: hidden/disabled governs control interaction; always read and submit current selected values, including explicit client-side changes. No preservation/restoration of originally served values or hidden/disabled-based omission, ignoring or defaulting. Updated P5/P15, evaluate semantics and acceptance coverage. Dashboard state and outgoing pipeline-value overrides are independently optional server-side consumer responsibilities, linked in §13. |
