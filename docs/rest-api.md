@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.33 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
+**Status:** v2.34 (frozen contract — additive-only changes after this point; see the 2026-09-20 and 2026-09-24 rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-24
@@ -74,6 +74,7 @@ All datapipelines custom headers use the `DP-` prefix:
 
 | Header | Direction | Purpose |
 |---|---|---|
+| 2026-09-25 | v2.34 | 233 landing (#233) the limiter's principal | §12.1: limits are per PRINCIPAL — since keys v2 (A13) an mcp key is its own robot identity, so its request budget is its own, not its creator's (the pre-v2 sentence "an API key draws from its owner's budget, so minting more keys does not raise any limit" stopped being true with V37); `PerUserRateLimitE2eTest` (232) now proves the separation on the wire. No field or code changed. |
 | 2026-09-25 | v2.33 | keys v2 (#233) | **§16.1 rewritten**: the ONE creation path for every kind — `kind` REQUIRED (`400 auth.key_kind_not_mintable` with no default kind, A15), `mcp` (renamed from `user`, A19) offered with a CHOSEN role under the subset rule (A14; `mcp_key.create` + `mcp_key.revoke_own`), a live name conflict answered `409 auth.key_name_taken` (A18), `GET /auth/api-keys/mine` gone with the login mint. **§19.3**: the result paging documented under the business path (`GET /api/<cat>/v<n>/<path>/executions/{id}[/result]`, keys-v2 A16) — a session refused there as on the serve route. |
 | `DP-API-Key` | request | API-key authentication (§3.2) |
 | `DP-Correlation-Id` | both | Log/trace correlation (§3.4) |
@@ -1608,7 +1609,7 @@ Returns `200 OK` when the service is ready to accept traffic, `503` otherwise. U
 
 ### 12.1 Limits
 
-All limits are **per user** — an API key draws from its owner's budget, so minting more keys does not raise any limit. Key names and defaults in [Configuration §3.7](configuration.md#37-rate-limiting) and §3.2 (executor concurrency):
+All limits are **per principal** — a signed-in person, or a key acting as its own robot identity ([Auth §7.4](auth.md#74-issuance), keys v2 A13): a key's budget is the key's, never its creator's, so a person's session and their mcp key are two budgets, and every key a role may create is one more. (Before keys v2 a key drew from its owner's budget; since 2026-09-25 the creator's ROLE gates how many principals a workspace holds.) Key names and defaults in [Configuration §3.7](configuration.md#37-rate-limiting) and §3.2 (executor concurrency):
 
 - Requests: `rate-limit.requests-per-second` (100), `rate-limit.requests-per-minute` (1000).
 - Pipeline execution: `executor.max-concurrent-executions-per-user` (10) → `pipeline.execution.concurrency_limit`.

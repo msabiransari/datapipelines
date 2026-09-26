@@ -27,7 +27,8 @@ import java.util.UUID
  * (`ApiErrorCatalog.userMessageFor(rate_limit.exceeded)`), pinned as the LITERAL the caller
  * receives, the way `ApplicationSmokeTest` reads the CSP.
  *
- * The two arms also prove §12.1's shared budget across credentials: one seeded person's
+ * The two arms also prove §12.1 as keys v2 (233, A13) left it: a key is its OWN principal — a
+ * robot member with its own identity — so its budget is its own, never its creator's. One seeded person's
  * SESSION spends the budget over REST, and their OWN MCP key — the same owner, so the same
  * budget — is the one refused on `/mcp`.
  *
@@ -67,37 +68,46 @@ class PerUserRateLimitE2eTest {
         restThrottled.body().asString() shouldContain API_SENTENCE
         restThrottled.body().asString() shouldNotContain LOGIN_SENTENCE
 
-        // Arm B — one person, two credentials, ONE budget (§12.1): the session spends it over
-        // REST (a fresh user's first request of a minute is deterministically allowed), and
-        // the same person's MCP key is the one refused on /mcp.
+        // Arm B — the key's OWN budget (§12.1 since keys v2, 233 A13: an mcp key acts as its own
+        // service identity, so the limiter's `principal.userId` is the key's, never its
+        // creator's). The creator's session spends ITS minute over REST (a fresh user's first
+        // request of a minute is deterministically allowed); the key's first call on /mcp is
+        // still allowed — a separate budget — and the key's own second call is the refusal.
         val spend =
             given()
                 .port(port)
-                .asSession(jwt(viewerB, "viewer-b@ratelimit.test"))
+                .asSession(jwt(authorC, "author-c@ratelimit.test"))
                 .`when`()
                 .get("/api/v1/pipelines")
                 .then()
                 .extract()
         spend.statusCode() shouldBe 200
 
+        val keyFirst = mcpToolsList()
+        keyFirst.statusCode() shouldBe 200
+
         val mcpAnswer =
             drivePastBound {
-                given()
-                    .port(port)
-                    .header("DP-API-Key", viewerBKey.plaintext)
-                    .contentType(ContentType.JSON)
-                    .accept("application/json, text/event-stream")
-                    .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
-                    .`when`()
-                    .post("/mcp")
-                    .then()
-                    .extract()
+                mcpToolsList()
             }
         mcpAnswer.statusCode() shouldBe 429
         mcpAnswer.body().asString() shouldContain """"code":"rate_limit.exceeded""""
         mcpAnswer.body().asString() shouldContain API_SENTENCE
         mcpAnswer.body().asString() shouldNotContain LOGIN_SENTENCE
     }
+
+    /** One `tools/list` call on /mcp as the seeded key — the metered MCP surface. */
+    private fun mcpToolsList(): ExtractableResponse<Response> =
+        given()
+            .port(port)
+            .header("DP-API-Key", authorCKey.plaintext)
+            .contentType(ContentType.JSON)
+            .accept("application/json, text/event-stream")
+            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
+            .`when`()
+            .post("/mcp")
+            .then()
+            .extract()
 
     /**
      * Sends the request pair until one of them is the throttled answer: [request] returns the
@@ -129,9 +139,11 @@ class PerUserRateLimitE2eTest {
 
         private val wsId = UUID.randomUUID()
         private val viewerA = UUID.randomUUID()
-        private val viewerB = UUID.randomUUID()
+        private val authorC = UUID.randomUUID()
 
-        private val viewerBKey = E2eAuth.generateKey("ratelimit232-mcp", ownerId = viewerB.toString())
+        /** The key's OWN identity (keys v2 A13) — the `service` user the limiter's budget belongs to. */
+        private val authorCKeyIdentity = UUID.randomUUID()
+        private val authorCKey = E2eAuth.generateKey("ratelimit232-mcp", ownerId = authorC.toString())
 
         private val jwtSecret = E2eSession.newSecret()
 
@@ -149,21 +161,29 @@ class PerUserRateLimitE2eTest {
                             "INSERT INTO workspaces (id, name, display_name) VALUES ('$wsId', '$WS_NAME', 'Rate Limit 232')",
                         )
                         listOf(
-                            "viewer-a" to viewerA,
-                            "viewer-b" to viewerB,
-                        ).forEach { (label, id) ->
+                            Triple("viewer-a", viewerA, "viewer"),
+                            // A viewer may not hold an mcp key (keys v2 A15): the key's creator is an author.
+                            Triple("author-c", authorC, "author"),
+                        ).forEach { (label, id, role) ->
                             statement.execute(
                                 "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
                                     "('$id', '$label@ratelimit.test', '$label', 'test', '$label-sub', TRUE, FALSE)",
                             )
                             statement.execute(
-                                "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$wsId', '$id', 'viewer')",
+                                "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ('$wsId', '$id', '$role')",
                             )
                         }
+                        // The key's own identity, built as ApiKeyService builds one (keys v2 A13), then
+                        // the key: kind `mcp`, role `author` (the subset rule's choice for an author).
+                        statement.execute(
+                            "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
+                                "('$authorCKeyIdentity', '${authorCKey.id.lowercase()}@keys.invalid', '${authorCKey.name}', 'key', " +
+                                "'${authorCKey.id}', TRUE, FALSE, 'service')",
+                        )
                         statement.execute(
                             "INSERT INTO api_keys (id, user_id, created_by, name, key_hash, workspace_id, kind, role) VALUES " +
-                                "('${viewerBKey.id}', '$viewerB', '$viewerB', '${viewerBKey.name}', " +
-                                "'${viewerBKey.hash}', '$wsId', 'user', NULL)",
+                                "('${authorCKey.id}', '$authorCKeyIdentity', '$authorC', '${authorCKey.name}', " +
+                                "'${authorCKey.hash}', '$wsId', 'mcp', 'author')",
                         )
                     }
                 }
