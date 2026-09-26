@@ -160,7 +160,7 @@ If an instance dies, its in-progress tasks are revived elsewhere after six misse
 
 On shutdown the instance first stops admitting — a run not yet claimed stays `queued` and is picked up by another instance or after restart — then waits up to `shutdown-wait-seconds` (default 5) for launches in progress to reach "started", and only then do the local executions drain. A scheduled execution cut off by the drain ends `aborted` / `shutdown`: a conclusive outcome that does not block. Under `skip` that occurrence does not run again.
 
-The drain can need 20 seconds. A container runtime whose stop grace is shorter (Docker's default is 10 s) kills the process first; the executions it cut off then end as lost instances, which the scheduler records as `unknown`, blocking. Give the application container a stop grace period of at least 30 seconds; the shipped `deploy/compose.yml` does not set one yet (a follow-up tracked on #9).
+The drain can need 20 seconds. A container runtime whose stop grace is shorter (Docker's default is 10 s) kills the process first; the executions it cut off then end as lost instances, which the scheduler records as `unknown`, blocking. Give the application container a stop grace period of at least 30 seconds; the shipped `deploy/compose.yml` does not set one yet (#251).
 
 ### 8.3 Watching it
 

@@ -1506,7 +1506,7 @@ result is unexpired):
 
 Ownership (roles design D11, ratified 2026-09-20 — [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) `execution.read`): a **workspace admin** (or super admin — `execution.read_all`) reads every execution in the workspace, optionally pipeline-narrowed; a **viewer** or **author** reads only their OWN runs — `executed_by = self` and not started through an endpoint key; a **promoter** is refused the list, the read, the result and the replay by role (`403 auth.role_required`) before any row is consulted. The filter is SQL, so the page is cut after it and `has_more` is honest. Another member's execution is `404 result.execution_not_found` on the single reads, never 403 ([Auth §11A.1](auth.md#11a1-the-404-rule)).
 
-**Scheduled runs (#9, ruling R3).** An execution a schedule fired (`triggered_via = SCHEDULE`) is nobody's own — it ran as the system identity — so it is visible to **every member whose role reaches `execution.read`**, on this list and on §10.2, §10.3, §10.3A and the result read. It lifts visibility, never ownership: cancelling one (§10.4) still needs `execution.cancel_all`. The UI's execution lists and MCP's `executions_list` still list own runs only (a later slice rules on them).
+**Scheduled runs (#9, ruling R3).** An execution a schedule fired (`triggered_via = SCHEDULE`) is nobody's own — it ran as the system identity — so it is visible to **every member whose role reaches `execution.read`**, on this list and on §10.2, §10.3, §10.3A and the result read. It lifts visibility, never ownership: cancelling one (§10.4) still needs `execution.cancel_all`. The UI's execution lists and MCP's `executions_list` still list own runs only (#250 decides them).
 
 ### 10.2 Get execution metadata
 
