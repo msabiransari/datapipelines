@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.73
+**Status:** v1.74
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-25 (7e)
@@ -261,6 +261,8 @@ nav packs to the top; the free space below it is deliberate.
 **The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold),
 the search field **palette** (161), the light/dark toggle, and the avatar menu. The **MCP-key
 chip** (179) sat between the toggle and the menu until keys v2 (233, A15) retired it — see below.
+From 768 to 1099px the search field itself hides (§3.6) and a search **icon button** stands in
+(#159): it reveals the same palette in place, and ⌘K drives it too.
 
 - **The MCP-key chip is retired** (keys v2 — 233, A15, 2026-09-25). 179 (D16, ruling 7) put
   the caller's one login-minted `user` key in the top bar with Copy and delete-to-rotate, and
@@ -288,8 +290,10 @@ chip** (179) sat between the toggle and the menu until keys v2 (233, A15) retire
   `?pipeline_id=`). The keyboard is the combobox contract: ↑/↓ move the active row (focus
   stays in the input; `aria-activedescendant`), Enter opens it, Esc or an outside click
   closes, and any boosted navigation closes the palette. Both copies (top bar + drawer) share
-  the behaviour through `data-search-*` hooks; ⌘K drives whichever copy is displayed (between
-  768 and 1100px neither is, and the chord does nothing). The search is read-only for every
+  the behaviour through `data-search-*` hooks; ⌘K drives whichever copy is displayed, and in the
+  768–1099px band — where neither is (#159) — it drives the band's entry button, a topbar icon
+  button lit only in that band, which reveals the topbar copy in place (no third copy of the
+  control: same ids, same fetch) and stands down when the palette closes. The search is read-only for every
   role — a viewer sees what a viewer may open.
 - **The avatar** renders the OIDC `picture` claim when there is one and initials otherwise.
   The claim IS stored: `users.profile_picture_url`, written by `OidcSuccessHandler` through
@@ -399,7 +403,7 @@ One breakpoint table for the whole shell — the rail, the top bar and the main 
 | Width | Rail | Topbar | Main gutter |
 |---|---|---|---|
 | ≥ 1100 px | as today (expanded; `rail-collapsed` on user choice, remembered) | as today | `--gap-lg` |
-| 768–1099 px | **starts collapsed** (icons only) unless the user expanded it — same class, same `localStorage` key, one more rule: the default flips at this width | search text hidden (the existing 900 rule moves to this breakpoint), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--gap-lg` |
+| 768–1099 px | **starts collapsed** (icons only) unless the user expanded it — same class, same `localStorage` key, one more rule: the default flips at this width | search text hidden (the existing 900 rule moves to this breakpoint) and the search ICON BUTTON stands in (#159: it reveals the topbar copy in place; ⌘K drives it too), crumbs truncate to the LEAF with the full path in `title` (106's pattern on `h2.tplx-detail-title`) | `--gap-lg` |
 | < 768 px | **off-canvas drawer**: not in the grid (`grid-template-columns: 1fr`), `position: fixed`, `z-index: var(--z-drawer)`, translated off-screen; opened by a hamburger button that appears FIRST in the topbar; closed by Escape, backdrop tap, or any boosted navigation | brand tile → hamburger, crumbs (leaf only), workspace switcher as its avatar only, user menu; **nothing wraps**; the search moves INTO the drawer's head (it is hidden today — `app.css` — it must not disappear, it must move) | `--gap-md` |
 
 Rules the table rides on, all testable:
@@ -1007,6 +1011,7 @@ Content:
   | Memory | `localStorage` key `dp.pane.template-editor-side` — its OWN key, not shared with the pipeline editor's sidebar |
 
   Below 768px the page shows the phone band and the editor stays rendered underneath — `.te-body` has no collapse breakpoint today (at 390px the clamp's 220px floor wins over the 50vw ceiling and the source column squeezes toward its `minmax(0, 1fr)` floor beside it), so the handle stays bound there too.
+- **A context row fits its rail (#243).** The key/value rows are flex rows whose inputs carry `min-width: 0` (a flex item's automatic minimum is its intrinsic size, and an `<input>`'s is its `size` attribute — without the zero minimum the row held 476px in a 320px rail and the remove button sat off-screen at every width) and the remove control never yields width; `TemplateEditorContextRowBrowserTest` measures the row's edges against the rail's box at 1100/1440/1920 and at the splitter's 220px floor, for the static row and an Add-Row clone.
 - **Phone widths (110): desktop-first by decision, not omission.** Below 768px the page renders a `.app-wide-screen-note` band above the editor — "Open on a wider screen to edit", the template's name, its draft badge (the same `hasDraft`/`draftVersion` pair the header renders) and a link back to the Templates explorer — with the editor itself left rendered underneath.
 
 #### 4.7a The transform face (7d, #7)
@@ -1169,7 +1174,10 @@ Content, in order:
 
 **A create form**, super admins only (D-R11 removed the provisioning modes, and with them
 `workspace.creation_forbidden` and the joinable list; 114 removed the stale "provisioning mode on
-this server" footnote and the dead join section that survived them).
+this server" footnote and the dead join section that survived them). It navigates in FULL —
+`hx-boost="false"`, the switch form's rule — because creating a workspace changes the SHELL: the
+rail's switcher is filled on every full render, and a boosted swap (which replaces only `#app-main`)
+left the new workspace out of the switcher until a manual reload (#170).
 
 **Your workspaces** — name, the role you hold there, the active marker, and the verbs. Every
 workspace on the instance for a super admin, with a `inactive` badge and a **Reactivate** verb on
@@ -1660,6 +1668,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.74 | 243 (#243, #170, #159) three small UI defects, measured and pinned | §4.7: a Render Context row fits its rail (#243) — the rows' inputs carry `min-width: 0` and the remove control never yields width, so the row's key, value and × end inside the rail at 1100/1440/1920 and at the splitter's 220px floor, static row and Add-Row clone alike (`TemplateEditorContextRowBrowserTest` measures the edges; on the base the row was 476px in a 320px rail). §4.13: the create form navigates in FULL — `hx-boost="false"` (#170) — because a boosted swap replaces only `#app-main` and the rail's switcher (filled on every full render) kept the pre-create options until a manual reload (`WorkspacesCreateBrowserTest` asserts the row lands in BOTH the table and the switcher). §3.4/§3.6: the 768–1099px band has a search entry point (#159) — a topbar icon button lit only in that band reveals the topbar copy in place (no third copy of the control) and ⌘K drives it, where previously neither copy was displayed and the chord did nothing (`MobileShellBrowserTest`'s band arm, red on the base; plus the phone-width drawer arm the issue named, and HeaderSearchBrowserTest's desktop arm pinning the button absent at ≥1100px). |
 | 2026-09-25 | v1.73 | 233 landing (#233, #248) the chip's retirement recorded | §3.4: the top bar's inventory no longer lists the MCP-key chip; the chip bullet becomes its retirement record (keys v2 A15 — every key created on the Keys page, plaintext once at creation; `GET /partials/mcp-key/secret` survives for the V37-migrated sealed copies with no caller, #248). §4.10: `/settings/api-keys` points at the Keys page, not the top bar. The two chip browser tests, the shell's dead copy handler and the screenshot tool's chip wait left with it. |
 | 2026-09-25 | v1.72 | 7e (#7) the semantic link | §4.3d **the Release dialog warns on a `needs_review` pin**: one row per pinned template version citing a retired learned fact ("cites a retired fact: … — superseded by …"), above the confirm, never blocking it — the same port read the REST release's `warnings` come from. §4.6: 7d's `needs_review` marker is now computed (the tree/search rows' own flag, the detail's working version, the editor's displayed version, the node card's pin read). No new verb, no new route. |
 | 2026-09-25 | v1.71 | 7d (#7) the transform UI | **§4.7a (new): the transform face** — four textarea panes over a `jsonata`/`javascript` template (losslessly pretty-printed blocks), editable only on the working draft for an author; **Save draft** (`POST /partials/templates/transform-face/save`, `template.update` — 7b's deserializer, validator and draft service under the draft's hash; refusals name their pane) and **Run suite** (`…/run-suite`, `template.evaluate` — the panes as typed, owner ruling 2026-09-25: the gate's verdict plus a per-case list with the first difference's path, both sides and every invariant); `GET /partials/templates/transform-face` for the version select. §4.3e gains the face's two verbs. **§4.6:** the four types in the filter and the create modal, the modal's Contract/Invariants/Tests field prefilled with the record's example, the transform detail's Mode and Inputs, the `needs_review` marker behind 7e's flag. **§4.4:** the TRANSFORM node card (its accent and glyph, the language resolved from the pin, inputs → output, rejects + strict) and its Details rows. The `readOnly` rule's home is `TemplateSourceModel` (moved from `fillSource`, unchanged). |
