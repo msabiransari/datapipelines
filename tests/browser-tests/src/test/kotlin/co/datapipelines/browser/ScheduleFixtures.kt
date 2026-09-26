@@ -94,7 +94,8 @@ internal object ScheduleFixtures {
                 "POST",
                 "/api/v1/pipelines",
                 """{"name":"$name","display_name":"${name.substringAfterLast('/')}","description":"scheduler-3 fixture",""" +
-                    """"parameters":{"$DATE_PARAMETER":{"type":"DATE","required":true,"description":"The logical day the run is for."}},""" +
+                    """"parameters":{"$DATE_PARAMETER":{"type":"DATE","required":true,""" +
+                    """"description":"The logical day the run is for."}},""" +
                     """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
                     """"inputs":{"date":"${'$'}$DATE_PARAMETER","fiscal_start":"01-01"}}]}""",
             )

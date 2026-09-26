@@ -31,7 +31,13 @@ class PipelineInputResolverTest {
     fun `the record New York example - due 2355 on the 22nd, started 0005 on the 23rd, TODAY is the 22nd`() {
         val reference = ExecutionReference(Instant.parse("2026-09-23T03:55:00Z"), ZoneId.of("America/New_York"))
 
-        val resolved = resolver.resolve(declaredDates, emptyMap(), bindings("""{"as_of_date":{"source":"keyword","name":"TODAY"},"previous_date":{"source":"keyword","name":"YESTERDAY"}}"""), reference)
+        val resolved =
+            resolver.resolve(
+                declaredDates,
+                emptyMap(),
+                bindings("""{"as_of_date":{"source":"keyword","name":"TODAY"},"previous_date":{"source":"keyword","name":"YESTERDAY"}}"""),
+                reference,
+            )
 
         (resolved as Result.Resolved).parameters shouldBe
             mapOf(
@@ -62,7 +68,13 @@ class PipelineInputResolverTest {
         // 2026-09-22T20:00Z is 01:30 on the 23rd in Kolkata (UTC+05:30): TODAY is the 23rd.
         val reference = ExecutionReference(Instant.parse("2026-09-22T20:00:00Z"), ZoneId.of("Asia/Kolkata"))
 
-        val resolved = resolver.resolve(declaredDates, emptyMap(), bindings("""{"as_of_date":{"source":"keyword","name":"TODAY"}}"""), reference)
+        val resolved =
+            resolver.resolve(
+                declaredDates,
+                emptyMap(),
+                bindings("""{"as_of_date":{"source":"keyword","name":"TODAY"}}"""),
+                reference,
+            )
 
         (resolved as Result.Resolved).parameters["as_of_date"] shouldBe mapper.readTree("\"2026-09-23\"")
     }
@@ -116,7 +128,13 @@ class PipelineInputResolverTest {
 
     @Test
     fun `an unknown keyword, an unknown source and a literal without a value are refused with their reasons`() {
-        val unknownKeyword = resolver.resolve(declaredDates, emptyMap(), bindings("""{"as_of_date":{"source":"keyword","name":"TOMORROW"}}"""), reference())
+        val unknownKeyword =
+            resolver.resolve(
+                declaredDates,
+                emptyMap(),
+                bindings("""{"as_of_date":{"source":"keyword","name":"TOMORROW"}}"""),
+                reference(),
+            )
         (unknownKeyword as Result.Refused).refusal shouldBe
             Refusal.Invalid(Refusal.Reason.UNKNOWN_KEYWORD, "as_of_date", (unknownKeyword.refusal as Refusal.Invalid).message)
 

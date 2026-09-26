@@ -91,7 +91,13 @@ class ScheduleBindingsE2eTest {
         }
 
         // The occurrence is due: yesterday's 23:45 New York. Its actual start is on the next day.
-        val due = LocalDate.ofInstant(Instant.now(), NY_ZONE).minusDays(1).atTime(23, 45).atZone(NY_ZONE).toInstant()
+        val due =
+            LocalDate
+                .ofInstant(Instant.now(), NY_ZONE)
+                .minusDays(1)
+                .atTime(23, 45)
+                .atZone(NY_ZONE)
+                .toInstant()
         sql("UPDATE schedules SET next_due_at = '$due' WHERE id = '$scheduleId'")
 
         val run =

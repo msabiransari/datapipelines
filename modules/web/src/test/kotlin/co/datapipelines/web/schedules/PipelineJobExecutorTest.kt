@@ -18,6 +18,7 @@ import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
@@ -25,17 +26,16 @@ import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.scheduler.Admission
 import co.datapipelines.scheduler.ExecutionOutcome
 import co.datapipelines.scheduler.Launch
 import co.datapipelines.scheduler.Preparation
 import co.datapipelines.scheduler.RunOrigin
-import co.datapipelines.scheduler.StartOutcome
 import co.datapipelines.scheduler.RunState
 import co.datapipelines.scheduler.ScheduleErrorCodes
 import co.datapipelines.scheduler.ScheduleException
+import co.datapipelines.scheduler.StartOutcome
 import co.datapipelines.scheduler.TargetViewer
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
@@ -230,7 +230,9 @@ class PipelineJobExecutorTest {
 
         adapter.validate(
             workspace.id,
-            payloadJson("""{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY"}}}"""),
+            payloadJson(
+                """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY"}}}""",
+            ),
             mapper.createObjectNode(),
         ) shouldBe "pipeline:a/p"
 
@@ -239,7 +241,9 @@ class PipelineJobExecutorTest {
             shouldThrow<ScheduleException> {
                 adapter.validate(
                     workspace.id,
-                    payloadJson("""{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY"}}}"""),
+                    payloadJson(
+                        """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY"}}}""",
+                    ),
                     mapper.createObjectNode(),
                 )
             }
@@ -259,7 +263,9 @@ class PipelineJobExecutorTest {
             shouldThrow<ScheduleException> {
                 adapter.validate(
                     workspace.id,
-                    payloadJson("""{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"literal","value":"2026-01-01"}}}"""),
+                    payloadJson(
+                        """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"literal","value":"2026-01-01"}}}""",
+                    ),
                     mapper.readTree("""{"as_of_date":"2026-02-02"}"""),
                 )
             }
@@ -267,7 +273,9 @@ class PipelineJobExecutorTest {
         conflict.details["parameter"] shouldBe "as_of_date"
 
         reasonOf("""{"pipeline":"a/p","version":"current","reference_at":"2026-01-01T00:00:00Z"}""") shouldBe "unknown_field"
-        reasonOf("""{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY","reference_at":"2026-01-01T00:00:00Z"}}}""") shouldBe
+        reasonOf(
+            """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY","reference_at":"2026-01-01T00:00:00Z"}}}""",
+        ) shouldBe
             "unknown_field"
     }
 
@@ -308,7 +316,9 @@ class PipelineJobExecutorTest {
             adapter.prepare(
                 admission(
                     payload =
-                        payloadJson("""{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY"}}}"""),
+                        payloadJson(
+                            """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY"}}}""",
+                        ),
                     referenceTimezone = "UTC",
                 ),
             )
@@ -402,9 +412,7 @@ class PipelineJobExecutorTest {
     )
 
     /** A record + parsed body declaring [params], the shape `findExecutable` returns. */
-    private fun executable(
-        vararg params: Pair<String, LogicalType>,
-    ): PipelineService.ExecutablePipeline {
+    private fun executable(vararg params: Pair<String, LogicalType>): PipelineService.ExecutablePipeline {
         // A REAL record, not a mock: `start` reads the id back out of the frozen snapshot, and a
         // mock's unstubbed getter answer would not survive the string interpolation.
         val record =

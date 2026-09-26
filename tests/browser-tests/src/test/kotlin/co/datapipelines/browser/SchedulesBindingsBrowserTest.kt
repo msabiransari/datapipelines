@@ -10,8 +10,8 @@ import co.datapipelines.browser.ScheduleFixtures.send
 import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.WaitForSelectorState
-import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -139,6 +139,7 @@ class SchedulesBindingsBrowserTest : SchedulesBrowserSuite() {
         val id = createBoundSchedule(page, "$root/nightly/shots", pipeline)
 
         val dir: Path = Paths.get("build", "reports", "schedules-screenshots").also { it.toFile().mkdirs() }
+
         fun shot(name: String) {
             page.waitForFunction("() => document.fonts.ready.then(() => document.fonts.status === 'loaded')")
             page.screenshot(Page.ScreenshotOptions().setPath(dir.resolve("schedules-$name.png")))

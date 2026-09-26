@@ -13,13 +13,13 @@ import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineSettings
 import co.datapipelines.pipeline.PipelineVersionDetail
 import co.datapipelines.pipeline.PipelineVersionStatus
-import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.scheduler.JobExecutors
 import co.datapipelines.scheduler.RunLedger
@@ -127,7 +127,8 @@ class SchedulesCreateBindingsTest {
                 workspace = WorkspaceContext(workspaceId, "acme", WorkspaceRole.AUTHOR),
             )
         SecurityContextHolder.getContext().authentication =
-            org.springframework.security.authentication.UsernamePasswordAuthenticationToken(principal, null, emptyList())
+            org.springframework.security.authentication
+                .UsernamePasswordAuthenticationToken(principal, null, emptyList())
         val workspace = Workspace(workspaceId, "acme", "Acme", false, null, false, Instant.EPOCH)
         every { workspaces.findById(workspaceId) } returns workspace
         every { users.systemActor() } returns systemRow()
@@ -135,7 +136,8 @@ class SchedulesCreateBindingsTest {
         every { schedulesRepo.insert(any()) } answers { createdFrom(firstArg()) }
         every { pipelines.findByNameAnyStatus(workspaceId, "a/p") } returns record()
         every { pipelines.findVersionDetail(workspaceId, recordId, 1) } returns detail()
-        every { pipelineService.findExecutable(workspaceId, ReadLens.Everything, any(), 1) } returns executable("as_of_date" to LogicalType.DATE)
+        every { pipelineService.findExecutable(workspaceId, ReadLens.Everything, any(), 1) } returns
+            executable("as_of_date" to LogicalType.DATE)
     }
 
     @AfterEach
@@ -225,22 +227,21 @@ class SchedulesCreateBindingsTest {
             createdBy = SYSTEM_ID,
         )
 
-    private fun executable(
-        vararg params: Pair<String, LogicalType>,
-    ) = PipelineService.ExecutablePipeline(
-        record(),
-        1,
-        "{}",
-        Pipeline(
-            schemaVersion = 1,
-            name = "a/p",
-            displayName = "A P",
-            description = "",
-            settings = PipelineSettings(),
-            parameters = params.toMap().mapValues { Parameter(type = it.value) },
-            nodes = emptyList(),
-        ),
-    )
+    private fun executable(vararg params: Pair<String, LogicalType>) =
+        PipelineService.ExecutablePipeline(
+            record(),
+            1,
+            "{}",
+            Pipeline(
+                schemaVersion = 1,
+                name = "a/p",
+                displayName = "A P",
+                description = "",
+                settings = PipelineSettings(),
+                parameters = params.toMap().mapValues { Parameter(type = it.value) },
+                nodes = emptyList(),
+            ),
+        )
 
     /** The row the (mocked) insert returns: what was asked for, assigned its id and stamps. */
     private fun createdFrom(newSchedule: co.datapipelines.scheduler.NewSchedule): Schedule =

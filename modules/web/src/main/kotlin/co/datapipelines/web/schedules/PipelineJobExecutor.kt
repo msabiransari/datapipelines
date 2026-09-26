@@ -1,6 +1,7 @@
 package co.datapipelines.web.schedules
 
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.application.pipelines.PipelineInputResolver
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.SystemActorPrincipals
@@ -15,7 +16,6 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
-import co.datapipelines.application.pipelines.PipelineInputResolver
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -191,10 +191,22 @@ class PipelineJobExecutor(
             )
         }
         val resolved =
-            when (val result = resolver.resolve(declaredTypes(executable.pipeline), parametersOf(admission.parameters), bindings, reference)) {
-                is PipelineInputResolver.Result.Refused ->
+            when (
+                val result =
+                    resolver.resolve(
+                        declaredTypes(executable.pipeline),
+                        parametersOf(admission.parameters),
+                        bindings,
+                        reference,
+                    )
+            ) {
+                is PipelineInputResolver.Result.Refused -> {
                     return refused(PARAMETERS_INVALID, block = true, "[${result.refusal.parameter}] ${result.refusal.message}")
-                is PipelineInputResolver.Result.Resolved -> result.parameters
+                }
+
+                is PipelineInputResolver.Result.Resolved -> {
+                    result.parameters
+                }
             }
         try {
             bind(executable.pipeline, resolved)
@@ -248,7 +260,11 @@ class PipelineJobExecutor(
                     "The run's reference timezone '${admission.referenceTimezone}' is not a zone this instance knows.",
                 )
         val frozenParameters =
-            launch.snapshot.path(RESOLVED_PARAMETERS).takeIf { it.isObject }?.properties()?.associate { it.key to it.value }
+            launch.snapshot
+                .path(RESOLVED_PARAMETERS)
+                .takeIf { it.isObject }
+                ?.properties()
+                ?.associate { it.key to it.value }
         val request =
             ExecuteRequest(
                 pipelineId = pipelineId,
@@ -445,7 +461,8 @@ class PipelineJobExecutor(
             if (!keys.contains(PipelineInputResolver.BINDING_SOURCE)) {
                 throw payloadInvalid(BINDINGS_SOURCE_MISSING, "The binding for '$name' names no `source`.")
             }
-            val unknown = keys - setOf(PipelineInputResolver.BINDING_SOURCE, PipelineInputResolver.BINDING_NAME, PipelineInputResolver.BINDING_VALUE)
+            val unknown =
+                keys - setOf(PipelineInputResolver.BINDING_SOURCE, PipelineInputResolver.BINDING_NAME, PipelineInputResolver.BINDING_VALUE)
             if (unknown.isNotEmpty()) {
                 throw payloadInvalid(
                     "unknown_field",
@@ -462,18 +479,21 @@ class PipelineJobExecutor(
     /** The resolver's refusal as the catalogued save-time code a surface renders (§13.19). */
     private fun bindingRefusal(refusal: PipelineInputResolver.Refusal): ScheduleException =
         when (refusal) {
-            is PipelineInputResolver.Refusal.Conflict ->
+            is PipelineInputResolver.Refusal.Conflict -> {
                 ScheduleException(
                     ScheduleErrorCodes.BINDING_CONFLICT,
                     refusal.message,
                     mapOf("parameter" to refusal.parameter),
                 )
-            is PipelineInputResolver.Refusal.Invalid ->
+            }
+
+            is PipelineInputResolver.Refusal.Invalid -> {
                 ScheduleException(
                     ScheduleErrorCodes.BINDING_INVALID,
                     refusal.message,
                     mapOf("reason" to refusal.reason.wire, "parameter" to refusal.parameter),
                 )
+            }
         }
 
     /**

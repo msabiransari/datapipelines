@@ -88,7 +88,6 @@ class PipelineInputResolver {
             UNKNOWN_SOURCE("unknown_source"),
             LITERAL_INVALID("literal_invalid"),
             NO_REFERENCE("no_reference"),
-            ;
         }
     }
 
@@ -127,7 +126,10 @@ class PipelineInputResolver {
                         }
                         keywordValue(node, reference)
                     }
-                    else -> requireNotNull(node.get(BINDING_VALUE))
+
+                    else -> {
+                        requireNotNull(node.get(BINDING_VALUE))
+                    }
                 }
         }
         return Result.Resolved(resolved)
@@ -142,7 +144,15 @@ class PipelineInputResolver {
         declared: Map<String, String>,
         literals: Map<String, JsonNode>,
         bindings: Map<String, JsonNode>?,
-    ): Refusal? = bindings?.keys?.sorted()?.firstNotNullOfOrNull { name -> refusalFor(name, declared, literals, requireNotNull(bindings)[name] ?: return null) }
+    ): Refusal? =
+        bindings?.keys?.sorted()?.firstNotNullOfOrNull { name ->
+            refusalFor(
+                name,
+                declared,
+                literals,
+                requireNotNull(bindings)[name] ?: return null,
+            )
+        }
 
     /** The first structural refusal for [name], or null — every check except resolution, in order. */
     private fun refusalFor(
@@ -175,7 +185,7 @@ class PipelineInputResolver {
         }
         val keyword = node.path(BINDING_NAME).takeIf { it.isTextual }?.asText()
         return when (node.path(BINDING_SOURCE).takeIf { it.isTextual }?.asText()) {
-            SOURCE_KEYWORD ->
+            SOURCE_KEYWORD -> {
                 if (keyword in KEYWORDS) {
                     null
                 } else {
@@ -186,7 +196,9 @@ class PipelineInputResolver {
                             " (uppercase), not '${keyword.orEmpty()}'.",
                     )
                 }
-            SOURCE_LITERAL ->
+            }
+
+            SOURCE_LITERAL -> {
                 if (node.has(BINDING_VALUE)) {
                     null
                 } else {
@@ -196,12 +208,15 @@ class PipelineInputResolver {
                         "A literal binding carries a `value` — '$name's does not.",
                     )
                 }
-            else ->
+            }
+
+            else -> {
                 Refusal.Invalid(
                     Refusal.Reason.UNKNOWN_SOURCE,
                     name,
                     "Binding sources are \"$SOURCE_KEYWORD\" or \"$SOURCE_LITERAL\", not '${node.path(BINDING_SOURCE).asText()}'.",
                 )
+            }
         }
     }
 
