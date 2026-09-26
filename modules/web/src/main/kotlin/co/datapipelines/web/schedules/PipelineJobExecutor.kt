@@ -172,47 +172,15 @@ class PipelineJobExecutor(
         val executable =
             pipelineService.findExecutable(workspace.id, ReadLens.Everything, record, version)
                 ?: return refused(TARGET_NOT_FOUND, block = true, "Pipeline '$name' version $version has no stored body.")
-        val bindings =
-            try {
-                parseBindings(admission.payload)
-            } catch (e: ScheduleException) {
-                return refused(PAYLOAD_INVALID, block = true, e.message ?: "invalid payload")
-            }
         // §5.2: resolve the bindings against the run's FROZEN reference (the schedule's zone, its
         // logical occurrence time — not the actual start) and the CURRENT version's declarations.
         // A binding that no longer fits — the parameter removed or retyped after save — is this
         // refusal, naming the binding in the message.
-        val reference = referenceOf(admission)
-        if (reference == null) {
-            return refused(
-                PARAMETERS_INVALID,
-                block = true,
-                "The run's reference timezone '${admission.referenceTimezone}' is not a zone this instance knows.",
-            )
-        }
         val resolved =
-            when (
-                val result =
-                    resolver.resolve(
-                        declaredTypes(executable.pipeline),
-                        parametersOf(admission.parameters),
-                        bindings,
-                        reference,
-                    )
-            ) {
-                is PipelineInputResolver.Result.Refused -> {
-                    return refused(PARAMETERS_INVALID, block = true, "[${result.refusal.parameter}] ${result.refusal.message}")
-                }
-
-                is PipelineInputResolver.Result.Resolved -> {
-                    result.parameters
-                }
+            when (val inputs = inputsFor(admission, executable)) {
+                is Inputs.Refused -> return refused(PARAMETERS_INVALID, block = true, inputs.message)
+                is Inputs.Resolved -> inputs.parameters
             }
-        try {
-            bind(executable.pipeline, resolved)
-        } catch (e: DatapipelinesException) {
-            return refused(PARAMETERS_INVALID, block = true, "${e.code}: ${e.message}")
-        }
         val snapshot =
             mapper.createObjectNode().apply {
                 put("pipeline_id", record.id.toString())
@@ -226,6 +194,59 @@ class PipelineJobExecutor(
                 replace(RESOLVED_PARAMETERS, nodeOf(resolved))
             }
         return Preparation.Prepared(snapshot)
+    }
+
+    /**
+     * The run's resolved inputs: the payload's bindings parsed, envelope-checked and resolved
+     * against the frozen reference and the CURRENT version, then bound by the interactive
+     * binder — every refusal along the way reduces to `parameters_invalid` with its message.
+     */
+    private fun inputsFor(
+        admission: Admission,
+        executable: PipelineService.ExecutablePipeline,
+    ): Inputs {
+        val bindings =
+            try {
+                parseBindings(admission.payload)
+            } catch (e: ScheduleException) {
+                return Inputs.Refused(e.message ?: "invalid payload")
+            }
+        val reference =
+            referenceOf(admission)
+                ?: return Inputs.Refused("The run's reference timezone '${admission.referenceTimezone}' is not a zone this instance knows.")
+        return when (
+            val result =
+                resolver.resolve(
+                    declaredTypes(executable.pipeline),
+                    parametersOf(admission.parameters),
+                    bindings,
+                    reference,
+                )
+        ) {
+            is PipelineInputResolver.Result.Refused -> {
+                Inputs.Refused("[${result.refusal.parameter}] ${result.refusal.message}")
+            }
+
+            is PipelineInputResolver.Result.Resolved -> {
+                try {
+                    bind(executable.pipeline, result.parameters)
+                } catch (e: DatapipelinesException) {
+                    return Inputs.Refused("${e.code}: ${e.message}")
+                }
+                Inputs.Resolved(result.parameters)
+            }
+        }
+    }
+
+    /** The prepare-time resolution outcome ([Inputs.Resolved.parameters] is what will execute). */
+    private sealed interface Inputs {
+        data class Resolved(
+            val parameters: Map<String, JsonNode>,
+        ) : Inputs
+
+        data class Refused(
+            val message: String,
+        ) : Inputs
     }
 
     // ---------------------------------------------------------------------------- launch
@@ -466,7 +487,8 @@ class PipelineJobExecutor(
             if (unknown.isNotEmpty()) {
                 throw payloadInvalid(
                     "unknown_field",
-                    "Unknown field(s) in the '$name' binding: ${unknown.joinToString()}. A binding carries `source` and its one payload key.",
+                    "Unknown field(s) in the '$name' binding: ${unknown.joinToString()}. " +
+                        "A binding carries `source` and its one payload key.",
                 )
             }
             name to node
@@ -524,7 +546,7 @@ class PipelineJobExecutor(
         try {
             ExecutionReference(admission.referenceAt, ZoneId.of(admission.referenceTimezone))
         } catch (
-            @Suppress("TooGenericExceptionCaught") e: Exception,
+            @Suppress("TooGenericExceptionCaught", "SwallowedException") e: Exception,
         ) {
             null
         }

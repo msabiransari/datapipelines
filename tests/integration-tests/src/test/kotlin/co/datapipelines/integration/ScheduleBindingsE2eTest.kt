@@ -73,9 +73,7 @@ class ScheduleBindingsE2eTest {
         createAndReleasePipeline(PARENT_NAME, parentBody())
 
         val created = createSchedule()
-        if (created.statusCode != 201) {
-            throw IllegalStateException("schedule create → ${created.statusCode}: ${created.body().asString().take(600)}")
-        }
+        check(created.statusCode == 201) { "schedule create → ${created.statusCode}: ${created.body().asString().take(600)}" }
         scheduleId = created.jsonPath().getString("data.id")
         created.jsonPath().getString("data.payload.parameter_bindings.as_of_date.name") shouldBe "TODAY"
 
@@ -216,17 +214,13 @@ class ScheduleBindingsE2eTest {
         body: String,
     ) {
         val created = session(ADMIN_SESSION).contentType(ContentType.JSON).body(body).post("/api/v1/pipelines")
-        if (created.statusCode != 201) {
-            throw IllegalStateException("pipeline create $name → ${created.statusCode}: ${created.body().asString().take(600)}")
-        }
+        check(created.statusCode == 201) { "pipeline create $name → ${created.statusCode}: ${created.body().asString().take(600)}" }
         val id = created.jsonPath().getString("data.id")
         val released =
             session(ADMIN_SESSION)
                 .header(IF_MATCH, created.jsonPath().getString("data.body_hash"))
                 .post("/api/v1/pipelines/$id/release")
-        if (released.statusCode != 200) {
-            throw IllegalStateException("pipeline release $name → ${released.statusCode}: ${released.body().asString().take(600)}")
-        }
+        check(released.statusCode == 200) { "pipeline release $name → ${released.statusCode}: ${released.body().asString().take(600)}" }
     }
 
     /**

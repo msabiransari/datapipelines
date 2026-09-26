@@ -230,9 +230,7 @@ class PipelineJobExecutorTest {
 
         adapter.validate(
             workspace.id,
-            payloadJson(
-                """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY"}}}""",
-            ),
+            payloadJson(todayBindingJson),
             mapper.createObjectNode(),
         ) shouldBe "pipeline:a/p"
 
@@ -241,9 +239,7 @@ class PipelineJobExecutorTest {
             shouldThrow<ScheduleException> {
                 adapter.validate(
                     workspace.id,
-                    payloadJson(
-                        """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY"}}}""",
-                    ),
+                    payloadJson(todayBindingJson),
                     mapper.createObjectNode(),
                 )
             }
@@ -263,9 +259,7 @@ class PipelineJobExecutorTest {
             shouldThrow<ScheduleException> {
                 adapter.validate(
                     workspace.id,
-                    payloadJson(
-                        """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"literal","value":"2026-01-01"}}}""",
-                    ),
+                    payloadJson(literalBindingJson),
                     mapper.readTree("""{"as_of_date":"2026-02-02"}"""),
                 )
             }
@@ -273,10 +267,7 @@ class PipelineJobExecutorTest {
         conflict.details["parameter"] shouldBe "as_of_date"
 
         reasonOf("""{"pipeline":"a/p","version":"current","reference_at":"2026-01-01T00:00:00Z"}""") shouldBe "unknown_field"
-        reasonOf(
-            """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY","reference_at":"2026-01-01T00:00:00Z"}}}""",
-        ) shouldBe
-            "unknown_field"
+        reasonOf(referenceSpoofJson) shouldBe "unknown_field"
     }
 
     @Test
@@ -293,7 +284,8 @@ class PipelineJobExecutorTest {
                     payload =
                         payloadJson(
                             """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
-                                """{"as_of_date":{"source":"keyword","name":"TODAY"},"previous_date":{"source":"keyword","name":"YESTERDAY"}}}""",
+                                """{"as_of_date":{"source":"keyword","name":"TODAY"},""" +
+                                """"previous_date":{"source":"keyword","name":"YESTERDAY"}}}""",
                         ),
                     referenceAt = Instant.parse("2026-09-23T03:55:00Z"),
                     referenceTimezone = "America/New_York",
@@ -315,10 +307,7 @@ class PipelineJobExecutorTest {
         val refused =
             adapter.prepare(
                 admission(
-                    payload =
-                        payloadJson(
-                            """{"pipeline":"a/p","version":"current","parameter_bindings":{"as_of_date":{"source":"keyword","name":"TODAY"}}}""",
-                        ),
+                    payload = payloadJson(todayBindingJson),
                     referenceTimezone = "UTC",
                 ),
             )
@@ -393,6 +382,18 @@ class PipelineJobExecutorTest {
 
     /** A payload spelled out in full — bindings included. */
     private fun payloadJson(json: String) = mapper.readTree(json)
+
+    private val todayBindingJson =
+        """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+            """{"as_of_date":{"source":"keyword","name":"TODAY"}}}"""
+
+    private val literalBindingJson =
+        """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+            """{"as_of_date":{"source":"literal","value":"2026-01-01"}}}"""
+
+    private val referenceSpoofJson =
+        """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+            """{"as_of_date":{"source":"keyword","name":"TODAY","reference_at":"2026-01-01T00:00:00Z"}}}"""
 
     private fun admission(
         payload: com.fasterxml.jackson.databind.JsonNode = payload("a/p"),
