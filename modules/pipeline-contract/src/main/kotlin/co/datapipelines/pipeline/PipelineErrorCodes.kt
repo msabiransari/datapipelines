@@ -198,6 +198,42 @@ object PipelineErrorCodes {
         /** §12.7 — the `default` value's JSON type matches the declared type's wire encoding. */
         const val DEFAULT_TYPE_MISMATCH = "pipeline.validation.default_type_mismatch"
 
+        /**
+         * §12.7 (#194) — the `default` coerces but breaks the parameter's own rules: a
+         * `constraints` bound, length or pattern, or its declared precision/scale (`min: 0` with
+         * `default: -1`; `"1.234"` for a scale-2 `BIGDECIMAL`). `details.reason` names the rule —
+         * the same reasons `pipeline.execution.parameter_constraint_violation` carries.
+         */
+        const val DEFAULT_INVALID = "pipeline.validation.default_invalid"
+
+        /**
+         * §12.7 (#194) — a `constraints` key on a type it does not apply to (`pattern` on an
+         * `INTEGER`, `min` on a `STRING`); `details.constraint` names the key.
+         */
+        const val CONSTRAINT_NOT_APPLICABLE = "pipeline.validation.constraint_not_applicable"
+
+        /**
+         * §12.7 (#194) — a malformed `constraints` block: not an object, an unknown key, a bound
+         * not wire-encoded in the parameter's type, `min > max`, a length that is not a
+         * non-negative integer, `min_length > max_length`. `details.reason` names which.
+         */
+        const val CONSTRAINT_INVALID = "pipeline.validation.constraint_invalid"
+
+        /**
+         * §12.7 (#194) — a `pattern` over 256 characters, one that does not compile, or one using
+         * a construct the regex budget refuses (backreference, lookaround, possessive quantifier,
+         * atomic group, the COMMENTS flag). `details.reason`: `too_long` / `syntax` /
+         * `unsafe_construct`.
+         */
+        const val PATTERN_INVALID = "pipeline.validation.pattern_invalid"
+
+        /**
+         * §12.7 (#194) — `cardinality` other than `SINGLE`. `MULTI` is part of the declaration
+         * contract (shared with the parameter engine) and refused here until the dashboard round
+         * adopts list binding; any other value is not a cardinality at all.
+         */
+        const val CARDINALITY_UNSUPPORTED = "pipeline.validation.cardinality_unsupported"
+
         /** §12.8 — `settings.tempdb.engine` is `H2` (v1). */
         const val TEMPDB_ENGINE_UNSUPPORTED = "pipeline.validation.tempdb_engine_unsupported"
 
@@ -463,6 +499,15 @@ object PipelineErrorCodes {
          * `supplied` and `missing`. HTTP 400.
          */
         const val CALCULATOR_KEYS_PARTIAL = "pipeline.execution.calculator_keys_partial"
+
+        /**
+         * §13.3 (#194) — a supplied value (or an applied default) breaks a declared rule of its
+         * parameter: a `constraints` bound, length or pattern, the pattern's read budget, or the
+         * declared precision/scale. `details.reason` names the rule (`min`, `max`, `min_length`,
+         * `max_length`, `pattern`, `pattern_budget`, `scale`, `precision`). HTTP 400; nothing is
+         * rounded or clamped.
+         */
+        const val PARAMETER_CONSTRAINT_VIOLATION = "pipeline.execution.parameter_constraint_violation"
 
         /** §13.8 — pre-execution reachability check failed for a referenced datasource. */
         const val DATASOURCE_UNREACHABLE = "pipeline.execution.datasource_unreachable"

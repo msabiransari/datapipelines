@@ -1,14 +1,23 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
+import co.datapipelines.typesystem.DeclarationRule
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterCardinality
 import co.datapipelines.typesystem.ParameterCoercion
+import co.datapipelines.typesystem.ParameterValueOutcome
+import co.datapipelines.typesystem.ParameterValueRule
 
 /**
  * pipeline-contract §12.7 — parameter declarations.
  *
  * `parameter_type_invalid` is raised by [PipelineDeserializer]'s pre-scan (a wire value with
- * no typed representation — see its KDoc); everything else is checkable here.
+ * no typed representation — see its KDoc), as are the shape refusals of `cardinality` and
+ * `constraints`; everything else is checkable here.
+ *
+ * `constraints` and the default are judged by the shared validator ([PipelineParameterValidator],
+ * #194) — the one that judges a supplied value at execute — so a default this saves is a value
+ * execute would accept.
  */
 internal object ParameterRules {
     fun check(
@@ -18,7 +27,9 @@ internal object ParameterRules {
         pipeline.parameters.forEach { (name, parameter) ->
             checkName(name, into)
             checkPrecisionAndScale(name, parameter, into)
-            checkDefault(name, parameter, into)
+            checkCardinality(name, parameter, into)
+            val declarationSound = checkConstraints(name, parameter, into)
+            checkDefault(name, parameter, declarationSound, into)
         }
     }
 
@@ -87,7 +98,63 @@ internal object ParameterRules {
     }
 
     /**
-     * §12.7 `conflicting_required_default` and `default_type_mismatch`.
+     * §12.7 `cardinality_unsupported` (#194) — `MULTI` is the parameter engine's list shape and
+     * part of the shared declaration contract, but a pipeline parameter binds one value until the
+     * dashboard round adopts list binding (§6.2). An unknown value was refused by the pre-scan.
+     */
+    private fun checkCardinality(
+        name: String,
+        parameter: Parameter,
+        into: FailureCollector,
+    ) {
+        val cardinality = parameter.cardinality ?: return
+        if (cardinality == ParameterCardinality.SINGLE) return
+        into.add(
+            Validation.CARDINALITY_UNSUPPORTED,
+            "parameters.${name.truncateForError()}.cardinality",
+            "Parameter '${name.truncateForError()}' declares cardinality ${cardinality.wire}; a pipeline parameter is " +
+                "${ParameterCardinality.SINGLE.wire} until list binding is adopted.",
+            mapOf(
+                "parameter" to name.truncateForError(),
+                "value" to cardinality.wire,
+                "supported" to listOf(ParameterCardinality.SINGLE.wire),
+            ),
+        )
+    }
+
+    /**
+     * §12.7 `constraint_not_applicable` / `constraint_invalid` / `pattern_invalid` (#194): every
+     * problem the shared validator finds in the declaration's `constraints`, all at once. True
+     * when there were none — the default may then be judged against them.
+     */
+    private fun checkConstraints(
+        name: String,
+        parameter: Parameter,
+        into: FailureCollector,
+    ): Boolean {
+        val problems = VALIDATOR.checkDeclaration(parameter.declaration)
+        problems.forEach { problem ->
+            into.add(
+                when (problem.rule) {
+                    DeclarationRule.CONSTRAINT_NOT_APPLICABLE -> Validation.CONSTRAINT_NOT_APPLICABLE
+                    DeclarationRule.CONSTRAINT_INVALID -> Validation.CONSTRAINT_INVALID
+                    DeclarationRule.PATTERN_INVALID -> Validation.PATTERN_INVALID
+                },
+                "parameters.${name.truncateForError()}.constraints.${problem.constraint}",
+                "Parameter '${name.truncateForError()}': ${problem.message}.",
+                mapOf(
+                    "parameter" to name.truncateForError(),
+                    "constraint" to problem.constraint,
+                    "type" to parameter.type.wire,
+                    "reason" to problem.reason,
+                ),
+            )
+        }
+        return problems.isEmpty()
+    }
+
+    /**
+     * §12.7 `conflicting_required_default`, `default_type_mismatch` and `default_invalid`.
      *
      * The type check is delegated to [ParameterCoercion], the same code path that runs at
      * execution time (§6.3). Checking the JSON *type* alone — which is the letter of §12.7 —
@@ -95,10 +162,17 @@ internal object ParameterRules {
      * belongs, and a guaranteed `invalid_parameter_type` on the first execution that uses the
      * default. D2 says nothing invalid reaches the database, so the stricter check is the one
      * that keeps that promise.
+     *
+     * Since #194 the check is the shared validator's whole judgement: a default that coerces but
+     * breaks the declaration's own rules — a `constraints` bound, length or pattern, or its
+     * declared precision/scale — is `default_invalid`, because execute would refuse it the first
+     * time it applied (`min: 0` with `default: -1`). When the constraints themselves were refused
+     * ([declarationSound] false) only the type is checked; their own codes are already reported.
      */
     private fun checkDefault(
         name: String,
         parameter: Parameter,
+        declarationSound: Boolean,
         into: FailureCollector,
     ) {
         if (!parameter.hasDefault) return
@@ -112,16 +186,41 @@ internal object ParameterRules {
                 mapOf("parameter" to name.truncateForError()),
             )
         }
-        val outcome = ParameterCoercion.coerce(parameter.type, default)
-        if (outcome is ParameterCoercion.Outcome.Rejected) {
-            into.add(
-                Validation.DEFAULT_TYPE_MISMATCH,
-                "parameters.${name.truncateForError()}.default",
-                "Default for parameter '${name.truncateForError()}' does not match its declared type: ${outcome.reason}.",
-                mapOf("parameter" to name.truncateForError(), "type" to parameter.type.wire),
-            )
+        if (!declarationSound) {
+            val outcome = ParameterCoercion.coerce(parameter.type, default)
+            if (outcome is ParameterCoercion.Outcome.Rejected) defaultTypeMismatch(name, parameter, outcome.reason, into)
+            return
+        }
+        val judged = VALIDATOR.resolveDefault(parameter.declaration) as? ParameterValueOutcome.Refused ?: return
+        when (judged.refusal.rule) {
+            ParameterValueRule.CONSTRAINT_VIOLATION -> {
+                into.add(
+                    Validation.DEFAULT_INVALID,
+                    "parameters.${name.truncateForError()}.default",
+                    "Default for parameter '${name.truncateForError()}' breaks its declared rules: ${judged.refusal.message}.",
+                    mapOf("parameter" to name.truncateForError(), "type" to parameter.type.wire, "reason" to judged.refusal.reason),
+                )
+            }
+
+            ParameterValueRule.INVALID_VALUE_TYPE, ParameterValueRule.REQUIRED_MISSING -> {
+                defaultTypeMismatch(name, parameter, judged.refusal.message, into)
+            }
         }
     }
+
+    private fun defaultTypeMismatch(
+        name: String,
+        parameter: Parameter,
+        reason: String,
+        into: FailureCollector,
+    ) = into.add(
+        Validation.DEFAULT_TYPE_MISMATCH,
+        "parameters.${name.truncateForError()}.default",
+        "Default for parameter '${name.truncateForError()}' does not match its declared type: $reason.",
+        mapOf("parameter" to name.truncateForError(), "type" to parameter.type.wire),
+    )
+
+    private val VALIDATOR = PipelineParameterValidator.validator
 
     /** §12.7 — parameter keys: anchored against a leading digit, capped at 63. See [checkName]. */
     private val PARAMETER_NAME = Regex("^[a-z_][a-z0-9_]{0,62}$")

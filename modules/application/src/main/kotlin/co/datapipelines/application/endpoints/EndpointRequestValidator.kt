@@ -47,6 +47,17 @@ import java.math.BigDecimal
  * refused with "INTEGER takes a JSON number", which is a true sentence that means nothing to
  * someone holding a URL.
  *
+ * ## The shared validator judges, after the lift (#194)
+ *
+ * Lifted values reach [ParameterBinder], which judges each by the shared `ParameterValueValidator`
+ * (typesystem, parameter-engine record P28) — the one every surface uses. So a URL's value obeys
+ * exactly the rules an execute body's does: the strict coercion (nothing trimmed), the declared
+ * precision/scale, and the parameter's `constraints`, whose breach is
+ * `pipeline.execution.parameter_constraint_violation` inside this surface's one `400`. The
+ * validator never sees raw URL text — the lift turns text into the wire form first (the record's
+ * §14 item 6: decode, then judge) — and a URL cannot carry a JSON null, so an absent key is the
+ * only unsupplied value here, resolved by the binder's default-then-required rule.
+ *
  * ## Headers are clamps, not failures
  *
  * `DP-Result-TTL-Seconds` and `DP-Result-Page-Rows` are clamped to their configured bounds, and

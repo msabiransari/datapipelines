@@ -15,9 +15,9 @@ import java.math.BigDecimal
  *
  * It is the run-time twin of [CalculatorRules]' save-time type check, and the two must agree
  * exactly: a literal the validator accepted must be a literal this resolves, and both must read
- * `"$name"` as a reference. Splitting them across modules is how they drift. It also keeps
- * [ParameterCoercion] internal — the §6.3 wire encoding has one implementation, and a calculator
- * literal obeys the same one a parameter default does.
+ * `"$name"` as a reference. Splitting them across modules is how they drift. The §6.3 wire
+ * encoding has one implementation — [ParameterCoercion], in `typesystem` since #194 so the
+ * parameter engine shares it — and a calculator literal obeys the same one a parameter default does.
  *
  * ## What a reference resolves to
  *

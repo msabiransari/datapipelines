@@ -1,6 +1,8 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterCardinality
+import co.datapipelines.typesystem.ParameterConstraints
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 
@@ -117,8 +119,102 @@ private class WireValueScan(
                     mapOf("value" to wire.truncateForError(), "allowed" to Parameter.ALLOWED_TYPE_WIRE_VALUES),
                 )
             }
+            scanCardinality(name, descriptor)
+            scanConstraints(name, descriptor)
         }
     }
+
+    /**
+     * §12.7 `cardinality_unsupported` for a value that is not a cardinality at all (#194). `MULTI`
+     * binds — it IS one, shared with the parameter engine — and `ParameterRules` refuses it on
+     * the typed model; `"TRIPLE"` or a number has no typed representation, so it is refused
+     * here, with the same code, before binding could throw.
+     */
+    private fun scanCardinality(
+        name: String,
+        descriptor: JsonNode,
+    ) {
+        val node = descriptor.path("cardinality")
+        if (node.isMissingNode || node.isNull) return
+        val wire = node.asTextOrNull()
+        if (ParameterCardinality.fromWireOrNull(wire) != null) return
+        add(
+            PipelineErrorCodes.Validation.CARDINALITY_UNSUPPORTED,
+            "parameters.${name.truncateForError()}.cardinality",
+            "Parameter '${name.truncateForError()}' declares cardinality '${(wire ?: node.toString()).truncateForError()}'; " +
+                "a pipeline parameter is ${ParameterCardinality.SINGLE.wire}.",
+            mapOf(
+                "parameter" to name.truncateForError(),
+                "value" to (wire ?: node.toString()).truncateForError(),
+                "supported" to listOf(ParameterCardinality.SINGLE.wire),
+            ),
+        )
+    }
+
+    /**
+     * §12.7 `constraint_invalid` for a `constraints` block whose SHAPE has no typed reading
+     * (#194): not an object, a key the catalogue does not define — a misspelt `minimum` would
+     * otherwise be silently absent, the constraint the author believes in never applied — a
+     * length that is not a JSON integer, a pattern that is not a string. What the values MEAN
+     * (a bound in the parameter's type, `min <= max`, a pattern that compiles) is
+     * `ParameterRules`' job on the typed model.
+     */
+    private fun scanConstraints(
+        name: String,
+        descriptor: JsonNode,
+    ) {
+        val node = descriptor.path("constraints")
+        if (node.isMissingNode || node.isNull) return
+        val path = "parameters.${name.truncateForError()}.constraints"
+        if (!node.isObject) {
+            constraintInvalid(name, path, "not_an_object", "constraints must be a JSON object; got a ${node.nodeType.name.lowercase()}")
+            return
+        }
+        node.properties().forEach { (key, value) ->
+            val keyPath = "$path.${key.truncateForError()}"
+            when {
+                key !in ParameterConstraints.KEYS -> {
+                    constraintInvalid(
+                        name,
+                        keyPath,
+                        "unknown_key",
+                        "'${key.truncateForError()}' is not a constraint; allowed: ${ParameterConstraints.KEYS.sorted()}",
+                    )
+                }
+
+                // A JSON null is an absent constraint, whatever the key.
+                key in ParameterConstraints.LENGTH_KEYS && !value.isNull && !(value.isIntegralNumber && value.canConvertToInt()) -> {
+                    constraintInvalid(
+                        name,
+                        keyPath,
+                        "length_not_an_integer",
+                        "$key must be a JSON integer; got ${value.nodeType.name.lowercase()}",
+                    )
+                }
+
+                key == "pattern" && !value.isNull && !value.isTextual -> {
+                    constraintInvalid(
+                        name,
+                        keyPath,
+                        "pattern_not_a_string",
+                        "pattern must be a JSON string; got ${value.nodeType.name.lowercase()}",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun constraintInvalid(
+        name: String,
+        path: String,
+        reason: String,
+        message: String,
+    ) = add(
+        PipelineErrorCodes.Validation.CONSTRAINT_INVALID,
+        path,
+        "Parameter '${name.truncateForError()}': $message.",
+        mapOf("parameter" to name.truncateForError(), "reason" to reason),
+    )
 
     private fun scanNodes() {
         val nodes = tree.path("nodes")

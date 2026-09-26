@@ -215,6 +215,67 @@ class PublishedEndpointE2eTest {
     }
 
     @Test
+    fun `a value breaking a declared constraint or scale is refused at a published endpoint (#194)`() {
+        listOf("-1" to "min", "12.345" to "scale").forEach { (value, reason) ->
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, endpointKey)
+                .queryParam("min_revenue", value)
+                .`when`()
+                .get("/api/nyc/v1/revenue/Manhattan")
+                .then()
+                .statusCode(400)
+                .body("error.code", equalTo("endpoint.request.invalid"))
+                .body("error.details.errors", hasSize<Any>(1))
+                .body("error.details.errors[0].parameter", equalTo("min_revenue"))
+                .body("error.details.errors[0].code", equalTo("pipeline.execution.parameter_constraint_violation"))
+                .body(
+                    "error.details.errors[0].message",
+                    org.hamcrest.Matchers.containsString(
+                        if (reason ==
+                            "min"
+                        ) {
+                            "minimum"
+                        } else {
+                            "decimal place"
+                        },
+                    ),
+                )
+        }
+    }
+
+    @Test
+    fun `a value breaking a declared constraint is refused at the execute API, naming the rule (#194)`() {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .accept(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"parameters": {"borough": "Manhattan", "min_revenue": "-1"}}""")
+            .`when`()
+            .post("/api/v1/pipelines/$revenuePipelineId/execute")
+            .then()
+            .statusCode(400)
+            .body("error.code", equalTo("pipeline.execution.parameter_constraint_violation"))
+            .body("error.details.failures[0].details.reason", equalTo("min"))
+    }
+
+    @Test
+    fun `a required parameter sent as JSON null is parameter_required at the execute API - null is unsupplied (#194)`() {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .accept(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"parameters": {"borough": null}}""")
+            .`when`()
+            .post("/api/v1/pipelines/$revenuePipelineId/execute")
+            .then()
+            .statusCode(400)
+            .body("error.code", equalTo("pipeline.execution.parameter_required"))
+    }
+
+    @Test
     fun `an unknown query parameter is refused rather than ignored`() {
         // Strict on purpose: ParameterBinder ignores undeclared inputs, which is right for the
         // execute body and wrong here — a typo would silently run the default and return
@@ -683,7 +744,7 @@ class PublishedEndpointE2eTest {
                  "description": "074 E2E.",
                  "parameters": {"borough": {"type": "STRING", "required": true},
                                 "start_date": {"type": "DATE", "required": false, "default": "2024-01-01"},
-                                "min_revenue": {"type": "BIGDECIMAL", "precision": 12, "scale": 2, "required": false}},
+                                "min_revenue": {"type": "BIGDECIMAL", "precision": 12, "scale": 2, "required": false, "constraints": {"min": "0"}}},
                  "nodes": [{"id": "revenue", "description": "Revenue for one borough", "type": "DQL",
                             "source": "ep-source", "template": {"id": "test/revenue_by_borough.sql", "version": 1},
                             "depends_on": []}]}

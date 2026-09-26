@@ -3,6 +3,9 @@ package co.datapipelines.pipeline
 import co.datapipelines.calculators.CalculatorInput
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCoercion
+import co.datapipelines.typesystem.ParameterValueOutcome
+import co.datapipelines.typesystem.ParameterValueRefusal
+import co.datapipelines.typesystem.ParameterValueRule
 import com.fasterxml.jackson.databind.JsonNode
 import java.math.BigDecimal
 import java.math.BigInteger
@@ -46,6 +49,17 @@ import java.time.LocalTime
  * mapping completeness rule (§12.10 `calculator_outputs_incomplete`) already refuses at save.
  * The refusal rides the same [ParameterBindingResult.Rejected] list as a type failure, so the
  * caller gets it with the identical shape and before anything runs.
+ *
+ * ## One validator, one null policy (#194, parameter-engine record P28)
+ *
+ * A declared parameter's value is judged by the shared `ParameterValueValidator`
+ * ([PipelineParameterValidator]): the strict §6.3 coercion, then the declared precision/scale,
+ * then `constraints` (§6.1). A wrong form is `invalid_parameter_type` exactly as before; a
+ * broken rule is `pipeline.execution.parameter_constraint_violation` with `details.reason`.
+ * A `null` or absent value is **unsupplied** — the validator neither accepts nor refuses it —
+ * and this binder resolves it as it always has: the declaration's `default` (judged by the same
+ * validator), then the `required` refusal, then an optional parameter bound to null. Byte for
+ * byte today's behaviour for every declaration without constraints.
  */
 class ParameterBinder(
     private val parameters: Map<String, Parameter>,
@@ -67,17 +81,10 @@ class ParameterBinder(
         val bound = LinkedHashMap<String, Any?>()
 
         parameters.forEach { (name, parameter) ->
-            val supplied = inputs[name]?.takeUnless { it.isNull }
-            val value = supplied ?: parameter.default?.takeUnless { it.isNull }
-            when {
-                value != null -> coerceInto(name, parameter.type, value, bound, failures)
-
-                parameter.required -> failures += requiredMissing(name)
-
-                // Optional, unsupplied, no default: the key exists in the Context with no
-                // value, so a template referencing it is defined-but-null rather than a
-                // render failure on an undefined variable (§7.4).
-                else -> bound[name] = null
+            when (val supplied = VALIDATOR.validate(parameter.declaration, inputs[name])) {
+                is ParameterValueOutcome.Accepted -> bound[name] = supplied.value
+                is ParameterValueOutcome.Refused -> failures += refusal(name, parameter, supplied.refusal)
+                ParameterValueOutcome.Unsupplied -> bindUnsupplied(name, parameter, bound, failures)
             }
         }
         // The calculator tier AFTER the parameter one: a supplied calculator key is optional in
@@ -146,6 +153,37 @@ class ParameterBinder(
             transformKeys
                 .filter { it !in parameters && it !in calculatorOutputs }
                 .associateWith { sampleValue(LogicalType.STRING) }
+
+    /**
+     * Nothing was supplied (absent or JSON null): the declaration's `default`, judged like a
+     * supplied value; else `parameter_required`; else — optional, no default — the key exists in
+     * the Context with no value, so a template referencing it is defined-but-null rather than a
+     * render failure on an undefined variable (§7.4).
+     */
+    private fun bindUnsupplied(
+        name: String,
+        parameter: Parameter,
+        bound: MutableMap<String, Any?>,
+        failures: MutableList<ValidationFailure>,
+    ) {
+        when (val default = VALIDATOR.resolveDefault(parameter.declaration)) {
+            is ParameterValueOutcome.Accepted -> bound[name] = default.value
+            is ParameterValueOutcome.Refused -> failures += refusal(name, parameter, default.refusal)
+            ParameterValueOutcome.Unsupplied -> if (parameter.required) failures += requiredMissing(name) else bound[name] = null
+        }
+    }
+
+    /** The validator's refusal in this surface's codes: a wrong form keeps `invalid_parameter_type` and its wording. */
+    private fun refusal(
+        name: String,
+        parameter: Parameter,
+        refusal: ParameterValueRefusal,
+    ): ValidationFailure =
+        when (refusal.rule) {
+            ParameterValueRule.INVALID_VALUE_TYPE -> invalidType(name, parameter.type.wire, refusal.message)
+            ParameterValueRule.CONSTRAINT_VIOLATION -> constraintViolation(name, parameter.type.wire, refusal)
+            ParameterValueRule.REQUIRED_MISSING -> requiredMissing(name)
+        }
 
     private fun coerceInto(
         name: String,
@@ -243,6 +281,22 @@ class ParameterBinder(
             ),
     )
 
+    /**
+     * `pipeline.execution.parameter_constraint_violation` (§13.3, #194) — the same shape as
+     * [invalidType] plus `details.reason`, the rule the value broke. The message is the
+     * validator's, which never echoes the value itself.
+     */
+    private fun constraintViolation(
+        name: String,
+        declaredType: String,
+        refusal: ParameterValueRefusal,
+    ) = validationFailure(
+        code = PipelineErrorCodes.Execution.PARAMETER_CONSTRAINT_VIOLATION,
+        path = "parameters.${name.truncateForError()}",
+        message = "Parameter '${name.truncateForError()}': ${refusal.message}.",
+        details = mapOf("parameter" to name.truncateForError(), "declared_type" to declaredType, "reason" to refusal.reason),
+    )
+
     private fun requiredMissing(name: String) =
         validationFailure(
             code = PipelineErrorCodes.Execution.PARAMETER_REQUIRED,
@@ -252,6 +306,8 @@ class ParameterBinder(
         )
 
     internal companion object {
+        private val VALIDATOR = PipelineParameterValidator.validator
+
         /**
          * A supplied TRANSFORM key's value as a plain JVM value (7c, #7) — containers
          * included, because an R4 object key IS one. Uncoerced on purpose: the pinned
