@@ -517,7 +517,26 @@ class PromoterLensSweepTest {
             }.replace("/**", "/x")
             .replace("*", "x")
 
+    /**
+     * One probe. A `429` is the per-user limiter (rest-api §12: 100 requests/second), never a
+     * lens verdict — this walk fires every route twice, back to back, on one principal, and a
+     * runner with the JVM to itself outruns that budget (CI on `77ed6a4a`, one fork: `GET
+     * /api/v1/templates?name=… -> 404, but the NONEXISTENT id gives 429`, the one failure of
+     * 390). The one retry waits out the second the budget is counted in, exactly as
+     * `WorkspaceIsolationSweepTest.call` does since 188's gate saw the same shape; a second
+     * `429` is returned as-is and fails the differential, as any real refusal should.
+     */
     private fun call(
+        path: String,
+        authenticate: (RequestSpecification) -> RequestSpecification,
+    ): Answer {
+        val first = callOnce(path, authenticate)
+        if (first.status != RATE_LIMITED) return first
+        Thread.sleep(RATE_LIMIT_WINDOW_MS)
+        return callOnce(path, authenticate)
+    }
+
+    private fun callOnce(
         path: String,
         authenticate: (RequestSpecification) -> RequestSpecification,
     ): Answer {
@@ -655,6 +674,10 @@ class PromoterLensSweepTest {
          * hidden/absent pairs per credential. A walk well under these is a broken scan.
          */
         private const val MINIMUM_ROUTES = 30
+        private const val RATE_LIMITED = 429
+
+        /** The limiter counts per epoch second; a little past one second is always a fresh window. */
+        private const val RATE_LIMIT_WINDOW_MS = 1_100L
         private const val MINIMUM_PAIRS = 15
 
         private const val PROMOTER = "promoter"
