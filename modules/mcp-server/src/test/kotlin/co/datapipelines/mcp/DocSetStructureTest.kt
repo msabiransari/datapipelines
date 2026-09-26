@@ -134,10 +134,10 @@ class DocSetStructureTest {
         val offenders =
             docSet.docs.flatMap { doc ->
                 doc.markdown.lines().mapIndexedNotNull { index, line ->
-                    val hits = DocArea.RESERVED_PREFIXES.filter { reserved ->
-                    Regex("(?<![a-z0-9_-])" + Regex.escape(reserved) + "(?![a-z0-9_-])", RegexOption.IGNORE_CASE)
-                        .containsMatchIn(line)
-                    }
+                    val hits =
+                        DocArea.RESERVED_PREFIXES.filter { reserved ->
+                            reservedWordRegex(reserved).containsMatchIn(line)
+                        }
                     if (hits.isEmpty()) null else "${doc.name}.md:${index + 1}: ${hits.joinToString()}"
                 }
             }
@@ -145,6 +145,10 @@ class DocSetStructureTest {
             offenders.shouldBeEmpty()
         }
     }
+
+    /** Word-bounded (dashes excluded from the neighbours), case-insensitive reserved-name match. */
+    private fun reservedWordRegex(reserved: String): Regex =
+        Regex("(?<![a-z0-9_-])" + Regex.escape(reserved) + "(?![a-z0-9_-])", RegexOption.IGNORE_CASE)
 
     /**
      * The §13 (and §12) catalog, parsed from pipeline-contract.md with the audit's check-C
