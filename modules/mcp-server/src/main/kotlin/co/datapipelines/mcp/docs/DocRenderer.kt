@@ -174,22 +174,23 @@ class DocRenderer(
          */
         val PROSE_LITERALS = setOf("name")
 
-        /**
-         * The narrative documents' serving order: the core first, then the guides and the
-         * references — `docs_list`'s order. Generated documents are appended by [generate] in
-         * their own stable order; a name here sorts by position, anything else after it.
-         */
-        val ORDER: List<String> =
-            listOf(
-                DocSet.CORE_NAME,
-                "pipelines-authoring",
-                "templates",
-                "transforms",
-                "lake",
-                "endpoints",
-                "datasources-connecting",
-                "pipelines-naming",
-                "pipelines-schema",
-            )
+    /**
+     * The narrative documents' serving order: the core first, then the area guides, then the
+     * references — `docs_list`'s order (the guides in catalog order as of 242b's split; a
+     * reference name not listed here sorts alphabetically after them). Generated documents are
+     * appended by [generate] in their own stable order; a name here sorts by position,
+     * anything else after it.
+     */
+    val ORDER: List<String> =
+        listOf(
+            DocSet.CORE_NAME,
+            "pipelines",
+            "executions",
+            "templates",
+            "transforms",
+            "datasources",
+            "lake",
+            "endpoints",
+        )
     }
 }

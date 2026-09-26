@@ -19,17 +19,32 @@ import org.junit.jupiter.api.Test
  * chose. This test holds rule 13 to that, plus the three other clauses the same round added
  * (learn-first made checkable, measured numbers, assumptions recorded as `asserted`).
  *
- * What it deliberately does NOT assert: any meaning of "last", "this", "trailing" or any other
- * phrase. R1 applies to the test as much as to the text — a test that pins an interpretation
- * would be the same defect wearing a guard's clothes. Falsified by reverting each clause with a
- * reversible edit: every assertion here went red, and green again on restore.
+ * Since 242b the golden path and the numbered rules live in the PIPELINES GUIDE (the core is
+ * orientation, the universal rules and the area index), so this guard reads that document; the
+ * clauses it pins moved there with their content. What it deliberately does NOT assert: any
+ * meaning of "last", "this", "trailing" or any other phrase. R1 applies to the test as much as
+ * to the text — a test that pins an interpretation would be the same defect wearing a guard's
+ * clothes. Falsified by reverting each clause with a reversible edit: every assertion here went
+ * red, and green again on restore.
  */
 class SkillCoreRulesTest {
     private val lines =
         SpecFiles
-            .read(SpecFiles.SKILL_CORE_RESOURCE)
+            .read(SpecFiles.SKILL_PIPELINES_RESOURCE)
             .let { text ->
                 // strip the front matter — the rules hold against the SERVED body
+                if (text.startsWith("---\n")) text.substring(text.indexOf("\n---", 4) + 5) else text
+            }.lines()
+
+    /**
+     * The core document's body — the universal rules' home since 242b. The naming rule (with
+     * `confirm_new_root`'s first-create clause) moved there; the golden-path clauses stayed
+     * with the workflow in the pipelines guide.
+     */
+    private val coreLines =
+        SpecFiles
+            .read(SpecFiles.SKILL_CORE_RESOURCE)
+            .let { text ->
                 if (text.startsWith("---\n")) text.substring(text.indexOf("\n---", 4) + 5) else text
             }.lines()
 
@@ -197,7 +212,13 @@ class SkillCoreRulesTest {
 
     @Test
     fun `step 0 - confirm_new_root on the first create of EITHER kind - 138 C1`() {
-        assertClause("on the FIRST create of either kind")
+        // 242b moved the naming rule (with this clause) to the core, where the universal
+        // rules live; the step cites it. Pinned there, against the rule's joined body —
+        // the clause may wrap across lines in the source.
+        val joined = coreLines.joinToString(" ") { it.trim() }
+        withClue("core lost the clause \"on the FIRST create of either kind\" — it is the naming rule's own") {
+            joined.contains("on the FIRST create of either kind") shouldBe true
+        }
     }
 
     @Test
@@ -230,7 +251,7 @@ class SkillCoreRulesTest {
     /** Finds [clause] somewhere in SKILL.md and fails naming the line when absent. */
     private fun assertClause(clause: String) {
         val found = lines.indexOfFirst { it.contains(clause) }
-        withClue("SKILL.md lost the clause \"$clause\" — it was at the heart of a 120 rule") {
+        withClue("the pipelines guide lost the clause \"$clause\" — it was at the heart of a 120 rule") {
             (found >= 0) shouldBe true
         }
     }
@@ -238,7 +259,7 @@ class SkillCoreRulesTest {
     /** Golden-path step [step]'s text, from its `N. ` header to the next step's, joined by spaces. */
     private fun golden(step: Int): String {
         val start = lines.indexOfFirst { it.startsWith("$step. ") }
-        require(start >= 0) { "SKILL.md has no golden-path line starting with '$step. '" }
+        require(start >= 0) { "pipelines.md has no golden-path line starting with '$step. '" }
         val end =
             lines
                 .withIndex()
@@ -252,7 +273,7 @@ class SkillCoreRulesTest {
     /** Rule 13's lines as (1-based line number, text), from its `13. ` header to the next rule. */
     private fun ruleThirteen(): List<Pair<Int, String>> {
         val start = lines.indexOfFirst { it.startsWith("13. ") }
-        require(start >= 0) { "SKILL.md has no line starting with '13. ' — the best-practices numbering moved" }
+        require(start >= 0) { "pipelines.md has no line starting with '13. ' — the best-practices numbering moved" }
         val end =
             lines
                 .withIndex()

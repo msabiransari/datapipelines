@@ -17,6 +17,9 @@ object SpecFiles {
      */
     const val SKILL_CORE_RESOURCE: String = "modules/mcp-server/src/main/resources/skill/core.md"
 
+    /** 242b — the pipelines guide: the golden path and the numbered rules' home. */
+    const val SKILL_PIPELINES_RESOURCE: String = "modules/mcp-server/src/main/resources/skill/pipelines.md"
+
     /** The narrative resources' directory in the repo tree (242a; the golden expectations mirror it). */
     const val SKILL_RESOURCES: String = "modules/mcp-server/src/main/resources/skill"
 

@@ -23,8 +23,12 @@ class DocSet(
     private val aliases: Map<String, String> =
         mapOf(
             "skill" to CORE_NAME,
-            "authoring-playbook" to "pipelines-authoring",
-            "connecting" to "datasources-connecting",
+            // 242b: the two 242a-era names whose content became an area guide answer with the
+            // guide — the record §4 contract (every previous name keeps answering, with the
+            // successor's bytes) and the handshake's `authoring-playbook` pointer (unchanged
+            // text, still true).
+            "authoring-playbook" to "pipelines",
+            "connecting" to "datasources",
             "dp-lake" to "lake",
             "error-codes" to "core-error-codes",
             "naming" to "pipelines-naming",

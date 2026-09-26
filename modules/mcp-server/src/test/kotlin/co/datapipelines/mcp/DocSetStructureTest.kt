@@ -120,6 +120,33 @@ class DocSetStructureTest {
     }
 
     /**
+     * 242b — the reserved areas are not listed ANYWHERE until the lane that ships the
+     * capability adds them: the core's area index lists the seven shipped areas, and no served
+     * document may so much as name a reserved one (a stray "scheduling" section would read as
+     * a promise the product does not keep). Word-bounded and case-insensitive over every
+     * document of the rendered set — narrative AND generated, since a new tool description or
+     * catalog row could carry the word too. Falsified at birth: planting the word in a
+     * narrative resource turns this red naming the document and line.
+     */
+    @Test
+    fun `no reserved area name appears in any served document`() {
+        docSet.docs.size shouldBeGreaterThan 18 // non-vacuity: the scan saw the real set
+        val offenders =
+            docSet.docs.flatMap { doc ->
+                doc.markdown.lines().mapIndexedNotNull { index, line ->
+                    val hits = DocArea.RESERVED_PREFIXES.filter { reserved ->
+                    Regex("(?<![a-z0-9_-])" + Regex.escape(reserved) + "(?![a-z0-9_-])", RegexOption.IGNORE_CASE)
+                        .containsMatchIn(line)
+                    }
+                    if (hits.isEmpty()) null else "${doc.name}.md:${index + 1}: ${hits.joinToString()}"
+                }
+            }
+        withClue("reserved area names in the served set — the lane that ships the area adds the name") {
+            offenders.shouldBeEmpty()
+        }
+    }
+
+    /**
      * The §13 (and §12) catalog, parsed from pipeline-contract.md with the audit's check-C
      * regex — the INDEPENDENT side of the error-code assertion: the generator walks the
      * constants, this reads the document. Restricted to codes that HAVE a
