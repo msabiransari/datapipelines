@@ -130,7 +130,13 @@
     dlg.querySelector("#sch-f-timezone").addEventListener("change", function () { schedulePreview(); });
     var pipeline = dlg.querySelector("#sch-f-pipeline");
     pipeline.addEventListener("input", function () { searchPipelines(pipeline.value); });
-    pipeline.addEventListener("change", function () { loadParameters(pipeline.value.trim(), currentTexts()); });
+    // `change` fires on BLUR, typically as the author moves on to type a parameter: re-reading
+    // the parameters of the pipeline already loaded would re-render the fields under their
+    // typing (the lane walk lost a value exactly so). Only a different pipeline reloads them.
+    pipeline.addEventListener("change", function () {
+      var name = pipeline.value.trim();
+      if (name && name !== (f() && f().parametersFor)) loadParameters(name, currentTexts());
+    });
     dlg.querySelector("#sch-f-name").addEventListener("input", function () { clearError("name"); });
   }
 
@@ -312,7 +318,8 @@
         state.declared = declared;
         var count = Object.keys(declared).length;
         renderParameters(declared, values, count
-          ? "Values for the " + (count === 1 ? "parameter" : count + " parameters") + " v" + found.version + " (its current version) declares. Blank means its default."
+          ? (count === 1 ? "The parameter" : "The " + count + " parameters") + " v" + found.version +
+            " (its current version) declares — a blank field takes the declared default."
           : "v" + found.version + " (its current version) declares no parameters.");
       })
       .catch(function (err) {
@@ -327,6 +334,9 @@
   function renderParameters(declared, values, status) {
     var dlg = S.dialog();
     var box = S.slot(dlg, "params");
+    // What is typed NOW wins over what was captured when the read began: the read is async, and
+    // a value typed while it was in flight must survive the re-render.
+    values = Object.assign({}, values || {}, currentTexts());
     S.clear(box);
     paramStatus(status);
     var names = Object.keys(declared).sort();

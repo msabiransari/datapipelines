@@ -41,6 +41,13 @@ class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
         page.fill("#sch-f-pipeline", pipeline)
         // The pipeline's current version declares one required parameter: its field appears.
         page.locator("#sch-f-param-$PARAMETER").waitFor()
+        // Typed AT ONCE — the pipeline field's blur fires `change` right here, and the lane walk
+        // lost a value typed at this moment to a redundant re-read re-rendering the fields. Every
+        // read the form makes must settle and leave the typed text in place. ("5x0" is also the
+        // binder's refusal below: not an INTEGER, and never silently truncated to 5.)
+        page.fill("#sch-f-param-$PARAMETER", "5x0")
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        page.inputValue("#sch-f-param-$PARAMETER") shouldBe "5x0"
         page.selectOption("#sch-f-preset", "weekly")
         page.selectOption("#sch-f-dow", "1")
         page.fill("#sch-f-time", "06:30")
@@ -54,10 +61,11 @@ class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
         page.locator("[data-verb='schedule-save']").click()
         page.locator("[data-field-error='name']:not([hidden])").waitFor()
         page.locator("[data-field-error='name']").textContent().isNotBlank() shouldBe true
-        // 2: the binder's refusal, beside the parameter it names.
+        // 2: the binder's refusal (invalid_parameter_type), beside the parameter it names.
         page.fill("#sch-f-name", "$root/nightly/rows")
         page.locator("[data-verb='schedule-save']").click()
         page.locator("[data-param-name='$PARAMETER'] [data-param-error]:not([hidden])").waitFor()
+        page.inputValue("#sch-f-param-$PARAMETER") shouldBe "5x0"
         // 3: a valid form saves; the dialog closes and the detail shows the new schedule.
         page.fill("#sch-f-param-$PARAMETER", "50")
         page.locator("[data-verb='schedule-save']").click()
