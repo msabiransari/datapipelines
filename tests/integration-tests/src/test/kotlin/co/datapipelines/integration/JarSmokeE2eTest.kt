@@ -131,17 +131,17 @@ class JarSmokeE2eTest {
      * and the allowlist assertion are the same request.
      */
     @Test
-    fun `the agent skill is served from the jar, anonymously, references included`() {
+    fun `the agent manual is served from the jar, anonymously, documents included`() {
         val (skill, status) = request("/skill.md", session = null, accept = "text/markdown")
         status shouldBe 200
-        skill shouldContain "name: datapipelines"
+        skill shouldContain "# datapipelines"
 
-        // The reference map is the file's own list of what else exists — every entry must
+        // The core's index is the file's own list of what else exists — every entry must
         // resolve, which is what proves the PATTERN scan walked the nested jar rather than
         // silently returning nothing.
-        val references = Regex("""references/([a-z0-9-]+)\.md""").findAll(skill).map { it.groupValues[1] }.toSet()
-        check(references.size >= MIN_SKILL_REFERENCES) { "the packaged skill advertised only ${references.size} references" }
-        references.forEach { name ->
+        val documents = Regex("\\*\\*`([a-z0-9-]+)`\\*\\*").findAll(skill).map { it.groupValues[1] }.toSet()
+        check(documents.size >= MIN_SKILL_REFERENCES) { "the served core advertised only ${documents.size} documents" }
+        documents.forEach { name ->
             val (body, refStatus) = request("/skill/$name.md", session = null, accept = "text/markdown")
             check(refStatus == 200) { "/skill/$name.md answered $refStatus from the jar" }
             check(body.isNotBlank()) { "/skill/$name.md was empty from the jar" }

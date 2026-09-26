@@ -1,6 +1,6 @@
 package co.datapipelines.web.skill
 
-import co.datapipelines.mcp.SkillDocs
+import co.datapipelines.mcp.docs.DocSet
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrors
@@ -14,22 +14,23 @@ import org.springframework.web.bind.annotation.ResponseBody
 import java.util.concurrent.TimeUnit
 
 /**
- * `GET /skill.md` and `GET /skill/{reference}.md` — the agent skill over plain HTTP (095 §C3).
+ * `GET /skill.md` and `GET /skill/{name}.md` — the served manual over plain HTTP (095 §C3,
+ * the rendered set since 242a).
  *
  * This is the delivery for every client that is not Claude Code and speaks no MCP: a Cursor,
- * Codex or Copilot user runs one `curl` into `.agents/skills/datapipelines/` and their agent
- * has the manual for THIS deployment — the version it actually runs, not whatever a README
- * described when it was written. The bytes are [SkillDocs]', the same ones
- * `datapipelines://docs/skill` serves and the same ones the repository holds, so the three
- * surfaces cannot answer differently.
+ * Codex or Copilot user runs one `curl` and their agent has the manual for THIS deployment —
+ * the version it actually runs, rendered at boot from the same [DocSet] the MCP tools and the
+ * `datapipelines://docs/skill` resources answer from, so the three surfaces cannot answer
+ * differently. `/skill.md` serves the core; `/skill/<name>.md` serves a document by its flat
+ * name, one-release aliases (authoring-playbook, connecting, …) resolving to their successors.
  *
  * ## Why it is public
  *
  * It is the manual. It contains no secrets, reads no principal, resolves no workspace and
- * touches no datastore — it returns a constant packaged in the jar, and the identical text is
- * public in the AGPL repository on GitHub. Requiring a key would only mean an agent cannot
- * learn how to use its key correctly until after it has one, which is the wrong order. The
- * `permitAll` entries carry the same reasoning in `SecurityConfig`.
+ * touches no datastore — it returns a constant rendered at boot, and the identical text is
+ * what the MCP surface serves. Requiring a key would only mean an agent cannot learn how to
+ * use its key correctly until after it has one, which is the wrong order. The `permitAll`
+ * entries carry the same reasoning in `SecurityConfig`.
  *
  * ## Why `@Controller` and not `@RestController`
  *
@@ -42,8 +43,8 @@ import java.util.concurrent.TimeUnit
  * ## Why not `co.datapipelines.web.ui`
  *
  * `UiExceptionHandler` is scoped to that package at `HIGHEST_PRECEDENCE`, so a failure raised
- * there renders an HTML error page. A `curl` of a mistyped reference must come back as the
- * §4.2 JSON envelope, which is what `ApiExceptionHandler` gives every other package.
+ * there renders an HTML error page. A `curl` of a mistyped name must come back as the §4.2
+ * JSON envelope, which is what `ApiExceptionHandler` gives every other package.
  *
  * ## The 404's `user_message` says "pipeline", knowingly
  *
@@ -51,30 +52,32 @@ import java.util.concurrent.TimeUnit
  * `ApiExceptionHandler.onNoResource` reuses for an unknown address), and a
  * `DatapipelinesException` cannot carry its own user message — the catalog supplies one per
  * code. Raising a `ResponseStatusException` instead would buy the right prose and lose
- * `details.reason`, which is the field that separates "no such reference" from "no such
+ * `details.reason`, which is the field that separates "no such document" from "no such
  * route" and the only one an agent can branch on. The precise `reason` won. If §13 ever
  * gains a docs-side not-found code, this is the one throw site to change.
  */
 @Controller
-class SkillController {
+class SkillController(
+    private val docSet: DocSet,
+) {
     @GetMapping("/skill.md", produces = [MARKDOWN])
     @ResponseBody
     fun skill(response: HttpServletResponse): String {
         cache(response)
-        return SkillDocs.skill
+        return docSet.core.markdown
     }
 
-    @GetMapping("/skill/{reference}.md", produces = [MARKDOWN])
+    @GetMapping("/skill/{name}.md", produces = [MARKDOWN])
     @ResponseBody
     fun reference(
-        @PathVariable reference: String,
+        @PathVariable name: String,
         response: HttpServletResponse,
     ): String {
         val body =
-            SkillDocs.reference(reference)
+            docSet.resolve(name)?.markdown
                 ?: throw DatapipelinesException(
                     code = PipelineErrorCodes.Execution.NOT_FOUND,
-                    message = "No skill reference '$reference'. Read /skill.md — its reference map lists them all.",
+                    message = "No manual document '$name'. Read /skill.md — its index lists them all.",
                     details = mapOf(ApiErrors.REASON to "skill_reference_not_found"),
                 )
         cache(response)
@@ -83,7 +86,7 @@ class SkillController {
 
     /**
      * The same shared-cache window every public route carries: the content is immutable for
-     * the lifetime of a deployed jar, so a re-fetch is only interesting after a deploy.
+     * the lifetime of a deployed boot, so a re-fetch is only interesting after a deploy.
      */
     private fun cache(response: HttpServletResponse) {
         response.setHeader(
@@ -93,7 +96,7 @@ class SkillController {
     }
 
     private companion object {
-        /** Markdown, explicitly charset-qualified: the skill is full of em dashes and `→`. */
+        /** Markdown, explicitly charset-qualified: the manual is full of em dashes and `→`. */
         const val MARKDOWN = "text/markdown;charset=UTF-8"
 
         const val MAX_AGE_MINUTES = 15L

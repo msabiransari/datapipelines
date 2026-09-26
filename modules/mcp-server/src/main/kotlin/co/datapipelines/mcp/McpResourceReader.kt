@@ -6,6 +6,7 @@ import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorJson
+import co.datapipelines.mcp.docs.DocSet
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.templates.TemplateService
@@ -36,11 +37,13 @@ import java.util.UUID
  * discipline (§14): after the read, on success and failure alike, and a sink failure is
  * logged and swallowed — the caller's read never changes outcome because bookkeeping did.
  *
- * The one kind that is not an entity is the skill (095 §C2): `datapipelines://docs/skill` and
- * `…/skill/{reference}` serve the packaged Markdown ([SkillDocs]) — the same bytes the
- * deployment serves at `GET /skill.md`, and the same file a checkout holds at
- * `.agents/skills/datapipelines/`. It is workspace-independent and needs `read` like every
- * other resource; an unknown reference is not-found in the same shape as an unknown pipeline.
+ * The one kind that is not an entity is the manual (095 §C2, rendered by 242a): `datapipelines://docs/skill`
+ * and `…/skill/{name}` serve the [DocSet]'s documents — the same bytes `docs_get` serves and
+ * the deployment serves at `GET /skill.md`. The resource keeps serving whole documents (its URI
+ * shape carries no section segment — owner ruling O3); the response budget is the tools'
+ * contract, and the handshake points discovery at `docs_get`. It is workspace-independent and
+ * needs `read` like every other resource; an unknown name is not-found in the same shape as an
+ * unknown pipeline.
  */
 class McpResourceReader(
     private val pipelines: PipelineService,
@@ -51,6 +54,8 @@ class McpResourceReader(
     private val auditSink: AuditEventSink,
     /** 178 — the promoter lens: a hidden pipeline or template resource is RESOURCE_NOT_FOUND, exactly as an absent one. */
     private val lens: PromoterLens,
+    /** 242a — the served manual: the docs resources read the same rendered set the tools serve. */
+    private val docSet: DocSet,
 ) {
     private val log = LoggerFactory.getLogger(McpResourceReader::class.java)
 
@@ -128,11 +133,14 @@ class McpResourceReader(
                 }
 
                 is McpResourceUri.Skill -> {
-                    markdown(uri, SkillDocs.skill)
+                    markdown(uri, docSet.core.markdown)
                 }
 
                 is McpResourceUri.SkillReference -> {
-                    markdown(uri, SkillDocs.reference(parsed.reference) ?: throw notFound(uri))
+                    // The URI segment takes any document name of the set — an alias of the
+                    // previous delivery resolves to its successor, `.md` tolerated — the same
+                    // resolve docs_get and the HTTP twin answer through.
+                    markdown(uri, docSet.resolve(parsed.reference)?.markdown ?: throw notFound(uri))
                 }
             }
         return McpSchema.ReadResourceResult.builder(listOf(contents)).build()
@@ -239,7 +247,7 @@ class McpResourceReader(
         body: String,
     ): McpSchema.TextResourceContents = McpSchema.TextResourceContents(uri, MIME_EVENT_STREAM, body, null)
 
-    /** The skill and its references (095 §C2) — the packaged bytes, never a second copy. */
+    /** The manual's documents (095 §C2, the rendered set since 242a) — the served bytes, never a second copy. */
     private fun markdown(
         uri: String,
         body: String,

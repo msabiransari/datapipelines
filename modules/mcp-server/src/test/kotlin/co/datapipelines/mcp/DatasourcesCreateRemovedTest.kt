@@ -85,6 +85,7 @@ class DatasourcesCreateRemovedTest {
                     datasources,
                     executions,
                     McpFixtures.EVERYTHING_LENS,
+                    docSet = DocSetTestSupport.minimalDocSet(),
                 ),
             reader =
                 McpResourceReader(
@@ -95,6 +96,7 @@ class DatasourcesCreateRemovedTest {
                     events,
                     auditLogger,
                     McpFixtures.EVERYTHING_LENS,
+                    DocSetTestSupport.minimalDocSet(),
                 ),
             version = "1.0.0",
         )
@@ -150,6 +152,7 @@ class DatasourcesCreateRemovedTest {
                     datasources,
                     executions,
                     McpFixtures.EVERYTHING_LENS,
+                    docSet = DocSetTestSupport.minimalDocSet(),
                 ),
             reader =
                 McpResourceReader(
@@ -160,6 +163,7 @@ class DatasourcesCreateRemovedTest {
                     events,
                     auditLogger,
                     McpFixtures.EVERYTHING_LENS,
+                    DocSetTestSupport.minimalDocSet(),
                 ),
             version = "1.0.0",
         )

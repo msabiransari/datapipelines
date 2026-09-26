@@ -706,7 +706,7 @@ three runs late: (1) `ktlintCheck detekt` over the whole tree; (2) the **unfilte
 of every module the diff touched (so `verifyTestsExecuted` stays meaningful); (3) the
 cross-cutting guard classes, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
-the skill mirror, the config-key drift tests (the list lives in the script; a new guard that
+the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
 reads the whole tree or the docs is added there in the same commit). Iterate on its output,
 then run the gate once. It is not the gate: its exit code decides nothing about a merge.
 Measured need (five lanes, 2026-09-19 to 21): 0–3 extra full gates each, all on lint,
@@ -824,6 +824,36 @@ It mechanically checks cross-document links and anchors, error codes against the
 against [configuration.md](docs/configuration.md), and forbidden legacy spellings (superseded header
 names, removed entity fields). CI runs it alongside the Kotlin checks — **exit 0 is required before
 merging**. See [Validation Discipline](docs/enums.md#validation-discipline) in enums.md.
+
+### 10.1a The agent manual (the served docs)
+
+The manual an agent reads is not a file in the repo any more — it is **rendered at boot**
+(`DocRenderer`, `modules/mcp-server/src/main/kotlin/co/datapipelines/mcp/docs/`) from three
+inputs, then served over MCP tools, MCP resources and plain HTTP (`/skill.md`). To edit it:
+
+- **Narrative prose** lives in `modules/mcp-server/src/main/resources/skill/*.md` (flat names:
+  `core.md`, `pipelines-authoring.md`, …). Each file carries exactly three front-matter keys —
+  `area`, `layer`, `purpose`. Prose that quotes a configuration value writes a
+  `${placeholder}` (e.g. `${execution_timeout_seconds}`); the typed `DocContext` supplies it,
+  and an unknown key fails the render.
+- **Catalog content is generated, never typed**: the per-area tools references, the error-code
+  reference and the calculator catalog are rendered from `McpToolCatalog`, `PipelineErrorCodes`
+  and `CalculatorRegistry` — editing those means changing the catalog, not the docs.
+- **See the rendered set**: `./gradlew :modules:mcp-server:docsExport` writes it to
+  `build/skill-docs/` (this directory is also `scripts/docs-audit.sh`'s input — run the export
+  before the audit).
+- **Golden expectations**: the rendered narrative must equal the checked-in files under
+  `modules/mcp-server/src/test/resources/docs-golden/`. A deliberate prose or placeholder
+  change turns that test red; regenerate, read the printed diff, and re-run green:
+
+  ```bash
+  DOCS_GOLDEN_REGENERATE=true ./gradlew :modules:mcp-server:test --tests 'co.datapipelines.mcp.DocSetGoldenTest'
+  ./gradlew :modules:mcp-server:test --tests 'co.datapipelines.mcp.DocSetGoldenTest'   # green again
+  ```
+
+The design record is
+[docs/superpowers/specs/2026-09-25-agent-docs-by-area-design.md](superpowers/specs/2026-09-25-agent-docs-by-area-design.md);
+`docs/mcp-server.md` §15 is the normative description of the deliveries.
 
 ### 10.2 Quality tooling
 

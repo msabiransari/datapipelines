@@ -1602,6 +1602,23 @@ GET /ready
 
 Returns `200 OK` when the service is ready to accept traffic, `503` otherwise. Used by orchestrators (k8s).
 
+### 11.3 The agent manual (public routes)
+
+```
+GET /skill.md
+GET /skill/{name}.md
+```
+
+The manual an agent reads for THIS deployment, unauthenticated and `text/markdown` — it holds
+no secret, and requiring a key would mean an agent cannot learn to use its key correctly until
+after it has one (mcp-server.md §15). `/skill.md` is the operating core
+(`core`); `/skill/{name}.md` serves any document of the rendered set by its flat name
+(`pipelines-authoring`, `core-error-codes`, … — `docs_list` over MCP is the catalog). The
+one-release aliases of the previous delivery's names (`skill`, `authoring-playbook`,
+`connecting`, …) answer with their successors' bytes; an unknown name is a `404` in the §4.2
+envelope with `details.reason: "skill_reference_not_found"`. The bytes are the same rendered
+`DocSet` the MCP tools and resources serve ([mcp-server.md §15](mcp-server.md#15-the-manual-how-an-agent-learns-this-server)).
+
 ---
 
 ## 12. Rate Limiting

@@ -1651,37 +1651,40 @@ Returns: the retired fact in the full shape (`trust: "retired"`, `retired_at`, `
 
 #### 6.2.40 `docs_list`
 
-The skill's document catalog, as a tool (120, ruling R3). The skill has been served as resources since 095 (§7.2.4), but resources are a weak surface — several MCP clients fetch them reluctantly or never, while every client calls tools. This and `docs_get` serve EXACTLY what the resources serve, from the same `SkillDocs` loader, so the two surfaces cannot drift.
+The served manual's catalog, as a tool (120, ruling R3; the by-area shape is the 242a record §4). Without `area`: the operating core first, then one entry per functional area — the area guide, or the area's tools reference where no guide exists yet — with each area's other documents nested under `references`, so the top-level list stays a short routing table and nothing is invisible. With `area`: that area's documents, flat. The same rendered set the resources (§7.2.4) and the HTTP twin serve, from the same `DocSet`.
 
 ```json
 {
   "name": "docs_list",
-  "description": "The datapipelines skill's document catalog: the operating core (`skill`) first, then every reference in the order the skill's own map lists them, each with its title and a one-line purpose (when to open it). The same documents the datapipelines://docs/skill resources serve, for clients that fetch resources reluctantly or never. Read-only.",
+  "description": "The served manual's catalog: the operating core (core) first, then every area's entry point — the area guide, or its tools reference where no guide exists yet — with each area's other documents nested under references (name, title, purpose, size). Optional area filter (pipelines, executions, templates, transforms, datasources, lake, endpoints, core) returns that area's documents flat. Documents flagged over_budget are served by section only. Read-only.",
   "inputSchema": {
     "type": "object",
-    "properties": {},
+    "properties": {
+      "area": {"type": "string", "enum": ["core", "pipelines", "executions", "templates", "transforms", "datasources", "lake", "endpoints"], "description": "Return only this area's documents, flat."}
+    },
     "additionalProperties": false
   }
 }
 ```
 
-**Permission:** `docs.read` — the §6.2.23 reasoning: the manual this deployment ships is a property of the BUILD, identical for every caller, every key and every workspace.
+**Permission:** `docs.read` — the §6.2.23 reasoning: the manual this deployment serves is a property of the BUILD and the boot configuration, identical for every caller, every key and every workspace.
 
-**Response:** `[{name, title, purpose}]` — `skill` first (the operating core, `SKILL.md`), then every reference in the order the skill's own map lists them; `title` is the document's own H1, `purpose` the map's one-line "open this when…". A reference on disk with no map line, or a map line with no file, is a build failure (`SkillDistributionTest`), not a warning.
+**Response:** `[{name, area, layer, title, purpose, chars, over_budget, sections: [{id, title, chars}], references?: [{name, layer, title, purpose, chars, over_budget}]}]` — the core first, then the areas in catalog order (core, pipelines, executions, templates, transforms, datasources, lake, endpoints); `sections` cuts the document at `##` headings, slugged by the GitHub rules the docs audit spells; a document over the 24,000-character response budget is flagged `over_budget` and served by section only (§6.2.41). `references` appears on area entry points, listing the rest of the area's documents.
 
 #### 6.2.41 `docs_get`
 
-One skill document's full markdown — the same bytes the `datapipelines://docs/skill/<name>` resource serves.
+One document of the served manual — the same bytes the `datapipelines://docs/skill/<name>` resource serves; the by-section shape is the 242a record §4.
 
 ```json
 {
   "name": "docs_get",
-  "description": "One datapipelines skill document's full markdown: `name` is `skill` for the operating core or a reference name from docs_list. Returns {name, title, markdown} — the same bytes the datapipelines://docs/skill/<name> resource serves. An unknown name is refused with the catalogued names in the error detail. Read-only.",
+  "description": "One document of the served manual: `name` is `core` for the operating core, an area guide name (pipelines-authoring, templates, transforms, lake, endpoints) or a reference name from docs_list. Optional `section`: a section id from docs_list, for the by-section read large documents require (they answer whole-document calls with their section list); a response carrying `next` continues at that id. Unknown names list the catalogued ones. Read-only.",
   "inputSchema": {
     "type": "object",
     "required": ["name"],
     "properties": {
-      "name": {"type": "string", "description": "The document name: `skill` for the operating core, or a reference name from docs_list, e.g. authoring-playbook."}
+      "name": {"type": "string", "description": "The document name: `core` for the operating core, or a name from docs_list, e.g. pipelines-authoring."},
+      "section": {"type": "string", "description": "A section id from docs_list (or a `next` continuation id) for the by-section read."}
     },
     "additionalProperties": false
   }
@@ -1690,9 +1693,9 @@ One skill document's full markdown — the same bytes the `datapipelines://docs/
 
 **Permission:** `docs.read`.
 
-**Returns:** `{name, title, markdown}`. `name` is `skill` for the operating core or a reference name from `docs_list`; the `.md`-suffixed form is accepted like the resource's own tolerance.
+**Returns:** whole document `{name, title, area, markdown}` (within the 24,000-character budget), or by section `{name, title, section, markdown, next?}` — `next` names the continuation id when the section itself was split at its inner headings. The `.md`-suffixed form is accepted like the resource's own tolerance. The one-release aliases (`skill`, `authoring-playbook`, `connecting`, `dp-lake`, `error-codes`, `naming`, `node-types`, `pipeline-schema`, `tools`) resolve to their successors and the response carries the NEW name (record §4, ruling O4; removed the release after).
 
-**Errors:** an unknown name is `mcp.doc_not_found` (pipeline-contract §13.16) with `details.known_docs` — the tool-surface answer to a resource read's RESOURCE_NOT_FOUND, which is a protocol-level error that cannot travel in a §9.2 content envelope.
+**Errors:** an unknown name is `mcp.doc_not_found` (pipeline-contract §13.16) with `details.known_docs`; a whole-document call on an over-budget document is the same code with `details.reason: "document_over_budget"` and `details.sections` — served by section only, so the refusal lists the section ids; an unknown section id carries `details.reason: "unknown_section"` and `details.known_sections`.
 
 #### 6.2.42 `pipelines_run_checks`
 
@@ -2103,20 +2106,24 @@ The event names are registered in [Enums §15](enums.md#15-authauditevent--auth-
 
 ---
 
-## 15. The skill: how an agent learns this server
+## 15. The manual: how an agent learns this server
 
-> **Status:** normative (095). One source, four deliveries.
+> **Status:** normative (095; rendered at boot since 242a). One home, four deliveries.
 
 An agent connecting from OUTSIDE a checkout used to get the tool descriptions, the prompts and
 eight lines of workspace context — and not one word about how to author. The skill it needed
-existed only as a file in the repository. It is now a shipped artifact of the server.
+existed only as a file in the repository. It is now served by the application itself.
 
-**The source.** `.agents/skills/datapipelines/` — `SKILL.md` (the operating core: core
+**The source.** The document set rendered at boot (`DocRenderer`, `co.datapipelines.mcp.docs`):
+the narrative resources packaged in the jar — `skill/core.md` (the operating core: core
 concepts, the naming grammar and `confirm_new_root`, the golden path, execution semantics,
-promotion, error handling, best practices, and a map of the references) plus `references/*.md`,
-which an agent opens only when it needs them. `.claude/skills/datapipelines` is a symlink to
-that directory. There is exactly one source; everything below is derived from it and
-drift-tested against it.
+promotion, error handling, best practices, and an index of the documents) plus one guide or
+reference per remaining topic (`skill/pipelines-authoring.md`, `skill/templates.md`, …) — and
+the generated documents (the per-area tools references, the error codes, the calculator
+catalog). The core is named `core`; `skill` is its one-release alias. Configuration values the
+prose quotes (`${execution_timeout_seconds}`, the timeout budgets) are typed placeholders
+substituted from the boot configuration, so the manual a deployment serves is the manual it
+runs. There is exactly one home; everything below is derived from it.
 
 **Delivery 1 — the handshake (push).** `initialize`'s `instructions` (§5.1) is the operating
 core distilled, RANKED for a client that cuts it (#241): the workspace scope; then the learning
@@ -2162,57 +2169,69 @@ states in full every rule this text shortens; the one fact the shortening droppe
 did not already carry — pipeline and template names are unique per workspace, datasource names
 across the server — moved to its Core concepts.
 
-**Delivery 2 — the resource (pull, MCP).** `datapipelines://docs/skill` and
-`datapipelines://docs/skill/{reference}` (§7.1, §7.2.4), `docs.read`, listed by
-`resources/list` ahead of the entity kinds. Since 120 the same bytes also answer as TOOLS —
-`docs_list` / `docs_get` (§6.2.40–41), from the same `SkillDocs` loader — because resources
-are a weak surface: several clients fetch them reluctantly or never, and every client calls
-tools (R3).
+**Delivery 2 — the resource (pull, MCP).** `datapipelines://docs/skill` (the core) and
+`datapipelines://docs/skill/{name}` (any document of the set; §7.1, §7.2.4), `docs.read`,
+listed by `resources/list` ahead of the entity kinds. Since 120 the same bytes also answer as
+TOOLS — `docs_list` / `docs_get` (§6.2.40–41), from the same rendered `DocSet` — because
+resources are a weak surface: several clients fetch them reluctantly or never, and every
+client calls tools (R3). The tools carry the 24,000-character response budget and the
+by-section form; the resources keep serving whole documents (owner ruling O3 keeps their URI
+shapes, which carry no section segment), so the handshake points discovery at the tools.
 
-**Delivery 3 — the URL (pull, HTTP).** `GET /skill.md` and `GET /skill/{reference}.md`,
-`text/markdown`, **unauthenticated** — it is the manual, it holds no secret, and requiring a
-key would mean an agent cannot learn to use its key correctly until after it has one. This is
-the delivery for Cursor, Codex CLI, Copilot and anything else that speaks no MCP: one `curl`
-into `.agents/skills/datapipelines/` and the agent has the manual for the version this
-deployment actually runs. An unknown reference is a `404` in the §4.2 envelope with
-`details.reason: "skill_reference_not_found"`.
+**Delivery 3 — the URL (pull, HTTP).** `GET /skill.md` (the core) and `GET /skill/{name}.md`
+(any document by its flat name), `text/markdown`, **unauthenticated** — it is the manual, it
+holds no secret, and requiring a key would mean an agent cannot learn to use its key correctly
+until after it has one. This is the delivery for Cursor, Codex CLI, Copilot and anything else
+that speaks no MCP: one `curl` and the agent has the manual for the version this
+deployment actually runs. An unknown name is a `404` in the §4.2 envelope with
+`details.reason: "skill_reference_not_found"`; the one-release aliases of the previous
+delivery's names (`skill`, `authoring-playbook`, `connecting`, …) answer with their
+successors' bytes.
 
-*The rendered `/docs` viewer does NOT list the skill, deliberately.* That index is the
+*The rendered `/docs` viewer does NOT list the manual, deliberately.* That index is the
 operator-facing spec set, grouped by `DocsCatalog` and link-rewritten to GitHub for anything it
-does not package; the skill is agent-facing, carries YAML front matter that is meaningless as
-HTML, and its reference map would render as dead links. The raw route is the one an agent
-needs, and it is the one that exists.
+does not package; the manual is agent-facing and its document index would render as dead
+links. The raw route is the one an agent needs, and it is the one that exists.
 
 **Delivery 4 — the Claude Code plugin.** `.claude-plugin/marketplace.json` at the repository
 root and `plugins/datapipelines/`: `/plugin marketplace add msabiransari/datapipelines` then
-`/plugin install datapipelines@datapipelines`. The plugin ships the skill and the MCP server
-entry together; its `skills/datapipelines/` is a build-time COPY, not a symlink, because a
-marketplace is fetched with git and Claude Code skips a symlink pointing out of the plugin
-directory. The deployment URL and the API key are plugin `userConfig` values substituted into
-the server entry — `${user_config.url}` / `${user_config.api_key}` — because a plugin
-`.mcp.json` expands only those and the `${CLAUDE_PLUGIN_*}` path variables, never arbitrary
-shell environment variables.
+`/plugin install datapipelines@datapipelines`. Since 242a (record §6, ruling O1) the plugin
+ships NO copy of the manual: its `skills/datapipelines/SKILL.md` is a **pointer** of under
+twenty lines whose front matter names the product and whose body says to connect the server
+and call `docs_get {"name": "skill"}` — nothing else is mirrored, and there is no parity
+test, because a pointer cannot drift. The deployment URL and the API key are plugin
+`userConfig` values substituted into the server entry — `${user_config.url}` /
+`${user_config.api_key}` — because a plugin `.mcp.json` expands only those and the
+`${CLAUDE_PLUGIN_*}` path variables, never arbitrary shell environment variables.
 
-**Packaging (why it cannot break `main`).** `mcp-server`'s `processResources` packages the
-skill directory into the jar under its own classpath root, `skill/` — never under `docs/`,
-which `web`'s `DocsCatalog` scans and where an ungrouped file fails the application context at
-init. `SkillDocs` is the single reader of those bytes, so the resource and the URL cannot
-answer differently.
+**Packaging (why it cannot break `main`).** The narrative resources live in
+`modules/mcp-server/src/main/resources/skill/` and are packaged by the standard
+`processResources` — in their own classpath root, `skill/`, never under `docs/`, which
+`web`'s `DocsCatalog` scans and where an ungrouped file fails the application context at
+init. `DocRenderer` (`co.datapipelines.mcp.docs`) is the single reader, so the tools, the
+resources and the URL cannot answer differently.
 
-**The generated reference.** `references/tools.md` is rendered from `McpToolCatalog` plus each
-tool's `definition` — name, description, arguments with their descriptions, §7.6 permission,
-mutating flag — by `./gradlew :modules:mcp-server:skillArtifacts`, and a drift test fails when
-the committed file is not what the catalog renders. The handwritten sections may NAME tools;
-they may not list them. This is not a hypothetical: three hand-typed tool counts were stale
-simultaneously when this was written.
+**The generated documents.** The per-area tools references (`<area>-tools`), the error-code
+reference (`core-error-codes`, every §13 code with its HTTP status and the server's message)
+and the calculator catalog (`pipelines-calculators`) are rendered by `DocRenderer` at boot
+from `McpToolCatalog` + the shipped tool definitions, `PipelineErrorCodes` + the §13
+projection, and `CalculatorRegistry` — never typed (three hand-typed tool counts were stale
+simultaneously when this section was first written; the handwritten sections may NAME tools,
+they may not list them). `./gradlew :modules:mcp-server:docsExport` writes the same rendered
+set to `build/skill-docs/` for `scripts/docs-audit.sh` (its checks A–C run over the exported
+files) and for a human who wants to read what the server serves without booting it.
 
-**The guards**, each able to go red: `SKILL.md` ≤ 400 lines and its front matter unchanged;
-`instructions` within 1,843 characters and bytes, every phrase an agent must see inside the
-first 2,048 characters, its rules in their ranked order and equal to the Delivery 1 block above;
-every tool description ≤ 2,048 characters; the packaged copy byte-identical to
-the repo file for every file, both directions; the plugin copy likewise; `tools.md` equal to
-the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /skill.md`
-200 `text/markdown` anonymous and `GET /skill/nope.md` 404 in the envelope.
+**The guards**, each able to go red: the core ≤ 400 lines with prose no line folding past the
+readable column; `instructions` within 1,843 characters and bytes, every phrase an agent must
+see inside the first 2,048 characters, its rules in their ranked order and equal to the
+Delivery 1 block above; every tool description ≤ 2,048 characters; every tool exactly once in
+its area's tools reference with its shipped description and catalogued permission; every §13
+code exactly once in the rendered error-code reference; every node type in the node-types
+narrative and every calculator kind in the catalog; golden tests pinning each narrative
+document's rendered text (a changed placeholder turns them red); no demo content anywhere in
+the rendered set; documents and sections within the 24,000-character response budget; the two
+resource URIs read, list and 404 correctly; `GET /skill.md` 200 `text/markdown` anonymous and
+`GET /skill/nope.md` 404 in the envelope; the audit green over the exported set.
 
 ---
 
@@ -2220,6 +2239,7 @@ the rendered catalog; the two resource URIs read, list and 404 correctly; `GET /
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-25 | v1.51 | 242a (#242) the manual rendered at boot | **§15 rewritten** — the manual is no longer a repo file but a document set rendered at boot (`DocRenderer`) from narrative resources in the jar (`modules/mcp-server/src/main/resources/skill/`), the boot configuration (typed `${placeholders}` — the timeout budgets the prose quotes) and the catalogs. **§6.2.40 `docs_list`**: optional `area` filter; without it the core plus one entry per area with the area's other documents nested; entries carry `area`, `layer`, `chars`, `over_budget`, `sections` and nested `references`. **§6.2.41 `docs_get`**: optional `section` (by-section read), whole-document answers within the **24,000-character** response budget (`details.reason: document_over_budget` otherwise, section list attached), `next` continuations for split sections, and the one-release **aliases** (`skill`, `authoring-playbook`, `connecting`, `dp-lake`, `error-codes`, `naming`, `node-types`, `pipeline-schema`, `tools`) answering with the successors' bytes. Per-area tools references (`<area>-tools`), `core-error-codes` (generated from the §13 projection) and `pipelines-calculators` join the set as generated documents; `.agents/skills/datapipelines/` and its build tasks (`skillToolsDoc`, `pluginSkillCopy`, `skillArtifacts`) are gone; `docsExport` renders the set to `build/skill-docs/` for the audit. `datapipelines://docs/skill/{name}` and `GET /skill/{name}.md` serve the set by flat name; the plugin is a pointer (§15 Delivery 4). No tool added or removed: **42 stays 42**, permissions unchanged (`docs.read`). |
 | 2026-09-25 | v1.50 | keys v2 (#233) | **§1/§2/§3/§4/§11: the MCP key is a robot member** — created on the Keys page with a role chosen under the subset rule (A13–A15), acting as its own identity with that member role; the login mint, the top-bar chip and the PK4 cap are gone, and a role refusal is `auth.role_required` (`details.held` = the key's role). The `user` kind is renamed `mcp` (A19). §6.2 descriptions that still described pre-v2 access rewritten: `endpoints_create` (an unbound endpoint is served to no one — never "user keys with the execute scope"), `executions_list`/`executions_get`/`executions_get_result` (the key acts as its role; `execution.read_all` lifts own-only), `semantics_retire` (`datasource.manage` decides the cross-workspace retire — not "a workspace admin"). `references/tools.md` regenerated from the shipped surface. |
 | 2026-09-25 | v1.49 | 241 (#241) the handshake under the client cap | No tool, schema or permission change (42 stays 42). **§5.1 `instructions` rewritten for what a client SHOWS**: Claude Code cuts server instructions and each tool description at 2,048 characters by default (`CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH`, read from the 2.1.283 runtime); the handshake was 3,157 characters with the learning path from character 2,687, so a default session never saw it. Now 1,783 characters / 1,791 bytes, ranked: workspace scope, the learning path (`docs_get` skill → `authoring-playbook` → `docs_list`, the HTTP twin), the draft rule, names + `confirm_new_root`, humans register datasources, three recoveries. The stale "datasources are bound or global" clause (global is gone since D-R7) is corrected to "exactly the datasources granted to this workspace". **§15 Delivery 1** carries the served text verbatim, pinned to the file by `SkillDistributionTest`; the 4096-byte cap is replaced by `McpClientCapTest` (1,843 characters and bytes, the required phrases inside the first 2,048 characters, the ranked order, every tool description ≤ 2,048). SKILL.md's Core concepts gains the one dropped fact it lacked (name uniqueness per workspace, datasource names per server). |
 | 2026-09-25 | v1.48 | 7e (#7) the semantic link | No tool added (42 stays 42), no permission changed. **`templates_create` / `templates_update` accept `implements`** (§6.2.8, §6.2.36): the learned facts a transform version cites, outside `body_hash`; on update an omitted `implements` is inherited (owner ruling 2026-09-25), `[]` clears, and an implements-only write on a released version opens no draft; refusals `template.implements_unresolved` (new, §13.9) and `template.blocks_not_allowed` on `sql`/`html`. **`templates_list` gains `implements=<fact id>`** (§6.2.6) and every row carries `implements` + `needs_review`; **`templates_get`** (§6.2.7) carries `implements`, `needs_review` (a cited fact retired, computed on read) and `retired_facts` (`{fact_id, retired_reason, superseded_by}`). **`semantics_list` rows** (§6.2.38) and the **`definitions`** on `datasources_list`/`datasources_get` (§6.2.10/§6.2.18a) carry `implemented_by` on every WORKSPACE fact, under the key's template lens. `tools.md` regenerated. |

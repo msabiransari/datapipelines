@@ -143,6 +143,11 @@ class McpServerAutoConfiguration {
         // TemplateLifecycleConfiguration). Injected, no longer built here: since 7e it carries the
         // citation store, and one instance for both surfaces is what keeps the write rule single.
         templateDrafts: co.datapipelines.templates.TemplateDraftService,
+        // 242a — the rendered manual: the docs tools serve the same DocSet the resources and
+        // the HTTP twin do. A PROVIDER, the 056/D6 pattern: the docSet bean renders FROM this
+        // bean's tools, so the tools take it deferred and the cycle never exists at
+        // construction time.
+        docSet: ObjectProvider<co.datapipelines.mcp.docs.DocSet>,
     ): List<McpTool> {
         // The authoring capability (versioning §5.5), read from the same property web's
         // guard bean reads — built locally so this module needs no bean from `web`; the
@@ -212,15 +217,37 @@ class McpServerAutoConfiguration {
             CalculatorsGetTool(),
         ) + EndpointsTools.all(endpointPublishService, pipelines) + LakeTableTools.all(datasources, lakeTableRegistryService) +
             SemanticsTools.all(datasources, semanticsService, introspector, lens) +
-            // 120 — the skill docs as tools: no collaborators at all, the 072 reasoning —
-            // the content is the packaged build artifact, read through the same SkillDocs
-            // loader the resources use.
-            DocsTools.all() +
+            // 120 — the skill docs as tools (R3); the by-area served set since 242a. No
+            // collaborators beyond the DocSet itself — the content is a property of the
+            // build and the boot configuration, like the calculator catalog.
+            DocsTools.all { docSet.getObject() } +
             // 140 — the release-check run, appended after the docs tools (the 117/107 append
             // rule). Takes the service for the working-version resolution and the shared
             // runner for everything else.
             listOf(PipelineRunChecksTool(pipelineService, checkRunner))
     }
+
+    /**
+     * 242a — the rendered manual, assembled ONCE at boot (the agent-docs-by-area record §3.3):
+     * narrative resources from the jar, the boot configuration through [DocContext], and the
+     * shipped catalogs through the same tool instances the dispatcher serves and the
+     * [DocErrorCatalog] port (`web` declares the implementation — the 068/074 pattern: wherever
+     * the MCP surface is wired, the assembled application has declared it too).
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    fun docSet(
+        executorConfig: ExecutorConfig,
+        mcpTools: List<McpTool>,
+        errorCatalog: co.datapipelines.mcp.docs.DocErrorCatalog,
+    ): co.datapipelines.mcp.docs.DocSet =
+        co.datapipelines.mcp.docs
+            .DocRenderer(
+                co.datapipelines.mcp.docs.DocContext
+                    .of(executorConfig),
+                errorCatalog,
+                mcpTools,
+            ).render()
 
     @Bean
     @ConditionalOnMissingBean
@@ -252,10 +279,13 @@ class McpServerAutoConfiguration {
         executions: ExecutionRepository,
         // 178 — the promoter lens on the catalogue.
         lens: PromoterLens,
-    ): McpResourceCatalog = McpResourceCatalog(pipelines, templates, datasources, executions, lens)
+        // 242a — the docs listing enumerates the rendered manual's documents.
+        docSet: co.datapipelines.mcp.docs.DocSet,
+    ): McpResourceCatalog = McpResourceCatalog(pipelines, templates, datasources, executions, lens, docSet = docSet)
 
     @Bean
     @ConditionalOnMissingBean
+    @Suppress("LongParameterList")
     fun mcpResourceReader(
         // The SERVICE, not the repository: the pipeline resource serves the working version
         // (D56) and that resolution lives in PipelineService.
@@ -268,7 +298,9 @@ class McpServerAutoConfiguration {
         auditSink: co.datapipelines.auth.AuditEventSink,
         // 178 — the promoter lens on the pipeline and template resources.
         lens: PromoterLens,
-    ): McpResourceReader = McpResourceReader(pipelines, templates, datasources, executions, events, auditSink, lens)
+        // 242a — the docs resources read the rendered manual.
+        docSet: co.datapipelines.mcp.docs.DocSet,
+    ): McpResourceReader = McpResourceReader(pipelines, templates, datasources, executions, events, auditSink, lens, docSet)
 
     @Bean
     @ConditionalOnMissingBean

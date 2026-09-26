@@ -175,11 +175,11 @@ class SiteDocsE2eTest {
 
         skill.statusCode shouldBe 200
         skill.contentType shouldContain "text/markdown"
-        skill.asString() shouldContain "name: datapipelines"
+        skill.asString() shouldContain "# datapipelines"
         skill.header("Cache-Control") shouldContain "public"
 
-        // Every reference the skill's own map advertises answers at its own URL — the sweep
-        // that makes the map trustworthy rather than a list of hopes.
+        // Every document the core's index advertises answers at its own URL — the sweep
+        // that makes the index trustworthy rather than a list of hopes.
         val references = SKILL_REFERENCE.findAll(skill.asString()).map { it.groupValues[1] }.toSet()
         check(references.size >= MIN_SKILL_REFERENCES) { "the skill advertised only ${references.size} references" }
         val unreachable =
@@ -350,8 +350,8 @@ class SiteDocsE2eTest {
         /** 14 registry pages + the docs index + ~25 packaged docs. */
         private const val MIN_SITEMAP_URLS = 35
 
-        /** The reference map in SKILL.md — `references/<name>.md`, one per reference (095). */
-        private val SKILL_REFERENCE = Regex("""references/([a-z0-9-]+)\.md""")
+        /** The core's document index — bolded flat names, one per document (242a). */
+        private val SKILL_REFERENCE = Regex("""\*\*`([a-z0-9-]+)`\*\*""")
 
         /** Non-vacuity floor for the reference sweep: the split landed nine. */
         private const val MIN_SKILL_REFERENCES = 8

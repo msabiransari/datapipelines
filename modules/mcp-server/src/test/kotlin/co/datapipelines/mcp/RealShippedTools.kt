@@ -65,5 +65,12 @@ fun realShippedTools(): List<McpTool> {
         templateService = McpFixtures.templateService(mockk<TemplateRepository>()),
         templateEvaluateService = mockk<co.datapipelines.application.templates.TemplateEvaluateService>(),
         templateDrafts = mockk<co.datapipelines.templates.TemplateDraftService>(),
+        // 242a — the docs tools' set, passed as the deferred provider the bean now takes (the
+        // 056/D6 pattern); the tools-only callers never resolve it, so a minimal set here
+        // keeps this fixture acyclic with DocSetTestSupport.
+        docSet =
+            mockk<ObjectProvider<co.datapipelines.mcp.docs.DocSet>>().also { provider ->
+                every { provider.getObject() } returns DocSetTestSupport.minimalDocSet()
+            },
     )
 }

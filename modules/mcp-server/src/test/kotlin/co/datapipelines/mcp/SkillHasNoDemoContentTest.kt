@@ -3,30 +3,26 @@ package co.datapipelines.mcp
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import org.junit.jupiter.api.Test
-import java.io.File
 
 /**
- * The skill teaches principles, quirks and procedure — never facts about a dataset (owner,
- * 2026-09-11: "Skills must be generic with no information about the data whatsoever").
+ * The manual teaches principles, quirks and procedure — never facts about a dataset (owner,
+ * 2026-09-11: "Skills must be generic with no information about the data whatsoever"). Since
+ * 242a the guard runs over the RENDERED set ([co.datapipelines.mcp.docs.DocSet]) — the bytes
+ * the server actually serves, narrative and generated alike — instead of the repository
+ * files; the handshake (`server-instructions.txt`) is still scanned here, the one delivered
+ * surface no document reaches.
  *
  * Why it is a build failure and not a review note: a customer attaches their own datasources
- * and the agent reads the SAME skill. A sentence like "filter on `pickup_date`" or "exclude
- * EWR" is a fact about the sample data wearing the voice of a rule — the agent applies it to a
- * warehouse where it is false, and the failure is silent. The audit of `notes/pipeline-3.txt`
- * found the playbook written FROM the demo; this test keeps it out.
- *
- * The scan covers the hand-written skill files AND the rendered `references/tools.md`, because
- * tool DESCRIPTIONS are agent-facing text too (they reach the agent through `tools/list`
- * before any document does) and `tools.md` is rendered from them. Since 144 it also covers the
- * connect-time `instructions` string — the one delivered surface no skill-file scan reaches,
- * paid for by every session of every client.
+ * and the agent reads the SAME manual. A sentence like "filter on `pickup_date`" is a fact
+ * about the sample data wearing the voice of a rule — the agent applies it to a warehouse
+ * where it is false, and the failure is silent.
  *
  * The token list is the sample data's vocabulary — table names, family names, the datasource
  * names `app.sh --demo` registers, the domain words the demo questions use. Add to it when a
  * new family ships; never remove a token to make a sentence pass.
  */
 class SkillHasNoDemoContentTest {
-    private val skillDir = File(SpecFiles.root, SpecFiles.SKILL_DIR)
+    private val docSet by lazy { DocSetTestSupport.renderedDocSet() }
 
     private val forbidden =
         listOf(
@@ -76,39 +72,30 @@ class SkillHasNoDemoContentTest {
         )
 
     @Test
-    fun `no skill file names the sample data - the agent learns from the datasource, not from us`() {
-        val files = skillFiles()
-        files.size shouldBeGreaterThan 5 // non-vacuity: the scan saw the real skill
+    fun `no rendered document names the sample data - the agent learns from the datasource, not from us`() {
+        val docs = docSet.docs
+        docs.size shouldBeGreaterThan 15 // non-vacuity: the scan saw the real set
         val hits =
-            files.flatMap { file ->
-                file.readLines().mapIndexedNotNull { index, line ->
+            docs.flatMap { doc ->
+                doc.markdown.lines().mapIndexedNotNull { index, line ->
                     val lower = line.lowercase()
                     val found = forbidden.filter { token -> matches(lower, token) }
                     if (found.isEmpty()) {
                         null
                     } else {
-                        val where = "${displayName(file)}:${index + 1}"
-                        "$where: ${found.joinToString()} — ${line.trim().take(90)}"
+                        "${doc.name}.md:${index + 1}: ${found.joinToString()} — ${line.trim().take(90)}"
                     }
                 }
             }
         hits.shouldBeEmpty()
     }
 
-    private fun skillFiles(): List<File> =
-        skillDir
-            .walkTopDown()
-            .filter { it.isFile && it.extension == "md" }
-            .toList() +
-            File(SpecFiles.root, INSTRUCTIONS_PATH)
-
-    /** Skill files report relative to the skill dir; the instructions file by its repo path. */
-    private fun displayName(file: File): String =
-        if (file.absolutePath.startsWith(skillDir.absolutePath)) {
-            file.relativeTo(skillDir).path
-        } else {
-            INSTRUCTIONS_PATH
-        }
+    @Test
+    fun `the connect-time instructions name no sample data either`() {
+        val instructions = SpecFiles.read(INSTRUCTIONS_PATH).lowercase()
+        val hits = forbidden.filter { token -> matches(instructions, token) }
+        hits.shouldBeEmpty()
+    }
 
     /** Word-bounded for plain words; substring for path-shaped tokens (`nyc/`, `--demo`). */
     private fun matches(
@@ -124,7 +111,7 @@ class SkillHasNoDemoContentTest {
     }
 
     private companion object {
-        /** 144 — the connect-time briefing, the delivered instruction surface no skill-file scan reaches. */
+        /** 144 — the connect-time briefing, the delivered instruction surface no document scan reaches. */
         const val INSTRUCTIONS_PATH = "modules/mcp-server/src/main/resources/mcp/server-instructions.txt"
     }
 }

@@ -41,6 +41,7 @@ class McpResourceCatalogTest {
             executions,
             McpFixtures.EVERYTHING_LENS,
             clock,
+            DocSetTestSupport.renderedDocSet(),
         )
 
     /**
@@ -50,7 +51,12 @@ class McpResourceCatalogTest {
      * exists to prevent.
      */
     private val skillUris: List<String> =
-        listOf(McpResourceUri.skill()) + SkillDocs.references.keys.map { McpResourceUri.skillReference(it) }
+        listOf(McpResourceUri.skill()) +
+            DocSetTestSupport
+                .renderedDocSet()
+                .docs
+                .filter { it.name != "core" }
+                .map { McpResourceUri.skillReference(it.name) }
 
     private fun emptyWorld() {
         every { pipelines.findAll(any(), null) } returns emptyList()
@@ -155,11 +161,11 @@ class McpResourceCatalogTest {
         val entities = page.resources.drop(skillUris.size)
 
         assertAll(
-            { page.resources[0].name() shouldBe "skill" },
+            { page.resources[0].name() shouldBe "core" },
             { page.resources[0].mimeType() shouldBe McpResourceCatalog.MIME_MARKDOWN },
-            // Every reference advertises its own H1, so a client picking one from the listing
-            // is choosing on the file's actual subject rather than on its file name.
-            { page.resources[1].description() shouldContain "reference of the datapipelines skill" },
+            // Every document advertises its own H1 and its area, so a client picking one from
+            // the listing is choosing on the document's actual subject.
+            { page.resources[1].description() shouldContain "a document of the served manual" },
             { entities[0].name() shouldBe "monthly_revenue" },
             { entities[0].mimeType() shouldBe McpResourceCatalog.MIME_JSON },
             { entities[0].description().shouldNotBeNull() },

@@ -4,6 +4,7 @@ import co.datapipelines.application.lens.LensedView
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.mcp.docs.DocSet
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.templates.TemplateService
 import io.modelcontextprotocol.spec.McpSchema
@@ -53,6 +54,8 @@ class McpResourceCatalog(
     /** 178 — the promoter lens: the catalogue lists the key's view of pipelines and templates. */
     private val lens: PromoterLens,
     private val clock: Clock = Clock.systemUTC(),
+    /** 242a — the served manual: the docs listing enumerates the rendered set's documents. */
+    private val docSet: DocSet,
 ) {
     /**
      * The page addressed by [cursor], or the first page when it is null.
@@ -135,8 +138,9 @@ class McpResourceCatalog(
         }
 
     /**
-     * The skill (095 §C2): its operating core plus one row per reference file, read from the
-     * packaged copy so the listing cannot advertise a reference the server would 404.
+     * The manual (095 §C2, the rendered set since 242a): the core first, then one row per
+     * document of the set — read from the served [DocSet], so the listing cannot advertise a
+     * document the server would 404.
      */
     private fun skillDescriptors(
         offset: Int,
@@ -145,22 +149,24 @@ class McpResourceCatalog(
         val core =
             descriptor(
                 uri = McpResourceUri.skill(),
-                name = "skill",
+                name = docSet.core.name,
                 description =
-                    "How to author, execute and debug pipelines on this server — read this before " +
-                        "authoring anything beyond a one-node pipeline.",
+                    "The operating core — how to author, execute and debug pipelines on this server; " +
+                        "read this before authoring anything beyond a one-node pipeline.",
                 mimeType = MIME_MARKDOWN,
             )
-        val references =
-            SkillDocs.references.keys.map {
-                descriptor(
-                    uri = McpResourceUri.skillReference(it),
-                    name = it,
-                    description = "${SkillDocs.title(it)} — a reference of the datapipelines skill.",
-                    mimeType = MIME_MARKDOWN,
-                )
-            }
-        return (listOf(core) + references).drop(offset).take(limit)
+        val others =
+            docSet.docs
+                .filter { it !== docSet.core }
+                .map {
+                    descriptor(
+                        uri = McpResourceUri.skillReference(it.name),
+                        name = it.name,
+                        description = "${it.title} — a document of the served manual (${it.area.wire}).",
+                        mimeType = MIME_MARKDOWN,
+                    )
+                }
+        return (listOf(core) + others).drop(offset).take(limit)
     }
 
     private fun pipelineDescriptors(
