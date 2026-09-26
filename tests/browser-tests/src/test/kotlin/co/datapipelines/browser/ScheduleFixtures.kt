@@ -19,6 +19,9 @@ internal object ScheduleFixtures {
 
     const val PARAMETER = "batch_size"
 
+    /** The DATE parameter the bindings suites bind (slice 3). */
+    const val DATE_PARAMETER = "as_of_date"
+
     data class Response(
         val status: Int,
         val body: String,
@@ -73,7 +76,37 @@ internal object ScheduleFixtures {
                     """"inputs":{"date":"2026-08-14","fiscal_start":"09-15"}}]}""",
             )
         check(created.status == 201) { "pipeline create ${created.status}: ${created.body.take(400)}" }
-        val id = idIn(created.body)
+        return release(page, idIn(created.body))
+    }
+
+    /**
+     * A released pipeline declaring one REQUIRED DATE parameter ([DATE_PARAMETER]) whose
+     * calculator node reads it (`$as_of_date`, the same reference form `$current_date` uses) —
+     * the field the bindings suites bind and the node proves the bound value reached the run.
+     */
+    fun releasedDatePipeline(
+        page: Page,
+        name: String,
+    ): String {
+        val created =
+            send(
+                page,
+                "POST",
+                "/api/v1/pipelines",
+                """{"name":"$name","display_name":"${name.substringAfterLast('/')}","description":"scheduler-3 fixture",""" +
+                    """"parameters":{"$DATE_PARAMETER":{"type":"DATE","required":true,"description":"The logical day the run is for."}},""" +
+                    """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
+                    """"inputs":{"date":"${'$'}$DATE_PARAMETER","fiscal_start":"01-01"}}]}""",
+            )
+        check(created.status == 201) { "pipeline create ${created.status}: ${created.body.take(400)}" }
+        return release(page, idIn(created.body))
+    }
+
+    /** Releases [id] (the one precondition a schedule's `current` needs) and returns the id. */
+    fun release(
+        page: Page,
+        id: String,
+    ): String {
         val read = send(page, "GET", "/api/v1/pipelines/$id")
         val released = send(page, "POST", "/api/v1/pipelines/$id/release", ifMatch = hashIn(read.body))
         check(released.status == 200) { "pipeline release ${released.status}: ${released.body.take(400)}" }
@@ -96,6 +129,31 @@ internal object ScheduleFixtures {
                 "/api/v1/schedules",
                 """{"name":"$name","payload":{"pipeline":"$pipeline","version":"current"},""" +
                     """"parameters":{"$PARAMETER":$batchSize},"cron":"$cron","timezone":"$timezone"}""",
+            )
+        check(created.status == 201) { "schedule create ${created.status}: ${created.body.take(400)}" }
+        return idIn(created.body)
+    }
+
+    /**
+     * A schedule whose payload binds [DATE_PARAMETER] to the [keyword] (slice 3, §20.2) — the
+     * save passes with no literal parameters at all: the placeholder satisfies the required DATE.
+     */
+    fun createBoundSchedule(
+        page: Page,
+        name: String,
+        pipeline: String,
+        keyword: String = "TODAY",
+        cron: String = YEARLY,
+        timezone: String = "America/New_York",
+    ): String {
+        val created =
+            send(
+                page,
+                "POST",
+                "/api/v1/schedules",
+                """{"name":"$name","payload":{"pipeline":"$pipeline","version":"current",""" +
+                    """"parameter_bindings":{"$DATE_PARAMETER":{"source":"keyword","name":"$keyword"}}},""" +
+                    """"cron":"$cron","timezone":"$timezone"}""",
             )
         check(created.status == 201) { "schedule create ${created.status}: ${created.body.take(400)}" }
         return idIn(created.body)

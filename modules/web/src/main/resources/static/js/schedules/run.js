@@ -101,6 +101,14 @@
     S.text(dlg, "payload", JSON.stringify(run.payload || {}, null, 2));
     S.text(dlg, "parameters", JSON.stringify(run.parameters || {}, null, 2));
 
+    // Slice 3 (§20.11): what the run's bindings resolved to on its frozen reference — the
+    // literal map the execution actually launched with. Absent when the run never got prepared.
+    var resolved = run.prepared && run.prepared.resolved_parameters;
+    var hasResolved = resolved && Object.keys(resolved).length > 0;
+    S.text(dlg, "resolved", hasResolved ? JSON.stringify(resolved, null, 2) : "");
+    S.show(S.slot(dlg, "resolved"), !!hasResolved);
+    S.show(S.slot(dlg, "resolved-note"), !!hasResolved);
+
     var link = S.slot(dlg, "execution");
     if (run.execution_id && link) {
       link.textContent = run.execution_id;

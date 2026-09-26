@@ -228,3 +228,45 @@ test("uuidFrom writes an RFC 4122 v4 id", () => {
   const id = M.uuidFrom(new Uint8Array(16).fill(0xff));
   assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
+
+// ---------------------------------------------------------------- bindings (slice 3, §20.2)
+
+test("keyword presets are the exact allowlist, Fixed value first", () => {
+  assert.deepEqual(M.keywordPresets(), [
+    { value: "", label: "Fixed value" },
+    { value: "TODAY", label: "Today" },
+    { value: "YESTERDAY", label: "Yesterday" },
+  ]);
+});
+
+test("keywordOfBinding reads only a keyword binding, and only the known keywords", () => {
+  const bindings = {
+    a: { source: "keyword", name: "TODAY" },
+    b: { source: "keyword", name: "YESTERDAY" },
+    c: { source: "keyword", name: "TOMORROW" },
+    d: { source: "literal", value: "TODAY" },
+  };
+  assert.equal(M.keywordOfBinding(bindings, "a"), "TODAY");
+  assert.equal(M.keywordOfBinding(bindings, "b"), "YESTERDAY");
+  // An unknown keyword is not a selection: the server refuses it, the form does not show it.
+  assert.equal(M.keywordOfBinding(bindings, "c"), "");
+  // A literal binding is a fixed value, never a preset.
+  assert.equal(M.keywordOfBinding(bindings, "d"), "");
+  assert.equal(M.keywordOfBinding(bindings, "e"), "");
+  assert.equal(M.keywordOfBinding(null, "a"), "");
+});
+
+test("collectBindings sends presetted keywords and passes literal bindings through untouched", () => {
+  const bindings = M.collectBindings(
+    { as_of_date: "TODAY", previous_date: "YESTERDAY", label: "" },
+    { label: { source: "literal", value: "TODAY" } },
+  );
+  assert.deepEqual(bindings, {
+    as_of_date: { source: "keyword", name: "TODAY" },
+    previous_date: { source: "keyword", name: "YESTERDAY" },
+    label: { source: "literal", value: "TODAY" },
+  });
+  // Blank sources send nothing at all — the no-bindings form is byte-equal to slice 2's.
+  assert.deepEqual(M.collectBindings({}, {}), {});
+  assert.deepEqual(M.collectBindings({ x: "", y: "" }, {}), {});
+});

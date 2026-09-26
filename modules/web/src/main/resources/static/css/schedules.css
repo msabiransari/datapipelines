@@ -233,3 +233,23 @@
 .sch-form-actions {
   justify-content: flex-end;
 }
+
+/* One parameter field's value area (slice 3): the binding source select and the fixed-value
+   input share the row when the field is a DATE — the select is absent (removed) for every
+   other type. */
+.sch-param-value {
+  display: grid;
+  gap: var(--gap-xs);
+}
+
+/* A chosen keyword preset (Today / Yesterday) hides the fixed-value input — by class, never
+   an inline style, and `hidden` would fight the select's own visibility toggles. */
+.sch-value-hidden {
+  display: none;
+}
+
+/* The run dialog's resolved parameters (slice 3, §20.11): the literal map the run executed
+   with, beside the frozen job parameters. */
+.sch-resolved-note {
+  margin: var(--gap-xs) 0 0;
+}

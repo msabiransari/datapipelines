@@ -11,7 +11,10 @@
  *    of the next five from §20.3 — the dispatcher's own function, so the DST rule shown is
  *    the one that will fire.
  *  - Parameters: the declared parameters of the version the pipeline's current pointer names
- *    NOW (the version §20.2 validates against), as literal values (R7).
+ *    NOW (the version §20.2 validates against), as literal values (R7). A DATE parameter's
+ *    field also offers the binding source (slice 3, §20.2): Fixed value (default) / Today /
+ *    Yesterday — a preset travels in `payload.parameter_bindings` and each run resolves it on
+ *    the schedule's frozen reference; the selection round-trips on edit.
  *
  * Create carries an idempotency key per attempt (model.nextAttempt); edit carries the
  * revision the form was opened at in If-Match, and a stale one (409
@@ -26,6 +29,9 @@
 
   var PREVIEW_DELAY_MS = 300;
   var SEARCH_DELAY_MS = 250;
+
+  /** The class a chosen preset gives the fixed-value text field (never an inline style). */
+  var PRESET_HIDDEN = "sch-value-hidden";
 
   function f() {
     return S.state.form || null;
@@ -102,7 +108,8 @@
     if (d.dom !== undefined) el("sch-f-dom").value = String(d.dom);
     el("sch-f-cron").value = s.cron;
     applyPreset(d.preset, true);
-    loadParameters(M().pipelineOf(s), s.parameters || {});
+    f().savedBindings = (s.payload && s.payload.parameter_bindings) || {};
+    loadParameters(M().pipelineOf(s), s.parameters || {}, f().savedBindings);
   }
 
   function pad(n) {
@@ -135,7 +142,9 @@
     // typing (the lane walk lost a value exactly so). Only a different pipeline reloads them.
     pipeline.addEventListener("change", function () {
       var name = pipeline.value.trim();
-      if (name && name !== (f() && f().parametersFor)) loadParameters(name, currentTexts());
+      // A different pipeline means different parameters: the previous pipeline's bindings do
+      // not carry over (its declared names are not this one's).
+      if (name && name !== (f() && f().parametersFor)) loadParameters(name, currentTexts(), {});
     });
     dlg.querySelector("#sch-f-name").addEventListener("input", function () { clearError("name"); });
   }
@@ -259,7 +268,7 @@
           });
           // A name typed (or picked) in full needs no separate "change" to load its parameters.
           var exact = state.found.filter(function (p) { return p.name === el("sch-f-pipeline").value.trim(); })[0];
-          if (exact && state.parametersFor !== exact.name) loadParameters(exact.name, currentTexts());
+          if (exact && state.parametersFor !== exact.name) loadParameters(exact.name, currentTexts(), {});
         })
         .catch(function () { /* suggestions are a convenience; the save is the authority */ });
     }, SEARCH_DELAY_MS);
@@ -272,8 +281,23 @@
     if (!dlg) return out;
     Array.prototype.forEach.call(dlg.querySelectorAll("[data-param-name]"), function (field) {
       var name = field.getAttribute("data-param-name");
-      var input = field.querySelector("[data-param-input]:not([hidden]), [data-param-select]:not([hidden])");
+      var input = field.querySelector(
+        "[data-param-input]:not([hidden]):not(." + PRESET_HIDDEN + "), [data-param-select]:not([hidden])",
+      );
       if (input) out[name] = input.value;
+    });
+    return out;
+  }
+
+  /** The keyword presets chosen on rendered DATE fields, by name — only non-blank ones. */
+  function currentSources() {
+    var out = {};
+    var dlg = S.dialog();
+    if (!dlg) return out;
+    Array.prototype.forEach.call(dlg.querySelectorAll("[data-param-source]:not([hidden])"), function (select) {
+      var field = select.closest("[data-param-name]");
+      var name = field && field.getAttribute("data-param-name");
+      if (name && select.value) out[name] = select.value;
     });
     return out;
   }
@@ -285,12 +309,19 @@
   /**
    * The declared parameters of the version the pipeline's CURRENT pointer names — what §20.2
    * binds the values against at save (PipelineJobExecutor.validate) and what each run
-   * re-binds. `values` prefill the fields (a saved schedule's literals, or what was typed).
+   * re-binds. `values` prefill the fields (a saved schedule's literals, or what was typed);
+   * `bindings` are the saved `parameter_bindings` — keyword presets re-open selected (§20.5's
+   * round-trip), literal bindings show their value as the fixed text.
    */
-  function loadParameters(name, values) {
+  function loadParameters(
+    name,
+    values,
+    bindings,
+  ) {
     var state = f();
     if (!state || !name) return;
     state.parametersFor = name;
+    state.savedBindings = bindings || {};
     var seq = (state.paramSeq = (state.paramSeq || 0) + 1);
     paramStatus("Reading " + name + "'s parameters…");
     API()
@@ -309,7 +340,7 @@
       .then(function (found) {
         if (seq !== state.paramSeq || !S.dialog()) return;
         if (found.none) {
-          renderParameters({}, values, name + " has no current version yet — a schedule on it is refused until one is released (or its current version is switched to a draft).");
+          renderParameters({}, values, {}, name + " has no current version yet — a schedule on it is refused until one is released (or its current version is switched to a draft).");
           return;
         }
         state.pipelineVersion = found.version;
@@ -317,7 +348,7 @@
         M().declaredParameters(found.body.parameters).forEach(function (d) { declared[d.name] = d.spec; });
         state.declared = declared;
         var count = Object.keys(declared).length;
-        renderParameters(declared, values, count
+        renderParameters(declared, values, state.savedBindings, count
           ? (count === 1 ? "The parameter" : "The " + count + " parameters") + " v" + found.version +
             " (its current version) declares — a blank field takes the declared default."
           : "v" + found.version + " (its current version) declares no parameters.");
@@ -325,18 +356,30 @@
       .catch(function (err) {
         if (seq !== state.paramSeq || !S.dialog()) return;
         state.declared = {};
-        renderParameters({}, values, err && err.notFound
+        renderParameters({}, values, {}, err && err.notFound
           ? "No pipeline named " + name + " that you can read in this workspace."
           : "The pipeline's parameters could not be read; the save still checks them.");
       });
   }
 
-  function renderParameters(declared, values, status) {
+  function renderParameters(
+    declared,
+    values,
+    bindings,
+    status,
+  ) {
     var dlg = S.dialog();
     var box = S.slot(dlg, "params");
+    bindings = bindings || {};
     // What is typed NOW wins over what was captured when the read began: the read is async, and
     // a value typed while it was in flight must survive the re-render.
     values = Object.assign({}, values || {}, currentTexts());
+    // A saved literal binding shows its value as the field's fixed text (body() keeps its
+    // envelope on save unless the author edits the text).
+    Object.keys(bindings).forEach(function (k) {
+      var b = bindings[k];
+      if (b && b.source === "literal" && values[k] === undefined) values[k] = b.value;
+    });
     S.clear(box);
     paramStatus(status);
     var names = Object.keys(declared).sort();
@@ -359,9 +402,30 @@
       S.text(field, "help", help.join(" · "));
       var input = field.querySelector("[data-param-input]");
       var select = field.querySelector("[data-param-select]");
+      var source = field.querySelector("[data-param-source]");
       var id = "sch-f-param-" + name;
       field.querySelector("label").setAttribute("for", id);
       var value = values && values[name] !== undefined ? M().parameterText(values[name]) : "";
+      var isDate = !!(spec && String(spec.type).toUpperCase() === "DATE");
+      var keyword = M().keywordOfBinding(bindings, name);
+      if (isDate) {
+        // The binding source (§20.2): each run resolves the value from the schedule's frozen
+        // reference. Fixed value is the default; a preset hides the text field by class.
+        source.hidden = false;
+        S.clear(source);
+        M().keywordPresets().forEach(function (p) {
+          var o = document.createElement("option");
+          o.value = p.value;
+          o.textContent = p.label;
+          source.appendChild(o);
+        });
+        source.value = keyword;
+        source.addEventListener("change", function () {
+          input.classList.toggle(PRESET_HIDDEN, !!source.value);
+        });
+      } else {
+        source.remove();
+      }
       if (spec && String(spec.type).toUpperCase() === "BOOLEAN") {
         input.remove();
         select.hidden = false;
@@ -371,8 +435,9 @@
         select.remove();
         input.id = id;
         input.value = value;
+        input.classList.toggle(PRESET_HIDDEN, isDate && !!keyword);
         if (spec && (spec.type === "INTEGER" || spec.type === "DECIMAL")) input.setAttribute("inputmode", "decimal");
-        if (spec && spec.type === "DATE") input.setAttribute("placeholder", "YYYY-MM-DD");
+        if (isDate) input.setAttribute("placeholder", "YYYY-MM-DD");
         if (spec && spec.type === "TIMESTAMP") input.setAttribute("placeholder", "2026-01-31T06:00:00Z");
         if (spec && spec.type === "TIME") input.setAttribute("placeholder", "HH:MM:SS");
       }
@@ -450,11 +515,38 @@
   function body() {
     var dlg = S.dialog();
     var policy = dlg.querySelector('input[name="missed_run_policy"]:checked');
+    var sources = currentSources();
+    var texts = currentTexts();
+    // A presetted name travels as a keyword binding, never also as a fixed value (the server
+    // refuses the ambiguity — §20.2's conflict rule).
+    Object.keys(sources).forEach(function (name) { delete texts[name]; });
+    var saved = f().savedBindings || {};
+    var untouchedLiterals = {};
+    Object.keys(saved).forEach(function (name) {
+      var b = saved[name];
+      if (!b || b.source !== "literal" || name in sources) return;
+      if (texts[name] === undefined || texts[name] === M().parameterText(b.value)) {
+        // Untouched: the binding keeps its envelope, so its fixed text must NOT also go out
+        // as a parameter. Edited: the fixed text replaces it (the binding is dropped).
+        untouchedLiterals[name] = b;
+        delete texts[name];
+      }
+    });
+    var bindings = M().collectBindings(sources, untouchedLiterals);
+    // A saved KEYWORD binding whose name this version no longer declares has no field to
+    // render — it goes out as it is, so the save REFUSES with the real reason instead of
+    // silently dropping the binding behind the author's back.
+    Object.keys(saved).forEach(function (name) {
+      var b = saved[name];
+      if (b && b.source === "keyword" && !(name in bindings) && !(name in texts) && !(name in sources)) bindings[name] = b;
+    });
+    var payload = { pipeline: el("sch-f-pipeline").value.trim(), version: "current" };
+    if (Object.keys(bindings).length) payload.parameter_bindings = bindings;
     return {
       name: el("sch-f-name").value.trim(),
       executor: "pipeline",
-      payload: { pipeline: el("sch-f-pipeline").value.trim(), version: "current" },
-      parameters: M().collectParameters(f().declared, currentTexts()),
+      payload: payload,
+      parameters: M().collectParameters(f().declared, texts),
       cron: el("sch-f-cron").value.trim(),
       timezone: el("sch-f-timezone").value,
       missed_run_policy: policy ? policy.value : "skip",
