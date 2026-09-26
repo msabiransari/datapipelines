@@ -1,5 +1,6 @@
 package co.datapipelines.web.sse
 
+import co.datapipelines.auth.AuthenticatedPrincipal
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType
@@ -26,11 +27,25 @@ import java.util.concurrent.TimeUnit
  * A follower's disconnect cancels **nothing**: the disconnect-grace rule (§6.8) belongs to the
  * owning stream in [ExecutionStreamRegistry], and an execution must not be aborted because a
  * replay consumer went away.
+ *
+ * ## Subscriber authority (#230, P4)
+ * Both call sites hand the stream the SUBSCRIBER — the principal the route authorized at open —
+ * and every write (each replayed chunk, each followed event) re-asks their CURRENT authority
+ * through [ExecutionStreamAuthority] before it goes out (ruling P4: an open stream is cut at
+ * its next write after revocation). A refusal ends the stream at that write: nothing of the
+ * event is served, a final `: revoked` comment (§6.6's comment form) names why.
  */
 class SseLogStreamer(
     private val eventLog: SseEventLog,
     private val mapper: ObjectMapper,
     private val scheduler: ScheduledExecutorService,
+    /**
+     * #230 (P4): the subscriber re-judgement, shared by [replay] and [follow]. Kept BEFORE
+     * [emitterFactory] on purpose — a function-typed parameter must stay LAST or every trailing-
+     * lambda call site silently rebinds to the new hook. Null only in tests of the pre-#230
+     * shape.
+     */
+    private val authority: ExecutionStreamAuthority? = null,
     /**
      * Test seam: builds the emitter to serve. Production wiring uses the default (a never-timing-
      * out emitter, because the execution's own timeout bounds the run); tests substitute a
@@ -44,12 +59,23 @@ class SseLogStreamer(
     /** True when a (possibly still-growing) event log exists for [executionId]. */
     fun hasLog(executionId: UUID): Boolean = eventLog.replay(executionId) != null
 
-    /** §10.3: emits the stored stream once, in original order, then completes. */
-    fun replay(executionId: UUID): SseEmitter {
+    /**
+     * §10.3: emits the stored stream once, in original order, then completes.
+     *
+     * Each chunk re-asks the subscriber's authority first (#230, P4): a refusal ends the replay
+     * at that chunk — a partially-consumed replay is the contract, not an error.
+     */
+    fun replay(
+        executionId: UUID,
+        subscriber: AuthenticatedPrincipal? = null,
+    ): SseEmitter {
         val emitter = emitterFactory()
         val events = eventLog.replay(executionId).orEmpty()
         scheduler.execute {
-            events.forEach { event -> if (!send(emitter, event)) return@execute }
+            for (event in events) {
+                if (!authorizedBeforeWrite(emitter, executionId, subscriber)) return@execute
+                if (!send(emitter, event)) return@execute
+            }
             completeQuietly(emitter, executionId)
         }
         return emitter
@@ -62,10 +88,16 @@ class SseLogStreamer(
      * A log that never appears (the original died before its first event could be persisted) is
      * given up on after [GIVE_UP_AFTER_POLLS] ticks; the stream completes without events, which
      * the client reads as "attach failed — re-execute", exactly the §6.8 guidance.
+     *
+     * The subscriber (#230, P4) rides in [FollowState]: every event the follow serves is
+     * re-judged first, so an attach made under valid authority cannot outlive it.
      */
-    fun follow(executionId: UUID): SseEmitter {
+    fun follow(
+        executionId: UUID,
+        subscriber: AuthenticatedPrincipal? = null,
+    ): SseEmitter {
         val emitter = emitterFactory()
-        val state = FollowState()
+        val state = FollowState(subscriber)
         follows[emitter] = state
         state.task =
             scheduler.scheduleWithFixedDelay(
@@ -81,7 +113,10 @@ class SseLogStreamer(
     }
 
     /** Mutable per-follow bookkeeping; one instance per [follow] call, dropped at close. */
-    private class FollowState {
+    private class FollowState(
+        /** The subscriber this follow serves (#230, P4); re-judged before every served event. */
+        val subscriber: AuthenticatedPrincipal?,
+    ) {
         @Volatile var task: ScheduledFuture<*>? = null
 
         @Volatile var lastSentEventId: Int = 0
@@ -130,6 +165,9 @@ class SseLogStreamer(
         }
         val fresh = events.filter { it.eventId > state.lastSentEventId }
         for (event in fresh) {
+            // The re-judge (#230, P4) runs before every served event; a refusal has already
+            // cancelled and completed the stream, so the follow simply ends.
+            if (!authorizedBeforeWrite(emitter, executionId, state.subscriber)) return
             if (!send(emitter, event)) {
                 cancel(emitter)
                 return
@@ -151,6 +189,34 @@ class SseLogStreamer(
                 completeQuietly(emitter, executionId)
             }
         }
+    }
+
+    /**
+     * The #230 (P4) gate both loops pass before every write: re-ask [authority] for the
+     * subscriber's CURRENT authority to read this execution.
+     *
+     * On a refusal the stream ends at THIS write: nothing of the event is served; a final
+     * `: revoked` comment (§6.6's comment form — ignored by every SSE consumer) names why. Fail
+     * closed: an answer that cannot be established is a refusal. A null subscriber or authority
+     * — the pre-#230 shape, tests only — passes untouched.
+     */
+    private fun authorizedBeforeWrite(
+        emitter: SseEmitter,
+        executionId: UUID,
+        subscriber: AuthenticatedPrincipal?,
+    ): Boolean {
+        val judge = authority ?: return true
+        if (subscriber == null) return true
+        // [ExecutionStreamAuthority.mayRead] never throws — an unsettleable answer is its own
+        // refusal (fail closed, in the log).
+        val allowed = judge.mayRead(subscriber, executionId)
+        if (!allowed) {
+            log.info("SSE log stream of execution {} cut: the subscriber's authority no longer holds (#230, P4).", executionId)
+            runCatching { emitter.send(SseEmitter.event().comment(REVOKED_COMMENT)) }
+            cancel(emitter)
+            completeQuietly(emitter, executionId)
+        }
+        return allowed
     }
 
     private fun cancel(emitter: SseEmitter) {
@@ -191,6 +257,13 @@ class SseLogStreamer(
 
     private companion object {
         const val NEVER_TIMEOUT = 0L
+
+        /**
+         * #230 (P4) — the final comment a cut stream carries. A comment, not an event: the
+         * subscriber is no longer authorized to read EVENTS, and a comment is invisible to
+         * every SSE consumer by construction (§6.6).
+         */
+        const val REVOKED_COMMENT = "revoked"
 
         /** Follow cadence. Sub-second, so a retry watches the original near-live. */
         const val FOLLOW_POLL_MILLIS = 250L

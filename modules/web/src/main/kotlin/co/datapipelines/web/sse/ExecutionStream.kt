@@ -1,5 +1,6 @@
 package co.datapipelines.web.sse
 
+import co.datapipelines.auth.AuthenticatedPrincipal
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType
@@ -36,17 +37,40 @@ class ExecutionStream(
     val emitter: SseEmitter,
     private val mapper: ObjectMapper,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    /**
+     * #230 (P4): the subscriber this stream serves, exactly as the request that opened it
+     * carried them — identity, key id when a key (no key reaches an SSE route today, §7.7),
+     * workspace. Carried so every write can re-ask their CURRENT authority, not the open-time
+     * snapshot. Null only in tests of the pre-#230 shape.
+     */
+    val subscriber: AuthenticatedPrincipal? = null,
+    /**
+     * #230 (P4): the re-judgement asked before EVERY write — event and heartbeat alike (the
+     * heartbeat bounds how long a revocation can go unnoticed on a quiet stream, §6.6). A
+     * refusal ends the stream at that write, serving nothing; the execution keeps running
+     * (P4's first half), which is why [ExecutionStreamRegistry.tick] never reads a revoked
+     * stream as a disconnect. Null only in tests of the pre-#230 shape.
+     */
+    private val authority: ExecutionStreamAuthority? = null,
 ) {
     private val log = LoggerFactory.getLogger(ExecutionStream::class.java)
     private val connected = AtomicBoolean(true)
     private val terminal = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
+    private val revoked = AtomicBoolean(false)
 
     /** False once a write has failed or the container reported completion/timeout. */
     val isConnected: Boolean get() = connected.get()
 
     /** True once a terminal event (§6.5 step 3) has been written. */
     val isTerminal: Boolean get() = terminal.get()
+
+    /**
+     * True once the authority guard refused a write and the stream was cut for it (#230, P4).
+     * [ExecutionStreamRegistry.tick] reads this to keep a revoked stream out of the §6.8
+     * disconnect path — the run is not cancelled because its READER was.
+     */
+    val isRevoked: Boolean get() = revoked.get()
 
     /**
      * The `close_reason` of the `datapipelines.sse.stream.duration` timer (observability §4):
@@ -66,8 +90,12 @@ class ExecutionStream(
     /**
      * Writes one SSE event.
      *
-     * @return false when the client is gone. Never throws for a dropped client: the emitter must
-     *   not propagate "nobody is listening" into the executor (dag-executor §10).
+     * Before writing, the subscriber's authority is re-asked (#230, P4) — a refusal ends the
+     * stream here and nothing of the event is served.
+     *
+     * @return false when the client is gone or the stream was cut by the authority guard. Never
+     *   throws for a dropped client: the emitter must not propagate "nobody is listening" into
+     *   the executor (dag-executor §10).
      */
     fun send(
         eventName: String,
@@ -75,6 +103,7 @@ class ExecutionStream(
         payload: Map<String, Any?>,
     ): Boolean {
         if (!connected.get()) return false
+        if (!stillAuthorized()) return false
         return try {
             emitter.send(
                 SseEmitter
@@ -103,9 +132,14 @@ class ExecutionStream(
      *
      * An SSE comment (`: heartbeat`) is ignored by `EventSource` and by a fetch-based consumer; it
      * exists solely to keep the TCP connection alive through a load balancer's idle timeout.
+     *
+     * The heartbeat is also the revocation bound on a quiet stream (#230, P4): the guard runs
+     * here exactly as on [send], so a stream with no event flow is still cut within one heartbeat
+     * of the authority's end.
      */
     fun heartbeat(): Boolean {
         if (!connected.get()) return false
+        if (!stillAuthorized()) return false
         return try {
             emitter.send(SseEmitter.event().comment(HEARTBEAT_COMMENT))
             lastActivityAtMillis.set(nowMillis())
@@ -138,6 +172,32 @@ class ExecutionStream(
         connected.set(false)
     }
 
+    /**
+     * The #230 (P4) gate both writers pass: re-ask [authority] for the subscriber's CURRENT
+     * authority to read this execution.
+     *
+     * On a refusal the stream ends at THIS write: nothing of the write is served; a final
+     * `: revoked` comment (§6.6's comment form — ignored by every SSE consumer, exactly like the
+     * heartbeat) names why; the emitter completes. Fail closed: an answer that cannot be
+     * established is a refusal, never a reason to keep serving. Streams opened without a
+     * subscriber and authority — the pre-#230 shape, tests only — pass untouched.
+     */
+    private fun stillAuthorized(): Boolean {
+        val judge = authority ?: return true
+        val principal = subscriber ?: return true
+        if (revoked.get()) return false
+        // [ExecutionStreamAuthority.mayRead] never throws — an unsettleable answer is its own
+        // refusal (fail closed, in the log).
+        val allowed = judge.mayRead(principal, executionId)
+        if (!allowed) {
+            revoked.set(true)
+            log.info("SSE stream of execution {} cut: the subscriber's authority no longer holds (#230, P4).", executionId)
+            runCatching { emitter.send(SseEmitter.event().comment(REVOKED_COMMENT)) }
+            close()
+        }
+        return allowed
+    }
+
     /** Completes the emitter exactly once; further calls are no-ops. */
     fun close() {
         if (!closed.compareAndSet(false, true)) return
@@ -148,6 +208,13 @@ class ExecutionStream(
 
     private companion object {
         const val HEARTBEAT_COMMENT = "heartbeat"
+
+        /**
+         * #230 (P4) — the final comment a cut stream carries. A comment, not an event: the
+         * subscriber is no longer authorized to read EVENTS, and a comment is invisible to
+         * every SSE consumer by construction (§6.6).
+         */
+        const val REVOKED_COMMENT = "revoked"
 
         /** The terminal event names that map to a metric close-reason (observability §4). */
         val TERMINAL_KINDS = setOf("pipeline_completed", "pipeline_failed", "execution_aborted")

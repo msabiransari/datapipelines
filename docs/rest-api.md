@@ -896,6 +896,8 @@ The heartbeat interval is configurable via `datapipelines.sse.heartbeat-interval
 
 **A disconnected client cancels its execution.** If the SSE connection drops mid-stream, the executing instance starts a grace timer (`datapipelines.sse.disconnect-grace-seconds`, default 30). If no terminal event has been reached when the grace period elapses, the execution is cancelled — in-flight statements are interrupted via `Statement.cancel()`, held datasource connections are released, and the execution finishes as `ABORTED` ([DAG Executor §8.3](dag-executor.md#83-cancellation)). Rationale: an execution nobody is waiting for must not keep occupying source-database connections and staging memory.
 
+**A revoked subscriber's stream is cut; the execution is not** (#230, security-assurance P4). Before every write — event or heartbeat — an open stream re-judges its subscriber's authority to read the execution, with the same predicate a new request would run ([Auth §11.4](auth.md#114-api-key-validation-cache)); when the answer turns no, the stream ends at that write, carrying a final `revoked` SSE comment and nothing after, while the execution itself keeps running to its terminal state.
+
 Consequences clients must design for:
 
 - There is no reconnection or resumption path — `Last-Event-Id` is ignored. A client that loses its stream should assume the execution will be aborted and re-execute (with an `Idempotency-Key`, a retry within the idempotency TTL that arrives before the abort completes attaches to nothing — the original is gone; the retry starts a fresh execution).
@@ -1555,7 +1557,7 @@ GET /executions/{execution_id}/events
 Accept: text/event-stream
 ```
 
-Re-emits the SSE event stream from the Redis event log, in original order with original timestamps — `node_progress` samples included, each with the `observed_at` it was taken at (§6.4.9). Useful for debugging pipelines after the fact.
+Re-emits the SSE event stream from the Redis event log, in original order with original timestamps — `node_progress` samples included, each with the `observed_at` it was taken at (§6.4.9). Useful for debugging pipelines after the fact. The same revoked-subscriber cut as the live stream applies per chunk (§6.8, #230): a replay re-checks the caller's authority before each chunk it serves.
 
 Availability: the Redis event log lives **1 hour** past completion (not configurable); afterwards this endpoint returns `410 result.expired`. The durable per-event record survives 7 days in the `execution_events` table (`datapipelines.executions.event-retention-days`) and is queryable via ordinary execution metadata — only the *replayable stream* expires at 1 hour. The replay is also the answer to "I was not attached (or left early) while it ran": the live stream's delivery guarantee runs only to a connected consumer (§10.4), and everything else is read back from here.
 

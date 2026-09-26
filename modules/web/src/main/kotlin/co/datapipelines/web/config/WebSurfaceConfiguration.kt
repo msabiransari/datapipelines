@@ -107,7 +107,23 @@ class WebSurfaceConfiguration {
     fun sseLogStreamer(
         eventLog: SseEventLog,
         scheduler: ScheduledExecutorService,
-    ): SseLogStreamer = SseLogStreamer(eventLog, SseJson.mapper, scheduler)
+        authority: co.datapipelines.web.sse.ExecutionStreamAuthority,
+    ): SseLogStreamer = SseLogStreamer(eventLog, SseJson.mapper, scheduler, authority)
+
+    /**
+     * #230 (P4): the ONE re-judgement an open execution stream makes of its subscriber before
+     * every write — the same predicate a new request would run (liveness, the live `is_admin`
+     * snapshot, the request path's workspace resolution, the route's permission and visibility),
+     * every read through the existing auth caches.
+     */
+    @Bean
+    fun executionStreamAuthority(
+        executions: ExecutionRepository,
+        principalLiveness: co.datapipelines.auth.PrincipalLiveness,
+        workspaceService: co.datapipelines.auth.WorkspaceService,
+        userService: co.datapipelines.auth.UserService,
+    ): co.datapipelines.web.sse.ExecutionStreamAuthority =
+        co.datapipelines.web.sse.ExecutionStreamAuthority(executions, principalLiveness, workspaceService, userService)
 
     @Bean
     fun executionStreamRegistry(
@@ -253,6 +269,7 @@ class WebSurfaceConfiguration {
         streams: ExecutionStreamRegistry,
         eventLog: SseEventLog,
         streamer: SseLogStreamer,
+        authority: co.datapipelines.web.sse.ExecutionStreamAuthority,
         eventRepository: ExecutionEventRepository,
         executionRepository: ExecutionRepository,
         launcher: ExecutionLauncher,
@@ -277,6 +294,7 @@ class WebSurfaceConfiguration {
             streams = streams,
             eventLog = eventLog,
             streamer = streamer,
+            authority = authority,
             eventRepository = eventRepository,
             executionRepository = executionRepository,
             launcher = launcher,

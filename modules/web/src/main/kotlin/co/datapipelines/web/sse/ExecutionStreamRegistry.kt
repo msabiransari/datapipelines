@@ -138,7 +138,12 @@ class ExecutionStreamRegistry(
         try {
             streams.values.forEach { stream ->
                 if (stream.isConnected && stream.lastActivityAtMillis.get() <= lastTickAtMillis) stream.heartbeat()
-                if (!stream.isConnected) noticeDisconnect(stream)
+                // #230 (P4): a REVOKED stream was closed on purpose — the subscriber lost the
+                // authority to READ, not the connection. §6.8's grace exists to cancel a run
+                // nobody is watching; a revoked reader's execution keeps its authority to
+                // completion (P4's first half), so the revoked stream never reaches
+                // [noticeDisconnect] and the run it watches is never cancelled for it.
+                if (!stream.isConnected && !stream.isRevoked) noticeDisconnect(stream)
             }
             lastTickAtMillis = nowMillis()
         } catch (e: RuntimeException) {

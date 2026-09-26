@@ -83,6 +83,7 @@ class ExecutionStreamLauncherTest {
             streams = registry,
             eventLog = mockk(relaxed = true),
             streamer = streamer,
+            authority = mockk(relaxed = true),
             eventRepository = mockk(relaxed = true),
             executionRepository = mockk(relaxed = true),
             launcher =
