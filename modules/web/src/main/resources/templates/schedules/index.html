@@ -23,6 +23,7 @@
   <script th:src="@{/js/schedules/api.js}" defer></script>
   <script th:src="@{/js/schedules/dom.js}" defer></script>
   <script th:src="@{/js/schedules/explorer.js}" defer></script>
+  <script th:src="@{/js/schedules/detail.js}" defer></script>
   <script th:src="@{/js/schedules/page.js}" defer></script>
 
   <div class="tplx-page sch-page" data-schedules-root
@@ -86,5 +87,6 @@
   <div id="sch-dialog"></div>
 
   <th:block th:replace="~{schedules/explorer :: skeletons}"></th:block>
+  <th:block th:replace="~{schedules/detail :: skeletons}"></th:block>
 </th:block>
 </html>

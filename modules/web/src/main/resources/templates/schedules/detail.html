@@ -1,0 +1,198 @@
+<!-- The selected schedule (ui-screens.md §4.20) — the explorers' detail shape (§4.3b): a
+     header with the verbs, a READING column (what it is, when it runs, its parameters) and an
+     ACTING column (its runs). Cloned and filled by static/js/schedules/detail.js from §20.4,
+     §20.9 and §20.10; every text slot is set with textContent.
+
+     VERBS (§4.3e): each is `canAuthor` — the author / workspace admin / super admin set, which
+     is exactly the schedule.create/update/pause/delete/run rows. A viewer's and a promoter's
+     skeleton carries none of them. The script only decides which of the rendered ones the
+     schedule's STATE admits (Pause while enabled, Resume while paused, Unblock while blocked);
+     the server re-decides every one. -->
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="skeletons">
+  <template id="sch-tpl-detail">
+    <div class="tplx-detail-content sch-detail" data-schedule-detail>
+      <header class="tplx-detail-header">
+        <div class="tplx-detail-identity">
+          <p class="tplx-detail-path" data-slot="folder"></p>
+          <h2 class="tplx-detail-title" data-slot="leaf"></h2>
+        </div>
+        <div class="tplx-detail-actions">
+          <span class="ds-spinner sch-busy" data-slot="busy" aria-hidden="true" hidden></span>
+          <!-- ONE destructive verb per entity per view (owner rule, §4.3d): Delete. -->
+          <button th:if="${canAuthor == true}" data-verb="schedule-delete" type="button"
+                  class="ds-button ds-button-ghost ds-button-sm tplx-danger" data-sch-action="delete">Delete…</button>
+          <button th:if="${canAuthor == true}" data-verb="schedule-pause" type="button"
+                  class="ds-button ds-button-secondary ds-button-sm" data-sch-action="pause" hidden>Pause</button>
+          <button th:if="${canAuthor == true}" data-verb="schedule-resume" type="button"
+                  class="ds-button ds-button-secondary ds-button-sm" data-sch-action="resume" hidden>Resume</button>
+          <button th:if="${canAuthor == true}" data-verb="schedule-edit" type="button"
+                  class="ds-button ds-button-secondary ds-button-sm" data-sch-action="edit">Edit</button>
+          <button th:if="${canAuthor == true}" data-verb="schedule-run" type="button"
+                  class="ds-button ds-button-primary ds-button-sm" data-sch-action="run-now">
+            <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#play"></use></svg>
+            <span>Run now</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="tplx-detail-body">
+        <!-- ============================================================ reading -->
+        <div class="tplx-read">
+          <!-- A block names its cause and the run that caused it (scheduler.md §5.2), and its
+               recovery verb sits beside the reason, not somewhere else on the screen. -->
+          <section class="app-alert app-alert-danger sch-blocked" data-slot="blocked" role="status" hidden>
+            <p class="u-bold u-m0">Blocked — this schedule fires nothing until someone unblocks it.</p>
+            <p class="u-m0" data-slot="blocked-reason"></p>
+            <p class="u-m0 u-text-sm">
+              <span class="u-mono" data-slot="blocked-code"></span>
+              <span class="u-muted"> · since </span><time data-slot="blocked-at"></time>
+              <span data-slot="blocked-run-wrap" hidden><span class="u-muted"> · </span><button type="button"
+                    class="sch-link" data-sch-action="open-blocking-run">the run that blocked it</button></span>
+            </p>
+            <th:block th:if="${canAuthor == true}">
+              <p class="u-m0 u-text-sm">Unblock checks the pipeline and the saved parameters again, then resumes
+                from now — occurrences due while it was blocked are not caught up.</p>
+              <div>
+                <button th:if="${canAuthor == true}" data-verb="schedule-unblock" type="button"
+                        class="ds-button ds-button-secondary ds-button-sm" data-sch-action="unblock">Unblock</button>
+              </div>
+            </th:block>
+            <p class="u-m0 u-text-sm" th:if="${canAuthor != true}">An author or a workspace admin can unblock it.</p>
+          </section>
+
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Overview</h3>
+              <span class="app-card-note" data-slot="revision"></span>
+            </div>
+            <div class="app-card-b">
+              <div class="app-chips">
+                <span class="ds-badge" data-slot="condition"></span>
+                <span class="ds-badge ds-badge-default app-chip-mono" data-slot="executor"></span>
+                <span class="ds-badge ds-badge-default" data-slot="policy-chip"></span>
+              </div>
+              <dl class="tplx-kv">
+                <dt>Pipeline</dt>
+                <dd>
+                  <a class="u-mono" data-slot="pipeline-link" hidden></a>
+                  <span class="u-mono" data-slot="pipeline-text"></span>
+                  <span class="u-muted"> · </span><span data-slot="version"></span>
+                </dd>
+                <dt>When</dt>
+                <dd><span data-slot="when"></span><code class="sch-cron" data-slot="cron"></code></dd>
+                <dt>Timezone</dt>
+                <dd class="u-mono" data-slot="timezone"></dd>
+                <dt>Missed runs</dt>
+                <dd data-slot="policy"></dd>
+                <dt>Next due</dt>
+                <dd data-slot="next-due"></dd>
+                <dt>Updated</dt>
+                <dd data-slot="updated"></dd>
+              </dl>
+            </div>
+          </section>
+
+          <!-- §20.9 — the saved schedule's next five, from the ONE occurrence function: the wall
+               clock in the schedule's zone, the offset in force then, and the UTC instant. -->
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Next five occurrences</h3>
+              <span class="app-card-note" data-slot="occurrences-note"></span>
+            </div>
+            <div class="tplx-scroll">
+              <table class="ds-table tplx-fit-table sch-occurrences">
+                <thead><tr><th>Local time</th><th>Offset</th><th>UTC</th></tr></thead>
+                <tbody data-slot="occurrences"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="ds-card">
+            <div class="app-card-h">
+              <h3>Parameters</h3>
+              <span class="app-card-note" data-slot="parameters-note"></span>
+            </div>
+            <p class="ds-empty-description app-card-b" data-slot="parameters-empty" hidden>No parameter values — the pipeline's defaults apply.</p>
+            <div class="tplx-scroll" data-slot="parameters-wrap" hidden>
+              <table class="ds-table tplx-fit-table">
+                <thead><tr><th>Name</th><th>Value</th></tr></thead>
+                <tbody data-slot="parameters"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <!-- ============================================================= acting -->
+        <div class="tplx-act">
+          <section class="ds-card tplx-tabcard">
+            <div class="tplx-tabs">
+              <span class="tplx-tab is-on">Runs</span>
+              <button type="button" class="ds-button ds-button-ghost ds-button-sm sch-refresh"
+                      data-sch-action="refresh-runs" aria-label="Refresh runs">Refresh</button>
+            </div>
+            <div class="tplx-tabpanel">
+              <div class="tplx-runs sch-runs" data-slot="runs" aria-live="polite"></div>
+              <p class="ds-empty-description" data-slot="runs-empty" hidden>No runs yet. The first appears at the next occurrence<th:block th:if="${canAuthor == true}">, or when someone presses Run now</th:block>.</p>
+              <div class="sch-runs-more" data-slot="runs-more-wrap" hidden>
+                <button type="button" class="ds-button ds-button-ghost ds-button-sm" data-sch-action="more-runs">Show older runs</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <template id="sch-tpl-occurrence">
+    <tr><td data-slot="local"></td><td class="u-mono" data-slot="offset"></td><td class="u-mono u-muted" data-slot="utc"></td></tr>
+  </template>
+
+  <template id="sch-tpl-parameter">
+    <tr><td class="u-mono" data-slot="name"></td><td class="u-mono" data-slot="value"></td></tr>
+  </template>
+
+  <!-- A run in the list (§20.10): its state + reason and origin on the first line, then DUE
+       (the occurrence — for a manual run, when it was asked for) and STARTED (when its
+       execution began) read against each other, and how long the EXECUTION took — the
+       pipeline's own duration from its record, not the scheduler's stamps (§20's finished_at is
+       when the reconciler recorded the end, up to a tick later). Compact rows, never a table,
+       in this column (§4.3b). -->
+  <template id="sch-tpl-run-row">
+    <div class="tplx-runrow sch-runrow">
+      <span class="app-chip" data-slot="state"><i class="ds-status"></i><span data-slot="state-text"></span></span>
+      <span class="ds-badge ds-badge-default" data-slot="origin"></span>
+      <span class="u-mono u-text-xs u-muted sch-run-reason" data-slot="reason"></span>
+      <dl class="sch-run-times">
+        <dt data-slot="due-label">due</dt><dd><time data-slot="due"></time></dd>
+        <dt>started</dt><dd><time data-slot="started"></time></dd>
+        <dt>took</dt><dd data-slot="duration"></dd>
+      </dl>
+      <span class="tplx-vacts">
+        <button type="button" class="ds-button ds-button-ghost ds-button-sm" data-sch-action="open-run">Details</button>
+        <a th:if="${canReadExecutions == true}" class="ds-button ds-button-ghost ds-button-sm" data-slot="execution" hidden>Execution</a>
+      </span>
+    </div>
+  </template>
+
+  <!-- Delete (§20.6): a confirm, not a typed confirm — deleting a schedule is soft, its runs
+       and their executions stay. `If-Match` carries the revision this dialog was opened at. -->
+  <template id="sch-tpl-delete">
+    <div class="u-backdrop" data-sch-dialog>
+      <div class="ds-card app-modal app-modal-sm" role="dialog" aria-modal="true" aria-labelledby="sch-delete-title">
+        <button type="button" class="ds-button ds-button-ghost ds-button-sm app-modal-close" data-sch-action="close-dialog" aria-label="Close">
+          <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg>
+        </button>
+        <h2 class="ds-title u-m0 u-mb-md" id="sch-delete-title">Delete schedule?</h2>
+        <p class="u-m0 u-mb-sm"><span class="u-mono u-bold" data-slot="name"></span> stops recording occurrences now.</p>
+        <p class="u-m0 u-mb-md u-text-sm u-muted">A run still waiting is skipped. Its executions stay readable on the
+          Executions screen, and the name becomes free for a new schedule.</p>
+        <p class="u-danger u-text-sm u-mb-sm" data-slot="error" role="alert" hidden></p>
+        <div class="u-row u-gap-sm u-right">
+          <button type="button" class="ds-button ds-button-secondary" data-sch-action="close-dialog">Cancel</button>
+          <button th:if="${canAuthor == true}" data-verb="schedule-delete-confirm" type="button"
+                  class="ds-button ds-button-danger" data-sch-action="confirm-delete">Delete schedule</button>
+        </div>
+      </div>
+    </div>
+  </template>
+</th:block>
