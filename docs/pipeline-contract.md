@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.32 (revised — see Change Log)
+**Status:** v1.34 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-25
@@ -546,10 +546,18 @@ Pipeline-level, not global, for the same reason §5.2 gives `settings.tempdb`: d
     "default": <value>,           // optional; only honored if required = false
     "precision": <int>,           // required for DECIMAL, BIGDECIMAL
     "scale": <int>,               // required for BIGDECIMAL; required for DECIMAL with exact-numeric semantics
-    "description": "..."          // optional but recommended
+    "description": "...",         // optional but recommended
+    "constraints": {              // optional (#194) — value rules; a value that breaks one is REFUSED, never adjusted
+      "min": <value>, "max": <value>,        // ordered types; wire-encoded in the parameter's own type; inclusive
+      "min_length": <int>, "max_length": <int>, // STRING (characters) and BINARY (decoded bytes); non-negative
+      "pattern": "<regex>"                     // STRING; anchored (the whole value); at most 256 characters
+    },
+    "cardinality": "SINGLE"       // optional (#194); SINGLE is the only value a pipeline accepts today (§6.2)
   }
 }
 ```
+
+`constraints` and `cardinality` are the parameter engine's declaration model ([parameter-engine record](superpowers/specs/2026-09-21-parameter-engine-design.md) §3.5, P28), shared so that a pipeline and a parameter set judge a value by the same `ParameterValueValidator` (`typesystem`). Both are omitted from a body that does not declare them, so bodies saved before 2026-09-26 serialise — and hash — unchanged.
 
 ### 6.2 Rules
 
@@ -561,6 +569,10 @@ Pipeline-level, not global, for the same reason §5.2 gives `settings.tempdb`: d
   - `BIGINTEGER`, `BIGDECIMAL`, `STRING`, `BINARY`, `DATE`, `TIME`, `TIMESTAMP` → JSON string
   - `BOOLEAN` → JSON boolean
 - Parameter values supplied at execution time must satisfy the schema. Type mismatch → `pipeline.execution.invalid_parameter_type`.
+- **One validator, one null policy (#194).** Every value — supplied, or a default being applied — is judged by the shared `ParameterValueValidator`: the §6.3 coercion, then the declared precision and scale, then `constraints`. A value that breaks a rule is `pipeline.execution.parameter_constraint_violation` (§13.3) with `details.reason` naming it (`min`, `max`, `min_length`, `max_length`, `pattern`, `pattern_budget`, `scale`, `precision`). A JSON `null` or an absent key is **unsupplied** — neither judged nor refused — and resolves as it always has: the `default`, then `parameter_required`, then `null` for an optional parameter. A published endpoint reaches the same binder, and a URL has no null: an absent query key is its only unsupplied form (`?x=` is an empty-string value).
+- **Precision and scale are enforced on values** (since 2026-09-26, #194 — a deliberate break, REST API change log v2.37): a `DECIMAL(12,2)` / scale-2 `BIGDECIMAL` refuses `12.345` (`reason: scale`, nothing is rounded) and a `DECIMAL(6,2)` refuses `99999.5` (`reason: precision` — at most `precision − scale` integer digits). Trailing zeros carry no digits (`12.500` fits scale 2 and binds as sent); a `DECIMAL` with no `scale` is approximate and has no places to check; a `BIGDECIMAL` with no `precision` is unbounded in its integer part. Before, both were descriptive only.
+- `constraints` (#194) — `min`/`max` apply to `INTEGER`, `BIGINTEGER`, `DECIMAL`, `BIGDECIMAL`, `DATE`, `TIME`, `TIMESTAMP`, wire-encoded in the parameter's own type (a `BIGDECIMAL` bound is a JSON string) with `min ≤ max`; `min_length`/`max_length` apply to `STRING` (characters, counted as code points) and `BINARY` (decoded bytes), non-negative with `min_length ≤ max_length` — an undeclared `max_length` leaves the value unbounded, as before; `pattern` applies to `STRING`: a `java.util.regex` pattern matched against the WHOLE value, at most 256 characters, refused at save if it uses a backreference, lookahead/lookbehind, a possessive quantifier, an atomic group or the COMMENTS flag, and matched over a read-counting input with a budget of 100,000 reads (past it: `reason: pattern_budget`). A key outside the catalogue, a key on a type it does not apply to, a malformed bound or length, and an unsafe pattern are refused at save (§12.7). The `default` must satisfy the parameter's own rules (`default_invalid`).
+- `cardinality` (#194) — `SINGLE` (the default when omitted) or `MULTI`. **`MULTI` is refused (`pipeline.validation.cardinality_unsupported`) until the dashboard round adopts list binding**: the field is the contract, shared with the parameter engine; the semantics land later. Any other value is refused with the same code.
 
 ### 6.3 Wire encoding of input parameter values
 
@@ -575,6 +587,8 @@ This is the **symmetric contract**: data flows in and out of the pipeline using 
 - `TIMESTAMP` parameter values MUST carry an explicit offset or `Z`; a zone-less timestamp string is rejected — the server never guesses the client's timezone.
 - `DATE`/`TIME` values must be exact ISO 8601 (`YYYY-MM-DD`, `HH:MM:SS[.ffffff]`). The fractional part, when present, is 1–6 digits — sub-microsecond input is rejected, not silently truncated (2026-08-08: strictness applies on ingress exactly as on egress; leniency here would make §3.5's exact egress a silent transformation).
 - `BINARY` parameter values must be PADDED standard base64 (RFC 4648 §4, length ≡ 0 mod 4) — the same alphabet and padding §3.5 mandates on egress; unpadded input is rejected (2026-08-08).
+- Precision and scale bind values: a `DECIMAL`/`BIGDECIMAL` value with more decimal places than the declared `scale`, or more integer digits than `precision − scale`, is `pipeline.execution.parameter_constraint_violation` (`details.reason`: `scale` / `precision`) — never rounded. Until 2026-09-26 a declared precision/scale was not checked against supplied values (`12.345` bound unchanged into a `DECIMAL(12,2)` parameter); enforcing it is the second deliberate break of #194 ([REST API change log v2.37](rest-api.md#appendix-a-change-log)).
+- Nothing is trimmed: a value with surrounding whitespace — `" 12.50 "` for `BIGDECIMAL`, `" 12 "` for `BIGINTEGER` — is `pipeline.execution.invalid_parameter_type`. Until 2026-09-26 the two BIG types were trimmed before parsing (and a published endpoint trimmed its `INTEGER`/`DECIMAL`/`BOOLEAN` query values too); that tolerance was retired as a deliberate break ([REST API change log v2.36](rest-api.md#appendix-a-change-log), #194). The coercion lives in `typesystem` since then, shared with the parameter engine ([Type System §3.1](type-system.md#31-wire-encoding-summary)).
 
 ---
 
@@ -928,6 +942,11 @@ is the same hole as an interpolated one, one directive earlier.
 | `pipeline.validation.parameter_scale_missing` | `scale` is present when type is `BIGDECIMAL`, or `DECIMAL` with exact semantics |
 | `pipeline.validation.conflicting_required_default` | `required: true` and `default` are not both set |
 | `pipeline.validation.default_type_mismatch` | `default` survives the FULL §6.3 coercion for its declared type, not merely the JSON-type check — a default that would fail at execution fails at save (D2, adjudicated 2026-08-08) |
+| `pipeline.validation.default_invalid` | `default` coerces but breaks the parameter's own rules — a `constraints` bound, length or pattern, or its declared precision/scale (`min: 0` with `default: -1`; `1.234` for `DECIMAL(12,2)`). `details.reason` names the rule, as `parameter_constraint_violation` does (#194) |
+| `pipeline.validation.constraint_not_applicable` | A `constraints` key on a type it does not apply to (§6.2: `min`/`max` on the ordered types, the lengths on `STRING`/`BINARY`, `pattern` on `STRING`); `details.constraint` names it (#194) |
+| `pipeline.validation.constraint_invalid` | A malformed `constraints` block (`details.reason`): `not_an_object`, `unknown_key`, `length_not_an_integer`, `pattern_not_a_string` (the wire pre-scan), `bound_type` (a bound not wire-encoded in the parameter's type), `min_greater_than_max`, `negative_length`, `min_length_greater_than_max_length` (#194) |
+| `pipeline.validation.pattern_invalid` | A `pattern` over 256 characters (`too_long`), one that does not compile (`syntax`), or one using a construct the regex budget refuses — a backreference, lookahead/lookbehind, a possessive quantifier, an atomic group, the COMMENTS flag (`unsafe_construct`) (#194) |
+| `pipeline.validation.cardinality_unsupported` | `cardinality` other than `SINGLE`: `MULTI` until the dashboard round adopts list binding, and any value that is not a cardinality at all; `details.supported` is `["SINGLE"]` (#194) |
 
 ### 12.8 Settings validations
 
@@ -1046,6 +1065,7 @@ Error codes follow the format `{domain}.{entity}.{failure}`. Codes are lowercase
 | `pipeline.execution.not_found` | 404 | Pipeline id or version not found |
 | `pipeline.execution.parameter_required` | 400 | Required parameter missing from execution request |
 | `pipeline.execution.invalid_parameter_type` | 400 | Parameter value doesn't match declared type — also a calculator `context_key` supplied at execute time that fails coercion against its kind's output type (§4.10; an ANY-output key accepts any JSON scalar, a container is refused with this same code) |
+| `pipeline.execution.parameter_constraint_violation` | 400 | A supplied value — or a default being applied — breaks a declared rule of its parameter: a `constraints` bound, length or pattern, the pattern's read budget, or the declared precision/scale (§6.2, #194). Nothing is rounded or clamped. `details.reason` names the rule (`min`, `max`, `min_length`, `max_length`, `pattern`, `pattern_budget`, `scale`, `precision`); same shape as `invalid_parameter_type` otherwise. At a published endpoint it is one entry of `endpoint.request.invalid` |
 | `pipeline.execution.calculator_keys_partial` | 400 | The caller supplied a PROPER SUBSET of a multi-output node's keys (121, §4.10). Override is all-or-nothing per node: every key supplied and the node is skipped (`provided_by: "caller"` on its stats), none and it computes; some is refused before any node runs, with the same shape as `invalid_parameter_type`. `details` carries `supplied` and `missing` |
 | `pipeline.execution.aborted` | 500 | Execution aborted unexpectedly (executor error) |
 | `pipeline.execution.timeout` | 504 | Execution exceeded timeout |
@@ -1626,6 +1646,8 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.34 | 194a (#194) parameter engine lane A — the shared validator | §6.1: a parameter gains optional **`constraints`** (`min`, `max`, `min_length`, `max_length`, `pattern`) and **`cardinality`** (`SINGLE`/`MULTI`), the parameter engine's declaration model; both omitted when absent, so no stored body's hash moves. §6.2: every value (and every applied default) is judged by the shared `ParameterValueValidator` with ONE null policy — `null` and absent are unsupplied and resolve as before; **precision and scale are enforced on values** (the second deliberate break, REST API v2.37); `MULTI` is refused until the dashboard round. §12.7 gains `default_invalid`, `constraint_not_applicable`, `constraint_invalid`, `pattern_invalid`, `cardinality_unsupported`; §13.3 gains `pipeline.execution.parameter_constraint_violation` (400, `details.reason`). Additive per §15.2 except the precision/scale enforcement, which is named as a break. |
+| 2026-09-26 | v1.33 | 194a (#194) parameter engine lane A | §6.3: **nothing is trimmed** — a `BIGINTEGER`/`BIGDECIMAL` value with surrounding whitespace is `pipeline.execution.invalid_parameter_type`; the two BIG types were trimmed before parsing until today, a deliberate break recorded in REST API v2.36. `ParameterCoercion` and `ParameterWireEncoder` moved to `typesystem` (made public) so the parameter engine shares the one implementation; the rejection wording is unchanged. |
 | 2026-09-26 | v1.32 | scheduler lane 1 (#9) — numbered after origin/main's v1.31 (232) | New **§13.19 Schedules**: sixteen `schedule.*` codes — `schedule.not_found` / `schedule.run.not_found` (404), the 409 state family (`name_taken`, `revision_conflict`, `run.overlap`, `blocked`, `not_blocked`, `limit.per_workspace`) and the 400 `schedule.validation.*` family (`request_invalid`, `name_invalid`, `cron_invalid`, `timezone_invalid`, `interval_too_short`, `executor_unknown`, `payload_invalid`, `target_not_found`). None is raised while a schedule fires. Landed with `ScheduleErrorCodes` and their `ApiErrorCatalog` rows. |
 | 2026-09-25 | v1.31 | 232 (#232) the limiter's own sentence | §13.11's `rate_limit.exceeded` row now states WHICH user message answers on which surface: the catalog default (the request-volume sentence) for every API surface, the sign-in sentence only from the login damper. Code, status and `details` unchanged; no new code, no catalog row count change. |
 | 2026-09-25 | v1.30 | 7e (#7) the semantic link | §13.9 gains `template.implements_unresolved` (400 — an `implements` entry that is not a WORKSPACE `definition`/`exclusion`/`preference` fact visible from the writing workspace; not-found semantics) and the `template.blocks_not_allowed` row names `implements` beside the three blocks. §13.13 gains `pipeline.release.template_needs_review` with HTTP `—`: a WARNING in the release response's new `warnings` array, never an error status (the §13.6 type-mapping shape; `ApiErrorCatalog.NEVER_RETURNED_LIVE`). §14's release row names the response's `warnings`. Landed in the same commit as the constants, the catalog rows and the drift counts (§13 row count 202 → 204). |

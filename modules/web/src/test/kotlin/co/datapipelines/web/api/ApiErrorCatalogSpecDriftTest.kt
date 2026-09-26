@@ -254,8 +254,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 404s with explicit catalog rows, the 409 `schedule.` and 400 `schedule.validation.`
          * family defaults), landed in the SAME commit as `ScheduleErrorCodes`. Re-derived from
          * the document's own parse.
+         *
+         * 221 → 222 with #194 lane A: §13.3's `pipeline.execution.parameter_constraint_violation`
+         * (400, an explicit catalog row — the `pipeline.execution.` family default is 500), landed
+         * in the SAME commit as its constant. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 221
+        const val SECTION_13_ROW_COUNT = 222
 
         /**
          * §12's distinct validation codes.
@@ -295,7 +299,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 69 → 79 with 7c (#7, the TRANSFORM node): §12.13's ten rules
          * (`pipeline.validation.transform_*`), landed in the SAME commit as their constants. All
          * 400 like the family default; re-derived from the document's own parse.
+         *
+         * 79 → 84 with #194 lane A (the shared parameter validator): §12.7's `default_invalid`,
+         * `constraint_not_applicable`, `constraint_invalid`, `pattern_invalid` and
+         * `cardinality_unsupported` — all 400 through the family default, landed in the SAME
+         * commit as their constants. Re-derived from the document's own parse.
          */
-        const val SECTION_12_CODE_COUNT = 79
+        const val SECTION_12_CODE_COUNT = 84
     }
 }

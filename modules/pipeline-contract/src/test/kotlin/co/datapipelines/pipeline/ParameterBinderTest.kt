@@ -90,6 +90,18 @@ class ParameterBinderTest {
     }
 
     @Test
+    fun `a padded BIG numeric is refused at the execute path - nothing is trimmed (#194)`() {
+        // The execute API's binder (POST /api/v1/pipelines/{id}/execute) — a deliberate break of
+        // 2026-09-26: " 12.50 " used to bind as 12.50 (rest-api change log).
+        val result = binder.bind(mapOf("start_date" to Fixtures.json("\"2026-08-01\""), "min_total" to Fixtures.json("\" 12.50 \"")))
+
+        result.shouldBeInstanceOf<ParameterBindingResult.Rejected>()
+        result.failures.single().code shouldBe PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE
+        result.failures.single().path shouldBe "parameters.min_total"
+        result.failures.single().message shouldBe "Parameter 'min_total': BIGDECIMAL value is not a number: ' 12.50 '."
+    }
+
+    @Test
     fun `undeclared inputs are ignored rather than rejected`() {
         // §7.2 defines the Context by the pipeline's declarations, and §13 has no code for an
         // extra. Ignoring also keeps a client that upgrades before the pipeline from breaking.

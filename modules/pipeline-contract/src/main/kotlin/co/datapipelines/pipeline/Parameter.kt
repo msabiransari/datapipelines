@@ -1,6 +1,9 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterCardinality
+import co.datapipelines.typesystem.ParameterConstraints
+import co.datapipelines.typesystem.ParameterDeclaration
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonInclude
@@ -22,6 +25,15 @@ import com.fasterxml.jackson.databind.JsonNode
  * Binding the default to a Kotlin type here would erase exactly the distinction the rule
  * checks: a JSON number and a JSON string both land in a `String` field once Jackson has
  * coerced them. Keeping the raw node means the validator sees what the author wrote.
+ *
+ * ## `constraints` and `cardinality` (#194, parameter-engine record P28)
+ *
+ * Both optional, both the parameter engine's declaration model — so a pipeline and a parameter
+ * set judge a value by the same `ParameterValueValidator` (see [declaration]). `constraints`
+ * (§6.1) is enforced from the start; `cardinality` is part of the contract with `SINGLE` the only
+ * value a pipeline accepts until the dashboard round adopts `MULTI` (§6.2). Absent stays absent:
+ * both are null when the author wrote nothing and are then omitted on the way out, so a body
+ * saved before #194 re-serialises — and hashes — byte for byte as it did.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -38,6 +50,11 @@ data class Parameter(
     val scale: Int? = null,
     @field:JsonProperty("description") @get:JsonProperty("description") @param:JsonProperty("description")
     val description: String? = null,
+    @field:JsonProperty("constraints") @get:JsonProperty("constraints") @param:JsonProperty("constraints")
+    val constraints: ParameterConstraints? = null,
+    /** Null means the author wrote none, which reads as [ParameterCardinality.SINGLE] — see [declaration]. */
+    @field:JsonProperty("cardinality") @get:JsonProperty("cardinality") @param:JsonProperty("cardinality")
+    val cardinality: ParameterCardinality? = null,
 ) {
     /**
      * True when the declaration supplies a default the executor may apply.
@@ -49,6 +66,23 @@ data class Parameter(
      */
     @get:JsonIgnore
     val hasDefault: Boolean get() = default != null && !default.isNull
+
+    /**
+     * This declaration as the shared validator reads it — the one projection every binder and the
+     * save-time rules use, so the two cannot judge a value by different fields.
+     */
+    @get:JsonIgnore
+    val declaration: ParameterDeclaration
+        get() =
+            ParameterDeclaration(
+                type = type,
+                precision = precision,
+                scale = scale,
+                required = required,
+                default = default,
+                constraints = constraints,
+                cardinality = cardinality ?: ParameterCardinality.SINGLE,
+            )
 
     companion object {
         /**

@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.20 (living document — updated as enums evolve)
+**Status:** v1.21 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -711,6 +711,20 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 
 ---
 
+## 26. `ParameterCardinality` — how many values one parameter carries (#194)
+
+**Source:** [Pipeline Contract §6.1/§6.2](pipeline-contract.md#61-schema) (a pipeline parameter's optional `cardinality`) and the [parameter-engine record §3.2](superpowers/specs/2026-09-21-parameter-engine-design.md) (a parameter set's); the Kotlin enum is `ParameterCardinality` (`typesystem`, `ParameterDeclaration.kt`).
+**Used by:** pipeline-contract, the parameter engine (#194's later lanes).
+
+| Value | Meaning |
+|---|---|
+| `SINGLE` | One value. The default when the key is omitted, and the only value a pipeline parameter accepts today |
+| `MULTI` | A JSON array of distinct values of the declared type; `[]` reads as nothing chosen. Refused on a pipeline parameter (`pipeline.validation.cardinality_unsupported`) until the dashboard round adopts list binding |
+
+**Closed.** Any other value is refused where it arrives (`cardinality_unsupported` on a pipeline).
+
+---
+
 ## Cross-Reference: Where Each Enum Is Authored
 
 | Enum | Authoring spec | Consuming specs |
@@ -741,6 +755,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 | `CheckRunVerdict` | pipeline-contract (`ReleaseCheckGate.kt`; §20 here is the wire table) | metadata-db (the V28 CHECK), application, mcp-server, rest-api, the UI |
 | `CheckRunVia` | pipeline-contract (`ReleaseCheckGate.kt`; §21 here is the wire table) | metadata-db (the V28 CHECK), application, mcp-server, rest-api, the UI |
 | `MissedRunPolicy`, `RunOrigin`, `RunState`, `TrailKind` | [scheduler.md](scheduler.md) (`scheduler` declares them; §22–§25 here are the wire tables) | metadata-db (the V38 CHECKs), rest-api §20 |
+| `ParameterCardinality` | pipeline-contract §6.1 (`typesystem` declares it; §26 here is the wire table) | the parameter engine (#194), rest-api, mcp-server |
 
 ---
 
@@ -763,6 +778,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.21 | 194a (#194) parameter engine lane A | New **§26 `ParameterCardinality`** (`SINGLE`, `MULTI`) — a pipeline parameter's optional `cardinality`, shared with the parameter engine; `MULTI` is refused on a pipeline until the dashboard round. Cross-reference row added. |
 | 2026-09-25 | v1.20 | scheduler lane 1 (#9) | §18 gains **`SCHEDULE`** (V38); the never-shipped `SCHEDULED` placeholder is marked superseded (kept — this document never removes a value). §15 gains the seven **schedule audit events** (`schedule.created` … `schedule.run_requested`). §16 registers the `schedule.*` domain (pipeline-contract §13.19). New **§22 `MissedRunPolicy`**, **§23 `RunOrigin`**, **§24 `RunState`**, **§25 `TrailKind`**. |
 | 2026-09-25 | v1.19 | 7e (#7) the semantic link | §16: the `pipeline.release.*` row names its one WARNING code (`pipeline.release.template_needs_review`, in the release response's `warnings`, never an error), and the two-segment list names the bare `template.*` block/citation codes (7b's, and 7e's `template.implements_unresolved`). No enum value added, removed or renamed. |
 | 2026-09-24 | v1.18 | 215b (#215) key identities, key roles | **§8 `Scope` is replaced by §8 `UserKind`** (`human` / `service` / `system`, V34) and new **§8D `KeyRole`** (`api_caller`, `promotion_receiver`) — scopes were removed (PK8). §8A's kinds restated as where a credential may be presented, the role as what it may do; §8B is one axis. §15's `auth.scope.denied` keeps its name, now for every authorization refusal; §16/§17 name `auth.permission.undeclared`. Cross-reference rows for the two new enums. |

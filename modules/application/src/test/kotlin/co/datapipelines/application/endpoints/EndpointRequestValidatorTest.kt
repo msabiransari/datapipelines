@@ -3,6 +3,7 @@ package co.datapipelines.application.endpoints
 import co.datapipelines.pipeline.Parameter
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterConstraints
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
@@ -162,6 +163,70 @@ class EndpointRequestValidatorTest {
             { valid.parameters["s"]?.isTextual shouldBe true },
             { valid.parameters["day"]?.isTextual shouldBe true },
         )
+    }
+
+    @Test
+    fun `a padded query value is refused, never trimmed (#194)`() {
+        // A deliberate break of 2026-09-26 (rest-api change log): the lift used to `trim()` the
+        // three number/boolean types and the BIG numerics trimmed inside the coercion, so
+        // `?amount=%2012.50%20` ran as 12.50. Strict everywhere now, one code per defect.
+        val outcome =
+            typed(
+                "n" to Parameter(LogicalType.INTEGER),
+                "d" to Parameter(LogicalType.DECIMAL, precision = 12, scale = 2),
+                "b" to Parameter(LogicalType.BOOLEAN),
+                "bi" to Parameter(LogicalType.BIGINTEGER),
+                "bd" to Parameter(LogicalType.BIGDECIMAL, precision = 12, scale = 2),
+            ).validate(
+                request(
+                    pathVariables = emptyMap(),
+                    query =
+                        mapOf(
+                            "n" to listOf(" 42"),
+                            "d" to listOf(" 12.50 "),
+                            "b" to listOf("true "),
+                            "bi" to listOf("12 "),
+                            "bd" to listOf(" 12.50 "),
+                        ),
+                ),
+            )
+
+        val invalid = outcome.shouldBeInstanceOf<EndpointRequestValidator.Outcome.Invalid>()
+        withClue("defects: ${invalid.defects}") {
+            invalid.defects.map { it.parameter to it.code } shouldContainExactlyInAnyOrder
+                listOf("n", "d", "b", "bi", "bd").map { it to PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE }
+        }
+    }
+
+    @Test
+    fun `a value breaking a declared constraint or scale is the constraint code, beside the other defects (#194)`() {
+        val outcome =
+            typed(
+                "amount" to
+                    Parameter(
+                        LogicalType.DECIMAL,
+                        precision = 12,
+                        scale = 2,
+                        constraints = ParameterConstraints(min = JsonMapper().readTree("0")),
+                    ),
+                "fee" to Parameter(LogicalType.BIGDECIMAL, scale = 2),
+                "day" to Parameter(LogicalType.DATE),
+            ).validate(
+                request(
+                    pathVariables = emptyMap(),
+                    query = mapOf("amount" to listOf("-1"), "fee" to listOf("1.234"), "day" to listOf("bogus")),
+                ),
+            )
+
+        val invalid = outcome.shouldBeInstanceOf<EndpointRequestValidator.Outcome.Invalid>()
+        withClue("defects: ${invalid.defects}") {
+            invalid.defects.map { it.parameter to it.code } shouldContainExactlyInAnyOrder
+                listOf(
+                    "amount" to PipelineErrorCodes.Execution.PARAMETER_CONSTRAINT_VIOLATION,
+                    "fee" to PipelineErrorCodes.Execution.PARAMETER_CONSTRAINT_VIOLATION,
+                    "day" to PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                )
+        }
     }
 
     @Test

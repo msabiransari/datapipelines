@@ -1,6 +1,5 @@
-package co.datapipelines.pipeline
+package co.datapipelines.typesystem
 
-import co.datapipelines.typesystem.LogicalType
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal

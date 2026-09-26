@@ -15,12 +15,12 @@ import co.datapipelines.pipeline.CheckRunVerdict
 import co.datapipelines.pipeline.CheckRunVia
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.ParameterBindingResult
-import co.datapipelines.pipeline.ParameterWireEncoder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineCheck
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterWireEncoder
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.json.JsonMapper
 import java.util.UUID

@@ -44,6 +44,7 @@ datapipelines/
 │       └── KotlinConventionsPlugin.kt
 ├── modules/
 │   ├── typesystem/                      # [Type System spec]
+│   ├── graph/                           # the generic Dag<T> primitive, layer 0 (§5.17)
 │   ├── calculators/                     # [Calculators catalog] — pure kinds, layer 0 (§5.14)
 │   ├── scripting/                       # Transform script engine seam, layer 0 (§5.15)
 │   ├── pipeline-contract/               # [Pipeline Contract spec]
@@ -68,6 +69,7 @@ datapipelines/
 | Module | Spec | Responsibility | Owns persistence for |
 |---|---|---|---|
 | `typesystem` | [type-system.md](type-system.md) | The 11 canonical types, per-dialect mappers, H2 mapping, schema envelope. Foundation. | — (no persistence) |
+| `graph` | [dag-executor.md §3](dag-executor.md#3-dag-data-structure) (this spec, §5.17) | The generic DAG primitive — `Dag<T>`, `DagBuilder<T>` (topological order, cycle detection, reverse index). Stdlib only, no internal dependencies: moved out of `dag` (#194) so a module below the executor can build a graph without inheriting the executor's dependency set. Package `co.datapipelines.dag`, kept on purpose. | — (no persistence) |
 | `scripting` | (this spec, §5.15) | The transform engine seam: `ScriptEngine` (JSONata in round one), the evaluation pool, the type gate, canonical JSON. Pure library — evaluates untrusted script bodies with no I/O surface. | — (no persistence) |
 | `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. | `PipelineRepository` → `pipelines`, `pipeline_versions` |
 | `templates` | [templates.md](templates.md) | Freemarker integration, library macros, template registry, versioning. | `TemplateRepository` → `templates`, `template_versions` |
@@ -100,9 +102,9 @@ This diagram is a **rendering of the normative table in §4.2** — it carries n
 
 ```
 layer 0 — no internal deps
-┌──────────────┐
-│  typesystem  │
-└──────────────┘
+┌──────────────┐ ┌─────────┐
+│  typesystem  │ │  graph  │
+└──────────────┘ └─────────┘
 
 layer 1 — typesystem only
 ┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
@@ -122,7 +124,7 @@ layer 3
 layer 4
 ┌──────────────┐
 │     dag      │  ← typesystem, calculators, pipeline-contract, templates,
-│  (executor)  │    datasources, staging, scripting
+│  (executor)  │    datasources, staging, scripting, graph
 └──────────────┘
 
 layer 5
@@ -164,6 +166,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | Module | Allowed internal dependencies (exhaustive) |
 |---|---|
 | `typesystem` | *(none)* |
+| `graph` | *(none)* |
 | `calculators` | `typesystem` |
 | `scripting` | `typesystem` |
 | `pipeline-contract` | `typesystem`, `calculators` |
@@ -172,7 +175,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `staging` | `typesystem` |
 | `auth` | `typesystem` |
 | `scheduler` | `typesystem`, `pipeline-contract` |
-| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting` |
+| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph` |
 | `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application` |
 | `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler` |
@@ -385,8 +388,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 - `io.micrometer:micrometer-core` — executor metrics ([DAG Executor §15.3](dag-executor.md#153-monitoring))
 
 **Public API:**
-- `Dag<T>` data structure (the ~150-line implementation)
-- `PipelineExecutor`
+- `PipelineExecutor` — built on `Dag<T>`, which lives in `graph` since #194 (§5.17; same package, `co.datapipelines.dag`)
 - `ExecutableNode`, `NodeSource`, `NodeType`
 - `NodeResult` — the executor's **internal** in-flight per-node value ([§7.1](dag-executor.md#71-noderesult--the-executors-in-flight-per-node-value)); carries `callerResultRef`, a Redis key, never a live `ResultSet`
 - `NodeStats`, `NodeStatus` — the wire-facing projection of `NodeResult`
@@ -401,7 +403,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 - `StaleExecutionSweeper` — the crash sweep's idempotent `UPDATE` (safe for every replica to run; no leader election by design). Its scheduling lives in `web` (§5.9): `web`'s `SweepSchedulingConfiguration` is the project's one `@EnableScheduling`/`@Scheduled` surface, introduced 2026-09-01 (036). Before that, "no `@Scheduled`/Quartz/cron anywhere" was a verified property of the codebase — any NEW scheduled job is a lifecycle-surface change and belongs on this record.
 - `ExecutionEventRetention` — the `execution_events` retention job (050/T60): one idempotent `DELETE` past the retention window, safe for every replica, never touching `pipeline_executions`. Scheduled by `web`'s `RetentionSchedulingConfiguration` (`@Scheduled`, fixed-delay 1h, riding the sweep's single-thread scheduler — still exactly ONE `@EnableScheduling`).
 
-**Tests:** unit tests for `Dag<T>` algorithms; unit tests for executor (mocked dependencies); cancellation tests covering all three `AbortReason` paths incl. the cross-instance Redis flag; integration tests with real H2 + Testcontainers sources + a Redis container.
+**Tests:** unit tests for executor (mocked dependencies) — the `Dag<T>` algorithm tests moved to `graph` with the class; cancellation tests covering all three `AbortReason` paths incl. the cross-instance Redis flag; integration tests with real H2 + Testcontainers sources + a Redis container.
 
 ### 5.7 `auth`
 
@@ -658,6 +660,18 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Why it is its own module.** The scheduler must stay pipeline-agnostic (the owner's boundary, record §5): timing, occurrence identity, admission and the run trail are generic, and a report executor is expected to plug into the same port. A module with no `dag`/`application`/`auth` edge makes that a build fact; the fake executor in its own suite proves it at runtime.
 
 **Tests:** the occurrence function (DST gap/fold against the measured A9 case, month/year boundaries, the min-interval guard); the repositories and the dispatcher/worker/reconciler against a real Postgres with a controlled clock (`ManualScheduler`, `SettableClock`) — two instances, one occurrence, one launch; the crash windows; capacity retries; the two spike proofs; `SchedulerBoundaryTest`.
+
+### 5.17 `graph`
+
+**Dependencies (internal):** none. **Dependencies (external):** none — Kotlin stdlib only ([DAG Executor §2](dag-executor.md#2-design-principles) principle 1: no graph library for ~150 lines of code).
+
+**Public API:**
+- `Dag<T>` — the immutable, well-formed-by-construction DAG ([DAG Executor §3](dag-executor.md#3-dag-data-structure)): node ids, `dependenciesOf`/`dependentsOf`, `topologicalOrder()`, `independentBatches()`, `detectCycle()`
+- `DagBuilder<T>` — rejects duplicate ids, dangling dependencies and cycles at `build()`
+
+**Why it is its own module.** Parameter-engine record P16/P17 (#194): the parameter engine builds its dependency graph with the house `Dag<T>`, and `dag` — the executor — carries `pipeline-contract`, `templates`, `datasources`, `staging`, Redis and JDBC, so nothing below `application` could depend on it without inheriting that set. The primitive moved **byte-identical** (`git diff -M` shows two 100% renames) and **in the same package**, `co.datapipelines.dag`, so the executor's two importers did not change — the owner's ruling was that the mature executor is not touched. `DagPackageTest` pins the package; renaming it is an executor change, not a tidy-up.
+
+**Tests:** `DagTest` (moved unchanged: topological order, batches, cycle detection and its path, builder refusals, the deep-chain iterative search); `DagPackageTest`.
 
 ## 6. Version Catalog
 
@@ -1202,3 +1216,4 @@ Before considering the module structure "ready":
 | 2026-09-02 | v1.6 | multi-instance round 2 (050) | **§5.6** gains `ExecutionEventRetention` — the SECOND scheduled job (retention, fixed-delay 1h), riding the same single `@EnableScheduling`; the sweep record above now reads as the pattern, not the exception. §5.9's `web` list gains `DatasourceInvalidationConfiguration` (the §5.7 pool-invalidation channel — the codebase's first Redis pub/sub message, `dp:datasource-invalidated`). dag's `ExecutionSlots`/`ExecutorConfig` rename `maxConcurrentExecutionsGlobal` → `maxConcurrentExecutionsPerInstance` (050/R2: the limit was always per JVM). |
 | 2026-08-28 | §3.1 amendment (promised at 019's merge) | The workspace domain's placement recorded in the responsibility matrix and the `auth` module spec: `WorkspaceRepository` → `workspaces`/`workspace_members`, `WorkspaceService`/types in the public API. No module moves; this documents what 019 built where it built it. |
 | 2026-09-08 | 089 dialect-count fix | The integration-tests dependency note said the dialect catalogs "list the seven" — they have listed eight since 087's LAKE (§4.1). One word, plus the fact that LAKE is embedded too (its suite's container is MinIO, object storage, not a database server). |
+| 2026-09-26 | #194 lane A — `graph` | New layer-0 module `graph` (§3 tree, §3.1 matrix, §4.1 diagram, §4.2 table, new §5.17): the generic `Dag<T>`/`DagBuilder<T>` moved out of `dag` byte-identical and in the same package (`co.datapipelines.dag`), so the parameter engine can build a graph without depending on the executor (parameter-engine record P16/P17). `dag`'s row gains `graph`; §5.6's API and test lists follow. The root build's allowed-dependency map moved with the table. |

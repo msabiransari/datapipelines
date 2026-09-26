@@ -51,6 +51,7 @@ class PublishedEndpointE2eTest {
 
     private lateinit var endpointKey: String
     private lateinit var foreignKey: String
+    private lateinit var revenuePipelineId: String
 
     @BeforeAll
     fun seed() {
@@ -176,6 +177,102 @@ class PublishedEndpointE2eTest {
             .body("error.details.errors", hasSize<Any>(1))
             .body("error.details.errors[0].parameter", equalTo("start_date"))
             .body("error.details.errors[0].code", equalTo("pipeline.execution.invalid_parameter_type"))
+    }
+
+    @Test
+    fun `a padded number is refused at a published endpoint, never trimmed (#194)`() {
+        // A deliberate break of 2026-09-26 (rest-api change log): a BIGDECIMAL used to be
+        // trimmed inside the coercion, so this URL ran as 12.50.
+        given()
+            .port(port)
+            .header(API_KEY_HEADER, endpointKey)
+            .queryParam("min_revenue", " 12.50 ")
+            .`when`()
+            .get("/api/nyc/v1/revenue/Manhattan")
+            .then()
+            .statusCode(400)
+            .body("error.code", equalTo("endpoint.request.invalid"))
+            .body("error.details.errors", hasSize<Any>(1))
+            .body("error.details.errors[0].parameter", equalTo("min_revenue"))
+            .body("error.details.errors[0].code", equalTo("pipeline.execution.invalid_parameter_type"))
+    }
+
+    @Test
+    fun `a padded number is refused at the execute API, never trimmed (#194)`() {
+        // The same value through POST /api/v1/pipelines/{id}/execute — the one binder both
+        // surfaces share refuses it before anything runs.
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .accept(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"parameters": {"borough": "Manhattan", "min_revenue": " 12.50 "}}""")
+            .`when`()
+            .post("/api/v1/pipelines/$revenuePipelineId/execute")
+            .then()
+            .statusCode(400)
+            .body("error.code", equalTo("pipeline.execution.invalid_parameter_type"))
+    }
+
+    @Test
+    fun `a value breaking a declared constraint or scale is refused at a published endpoint (#194)`() {
+        listOf("-1" to "min", "12.345" to "scale").forEach { (value, reason) ->
+            given()
+                .port(port)
+                .header(API_KEY_HEADER, endpointKey)
+                .queryParam("min_revenue", value)
+                .`when`()
+                .get("/api/nyc/v1/revenue/Manhattan")
+                .then()
+                .statusCode(400)
+                .body("error.code", equalTo("endpoint.request.invalid"))
+                .body("error.details.errors", hasSize<Any>(1))
+                .body("error.details.errors[0].parameter", equalTo("min_revenue"))
+                .body("error.details.errors[0].code", equalTo("pipeline.execution.parameter_constraint_violation"))
+                .body(
+                    "error.details.errors[0].message",
+                    org.hamcrest.Matchers.containsString(
+                        if (reason ==
+                            "min"
+                        ) {
+                            "minimum"
+                        } else {
+                            "decimal place"
+                        },
+                    ),
+                )
+        }
+    }
+
+    @Test
+    fun `a value breaking a declared constraint is refused at the execute API, naming the rule (#194)`() {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .accept(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"parameters": {"borough": "Manhattan", "min_revenue": "-1"}}""")
+            .`when`()
+            .post("/api/v1/pipelines/$revenuePipelineId/execute")
+            .then()
+            .statusCode(400)
+            .body("error.code", equalTo("pipeline.execution.parameter_constraint_violation"))
+            .body("error.details.failures[0].details.reason", equalTo("min"))
+    }
+
+    @Test
+    fun `a required parameter sent as JSON null is parameter_required at the execute API - null is unsupplied (#194)`() {
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .accept(ContentType.JSON)
+            .asSession(ADMIN_SESSION)
+            .body("""{"parameters": {"borough": null}}""")
+            .`when`()
+            .post("/api/v1/pipelines/$revenuePipelineId/execute")
+            .then()
+            .statusCode(400)
+            .body("error.code", equalTo("pipeline.execution.parameter_required"))
     }
 
     @Test
@@ -637,18 +734,22 @@ class PublishedEndpointE2eTest {
             .jsonPath()
             .getString("data.body_hash")
 
+    // `min_revenue` is declared for the value-validation cases (#194) and the SQL never reads it —
+    // §12 has no unused-parameter rule, and a value is judged whether or not a template uses it.
     private fun createPipelines() {
-        pipeline(
-            """
-            {"schema_version": 1, "name": "test/revenue_by_borough", "display_name": "Revenue by borough",
-             "description": "074 E2E.",
-             "parameters": {"borough": {"type": "STRING", "required": true},
-                            "start_date": {"type": "DATE", "required": false, "default": "2024-01-01"}},
-             "nodes": [{"id": "revenue", "description": "Revenue for one borough", "type": "DQL",
-                        "source": "ep-source", "template": {"id": "test/revenue_by_borough.sql", "version": 1},
-                        "depends_on": []}]}
-            """.trimIndent(),
-        )
+        revenuePipelineId =
+            pipeline(
+                """
+                {"schema_version": 1, "name": "test/revenue_by_borough", "display_name": "Revenue by borough",
+                 "description": "074 E2E.",
+                 "parameters": {"borough": {"type": "STRING", "required": true},
+                                "start_date": {"type": "DATE", "required": false, "default": "2024-01-01"},
+                                "min_revenue": {"type": "BIGDECIMAL", "precision": 12, "scale": 2, "required": false, "constraints": {"min": "0"}}},
+                 "nodes": [{"id": "revenue", "description": "Revenue for one borough", "type": "DQL",
+                            "source": "ep-source", "template": {"id": "test/revenue_by_borough.sql", "version": 1},
+                            "depends_on": []}]}
+                """.trimIndent(),
+            )
         pipeline(
             """
             {"schema_version": 1, "name": "test/trade_summary", "display_name": "Trade summary",
@@ -703,7 +804,7 @@ class PublishedEndpointE2eTest {
      * would be publishing over something this surface is right to refuse. The release is the human
      * step the product requires, done here the way a person does it.
      */
-    private fun pipeline(body: String) {
+    private fun pipeline(body: String): String {
         val created =
             given()
                 .port(port)
@@ -727,6 +828,7 @@ class PublishedEndpointE2eTest {
             .then()
             .statusCode(200)
             .body("data.status", equalTo("RELEASED"))
+        return id
     }
 
     /** The rows the endpoint serves: 3 Manhattan, 2 elsewhere, so a path variable can be seen to filter. */

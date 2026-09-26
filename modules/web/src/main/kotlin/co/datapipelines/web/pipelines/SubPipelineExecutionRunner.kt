@@ -28,7 +28,6 @@ import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.executor.pipelineExecutor
 import co.datapipelines.pipeline.NodeOutput
-import co.datapipelines.pipeline.ParameterWireEncoder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineDeserializer
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -40,6 +39,7 @@ import co.datapipelines.staging.StagingMemoryLimitException
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterWireEncoder
 import co.datapipelines.web.sse.ExecutionContext
 import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.SseEventLog

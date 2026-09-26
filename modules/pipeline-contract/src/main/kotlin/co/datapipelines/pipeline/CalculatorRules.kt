@@ -5,6 +5,7 @@ import co.datapipelines.calculators.CalculatorKind
 import co.datapipelines.calculators.CalculatorRegistry
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterCoercion
 import com.fasterxml.jackson.databind.JsonNode
 import java.util.UUID
 
