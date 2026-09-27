@@ -1601,6 +1601,8 @@ object PipelineErrorCodes {
 
         const val SELECTOR_VALUE_TYPE_MISMATCH = "parameter.validation.selector_value_type_mismatch"
 
+        const val INPUT_SOURCE_MULTIPLE_ROWS = "parameter.validation.input_source_multiple_rows"
+
         const val SELECTOR_ORDER_BY_MISSING = "parameter.validation.selector_order_by_missing"
 
         const val SELECTOR_PROBE_UNAVAILABLE = "parameter.validation.selector_probe_unavailable"

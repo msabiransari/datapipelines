@@ -13,6 +13,9 @@ dependencies {
     // validator calls — TemplateDryRenderer, DatasourceRegistry, TemplateVersionStatuses,
     // TemplateReleaser (record §14 item 3: this module compiles against pipeline-contract).
     implementation(project(":modules:pipeline-contract"))
+    // Dag<T> — the set's dependency graph (record P16): cycle refusal at save, topological order for the
+    // dry run and (lane C) the evaluator. Same package as the executor's, `co.datapipelines.dag`.
+    implementation(project(":modules:graph"))
 
     implementation(libs.jackson.module.kotlin)
     implementation(libs.spring.boot.starter.jdbc) // ParameterSetRepository (§8.1), @ConfigurationProperties

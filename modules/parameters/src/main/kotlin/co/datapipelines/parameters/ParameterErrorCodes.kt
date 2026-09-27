@@ -188,6 +188,12 @@ object ParameterErrorCodes {
     /** The selector's `value` column type does not pass record §6.4 against the declared type. */
     const val SELECTOR_VALUE_TYPE_MISMATCH = "parameter.validation.selector_value_type_mismatch"
 
+    /**
+     * A database-fed `INPUT`'s template returned two or more rows at save's dry run (owner ruling
+     * 2026-09-27) — the save-time twin of [EVALUATE_INPUT_SOURCE_MULTIPLE_ROWS] (record §4 step 6).
+     */
+    const val INPUT_SOURCE_MULTIPLE_ROWS = "parameter.validation.input_source_multiple_rows"
+
     /** A `SELECT`'s rendered SQL carries no `ORDER BY` (P7). */
     const val SELECTOR_ORDER_BY_MISSING = "parameter.validation.selector_order_by_missing"
 
