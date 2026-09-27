@@ -376,6 +376,71 @@ class TransformNodeE2eTest {
         executed["status"].asText() shouldBe "SUCCESS"
     }
 
+    @Test
+    @Order(10)
+    fun `the 260 shape - a jsonata transform splitting 2000 ranked rows into terciles - runs end to end`() {
+        // #260's reporting agent, end to end: a SQL node ranks every lake row, a jsonata
+        // transform splits them into thirds with a per-item block (outer assignment +
+        // per-item block + multi-field object constructor — the exact shape that leaked
+        // one depth unit per item under the library's Timebox and refused at ~100 rows
+        // with pipeline.transform.resource_limit).
+        val rankHash =
+            createSqlTemplate(
+                RANK_ZONES_TEMPLATE,
+                "LAKE",
+                "SELECT id, ROW_NUMBER() OVER (ORDER BY fare DESC, id)::INT AS trip_rank FROM trips",
+            )
+        releaseTemplate(RANK_ZONES_TEMPLATE, rankHash)
+        createTransformTemplate(TERCILES_TEMPLATE, TERCILES_BODY, tercilesContract(), emptyList(), tercilesTests())
+
+        val tercilePipeline =
+            createPipeline(
+                "test/transform_terciles",
+                mapOf(
+                    "schema_version" to 1,
+                    "name" to "test/transform_terciles",
+                    "display_name" to "Transform Terciles E2E",
+                    "description" to "#260 E2E",
+                    "parameters" to emptyMap<String, Any>(),
+                    "nodes" to tercileNodes(),
+                ),
+                expectedStatus = 201,
+            )
+
+        val events = execute(tercilePipeline, emptyMap())
+        withClue("the run's events: ${events.last()}") { events.last().first shouldBe "data_ready" }
+        val executionId = events.last().second["execution_id"].asText()
+
+        // The default result page is 1000 rows; the leg wants every row it ranked.
+        val full =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .queryParam("offset", 0)
+                .queryParam("limit", ICEBERG_ROWS)
+                .`when`()
+                .get("/api/v1/executions/$executionId/result")
+                .then()
+                .statusCode(200)
+                .extract()
+                .body()
+                .asString()
+        val result = mapper.readTree(full)["data"]
+        result["total_rows"].asLong() shouldBe ICEBERG_ROWS.toLong()
+        result["schema"].map { it["name"].asText() } shouldBe listOf("id", "trip_rank", "volume_class")
+        // 2000 rows: ranks 1..667 top, 668..1334 middle, 1335..2000 bottom.
+        result["rows"][0][1].asInt() shouldBe 1
+        result["rows"][0][2].asText() shouldBe "top"
+        result["rows"][667][2].asText() shouldBe "middle"
+        result["rows"][1334][2].asText() shouldBe "bottom"
+        result["rows"][1999][2].asText() shouldBe "bottom"
+
+        val terciles = nodeStats(executionId).single { it["node_id"].asText() == "terciles" }
+        terciles["status"].asText() shouldBe "SUCCESS"
+        terciles["rows_in"].asLong() shouldBe ICEBERG_ROWS.toLong()
+        terciles["rows_out"].asLong() shouldBe ICEBERG_ROWS.toLong()
+    }
+
     // ------------------------------------------------------------ the graph
 
     // ------------------------------------------------------------ fixture builders
@@ -863,6 +928,94 @@ private const val SUMMARIZE_TEMPLATE = "test/it_summarize.jsonata"
 private const val SHAPE_TEMPLATE = "test/it_shape.jsonata"
 private const val BIND_PAYLOAD_TEMPLATE = "test/it_bind_payload.sql"
 private const val WRAP_TEMPLATE = "test/it_wrap.jsonata"
+private const val RANK_ZONES_TEMPLATE = "test/it_rank_zones.sql"
+private const val TERCILES_TEMPLATE = "test/it_terciles.jsonata"
+
+/** #260's reporting agent body, adapted to the E2E's ranked-trips columns. */
+private const val TERCILES_BODY =
+    """( ${'$'}n := ${'$'}count(inputs.ranked); ${'$'}classes := ["top","middle","bottom"]; """ +
+        """${'$'}append([], inputs.ranked.( ${'$'}tercile := ${'$'}floor((trip_rank - 1) * 3 / ${'$'}n); """ +
+        """{ "id": id, "trip_rank": trip_rank, "volume_class": ${'$'}classes[${'$'}tercile] } )) )"""
+
+private fun tercileNodes(): List<Map<String, Any?>> =
+    listOf(
+        mapOf(
+            "id" to "rank_zones",
+            "description" to "lake trips ranked by fare",
+            "type" to "DQL",
+            "source" to LAKE_DS,
+            "template" to mapOf("id" to RANK_ZONES_TEMPLATE, "version" to 1),
+            "output" to mapOf("target" to "tempdb", "table" to "ranked_trips"),
+            "depends_on" to emptyList<String>(),
+        ),
+        mapOf(
+            "id" to "terciles",
+            "description" to "terciles by per-item block over the ranked rows (#260)",
+            "type" to "TRANSFORM",
+            "template" to mapOf("id" to TERCILES_TEMPLATE, "version" to 1),
+            "inputs" to mapOf("ranked" to "ranked_trips"),
+            "output" to mapOf("target" to "caller"),
+            "depends_on" to listOf("rank_zones"),
+        ),
+    )
+
+private fun tercilesContract() =
+    mapOf(
+        "mode" to "table",
+        "inputs" to
+            mapOf(
+                "ranked" to
+                    mapOf(
+                        "kind" to "table",
+                        "columns" to
+                            listOf(
+                                mapOf("name" to "id", "type" to "BIGINTEGER"),
+                                mapOf("name" to "trip_rank", "type" to "INTEGER"),
+                            ),
+                    ),
+            ),
+        "output" to
+            mapOf(
+                "kind" to "table",
+                "columns" to
+                    listOf(
+                        mapOf("name" to "id", "type" to "BIGINTEGER"),
+                        mapOf("name" to "trip_rank", "type" to "INTEGER"),
+                        mapOf("name" to "volume_class", "type" to "STRING"),
+                    ),
+            ),
+    )
+
+private fun tercilesTests(): List<Map<String, Any?>> {
+    fun row(id: Int): Map<String, Any?> = mapOf("id" to id.toString(), "trip_rank" to id)
+    return listOf(
+        mapOf(
+            "name" to "empty input",
+            "input" to mapOf("inputs" to mapOf("ranked" to emptyList<Any>())),
+            "expect" to mapOf("output" to emptyList<Any>()),
+        ),
+        mapOf(
+            "name" to "six rows split evenly",
+            "input" to mapOf("inputs" to mapOf("ranked" to (1..6).map { row(it) })),
+            "expect" to
+                mapOf(
+                    "output" to
+                        (1..6).map { rank ->
+                            mapOf(
+                                "id" to rank.toString(),
+                                "trip_rank" to rank,
+                                "volume_class" to
+                                    when {
+                                        rank <= 2 -> "top"
+                                        rank <= 4 -> "middle"
+                                        else -> "bottom"
+                                    },
+                            )
+                        },
+                ),
+        ),
+    )
+}
 
 private val WRAP_BODY = """{ "total_cents": ${'$'}sum(inputs.orders.amount_cents) }"""
 
