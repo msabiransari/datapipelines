@@ -172,6 +172,33 @@ class ScheduleServiceIntegrationTest {
     }
 
     @Test
+    fun `a lensed reader pages over the ADMITTED schedules - every visible row exactly once, has_more right (#257)`() {
+        // Name order interleaves hidden and admitted rows: a hidden row inside the first
+        // `limit + 1` window must not end the walk or make the offset re-read rows.
+        val names = listOf("p/a_h1", "p/b_v1", "p/c_h2", "p/d_v2", "p/e_h3", "p/f_v3")
+        names.forEach { name ->
+            val job = name.substringAfterLast('_')
+            h.create(h.request(name = name, payload = FakeExecutor.payload(job)))
+        }
+        h.executor.lens = setOf("job:v1", "job:v2", "job:v3")
+
+        // The controller's walk: ask limit+1, take limit, advance the offset by the items received.
+        val listed = ArrayList<String>()
+        var offset = 0
+        var hasMore: Boolean
+        do {
+            val found = h.service.list(SchedulerTestDb.WORKSPACE, null, LIMIT_PLUS_ONE, offset, NarrowedViewer)
+            listed += found.take(PAGE_SIZE).map { it.name }
+            hasMore = found.size > PAGE_SIZE
+            offset += found.take(PAGE_SIZE).size
+        } while (hasMore)
+
+        withClue("the promoter lists every admitted schedule exactly once — base behaviour re-read d and stopped early") {
+            listed shouldContainExactly listOf("p/b_v1", "p/d_v2", "p/f_v3")
+        }
+    }
+
+    @Test
     fun `list narrows to a folder prefix and refuses a malformed one`() {
         h.create(h.request(name = "finance/daily/revenue"))
         h.create(h.request(name = "finance_x/daily"))
@@ -467,5 +494,9 @@ class ScheduleServiceIntegrationTest {
         const val JOIN_BUDGET_MS = 10_000L
         const val WAIT_BUDGET_SECONDS = 20L
         const val POLL_MILLIS = 100L
+
+        /** The paging walk's envelope: the page the client keeps, plus the one extra row for has_more. */
+        const val PAGE_SIZE = 2
+        const val LIMIT_PLUS_ONE = PAGE_SIZE + 1
     }
 }

@@ -300,7 +300,16 @@ class ScheduleService(
         viewer: TargetViewer,
     ): Schedule = visible(workspaceId, id, viewer)
 
-    /** The workspace's live schedules the [viewer] may see, under a folder [prefix]. */
+    /**
+     * The workspace's live schedules the [viewer] may see, under a folder [prefix].
+     *
+     * A lensed reader pages over the ADMITTED sequence (#257): the promoter lens is a per-row
+     * property the SQL cannot carry, so applying it after a database page made `has_more` and
+     * `offset` count the wrong rows — one hidden row among `limit + 1` reported `has_more: false`,
+     * and a client advancing by the items it received re-read rows it already had. The workspace's
+     * live list is therefore read in windows (bounded by [LENS_SCAN_LIMIT]; the per-workspace cap
+     * keeps it small), filtered through the executors' lenses, and sliced.
+     */
     fun list(
         workspaceId: UUID,
         prefix: String?,
@@ -313,17 +322,32 @@ class ScheduleService(
                 throw requestInvalid("prefix", "a folder path: 1 to 9 lower-case segments separated by `/`")
             }
         }
-        val page = schedules.listLive(workspaceId, prefix, limit, offset)
-        if (!viewer.narrowed) return page
-        val admitted =
-            page.groupBy { it.executorId }.flatMap { (executorId, group) ->
+        if (!viewer.narrowed) return schedules.listLive(workspaceId, prefix, limit, offset)
+        val admitted = ArrayList<Schedule>()
+        var windowOffset = 0
+        while (admitted.size < offset + limit && windowOffset < LENS_SCAN_LIMIT) {
+            val window = schedules.listLive(workspaceId, prefix, LENS_WINDOW, windowOffset)
+            admitted += admittedOf(window, workspaceId, viewer)
+            if (window.size < LENS_WINDOW) break
+            windowOffset += LENS_WINDOW
+        }
+        return admitted.drop(offset).take(limit)
+    }
+
+    /** The [page]'s schedules whose target the [viewer]'s executor lenses admit (R8, auth.md §11A.1). */
+    private fun admittedOf(
+        page: List<Schedule>,
+        workspaceId: UUID,
+        viewer: TargetViewer,
+    ): List<Schedule> =
+        page
+            .groupBy { it.executorId }
+            .flatMap { (executorId, group) ->
                 val executor = executors.find(executorId) ?: return@flatMap emptyList()
                 executor.visibleTargets(viewer, workspaceId, group.map { it.targetRef }).let { refs ->
                     group.filter { it.targetRef in refs }
                 }
             }
-        return page.filter { it in admitted }
-    }
 
     /** The saved schedule's next [count] occurrences — the ONE function (record §3.2). */
     fun upcoming(
@@ -544,6 +568,12 @@ class ScheduleService(
     companion object {
         /** The preview's and upcoming's most occurrences (record §6). */
         const val MAX_PREVIEW = 20
+
+        /** The lensed read's database window (#257): one page of the live list per round trip. */
+        const val LENS_WINDOW = 200
+
+        /** The lensed read's scan ceiling (#257) — a workspace far past its cap stops the walk. */
+        const val LENS_SCAN_LIMIT = 10_000
 
         /** The generic payload size cap (record §5). */
         const val MAX_PAYLOAD_BYTES = 16 * 1024
