@@ -163,7 +163,7 @@ class ScheduleServiceIntegrationTest {
 
     @Test
     fun `listByTarget answers the reverse lookup on target_ref - lensed like every list (#259)`() {
-        val nightly = h.create(h.request(name = "ops/nightly", payload = FakeExecutor.payload("nightly")))
+        h.create(h.request(name = "ops/nightly", payload = FakeExecutor.payload("nightly")))
         h.create(h.request(name = "ops/other", payload = FakeExecutor.payload("other")))
 
         h.service.listByTarget(SchedulerTestDb.WORKSPACE, "job:nightly", TargetViewer.EVERYONE).map { it.name } shouldContainExactly

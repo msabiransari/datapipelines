@@ -59,7 +59,11 @@ class ExecutionHistoryBrowserTest : BrowserSuite() {
         page.waitForURL("**/executions")
         // The htmx-loaded partial carries the rows — wait for the scheduled run's row.
         // Scoped to #execution-table: the filter bar's <select> options carry the same names.
-        page.locator("#execution-table").locator("text=$scheduledPipeline").first().waitFor()
+        page
+            .locator("#execution-table")
+            .locator("text=$scheduledPipeline")
+            .first()
+            .waitFor()
         val table = page.locator("#execution-table").innerText()
         table.shouldContain("SCHEDULE")
         table.shouldContain(scheduledPipeline)

@@ -19,6 +19,8 @@ import co.datapipelines.pipeline.PipelineVersionRecord
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.through
+import co.datapipelines.web.schedules.PipelineJobExecutor
+import co.datapipelines.web.schedules.PrincipalTargetViewer
 import org.springframework.ui.Model
 import java.security.MessageDigest
 import java.time.Instant
@@ -436,18 +438,21 @@ class PipelineBrowseModel(
             endpoints
                 .findByPipeline(record.id)
                 .map { UsageView.EndpointUse(it.pathPattern, it.isEnabled, it.description) }
-        val runsOnIt =
-            principal
-                ?.let {
-                    schedules.listByTarget(
-                        workspaceId,
-                        co.datapipelines.web.schedules.PipelineJobExecutor.TARGET_PREFIX + record.name,
-                        co.datapipelines.web.schedules.PrincipalTargetViewer(it),
-                    )
-                }
-                .orEmpty()
-                .map { UsageView.ScheduleUse(it.id, it.name, scheduleState(it)) }
+        val runsOnIt = runSchedules(workspaceId, record, principal)
         return UsageView(endpoints = served, parents = parents, schedules = runsOnIt)
+    }
+
+    /** The schedule half of the Usage read — empty when no principal is supplied (the badge). */
+    private fun runSchedules(
+        workspaceId: UUID,
+        record: PipelineRecord,
+        principal: AuthenticatedPrincipal?,
+    ): List<UsageView.ScheduleUse> {
+        if (principal == null) return emptyList()
+        val targetRef = PipelineJobExecutor.TARGET_PREFIX + record.name
+        return schedules
+            .listByTarget(workspaceId, targetRef, PrincipalTargetViewer(principal))
+            .map { UsageView.ScheduleUse(it.id, it.name, scheduleState(it)) }
     }
 
     /** The schedule's operational state, in the tab's vocabulary: enabled, paused or blocked. */
