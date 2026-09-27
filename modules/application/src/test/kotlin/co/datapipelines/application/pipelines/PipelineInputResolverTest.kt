@@ -194,5 +194,52 @@ class PipelineInputResolverTest {
         (resolved as Result.Resolved).parameters shouldBe literals
     }
 
+    @Test
+    fun `every echoed client string is clipped and control-safe (#269)`() {
+        val long = "b".repeat(200)
+        val clipped = "b".repeat(64) + "…"
+
+        // unknown_parameter: the binding NAME, in both the message and the details' parameter.
+        val unknown =
+            resolver.resolve(
+                declaredDates,
+                emptyMap(),
+                bindings("""{"$long":{"source":"keyword","name":"TODAY"}}"""),
+                reference(),
+            ) as Result.Refused
+        unknown.refusal.parameter shouldBe clipped
+        unknown.refusal.message.contains(long) shouldBe false
+
+        // unknown_keyword: the echoed KEYWORD — with a control character, U+FFFD, never a newline.
+        // (Built as a node: a raw CR is not legal JSON text, which is the point of the sanitiser.)
+        val evilKeyword = "TO" + '\r' + "DAY" + "x".repeat(100)
+        val keyword =
+            resolver.resolve(
+                declaredDates,
+                emptyMap(),
+                mapOf(
+                    "as_of_date" to
+                        mapper.createObjectNode()
+                            .put("source", "keyword")
+                            .put("name", evilKeyword),
+                ),
+                reference(),
+            ) as Result.Refused
+        (keyword.refusal as Refusal.Invalid).message.contains('\r') shouldBe false
+        keyword.refusal.message.contains("x".repeat(100)) shouldBe false
+
+        // unknown_source: the echoed SOURCE.
+        val evilSource = "s".repeat(200)
+        val source =
+            resolver.resolve(
+                declaredDates,
+                emptyMap(),
+                bindings("""{"as_of_date":{"source":"$evilSource"}}"""),
+                reference(),
+            ) as Result.Refused
+        source.refusal.message.contains(evilSource) shouldBe false
+        source.refusal.message.contains("s".repeat(64)) shouldBe true
+    }
+
     private fun reference() = ExecutionReference(Instant.parse("2026-09-23T03:55:00Z"), ZoneId.of("America/New_York"))
 }

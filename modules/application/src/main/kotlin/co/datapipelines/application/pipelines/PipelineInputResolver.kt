@@ -116,13 +116,7 @@ class PipelineInputResolver {
                 when (node.path(BINDING_SOURCE).asText()) {
                     SOURCE_KEYWORD -> {
                         if (reference == null) {
-                            return Result.Refused(
-                                Refusal.Invalid(
-                                    Refusal.Reason.NO_REFERENCE,
-                                    name,
-                                    "'$name' is bound to a keyword, and this run has no reference time to resolve it against.",
-                                ),
-                            )
+                            return resolveNoReference(name)
                         }
                         keywordValue(node, reference)
                     }
@@ -161,10 +155,11 @@ class PipelineInputResolver {
         literals: Map<String, JsonNode>,
         node: JsonNode,
     ): Refusal? {
+        val echoed = name.reflectSafely()
         if (name in literals) {
             return Refusal.Conflict(
-                name,
-                "Parameter '$name' is supplied both in `parameters` and in `parameter_bindings` — " +
+                echoed,
+                "Parameter '$echoed' is supplied both in `parameters` and in `parameter_bindings` — " +
                     "give it one source; a keyword's value is decided by the schedule's timezone and its logical occurrence time.",
             )
         }
@@ -172,15 +167,15 @@ class PipelineInputResolver {
         if (declaredType == null) {
             return Refusal.Invalid(
                 Refusal.Reason.UNKNOWN_PARAMETER,
-                name,
-                "'$name' is not a parameter the pipeline declares, so it cannot be bound.",
+                echoed,
+                "'$echoed' is not a parameter the pipeline declares, so it cannot be bound.",
             )
         }
         if (!declaredType.equals(DATE, ignoreCase = true)) {
             return Refusal.Invalid(
                 Refusal.Reason.TYPE_MISMATCH,
-                name,
-                "'$name' is declared $declaredType; only a DATE parameter can take a binding.",
+                echoed,
+                "'$echoed' is declared $declaredType; only a DATE parameter can take a binding.",
             )
         }
         val keyword = node.path(BINDING_NAME).takeIf { it.isTextual }?.asText()
@@ -191,9 +186,9 @@ class PipelineInputResolver {
                 } else {
                     Refusal.Invalid(
                         Refusal.Reason.UNKNOWN_KEYWORD,
-                        name,
+                        echoed,
                         "Keyword bindings name " + KEYWORDS.sorted().joinToString(" or ") +
-                            " (uppercase), not '${keyword.orEmpty()}'.",
+                            " (uppercase), not '${keyword.reflectSafely()}'.",
                     )
                 }
             }
@@ -204,8 +199,8 @@ class PipelineInputResolver {
                 } else {
                     Refusal.Invalid(
                         Refusal.Reason.LITERAL_INVALID,
-                        name,
-                        "A literal binding carries a `value` — '$name's does not.",
+                        echoed,
+                        "A literal binding carries a `value` — '$echoed's does not.",
                     )
                 }
             }
@@ -213,8 +208,8 @@ class PipelineInputResolver {
             else -> {
                 Refusal.Invalid(
                     Refusal.Reason.UNKNOWN_SOURCE,
-                    name,
-                    "Binding sources are \"$SOURCE_KEYWORD\" or \"$SOURCE_LITERAL\", not '${node.path(BINDING_SOURCE).asText()}'.",
+                    echoed,
+                    "Binding sources are \"$SOURCE_KEYWORD\" or \"$SOURCE_LITERAL\", not '${node.path(BINDING_SOURCE).asText().reflectSafely()}'.",
                 )
             }
         }
@@ -236,6 +231,15 @@ class PipelineInputResolver {
         return TextNode(date.toString())
     }
 
+    private fun resolveNoReference(name: String): Result =
+        Result.Refused(
+            Refusal.Invalid(
+                Refusal.Reason.NO_REFERENCE,
+                name.reflectSafely(),
+                "'${name.reflectSafely()}' is bound to a keyword, and this run has no reference time to resolve it against.",
+            ),
+        )
+
     companion object {
         const val TODAY = "TODAY"
         const val YESTERDAY = "YESTERDAY"
@@ -249,5 +253,28 @@ class PipelineInputResolver {
 
         const val SOURCE_KEYWORD = "keyword"
         const val SOURCE_LITERAL = "literal"
+
+        /** Longest client-supplied text a refusal reflects (#269; the house `truncateForError` cap). */
+        private const val MAX_ECHO = 64
+
+        /** Replacement for an ISO control character in reflected text (CF-1 — the house shape). */
+        private const val CONTROL_REPLACEMENT = '�'
+
+        /**
+         * Makes client-supplied text safe to echo into a refusal — the byte-for-byte carry-forwards
+         * of `typesystem`'s and `pipeline-contract`'s `truncateForError` (#269): clipped at
+         * [MAX_ECHO] characters (CF-2 — bounded reflection), every ISO control character become
+         * U+FFFD (CF-1 — no forged log lines). Truncation BEFORE sanitising, so the work is bounded
+         * by the cap, not by the caller's length. `internal` so the tests can pin it.
+         */
+        internal fun String?.reflectSafely(): String {
+            val raw = this ?: return "null"
+            val clipped = if (raw.length <= MAX_ECHO) raw else raw.take(MAX_ECHO) + "…"
+            return if (clipped.none { it.isISOControl() }) {
+                clipped
+            } else {
+                clipped.map { if (it.isISOControl()) CONTROL_REPLACEMENT else it }.joinToString("")
+            }
+        }
     }
 }

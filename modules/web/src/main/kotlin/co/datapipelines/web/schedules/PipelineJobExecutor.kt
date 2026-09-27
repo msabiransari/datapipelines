@@ -286,6 +286,18 @@ class PipelineJobExecutor(
                 .takeIf { it.isObject }
                 ?.properties()
                 ?.associate { it.key to it.value }
+        if (frozenParameters == null && admission.payload.has(BINDINGS_FIELD)) {
+            // Fail closed (#269): a bindings-carrying schedule whose snapshot lacks the resolved map
+            // would otherwise launch the RAW parameters with bindings unapplied. The only way the
+            // key can be missing on such a schedule is a rolling deploy between prepare and start
+            // (slice 3's prepare froze it; an older start does not read it) — nothing about the
+            // schedule is wrong, so this does not block: the next occurrence prepares afresh.
+            return notStarted(
+                SNAPSHOT_UNRESOLVED,
+                block = false,
+                "The run's frozen snapshot carries no resolved parameters for a schedule with bindings.",
+            )
+        }
         val request =
             ExecuteRequest(
                 pipelineId = pipelineId,
@@ -294,6 +306,7 @@ class PipelineJobExecutor(
                 userId = principal.userId,
                 workspaceId = workspace.id,
                 // The map frozen at preparation (R5): what was resolved then is what executes now.
+                // Pre-slice-3 rows (no bindings) keep the raw-parameters fallback (#269).
                 parameters = frozenParameters ?: parametersOf(admission.parameters),
                 // A12/L3: a scheduled run's caller result is inspection material — keep it for the maximum.
                 resultTtlSeconds = executorConfig.result.ttlMaxSeconds,
@@ -635,6 +648,7 @@ class PipelineJobExecutor(
         const val AUTHORITY_REFUSED = "authority_refused"
         const val RECORD_UNWRITABLE = "record_unwritable"
         const val START_REFUSED = "start_refused"
+        const val SNAPSHOT_UNRESOLVED = "snapshot_unresolved"
 
         /** The `start_refused` detail when the launch threw something with no catalogued code (#253). */
         const val LAUNCH_REFUSED_WITHOUT_CODE = "launch_refused"

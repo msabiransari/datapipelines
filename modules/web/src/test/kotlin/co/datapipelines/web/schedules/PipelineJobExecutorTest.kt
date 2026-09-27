@@ -43,9 +43,11 @@ import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.TextNode
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -111,26 +113,32 @@ class PipelineJobExecutorTest {
 
     @Test
     fun `R6 - success, failure and an absent record map as the table says`() {
-        outcomeFor(record(ExecutionStatus.SUCCESS)) shouldBe ExecutionOutcome.Finished(RunState.SUCCEEDED, null)
-        outcomeFor(record(ExecutionStatus.FAILED)) shouldBe ExecutionOutcome.Finished(RunState.FAILED, PipelineJobExecutor.EXECUTION_FAILED)
+        val success = record(ExecutionStatus.SUCCESS)
+        val failure = record(ExecutionStatus.FAILED)
+        outcomeFor(success) shouldBe
+            ExecutionOutcome.Finished(RunState.SUCCEEDED, null, success.startedAt, success.completedAt)
+        outcomeFor(failure) shouldBe
+            ExecutionOutcome.Finished(RunState.FAILED, PipelineJobExecutor.EXECUTION_FAILED, failure.startedAt, failure.completedAt)
         outcomeFor(record(ExecutionStatus.RUNNING)) shouldBe ExecutionOutcome.Running
         outcomeFor(null) shouldBe ExecutionOutcome.Absent
     }
 
     @Test
     fun `R6 - an abort is cancelled when a person asked, aborted with its reason when the drain did`() {
+        val record = record(ExecutionStatus.ABORTED)
         every { events.findByExecution(executionId) } returns listOf(abortEvent("cancelled"))
-        outcomeFor(record(ExecutionStatus.ABORTED)) shouldBe ExecutionOutcome.Finished(RunState.CANCELLED, "cancelled")
+        outcomeFor(record) shouldBe ExecutionOutcome.Finished(RunState.CANCELLED, "cancelled", record.startedAt, record.completedAt)
 
         every { events.findByExecution(executionId) } returns listOf(abortEvent("shutdown"))
-        outcomeFor(record(ExecutionStatus.ABORTED)) shouldBe ExecutionOutcome.Finished(RunState.ABORTED, "shutdown")
+        outcomeFor(record) shouldBe ExecutionOutcome.Finished(RunState.ABORTED, "shutdown", record.startedAt, record.completedAt)
     }
 
     @Test
     fun `A5 - the stale sweeper's instance_lost is unknown, never a conclusive abort, and reads no events`() {
-        val lost = record(ExecutionStatus.ABORTED).copy(errorJson = """{"code":"pipeline.execution.instance_lost"}""")
+        val record = record(ExecutionStatus.ABORTED).copy(errorJson = """{"code":"pipeline.execution.instance_lost"}""")
 
-        outcomeFor(lost) shouldBe ExecutionOutcome.Finished(RunState.UNKNOWN, PipelineJobExecutor.INSTANCE_LOST)
+        outcomeFor(record) shouldBe
+            ExecutionOutcome.Finished(RunState.UNKNOWN, PipelineJobExecutor.INSTANCE_LOST, record.startedAt, record.completedAt)
         verify(exactly = 0) { events.findByExecution(any()) }
     }
 
@@ -396,6 +404,35 @@ class PipelineJobExecutorTest {
         val uncoded = adapter.start(launch()).shouldBeInstanceOf<StartOutcome.NotStarted>()
         uncoded.message shouldBe PipelineJobExecutor.LAUNCH_REFUSED_WITHOUT_CODE
         uncoded.message.contains("poucha") shouldBe false
+    }
+
+    @Test
+    fun `start - a bindings-carrying schedule whose snapshot lacks resolved_parameters never launches raw (#269)`() {
+        val bound = executable("as_of_date" to LogicalType.DATE)
+        every { pipelines.findById(workspace.id, bound.record.id) } returns bound.record
+        every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail()
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, bound.record, 1) } returns bound
+        every { executorConfig.result } returns mockk { every { ttlMaxSeconds } returns 3600 }
+        val outcome =
+            adapter.start(
+                Launch(
+                    admission(
+                        payload = payloadJson(todayBindingJson),
+                        referenceAt = Instant.parse("2026-09-23T03:55:00Z"),
+                        referenceTimezone = "America/New_York",
+                    ),
+                    executionId = executionId,
+                    // A slice-3 prepare always froze the map; its absence is a rolling deploy
+                    // between prepare and start.
+                    snapshot = mapper.readTree("""{"pipeline_id":"${bound.record.id}","version":1,"body_sha256":"h"}"""),
+                    capacity = mockk(),
+                ),
+            )
+
+        val refused = outcome.shouldBeInstanceOf<StartOutcome.NotStarted>()
+        refused.reason shouldBe PipelineJobExecutor.SNAPSHOT_UNRESOLVED
+        refused.block shouldBe false // nothing about the schedule is wrong — the next occurrence re-prepares
+        coVerify(exactly = 0) { runner.run(any(), any(), any(), any(), any()) }
     }
 
     // ------------------------------------------------------------------------------ fixtures

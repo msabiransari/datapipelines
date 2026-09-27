@@ -127,7 +127,7 @@ A run is admitted by a worker: capacity first (§7), then the executor prepares 
 | `cancelled` | `cancelled` | Someone cancelled the execution |
 | `aborted` | `shutdown` | An instance shut down under it (§8.2) |
 | `unknown` | `instance_lost`, `start_unconfirmed`, `start_failed`, `execution_missing` | Nobody can say whether its work happened: its instance died mid-run; a claim whose execution never appeared; a launch that threw; a running execution whose record vanished. **Blocks the schedule** |
-| `not_started` | `capacity`, `executor_unavailable`, `pointer_null`, `target_not_found`, `payload_invalid`, `parameters_invalid`, `version_changed`, `workspace_inactive`, `authority_refused`, `start_refused`, `record_unwritable` | Definitively never started — nothing ran |
+| `not_started` | `capacity`, `executor_unavailable`, `pointer_null`, `target_not_found`, `payload_invalid`, `parameters_invalid`, `version_changed`, `workspace_inactive`, `authority_refused`, `start_refused`, `snapshot_unresolved`, `record_unwritable` | Definitively never started — nothing ran. `snapshot_unresolved` is the bindings fail-closed refusal (#269): a schedule with `parameter_bindings` whose frozen snapshot carries no resolved map — a rolling deploy between prepare and start — is never launched on its raw parameters, and does not block |
 | `skipped` | `missed`, `overlap`, `schedule_paused`, `schedule_blocked`, `schedule_deleted` | By policy; never attempted |
 
 ### 5.1 Not started means nothing ran
