@@ -216,6 +216,10 @@ object AuthErrorCodes {
             "mcp." to "1316-mcp-surface",
             // #9 — the scheduler's refusals (validation, state, not-found).
             "schedule." to "1319-schedules",
+            // #194 — the parameter engine's refusals (§13.20, lane B). Its 81 codes landed with the
+            // web catalogue rows but without this anchor, so doc_url fell to the catalog top —
+            // AuthErrorSpecDriftTest caught it on the merge SHA.
+            "parameter." to "1320-parameter-sets",
         )
 }
 
