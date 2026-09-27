@@ -13,8 +13,10 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertTimeoutPreemptively
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -116,6 +118,18 @@ class ParameterValueValidatorTest {
         accepted(narrow, "-9999.99") shouldBe BigDecimal("-9999.99")
         refused(narrow, "99999.5").reason shouldBe "precision"
         refused(narrow, "1e5").reason shouldBe "precision"
+    }
+
+    @Test
+    fun `a MULTI of 200,000 distinct members validates in linear time, and 1_0 still repeats 1_00`() {
+        // The 194b security pass, F2: the duplicate check was a linear scan per member — O(N²), tens of
+        // seconds at a megabyte; a set over canonical keys is the bound now.
+        val declaration = ParameterDeclaration(LogicalType.STRING, cardinality = ParameterCardinality.MULTI)
+        val members = MAPPER.createArrayNode().also { a -> repeat(200_000) { a.add("m$it") } }
+        val accepted = assertTimeoutPreemptively(Duration.ofSeconds(10)) { validator.validate(declaration, members) }
+        accepted.shouldBeInstanceOf<ParameterValueOutcome.Accepted>()
+        val decimals = ParameterDeclaration(LogicalType.BIGDECIMAL, cardinality = ParameterCardinality.MULTI)
+        refused(decimals, "[\"1.0\", \"1.00\"]").rule shouldBe ParameterValueRule.INVALID_VALUE_TYPE
     }
 
     @Test

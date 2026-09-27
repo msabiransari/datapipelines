@@ -564,7 +564,7 @@ class ParameterSetService(
         ) = DatapipelinesException(
             ParameterErrorCodes.VERSION_CONFLICT,
             "The export's body_hash does not prove its body (${reason.replace('_', ' ')}).",
-            mapOf("reason" to reason, "declared_body_hash" to declared, "computed_body_hash" to actual),
+            mapOf("reason" to reason, "declared_body_hash" to declared?.safeEcho(), "computed_body_hash" to actual),
         )
     }
 }

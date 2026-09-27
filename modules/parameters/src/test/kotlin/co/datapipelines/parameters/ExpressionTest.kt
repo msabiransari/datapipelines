@@ -115,6 +115,18 @@ class ExpressionTest {
         }
 
         @Test
+        fun `breadth at the depth bound is ONE refusal - the walk stops, never one problem per over-deep child`() {
+            // The 194b security pass, F1: an `and` sitting at the bound with N scalar args produced N
+            // depth refusals (no operator is counted for a scalar, so the node budget never tripped) —
+            // ~1 KB of heap per 2 input bytes, straight into the response. The depth refusal now spends
+            // the budget exactly as the node refusal does.
+            val four = ExpressionParser(maxDepth = 4, maxNodes = 128)
+            val wide = json.objectNode().put("op", "and").set<JsonNode>("args", json.arrayNode().also { a -> repeat(10_000) { a.add(1) } })
+            val problems = refused(nots(4, leaf = wide), four)
+            problems.map { it.code } shouldBe listOf(ParameterErrorCodes.EXPRESSION_DEPTH_EXCEEDED)
+        }
+
+        @Test
         fun `operator nodes - the budget itself parses, one past it is expression_too_large, and the walk stops there`() {
             fun and(n: Int): ObjectNode =
                 json.objectNode().put("op", "and").set(

@@ -97,11 +97,14 @@ class ParameterValueValidator(
         }
         if (node.isEmpty) return ParameterValueOutcome.Unsupplied
         val accepted = mutableListOf<Any>()
+        // Distinctness through a set of canonical keys — a linear scan per member was O(N²), tens of
+        // seconds at a megabyte (the 194b security pass, F2); the keys agree with [sameValue].
+        val seen = HashSet<Any>()
         node.forEachIndexed { index, member ->
             if (member.isNull) return refused(ParameterValueRule.INVALID_VALUE_TYPE, "MULTI member $index is null")
             when (val outcome = single(declaration, rules, member)) {
                 is ParameterValueOutcome.Accepted -> {
-                    if (accepted.any { sameValue(it, outcome.value) }) {
+                    if (!seen.add(canonicalKey(outcome.value))) {
                         return refused(ParameterValueRule.INVALID_VALUE_TYPE, "MULTI member $index repeats an earlier member")
                     }
                     accepted += outcome.value
@@ -187,6 +190,14 @@ class ParameterValueValidator(
     }
 
     private companion object {
+        /** The key [sameValue] equality reduces to: scale-free decimals, list-wrapped bytes, the value itself. */
+        fun canonicalKey(value: Any): Any =
+            when (value) {
+                is BigDecimal -> value.stripTrailingZeros()
+                is ByteArray -> value.toList()
+                else -> value
+            }
+
         /** Two coerced values are the same member: numerically for decimals (`1.0` = `1.00`), by content for bytes. */
         fun sameValue(
             a: Any,

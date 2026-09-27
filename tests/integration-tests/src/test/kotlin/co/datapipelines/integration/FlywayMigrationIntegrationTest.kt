@@ -141,6 +141,8 @@ class FlywayMigrationIntegrationTest {
                 "38|scheduler core|true",
                 // #194 lane B — parameter_sets + parameter_set_versions (the templates shape, one-draft index).
                 "39|parameter sets|true",
+                // #258 (V40) — the run carries the execution's own timing (scheduler follow-ups, lane 253).
+                "40|schedule run execution timing|true",
             )
     }
 

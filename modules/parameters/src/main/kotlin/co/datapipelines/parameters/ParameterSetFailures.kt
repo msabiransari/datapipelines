@@ -25,14 +25,39 @@ internal class ParameterSetFailures {
         message: String,
         details: Map<String, Any?> = emptyMap(),
     ) {
+        if (!admit()) return
         failures += ValidationFailure(code, path.safeEcho(MAX_REFLECTED_PATH_LENGTH), message, details)
     }
 
     fun addAll(other: List<ValidationFailure>) {
-        failures += other
+        other.forEach { if (admit()) failures += it }
+    }
+
+    /**
+     * The list is bounded (the 194b security pass, F1's sink): past [MAX_FAILURES] one terminal
+     * `body_invalid` / `too_many_failures` marker lands and everything after it is dropped, so a body
+     * built to produce a refusal per byte cannot answer a response hundreds of times its own size.
+     */
+    private fun admit(): Boolean {
+        if (failures.size < MAX_FAILURES) return true
+        if (failures.size == MAX_FAILURES) {
+            failures +=
+                ValidationFailure(
+                    ParameterErrorCodes.BODY_INVALID,
+                    "",
+                    "The document produced more than $MAX_FAILURES refusals; the rest are not listed.",
+                    mapOf("reason" to "too_many_failures", "max" to MAX_FAILURES),
+                )
+        }
+        return false
     }
 
     fun toResult(): ValidationResult = ValidationResult(failures.toList())
+
+    companion object {
+        /** Refusals listed before the terminal marker; the marker makes it one more. */
+        const val MAX_FAILURES = 1_000
+    }
 }
 
 /**

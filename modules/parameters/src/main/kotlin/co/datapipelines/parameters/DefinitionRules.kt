@@ -339,6 +339,29 @@ internal class DefinitionRules(
     }
 
     /**
+     * A `MULTI` default longer than a selection may ever carry (§11 `max-multi-bind-values`) is refused
+     * BEFORE the shared validator sees it (the 194b security pass, F2 — its duplicate check was the
+     * quadratic sink); it could never be a valid selection anyway.
+     */
+    private fun multiDefaultTooLong(
+        path: String,
+        parameter: ParameterDefinition,
+        default: JsonNode,
+        failures: ParameterSetFailures,
+    ): Boolean {
+        val multi = parameter.cardinality == ParameterCardinality.MULTI && default.isArray
+        if (!multi || default.size() <= config.maxMultiBindValues) return false
+        failures.add(
+            ParameterErrorCodes.DEFAULT_INVALID,
+            path,
+            "default_value has ${default.size()} members; a MULTI selection carries at most " +
+                "${config.maxMultiBindValues} (datapipelines.parameters.max-multi-bind-values).",
+            detailsOf(parameter) + mapOf("reason" to "too_many_values", "max" to config.maxMultiBindValues),
+        )
+        return true
+    }
+
+    /**
      * §3.2 `default_value`: the full shared-validator check (type, precision/scale, the INPUT's own
      * constraints — `min: 0` with `-1` is `default_invalid`), and for a `constants` select, every
      * default member among the options. A template select's default is checked at evaluate (its
@@ -364,6 +387,7 @@ internal class DefinitionRules(
             }
             return
         }
+        if (multiDefaultTooLong(path, parameter, default, failures)) return
         val validator = if (parameter.kind == ParameterKind.INPUT) inputValidator else valueValidator
         when (val outcome = validator.validate(parameter.declaration.copy(required = false, default = null), default)) {
             is ParameterValueOutcome.Refused -> {

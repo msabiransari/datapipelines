@@ -181,6 +181,20 @@ class ParameterSetValidatorTest {
         }
 
         @Test
+        fun `default_value - a MULTI default longer than max-multi-bind-values is refused before the validator sees it`() {
+            // The 194b security pass, F2: the default reached the shared validator's quadratic duplicate
+            // check uncapped; a default longer than a selection may ever carry is refused first.
+            val wide =
+                ParameterSetFixtures
+                    .constantsSelect("c", listOf("a", "b", "c"), cardinality = "MULTI")
+                    .replace("\"depends_on\"", "\"default_value\": [\"a\", \"b\", \"c\"], \"depends_on\"")
+            failures(set(wide), validator(config = ParametersConfig(maxMultiBindValues = 2))).single().let {
+                it.code shouldBe ParameterErrorCodes.DEFAULT_INVALID
+                it.details["reason"] shouldBe "too_many_values"
+            }
+        }
+
+        @Test
         fun `default_value - its type, its own rules, and a constants select's options`() {
             codes(param(type = "INTEGER", extra = """, "default_value": "5" """)) shouldBe listOf(ParameterErrorCodes.DEFAULT_TYPE_MISMATCH)
             failures(set(param(type = "INTEGER", extra = """, "default_value": -1, "constraints": { "min": 0 }"""))).single().let {

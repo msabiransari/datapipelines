@@ -67,6 +67,9 @@ class ExpressionParser(
         ): Expr? {
             if (budgetSpent) return null
             if (depth > maxDepth) {
+                // One refusal per expression, like the node budget: an `and` at the bound with N scalar
+                // args produced N of these (the 194b security pass, F1 — ~1 KB of heap per 2 input bytes).
+                budgetSpent = true
                 problems +=
                     ExpressionProblem(
                         ParameterErrorCodes.EXPRESSION_DEPTH_EXCEEDED,
