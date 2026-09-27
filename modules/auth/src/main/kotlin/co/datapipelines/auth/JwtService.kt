@@ -104,7 +104,15 @@ class JwtService(
         if (token.isBlank()) throw SessionInvalidException("Empty session token")
         val jws = parseSigned(token)
         val alg = jws.header.algorithm
-        if (alg != PINNED_ALG) throw SessionInvalidException("Unexpected JWT algorithm: $alg")
+        // `issue` always sets `exp` and JJWT's parser does not require it: a signed token without one
+        // is not ours, and an open SSE stream would never be expiry-judged for it (the 262 security pass).
+        val problem =
+            when {
+                alg != PINNED_ALG -> "Unexpected JWT algorithm: $alg"
+                jws.payload.expiration == null -> "Session token has no expiry"
+                else -> null
+            }
+        if (problem != null) throw SessionInvalidException(problem)
         return jws.payload
     }
 

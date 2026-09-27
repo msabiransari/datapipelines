@@ -210,6 +210,10 @@ class ExecutionStreamAuthorityTest {
         every { repository.findByName("acme") } returns ws
         every { repository.findByName("other") } returns wsOther
         ownRun()
+        // The fallback resolves the OTHER workspace, whose scoped read misses the execution: the cut
+        // is the record-miss + id-mismatch branch, not the strict mock's answerless throw (the 262
+        // security pass, observation 1 — a refusal through the fail-closed catch proves nothing).
+        every { executions.findById(wsOther.id, executionId) } returns null
 
         val subscriber = subscriberAtOpen().copy(workspaceName = "other")
 

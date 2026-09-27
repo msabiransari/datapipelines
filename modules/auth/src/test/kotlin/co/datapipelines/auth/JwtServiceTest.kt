@@ -110,6 +110,25 @@ class JwtServiceTest {
     }
 
     @Test
+    fun `a signed token with no exp is refused as invalid - expiry is never optional (the 262 security pass)`() {
+        // JJWT's parser does not require `exp`; `issue` always sets it, so a token without it is not
+        // ours. Without this check an open SSE stream would never be expiry-judged for such a token.
+        val key = Keys.hmacShaKeyFor(secretBytes)
+        val noExp =
+            Jwts
+                .builder()
+                .subject(UUID.randomUUID().toString())
+                .claim("email", "a@b.com")
+                .claim("name", "A")
+                .issuer("datapipelines")
+                .issuedAt(Date.from(Instant.now().minusSeconds(60)))
+                .signWith(key, Jwts.SIG.HS256)
+                .compact()
+
+        shouldThrow<SessionInvalidException> { service.validate(noExp) }
+    }
+
+    @Test
     fun `a secret shorter than 32 bytes fails fast at construction`() {
         val shortSecret = Base64.getEncoder().encodeToString(ByteArray(16))
         shouldThrow<IllegalArgumentException> { JwtService(JwtProperties(shortSecret), AuthProperties()) }
