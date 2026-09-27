@@ -189,7 +189,9 @@ class ScheduleServiceIntegrationTest {
         h.executor.lens = setOf("job:nightly")
         h.service.listByTarget(SchedulerTestDb.WORKSPACE, "job:nightly", NarrowedViewer).map { it.name } shouldContainExactly
             listOf("ops/nightly")
+    }
 
+    @Test
     fun `a lensed reader pages over the ADMITTED schedules - every visible row exactly once, has_more right (#257)`() {
         // Name order interleaves hidden and admitted rows: a hidden row inside the first
         // `limit + 1` window must not end the walk or make the offset re-read rows.
@@ -416,7 +418,7 @@ class ScheduleServiceIntegrationTest {
         dataSource.connection.use { holder ->
             holder.autoCommit = false
             holder
-                .prepareStatement("SELECT id FROM workspaces WHERE id = ? FOR UPDATE")
+                .prepareStatement("SELECT id FROM workspaces WHERE id = ? FOR NO KEY UPDATE")
                 .apply { setObject(1, SchedulerTestDb.WORKSPACE) }
                 .execute()
 
@@ -440,7 +442,7 @@ class ScheduleServiceIntegrationTest {
                         refusedTwo = e
                     }
                 }
-            awaitLockWaits("%workspaces%FOR UPDATE%", 2)
+            awaitLockWaits("%workspaces%FOR NO KEY UPDATE%", 2)
             holder.commit()
             one.join(JOIN_BUDGET_MS)
             two.join(JOIN_BUDGET_MS)

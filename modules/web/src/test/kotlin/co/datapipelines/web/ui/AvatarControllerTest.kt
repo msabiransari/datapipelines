@@ -286,14 +286,15 @@ class AvatarControllerTest {
         every { userRepository.findById(userId) } returns userWith(url("/negative"))
 
         val (firstStatus, firstElapsed) = timed { controller.avatar().statusCode.value() }
-        val (second, secondElapsed) = timed { controller.avatar() }
+        val second = controller.avatar()
 
         firstStatus shouldBe 404
         second.statusCode.value() shouldBe 404
         fetcher.fetches.get() shouldBe 1 // red on the base: two fetches, one per request
-        // The second answer did not pay even the stall the first paid — no fetch stood behind it.
+        // The first answer paid the provider's stall; the fetch count above proves the second did not fetch
+        // at all (an upper bound on its elapsed time would be a wall-clock flake on a loaded CI runner —
+        // the 254 security pass, observation 1 — so only the lower bound and the counter are asserted).
         firstElapsed shouldBeGreaterThanOrEqualTo stall
-        secondElapsed shouldBeLessThan stall
         second.headers.cacheControl shouldContain "private"
         second.headers.cacheControl shouldContain "max-age=300"
     }

@@ -139,12 +139,14 @@ class ScheduleRepository(
      * The workspace row's lock, taken FIRST in the create transaction (#253): it serialises the
      * cap's count-then-insert against every concurrent create of the same workspace, so the cap
      * cannot be overshot by N creates that all counted below it. The row always exists (the
-     * schedule carries its FK), so a miss here is a defect that fails the transaction loudly.
+     * schedule carries its FK); a miss here returns silently and the insert's FK refuses instead — the
+     * lock is `FOR NO KEY UPDATE` so it serialises creates without blocking the FK `KEY SHARE` every
+     * `schedule_runs` insert takes on the same row (the 253 security pass, observations 1–2).
      */
     fun lockWorkspace(workspaceId: UUID) {
         jdbc
             .query(
-                "SELECT id FROM workspaces WHERE id = :ws FOR UPDATE",
+                "SELECT id FROM workspaces WHERE id = :ws FOR NO KEY UPDATE",
                 mapOf("ws" to workspaceId),
             ) { _, _ -> Unit }
     }
