@@ -25,6 +25,10 @@ dependencies {
 
     implementation(libs.jackson.module.kotlin)
     implementation(libs.spring.boot.starter.jdbc) // ParameterSetRepository (§8.1), @ConfigurationProperties
+    // The evaluator (record P16, §5.2 step 3): one coroutine per parameter awaiting its parents, the
+    // evaluate's deadline a withTimeout on the AWAIT, and the SelectorPool's suspending slot wait.
+    // BOM-managed (the version `dag` already resolves).
+    implementation(libs.kotlinx.coroutines.core)
 
     // The container suite runs the repository and the lifecycle against a real Postgres with the SHIPPED
     // migrations applied through plain JDBC (module-structure §7.4; Flyway stays in `app`, §3.1 rule 2),
