@@ -247,6 +247,18 @@
 
   // ------------------------------------------------------------------ pipeline and parameters
 
+  /**
+   * The release-first sentence (#280) — the catalogue's `schedule.validation.target_not_released`
+   * user message, shown at the PIPELINE field the moment the typed or picked pipeline resolves
+   * with no current version. The save's own refusal lands in the same slot with the same words
+   * (one sentence, two sources — the server stays the authority); the browser suite pins the two
+   * equal end to end. The suggestion list cannot carry this honestly: a list entry's DRAFT
+   * status also covers a RELEASED pipeline with a draft in flight, so marking or filtering it
+   * would lie about pipelines that CAN be scheduled.
+   */
+  var RELEASE_FIRST_TEXT =
+    "This pipeline has no released version yet. Release it (or switch its current version), then schedule it.";
+
   function searchPipelines(text) {
     var state = f();
     if (!state) return;
@@ -340,9 +352,16 @@
       .then(function (found) {
         if (seq !== state.paramSeq || !S.dialog()) return;
         if (found.none) {
-          renderParameters({}, values, {}, name + " has no current version yet — a schedule on it is refused until one is released (or its current version is switched to a draft).");
+          // #280 — the release-first words go to the pipeline field's OWN slot (aria-invalid
+          // like a save refusal), not the parameters area; the save would refuse with the
+          // same sentence either way.
+          showError("pipeline", RELEASE_FIRST_TEXT);
+          renderParameters({}, values, {}, "");
           return;
         }
+        // A pipeline WITH a current version resolved: any pick-time release-first error the
+        // field carried is stale, wherever it came from (the save is the authority).
+        clearError("pipeline");
         state.pipelineVersion = found.version;
         var declared = {};
         M().declaredParameters(found.body.parameters).forEach(function (d) { declared[d.name] = d.spec; });
@@ -356,6 +375,9 @@
       .catch(function (err) {
         if (seq !== state.paramSeq || !S.dialog()) return;
         state.declared = {};
+        // The name resolves to nothing (or the read failed): a pick-time release-first error is
+        // stale — the save refuses a non-existent name with its own words.
+        clearError("pipeline");
         renderParameters({}, values, {}, err && err.notFound
           ? "No pipeline named " + name + " that you can read in this workspace."
           : "The pipeline's parameters could not be read; the save still checks them.");
