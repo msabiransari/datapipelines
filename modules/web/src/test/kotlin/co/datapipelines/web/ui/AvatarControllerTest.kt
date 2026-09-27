@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The avatar proxy's fence (#197, hardened by #246), exercised over the REAL transport: the
@@ -170,6 +171,23 @@ class AvatarControllerTest {
             )
     }
 
+    /**
+     * A fetcher that always refuses, after a fixed stall — the broken picture host of #254.
+     * It COUNTS its calls: the assertion is on the counter (a real observation), never on a
+     * mock's expectations.
+     */
+    private class CountingRefusingFetcher(
+        private val stall: Duration,
+    ) : AvatarImageFetcher() {
+        val fetches = AtomicInteger()
+
+        override fun fetch(uri: URI): AvatarImage? {
+            fetches.incrementAndGet()
+            Thread.sleep(stall.toMillis())
+            return null
+        }
+    }
+
     @Test
     fun `an anonymous request is refused without reading any user`() {
         val answer = controller.avatar()
@@ -180,7 +198,11 @@ class AvatarControllerTest {
     fun `a user with no stored picture answers 404`() {
         authenticate()
         every { userRepository.findById(userId) } returns userWith(null)
-        controller.avatar().statusCode.value() shouldBe 404
+        val answer = controller.avatar()
+        answer.statusCode.value() shouldBe 404
+        // #254: the browser stops asking for the TTL too — private, never a shared cache.
+        answer.headers.cacheControl shouldContain "private"
+        answer.headers.cacheControl shouldContain "max-age=300"
     }
 
     @Test
@@ -244,6 +266,36 @@ class AvatarControllerTest {
         controller.avatar()
         controller.avatar()
         hitCount("/cached") shouldBe 1
+    }
+
+    /**
+     * #254 — a refused fetch is remembered for the TTL: the SECOND request for the same
+     * stored URL costs no fetch at all (the counting fake is never called again) and answers
+     * without paying the stall the first one paid, so a broken picture host cannot hold a
+     * request thread on every page view. The fetcher is a counting STUB, not a strict mock —
+     * a strict mock makes the missing second call unobservable (the suite would be green
+     * precisely because the call never happened). The 404 carries the private browser TTL.
+     * Its own controller instance (and its own cache): the class-level one is shared.
+     */
+    @Test
+    fun `a refused fetch is remembered for the TTL - one fetch per TTL, no second wait`() {
+        val stall = Duration.ofMillis(250)
+        val fetcher = CountingRefusingFetcher(stall)
+        val controller = AvatarController(userRepository, AvatarHosts(authProperties), fetcher)
+        authenticate()
+        every { userRepository.findById(userId) } returns userWith(url("/negative"))
+
+        val (firstStatus, firstElapsed) = timed { controller.avatar().statusCode.value() }
+        val (second, secondElapsed) = timed { controller.avatar() }
+
+        firstStatus shouldBe 404
+        second.statusCode.value() shouldBe 404
+        fetcher.fetches.get() shouldBe 1 // red on the base: two fetches, one per request
+        // The second answer did not pay even the stall the first paid — no fetch stood behind it.
+        firstElapsed shouldBeGreaterThanOrEqualTo stall
+        secondElapsed shouldBeLessThan stall
+        second.headers.cacheControl shouldContain "private"
+        second.headers.cacheControl shouldContain "max-age=300"
     }
 
     @Test
@@ -359,6 +411,35 @@ class AvatarControllerTest {
         val expiring = AvatarCache(maxEntries = 2, ttl = Duration.ZERO)
         expiring.put("x", image)
         expiring.get("x") shouldBe null
+    }
+
+    @Test
+    fun `a negative entry stands for the ttl, shares the bound, and a success replaces it`() {
+        val cache = AvatarCache(maxEntries = 2, ttl = Duration.ofSeconds(60))
+        val image = AvatarImage(pictureBytes, MediaType.IMAGE_PNG)
+
+        cache.putNegative("u")
+        cache.get("u") shouldBe null // no positive answer in it
+        cache.refused("u") shouldBe true // the refusal stands
+
+        cache.put("u", image)
+        cache.refused("u") shouldBe false // the success replaced it
+        cache.get("u") shouldBe image
+
+        // A negative holds its own entry slot — the bound is one map, not two.
+        val bounded = AvatarCache(maxEntries = 2, ttl = Duration.ofSeconds(60))
+        bounded.put("a", image)
+        bounded.putNegative("n")
+        bounded.put("c", image)
+        bounded.refused("a") shouldBe false
+        bounded.get("a") shouldBe null // evicted by "c" — the negative counted against the bound
+        bounded.refused("n") shouldBe true
+        bounded.get("c") shouldBe image
+
+        // An expired negative is a miss again — the next request may fetch once more.
+        val expiring = AvatarCache(maxEntries = 2, ttl = Duration.ZERO)
+        expiring.putNegative("x")
+        expiring.refused("x") shouldBe false
     }
 
     private fun <T> timed(block: () -> T): Pair<T, Duration> {
