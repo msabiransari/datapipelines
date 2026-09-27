@@ -123,9 +123,10 @@ class PipelineJobExecutor(
                 )
         val version =
             record.currentVersion
-                ?: throw payloadInvalid(
-                    POINTER_NULL,
+                ?: throw ScheduleException(
+                    ScheduleErrorCodes.TARGET_NOT_RELEASED,
                     "Pipeline '$name' has no current version to follow — release it (or switch its current version) first.",
+                    mapOf("pipeline" to name),
                 )
         val executable =
             pipelineService.findExecutable(workspaceId, ReadLens.Everything, record, version)

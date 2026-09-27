@@ -270,8 +270,13 @@ class ApiErrorCatalogSpecDriftTest {
          * evaluate codes). Re-derived from the document's own parse on the lane's base 2e32943e; a lane
          * merging beside it re-derives again. 304 → 305 in the same lane: the owner's third ruling
          * (2026-09-27) adds `parameter.validation.input_source_multiple_rows` (400, the family default).
+         *
+         * 305 → 306 with #280: §13.19 gains `schedule.validation.target_not_released` (400 — the
+         * `schedule.validation.` family default, so no explicit catalog row), landed in the SAME
+         * commit as its constants in `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` and the
+         * executor that raises it. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 305
+        const val SECTION_13_ROW_COUNT = 306
 
         /**
          * §12's distinct validation codes.

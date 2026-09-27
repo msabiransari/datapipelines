@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.35 (revised — see Change Log)
+**Status:** v1.36 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-27
 
 ---
 
@@ -1403,8 +1403,9 @@ The scheduler's refusals (#9; [Scheduler](scheduler.md), the scheduler design re
 | `schedule.validation.timezone_invalid` | 400 | not an IANA region id (`Europe/Berlin`); a fixed offset such as `+02:00` is refused too |
 | `schedule.validation.interval_too_short` | 400 | two consecutive occurrences closer than `datapipelines.scheduler.min-interval-seconds` |
 | `schedule.validation.executor_unknown` | 400 | no executor is registered under that id (v1 registers `pipeline`) |
-| `schedule.validation.payload_invalid` | 400 | the executor refused the payload — for `pipeline`: an unknown field, no pipeline name, a `version` other than `"current"` (`latest` is refused by name), or a pipeline with no current version to follow; `details.reason` names which — or the payload or parameters exceed 16 KiB or 8 levels |
-| `schedule.validation.target_not_found` | 400 | the payload names a pipeline the workspace does not hold, or its current version has no stored body |
+| `schedule.validation.payload_invalid` | 400 | the executor refused the payload — for `pipeline`: an unknown field, no pipeline name, or a `version` other than `"current"` (`latest` is refused by name); `details.reason` names which — or the payload or parameters exceed 16 KiB or 8 levels |
+| `schedule.validation.target_not_found` | 400 | the payload names a pipeline the workspace does not hold, or its current version has no stored body; `details.pipeline` |
+| `schedule.validation.target_not_released` | 400 | the payload names a pipeline with no current version to follow (#280) — release it, or switch its current version, then save again; `details.pipeline` |
 | `schedule.validation.binding_invalid` | 400 | a `parameter_bindings` entry cannot be resolved (#9 slice 3) — an unknown parameter, a non-`DATE` type, an unknown keyword (`TODAY`/`YESTERDAY` only), an unknown source, a literal binding without a value, or a keyword with no reference at run time; `details.reason` (`unknown_parameter` / `type_mismatch` / `unknown_keyword` / `unknown_source` / `literal_invalid` / `no_reference`) and `details.parameter` name why |
 | `schedule.validation.binding_conflict` | 400 | the same parameter is supplied in `parameters` and in `parameter_bindings` — give it one source; the resolver rejects ambiguity instead of applying a precedence rule (`details.parameter`) |
 
@@ -1737,6 +1738,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v1.36 | #280 the schedule form says what is wrong | **§13.19** gains `schedule.validation.target_not_released` (400, the `schedule.validation.` family default) — the payload names a pipeline with no current version to follow, release it or switch its current version then save again (`details.pipeline`). It was a `payload_invalid` / `details.reason=pointer_null` refusal before, one code shared with the shape and size refusals, so a static per-code user message could not say "release it"; `payload_invalid`'s description loses that clause and keeps the shape reasons. The save's `message` keeps its sentence; the run side's `pointer_null` reasons are untouched. Landed in the SAME commit as the constants in `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` and the executor that raises it. |
 | 2026-09-26 | v1.35 | 194b (#194) parameter engine lane B — the frozen model | New **§13.20 Parameter sets**: the `parameter.*` family, 81 codes, one row each — the record's §10 plus the owner's three rulings of 2026-09-26/27 (`parameter.validation.body_invalid` for the document's shape at every level, `parameter.validation.selector_query_failed` when the save-time probe's statement fails, `parameter.validation.input_source_multiple_rows` when a database-fed input's dry run returns two rows) and the lane's temporary `parameter.validation.selector_probe_unavailable` (gone with lane C). The evaluate's per-parameter codes are "—" (never a response status; reported in `state.errors[]` of a 200); `parameter.evaluate.timeout` is 504 (the house deadline mapping, §13.3 — the record's §14 item 1). Landed with `ParameterErrorCodes`, its mirror `PipelineErrorCodes.Parameters` and the `ApiErrorCatalog` rows. |
 | 2026-09-26 | v1.34 | 194a (#194) parameter engine lane A — the shared validator | §6.1: a parameter gains optional **`constraints`** (`min`, `max`, `min_length`, `max_length`, `pattern`) and **`cardinality`** (`SINGLE`/`MULTI`), the parameter engine's declaration model; both omitted when absent, so no stored body's hash moves. §6.2: every value (and every applied default) is judged by the shared `ParameterValueValidator` with ONE null policy — `null` and absent are unsupplied and resolve as before; **precision and scale are enforced on values** (the second deliberate break, REST API v2.37); `MULTI` is refused until the dashboard round. §12.7 gains `default_invalid`, `constraint_not_applicable`, `constraint_invalid`, `pattern_invalid`, `cardinality_unsupported`; §13.3 gains `pipeline.execution.parameter_constraint_violation` (400, `details.reason`). Additive per §15.2 except the precision/scale enforcement, which is named as a break. |
 | 2026-09-26 | v1.33 | 194a (#194) parameter engine lane A | §6.3: **nothing is trimmed** — a `BIGINTEGER`/`BIGDECIMAL` value with surrounding whitespace is `pipeline.execution.invalid_parameter_type`; the two BIG types were trimmed before parsing until today, a deliberate break recorded in REST API v2.36. `ParameterCoercion` and `ParameterWireEncoder` moved to `typesystem` (made public) so the parameter engine shares the one implementation; the rejection wording is unchanged. |

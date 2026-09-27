@@ -178,13 +178,13 @@ class PipelineJobExecutorTest {
     }
 
     @Test
-    fun `a pipeline with no current version cannot be scheduled - pointer_null at save`() {
+    fun `a pipeline with no current version cannot be scheduled - target_not_released at save`() {
         every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns pipeline(currentVersion = null)
 
         val refused = shouldThrow<ScheduleException> { adapter.validate(workspace.id, payload("a/p"), mapper.createObjectNode()) }
 
-        refused.code shouldBe ScheduleErrorCodes.PAYLOAD_INVALID
-        refused.details["reason"] shouldBe PipelineJobExecutor.POINTER_NULL
+        refused.code shouldBe ScheduleErrorCodes.TARGET_NOT_RELEASED
+        refused.details shouldBe mapOf("pipeline" to "a/p")
     }
 
     // ------------------------------------------------------------------------------ preparation

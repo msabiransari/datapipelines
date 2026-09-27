@@ -58,6 +58,12 @@ object ScheduleErrorCodes {
     /** 400 — the payload names a target the workspace does not hold. */
     const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
 
+    /**
+     * 400 — the payload names a pipeline with no current version to follow (#280): release it, or switch
+     * its current version, then save again.
+     */
+    const val TARGET_NOT_RELEASED = "schedule.validation.target_not_released"
+
     /** 400 — a `parameter_bindings` entry cannot be resolved; `details.reason` and `details.parameter` name why. */
     const val BINDING_INVALID = "schedule.validation.binding_invalid"
 
@@ -91,6 +97,7 @@ object ScheduleErrorCodes {
             EXECUTOR_UNKNOWN,
             PAYLOAD_INVALID,
             TARGET_NOT_FOUND,
+            TARGET_NOT_RELEASED,
             BINDING_INVALID,
             BINDING_CONFLICT,
         )
