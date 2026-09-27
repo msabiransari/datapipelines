@@ -206,10 +206,11 @@ class PipelineInputResolver {
             }
 
             else -> {
+                val echoedSource = node.path(BINDING_SOURCE).asText().reflectSafely()
                 Refusal.Invalid(
                     Refusal.Reason.UNKNOWN_SOURCE,
                     echoed,
-                    "Binding sources are \"$SOURCE_KEYWORD\" or \"$SOURCE_LITERAL\", not '${node.path(BINDING_SOURCE).asText().reflectSafely()}'.",
+                    "Binding sources are \"$SOURCE_KEYWORD\" or \"$SOURCE_LITERAL\", not '$echoedSource'.",
                 )
             }
         }

@@ -123,7 +123,9 @@ object RunReasons {
     const val CAPACITY = "capacity"
     const val START_UNCONFIRMED = "start_unconfirmed"
     const val START_FAILED = "start_failed"
-}/** The reason a schedule is blocked by an `unknown` run (record §2.1). An executor refusal blocks under its own reason. */
+}
+
+/** The reason a schedule is blocked by an `unknown` run (record §2.1). An executor refusal blocks under its own reason. */
 const val BLOCKED_BY_UNKNOWN_RUN = "run_unknown"
 
 /**

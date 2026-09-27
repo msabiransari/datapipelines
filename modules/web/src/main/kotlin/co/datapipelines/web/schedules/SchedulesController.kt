@@ -335,7 +335,10 @@ class SchedulesController(
             "updated_at" to schedule.updatedAt.toString(),
         )
 
-    private fun nameOf(names: Map<UUID, String>, id: UUID): String = names[id] ?: ActorNames.fallback(id)
+    private fun nameOf(
+        names: Map<UUID, String>,
+        id: UUID,
+    ): String = names[id] ?: ActorNames.fallback(id)
 
     private fun runJson(
         run: ScheduleRun,

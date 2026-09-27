@@ -219,7 +219,8 @@ class PipelineInputResolverTest {
                 emptyMap(),
                 mapOf(
                     "as_of_date" to
-                        mapper.createObjectNode()
+                        mapper
+                            .createObjectNode()
                             .put("source", "keyword")
                             .put("name", evilKeyword),
                 ),

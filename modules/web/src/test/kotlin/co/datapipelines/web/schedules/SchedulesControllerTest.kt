@@ -288,7 +288,11 @@ class SchedulesControllerTest {
         schedule["created_by_name"] shouldBe "Alice"
         schedule["updated_by_name"] shouldBe "Alice"
 
-        val run = controller.runs(scheduleId, 0, 2).data.items.single()
+        val run =
+            controller
+                .runs(scheduleId, 0, 2)
+                .data.items
+                .single()
         run["requested_by"] shouldBe user.toString()
         run["requested_by_name"] shouldBe "Alice"
     }

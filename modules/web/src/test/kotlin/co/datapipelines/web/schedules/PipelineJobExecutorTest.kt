@@ -380,6 +380,7 @@ class PipelineJobExecutorTest {
         every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail()
         every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, bound.record, 1) } returns bound
         every { executorConfig.result } returns mockk { every { ttlMaxSeconds } returns 3600 }
+
         fun launch() =
             Launch(
                 admission(payload = payload("a/p")),

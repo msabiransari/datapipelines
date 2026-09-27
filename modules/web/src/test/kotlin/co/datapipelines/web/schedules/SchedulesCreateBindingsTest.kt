@@ -116,9 +116,11 @@ class SchedulesCreateBindingsTest {
             ),
             audit,
             mapper,
-            ActorNames(mockk {
-                every { query(any<String>(), any<Map<String, Any?>>(), any<RowMapper<Pair<UUID, String>>>()) } returns emptyList()
-            }),
+            ActorNames(
+                mockk {
+                    every { query(any<String>(), any<Map<String, Any?>>(), any<RowMapper<Pair<UUID, String>>>()) } returns emptyList()
+                },
+            ),
         )
 
     @BeforeEach

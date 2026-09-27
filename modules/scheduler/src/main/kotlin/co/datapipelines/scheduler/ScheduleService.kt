@@ -538,6 +538,7 @@ class ScheduleService(
         }
         return trimmed
     }
+
     private fun notFound(id: UUID) =
         ScheduleException(ScheduleErrorCodes.NOT_FOUND, "No schedule '$id' in this workspace.", mapOf("schedule_id" to id.toString()))
 

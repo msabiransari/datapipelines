@@ -397,11 +397,21 @@ class PipelineJobExecutor(
     /** R6's normative table (record §7.1), from the execution record — its own timing rides along (#258). */
     private fun outcomeOf(record: ExecutionRecord): ExecutionOutcome =
         when (record.status) {
-            ExecutionStatus.RUNNING -> ExecutionOutcome.Running
-            ExecutionStatus.SUCCESS -> ExecutionOutcome.Finished(RunState.SUCCEEDED, null, record.startedAt, record.completedAt)
-            ExecutionStatus.FAILED ->
+            ExecutionStatus.RUNNING -> {
+                ExecutionOutcome.Running
+            }
+
+            ExecutionStatus.SUCCESS -> {
+                ExecutionOutcome.Finished(RunState.SUCCEEDED, null, record.startedAt, record.completedAt)
+            }
+
+            ExecutionStatus.FAILED -> {
                 ExecutionOutcome.Finished(RunState.FAILED, EXECUTION_FAILED, record.startedAt, record.completedAt)
-            ExecutionStatus.ABORTED -> abortedOutcome(record)
+            }
+
+            ExecutionStatus.ABORTED -> {
+                abortedOutcome(record)
+            }
         }
 
     private fun abortedOutcome(record: ExecutionRecord): ExecutionOutcome.Finished {
