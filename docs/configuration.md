@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.33 (single source of truth for every config key)
+**Status:** v1.34 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-26
 
@@ -909,7 +909,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 | Date | Version | Author | Change |
 |---|---|---|---|
 | 2026-09-26 | v1.32 | 246 (#246) the avatar proxy hardened — numbered after scheduler lane 1's v1.31 (#9, merging at dispatch) | §3.4's `picture-hosts` row says **no port** on both sides: an entry is a bare hostname (unchanged), and a stored picture URL naming a port is refused; it points at auth.md §11.1 for the two other #246 rules (raster types only, one 5 s budget for the whole fetch). No key, default or binding changed. |
-| 2026-09-26 | v1.33 | 194b (#194) parameter engine lane B | New **§3.30 Parameter engine**: the fifteen `datapipelines.parameters.*` keys of the design record's §11 with their bounds (enforced at boot by `ConfigValidator` and at binding by `ParametersProperties`); §5's template gains the `parameters:` block as the last child of `datapipelines:`; §7 lists the rule. No options cache (the record's §11). |
+| 2026-09-26 | v1.34 | 194b (#194) parameter engine lane B — numbered after origin/main's v1.33 (260) | New **§3.30 Parameter engine**: the fifteen `datapipelines.parameters.*` keys of the design record's §11 with their bounds (enforced at boot by `ConfigValidator` and at binding by `ParametersProperties`); §5's template gains the `parameters:` block as the last child of `datapipelines:`; §7 lists the rule. No options cache (the record's §11). |
 | 2026-09-26 | v1.31 | scheduler lane 1 (#9) — numbered after origin/main's v1.30 (197) | New **§3.29 Scheduler**: the eleven `datapipelines.scheduler.*` keys (dispatch on/off — API mode, threads, polling, heartbeat, tick, max concurrent runs, lateness, catch-up reach, shutdown wait, the two save guards) with their bounds, enforced at binding; `management.health.db-scheduler.enabled: false`. §5 template gains the `scheduler:` block and the top-level `db-scheduler:` wiring fed from it. Status caught up (it read v1.27 after v1.29's row; main's v1.30 row is 197's). |
 | 2026-09-25 | v1.30 | 197 (#197) the avatar proxy | §3.4 gains `datapipelines.auth.oidc.providers[].picture-hosts` (per-provider, default **empty** = the avatar proxy fetches nothing and avatars render initials): bare hostnames only — a scheme, port, path, userinfo or wildcard entry refuses startup, enforced where the allowlist is built (the `trusted-proxies` precedent). The demo `google` provider ships `lh3.googleusercontent.com` — measured, NOT derived from the issuer (`accounts.google.com`). [Auth §11.1](auth.md#111-oidc-provider-configuration) carries the full key story; [Deployment §6.2](deployment.md#62-multi-instance-horizontal-scaling-production) the narrowed CSP row. |
 | 2026-09-24 | v1.29 | 224 (#224) | §3.18 gains `datapipelines.bootstrap.demo-api-key` (committed default, blank = off, changed = rotation) and §3.22 the `datapipelines.endpoints.key-request-budget.*` pair (window 60 s, 60 requests, `0` = off); §7 gains the demo-key shape/hardened check and the budget bounds check (checks 28 and 29). The demo key and its page section are rest-api §19's worked example. |
