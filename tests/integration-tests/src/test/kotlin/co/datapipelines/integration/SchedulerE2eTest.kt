@@ -180,6 +180,44 @@ class SchedulerE2eTest {
     }
 
     @Test
+    @Order(4)
+    fun `R3 on the MCP surface - a member's key lists the scheduled run, never another member's own run (#250)`() {
+        // The key is a robot member with the AUTHOR role (keys v2): the key's OWN role decides.
+        // Its identity started nothing, so before #250 the list was empty — a scheduled run was
+        // invisible to the one member kind whose agent most wants to see what the schedule did.
+        val minted =
+            session(AUTHOR_SESSION)
+                .contentType(ContentType.JSON)
+                .body("""{"name": "sched-r3-agent", "kind": "mcp", "role": "author"}""")
+                .post("/api/v1/auth/api-keys")
+        minted.statusCode shouldBe 201
+        val agentKey = minted.jsonPath().getString("data.key")
+
+        fun mcpExecutionsList(): List<String> =
+            given()
+                .port(port)
+                .header("DP-API-Key", agentKey)
+                .contentType(ContentType.JSON)
+                .accept("application/json, text/event-stream")
+                .body("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"executions_list","arguments":{"limit":200}}}""")
+                .`when`()
+                .post("/mcp")
+                .then()
+                .extract()
+                .asString()
+                .replace("\\\"", "\"")
+                .let { body -> EXECUTION_ID.findAll(body).map { it.groupValues[1] }.toList() }
+
+        val listedByAgent = mcpExecutionsList()
+        withClue("the key's role reaches execution.read, so the schedule's run is listed") {
+            listedByAgent shouldContain scheduledExecutionId
+        }
+        withClue("R3 widens nothing else — the admin's own interactive run stays absent for the key") {
+            listedByAgent shouldNotContain interactiveExecutionId
+        }
+    }
+
+    @Test
     @Order(5)
     fun `a creator demoted to viewer keeps their schedule firing - it never ran as them`() {
         val hourly = createSchedule(AUTHOR_SESSION, "test/sched_every_five", PIPELINE_NAME, EVERY_FIVE_MINUTES)
@@ -536,6 +574,9 @@ class SchedulerE2eTest {
         private const val NODE_PROGRESS = "node_progress"
         private const val SHA256_HEX_LENGTH = 64
         private const val DIAGNOSTIC_CHARS = 2_000
+
+        /** An execution id inside a `/mcp` body — the tool result rides as escaped JSON text. */
+        private val EXECUTION_ID = Regex("\"execution_id\"\\s*:\\s*\"([0-9a-f-]{36})\"")
         private const val POLL_BUDGET_SECONDS = 90L
         private const val POLL_MILLIS = 250L
         private val ACTIVE_STATES = setOf("queued", "starting", "running")

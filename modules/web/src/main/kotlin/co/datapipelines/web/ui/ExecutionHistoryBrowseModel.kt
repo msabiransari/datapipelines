@@ -70,7 +70,11 @@ class ExecutionHistoryBrowseModel(
                     offset = page,
                 )
             } else {
-                executions.findByUser(
+                // #9 R3 / #250: own runs PLUS every scheduled run of the workspace — the same
+                // `findVisible` predicate the REST listing reads, so the screen and the API
+                // cannot disagree about what a schedule did. Visibility is decided in SQL and
+                // the page is cut after it.
+                executions.findVisible(
                     workspaceId,
                     principal.userId,
                     pipelineId,

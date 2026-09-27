@@ -34,7 +34,13 @@ class ScheduleService(
     private val properties: SchedulerProperties,
     private val queue: RunQueue,
     private val mapper: ObjectMapper,
-    /** The system identity's user id (R2) — every run's `actor_user_id`. */
+    /** #259 — the by-target read, in its own file while the follow-ups lane is in flight. */
+    private val targetReads: ScheduleTargetReads,
+    /**
+     * The system identity's user id (R2) — every run's `actor_user_id`. LAST on purpose: a
+     * call site may pass it as a trailing lambda, which binds to the final parameter (#250
+     * lane note — placing [targetReads] after it silently stole every trailing lambda).
+     */
     private val systemActor: () -> UUID,
 ) {
     // ------------------------------------------------------------------------------ writes
@@ -319,6 +325,16 @@ class ScheduleService(
             }
         return page.filter { it in admitted }
     }
+
+    /**
+     * The live schedules whose target names [targetRef] (`pipeline:<name>`, B15) — #259's Usage
+     * evidence, lensed for [viewer] exactly as [list] is.
+     */
+    fun listByTarget(
+        workspaceId: UUID,
+        targetRef: String,
+        viewer: TargetViewer,
+    ): List<Schedule> = targetReads.listByTarget(schedules, executors, workspaceId, targetRef, viewer)
 
     /** The saved schedule's next [count] occurrences — the ONE function (record §3.2). */
     fun upcoming(

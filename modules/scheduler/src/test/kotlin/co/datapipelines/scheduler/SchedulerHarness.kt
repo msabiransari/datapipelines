@@ -62,7 +62,18 @@ internal class SchedulerHarness(
     val queue = DbSchedulerRunQueue(manual, SchedulerTasks.RUN_TASK)
 
     val service =
-        ScheduleService(schedules, runs, executors, ledger, transactions, clock, properties, queue, SchedulerAutoConfiguration.JSON) {
+        ScheduleService(
+            schedules,
+            runs,
+            executors,
+            ledger,
+            transactions,
+            clock,
+            properties,
+            queue,
+            SchedulerAutoConfiguration.JSON,
+            ScheduleTargetReads(SchedulerTestDb.jdbc),
+        ) {
             SchedulerTestDb.SYSTEM_ACTOR
         }
 

@@ -7,6 +7,7 @@ import io.kotest.matchers.doubles.shouldBeGreaterThan
 import io.kotest.matchers.doubles.shouldBeLessThan
 import io.kotest.matchers.longs.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -624,6 +625,67 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         // the failure a header-only assertion misses.
         page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
         page.locator("#pipeline-tab-runs").getAttribute("hidden").shouldBeHiddenAttribute()
+    }
+
+    @Test
+    fun `the usage tab lists the schedules that run the pipeline (#259)`() {
+        startTrace()
+        val wsName = "detws-" + generatedPassword("w").take(8).lowercase()
+        val email = uniqueEmail("det-" + generatedPassword("u").take(8))
+        val user = seedLocalUser(email, generatedPassword("pw"), mustChange = false)
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        createWorkspace(wsName)
+        seed()
+        seedSchedule(wsName, email, "test/nightly-usage", "pipeline:test/detail_probe")
+
+        page.setViewportSize(1440, 900)
+        page.navigate("$baseUrl/pipelines")
+        selectLeaf()
+        page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
+        page.waitForResponse({ it.url().contains("/usage") }) {
+            page.locator("[data-tab-panel='pipeline-tab-usage']").click()
+        }
+        page.waitForFunction("() => !document.getElementById('pipeline-tab-usage').hidden")
+
+        val usage = page.locator("#pipeline-tab-usage").innerText()
+        // The heading is CSS-uppercased on the page (innerText returns the transformed text).
+        usage.lowercase().shouldContain("schedules running it")
+        usage.shouldContain("test/nightly-usage")
+        usage.lowercase().shouldContain("enabled")
+    }
+
+    /**
+     * A live schedule of EXACTLY [workspaceName] whose target names [pipelineName] — seeded
+     * straight into the shared Postgres with the same shape the scheduler's adapter writes
+     * (`executor_id = 'pipeline'`, `target_ref = 'pipeline:<name>'`). The workspace and user
+     * are matched by their full unique keys, never by a LIKE over the shared database.
+     */
+    private fun seedSchedule(
+        workspaceName: String,
+        userEmail: String,
+        scheduleName: String,
+        targetRef: String,
+    ) {
+        java.sql.DriverManager
+            .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
+            .use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.execute(
+                        """
+                        INSERT INTO schedules (id, workspace_id, name, executor_id, payload_schema_version, payload_json,
+                                               target_ref, cron, timezone, next_due_at, created_by, updated_by)
+                        SELECT gen_random_uuid(), w.id, '$scheduleName', 'pipeline', 1,
+                               jsonb_build_object('pipeline', right('$targetRef', - length('pipeline:'))),
+                               '$targetRef', '0 30 2 * * *', 'UTC', NOW() + interval '1 day', u.id, u.id
+                          FROM workspaces w
+                          CROSS JOIN users u
+                         WHERE w.name = '$workspaceName'
+                           AND u.email = '$userEmail'
+                        """.trimIndent(),
+                    )
+                }
+            }
     }
 
     @Test

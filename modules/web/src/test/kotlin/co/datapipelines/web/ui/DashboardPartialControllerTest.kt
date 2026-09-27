@@ -104,7 +104,7 @@ class DashboardPartialControllerTest {
         authenticate()
         every { pipelines.countAll(workspaceId) } returns 0
         every {
-            executions.findByUser(workspaceId, userId, null, null, null, null, any(), any())
+            executions.findVisible(workspaceId, userId, null, null, null, null, any(), any())
         } returns emptyList()
 
         controller.stats(model)
@@ -146,7 +146,7 @@ class DashboardPartialControllerTest {
     fun `recent executions carries the batch for the template`() {
         authenticate()
         val batch = listOf(record(ExecutionStatus.SUCCESS))
-        every { executions.findByUser(workspaceId, userId, null, null, null, null, any(), any()) } returns batch
+        every { executions.findVisible(workspaceId, userId, null, null, null, null, any(), any()) } returns batch
 
         controller.recentExecutions(model)
 

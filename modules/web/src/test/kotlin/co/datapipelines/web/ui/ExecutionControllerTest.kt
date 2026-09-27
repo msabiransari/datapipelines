@@ -132,7 +132,7 @@ class ExecutionControllerTest {
         authenticate(owner)
         every { pipelines.findAll(any()) } returns listOf(pipelineRecord())
         // §5 (097 §B): the page paints the first fragment too, so it reads the rows as well.
-        every { executions.findByUser(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns emptyList()
+        every { executions.findVisible(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns emptyList()
         val model = ExtendedModelMap()
         val viewName = pageController.list(model, null, null, null, null, 0)
 
@@ -147,7 +147,7 @@ class ExecutionControllerTest {
     fun `history partial returns paginated executions`() {
         authenticate(owner)
         val records = (1..21).map { record() }
-        every { executions.findByUser(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns records
+        every { executions.findVisible(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns records
 
         val model = ExtendedModelMap()
         val viewName = partialController.listPartial(null, null, null, null, 0, model)
@@ -162,7 +162,7 @@ class ExecutionControllerTest {
     @Test
     fun `history partial empty state when no executions`() {
         authenticate(owner)
-        every { executions.findByUser(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns emptyList()
+        every { executions.findVisible(any(), owner, null, null, null, null, limit = 21, offset = 0) } returns emptyList()
 
         val model = ExtendedModelMap()
         partialController.listPartial(null, null, null, null, 0, model)

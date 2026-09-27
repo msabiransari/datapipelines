@@ -17,7 +17,11 @@ import java.util.UUID
 /**
  * Execution **ownership** (mcp-server.md §13 security checklist; D11): a key reads its issuer's
  * OWN runs, and another user's only when the issuer holds `execution.read_all` (#215 — the
- * workspace admin's and the super admin's).
+ * workspace admin's and the super admin's) — or when the run is a SCHEDULE's (#9 R3, #250):
+ * a scheduled run is nobody's own, it ran as the system identity, so every member whose role
+ * reaches `execution.read` sees it, on the list and on the single reads. The key's OWN role
+ * decides (keys v2): the matrix already refused the promoter this row before any record is
+ * consulted. Visibility lifts, never ownership — cancelling one still needs `cancel_all`.
  *
  * A non-owned execution is reported as *not found* rather than *forbidden*: telling a caller that
  * an execution it may not read exists is an information disclosure, and §13.10 catalogues no
@@ -25,7 +29,9 @@ import java.util.UUID
  * `result.execution_not_found` row of §6.2.15's error table.
  */
 internal fun ExecutionRecord.visibleTo(ctx: McpToolContext): Boolean =
-    isOwnRunOf(ctx.principal.userId) || ctx.principal.holds(Permission.EXECUTION_READ_ALL)
+    isOwnRunOf(ctx.principal.userId) ||
+        ctx.principal.holds(Permission.EXECUTION_READ_ALL) ||
+        (triggeredVia == ExecutionTrigger.SCHEDULE && ctx.principal.holds(Permission.EXECUTION_READ))
 
 /** [visibleTo]'s twin for the cancel verb: own runs, or any with `execution.cancel_all` (#215). */
 internal fun ExecutionRecord.cancellableBy(ctx: McpToolContext): Boolean =
@@ -63,10 +69,14 @@ internal fun ExecutionRecord.toMcpMetadata(): Map<String, Any?> =
 /**
  * `executions_list` (mcp-server.md §6.2.13). Permission: `execution.read` (D11).
  *
- * Own runs unless the key's issuer administers the workspace, in which case every run of the
- * workspace (`findAll`): the same rule the REST listing and the executions screen apply, read
- * from one predicate (`ExecutionRepository.OWN_RUN_PREDICATE`). An endpoint-key run is nobody's
- * own and lists for admins only. The promoter is refused the tool by the matrix before it runs.
+ * Own runs plus every SCHEDULED run of the workspace (#9 R3, #250), and every run of the
+ * workspace when the key's role administers it (`findAll`): the same rule the REST listing
+ * and the executions screen apply, read from one predicate (`findVisible` — the
+ * `(OWN_RUN_PREDICATE OR SCHEDULED_RUN_PREDICATE)` read). The visibility is decided in SQL,
+ * so the page is cut after it and `limit` stays honest; the in-memory `visibleTo` filter is
+ * defence in depth, a no-op over what `findVisible` already returned. An endpoint-key run is
+ * nobody's own and lists for admins only. The promoter is refused the tool by the matrix
+ * before it runs.
  */
 class ExecutionsListTool(
     private val executions: ExecutionRepository,
@@ -76,8 +86,9 @@ class ExecutionsListTool(
             name = "executions_list",
             description =
                 "List recent pipeline executions of the key's pinned workspace, optionally filtered by pipeline or status. " +
-                    "The key acts as its own role: your own runs are always listed, plus every run of the workspace when " +
-                    "the key's role holds execution.read_all (a workspace-admin-role key). Other members' runs are not listed.",
+                    "The key acts as its own role: you see the runs you fired, and every run a schedule fired (a scheduled " +
+                    "run is nobody's own — it ran as the system identity), plus every run of the workspace when the key's " +
+                    "role holds execution.read_all (a workspace-admin-role key). Other members' own interactive runs are not listed.",
             schema =
                 """
                 {
@@ -100,14 +111,15 @@ class ExecutionsListTool(
         val status = args.enumString("status", ExecutionStatus.entries.map { it.name }.toSet())
         val pipelineId = args.uuid("pipeline_id")
 
-        // D11: own-or-admin decided in SQL, like the REST listing — an admin's key sees the
-        // workspace's runs (endpoint-key runs included), everyone else exactly their own.
+        // D11 + #9 R3: own-or-scheduled-or-admin decided in SQL, like the REST listing — an
+        // admin's key sees the workspace's runs (endpoint-key runs included), everyone else
+        // their own plus every scheduled run.
         val wanted = status?.let { ExecutionStatus.valueOf(it) }
         val candidates =
             if (ctx.principal.holds(Permission.EXECUTION_READ_ALL)) {
                 executions.findAll(workspaceId, pipelineId, wanted, limit = limit)
             } else {
-                executions.findByUser(workspaceId, ctx.principal.userId, pipelineId, wanted, limit = limit)
+                executions.findVisible(workspaceId, ctx.principal.userId, pipelineId, wanted, limit = limit)
             }
         return candidates
             .filter { it.visibleTo(ctx) }
@@ -136,8 +148,9 @@ class ExecutionsGetTool(
                     "(datasource, dialect, pinned template), the rendered SQL (:name form, no bound values) and the " +
                     "exception chain with stack frames — read error.code first, then error.exception.caused_by (root " +
                     "cause LAST), then error.sql; quote error.correlation_id when escalating. To get the result " +
-                    "rows, use executions_get_result. Visible for YOUR OWN runs (this key's own), or any run of the " +
-                    "workspace when the key's role holds execution.read_all; another member's execution is not found.",
+                    "rows, use executions_get_result. Visible for YOUR OWN runs (this key's own), every run a schedule " +
+                    "fired, or any run of the workspace when the key's role holds execution.read_all; another member's " +
+                    "own interactive execution is not found.",
             schema =
                 """
                 {

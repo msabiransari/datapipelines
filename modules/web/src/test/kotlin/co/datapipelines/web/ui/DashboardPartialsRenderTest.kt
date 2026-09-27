@@ -107,6 +107,36 @@ class DashboardPartialsRenderTest {
         html shouldContain "class=\"app-path\">nyc/mobility/stage_trips<"
     }
 
+    @Test
+    fun `recent-executions renders a scheduled run with its origin (#250 R3)`() {
+        // The dashboard's recent list reads findVisible (#250), so a run the schedule fired
+        // can be in the batch; its row states where it came from, like the executions screen's.
+        val scheduled =
+            co.datapipelines.executor.ExecutionRecord(
+                executionId = java.util.UUID.randomUUID(),
+                pipelineId = java.util.UUID.randomUUID(),
+                pipelineVersion = 1,
+                status = co.datapipelines.executor.ExecutionStatus.SUCCESS,
+                parametersJson = "{}",
+                executedBy = java.util.UUID.randomUUID(),
+                triggeredVia = co.datapipelines.executor.ExecutionTrigger.SCHEDULE,
+                startedAt = java.time.Instant.parse("2026-09-01T10:00:00Z"),
+                durationMs = 900,
+            )
+        val application = JakartaServletWebApplication.buildApplication(MockServletContext())
+        val exchange = application.buildExchange(MockHttpServletRequest(), MockHttpServletResponse())
+        val html =
+            engine.process(
+                "partials/recent-executions",
+                WebContext(exchange).apply {
+                    setVariable("executions", listOf(scheduled))
+                    setVariable("pipelineNames", emptyMap<java.util.UUID, PipelineName>())
+                },
+            )
+
+        html shouldContain ">SCHEDULE<"
+    }
+
     /**
      * 025 C1: the theme-swap fragment's OOB link must come out RENDERED — a resolved href
      * (context-pathed by @{...}), no surviving th: attributes. The old hand-built string

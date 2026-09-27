@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.76
+**Status:** v1.77
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-26 (scheduler lane 3, #9)
@@ -454,7 +454,7 @@ Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not
 | Attribute | Value |
 |---|---|
 | URL | `GET /dashboard` |
-| Auth required | Yes (`read`); the Recent executions panel and the run figures follow `execution.read` (D11, 177) — a promoter's dashboard draws neither, and the stats tiles count runs the caller may see (own unless workspace admin). The **Pipelines** tile counts the caller's VIEW (178): for a promoter, the released-and-newer set the lens admits ([Auth §11A.1](auth.md#11a1-the-404-rule)), the same number the rail badge and the explorer show |
+| Auth required | Yes (`read`); the Recent executions panel and the run figures follow `execution.read` (D11, 177) — a promoter's dashboard draws neither, and the stats tiles count runs the caller may see (own plus the workspace's SCHEDULED runs (#250 — R3) unless workspace admin). The **Pipelines** tile counts the caller's VIEW (178): for a promoter, the released-and-newer set the lens admits ([Auth §11A.1](auth.md#11a1-the-404-rule)), the same number the rail badge and the explorer show |
 | Purpose | Landing page — overview of recent activity |
 | Design primitives | `.ds-card`, `.ds-badge`, `.ds-table` |
 | JS | None |
@@ -581,8 +581,14 @@ one. **Usage** is the published endpoints serving the pipeline and the live pipe
 pinning it, and it runs the **same query 101's discard refusal runs**
 (`PipelineRepository.findLiveParentsPinningVersion`, the evidence behind
 `pipeline.version.pinned`), so what the user reads before pressing Discard is what the server
-will decide on. Schedules join the list when 092 lands; there is no schedule table to query
-today, and an empty third heading would claim they had been checked.
+will decide on. Schedules joined the list with #259: a third heading lists the live schedules
+whose `target_ref` names the pipeline — name, a link to `/schedules?id=<id>` and the
+enabled/paused/blocked state — read through the scheduler's lensed by-target read
+(`ScheduleService.listByTarget`, over the indexed `target_ref` column), so a hidden target's
+schedule is absent exactly as §20.1 hides it. A schedule is not refusal evidence — the discard
+succeeds and the schedule then blocks (`pointer_null` / `target_not_found`) at its next
+occurrence, which is the consequence the heading exists to show — so the tab badge counts
+refusal evidence only, and the empty state speaks only when none of the three lists has a row.
 
 `PipelineBrowseModel.fillDetail` supplies every region in ONE call, with the lifecycle flags
 computed beside the query that produced the rows — a button is rendered because the server
@@ -1041,7 +1047,7 @@ Every user-supplied string — the panes, case and invariant names and messages,
 | Attribute | Value |
 |---|---|
 | URL | `GET /executions` |
-| Auth required | Yes — `execution.read` (D11, 177): a viewer or author sees their OWN runs, a workspace admin (`execution.read_all`) every run of the workspace (endpoint-key runs included), a **promoter is refused by role** (`auth.role_required`) and the rail does not draw the Executions item for one ([§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
+| Auth required | Yes — `execution.read` (D11, 177): a viewer or author sees their OWN runs plus every SCHEDULED run of the workspace (#250 — R3, the same `findVisible` read the REST listing does), a workspace admin (`execution.read_all`) every run of the workspace (endpoint-key runs included), a **promoter is refused by role** (`auth.role_required`) and the rail does not draw the Executions item for one ([§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
 | Purpose | Browse past executions, filter by pipeline/status/date |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-input` |
 | JS | None |
@@ -1702,6 +1708,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v1.77 | 250 (#250, #259) R3 on the UI + the Usage tab's schedules | **§4.8 / §4.2**: the executions screen and the dashboard's recent executions and run figures read `findVisible` — a viewer or author sees their OWN runs plus every SCHEDULED run of the workspace (#250, rest-api §10.1's R3), a scheduled run's row stating its origin (`SCHEDULE`) in the via column. **§4.3b**: the pipelines explorer's Usage tab gains a third heading — the live schedules whose target names the pipeline (#259), name + link to `/schedules?id=<id>` + enabled/paused/blocked, read through the lensed `ScheduleService.listByTarget`; a schedule is not refusal evidence, so the tab badge does not count it and the empty state now names all three absences. `ExecutionHistoryBrowserTest` holds a viewer's list to scheduled-visible / other's-own-absent; `ExplorerDetailBrowserTest` reads the third heading off the tab. |
 | 2026-09-26 | v1.76 | scheduler lane 3 (#9, slice 3) — numbered after origin/main's v1.75 (242b/230 may take it; renumber at merge, keep both) | **§4.20, the form**: a `DATE` parameter's field gains the **binding source** selector — Fixed value (default) / Today / Yesterday; a preset hides the fixed-value input by class and travels in `payload.parameter_bindings`, resolved per run on the schedule's frozen reference; the selection round-trips on edit; a literal binding shows its value and keeps its envelope while untouched. **§4.20, the run dialog**: beside the frozen parameters, **resolved parameters** (`prepared.resolved_parameters`) — what the run executed with. No new route, verb or role; the browser suites gain the bindings cases (`SchedulesBindingsBrowserTest`). |
 | 2026-09-26 | v1.75 | scheduler lane 2 (#9, slice 2) — numbered after origin/main's v1.74 (243) | **§4.20 Schedules, new**: `GET /schedules` (`schedule.read`) — a shell whose every read and write is a call to REST §20 (the scheduler design revision §6: no partial route, reads included): the folder explorer (§20.1 by prefix, a level's folders derived from the names, search over every rendered column), the detail (blocked reason with Unblock beside it; overview; the next five from §20.9 with their offsets; parameters; runs with due / started / took and the execution link), a run's dialog with the MERGED Messages (the run's trail + the execution's durable events, one time order, labelled by source; an unknown run's recovery named), and the one form for create and edit (presets that write the pattern, the timezone, a live §20.3 preview, the current version's declared parameters, field-level refusals, idempotency per attempt, the stale-revision 409 in the form with a reload). §3 the rail's Operate group gains **Schedules** after Executions, for every role. §4.3e gains the page's verb rows (`canAuthor` = the five write rows) and the execution half's `canReadExecutions`. §5.1 Shape D names the page as the second client-originated toast case. |
 | 2026-09-26 | v1.74 | 243 (#243, #170, #159) three small UI defects, measured and pinned | §4.7: a Render Context row fits its rail (#243) — the rows' inputs carry `min-width: 0` and the remove control never yields width, so the row's key, value and × end inside the rail at 1100/1440/1920 and at the splitter's 220px floor, static row and Add-Row clone alike (`TemplateEditorContextRowBrowserTest` measures the edges; on the base the row was 476px in a 320px rail). §4.13: the create form navigates in FULL — `hx-boost="false"` (#170) — because a boosted swap replaces only `#app-main` and the rail's switcher (filled on every full render) kept the pre-create options until a manual reload (`WorkspacesCreateBrowserTest` asserts the row lands in BOTH the table and the switcher). §3.4/§3.6: the 768–1099px band has a search entry point (#159) — a topbar icon button lit only in that band reveals the topbar copy in place (no third copy of the control) and ⌘K drives it, where previously neither copy was displayed and the chord did nothing (`MobileShellBrowserTest`'s band arm, red on the base; plus the phone-width drawer arm the issue named, and HeaderSearchBrowserTest's desktop arm pinning the button absent at ≥1100px). |
