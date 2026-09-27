@@ -228,6 +228,49 @@ class WorkspaceServiceTest {
     }
 
     @Test
+    fun `a super admin logging in keeps super-admin authority on the LAST-USED stamp (#262)`() {
+        // #216's twin on the login stamp: the last-used fallback built a plain member context
+        // before #262, demoting the login response — the one request before
+        // `resolveForSession` is asked again.
+        every { lastUsed.lastUsed(userId) } returns "alpha"
+        principal(memberships = listOf(membership(wsA, WorkspaceRole.AUTHOR)))
+
+        val stamped =
+            service().workspaceForLogin(user().copy(isAdmin = true), "alice@company.com", LoginMethod.PWD)
+                ?: error("a member's login stamps their membership")
+
+        stamped.id shouldBe wsA.id
+        stamped.superAdmin shouldBe true
+        stamped.implicit shouldBe false
+        stamped.heldRole shouldBe WorkspaceContext.SUPER_ADMIN_WIRE
+    }
+
+    @Test
+    fun `a super admin logging in keeps super-admin authority on the FIRST-MEMBERSHIP stamp (#262)`() {
+        every { lastUsed.lastUsed(userId) } returns "long-gone"
+        principal(memberships = listOf(membership(wsA, WorkspaceRole.VIEWER)))
+
+        val stamped =
+            service().workspaceForLogin(user().copy(isAdmin = true), "alice@company.com", LoginMethod.PWD)
+                ?: error("a member's login stamps their membership")
+
+        stamped.id shouldBe wsA.id
+        stamped.superAdmin shouldBe true
+        stamped.implicit shouldBe false
+    }
+
+    @Test
+    fun `a non-super-admin's login stamp is byte-identical to the plain member context (#262 golden)`() {
+        // The correction is a demotion FIX, never a promotion: without the instance flag the
+        // stamped context is exactly what the pre-#262 helper produced.
+        every { lastUsed.lastUsed(userId) } returns "long-gone"
+        principal(memberships = listOf(membership(wsA, WorkspaceRole.AUTHOR)))
+
+        service().workspaceForLogin(user(), "alice@company.com", LoginMethod.PWD) shouldBe
+            WorkspaceContext(wsA.id, "alpha", WorkspaceRole.AUTHOR)
+    }
+
+    @Test
     fun `a first login with NO membership joins demo as a viewer (D-R11)`() {
         every { lastUsed.lastUsed(userId) } returns null
         principal(memberships = emptyList())

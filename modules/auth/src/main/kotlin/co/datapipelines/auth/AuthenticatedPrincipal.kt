@@ -106,6 +106,20 @@ data class AuthenticatedPrincipal(
      * permission beyond its column and no instance permission.
      */
     val keyRole: KeyRole? = null,
+    /**
+     * #263: the validated session token's `exp`, in epoch millis — read by the credential
+     * filter from the claims it has ALREADY validated (never a second parse, never a
+     * client-supplied value) and carried so an open SSE stream can be cut at its next write
+     * after the token's expiry (auth.md §11.4, close reason `expired`). Null when the
+     * credential carries no session expiry — every non-session principal, and principals
+     * built before this field existed (tests): the expiry cut is then not judged, exactly as
+     * before this field existed.
+     *
+     * LAST and defaulting NULL, for the same two reasons `loginMethod` and `superAdmin` are:
+     * positional constructions across the suites keep compiling, and a caller that forgets
+     * it carries no expiry claim.
+     */
+    val sessionExpiresAtMillis: Long? = null,
 ) {
     /**
      * True when this principal is an `endpoint` key (§7.7): its authority is [KeyRole.API_CALLER]

@@ -111,6 +111,9 @@ class JwtAuthenticationFilter(
                     // WorkspaceResolutionFilter resolves it into `workspace` with its role.
                     workspaceName = claims["active_workspace"] as String?,
                     superAdmin = user.isAdmin,
+                    // #263: the expiry the claims JUST validated carry — the open-stream
+                    // re-judgement cuts at the next write past it. No second parse.
+                    sessionExpiresAtMillis = claims.expiration?.time,
                 )
             SecurityContextHolder.getContext().authentication =
                 UsernamePasswordAuthenticationToken(principal, null, emptyList())

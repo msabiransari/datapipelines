@@ -22,12 +22,16 @@ import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.web.CapturingSseEmitter
+import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * #230 (P4) — the ONE predicate an open stream re-asks before every write, at unit level: the
@@ -47,6 +51,8 @@ class ExecutionStreamAuthorityTest {
     private val executionId = UUID.randomUUID()
     private val ws =
         Workspace(UUID.randomUUID(), "acme", "acme", isPersonal = false, createdBy = null, isDeleted = false, createdAt = Instant.now())
+    private val wsOther =
+        Workspace(UUID.randomUUID(), "other", "other", isPersonal = false, createdBy = null, isDeleted = false, createdAt = Instant.now())
 
     /** The open-time snapshot: the member was an author with `acme` resolved, claim stamped. */
     private fun subscriberAtOpen(superAdmin: Boolean = false) =
@@ -60,12 +66,13 @@ class ExecutionStreamAuthorityTest {
             superAdmin = superAdmin,
         )
 
-    private fun authority() =
+    private fun authority(nowMillis: () -> Long = System::currentTimeMillis) =
         ExecutionStreamAuthority(
             executions,
             PrincipalLiveness(users, WorkspaceLiveness { true }),
             workspaceService(),
             users,
+            nowMillis,
         )
 
     private fun liveUser(isAdmin: Boolean = false) {
@@ -145,11 +152,14 @@ class ExecutionStreamAuthorityTest {
 
     @Test
     fun `a super admin with a stale claim and one membership keeps reading (#216)`() {
-        // The fallback branch's context carries the instance authority, so the guard's
-        // permission ask succeeds exactly as the request path's would.
+        // The stale claim ("gone-ws") must not demote the instance authority. Since #263 the
+        // re-judgement asks the OPEN-TIME resolution ("acme") rather than the claim, so the
+        // claim is doubly irrelevant — the resolution below still runs the super-admin-aware
+        // constructor (#216's), which is what this test pins.
         liveUser(isAdmin = true)
         every { repository.membershipsOf(userId) } returns listOf(memberRow(WorkspaceRole.VIEWER))
         every { repository.findByName("gone-ws") } returns null
+        every { repository.findByName("acme") } returns ws
         ownRun()
 
         val subscriber = subscriberAtOpen().copy(workspaceName = "gone-ws")
@@ -170,12 +180,130 @@ class ExecutionStreamAuthorityTest {
     }
 
     @Test
+    fun `a header-switched subscriber re-judges the workspace it OPENED in, not the claim (#263)`() {
+        // Opened under `DP-Workspace: acme` while the JWT claim names `other`: the request
+        // path resolved the HEADER, so the re-judgement must re-resolve `acme`. The pre-#263
+        // shape re-resolved the claim instead, found no record there, compared `other` != the
+        // open-time `acme`, and cut the stream at its first write.
+        liveUser()
+        every { repository.membershipsOf(userId) } returns
+            listOf(
+                WorkspaceMembership(ws.id, "acme", WorkspaceRole.AUTHOR, Instant.now(), workspaceActive = true),
+                WorkspaceMembership(wsOther.id, "other", WorkspaceRole.VIEWER, Instant.now(), workspaceActive = true),
+            )
+        every { repository.findByName("acme") } returns ws
+        every { repository.findByName("other") } returns wsOther
+        ownRun()
+
+        val subscriber = subscriberAtOpen().copy(workspaceName = "other")
+
+        authority().mayRead(subscriber, executionId) shouldBe true
+    }
+
+    @Test
+    fun `a header-switched subscriber is cut when the opened workspace's membership is revoked (#263)`() {
+        // The same subscriber: the re-judgement still RE-CHECKS the acme membership through
+        // the cache — the open-time resolution is a claim on the workspace, not an entitlement.
+        liveUser()
+        every { repository.membershipsOf(userId) } returns
+            listOf(WorkspaceMembership(wsOther.id, "other", WorkspaceRole.VIEWER, Instant.now(), workspaceActive = true))
+        every { repository.findByName("acme") } returns ws
+        every { repository.findByName("other") } returns wsOther
+        ownRun()
+
+        val subscriber = subscriberAtOpen().copy(workspaceName = "other")
+
+        authority().mayRead(subscriber, executionId) shouldBe false
+    }
+
+    @Test
+    fun `a UI-shaped subscriber - claim equals the resolution - is judged exactly as before (#263)`() {
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
+        authority().mayRead(subscriberAtOpen(), executionId) shouldBe true
+    }
+
+    @Test
     fun `a failure behind the cache is a refusal, not an exception - fail closed`() {
         liveUser()
         every { repository.membershipsOf(userId) } throws IllegalStateException("store down")
         ownRun()
 
         authority().mayRead(subscriberAtOpen(), executionId) shouldBe false
+    }
+
+    // ------------------------------------------------------------ token expiry (#263)
+
+    @Test
+    fun `a write before the token's expiry is judged normally (#263)`() {
+        // Fixed clock, never a sleep: exp is one second in the future, the full standing is
+        // green, so the write is served.
+        val clock = AtomicLong(1_000_000L)
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
+        val subscriber = subscriberAtOpen().copy(sessionExpiresAtMillis = 1_001_000L)
+
+        authority({ clock.get() }).mayRead(subscriber, executionId) shouldBe true
+    }
+
+    @Test
+    fun `a write at the token's expiry instant is refused - everything else green, only the expiry can refuse (#263)`() {
+        // The rest of the standing is fully stubbed green: with the expiry check removed this
+        // returns TRUE (that is the falsification), so the refusal can only be the expiry's.
+        val clock = AtomicLong(1_000_000L)
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
+        val subscriber = subscriberAtOpen().copy(sessionExpiresAtMillis = 1_000_000L)
+
+        authority({ clock.get() }).mayRead(subscriber, executionId) shouldBe false
+    }
+
+    @Test
+    fun `a subscriber with no recorded expiry is not expiry-judged - the pre-#263 shape`() {
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
+        authority().mayRead(subscriberAtOpen(), executionId) shouldBe true
+    }
+
+    @Test
+    fun `an expired cut ends the stream with the same final comment and marks it expired (#263)`() {
+        // The delivered-then-cut pair: one write before expiry served, the next after it cut —
+        // `:revoked` comment (the static string, unchanged from #230), stream revoked AND
+        // expired, so the duration timer records `expired`, never a disconnect.
+        val clock = AtomicLong(1_000_000L)
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
+        val emitter = CapturingSseEmitter()
+        val stream =
+            ExecutionStream(
+                executionId,
+                userId,
+                emitter,
+                JsonMapper.builder().build(),
+                nowMillis = clock::get,
+                subscriber = subscriberAtOpen().copy(sessionExpiresAtMillis = 1_000_500L),
+                authority = authority({ clock.get() }),
+            )
+
+        stream.send("execution_started", 1, mapOf("execution_id" to executionId.toString())) shouldBe true
+        clock.set(1_000_500L)
+        stream.send("node_started", 2, emptyMap()) shouldBe false
+
+        emitter.completed.await(5, TimeUnit.SECONDS) shouldBe true
+        stream.isRevoked shouldBe true
+        stream.isExpired shouldBe true
+        emitter.frames().any { it.contains("revoked") } shouldBe true
+        emitter.eventNames() shouldBe listOf("execution_started")
     }
 
     private fun workspaceService() =

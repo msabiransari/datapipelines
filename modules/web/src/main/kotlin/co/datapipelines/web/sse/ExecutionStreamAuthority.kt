@@ -26,17 +26,28 @@ import java.util.UUID
  *     no SSE route, §7.7; should that ever change, the pin must join this check).
  *  2. **The live identity** — `users.is_admin` is read per request by the filter, never from a
  *     frozen flag, so the re-judgement reads the same snapshot through the same cache.
- *  3. **The context a new request would resolve now** — [WorkspaceService.resolveForSession],
- *     the request path's own resolution (claim, fallback, D-R8's super-admin branch), through
- *     the membership cache. A removal, a deactivation or a demotion is therefore seen on the
+ *  3. **The workspace the stream OPENED in, re-resolved now** — [WorkspaceService.resolveForSession]
+ *     asked with the subscriber's open-time resolution (the request path's own constructor:
+ *     claim, fallback, D-R8's super-admin branch) through the membership cache. #263: the name
+ *     asked is the one the filter RESOLVED at open — `subscriber.workspace` — not the JWT
+ *     claim, which a `DP-Workspace` header silently overrides on the request path: a stream
+ *     opened under a header switch keeps re-judging the workspace it opened in, while its
+ *     membership's removal, a workspace deactivation or a demotion is still seen on the
  *     instance that performed it at once, and elsewhere within one TTL (§11.4) — the bound P4
- *     accepts.
+ *     accepts. A UI subscriber (no header; claim = resolution) is judged exactly as before.
  *  4. **The route's own two checks** — the declared permission (`execution.read`, the role
  *     matrix) and [visibleTo] (own run / `execution.read_all`), asked of the refreshed
  *     principal. The record is looked up in the workspace the CURRENT context resolves: a
  *     removed member's new request resolves elsewhere and finds nothing — the stream answers
  *     the same way. The one false-miss is the live stream's first moments (the `execution_started`
  *     event precedes the RUNNING row's durable write), covered in [judge].
+ *
+ *  0. **The token's expiry (#263)** — judged FIRST, before any store read: the subscriber
+ *     carries the validated token's `exp` ([AuthenticatedPrincipal.sessionExpiresAtMillis],
+ *     read at the principal's birth from the claims the credential filter already validated),
+ *     and a write at or past it ends the stream with the same final `revoked` comment — a
+ *     policy cut like any other, close reason `expired` (observability §4.2). No second parse,
+ *     no client-supplied value, no new store read.
  *
  * Every read goes through the existing caches; a tick costs no database read beyond the TTL's.
  * An answer that cannot be established (a store error behind an expired cache entry) is NO:
@@ -47,8 +58,19 @@ class ExecutionStreamAuthority(
     private val liveness: PrincipalLiveness,
     private val workspaces: WorkspaceService,
     private val users: UserService,
+    /** Test seam: the instant "now" is judged at. House pattern — [ExecutionStream]'s own. */
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val log = LoggerFactory.getLogger(ExecutionStreamAuthority::class.java)
+
+    /**
+     * #263: has [subscriber]'s validated session token expired? Pure — the carried `exp` and
+     * the clock, no store read — so the stream guards ask it again after a refusal to tell an
+     * expired cut from a revoked one for the close reason (the final comment is the same
+     * static string either way). A subscriber with no recorded expiry is not expiry-judged:
+     * production sessions always carry one; the null case is the pre-#263 shape.
+     */
+    fun hasExpired(subscriber: AuthenticatedPrincipal): Boolean = subscriber.sessionExpiresAtMillis?.let { nowMillis() >= it } ?: false
 
     /**
      * True while [subscriber] may still read [executionId] — the same verdict a fresh request
@@ -73,13 +95,25 @@ class ExecutionStreamAuthority(
         subscriber: AuthenticatedPrincipal,
         executionId: UUID,
     ): Boolean {
+        // #263 first — before any store read: a token past its `exp` ends the stream at this
+        // write regardless of how healthy the rest of the standing is, the same cut a fresh
+        // request would meet at the credential filter (its validate throws on the same
+        // comparison). A null expiry is not judged — the pre-#263 shape.
+        if (hasExpired(subscriber)) return false
         if (liveness.check(subscriber.userId, pin = null) != null) return false
         val user = users.snapshot(subscriber.userId) ?: return false
         // The identity refresh FIRST: `is_admin` is a per-request read on the request path
         // (D-R1), and the resolution below branches on it (D-R8), so a demoted super admin must
         // not resolve a super-admin context their next request could not get.
         val liveIdentity = subscriber.copy(superAdmin = user.isAdmin)
-        val context = workspaces.resolveForSession(liveIdentity, liveIdentity.workspaceName) ?: return false
+        // #263: the claim asked is the OPEN-TIME resolution the filter stamped on the
+        // subscriber (a DP-Workspace header switch included) — re-resolving the JWT claim
+        // instead would judge the stream against a workspace it was never opened in (the
+        // record lookup misses, the equality fallback compares the wrong pair, the stream is
+        // wrongly cut). Null workspace — the pre-#263 principal shape, tests only — falls
+        // back to the claim, the pre-#263 behaviour. The membership in that workspace is
+        // RE-CHECKED by the resolution, so its revocation still cuts at this write.
+        val context = workspaces.resolveForSession(liveIdentity, subscriber.workspace?.name ?: liveIdentity.workspaceName) ?: return false
         val current = liveIdentity.copy(workspace = context)
         if (!current.holds(Permission.EXECUTION_READ)) return false
         val record = executions.findById(context.id, executionId)

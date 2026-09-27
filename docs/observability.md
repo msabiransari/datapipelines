@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.13 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.15 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-25
@@ -226,7 +226,7 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.result.expiries` | counter | (none) | Results that reached TTL without ever being read past the inline first page. |
 | `datapipelines.result.size` | distribution summary | (none) | Result size in bytes — percentiles inform `result.max-size-bytes` tuning. |
 | `datapipelines.sse.streams.active` | gauge | (none) | Currently-open SSE execution streams |
-| `datapipelines.sse.stream.duration` | timer | `close_reason` (`completed`/`failed`/`aborted`/`client_disconnect`/`revoked`) | Lifetime of an SSE stream. `client_disconnect` here is what feeds the disconnect-grace cancellation path (D7). `revoked` (#230, security-assurance P4) is a stream cut by the subscriber-authority re-judgement — a policy cut whose execution deliberately KEEPS running, never a disconnect, so the cancellation path never sees it. |
+| `datapipelines.sse.stream.duration` | timer | `close_reason` (`completed`/`failed`/`aborted`/`client_disconnect`/`revoked`/`expired`) | Lifetime of an SSE stream. `client_disconnect` here is what feeds the disconnect-grace cancellation path (D7). `revoked` (#230, security-assurance P4) is a stream cut by the subscriber-authority re-judgement — a policy cut whose execution deliberately KEEPS running, never a disconnect, so the cancellation path never sees it. `expired` (#263) is the same policy cut where the refusal was the subscriber's validated token passing its `exp` — the same final comment and the same kept-running execution, a different credential fact, so an expired token is never counted as a standing revocation or a disconnect. |
 | `datapipelines.idempotency.cache.hits` | counter | (none) | Requests served from a stored idempotent response |
 | `datapipelines.idempotency.conflicts` | counter | (none) | `idempotency.key_reused_for_different_request` rejections |
 
@@ -435,6 +435,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.15 | 262 (#263) | §4.1 `datapipelines.sse.stream.duration`'s `close_reason` closed set gains **`expired`**: the same policy cut as `revoked` — the subscriber's re-judgement refuses a write, the final comment is the same static string, the execution keeps running — where the refusal was the subscriber's validated token passing its `exp` (#263), so an expired token is never counted as a standing revocation or a `client_disconnect`. |
 | 2026-09-26 | v1.14 | 230 (#230, security-assurance P4) | §4.2 `datapipelines.sse.stream.duration`'s `close_reason` closed set gains **`revoked`**: a stream cut by the subscriber-authority re-judgement before a write. Recorded BEFORE the terminal question — a cut stream has no terminal event of its own, and counting it as `client_disconnect` would feed D7's cancellation story a reader it never had; the execution deliberately keeps running (P4's first half). |
 | 2026-09-25 | v1.13 | scheduler lane 1 (#9) | New **§3.4E the scheduler events** (`scheduler.started` / `api_mode` / `dispatched` / `reconciled` / `run_not_started` / `schedule_blocked` / `start_failed` / `inspect_refused` / `admission_closed` / `admission_wait_expired`) and four scheduler metrics in §4.1 (`occurrences{outcome}`, `runs.finished{state}`, `capacity.retries`, `runs.in_flight`). §6.1: no scheduler health component — db-scheduler's indicator is disabled. `docs-audit.sh` check C does not extract `scheduler.*` yet (#252; the same gap v1.7 names for `lake.*`). |
 | 2026-09-17 | v1.12 | 158 (#121) mail connect retry | §3.4B gains `mail.send_retry` (WARN, `kind` + `attempt` + `error`): a connect-failed notice is retried in place (bounded, 3 attempts) before the claim row is marked — the retry line is per attempt, `mail.send_failed` remains the terminal one. |
