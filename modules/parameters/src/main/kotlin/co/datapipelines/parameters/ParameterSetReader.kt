@@ -6,6 +6,7 @@ import co.datapipelines.typesystem.ParameterCardinality
 import co.datapipelines.typesystem.ParameterConstraints
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 
 /**
@@ -107,25 +108,46 @@ class ParameterSetReader(
         /** Record §3.2: the ten declarable logical types — `NULL` is a column fact, never a declaration. */
         val DECLARABLE_TYPES: List<String> = LogicalType.entries.filter { it != LogicalType.NULL }.map { it.wire }
 
-        /** A copy of [node] with every JSON-null property removed, at every depth (null ≡ absent). */
-        internal fun withoutNulls(node: JsonNode): JsonNode =
-            when {
-                node.isObject -> {
-                    val copy = ParameterSetJson.mapper.createObjectNode()
-                    node.properties().forEach { (key, value) -> if (!value.isNull) copy.set<JsonNode>(key, withoutNulls(value)) }
-                    copy
-                }
-
-                node.isArray -> {
-                    val copy = ParameterSetJson.mapper.createArrayNode()
-                    node.forEach { copy.add(withoutNulls(it)) }
-                    copy
-                }
-
-                else -> {
-                    node
-                }
+        /**
+         * A copy of [document] with every JSON-null property removed at the SCHEMA's levels (null ≡
+         * absent) — the set, each parameter, its source and options and pin, its constraints and its
+         * presentation. A fixed number of levels, never a walk of the document's own depth: raw values
+         * (`default_value`, an option's `value`, a bound, an expression) are copied as they are, so a
+         * deeply nested value costs this nothing and cannot make the host stack the bound (the 260
+         * lesson). The pre-scan has already checked every level's shape.
+         */
+        internal fun withoutNulls(document: JsonNode): JsonNode {
+            val set = strip(document)
+            (set.get("parameters") as? ArrayNode)?.let { parameters ->
+                val copies = parameters.map { parameter -> strip(parameter).also(::stripParameterChildren) }
+                set.set<JsonNode>("parameters", ParameterSetJson.mapper.createArrayNode().addAll(copies))
             }
+            return set
+        }
+
+        private fun stripParameterChildren(parameter: ObjectNode) {
+            (parameter.get("source") as? ObjectNode)?.let { source ->
+                val copy = strip(source)
+                (copy.get("template") as? ObjectNode)?.let { copy.set<JsonNode>("template", strip(it)) }
+                (copy.get("constants") as? ArrayNode)?.let { options ->
+                    copy.set<JsonNode>("constants", ParameterSetJson.mapper.createArrayNode().addAll(options.map { strip(it) }))
+                }
+                parameter.set<JsonNode>("source", copy)
+            }
+            (parameter.get("constraints") as? ObjectNode)?.let { parameter.set<JsonNode>("constraints", strip(it)) }
+            (parameter.get("presentation") as? ObjectNode)?.let { presentation ->
+                val copy = strip(presentation)
+                (copy.get("format") as? ObjectNode)?.let { copy.set<JsonNode>("format", strip(it)) }
+                parameter.set<JsonNode>("presentation", copy)
+            }
+        }
+
+        /** One level: the object's non-null properties, values shared (not deep-copied). */
+        private fun strip(node: JsonNode): ObjectNode {
+            val copy = ParameterSetJson.mapper.createObjectNode()
+            node.properties().forEach { (key, value) -> if (!value.isNull) copy.set<JsonNode>(key, value) }
+            return copy
+        }
 
         /** The binding's reference chain in the pre-scan's own spelling: `parameters[0].source.constants[1]`. */
         private fun JsonProcessingException.pathReference(): String =

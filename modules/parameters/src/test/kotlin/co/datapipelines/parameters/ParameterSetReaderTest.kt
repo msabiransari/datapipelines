@@ -207,6 +207,18 @@ class ParameterSetReaderTest {
     }
 
     @Test
+    fun `a deeply nested raw value costs the reader nothing - null-stripping walks the schema's levels, not the value`() {
+        // 50,000 nested arrays as an INPUT's default_value: the pre-scan never looks inside a raw value,
+        // and the null-stripping must not either (the host stack must never be the bound — 260).
+        var deep: JsonNode = JsonNodeFactory.instance.textNode("x")
+        repeat(50_000) { deep = JsonNodeFactory.instance.arrayNode().add(deep) }
+        val set = ParameterSetFixtures.tree(ParameterSetFixtures.setJson(ParameterSetFixtures.textInput("city"))) as ObjectNode
+        set.parameter(0).set<JsonNode>("default_value", deep)
+        // Either binds (the validator then refuses the default's type) or is refused as a shape — never a StackOverflowError.
+        reader.read(set)
+    }
+
+    @Test
     fun `readOrThrow carries every failure in the exception's details`() {
         val set = ParameterSetFixtures.fullSet().also { it.put("a", 1).put("b", 2) }
         val thrown = shouldThrow<ParameterSetValidationException> { reader.readOrThrow(set) }
