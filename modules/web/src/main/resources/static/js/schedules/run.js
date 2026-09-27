@@ -75,6 +75,11 @@
 
     var manual = run.origin === "manual";
     S.text(dlg, "due-label", manual ? "Requested" : "Due");
+    // #261 — the person who pressed Run now, by name beside the id the run already carried.
+    var requestedName = run.requested_by_name || run.requested_by;
+    S.text(dlg, "requested-by", manual ? (requestedName || "—") : "");
+    S.show(S.slot(dlg, "requested-label"), manual);
+    S.show(S.slot(dlg, "requested-by"), manual);
     var dueIso = run.scheduled_at || run.reference_at;
     S.time(dlg, "due", dueIso, M().localText(dueIso, timezone));
     S.time(dlg, "started", run.started_at, M().localText(run.started_at, timezone));
@@ -140,12 +145,15 @@
 
   function messages(dlg, run, timezone) {
     var trail = run.trail || [];
+    // #261 — the trail's ids (a recorded row's requested_by) read as names when the run carries one.
+    var names = {};
+    if (run.requested_by) names[run.requested_by] = run.requested_by_name || "";
     if (!run.execution_id) {
-      render(dlg, trail, [], timezone, "The scheduler's trail only — this run launched no execution.");
+      render(dlg, trail, [], timezone, "The scheduler's trail only — this run launched no execution.", names);
       return;
     }
     if (!canReadExecutions()) {
-      render(dlg, trail, [], timezone, "The scheduler's trail only — your role does not read executions, so the pipeline's messages are not shown.");
+      render(dlg, trail, [], timezone, "The scheduler's trail only — your role does not read executions, so the pipeline's messages are not shown.", names);
       return;
     }
     return readEvents(run.execution_id)
@@ -153,7 +161,7 @@
         if (!dlg.isConnected) return;
         var note = "The scheduler's trail and the pipeline's messages, merged in time order.";
         if (read.truncated) note += " The first " + read.events.length + " pipeline messages are shown; the execution's page has the rest.";
-        render(dlg, trail, read.events, timezone, note);
+        render(dlg, trail, read.events, timezone, note, names);
       })
       .catch(function (err) {
         if (!dlg.isConnected) return;
@@ -161,16 +169,16 @@
           err.status === 410
             ? "The pipeline's messages are past their retention (kept a week after the execution finished); the execution's summary stays on its page."
             : "The pipeline's messages could not be read: " + (err.userMessage || err.message) + (err.correlationId ? " (ref " + err.correlationId + ")" : "");
-        render(dlg, trail, [], timezone, "The scheduler's trail only. " + why);
+        render(dlg, trail, [], timezone, "The scheduler's trail only. " + why, names);
       });
   }
 
-  function render(dlg, trail, events, timezone, note) {
+  function render(dlg, trail, events, timezone, note, names) {
     S.text(dlg, "messages-note", note);
     var body = S.slot(dlg, "messages");
     S.clear(body);
     M()
-      .mergeMessages(trail, events)
+      .mergeMessages(trail, events, names || {})
       .forEach(function (line) {
         var row = S.clone("sch-tpl-message");
         row.setAttribute("data-source", line.source);

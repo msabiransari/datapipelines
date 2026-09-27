@@ -127,6 +127,20 @@ test("#258 - the execution's own duration comes off the run, or nowhere", () => 
   assert.equal(M.executionDurationMs(null), null);
 });
 
+test("#261 - a recorded trail row names the person behind requested_by when the run carries one", () => {
+  const row = { at: "2026-09-27T06:00:00Z", kind: "recorded", seq: 1, details: { origin: "manual", requested_by: "5fec6f0a-1" } };
+  const named = M.schedulerLine(row, { "5fec6f0a-1": "Alice" });
+  assert.equal(named.detail, "origin manual · requested_by Alice");
+  // An id with no name keeps the id; other details are untouched.
+  const unnamed = M.schedulerLine(row, {});
+  assert.match(unnamed.detail, /requested_by 5fec6f0a-1/);
+  const noMap = M.schedulerLine(row);
+  assert.match(noMap.detail, /requested_by 5fec6f0a-1/);
+  // mergeMessages threads the map through.
+  const merged = M.mergeMessages([row], [], { "5fec6f0a-1": "Alice" });
+  assert.match(merged[0].detail, /requested_by Alice/);
+});
+
 test("the Messages pane merges the two logs in time order, each line labelled by its source", () => {
   const trail = [
     { seq: 1, kind: "recorded", reason: null, at: "2026-09-26T10:00:00.000Z", details: {} },

@@ -184,7 +184,14 @@
     } else {
       S.text(root, "next-due", "—");
     }
-    var updated = S.text(root, "updated", M().relativeText(s.updated_at) + " · created " + M().relativeText(s.created_at));
+    // #261 — who did what: the names §20 carries beside created_by/updated_by (an id with no
+    // name — a row gone since — keeps the id).
+    var updated = S.text(
+      root,
+      "updated",
+      M().relativeText(s.updated_at) + (s.updated_by_name ? " by " + s.updated_by_name : "") +
+        " · created " + M().relativeText(s.created_at) + (s.created_by_name ? " by " + s.created_by_name : ""),
+    );
     updated.setAttribute("title", "updated " + s.updated_at + " · created " + s.created_at);
   }
 

@@ -20,6 +20,7 @@ import co.datapipelines.scheduler.TrailEvent
 import co.datapipelines.scheduler.TrailKind
 import co.datapipelines.scheduler.Written
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.ui.ActorNames
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -34,6 +35,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.jdbc.core.RowMapper
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import java.time.Instant
@@ -52,11 +55,23 @@ class SchedulesControllerTest {
     private val service = mockk<ScheduleService>()
     private val audit = RecordingAudit()
     private val mapper = ObjectMapper()
-    private val controller = SchedulesController(service, audit, mapper)
-
     private val user = UUID.randomUUID()
     private val workspace = UUID.randomUUID()
     private val scheduleId = UUID.randomUUID()
+
+    // A REAL ActorNames over a stubbed read: "every §20 response names people in ONE batched
+    // read" is a must-call contract, and the name in the answer is what the test asserts.
+    private val jdbc = mockk<NamedParameterJdbcTemplate>()
+    private val actorNames: ActorNames
+    private val controller: SchedulesController
+
+    init {
+        every {
+            jdbc.query(any<String>(), any<Map<String, Any?>>(), any<RowMapper<Pair<UUID, String>>>())
+        } answers { listOf(user to "Alice") }
+        actorNames = ActorNames(jdbc)
+        controller = SchedulesController(service, audit, mapper, actorNames)
+    }
 
     @BeforeEach
     fun signIn() {
@@ -261,6 +276,21 @@ class SchedulesControllerTest {
         // even for the event that carried one.
         trail.last().containsKey("worker") shouldBe false
         data["payload"] shouldBe run().payload
+    }
+
+    @Test
+    fun `a schedule and a run name their people beside the ids - one batched read (#261)`() {
+        every { service.get(workspace, scheduleId, any()) } returns schedule()
+        every { service.runs(workspace, scheduleId, 3, 0, any()) } returns listOf(run().copy(requestedBy = user))
+
+        val schedule = controller.get(scheduleId).body!!.data
+        schedule["created_by"] shouldBe user.toString()
+        schedule["created_by_name"] shouldBe "Alice"
+        schedule["updated_by_name"] shouldBe "Alice"
+
+        val run = controller.runs(scheduleId, 0, 2).data.items.single()
+        run["requested_by"] shouldBe user.toString()
+        run["requested_by_name"] shouldBe "Alice"
     }
 
     // ------------------------------------------------------------------------------ fixtures
