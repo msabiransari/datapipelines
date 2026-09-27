@@ -68,8 +68,9 @@ class ExecutionHistoryBrowserTest : BrowserSuite() {
 
     /**
      * One pipeline (draft v1 — the executions' FK needs only the version row) plus ONE
-     * execution: a `SCHEDULE` run or an interactive `UI` run of [actor]'s, per [scheduledRun].
-     * Returns the pipeline NAME, which the history row renders when the join resolves.
+     * execution: a `SCHEDULE` run or an interactive `UI` run of [actorId]'s, per [scheduledRun].
+     * The pipeline lives in the `default` workspace the seeded memberships grant. Returns the
+     * pipeline NAME, which the history row renders when the join resolves.
      */
     private fun seedPipelineAndRuns(
         name: String,
@@ -83,8 +84,8 @@ class ExecutionHistoryBrowserTest : BrowserSuite() {
                 connection.createStatement().use { statement ->
                     statement.execute(
                         """
-                        INSERT INTO pipelines (id, name, display_name, owner_id, current_version)
-                        VALUES ('${UUID.randomUUID()}', '$name', '$name', '$actorId', 1)
+                        INSERT INTO pipelines (id, workspace_id, name, display_name, owner_id, current_version)
+                        VALUES ('${UUID.randomUUID()}', 'defa0000-0000-0000-0000-000000000001', '$name', '$name', '$actorId', 1)
                         """.trimIndent(),
                     )
                     statement.execute(

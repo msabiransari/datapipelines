@@ -65,8 +65,10 @@ class ExecutionToolsTest {
         // The repository's `findVisible` already encodes R3 in SQL; a full page of scheduled
         // runs must survive the in-memory defence-in-depth filter INTACT — a page cut before
         // visibility would silently return fewer rows than `limit` asked for.
-        val scheduled = (1..50).map { McpFixtures.executionRecord(executionId = UUID.randomUUID(), executedBy = McpFixtures.OTHER_USER) }
-            .map { it.copy(triggeredVia = ExecutionTrigger.SCHEDULE) }
+        val scheduled =
+            (1..50)
+                .map { McpFixtures.executionRecord(executionId = UUID.randomUUID(), executedBy = McpFixtures.OTHER_USER) }
+                .map { it.copy(triggeredVia = ExecutionTrigger.SCHEDULE) }
         every { executions.findVisible(any(), McpFixtures.USER, null, null, limit = 50, offset = 0) } returns scheduled
 
         val hits = ExecutionsListTool(executions).call(McpArguments(mapOf("limit" to 50)), ctx) as List<*>

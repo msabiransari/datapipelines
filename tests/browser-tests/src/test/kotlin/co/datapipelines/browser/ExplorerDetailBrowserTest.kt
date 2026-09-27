@@ -649,9 +649,10 @@ class ExplorerDetailBrowserTest : BrowserSuite() {
         page.waitForFunction("() => !document.getElementById('pipeline-tab-usage').hidden")
 
         val usage = page.locator("#pipeline-tab-usage").innerText()
-        usage.shouldContain("Schedules running it")
+        // The heading is CSS-uppercased on the page (innerText returns the transformed text).
+        usage.lowercase().shouldContain("schedules running it")
         usage.shouldContain("test/nightly-usage")
-        usage.shouldContain("enabled")
+        usage.lowercase().shouldContain("enabled")
     }
 
     /**

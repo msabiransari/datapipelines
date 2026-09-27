@@ -49,7 +49,7 @@ class ExecutionHistoryControllerTest {
     }
 
     private fun stubRows() {
-        every { executions.findByUser(workspaceId, any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findVisible(workspaceId, any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { pipelines.releasedAtFor(any(), any()) } returns emptyMap()
     }
 
@@ -96,7 +96,7 @@ class ExecutionHistoryControllerTest {
     fun `the page applies the filters in the URL and echoes them back to the bar`() {
         every { pipelines.findAll(workspaceId) } returns emptyList()
         every {
-            executions.findByUser(workspaceId, any(), any(), co.datapipelines.executor.ExecutionStatus.FAILED, any(), any(), any(), any())
+            executions.findVisible(workspaceId, any(), any(), co.datapipelines.executor.ExecutionStatus.FAILED, any(), any(), any(), any())
         } returns emptyList()
         every { pipelines.releasedAtFor(any(), any()) } returns emptyMap()
 
@@ -106,7 +106,7 @@ class ExecutionHistoryControllerTest {
         model["selectedStatus"] shouldBe "FAILED"
         model["selectedStartedAfter"] shouldBe "2026-09-01"
         verify(exactly = 1) {
-            executions.findByUser(
+            executions.findVisible(
                 workspaceId,
                 any(),
                 null,

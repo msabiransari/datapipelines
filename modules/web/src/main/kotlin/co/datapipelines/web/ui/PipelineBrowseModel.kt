@@ -444,7 +444,8 @@ class PipelineBrowseModel(
                         co.datapipelines.web.schedules.PipelineJobExecutor.TARGET_PREFIX + record.name,
                         co.datapipelines.web.schedules.PrincipalTargetViewer(it),
                     )
-                }.orEmpty()
+                }
+                .orEmpty()
                 .map { UsageView.ScheduleUse(it.id, it.name, scheduleState(it)) }
         return UsageView(endpoints = served, parents = parents, schedules = runsOnIt)
     }

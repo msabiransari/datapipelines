@@ -81,7 +81,7 @@ class DashboardControllerTest {
         authenticate(userId)
         every { pipelines.countAll(any()) } returns 2
         val records = listOf(record(), record(ExecutionStatus.FAILED), record())
-        every { executions.findByUser(any(), userId, null, null, null, null, limit = 100, offset = 0) } returns records
+        every { executions.findVisible(any(), userId, null, null, null, null, limit = 100, offset = 0) } returns records
 
         val model = ExtendedModelMap()
         val viewName = controller.stats(model)
@@ -96,7 +96,7 @@ class DashboardControllerTest {
     fun `recent executions returns last 10 for user`() {
         authenticate(userId)
         val records = (1..10).map { record() }
-        every { executions.findByUser(any(), userId, limit = 10, offset = 0) } returns records
+        every { executions.findVisible(any(), userId, limit = 10, offset = 0) } returns records
 
         val model = ExtendedModelMap()
         val viewName = controller.recentExecutions(model)
@@ -110,7 +110,7 @@ class DashboardControllerTest {
     @Test
     fun `recent executions empty state when no executions`() {
         authenticate(userId)
-        every { executions.findByUser(any(), userId, limit = 10, offset = 0) } returns emptyList()
+        every { executions.findVisible(any(), userId, limit = 10, offset = 0) } returns emptyList()
 
         val model = ExtendedModelMap()
         controller.recentExecutions(model)
