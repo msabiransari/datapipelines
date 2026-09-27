@@ -7,11 +7,14 @@
      pressing Discard is the list the server decides on — not a second implementation of the
      rule that can drift from it.
 
-     SCHEDULES ARE NOT HERE. 092 has not landed; there is no schedule table to query, and a
-     third empty heading would state that schedules were checked when nothing was. -->
+     SCHEDULES (#259) are the list's third heading: the live schedules whose target names
+     this pipeline, read through the scheduler's lensed by-target read. A discard does not
+     refuse over a schedule — it refuses over nothing here — but the schedule then blocks
+     (pointer_null / target_not_found) at its next occurrence, which is exactly the
+     consequence a reader is weighing. A schedule the lens hides is not on the list. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="usage" class="tplx-usage">
-  <p class="ds-empty-description" th:if="${usage.total == 0}">
-    Nothing depends on this pipeline — no published endpoint serves it and no live pipeline pins it.
+  <p class="ds-empty-description" th:if="${usage.total == 0 and #lists.isEmpty(usage.schedules)}">
+    Nothing depends on this pipeline — no published endpoint serves it, no live pipeline pins it and no schedule runs it.
   </p>
 
   <th:block th:if="${!#lists.isEmpty(usage.endpoints)}">
@@ -34,6 +37,15 @@
         <span th:text="'node ' + ${p.nodeId}">node child</span>
         <span> · </span><span th:text="'pins v' + ${p.pinnedVersion}">pins v1</span>
       </span>
+    </div>
+  </th:block>
+
+  <th:block th:if="${!#lists.isEmpty(usage.schedules)}">
+    <h4 class="tplx-usage-h">Schedules running it</h4>
+    <div class="tplx-vrow" th:each="s : ${usage.schedules}">
+      <a class="u-mono" hx-boost="false" th:href="@{'/schedules?id=' + ${s.id}}" th:text="${s.name}">reports/nightly</a>
+      <span class="ds-badge" th:classappend="${s.state == 'enabled'} ? 'ds-badge-success' : (${s.state == 'blocked'} ? 'ds-badge-danger' : 'ds-badge-default')"
+            th:text="${s.state}">enabled</span>
     </div>
   </th:block>
 </div>

@@ -77,6 +77,10 @@ class SchedulerAutoConfiguration {
     @Bean
     fun scheduleRepository(jdbc: NamedParameterJdbcTemplate): ScheduleRepository = ScheduleRepository(jdbc, JSON)
 
+    /** #259 — the by-target read (the Usage tab's evidence), beside the repository. */
+    @Bean
+    fun scheduleTargetReads(jdbc: NamedParameterJdbcTemplate): ScheduleTargetReads = ScheduleTargetReads(jdbc)
+
     @Bean
     fun scheduleRunRepository(jdbc: NamedParameterJdbcTemplate): ScheduleRunRepository = ScheduleRunRepository(jdbc, JSON)
 
@@ -180,6 +184,7 @@ class SchedulerAutoConfiguration {
         properties: SchedulerProperties,
         scheduler: Scheduler,
         systemActor: SystemActorSource,
+        jdbc: NamedParameterJdbcTemplate,
     ): ScheduleService =
         ScheduleService(
             schedules,
@@ -191,6 +196,7 @@ class SchedulerAutoConfiguration {
             properties,
             DbSchedulerRunQueue(scheduler, SchedulerTasks.RUN_TASK),
             JSON,
+            scheduleTargetReads(jdbc),
             systemActor::userId,
         )
 

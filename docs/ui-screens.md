@@ -581,8 +581,14 @@ one. **Usage** is the published endpoints serving the pipeline and the live pipe
 pinning it, and it runs the **same query 101's discard refusal runs**
 (`PipelineRepository.findLiveParentsPinningVersion`, the evidence behind
 `pipeline.version.pinned`), so what the user reads before pressing Discard is what the server
-will decide on. Schedules join the list when 092 lands; there is no schedule table to query
-today, and an empty third heading would claim they had been checked.
+will decide on. Schedules joined the list with #259: a third heading lists the live schedules
+whose `target_ref` names the pipeline — name, a link to `/schedules?id=<id>` and the
+enabled/paused/blocked state — read through the scheduler's lensed by-target read
+(`ScheduleService.listByTarget`, over the indexed `target_ref` column), so a hidden target's
+schedule is absent exactly as §20.1 hides it. A schedule is not refusal evidence — the discard
+succeeds and the schedule then blocks (`pointer_null` / `target_not_found`) at its next
+occurrence, which is the consequence the heading exists to show — so the tab badge counts
+refusal evidence only, and the empty state speaks only when none of the three lists has a row.
 
 `PipelineBrowseModel.fillDetail` supplies every region in ONE call, with the lifecycle flags
 computed beside the query that produced the rows — a button is rendered because the server

@@ -62,6 +62,7 @@ class PipelineLifecycleDialogControllerTest {
             mockk(relaxed = true),
             mockk(relaxed = true),
             AuthoringGuard(enabled = true),
+            mockk(relaxed = true), // the scheduler's by-target read — the dialogs never read it
         )
 
     private lateinit var mvc: MockMvc

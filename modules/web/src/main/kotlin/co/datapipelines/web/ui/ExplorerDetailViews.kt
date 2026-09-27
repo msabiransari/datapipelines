@@ -103,15 +103,17 @@ data class TemplatePinView(
  * The Usage tab's answer: **what the server would refuse a discard over**.
  *
  * Deliberately the same evidence 101's refusals name — `PipelineRepository`'s live-parent pin
- * query (the one `PipelineService.refuseIfPinned` runs) and the published-endpoints registry —
- * so the list the user reads before pressing Discard is the list the server will decide on.
- * Nothing here re-implements a rule; it asks the same questions earlier.
+ * query (the one `PipelineService.refuseIfPinned` runs), the published-endpoints registry and,
+ * since #259, the schedules whose target names the pipeline (the scheduler's by-target read,
+ * lensed) — so the list the user reads before pressing Discard is the list the server will
+ * decide on. Nothing here re-implements a rule; it asks the same questions earlier.
  */
 data class UsageView(
     val endpoints: List<EndpointUse>,
     val parents: List<ParentUse>,
+    val schedules: List<ScheduleUse> = emptyList(),
 ) {
-    val total: Int get() = endpoints.size + parents.size
+    val total: Int get() = endpoints.size + parents.size + schedules.size
 
     /** A published endpoint serving this pipeline (`GET /api{path}`). */
     data class EndpointUse(
@@ -127,5 +129,12 @@ data class UsageView(
         val pipelineVersion: Int,
         val nodeId: String,
         val pinnedVersion: Int,
+    )
+
+    /** A live schedule whose `target_ref` names this pipeline (#259) — name, id and state only. */
+    data class ScheduleUse(
+        val id: UUID,
+        val name: String,
+        val state: String,
     )
 }

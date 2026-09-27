@@ -113,13 +113,15 @@ class PipelinePartialController(
     }
 
     /**
-     * The acting column's **Usage** tab — the published endpoints serving this pipeline and
-     * the live pipeline versions pinning it.
+     * The acting column's **Usage** tab — the published endpoints serving this pipeline, the
+     * live pipeline versions pinning it, and (#259) the schedules that run it.
      *
      * This is 101's discard evidence, read BEFORE the refusal rather than after it: the parent
      * half runs the same `findLiveParentsPinningVersion` query `PipelineService.refuseIfPinned`
-     * runs, so what the user sees is what the server will decide on. Schedules join the list
-     * when 092 lands; there is no schedule table to query today.
+     * runs, so what the user sees is what the server will decide on. The Schedules list is the
+     * scheduler's by-target read through the promoter lens — a schedule that would silently
+     * block after a discard (`pointer_null` / `target_not_found`) is on the tab, a hidden
+     * target's schedule is not.
      */
     @GetMapping("/partials/pipelines/{id}/usage")
     @RequiredScope(Permission.PIPELINE_READ)
@@ -128,6 +130,6 @@ class PipelinePartialController(
         @PathVariable id: UUID,
     ): String {
         val principal = currentPrincipal()
-        return browse.fillUsage(model, principal.requireWorkspace().id, lens.viewFor(principal), id)
+        return browse.fillUsage(model, principal.requireWorkspace().id, lens.viewFor(principal), id, principal)
     }
 }

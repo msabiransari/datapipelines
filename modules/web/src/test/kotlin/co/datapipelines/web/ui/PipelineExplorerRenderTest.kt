@@ -462,7 +462,7 @@ class PipelineExplorerRenderTest {
     }
 
     @Test
-    fun `106 - the usage tab names what a discard would be refused over, and claims no schedules`() {
+    fun `106 - the usage tab names what a discard would be refused over`() {
         val html = render("partials/pipeline-usage") { fillUsage() }
 
         html shouldContain "Published endpoints"
@@ -470,8 +470,49 @@ class PipelineExplorerRenderTest {
         html shouldContain "Pipelines invoking it"
         html shouldContain "nyc/rollup"
         html shouldContain "pins v1"
-        // 092 has not landed; a third empty heading would claim schedules were checked.
-        html shouldNotContain "Schedule"
+    }
+
+    @Test
+    fun `106 - the usage tab lists the schedules that run the pipeline (#259)`() {
+        val scheduleId = UUID.randomUUID()
+        val html =
+            render("partials/pipeline-usage") {
+                setVariable(
+                    "usage",
+                    UsageView(
+                        endpoints = emptyList(),
+                        parents = emptyList(),
+                        schedules = listOf(UsageView.ScheduleUse(scheduleId, "reports/nightly", "enabled")),
+                    ),
+                )
+            }
+
+        html shouldContain "Schedules running it"
+        html shouldContain "reports/nightly"
+        html shouldContain "/schedules?id=$scheduleId"
+        html shouldContain ">enabled<"
+        // Schedules are not refusal evidence: the empty state stays silent while they run it.
+        html shouldNotContain "Nothing depends on this pipeline"
+    }
+
+    @Test
+    fun `106 - a blocked schedule reads as blocked, and a truly empty tab states all three absences`() {
+        val scheduleId = UUID.randomUUID()
+        val blocked =
+            render("partials/pipeline-usage") {
+                setVariable(
+                    "usage",
+                    UsageView(
+                        endpoints = emptyList(),
+                        parents = emptyList(),
+                        schedules = listOf(UsageView.ScheduleUse(scheduleId, "reports/nightly", "blocked")),
+                    ),
+                )
+            }
+        blocked shouldContain ">blocked<"
+
+        val empty = render("partials/pipeline-usage") { fillUsage(empty = true) }
+        empty shouldContain "no published endpoint serves it, no live pipeline pins it and no schedule runs it"
     }
 
     @Test
@@ -485,13 +526,17 @@ class PipelineExplorerRenderTest {
         html shouldContain "4 minutes ago"
     }
 
-    private fun WebContext.fillUsage() {
+    private fun WebContext.fillUsage(empty: Boolean = false) {
         setVariable(
             "usage",
-            UsageView(
-                endpoints = listOf(UsageView.EndpointUse("/rideshare/v1/daily", enabled = true, description = "Serves it.")),
-                parents = listOf(UsageView.ParentUse(UUID.randomUUID(), "nyc/rollup", 2, "child", 1)),
-            ),
+            if (empty) {
+                UsageView(endpoints = emptyList(), parents = emptyList())
+            } else {
+                UsageView(
+                    endpoints = listOf(UsageView.EndpointUse("/rideshare/v1/daily", enabled = true, description = "Serves it.")),
+                    parents = listOf(UsageView.ParentUse(UUID.randomUUID(), "nyc/rollup", 2, "child", 1)),
+                )
+            },
         )
     }
 

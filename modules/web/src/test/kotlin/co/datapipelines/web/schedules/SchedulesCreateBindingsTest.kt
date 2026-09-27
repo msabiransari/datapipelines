@@ -110,6 +110,7 @@ class SchedulesCreateBindingsTest {
                 queue = { _, _ -> },
                 mapper = mapper,
                 systemActor = { SYSTEM_ID },
+                targetReads = mockk(), // the by-target read; this suite creates, it never reads
             ),
             audit,
             mapper,

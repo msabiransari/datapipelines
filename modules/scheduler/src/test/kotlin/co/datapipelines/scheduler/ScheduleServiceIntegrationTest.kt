@@ -162,6 +162,26 @@ class ScheduleServiceIntegrationTest {
     }
 
     @Test
+    fun `listByTarget answers the reverse lookup on target_ref - lensed like every list (#259)`() {
+        val nightly = h.create(h.request(name = "ops/nightly", payload = FakeExecutor.payload("nightly")))
+        h.create(h.request(name = "ops/other", payload = FakeExecutor.payload("other")))
+
+        h.service.listByTarget(SchedulerTestDb.WORKSPACE, "job:nightly", TargetViewer.EVERYONE).map { it.name } shouldContainExactly
+            listOf("ops/nightly")
+        h.service.listByTarget(SchedulerTestDb.WORKSPACE, "job:absent", TargetViewer.EVERYONE) shouldHaveSize 0
+        // Another workspace's schedule never answers (R9), target_ref notwithstanding.
+        h.service.listByTarget(SchedulerTestDb.OTHER_WORKSPACE, "job:nightly", TargetViewer.EVERYONE) shouldHaveSize 0
+
+        // The promoter lens applies on the by-target read exactly as on list: a target the
+        // lens hides answers as absent, never as an empty "none run it".
+        h.executor.lens = setOf("job:other")
+        h.service.listByTarget(SchedulerTestDb.WORKSPACE, "job:nightly", NarrowedViewer) shouldHaveSize 0
+        h.executor.lens = setOf("job:nightly")
+        h.service.listByTarget(SchedulerTestDb.WORKSPACE, "job:nightly", NarrowedViewer).map { it.name } shouldContainExactly
+            listOf("ops/nightly")
+    }
+
+    @Test
     fun `list narrows to a folder prefix and refuses a malformed one`() {
         h.create(h.request(name = "finance/daily/revenue"))
         h.create(h.request(name = "finance_x/daily"))

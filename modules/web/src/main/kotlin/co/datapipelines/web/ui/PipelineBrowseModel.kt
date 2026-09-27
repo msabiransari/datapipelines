@@ -2,6 +2,7 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.endpoints.PublishedEndpointRepository
 import co.datapipelines.application.lens.LensedView
+import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.DatasourceRegistry
 import co.datapipelines.pipeline.NodeOutput
@@ -62,6 +63,8 @@ class PipelineBrowseModel(
     private val actors: ActorNames,
     private val runStats: PipelineRunStats,
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
+    /** #259 — the Usage tab's Schedules list, the scheduler's one transport-facing type. */
+    private val schedules: co.datapipelines.scheduler.ScheduleService,
 ) {
     private val deserializer = PipelineDeserializer()
 
@@ -382,30 +385,45 @@ class PipelineBrowseModel(
         return RUNS_VIEW
     }
 
-    /** Fills [model] for the Usage tab — 101's discard evidence, read before the refusal. */
+    /**
+     * Fills [model] for the Usage tab — 101's discard evidence, read before the refusal, plus
+     * #259's Schedules: the live schedules whose target names the pipeline, which a discard
+     * does NOT refuse but which then block (`pointer_null` / `target_not_found`) at their next
+     * occurrence — the consequence a reader is deciding about.
+     */
     fun fillUsage(
         model: Model,
         workspaceId: UUID,
         view: LensedView,
         pipelineId: UUID,
+        principal: AuthenticatedPrincipal,
     ): String {
         val record = pipelines.findRecord(workspaceId, view.pipelines, pipelineId)
-        model.addAttribute("usage", record?.let { usage(workspaceId, view.pipelines, it) } ?: UsageView(emptyList(), emptyList()))
+        model.addAttribute(
+            "usage",
+            record?.let { usage(workspaceId, view.pipelines, it, principal) } ?: UsageView(emptyList(), emptyList()),
+        )
         return USAGE_VIEW
     }
 
     /**
-     * What the server would refuse a discard over.
+     * What the server would refuse a discard over, and — for the tab, not the badge — the
+     * schedules that run the pipeline.
      *
      * The parent half is [PipelineRepository.findLiveParentsPinningVersion] — the SAME query
      * `PipelineService.refuseIfPinned` runs — asked once per version this pipeline has, so the
      * tab's list and the refusal's `pinned_by` detail cannot disagree. The endpoint half is the
-     * published-endpoints registry, which pins a pipeline and not a version (§5.1).
+     * published-endpoints registry, which pins a pipeline and not a version (§5.1). The schedule
+     * half is the scheduler's by-target read, LENSED like every schedule list (§20.1): a schedule
+     * whose target the lens hides answers as absent. Schedules carry [UsageView.total] NO — the
+     * badge counts refusal evidence, and a schedule is not that — so the detail badge's call
+     * passes no principal and reads none.
      */
     private fun usage(
         workspaceId: UUID,
         lens: ReadLens,
         record: PipelineRecord,
+        principal: AuthenticatedPrincipal? = null,
     ): UsageView {
         val parents =
             repository
@@ -418,8 +436,26 @@ class PipelineBrowseModel(
             endpoints
                 .findByPipeline(record.id)
                 .map { UsageView.EndpointUse(it.pathPattern, it.isEnabled, it.description) }
-        return UsageView(endpoints = served, parents = parents)
+        val runsOnIt =
+            principal
+                ?.let {
+                    schedules.listByTarget(
+                        workspaceId,
+                        co.datapipelines.web.schedules.PipelineJobExecutor.TARGET_PREFIX + record.name,
+                        co.datapipelines.web.schedules.PrincipalTargetViewer(it),
+                    )
+                }.orEmpty()
+                .map { UsageView.ScheduleUse(it.id, it.name, scheduleState(it)) }
+        return UsageView(endpoints = served, parents = parents, schedules = runsOnIt)
     }
+
+    /** The schedule's operational state, in the tab's vocabulary: enabled, paused or blocked. */
+    private fun scheduleState(schedule: co.datapipelines.scheduler.Schedule): String =
+        when {
+            schedule.blockedReason != null -> "blocked"
+            !schedule.enabled -> "paused"
+            else -> "enabled"
+        }
 
     private fun lastRun(
         workspaceId: UUID,

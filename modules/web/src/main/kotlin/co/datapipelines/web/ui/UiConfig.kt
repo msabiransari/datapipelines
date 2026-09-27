@@ -128,7 +128,8 @@ class UiConfig {
         actorNames: ActorNames,
         runStats: PipelineRunStats,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
-    ): PipelineBrowseModel = PipelineBrowseModel(pipelines, repository, executions, endpoints, datasources, actorNames, runStats, authoring)
+        schedules: co.datapipelines.scheduler.ScheduleService,
+    ): PipelineBrowseModel = PipelineBrowseModel(pipelines, repository, executions, endpoints, datasources, actorNames, runStats, authoring, schedules)
 
     /** 102: the lifecycle dialogs' facts — the same scans the services' own guards read. */
     @Bean
