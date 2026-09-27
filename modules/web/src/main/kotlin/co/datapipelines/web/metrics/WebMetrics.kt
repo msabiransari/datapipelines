@@ -32,8 +32,10 @@ class WebMetrics(
                 // #230 (P4) — decided BEFORE the terminal question: a revoked stream was cut by
                 // policy with no terminal event of its own, and counting it as a client
                 // disconnect would feed D7's cancellation story a subscriber it never had.
+                // #263 — an expired token is the same policy cut (same final comment, the run
+                // keeps running) with a different credential fact: its own tag value.
                 stream.isRevoked -> {
-                    REASON_REVOKED
+                    if (stream.isExpired) REASON_EXPIRED else REASON_REVOKED
                 }
 
                 else -> {
@@ -82,6 +84,9 @@ class WebMetrics(
 
         /** #230 (P4): the stream was cut because its subscriber's authority was revoked. */
         const val REASON_REVOKED = "revoked"
+
+        /** #263: the stream was cut because its subscriber's validated token passed its `exp`. */
+        const val REASON_EXPIRED = "expired"
 
         const val OUTCOME_HIT = "hit"
         const val OUTCOME_EXPIRED = "expired"

@@ -22,12 +22,16 @@ import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.web.CapturingSseEmitter
+import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * #230 (P4) — the ONE predicate an open stream re-asks before every write, at unit level: the
@@ -62,12 +66,13 @@ class ExecutionStreamAuthorityTest {
             superAdmin = superAdmin,
         )
 
-    private fun authority() =
+    private fun authority(nowMillis: () -> Long = System::currentTimeMillis) =
         ExecutionStreamAuthority(
             executions,
             PrincipalLiveness(users, WorkspaceLiveness { true }),
             workspaceService(),
             users,
+            nowMillis,
         )
 
     private fun liveUser(isAdmin: Boolean = false) {
@@ -227,6 +232,78 @@ class ExecutionStreamAuthorityTest {
         ownRun()
 
         authority().mayRead(subscriberAtOpen(), executionId) shouldBe false
+    }
+
+    // ------------------------------------------------------------ token expiry (#263)
+
+    @Test
+    fun `a write before the token's expiry is judged normally (#263)`() {
+        // Fixed clock, never a sleep: exp is one second in the future, the full standing is
+        // green, so the write is served.
+        val clock = AtomicLong(1_000_000L)
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
+        val subscriber = subscriberAtOpen().copy(sessionExpiresAtMillis = 1_001_000L)
+
+        authority({ clock.get() }).mayRead(subscriber, executionId) shouldBe true
+    }
+
+    @Test
+    fun `a write at the token's expiry instant is refused - everything else green, only the expiry can refuse (#263)`() {
+        // The rest of the standing is fully stubbed green: with the expiry check removed this
+        // returns TRUE (that is the falsification), so the refusal can only be the expiry's.
+        val clock = AtomicLong(1_000_000L)
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
+        val subscriber = subscriberAtOpen().copy(sessionExpiresAtMillis = 1_000_000L)
+
+        authority({ clock.get() }).mayRead(subscriber, executionId) shouldBe false
+    }
+
+    @Test
+    fun `a subscriber with no recorded expiry is not expiry-judged - the pre-#263 shape`() {
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
+        authority().mayRead(subscriberAtOpen(), executionId) shouldBe true
+    }
+
+    @Test
+    fun `an expired cut ends the stream with the same final comment and marks it expired (#263)`() {
+        // The delivered-then-cut pair: one write before expiry served, the next after it cut —
+        // `:revoked` comment (the static string, unchanged from #230), stream revoked AND
+        // expired, so the duration timer records `expired`, never a disconnect.
+        val clock = AtomicLong(1_000_000L)
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
+        val emitter = CapturingSseEmitter()
+        val stream =
+            ExecutionStream(
+                executionId,
+                userId,
+                emitter,
+                JsonMapper.builder().build(),
+                nowMillis = clock::get,
+                subscriber = subscriberAtOpen().copy(sessionExpiresAtMillis = 1_000_500L),
+                authority = authority({ clock.get() }),
+            )
+
+        stream.send("execution_started", 1, mapOf("execution_id" to executionId.toString())) shouldBe true
+        clock.set(1_000_500L)
+        stream.send("node_started", 2, emptyMap()) shouldBe false
+
+        emitter.completed.await(5, TimeUnit.SECONDS) shouldBe true
+        stream.isRevoked shouldBe true
+        stream.isExpired shouldBe true
+        emitter.frames().any { it.contains("revoked") } shouldBe true
+        emitter.eventNames() shouldBe listOf("execution_started")
     }
 
     private fun workspaceService() =

@@ -58,6 +58,7 @@ class ExecutionStream(
     private val terminal = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
     private val revoked = AtomicBoolean(false)
+    private val expired = AtomicBoolean(false)
 
     /** False once a write has failed or the container reported completion/timeout. */
     val isConnected: Boolean get() = connected.get()
@@ -71,6 +72,14 @@ class ExecutionStream(
      * disconnect path — the run is not cancelled because its READER was.
      */
     val isRevoked: Boolean get() = revoked.get()
+
+    /**
+     * True when the cut that set [isRevoked] was the subscriber's token EXPiring (#263), not a
+     * standing revocation — the same policy cut with the same final comment, a different close
+     * reason (`expired`, observability §4.2). Read only by the metric, so the duration timer
+     * never counts an expired token as a live-standing revocation or a disconnect.
+     */
+    val isExpired: Boolean get() = expired.get()
 
     /**
      * The `close_reason` of the `datapipelines.sse.stream.duration` timer (observability §4):
@@ -187,10 +196,13 @@ class ExecutionStream(
         val principal = subscriber ?: return true
         if (revoked.get()) return false
         // [ExecutionStreamAuthority.mayRead] never throws — an unsettleable answer is its own
-        // refusal (fail closed, in the log).
+        // refusal (fail closed, in the log). #263: the expiry refusal carries the same final
+        // comment (a static string either way); only the metric's close reason differs, so the
+        // expired flag is recorded here for [co.datapipelines.web.metrics.WebMetrics].
         val allowed = judge.mayRead(principal, executionId)
         if (!allowed) {
             revoked.set(true)
+            if (judge.hasExpired(principal)) expired.set(true)
             log.info("SSE stream of execution {} cut: the subscriber's authority no longer holds (#230, P4).", executionId)
             runCatching { emitter.send(SseEmitter.event().comment(REVOKED_COMMENT)) }
             close()

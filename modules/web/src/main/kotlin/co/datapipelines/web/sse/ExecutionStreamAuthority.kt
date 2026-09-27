@@ -42,6 +42,13 @@ import java.util.UUID
  *     the same way. The one false-miss is the live stream's first moments (the `execution_started`
  *     event precedes the RUNNING row's durable write), covered in [judge].
  *
+ *  0. **The token's expiry (#263)** — judged FIRST, before any store read: the subscriber
+ *     carries the validated token's `exp` ([AuthenticatedPrincipal.sessionExpiresAtMillis],
+ *     read at the principal's birth from the claims the credential filter already validated),
+ *     and a write at or past it ends the stream with the same final `revoked` comment — a
+ *     policy cut like any other, close reason `expired` (observability §4.2). No second parse,
+ *     no client-supplied value, no new store read.
+ *
  * Every read goes through the existing caches; a tick costs no database read beyond the TTL's.
  * An answer that cannot be established (a store error behind an expired cache entry) is NO:
  * fail closed — an open stream never keeps serving on an unknown answer.
@@ -51,8 +58,20 @@ class ExecutionStreamAuthority(
     private val liveness: PrincipalLiveness,
     private val workspaces: WorkspaceService,
     private val users: UserService,
+    /** Test seam: the instant "now" is judged at. House pattern — [ExecutionStream]'s own. */
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
     private val log = LoggerFactory.getLogger(ExecutionStreamAuthority::class.java)
+
+    /**
+     * #263: has [subscriber]'s validated session token expired? Pure — the carried `exp` and
+     * the clock, no store read — so the stream guards ask it again after a refusal to tell an
+     * expired cut from a revoked one for the close reason (the final comment is the same
+     * static string either way). A subscriber with no recorded expiry is not expiry-judged:
+     * production sessions always carry one; the null case is the pre-#263 shape.
+     */
+    fun hasExpired(subscriber: AuthenticatedPrincipal): Boolean =
+        subscriber.sessionExpiresAtMillis?.let { nowMillis() >= it } ?: false
 
     /**
      * True while [subscriber] may still read [executionId] — the same verdict a fresh request
@@ -77,6 +96,11 @@ class ExecutionStreamAuthority(
         subscriber: AuthenticatedPrincipal,
         executionId: UUID,
     ): Boolean {
+        // #263 first — before any store read: a token past its `exp` ends the stream at this
+        // write regardless of how healthy the rest of the standing is, the same cut a fresh
+        // request would meet at the credential filter (its validate throws on the same
+        // comparison). A null expiry is not judged — the pre-#263 shape.
+        if (hasExpired(subscriber)) return false
         if (liveness.check(subscriber.userId, pin = null) != null) return false
         val user = users.snapshot(subscriber.userId) ?: return false
         // The identity refresh FIRST: `is_admin` is a per-request read on the request path
