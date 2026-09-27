@@ -50,19 +50,21 @@ class RetirePreRep5RowsMigrationTest {
     @Order(1)
     @Test
     fun `the two-segment row is disabled and names the reason`() {
-        legacyRow() shouldBe mapOf(
-            "is_enabled" to false,
-            "retired_reason" to "pre-R-EP5 path",
-        )
+        legacyRow() shouldBe
+            mapOf(
+                "is_enabled" to false,
+                "retired_reason" to "pre-R-EP5 path",
+            )
     }
 
     @Order(2)
     @Test
     fun `the row that already meets today's grammar is untouched`() {
-        validRow() shouldBe mapOf(
-            "is_enabled" to true,
-            "retired_reason" to null,
-        )
+        validRow() shouldBe
+            mapOf(
+                "is_enabled" to true,
+                "retired_reason" to null,
+            )
     }
 
     @Order(3)
@@ -124,21 +126,22 @@ class RetirePreRep5RowsMigrationTest {
     }
 
     /** The columns V11 defined and V40 does not touch — the shape the old seeder left behind. */
-    private fun insertEndpoint(path: String) = jdbc.update(
-        """
-        INSERT INTO published_endpoints
-            (id, workspace_id, path_pattern, pipeline_id, timeout_seconds, description, is_enabled, created_by, created_at, updated_at)
-        VALUES (:id, :workspaceId, :path, :pipelineId, 30, '', TRUE, :createdBy, :at, :at)
-        """.trimIndent(),
-        mapOf(
-            "id" to UUID.nameUUIDFromBytes(path.toByteArray()),
-            "workspaceId" to WORKSPACE_ID,
-            "path" to path,
-            "pipelineId" to PIPELINE_ID,
-            "createdBy" to ACTOR_ID,
-            "at" to java.sql.Timestamp.from(Instant.EPOCH),
-        ),
-    )
+    private fun insertEndpoint(path: String) =
+        jdbc.update(
+            """
+            INSERT INTO published_endpoints
+                (id, workspace_id, path_pattern, pipeline_id, timeout_seconds, description, is_enabled, created_by, created_at, updated_at)
+            VALUES (:id, :workspaceId, :path, :pipelineId, 30, '', TRUE, :createdBy, :at, :at)
+            """.trimIndent(),
+            mapOf(
+                "id" to UUID.nameUUIDFromBytes(path.toByteArray()),
+                "workspaceId" to WORKSPACE_ID,
+                "path" to path,
+                "pipelineId" to PIPELINE_ID,
+                "createdBy" to ACTOR_ID,
+                "at" to java.sql.Timestamp.from(Instant.EPOCH),
+            ),
+        )
 
     private fun legacyRow(): Map<String, Any?> =
         jdbc
@@ -161,8 +164,7 @@ class RetirePreRep5RowsMigrationTest {
                 ?: error("no shipped migration ends with '$MIGRATION_SUFFIX' — it was renamed, not renumbered"),
         )
 
-    private fun versionOf(path: String): Int =
-        path.substringAfterLast("/V").substringBefore("__").toInt()
+    private fun versionOf(path: String): Int = path.substringAfterLast("/V").substringBefore("__").toInt()
 
     private companion object {
         const val MIGRATION_SUFFIX = "__retire_pre_rep5_endpoint_rows.sql"

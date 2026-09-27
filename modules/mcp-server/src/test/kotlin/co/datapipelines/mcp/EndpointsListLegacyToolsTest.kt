@@ -88,6 +88,8 @@ class EndpointsListLegacyToolsTest {
         val WORKSPACE: UUID = UUID.fromString("00000000-0000-0000-0000-000000000274")
         const val REASON = "Path has 2 segment(s); an endpoint is at least 3 — /<category>/<version>/<path…> (R-EP5)."
 
-        private fun Any?.asMap(): Map<String, Any?> = @Suppress("UNCHECKED_CAST") (this as Map<String, Any?>)
+        private fun Any?.asMap(): Map<String, Any?> =
+            @Suppress("UNCHECKED_CAST")
+            (this as Map<String, Any?>)
     }
 }

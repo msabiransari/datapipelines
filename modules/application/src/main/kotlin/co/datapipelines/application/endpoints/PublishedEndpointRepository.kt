@@ -61,8 +61,7 @@ class PublishedEndpointRepository(
     fun findAll(): List<PublishedEndpoint> = queryRows(SELECT_COLUMNS, emptyMap()).validEndpoints()
 
     /** Every valid ENABLED endpoint — what the per-instance registry cache holds. */
-    fun findAllEnabled(): List<PublishedEndpoint> =
-        queryRows("$SELECT_COLUMNS WHERE is_enabled = TRUE", emptyMap()).validEndpoints()
+    fun findAllEnabled(): List<PublishedEndpoint> = queryRows("$SELECT_COLUMNS WHERE is_enabled = TRUE", emptyMap()).validEndpoints()
 
     /** The valid endpoints of one workspace — the management listing (§6). */
     fun findByWorkspace(workspaceId: UUID): List<PublishedEndpoint> =

@@ -167,8 +167,10 @@ object EndpointsTools {
         ): Any =
             mapOf(
                 "endpoints" to
-                    (publishing.list(ctx.principal).map { it.toResponse(pipelines) } +
-                        publishing.listLegacy(ctx.principal).map { it.toLegacyResponse(pipelines) }),
+                    (
+                        publishing.list(ctx.principal).map { it.toResponse(pipelines) } +
+                            publishing.listLegacy(ctx.principal).map { it.toLegacyResponse(pipelines) }
+                    ),
             )
     }
 

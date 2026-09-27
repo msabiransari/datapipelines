@@ -138,6 +138,7 @@ internal object SharedPostgres {
         database: String,
     ): String = container.jdbcUrl.substringBeforeLast('/').substringBefore('?') + "/" + database
 }
+
 /**
  * Locates files relative to the repository root, whichever directory the test task runs from —
  * the same helper `auth`, `web`, `dag` and `pipeline-contract` keep in their own test sources so

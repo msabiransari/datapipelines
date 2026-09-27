@@ -78,7 +78,8 @@ class LegacyEndpointRowE2eTest {
             connection
                 .prepareStatement(
                     "INSERT INTO published_endpoints" +
-                        " (id, workspace_id, path_pattern, pipeline_id, timeout_seconds, description, is_enabled, retired_reason, created_by)" +
+                        " (id, workspace_id, path_pattern, pipeline_id, timeout_seconds, description," +
+                        " is_enabled, retired_reason, created_by)" +
                         " VALUES (?, ?, ?, ?, 30, '', FALSE, 'pre-R-EP5 path', ?)",
                 ).use { ps ->
                     ps.setObject(1, UUID.nameUUIDFromBytes(LEGACY_PATH.toByteArray()))
@@ -119,7 +120,7 @@ class LegacyEndpointRowE2eTest {
         ) shouldBe 1L
         given()
             .port(port)
-            .header("DP-API-Key", DEMO_KEY)
+            .header(API_KEY_HEADER, DEMO_KEY)
             .`when`()
             .get("/api$DEMO_PATH")
             .then()
@@ -128,7 +129,7 @@ class LegacyEndpointRowE2eTest {
         // The legacy path is not served: the row is retired, and the registry never sees it.
         given()
             .port(port)
-            .header("DP-API-Key", DEMO_KEY)
+            .header(API_KEY_HEADER, DEMO_KEY)
             .`when`()
             .get("/api$LEGACY_PATH")
             .then()
@@ -237,8 +238,7 @@ class LegacyEndpointRowE2eTest {
     private fun session(jwt: String) = given().port(port).asSession(jwt)
 
     @Suppress("UNCHECKED_CAST")
-    private fun <T> scalar(sql: String): T =
-        rows(sql).single().values.first() as T
+    private fun <T> scalar(sql: String): T = rows(sql).single().values.first() as T
 
     private fun rows(sql: String): List<Map<String, Any?>> =
         DriverManager

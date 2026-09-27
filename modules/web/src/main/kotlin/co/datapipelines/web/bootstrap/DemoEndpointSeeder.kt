@@ -250,6 +250,7 @@ class DemoEndpointSeeder(
      * the next target proceeds — a demo seed is never worth a refused boot, and the count this
      * returns is what actually landed, not what was wanted.
      */
+    @Suppress("TooGenericExceptionCaught") // the point IS any failure: one ERROR line, boot proceeds
     private fun publishWanted(
         system: co.datapipelines.auth.User,
         demoId: UUID,
@@ -357,6 +358,7 @@ class DemoEndpointSeeder(
      * The same per-target failure domain as [publishWanted] (#274): a retirement that throws is
      * ONE ERROR line — a stale demo path that refuses to go must not refuse the boot.
      */
+    @Suppress("TooGenericExceptionCaught") // the point IS any failure: one ERROR line, boot proceeds
     private fun retireStaleEndpoints(
         system: co.datapipelines.auth.User,
         demoId: UUID,
