@@ -30,6 +30,13 @@ import java.util.concurrent.atomic.AtomicReference
  *    on the record's pattern (measured 1–50 ms at 32 chars). No bound fires; the case
  *    is recorded as resistant, not bounded-loss.
  *
+ * Re-measured 2026-09-26 (#260): the deep-recursion outcome is UNCHANGED — the loop
+ * is tail-recursive and the library trampolines it, so depth stays flat and the wall
+ * clock (then the pool) bounds it, exactly as in the 2026-09-23 measurement. What
+ * #260 corrected is the EXPLANATION the old row carried: not `isParallelCall`, but
+ * the trampoline; and the engine now counts depth with its own entry/exit hooks, so
+ * the set-level leak the skip caused is gone (non-tail lambda recursion IS depth).
+ *
  * The table published in dag-executor.md is pasted from this suite's report — the
  * measurement is the authority; the doc never hand-writes it.
  */

@@ -16,8 +16,11 @@ import java.time.Instant
  *
  * @param wallClock wall-clock budget for one `evaluate` call; the evaluation pool adds
  *   its abandonment grace on top before declaring the evaluation abandoned.
- * @param maxDepth maximum expression/recursion depth; the JSONata engine maps it onto
- *   the library's `maxRecursionDepth` (checked at every evaluate entry/exit).
+ * @param maxDepth maximum expression/recursion depth — nested expressions and
+ *   non-tail lambda recursion included (a tail-recursive call is trampolined by the
+ *   library and never nests; the wall clock bounds that shape). The JSONata engine
+ *   enforces it with its own evaluate entry/exit hooks (checked at every entry and
+ *   exit — #260; the library's `Timebox` skipped `isParallelCall` frames).
  * @param maxHeapBytes heap budget in bytes, or null when the caller declares none. No
  *   in-process engine can enforce this today (`EngineCapabilities.boundsHeap` is false);
  *   carrying the field keeps the seam stable for the round-two isolate, which can.

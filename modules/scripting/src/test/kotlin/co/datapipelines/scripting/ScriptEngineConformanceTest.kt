@@ -49,18 +49,26 @@ class ScriptEngineConformanceTest {
     fun `every engine enforces the limits its capabilities claim - and skips the rest honestly`() {
         engines.forEach { engine ->
             val caps = engine.capabilities
-            val loop = "(\$f := function(\$x){ \$f(\$x) }; \$f(0))"
 
             if (caps.boundsWallClockBetweenSteps) {
+                // A long $reduce: bounded nesting (the lambda never recurses), unbounded
+                // steps — the wall clock fires at a step boundary no depth can catch
+                // (#260 re-measured the lambda loop as a DEPTH case, not a time case).
+                val reduce = mapOf("rows" to List(2_000_000) { 1 })
                 val caught =
                     runCatching {
-                        engine.evaluate(engine.compile(loop), null, limits(Duration.ofMillis(300)))
+                        engine.evaluate(
+                            engine.compile("${'$'}reduce(rows, function(${'$'}a, ${'$'}b){ ${'$'}a + 1 })"),
+                            reduce,
+                            limits(Duration.ofMillis(300)),
+                        )
                     }.exceptionOrNull()
                 caught.shouldNotBeNull() as ScriptTimeoutException
             }
             if (caps.boundsDepth) {
-                // Nested EXPRESSIONS drive the depth counter (lambda calls skip it -
-                // the library marks them isParallelCall; measured, lane 7a).
+                // Nested EXPRESSIONS drive the depth counter — and since #260 the
+                // engine counts every evaluate entry/exit itself, non-tail lambda
+                // recursion included (a tail call is trampolined and never nests).
                 val nested = "[".repeat(500) + "0" + "]".repeat(500)
                 val caught =
                     runCatching {
@@ -84,6 +92,11 @@ class ScriptEngineConformanceTest {
     @Test
     fun `every engine surfaces cancellation from outside through the pool`() {
         engines.forEach { engine ->
+            // The body never refuses ITSELF (60-second clock, bounded nesting): the
+            // long $reduce keeps stepping for seconds, so the only bound that fires is
+            // the pool's — the caller's timeout plus the abandoned thread's slot (#260:
+            // the old lambda-loop body is a DEPTH refusal now and could not exercise
+            // this path).
             val pool = ScriptEvaluationPool(1, 1, Duration.ofMillis(200), ScriptEvaluationPool.SYSTEM)
             val timeout = AtomicReference<ScriptTimeoutException>()
             val caller =
@@ -93,8 +106,11 @@ class ScriptEngineConformanceTest {
                             EvaluationLimits(Duration.ofMillis(200), 100),
                             "conformance-cancel",
                         ) {
-                            val loop = "(\$f := function(\$x){ \$f(\$x) }; \$f(0))"
-                            engine.evaluate(engine.compile(loop), null, limits(Duration.ofSeconds(60)))
+                            engine.evaluate(
+                                engine.compile("${'$'}reduce(rows, function(${'$'}a, ${'$'}b){ ${'$'}a + 1 })"),
+                                mapOf("rows" to List(2_000_000) { 1 }),
+                                limits(Duration.ofSeconds(60)),
+                            )
                         }
                     } catch (err: ScriptTimeoutException) {
                         timeout.set(err)

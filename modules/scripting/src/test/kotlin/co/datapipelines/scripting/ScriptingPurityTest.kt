@@ -140,8 +140,12 @@ class ScriptingPurityTest {
         /**
          * Ambient state a pure function may not read. `now(` covers `Instant.now` and
          * `Clock.system...().instant()`'s siblings; `systemDefault` covers the zone.
+         * The clock read is only ambient when the receiver is `System` — an injected
+         * `clock.currentTimeMillis()` is the legal injected read (this scan flagged it
+         * until #260 made the engine a second injected-clock reader; the ONE ambient
+         * occurrence stays pinned by the counted assertion below).
          */
         val AMBIENT =
-            Regex("""\b(now\(|currentTimeMillis|nanoTime|systemDefaultZone|systemDefault\(|Clock\.system|Math\.random|Random\()""")
+            Regex("""\b(now\(|System\.currentTimeMillis|nanoTime|systemDefaultZone|systemDefault\(|Clock\.system|Math\.random|Random\()""")
     }
 }
