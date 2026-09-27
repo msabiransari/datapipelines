@@ -245,6 +245,10 @@ class DemoEndpointSeeder(
      * this boot published. An existing endpoint at a wanted path held by a DIFFERENT pipeline
      * (a super admin's publish, or another workspace's row) is left alone with a WARN — never
      * replaced silently, and never loudly enough to fail a boot over a URL an operator chose.
+     *
+     * Each target is its own failure domain (#274): a publish that throws is ONE ERROR line and
+     * the next target proceeds — a demo seed is never worth a refused boot, and the count this
+     * returns is what actually landed, not what was wanted.
      */
     private fun publishWanted(
         system: co.datapipelines.auth.User,
@@ -253,32 +257,41 @@ class DemoEndpointSeeder(
     ): Int {
         var published = 0
         wanted.forEach { target ->
-            val existing = endpointRepository.findByPath(target.path)
-            when {
-                existing == null -> {
-                    publishService.publish(
-                        bootstrapPrincipal(system, demoId, DemoWorkspaceSeeder.DEMO_WORKSPACE),
-                        target.path,
-                        target.name,
-                        timeoutSeconds = null,
-                        description = DESCRIPTION,
-                    )
-                    published++
-                }
+            try {
+                val existing = endpointRepository.findByPath(target.path)
+                when {
+                    existing == null -> {
+                        publishService.publish(
+                            bootstrapPrincipal(system, demoId, DemoWorkspaceSeeder.DEMO_WORKSPACE),
+                            target.path,
+                            target.name,
+                            timeoutSeconds = null,
+                            description = DESCRIPTION,
+                        )
+                        published++
+                    }
 
-                existing.workspaceId == demoId && existing.pipelineId == target.pipelineId -> {
-                    // Already ours, already right: the idempotent boot's most common branch.
-                }
+                    existing.workspaceId == demoId && existing.pipelineId == target.pipelineId -> {
+                        // Already ours, already right: the idempotent boot's most common branch.
+                    }
 
-                else -> {
-                    log.warn(
-                        "event=demo.path_taken path={} pipeline={} message=\"an existing endpoint holds this " +
-                            "path; the demo endpoint for '{}' is not published\"",
-                        target.path,
-                        target.name,
-                        target.name,
-                    )
+                    else -> {
+                        log.warn(
+                            "event=demo.path_taken path={} pipeline={} message=\"an existing endpoint holds this " +
+                                "path; the demo endpoint for '{}' is not published\"",
+                            target.path,
+                            target.name,
+                            target.name,
+                        )
+                    }
                 }
+            } catch (e: Exception) {
+                log.error(
+                    "event=demo.endpoint_failed path={} reason={} message=\"this target is skipped; the " +
+                        "remaining demo endpoints are still published and the boot proceeds\"",
+                    target.path,
+                    e.message ?: e.javaClass.simpleName,
+                )
             }
         }
         return published
@@ -340,6 +353,9 @@ class DemoEndpointSeeder(
      * Unpublishes the step's own prior rows that the wanted set no longer names: endpoints of
      * the demo workspace at a `/demo/...` path whose `created_by` is [systemActorId] and whose
      * path is not wanted. Returns how many rows went.
+     *
+     * The same per-target failure domain as [publishWanted] (#274): a retirement that throws is
+     * ONE ERROR line — a stale demo path that refuses to go must not refuse the boot.
      */
     private fun retireStaleEndpoints(
         system: co.datapipelines.auth.User,
@@ -354,13 +370,22 @@ class DemoEndpointSeeder(
                 .filter { it.createdBy == systemActorId }
                 .filter { it.pathPattern !in wantedPaths }
         stale.forEach { endpoint ->
-            val removed = publishService.unpublish(actorForRetirement(system, demoId), endpoint.pathPattern)
-            log.info(
-                "event=demo.endpoint_retired path={} removed={} pipeline_id={}",
-                endpoint.pathPattern,
-                removed,
-                endpoint.pipelineId,
-            )
+            try {
+                val removed = publishService.unpublish(actorForRetirement(system, demoId), endpoint.pathPattern)
+                log.info(
+                    "event=demo.endpoint_retired path={} removed={} pipeline_id={}",
+                    endpoint.pathPattern,
+                    removed,
+                    endpoint.pipelineId,
+                )
+            } catch (e: Exception) {
+                log.error(
+                    "event=demo.endpoint_retire_failed path={} reason={} message=\"the stale demo path stays; " +
+                        "the boot proceeds\"",
+                    endpoint.pathPattern,
+                    e.message ?: e.javaClass.simpleName,
+                )
+            }
         }
         return stale.size
     }

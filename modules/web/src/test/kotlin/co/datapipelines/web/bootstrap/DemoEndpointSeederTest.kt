@@ -324,6 +324,22 @@ class DemoEndpointSeederTest {
     }
 
     @Test
+    fun `a failing publish is one skipped target - the next endpoint still publishes and the boot proceeds`() {
+        // #274: a demo seed is never worth a refused context. On the base, the throw below
+        // escaped afterSingletonsInstantiated and killed the whole application start; here it
+        // is one ERROR line and the remaining targets proceed.
+        happyStubs()
+        every {
+            publishService.publish(any(), "/demo/nyc/mobility/revenue-by-borough", any(), any(), any())
+        } throws RuntimeException("the conflict check exploded")
+
+        seeder().afterSingletonsInstantiated()
+
+        verify(exactly = 1) { publishService.publish(any(), "/demo/nyc/mobility/taxi-vs-rideshare", any(), any(), any()) }
+        verify(exactly = 1) { publishService.publish(any(), "/demo/nyc/mobility/revenue-by-borough", any(), any(), any()) }
+    }
+
+    @Test
     fun `no seeded pipelines means no key - the public key exists only while demo endpoints do`() {
         happyStubs()
         every { examples.seedablePipelines(demoId) } returns emptyList()
