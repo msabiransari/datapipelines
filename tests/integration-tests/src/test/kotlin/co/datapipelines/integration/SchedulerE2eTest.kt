@@ -280,9 +280,11 @@ class SchedulerE2eTest {
         schedule.getString("data.blocked.run_id") shouldBe run["id"].asText()
 
         session(ADMIN_SESSION).post("/api/v1/schedules/$refusedSchedule/run").jsonPath().getString("error.code") shouldBe "schedule.blocked"
-        withClue("unblock re-validates first: the pointer is still NULL, so it is refused and the block stays") {
+        withClue(
+            "unblock re-validates first: the pointer is still NULL, so the save path refuses with the new code (#280) and the block stays",
+        ) {
             session(ADMIN_SESSION).post("/api/v1/schedules/$refusedSchedule/unblock").jsonPath().getString("error.code") shouldBe
-                "schedule.validation.payload_invalid"
+                "schedule.validation.target_not_released"
             session(ADMIN_SESSION).get("/api/v1/schedules/$refusedSchedule").jsonPath().getString("data.condition") shouldBe "blocked"
         }
     }
