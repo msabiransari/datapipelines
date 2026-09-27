@@ -3,6 +3,7 @@ package co.datapipelines.browser
 import co.datapipelines.browser.ScheduleFixtures.PARAMETER
 import co.datapipelines.browser.ScheduleFixtures.YEARLY
 import co.datapipelines.browser.ScheduleFixtures.createSchedule
+import co.datapipelines.browser.ScheduleFixtures.draftPipeline
 import co.datapipelines.browser.ScheduleFixtures.etag
 import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
 import co.datapipelines.browser.ScheduleFixtures.send
@@ -10,18 +11,26 @@ import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
 import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.assertions.withClue
-import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
  * #9 slice 2, A.3 — the schedule form (ui-screens.md §4.20) in a real browser: create through the
- * form with the §20 refusals beside their fields (the name grammar, the binder's per-parameter
- * message), the detail's next five equal to §20.9 and the form's preview equal to both, and an
- * edit against a stale revision — the 409 rendered in the form, reloaded, saved.
+ * form with the §20 refusals beside their fields IN THE CATALOGUE'S OWN WORDS (#280 — the family
+ * line satisfies nobody), a draft-only pipeline named at pick time and refused at save with the
+ * same release-first sentence, the detail's next five equal to §20.9 and the form's preview equal
+ * to both, and an edit against a stale revision — the 409 rendered in the form, reloaded, saved.
+ *
+ * The expected words are LITERALS here, not `ApiErrorCatalog.userMessageFor`: `modules/web`
+ * reaches this module only through `modules:app`'s `implementation` dependency, so its classes
+ * are not on this module's compile classpath. The slot's text flows catalogue → envelope →
+ * `err.user_message` → DOM, so a literal equality here pins the catalogue row end to end.
  */
 class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
+    /** The catalogue's `schedule.validation.target_not_released` line (#280) — the words at the pipeline field. */
+    private val releaseFirst = "This pipeline has no released version yet. Release it (or switch its current version), then schedule it."
+
     // ------------------------------------------------------------------ A.3 create, A.2 detail
 
     @Test
@@ -57,10 +66,12 @@ class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
         previewList.waitFor()
         val preview = previewList.locator("li").evaluateAll("ls => ls.map(l => l.getAttribute('data-at'))")
 
-        // 1: the grammar's refusal, beside the name.
+        // 1: the grammar's refusal, beside the name, in the catalogue's own words (#280) —
+        // "No leading slash" is the rule's words; the family line the field showed before #280
+        // says none of them.
         page.locator("[data-verb='schedule-save']").click()
         page.locator("[data-field-error='name']:not([hidden])").waitFor()
-        page.locator("[data-field-error='name']").textContent().isNotBlank() shouldBe true
+        page.locator("[data-field-error='name']").textContent() shouldContain "No leading slash"
         // 2: the binder's refusal (invalid_parameter_type), beside the parameter it names.
         page.fill("#sch-f-name", "$root/nightly/rows")
         page.locator("[data-verb='schedule-save']").click()
@@ -95,6 +106,59 @@ class SchedulesFormBrowserTest : SchedulesBrowserSuite() {
         fromRest.size shouldBe 5
         // The address bar carries the selection (a reload lands on it).
         page.url() shouldContain "id=$id"
+    }
+
+    // ------------------------------------------------------------------ #280 the draft-only pipeline
+
+    @Test
+    fun `a draft-only pipeline is named at pick time and refused at save with the release-first words`() {
+        startTrace()
+        val root = ready("schdraft")
+        val draft = "$root/jobs/draftonly"
+        draftPipeline(page, draft)
+        val released = "$root/jobs/released"
+        releasedPipeline(page, released)
+        openSchedules()
+
+        page.locator("[data-verb='schedule-create']").first().click()
+        val form = page.locator("#sch-dialog [data-sch-form]")
+        form.waitFor()
+        page.fill("#sch-f-name", "$root/nightly/draft")
+        // Typing the draft-only pipeline's full name resolves it: the release-first words are at
+        // the pipeline field BEFORE any save — the parameters area carries nothing for it.
+        page.fill("#sch-f-pipeline", draft)
+        val pipelineError = page.locator("[data-field-error='pipeline']:not([hidden])")
+        pipelineError.waitFor()
+        pipelineError.textContent() shouldContain "has no released version yet"
+        pipelineError.textContent() shouldBe releaseFirst
+        page.locator("[data-field-error='parameters']").isHidden() shouldBe true
+
+        // The save still goes to the server (the authority) and its refusal lands in the same
+        // slot with the same words — the round-trip completed when the submit button is enabled
+        // again and the dialog is still open.
+        page.locator("[data-verb='schedule-save']").click()
+        page.waitForFunction("() => { const b = document.querySelector(\"[data-verb='schedule-save']\"); return b && !b.disabled; }")
+        form.waitFor()
+        page.locator("[data-field-error='pipeline']:not([hidden])").waitFor()
+        val afterSave = page.locator("[data-field-error='pipeline']").textContent()
+        afterSave shouldContain "has no released version yet"
+        afterSave shouldBe releaseFirst
+
+        // Picking the released pipeline clears the slot; the save then succeeds.
+        page.fill("#sch-f-pipeline", released)
+        page.locator("#sch-f-param-$PARAMETER").waitFor()
+        page.waitForFunction("() => { const p = document.querySelector(\"[data-field-error='pipeline']\"); return p && p.hidden; }")
+        page.fill("#sch-f-param-$PARAMETER", "50")
+        page.locator("[data-verb='schedule-save']").click()
+        form.waitFor(
+            com.microsoft.playwright.Locator
+                .WaitForOptions()
+                .setState(WaitForSelectorState.DETACHED),
+        )
+        detail().waitFor()
+        page.locator("#schedule-detail [data-slot='leaf']").textContent() shouldBe "draft"
+        page.locator("#schedule-detail [data-slot='parameters'] tr").evaluateAll("rs => rs.map(r => r.textContent)") shouldBe
+            listOf("${PARAMETER}50")
     }
 
     // ------------------------------------------------------------------ A.3 edit with a stale revision
