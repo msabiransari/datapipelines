@@ -70,6 +70,10 @@ class ApiConsoleController(
         val workspaceId = principal.requireWorkspace().id
 
         val endpoints = publishing.list(principal).sortedBy { it.pathPattern }
+        // #274 — the legacy rows, listed after the live ones and flagged with their reason. A
+        // legacy path never serves (the serve registry never sees it), so its section offers
+        // exactly one verb: unpublish.
+        val legacyEndpoints = publishing.listLegacy(principal).sortedBy { it.pathPattern }
         // ONE batch lookup for the whole page, never one per row — the same rule
         // [PipelineNames] was written for (T114). `EndpointsController` still does the
         // per-row read; this page has no excuse to copy it.
@@ -108,6 +112,17 @@ class ApiConsoleController(
             },
         )
         model.addAttribute("defaultTimeoutSeconds", endpointsProperties.timeoutDefaultSeconds)
+        model.addAttribute(
+            "legacyEndpoints",
+            legacyEndpoints.map { legacy ->
+                LegacyEndpointRow(
+                    path = legacy.pathPattern,
+                    url = PUBLISHED_PREFIX + legacy.pathPattern,
+                    reason = legacy.reason,
+                    enabled = legacy.enabled,
+                )
+            },
+        )
 
         model.addAttribute("mcpUrl", mcpUrl())
         model.addAttribute("mcpHeader", ApiKeyCredential.HEADER)
@@ -173,6 +188,20 @@ class ApiConsoleController(
         val servedDraft: Boolean,
         val timeoutSeconds: Int,
         val boundKeyNames: List<String>,
+        val enabled: Boolean,
+    )
+
+    /**
+     * One LEGACY row (#274): a stored path today's grammar refuses, retired rather than
+     * fatal. There is no parsed form to chip and no pipeline version to name — the row
+     * carries the refusal's reason, and its only offered verb is the template's unpublish
+     * button. [path] is the stored pattern (the unpublish call's `path` parameter); [url]
+     * is the display form.
+     */
+    data class LegacyEndpointRow(
+        val path: String,
+        val url: String,
+        val reason: String,
         val enabled: Boolean,
     )
 

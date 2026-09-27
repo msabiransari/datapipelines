@@ -68,7 +68,10 @@ endpoint key reaches published endpoints and the status and cursor of executions
 and nothing else: not `/mcp`, and no other `/api/v1` route.
 
 `endpoints_list`, `endpoints_get` and `endpoints_delete` complete the surface. Deleting an
-endpoint stops the URL answering and leaves the pipeline untouched.
+endpoint stops the URL answering and leaves the pipeline untouched. A row listed with
+`"legacy": true` is a stored path saved before the current three-segment grammar: it is retired
+— it never serves and never blocks a publish — and unpublishing it (`endpoints_delete`) is the
+fix.
 
 ## Common mistakes and references
 

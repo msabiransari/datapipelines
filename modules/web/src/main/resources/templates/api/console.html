@@ -82,6 +82,41 @@
         </div>
       </div>
 
+      <!-- #274 — legacy rows: stored paths saved before the current grammar. They never serve
+           (the serve registry never sees them) and they can no longer block a publish, so the
+           section offers exactly one verb: unpublish. The reason is the path grammar's own
+           refusal, carried on the row — what the operator reads is the rule the row predates. -->
+      <div class="app-card-b" th:if="${not #lists.isEmpty(legacyEndpoints)}">
+        <h3 class="ds-title">Legacy paths</h3>
+        <table class="ds-table">
+          <tbody>
+          <tr th:each="l : ${legacyEndpoints}">
+            <td>
+              <span class="ds-mono" th:text="${l.url}">/api/nyc/revenue-by-borough</span>
+              <span class="app-chip app-chip-warn"><i class="ds-status"></i>Legacy</span>
+              <span class="app-chip app-chip-warn" th:unless="${l.enabled}"><i class="ds-status"></i>Disabled</span>
+            </td>
+            <td>
+              <span class="app-path" th:text="${l.reason}">Path has 2 segment(s); an endpoint is at least 3.</span>
+            </td>
+            <td>
+              <!-- The existing unpublish route (DELETE /api/v1/endpoints), htmx-carried: no new
+                   route, no new permission. The row removes itself on success; the server's
+                   @RequiredScope is the guard, the markup only hides the verb from roles the
+                   `endpoint.unpublish` row refuses. -->
+              <button type="button" class="ds-button ds-button-ghost ds-button-sm"
+                      th:if="${canAuthor == true or canAdminWorkspace == true or isSuperAdmin == true}"
+                      th:attr="hx-delete=@{/api/v1/endpoints(path=${l.path})}"
+                      hx-confirm="Unpublish this legacy path? It never serves under today's grammar."
+                      hx-target="closest tr" hx-swap="delete">Unpublish</button>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+        <p class="app-card-note app-flush">These stored paths predate the current three-segment grammar and never
+          serve. Unpublishing one removes it; republishing at a current-grammar path is the replacement.</p>
+      </div>
+
       <div class="app-card-b">
         <!-- The mock has a per-endpoint 24-hour call column and this screen does NOT.
              Nothing in the system counts endpoint serves — no counter column on

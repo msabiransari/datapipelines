@@ -1,6 +1,7 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.endpoints.EndpointRow
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
@@ -56,6 +57,22 @@ object EndpointsTools {
             "description" to description,
             "enabled" to isEnabled,
             "path_variables" to pathVariables,
+            "url" to "/api$pathPattern",
+        )
+
+    /**
+     * The wire shape of one LEGACY row (#274) — a stored path today's grammar refuses, retired
+     * rather than fatal. It carries `legacy: true`, its `reason` (the grammar's own refusal,
+     * bounded) and the keys a caller needs to act on it; no `path_variables`, because there is
+     * no parse. Unpublishing it (`endpoints_delete`) is the fix.
+     */
+    internal fun EndpointRow.Legacy.toLegacyResponse(pipelines: PipelineRepository): Map<String, Any?> =
+        mapOf(
+            "path" to pathPattern,
+            "pipeline" to pipelines.findById(workspaceId, pipelineId)?.name,
+            "enabled" to enabled,
+            "legacy" to true,
+            "reason" to reason,
             "url" to "/api$pathPattern",
         )
 
@@ -138,14 +155,21 @@ object EndpointsTools {
                         "enabled, and the path variables it binds. A disabled endpoint answers 404 exactly like an " +
                         "unpublished one, so this listing is the only way to see that it exists. A promoter's key " +
                         "lists only the endpoints of pipelines it can see (the promoter lens: released, newer than the " +
-                        "promotion target's).",
+                        "promotion target's). Legacy rows (#274) are listed last with \"legacy\": true and their " +
+                        "\"reason\": a stored path saved before the current grammar that is retired — never served, " +
+                        "never a conflict partner; endpoints_delete removes one.",
                 schema = EMPTY_SCHEMA,
             )
 
         override fun call(
             args: McpArguments,
             ctx: McpToolContext,
-        ): Any = mapOf("endpoints" to publishing.list(ctx.principal).map { it.toResponse(pipelines) })
+        ): Any =
+            mapOf(
+                "endpoints" to
+                    (publishing.list(ctx.principal).map { it.toResponse(pipelines) } +
+                        publishing.listLegacy(ctx.principal).map { it.toLegacyResponse(pipelines) }),
+            )
     }
 
     /** `endpoints_get` (mcp-server.md §6.2.25). Permission: `endpoint.read`. */
@@ -188,7 +212,9 @@ object EndpointsTools {
                 description =
                     "Unpublish an endpoint by its path. The pipeline is untouched — only the URL stops answering. " +
                         "Key bindings on that path are NOT removed: they describe a node of the tree, which may still " +
-                        "carry other endpoints beneath it.",
+                        "carry other endpoints beneath it. This is also the fix for a LEGACY row (#274) — a retired " +
+                        "path listed with \"legacy\": true never serves under the current grammar, and deleting it " +
+                        "removes the row.",
                 schema = PATH_SCHEMA,
             )
 

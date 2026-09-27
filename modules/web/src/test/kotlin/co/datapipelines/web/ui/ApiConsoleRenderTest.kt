@@ -76,6 +76,7 @@ class ApiConsoleRenderTest {
         context.setVariable("authenticated", true)
         context.setVariable("currentPath", "/api-console")
         context.setVariable("endpoints", emptyList<Any>())
+        context.setVariable("legacyEndpoints", emptyList<Any>())
         context.setVariable("mcpUrl", "https://app.example/mcp")
         context.setVariable("mcpHeader", "DP-API-Key")
         context.setVariable("keyPrefix", "dpk_")
@@ -176,5 +177,42 @@ class ApiConsoleRenderTest {
                 .readBytes()
                 .decodeToString()
         source shouldNotContain "style=\""
+    }
+
+    // ------------------------------------------------------------------ legacy rows (#274)
+
+    private fun legacyRow(
+        path: String = "/nyc/revenue-by-borough",
+        reason: String = "Path has 2 segment(s); an endpoint is at least 3 — /<category>/<version>/<path…> (R-EP5).",
+        enabled: Boolean = false,
+    ) = ApiConsoleController.LegacyEndpointRow(path = path, url = "/api$path", reason = reason, enabled = enabled)
+
+    @Test
+    fun `a legacy row is listed flagged with its reason and no GET method tag`() {
+        // A legacy path never serves — a "GET" tag on it would promise a service the grammar
+        // refuses. The reason travels with the row so the operator reads the rule it predates.
+        val html = render { setVariable("legacyEndpoints", listOf(legacyRow())) }
+
+        html shouldContain "/api/nyc/revenue-by-borough"
+        html shouldContain ">Legacy<"
+        html shouldContain "at least 3"
+        html shouldContain ">Disabled<"
+    }
+
+    @Test
+    fun `the legacy section offers only unpublish, and only to the roles the unpublish row admits`() {
+        val author = render { setVariable("legacyEndpoints", listOf(legacyRow())) }
+        author shouldContain "Unpublish"
+        author shouldContain "hx-delete"
+        author shouldContain "hx-confirm"
+
+        // A viewer holds no `endpoint.unpublish` — the verb is hidden, not merely refused.
+        val viewer =
+            render {
+                setVariable("legacyEndpoints", listOf(legacyRow()))
+                withRoles(canAuthor = false, canPromote = false, canAdminWorkspace = false, isSuperAdmin = false, roleLabel = "viewer")
+            }
+        viewer shouldNotContain ">Unpublish<"
+        viewer shouldNotContain "hx-delete"
     }
 }
