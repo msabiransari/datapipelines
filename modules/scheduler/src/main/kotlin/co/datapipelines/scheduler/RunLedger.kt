@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import org.slf4j.LoggerFactory
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -41,7 +42,7 @@ class RunLedger(
      * Moves [runId] from one of [from] to [to] under [reason], appending [kind] — in its own
      * transaction. False when the run was no longer in [from] (another writer got there first);
      * nothing is written then. [block] blocks the run's schedule under [blockReason] in the same
-     * transaction.
+     * transaction. The execution's own timing (#258) rides on a terminal the reconciler records.
      */
     fun move(
         runId: UUID,
@@ -52,9 +53,11 @@ class RunLedger(
         details: JsonNode = empty(),
         block: Boolean = false,
         blockReason: String? = reason,
+        executionStartedAt: Instant? = null,
+        executionCompletedAt: Instant? = null,
     ): Boolean =
         transactions.execute {
-            moveInTransaction(runId, from, to, reason, kind, details, block, blockReason)
+            moveInTransaction(runId, from, to, reason, kind, details, block, blockReason, executionStartedAt, executionCompletedAt)
         } == true
 
     /** [move] inside a transaction the caller already holds. */
@@ -67,9 +70,11 @@ class RunLedger(
         details: JsonNode = empty(),
         block: Boolean = false,
         blockReason: String? = reason,
+        executionStartedAt: Instant? = null,
+        executionCompletedAt: Instant? = null,
     ): Boolean {
         val now = clock.instant()
-        if (!runs.transition(runId, from, to, reason, now)) return false
+        if (!runs.transition(runId, from, to, reason, now, executionStartedAt, executionCompletedAt)) return false
         runs.appendTrail(runId, kind, reason, now, worker, details)
         if (!to.active) metrics.runFinished(to)
         if (block) blockScheduleOf(runId, blockReason ?: BLOCKED_BY_UNKNOWN_RUN)

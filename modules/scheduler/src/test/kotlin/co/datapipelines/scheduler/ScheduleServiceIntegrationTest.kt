@@ -2,18 +2,28 @@ package co.datapipelines.scheduler
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertTimeoutPreemptively
+import org.springframework.dao.DuplicateKeyException
 import java.time.Duration
+import java.util.UUID
+import javax.sql.DataSource
+import kotlin.concurrent.thread
 
 /**
  * **The management use cases** (scheduler design revision §6): validation at save, durable
  * idempotency (L1), the revision guard, rename without losing history, soft delete, the B18 guards
- * (L4), unblock's revalidation, workspace isolation (R9) and the lens (R8).
+ * (L4), unblock's revalidation, workspace isolation (R9) and the lens (R8) — and, since #253, the
+ * two races the database's own locks decide: Run now's one-active insert and the per-workspace
+ * schedule cap, each forced on a held row lock and observed on `pg_stat_activity` (its own
+ * connection — a read inside an open transaction watches a snapshot frozen at its start).
  */
 class ScheduleServiceIntegrationTest {
     private lateinit var h: SchedulerHarness
@@ -179,6 +189,31 @@ class ScheduleServiceIntegrationTest {
         h.executor.lens = setOf("job:nightly")
         h.service.listByTarget(SchedulerTestDb.WORKSPACE, "job:nightly", NarrowedViewer).map { it.name } shouldContainExactly
             listOf("ops/nightly")
+
+    fun `a lensed reader pages over the ADMITTED schedules - every visible row exactly once, has_more right (#257)`() {
+        // Name order interleaves hidden and admitted rows: a hidden row inside the first
+        // `limit + 1` window must not end the walk or make the offset re-read rows.
+        val names = listOf("p/a_h1", "p/b_v1", "p/c_h2", "p/d_v2", "p/e_h3", "p/f_v3")
+        names.forEach { name ->
+            val job = name.substringAfterLast('_')
+            h.create(h.request(name = name, payload = FakeExecutor.payload(job)))
+        }
+        h.executor.lens = setOf("job:v1", "job:v2", "job:v3")
+
+        // The controller's walk: ask limit+1, take limit, advance the offset by the items received.
+        val listed = ArrayList<String>()
+        var offset = 0
+        var hasMore: Boolean
+        do {
+            val found = h.service.list(SchedulerTestDb.WORKSPACE, null, LIMIT_PLUS_ONE, offset, NarrowedViewer)
+            listed += found.take(PAGE_SIZE).map { it.name }
+            hasMore = found.size > PAGE_SIZE
+            offset += found.take(PAGE_SIZE).size
+        } while (hasMore)
+
+        withClue("the promoter lists every admitted schedule exactly once — base behaviour re-read d and stopped early") {
+            listed shouldContainExactly listOf("p/b_v1", "p/d_v2", "p/f_v3")
+        }
     }
 
     @Test
@@ -276,5 +311,210 @@ class ScheduleServiceIntegrationTest {
         val resumed = h.service.resume(SchedulerTestDb.WORKSPACE, schedule.id, SchedulerTestDb.CREATOR)
         h.service.resume(SchedulerTestDb.WORKSPACE, schedule.id, SchedulerTestDb.CREATOR).revision shouldBe resumed.revision
         resumed.condition shouldBe "enabled"
+    }
+
+    @Test
+    fun `two Run now racing one schedule - the loser serialises on the schedule row's lock and answers the overlap refusal (#253)`() {
+        val schedule = h.create()
+        val ghost = UUID.randomUUID()
+
+        // Connection A inserts an ACTIVE run and holds it UNCOMMITTED — the exact database state a
+        // concurrent Run now's insert produces at the moment the second arrives. The ghost's FK
+        // takes a FOR KEY SHARE on the schedule row, so the loser serialises at `lockLive`'s FOR
+        // UPDATE (observed on pg_stat_activity, its own connection — a read inside an open
+        // transaction watches a snapshot frozen at its start), never timed. After A commits, the
+        // loser's `hasActive` sees the ghost and answers the catalogued 409.
+        dataSource.connection.use { holder ->
+            holder.autoCommit = false
+            holder
+                .prepareStatement(INSERT_ACTIVE_RUN)
+                .apply {
+                    setObject(1, ghost)
+                    setObject(2, schedule.id)
+                    setObject(3, SchedulerTestDb.WORKSPACE)
+                    setObject(4, SchedulerTestDb.SYSTEM_ACTOR)
+                }.execute()
+
+            var answer: Written<ScheduleRun>? = null
+            var refused: ScheduleException? = null
+            val loser =
+                thread {
+                    try {
+                        answer = h.service.runNow(SchedulerTestDb.WORKSPACE, schedule.id, SchedulerTestDb.CREATOR, null)
+                    } catch (e: ScheduleException) {
+                        refused = e
+                    }
+                }
+            awaitLockWaits("%deleted_at IS NULL FOR UPDATE%", 1)
+            holder.commit()
+            loser.join(JOIN_BUDGET_MS)
+            loser.isAlive shouldBe false
+
+            withClue("the loser is the catalogued overlap 409, never a raw DuplicateKeyException") {
+                refused?.code shouldBe ScheduleErrorCodes.RUN_OVERLAP
+                answer shouldBe null
+            }
+        }
+        // A's stand-in row is history: it names nothing the next leg reads.
+        SchedulerTestDb.jdbc.update("DELETE FROM schedule_runs WHERE id = :id", mapOf("id" to ghost))
+    }
+
+    @Test
+    fun `a lost insert uniqueness maps to the catalogued overlap with its cause, never a raw DuplicateKeyException (#253)`() {
+        val scheduleId = UUID.randomUUID()
+        val cause = DuplicateKeyException("uq_schedule_runs_one_active")
+
+        val refused = shouldThrow<ScheduleException> { runNowConflictOrOverlap(scheduleId, cause) }
+
+        refused.code shouldBe ScheduleErrorCodes.RUN_OVERLAP
+        refused.details["schedule_id"] shouldBe scheduleId.toString()
+        refused.cause shouldBe cause
+    }
+
+    @Test
+    fun `two concurrent Run now calls - exactly one run, the loser's answer is the catalogued overlap`() {
+        val schedule = h.create()
+        var first: Written<ScheduleRun>? = null
+        var second: Written<ScheduleRun>? = null
+        var refused: ScheduleException? = null
+        val a =
+            thread {
+                try {
+                    first = h.service.runNow(SchedulerTestDb.WORKSPACE, schedule.id, SchedulerTestDb.CREATOR, null)
+                } catch (e: ScheduleException) {
+                    refused = e
+                }
+            }
+        val b =
+            thread {
+                try {
+                    second = h.service.runNow(SchedulerTestDb.WORKSPACE, schedule.id, SchedulerTestDb.CREATOR, null)
+                } catch (e: ScheduleException) {
+                    refused = e
+                }
+            }
+        a.join(JOIN_BUDGET_MS)
+        b.join(JOIN_BUDGET_MS)
+        a.isAlive shouldBe false
+        b.isAlive shouldBe false
+
+        withClue("one run wins, the loser is refused schedule.run.overlap (either path may lose)") {
+            listOfNotNull(first, second) shouldHaveSize 1
+            refused?.code shouldBe ScheduleErrorCodes.RUN_OVERLAP
+        }
+        h.runsOf(schedule.id) shouldHaveSize 1
+    }
+
+    @Test
+    fun `two creates at the cap - the workspace row's lock serialises the count, exactly one lands (#253)`() {
+        val strict = SchedulerHarness(properties = SchedulerProperties(minIntervalSeconds = 60, maxSchedulesPerWorkspace = 1))
+
+        // Connection A holds the workspace row: both creates must queue behind it, so the second
+        // one's COUNT runs strictly after the first one's INSERT committed — the interleaving the
+        // lock exists to force. Without the lock in the create transaction, neither create ever
+        // waits and both land (the base's defect, red here).
+        dataSource.connection.use { holder ->
+            holder.autoCommit = false
+            holder
+                .prepareStatement("SELECT id FROM workspaces WHERE id = ? FOR UPDATE")
+                .apply { setObject(1, SchedulerTestDb.WORKSPACE) }
+                .execute()
+
+            var landedOne: Schedule? = null
+            var landedTwo: Schedule? = null
+            var refusedOne: ScheduleException? = null
+            var refusedTwo: ScheduleException? = null
+            val one =
+                thread {
+                    try {
+                        landedOne = strict.create(strict.request(name = "cap/one"))
+                    } catch (e: ScheduleException) {
+                        refusedOne = e
+                    }
+                }
+            val two =
+                thread {
+                    try {
+                        landedTwo = strict.create(strict.request(name = "cap/two"))
+                    } catch (e: ScheduleException) {
+                        refusedTwo = e
+                    }
+                }
+            awaitLockWaits("%workspaces%FOR UPDATE%", 2)
+            holder.commit()
+            one.join(JOIN_BUDGET_MS)
+            two.join(JOIN_BUDGET_MS)
+            one.isAlive shouldBe false
+            two.isAlive shouldBe false
+
+            // Either thread may go through the lock first; exactly one lands.
+            withClue("exactly one create passes the cap — landed=$landedOne/$landedTwo refused=$refusedOne/$refusedTwo") {
+                listOfNotNull(landedOne, landedTwo) shouldHaveSize 1
+                listOfNotNull(refusedOne, refusedTwo).single().code shouldBe ScheduleErrorCodes.LIMIT_PER_WORKSPACE
+            }
+        }
+        strict.service.countLive(SchedulerTestDb.WORKSPACE) shouldBe 1
+    }
+
+    // ------------------------------------------------------------------------------ race helpers
+
+    /**
+     * Polls pg_stat_activity through ITS OWN pooled connection until [expected] statements matching
+     * [queryPattern] sit in a lock wait. Failing means the statements never serialised — the
+     * synchronisation this test's verdict rests on was never observed.
+     */
+    private fun awaitLockWaits(
+        queryPattern: String,
+        expected: Int,
+    ) {
+        assertTimeoutPreemptively(Duration.ofSeconds(WAIT_BUDGET_SECONDS), {
+            "no $expected lock wait(s) matching $queryPattern — the statements did not serialise on the lock"
+        }) {
+            var waits = 0
+            var polls = 0
+            do {
+                dataSource.connection.use { connection ->
+                    connection
+                        .createStatement()
+                        .use { statement ->
+                            statement
+                                .executeQuery(
+                                    "SELECT count(*) FROM pg_stat_activity " +
+                                        "WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid() " +
+                                        "AND coalesce(query, '') ILIKE '$queryPattern'",
+                                ).use { row ->
+                                    row.next()
+                                    waits = row.getInt(1)
+                                }
+                        }
+                }
+                if (waits < expected) {
+                    polls++
+                    Thread.sleep(POLL_MILLIS)
+                }
+            } while (waits < expected)
+        }
+    }
+
+    private val dataSource: DataSource get() = SchedulerTestDb.dataSource
+
+    private companion object {
+        /**
+         * Connection A's stand-in for the concurrent Run now's insert (the loser's collision
+         * partner): an ACTIVE manual run whose inserting transaction is still open. Every NOT NULL
+         * and CHECK of `schedule_runs` holds; nothing references it.
+         */
+        const val INSERT_ACTIVE_RUN =
+            "INSERT INTO schedule_runs (id, schedule_id, workspace_id, origin, reference_at, reference_timezone, " +
+                "admit_by, executor_id, payload_schema_version, payload_json, actor_user_id, state) " +
+                "VALUES (?, ?, ?, 'manual', now(), 'UTC', now() + interval '600 seconds', 'fake-job', 1, '{}'::jsonb, ?, 'queued')"
+
+        const val JOIN_BUDGET_MS = 10_000L
+        const val WAIT_BUDGET_SECONDS = 20L
+        const val POLL_MILLIS = 100L
+
+        /** The paging walk's envelope: the page the client keeps, plus the one extra row for has_more. */
+        const val PAGE_SIZE = 2
+        const val LIMIT_PLUS_ONE = PAGE_SIZE + 1
     }
 }

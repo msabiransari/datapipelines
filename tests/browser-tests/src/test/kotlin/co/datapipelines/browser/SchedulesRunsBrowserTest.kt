@@ -54,6 +54,8 @@ class SchedulesRunsBrowserTest : SchedulesBrowserSuite() {
         row.locator("[data-sch-action='open-run']").click()
         val dlg = page.locator("#sch-dialog .sch-run-dialog")
         dlg.waitFor()
+        // #261 — the person who pressed Run now reads as a NAME, not a 36-character id.
+        dlg.locator("[data-slot='requested-by']").textContent() shouldBe "Browser User"
         page.waitForFunction("() => document.querySelectorAll('#sch-dialog [data-slot=messages] tr[data-source=pipeline]').length > 0")
         val sources =
             dlg

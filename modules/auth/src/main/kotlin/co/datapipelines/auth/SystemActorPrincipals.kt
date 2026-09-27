@@ -11,7 +11,9 @@ import java.util.UUID
  * It is built here, in-process, and nowhere else: no filter produces [AuthMethod.SYSTEM]. The row
  * it names can never authenticate — no OIDC provider may be named `system`, the local-password
  * paths refuse it, it has no `api_keys` row, and `JwtAuthenticationFilter` refuses a session whose
- * subject is not a person. `SystemActorSecurityE2eTest` presents each of those and is refused.
+ * subject is not a person. Each of those refusals is exercised by `SchedulerE2eTest` (order 8,
+ * "the system identity cannot authenticate") — #253 corrected this KDoc, which named a test that
+ * does not exist.
  *
  * ## What it can and cannot do
  * [AuthenticatedPrincipal.holds] routes through [WorkspaceContext.permits], which asks

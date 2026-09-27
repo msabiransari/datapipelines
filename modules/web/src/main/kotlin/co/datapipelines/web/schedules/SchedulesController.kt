@@ -19,6 +19,7 @@ import co.datapipelines.web.api.Pagination
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.config.WebHeaders
 import co.datapipelines.web.pipelines.IfMatchHeader
+import co.datapipelines.web.ui.ActorNames
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
@@ -36,6 +37,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -57,6 +59,8 @@ class SchedulesController(
     private val schedules: ScheduleService,
     private val audit: AuditEventSink,
     private val mapper: ObjectMapper,
+    /** The people behind the ids a §20 object already carries (#261) — one batched read per response. */
+    private val actorNames: ActorNames,
 ) {
     // ------------------------------------------------------------------------------ reads
 
@@ -72,8 +76,10 @@ class SchedulesController(
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
         val found = schedules.list(workspaceOf(principal), prefix?.trim(), size + 1, page, PrincipalTargetViewer(principal))
-        val items = found.take(size).map(::scheduleJson)
-        return ApiResponse.of(PagedData(items, Pagination.unknownTotal(page, size, items.size, found.size > size)))
+        val items = found.take(size)
+        val names = namesOf(items.flatMap { listOf(it.createdBy, it.updatedBy) })
+        val mapped = items.map { scheduleJson(it, names) }
+        return ApiResponse.of(PagedData(mapped, Pagination.unknownTotal(page, size, mapped.size, found.size > size)))
     }
 
     /** §20.3 — the next occurrences of a pattern, before any save (the form's preview). */
@@ -124,8 +130,10 @@ class SchedulesController(
         val page = Pagination.clampOffset(offset)
         val size = Pagination.clampLimit(limit)
         val found = schedules.runs(workspaceOf(principal), id, size + 1, page, PrincipalTargetViewer(principal))
-        val items = found.take(size).map(::runJson)
-        return ApiResponse.of(PagedData(items, Pagination.unknownTotal(page, size, items.size, found.size > size)))
+        val items = found.take(size)
+        val names = namesOf(items.mapNotNull { it.requestedBy })
+        val mapped = items.map { runJson(it, names) }
+        return ApiResponse.of(PagedData(mapped, Pagination.unknownTotal(page, size, mapped.size, found.size > size)))
     }
 
     /** §20.11 — one run and its append-only trail (R10). */
@@ -136,7 +144,9 @@ class SchedulesController(
         @PathVariable runId: UUID,
     ): ApiResponse<Map<String, Any?>> {
         val principal = currentPrincipal()
-        return ApiResponse.of(runDetailJson(schedules.run(workspaceOf(principal), id, runId, PrincipalTargetViewer(principal))))
+        val run = schedules.run(workspaceOf(principal), id, runId, PrincipalTargetViewer(principal))
+        val names = namesOf(listOfNotNull(run.run.requestedBy))
+        return ApiResponse.of(runDetailJson(run, names))
     }
 
     // ------------------------------------------------------------------------------ writes
@@ -236,7 +246,7 @@ class SchedulesController(
         return ResponseEntity
             .status(
                 if (written.replayed) HttpStatus.OK else HttpStatus.ACCEPTED,
-            ).body(ApiResponse.of(runJson(written.value)))
+            ).body(ApiResponse.of(runJson(written.value, namesOf(listOfNotNull(written.value.requestedBy)))))
     }
 
     // ------------------------------------------------------------------------------ mapping
@@ -289,9 +299,15 @@ class SchedulesController(
         ResponseEntity
             .status(status)
             .header(HttpHeaders.ETAG, "\"${schedule.revision}\"")
-            .body(ApiResponse.of(scheduleJson(schedule)))
+            .body(ApiResponse.of(scheduleJson(schedule, namesOf(listOf(schedule.createdBy, schedule.updatedBy)))))
 
-    private fun scheduleJson(schedule: Schedule): Map<String, Any?> =
+    /** One batched name read per response (#261); a row whose user is gone falls back to its short id. */
+    private fun namesOf(ids: List<UUID>): Map<UUID, String> = actorNames.lookup(ids)
+
+    private fun scheduleJson(
+        schedule: Schedule,
+        names: Map<UUID, String>,
+    ): Map<String, Any?> =
         linkedMapOf(
             "id" to schedule.id.toString(),
             "name" to schedule.name,
@@ -312,12 +328,22 @@ class SchedulesController(
                 },
             "next_due_at" to schedule.nextDueAt?.toString(),
             "created_by" to schedule.createdBy.toString(),
+            "created_by_name" to nameOf(names, schedule.createdBy),
             "updated_by" to schedule.updatedBy.toString(),
+            "updated_by_name" to nameOf(names, schedule.updatedBy),
             "created_at" to schedule.createdAt.toString(),
             "updated_at" to schedule.updatedAt.toString(),
         )
 
-    private fun runJson(run: ScheduleRun): Map<String, Any?> =
+    private fun nameOf(
+        names: Map<UUID, String>,
+        id: UUID,
+    ): String = names[id] ?: ActorNames.fallback(id)
+
+    private fun runJson(
+        run: ScheduleRun,
+        names: Map<UUID, String>,
+    ): Map<String, Any?> =
         linkedMapOf(
             "id" to run.id.toString(),
             "schedule_id" to run.scheduleId?.toString(),
@@ -332,24 +358,40 @@ class SchedulesController(
             "execution_id" to run.executionId?.toString(),
             "prepared" to run.prepared,
             "requested_by" to run.requestedBy?.toString(),
+            "requested_by_name" to run.requestedBy?.let { nameOf(names, it) },
             "attempts" to run.attempts,
             "created_at" to run.createdAt.toString(),
             "claimed_at" to run.claimedAt?.toString(),
             "started_at" to run.startedAt?.toString(),
             "finished_at" to run.finishedAt?.toString(),
+            // The EXECUTION's own timing (#258): the run's stamps above are claim and reconciler
+            // times; these answer how long the execution took, in this one read.
+            "execution_started_at" to run.executionStartedAt?.toString(),
+            "execution_completed_at" to run.executionCompletedAt?.toString(),
+            "execution_duration_ms" to
+                run.executionStartedAt?.let { s ->
+                    run.executionCompletedAt?.let { e -> Duration.between(s, e).toMillis() }
+                },
         )
 
-    private fun runDetailJson(detail: RunDetail): Map<String, Any?> =
-        runJson(detail.run) +
+    private fun runDetailJson(
+        detail: RunDetail,
+        names: Map<UUID, String>,
+    ): Map<String, Any?> =
+        runJson(detail.run, names) +
             mapOf("payload" to detail.run.payload, "parameters" to detail.run.parameters, "trail" to detail.trail.map(::trailJson))
 
+    /**
+     * The trail as §20.11 answers it (#253): the `worker` column (`hostname:pid:suffix`) stays in
+     * the database and the instance's log — it is operator material, never a reader's — so it is
+     * not mapped here.
+     */
     private fun trailJson(event: TrailEvent): Map<String, Any?> =
         linkedMapOf(
             "seq" to event.seq,
             "kind" to event.kind.wire,
             "reason" to event.reason,
             "at" to event.at.toString(),
-            "worker" to event.worker,
             "details" to event.details,
         )
 

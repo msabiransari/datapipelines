@@ -38,8 +38,10 @@
           <p class="u-m0 u-text-sm" th:if="${canAuthor != true}">An author or a workspace admin can unblock it.</p>
         </section>
 
-        <dl class="tplx-kv sch-run-kv">
+          <dl class="tplx-kv sch-run-kv">
           <dt data-slot="due-label">Due</dt><dd><time data-slot="due"></time></dd>
+          <!-- #261 — a Run now's person is a NAME beside the id §20 already carried. -->
+          <dt data-slot="requested-label" hidden>Requested by</dt><dd data-slot="requested-by" hidden></dd>
           <dt>Started</dt><dd><time data-slot="started"></time></dd>
           <dt>Finished</dt><dd><time data-slot="finished"></time></dd>
           <dt>Took</dt><dd data-slot="duration"></dd>

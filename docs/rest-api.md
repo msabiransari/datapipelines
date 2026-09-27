@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.40 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.41 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-26
@@ -2261,6 +2261,7 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 | `blocked` | object \| null | `{reason, at, run_id}` while blocked (`run_unknown`, or an executor refusal such as `pointer_null`) |
 | `next_due_at` | timestamp \| null | The next occurrence the dispatcher will record; ignored while paused or blocked (resume and unblock recompute it from now) |
 | `created_by`, `updated_by` | uuid | People |
+| `created_by_name`, `updated_by_name` | string | The display names of the people the ids name (#261) — one batched read per response, the same resolution the pipelines explorer uses; a stamp whose user row no longer exists falls back to the id's first eight characters |
 | `created_at`, `updated_at` | timestamp | |
 
 **The run object** (§20.10–§20.12):
@@ -2278,8 +2279,11 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 | `execution_id` | uuid \| null | The execution it launched (read it at §10.2, its messages at §10.3A); null when none was |
 | `prepared` | object \| null | The executor's frozen snapshot — for `pipeline`, `{pipeline_id, version, body_sha256}` plus `resolved_parameters` (slice 3): the literal map the run actually executed with, bindings included |
 | `requested_by` | uuid \| null | The person who pressed Run now |
+| `requested_by_name` | string \| null | That person's display name (#261); the same resolution as the schedule's people |
 | `attempts` | int | Capacity retries |
-| `created_at`, `claimed_at`, `started_at`, `finished_at` | timestamp | Lifecycle; the last three null until they happen |
+| `created_at`, `claimed_at`, `started_at`, `finished_at` | timestamp | Lifecycle; the last three null until they happen. `claimed_at`/`started_at` are claim and launch stamps, and `finished_at` is when the RECONCILER recorded the terminal state — up to one tick after the execution ended — so none of them answers "how long did it take" |
+| `execution_started_at`, `execution_completed_at` | timestamp \| null | The EXECUTION's own start and end, copied by the reconciler from the execution row it already reads (#258); null until a terminal carrying them is recorded (runs that never launched, and runs finished before the field existed) |
+| `execution_duration_ms` | int \| null | `execution_completed_at − execution_started_at`: how long the execution took, answered in this one read for every member who may read the schedule — no `execution.read` needed, and no per-run execution read on a runs list |
 
 ### 20.1 List schedules
 
@@ -2301,6 +2305,8 @@ A **schedule** runs a registered executor's job — in v1 the `pipeline` executo
 ```
 
 Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and are matched ONLY inside an explicit `{"source": "keyword"}` binding, never by scanning strings: a literal STRING `"TODAY"` in `parameters` reaches the pipeline as the string. Each run resolves its bindings on the run's frozen reference time (§20.11's `reference_at`/`reference_timezone`) — the SCHEDULE'S timezone and its logical occurrence time, not the run's actual start: a run due 23:55 that starts 00:05 the next day still resolves `TODAY` to the day it was due for (`YESTERDAY` is a calendar day before, not 24 hours). A keyword binding is validated structurally at save; a keyword with no reference at run time is `binding_invalid`/`no_reference`. Refusals: a bound name the version does not declare, or that is not `DATE` (`400 schedule.validation.binding_invalid`, `details.reason` `unknown_parameter` / `type_mismatch` / `unknown_keyword` / `unknown_source` / `literal_invalid`); the same name in `parameters` and `parameter_bindings` (`400 schedule.validation.binding_conflict` — give it one source; there is no precedence rule). A `reference`, `reference_at` or `reference_timezone` key inside the payload or a binding is `400 schedule.validation.payload_invalid` (`details.reason` `unknown_field`): the run's time is the scheduler's frozen context, never a client field.
+
+**The save-time placeholder (#269).** To bind a required keyword-bound `DATE` parameter at save, the save binds a PLACEHOLDER DATE — today, UTC — for each keyword-bound name, never persisted; each run resolves its own real value on its frozen reference. Consequence for constrained DATE parameters: a `min`/`max` constraint that excludes today makes the SAVE pass or refuse on a date no run will ever bind. The save's parameter checks that mean anything for a bound name are the structural ones (declared, DATE, the keyword allowlist, the conflict rule); the prepare-time bind is the real gate for values. A schedule whose bindings stop fitting the current version refuses its run `not_started` / `parameters_invalid` and blocks, exactly as a literal that no longer binds; a run whose frozen snapshot somehow carries no resolved map for a bindings-carrying schedule is refused `not_started` / `snapshot_unresolved` and does NOT block (a rolling deploy between prepare and start; the next occurrence re-prepares).
 
 ### 20.3 Preview a pattern
 
@@ -2348,6 +2354,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v2.41 | scheduler follow-ups (#258, #261) — numbered after origin/main's v2.38 (scheduler-3) at dispatch | Additive. **§20's run object carries the EXECUTION's own timing** — `execution_started_at`, `execution_completed_at`, `execution_duration_ms` — copied by the reconciler from the execution row it already reads (V40's two nullable columns on `schedule_runs`); the run's own `finished_at` stays the reconciler's stamp and is documented as never answering "how long did it take". A runs list answers duration per run in one read, for every member who may read the schedule, including readers without `execution.read`. **§20 names people beside their ids** — `created_by_name` / `updated_by_name` on the schedule, `requested_by_name` on the run (#261): display names resolved in one batched read per response (the pipelines explorer's `ActorNames`), a stamp whose user row is gone falling back to the id's short form. The trail JSON no longer carries `worker` (#253). |
 | 2026-09-27 | v2.40 | 250 (#250, #259) R3 on every surface — the split ends | No route, field or code changes. **§10.1's R3 paragraph now states "every surface"**: the UI's execution lists (the executions screen, the dashboard's recent executions and run figures) and MCP's `executions_list`/`executions_get`/`executions_get_result` read the same `findVisible` predicate the REST listing does — own runs plus every `triggered_via = SCHEDULE` run of the workspace — so the temporary split (REST only) is closed. **§4.3b of ui-screens**: the pipelines explorer's Usage tab gains a Schedules heading (#259) — the schedules whose `target_ref` names the pipeline, read through `ScheduleService.listByTarget` under the promoter lens; a schedule is not refusal evidence and the tab badge does not count it. Numbered v2.40 after origin/main's v2.39 (262) at lane time. |
 | 2026-09-26 | v2.39 | 262 (#263, with #262) | §6.8's revoked-subscriber paragraph extended — no route, status or wire shape changed. The re-judged workspace is the one the stream OPENED in (a `DP-Workspace` header switch's resolution, not the stamped claim), so a header-switched stream keeps reading the workspace it was opened in while that membership holds; and a write at or past the session token's `exp` ends the stream with the same final `revoked` comment (the duration timer's `close_reason` gains `expired`, [Observability §4.1](observability.md#41-metric-naming)). |
 | 2026-09-26 | v2.38 | scheduler lane 3 (#9) — numbered after origin/main's v2.37 (194a) at merge | Additive. **§20.2: `payload.parameter_bindings`** — an optional, additive key of payload schema 1: one binding per declared `DATE` parameter, `{"source": "keyword", "name": "TODAY"\|"YESTERDAY"}` or `{"source": "literal", "value": …}`; keywords matched only inside an explicit binding (a literal STRING `TODAY` stays the string); each run resolves on its frozen reference — the schedule's timezone, its logical occurrence time, not the actual start. New §13.19 codes `schedule.validation.binding_invalid` (400, `details.reason`/`details.parameter`) and `schedule.validation.binding_conflict` (400); a `reference*` key in the payload or a binding is `payload_invalid`. **§20.11/§20's run object: `prepared.resolved_parameters`** — the literal map the run executed with. §20.5 documents that an edit replaces the bindings wholesale. |

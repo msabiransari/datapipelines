@@ -40,6 +40,14 @@ name: dp
 services:
   datapipelines:
     image: ghcr.io/datapipelines/datapipelines:1.0.0
+    # #251 — the shutdown sequence must RUN TO COMPLETION before the runtime's SIGKILL:
+    # the scheduler's admission gate closes (up to 15 s), then ExecutionDrainLifecycle
+    # cancels and flushes the local executions (up to 20 s), then Tomcat's graceful
+    # shutdown lets in-flight requests end. Docker's default stop grace is 10 s — a kill
+    # mid-drain leaves executions RUNNING, which the sweep marks ABORTED/instance_lost,
+    # which the scheduler records as UNKNOWN — and an unknown run BLOCKS its schedule.
+    # 40 s covers the worst case with margin. Helm's terminationGracePeriodSeconds matches.
+    stop_grace_period: 40s
     ports:
       # APP_HOST_PORT is the LANE knob, not app config (hence no DATAPIPELINES_
       # prefix — compose-env-audit.sh scopes that namespace to keys the app binds).

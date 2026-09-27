@@ -281,6 +281,17 @@
     return !!(run && ACTIVE[run.state]);
   }
 
+  /**
+   * How long the EXECUTION took, straight off the run (#258): `execution_duration_ms`, copied by
+   * the reconciler from the execution row it already reads. §20's own `finished_at` is when the
+   * RECONCILER recorded the end — up to a tick later — so it never answers this question. A number,
+   * or null when the run carries no execution timing (pre-V40 rows; a run that never launched) —
+   * callers fall back to the per-execution read where they may.
+   */
+  function executionDurationMs(run) {
+    return run && typeof run.execution_duration_ms === "number" ? run.execution_duration_ms : null;
+  }
+
   // A manual run's badge says "manual", not "Run now": beside the verb of that name a badge
   // reading like a button is a second button that does nothing.
   var ORIGIN_TEXT = { cron: "scheduled", catch_up: "catch-up", manual: "manual" };
@@ -327,12 +338,24 @@
     try { return JSON.stringify(value); } catch (e) { return String(value); }
   }
 
-  /** One scheduler trail row (§20.11) as a message line. */
-  function schedulerLine(t) {
+  /**
+   * One scheduler trail row (§20.11) as a message line. [names] (#261) — an id → name map the
+   * caller built from the run's own `requested_by_name` — lets a recorded row's `requested_by`
+   * read as a person instead of a 36-character id; ids with no name keep the id.
+   */
+  function schedulerLine(t, names) {
     var bits = [];
     if (t.reason) bits.push(t.reason);
     var d = t.details || {};
-    Object.keys(d).sort().forEach(function (k) { bits.push(k + " " + compactJson(d[k])); });
+    Object.keys(d).sort().forEach(function (k) {
+      var id = d[k];
+      var name = k === "requested_by" && names && typeof id === "string" && names[id];
+      if (name) {
+        bits.push(k + " " + name);
+      } else {
+        bits.push(k + " " + compactJson(id));
+      }
+    });
     return { at: t.at, source: "scheduler", what: t.kind, detail: bits.join(" · "), order: 0, seq: t.seq };
   }
 
@@ -403,8 +426,12 @@
    * timestamps keep each log's own order and put the scheduler's line first — its "execution
    * started" is what hands over to the pipeline's.
    */
-  function mergeMessages(trail, events) {
-    var lines = (trail || []).map(schedulerLine).concat((events || []).map(pipelineLine));
+  function mergeMessages(
+    trail,
+    events,
+    names,
+  ) {
+    var lines = (trail || []).map(function (t) { return schedulerLine(t, names); }).concat((events || []).map(pipelineLine));
     return lines
       .map(function (l, i) { return { line: l, t: new Date(l.at).getTime(), i: i }; })
       .sort(function (a, b) {
@@ -603,6 +630,7 @@
     runChip: runChip,
     runStateText: runStateText,
     isActive: isActive,
+    executionDurationMs: executionDurationMs,
     originText: originText,
     blockedText: blockedText,
     unknownText: unknownText,

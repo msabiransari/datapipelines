@@ -32,6 +32,7 @@ import co.datapipelines.scheduler.ScheduleService
 import co.datapipelines.scheduler.SchedulerProperties
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
+import co.datapipelines.web.ui.ActorNames
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
@@ -43,6 +44,8 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
+import org.springframework.jdbc.core.RowMapper
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.transaction.support.TransactionCallback
 import org.springframework.transaction.support.TransactionTemplate
@@ -114,6 +117,11 @@ class SchedulesCreateBindingsTest {
             ),
             audit,
             mapper,
+            ActorNames(
+                mockk {
+                    every { query(any<String>(), any<Map<String, Any?>>(), any<RowMapper<Pair<UUID, String>>>()) } returns emptyList()
+                },
+            ),
         )
 
     @BeforeEach
@@ -133,6 +141,7 @@ class SchedulesCreateBindingsTest {
         val workspace = Workspace(workspaceId, "acme", "Acme", false, null, false, Instant.EPOCH)
         every { workspaces.findById(workspaceId) } returns workspace
         every { users.systemActor() } returns systemRow()
+        every { schedulesRepo.lockWorkspace(workspaceId) } returns Unit
         every { schedulesRepo.countLive(workspaceId) } returns 0
         every { schedulesRepo.insert(any()) } answers { createdFrom(firstArg()) }
         every { pipelines.findByNameAnyStatus(workspaceId, "a/p") } returns record()

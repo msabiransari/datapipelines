@@ -126,6 +126,8 @@ class ScheduleRunRepository(
     /**
      * Moves a run from one of [from] to [to] with [reason]; false when it was not in [from] (another
      * writer got there first). Terminal states stamp `finished_at`; `running` stamps `started_at`.
+     * [executionStartedAt]/[executionCompletedAt] (#258) are the EXECUTION's own stamps, carried by
+     * the reconciler's terminal transition — the run's own stamps are claim and reconciler times.
      */
     fun transition(
         id: UUID,
@@ -133,12 +135,16 @@ class ScheduleRunRepository(
         to: RunState,
         reason: String?,
         now: Instant,
+        executionStartedAt: Instant? = null,
+        executionCompletedAt: Instant? = null,
     ): Boolean =
         jdbc.update(
             """
             UPDATE schedule_runs SET state = :to, reason = :reason, updated_at = :now,
                    started_at = CASE WHEN :to = 'running' THEN COALESCE(started_at, :now) ELSE started_at END,
-                   finished_at = CASE WHEN :terminal THEN :now ELSE finished_at END
+                   finished_at = CASE WHEN :terminal THEN :now ELSE finished_at END,
+                   execution_started_at = COALESCE(CAST(:execStarted AS timestamptz), execution_started_at),
+                   execution_completed_at = COALESCE(CAST(:execCompleted AS timestamptz), execution_completed_at)
             WHERE id = :id AND state IN (:from)
             """.trimIndent(),
             mapOf(
@@ -148,6 +154,8 @@ class ScheduleRunRepository(
                 "now" to Timestamp.from(now),
                 "terminal" to !to.active,
                 "from" to from.map { it.wire },
+                "execStarted" to executionStartedAt?.let(Timestamp::from),
+                "execCompleted" to executionCompletedAt?.let(Timestamp::from),
             ),
         ) == 1
 
@@ -288,6 +296,8 @@ class ScheduleRunRepository(
             startedAt = rs.getTimestamp("started_at")?.toInstant(),
             finishedAt = rs.getTimestamp("finished_at")?.toInstant(),
             updatedAt = rs.getTimestamp("updated_at").toInstant(),
+            executionStartedAt = rs.getTimestamp("execution_started_at")?.toInstant(),
+            executionCompletedAt = rs.getTimestamp("execution_completed_at")?.toInstant(),
         )
 
     private companion object {

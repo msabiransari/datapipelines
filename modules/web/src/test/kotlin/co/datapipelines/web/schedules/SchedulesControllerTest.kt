@@ -20,6 +20,7 @@ import co.datapipelines.scheduler.TrailEvent
 import co.datapipelines.scheduler.TrailKind
 import co.datapipelines.scheduler.Written
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.ui.ActorNames
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -34,6 +35,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.jdbc.core.RowMapper
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
 import java.time.Instant
@@ -52,11 +55,23 @@ class SchedulesControllerTest {
     private val service = mockk<ScheduleService>()
     private val audit = RecordingAudit()
     private val mapper = ObjectMapper()
-    private val controller = SchedulesController(service, audit, mapper)
-
     private val user = UUID.randomUUID()
     private val workspace = UUID.randomUUID()
     private val scheduleId = UUID.randomUUID()
+
+    // A REAL ActorNames over a stubbed read: "every §20 response names people in ONE batched
+    // read" is a must-call contract, and the name in the answer is what the test asserts.
+    private val jdbc = mockk<NamedParameterJdbcTemplate>()
+    private val actorNames: ActorNames
+    private val controller: SchedulesController
+
+    init {
+        every {
+            jdbc.query(any<String>(), any<Map<String, Any?>>(), any<RowMapper<Pair<UUID, String>>>())
+        } answers { listOf(user to "Alice") }
+        actorNames = ActorNames(jdbc)
+        controller = SchedulesController(service, audit, mapper, actorNames)
+    }
 
     @BeforeEach
     fun signIn() {
@@ -257,8 +272,29 @@ class SchedulesControllerTest {
         val trail = data["trail"] as List<Map<String, Any?>>
         trail.map { it["seq"] } shouldContainExactly listOf(1, 2)
         trail.map { it["kind"] } shouldContainExactly listOf("recorded", "claimed")
-        trail.last()["worker"] shouldBe "w-1"
+        // #253: the worker's hostname:pid stays in the database and the log, never the response —
+        // even for the event that carried one.
+        trail.last().containsKey("worker") shouldBe false
         data["payload"] shouldBe run().payload
+    }
+
+    @Test
+    fun `a schedule and a run name their people beside the ids - one batched read (#261)`() {
+        every { service.get(workspace, scheduleId, any()) } returns schedule()
+        every { service.runs(workspace, scheduleId, 3, 0, any()) } returns listOf(run().copy(requestedBy = user))
+
+        val schedule = controller.get(scheduleId).body!!.data
+        schedule["created_by"] shouldBe user.toString()
+        schedule["created_by_name"] shouldBe "Alice"
+        schedule["updated_by_name"] shouldBe "Alice"
+
+        val run =
+            controller
+                .runs(scheduleId, 0, 2)
+                .data.items
+                .single()
+        run["requested_by"] shouldBe user.toString()
+        run["requested_by_name"] shouldBe "Alice"
     }
 
     // ------------------------------------------------------------------------------ fixtures
@@ -321,6 +357,29 @@ class SchedulesControllerTest {
             updatedAt = AT,
         )
 
+    /** A finished run whose execution took 17 ms — what §20.10 answers in one read (#258). */
+    private fun finishedRun() =
+        run().copy(
+            state = RunState.SUCCEEDED,
+            executionId = EXECUTION_ID,
+            startedAt = AT,
+            finishedAt = AT.plusSeconds(20), // the reconciler's stamp — NOT what duration means
+            executionStartedAt = AT,
+            executionCompletedAt = AT.plusMillis(17),
+        )
+
+    @Test
+    fun `a finished run carries the execution's own timing and duration - one read, every reader (#258)`() {
+        every { service.runs(workspace, scheduleId, 3, 0, any()) } returns listOf(finishedRun())
+
+        val data = controller.runs(scheduleId, 0, 2).data
+
+        val run = data.items.single()
+        run["execution_started_at"] shouldBe AT.toString()
+        run["execution_completed_at"] shouldBe AT.plusMillis(17).toString()
+        run["execution_duration_ms"] shouldBe 17L
+    }
+
     private class RecordingAudit : AuditEventSink {
         val events = mutableListOf<Pair<String, Map<String, Any?>>>()
 
@@ -339,6 +398,7 @@ class SchedulesControllerTest {
     private companion object {
         val AT: Instant = Instant.parse("2026-09-25T06:00:00Z")
         val RUN_ID: UUID = UUID.fromString("00000000-0000-0000-0000-00000000f00d")
+        val EXECUTION_ID: UUID = UUID.fromString("00000000-0000-0000-0000-00000000e0ec")
         const val BODY =
             """{"name":"finance/daily/revenue","payload":{"pipeline":"finance/revenue","version":"current"},""" +
                 """"cron":"0 6 * * *","timezone":"UTC"}"""

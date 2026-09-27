@@ -18,6 +18,8 @@ class SchedulesRunRenderTest {
         dialog shouldContain "data-slot=\"execution\""
         dialog shouldContain "data-slot=\"unknown-execution\""
         dialog shouldContain "data-verb=\"schedule-unblock\""
+        // #261 — the run dialog names the person behind a Run now's requested_by id.
+        dialog shouldContain "data-slot=\"requested-by\""
     }
 
     @Test
