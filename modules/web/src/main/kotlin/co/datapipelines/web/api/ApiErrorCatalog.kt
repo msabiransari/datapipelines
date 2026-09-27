@@ -101,6 +101,16 @@ object ApiErrorCatalog {
             // #9 §13.19 — the rest of the family is a state conflict (a taken name, a stale
             // revision, an overlap, a block, the per-workspace cap); the two 404s are EXCEPTIONS.
             "schedule." to HttpStatus.CONFLICT,
+            // #194 §13.20 — the parameter engine. Save-time validation and the evaluate request's own
+            // refusals are the caller's (400); the lifecycle rows are the template.* twins (409 state
+            // conflicts, 403 authoring, 400 import). The per-parameter evaluate codes are never a
+            // response status (NEVER_RETURNED_LIVE); the 404, 409, 413 and 504 rows are EXCEPTIONS.
+            "parameter.validation." to HttpStatus.BAD_REQUEST,
+            "parameter.evaluate." to HttpStatus.BAD_REQUEST,
+            "parameter.version." to HttpStatus.CONFLICT,
+            "parameter.release." to HttpStatus.CONFLICT,
+            "parameter.import." to HttpStatus.BAD_REQUEST,
+            "parameter.authoring." to HttpStatus.FORBIDDEN,
         )
 
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
@@ -316,6 +326,14 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Transform.TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
             PipelineErrorCodes.Transform.POOL_EXHAUSTED to HttpStatus.SERVICE_UNAVAILABLE,
             PipelineErrorCodes.Transform.JS_UNAVAILABLE to HttpStatus.BAD_REQUEST,
+            // #194 §13.20 — a taken set name is a 409 (the UNIQUE constraint, the pipeline/template twin);
+            // an absent or lens-hidden set a 404; a wrong typed confirmation the caller's 400; the
+            // evaluate's whole-request refusals 413 (response budget) and 504 (the house deadline mapping).
+            PipelineErrorCodes.Parameters.DUPLICATE_NAME to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Parameters.NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Parameters.VERSION_CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Parameters.EVALUATE_RESPONSE_TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
+            PipelineErrorCodes.Parameters.EVALUATE_TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
         )
 
     /**
@@ -331,6 +349,18 @@ object ApiErrorCatalog {
             // §13.13 (7e) — a WARNING in the release response's `warnings`, never an error
             // status: a fact edit never blocks a release (transform-nodes design §8.2).
             PipelineErrorCodes.Versioning.RELEASE_TEMPLATE_NEEDS_REVIEW,
+            // §13.20 (#194) — the evaluate's per-parameter codes: reported in `state.errors[]` of a
+            // 200 evaluate (its `valid` false), never as the response's status.
+            PipelineErrorCodes.Parameters.EVALUATE_TOO_MANY_VALUES,
+            PipelineErrorCodes.Parameters.EVALUATE_TOO_MANY_BINDS,
+            PipelineErrorCodes.Parameters.EVALUATE_SELECTOR_ROWS_INVALID,
+            PipelineErrorCodes.Parameters.EVALUATE_INVALID_VALUE_TYPE,
+            PipelineErrorCodes.Parameters.EVALUATE_CONSTRAINT_VIOLATION,
+            PipelineErrorCodes.Parameters.EVALUATE_REQUIRED_MISSING,
+            PipelineErrorCodes.Parameters.EVALUATE_TOO_MANY_OPTIONS,
+            PipelineErrorCodes.Parameters.EVALUATE_INPUT_SOURCE_MULTIPLE_ROWS,
+            PipelineErrorCodes.Parameters.EVALUATE_SELECTOR_VALUE_TYPE_MISMATCH,
+            PipelineErrorCodes.Parameters.EVALUATE_SELECTORS_SATURATED,
         )
 
     /**
@@ -400,6 +430,15 @@ object ApiErrorCatalog {
             // is a state the schedule is in, which the message and details spell out.
             "schedule.validation." to "This schedule isn't valid yet. Check the reported field and try again.",
             "schedule." to "This schedule can't do that right now. The details say why.",
+            // #194 — the parameter-set families: validation lists every problem with its field; the
+            // evaluate request, the lifecycle and the receiver refusal say what to change.
+            "parameter.validation." to "This parameter set isn't valid yet. Every problem is listed with the field it concerns.",
+            "parameter.evaluate." to "These parameter values couldn't be evaluated. The details say why.",
+            "parameter.version." to "This parameter set changed or isn't in the right state for that. Reload it and try again.",
+            "parameter.release." to "This parameter set can't be released yet. The details say what to release first.",
+            "parameter.import." to "This parameter set can't be imported here yet. The details say what is missing.",
+            "parameter.authoring." to "Parameter sets can't be edited on this server. Edit them where authoring is enabled and promote.",
+            "parameter." to "We couldn't find that parameter set.",
         )
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =

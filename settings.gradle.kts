@@ -32,6 +32,7 @@ include(
     ":modules:datasources",
     ":modules:staging",
     ":modules:dag",
+    ":modules:parameters",
     ":modules:auth",
     ":modules:scheduler",
     ":modules:application",

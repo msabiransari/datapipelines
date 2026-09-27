@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.34 (revised — see Change Log)
+**Status:** v1.35 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-25
@@ -1408,6 +1408,94 @@ The scheduler's refusals (#9; [Scheduler](scheduler.md), the scheduler design re
 | `schedule.validation.binding_invalid` | 400 | a `parameter_bindings` entry cannot be resolved (#9 slice 3) — an unknown parameter, a non-`DATE` type, an unknown keyword (`TODAY`/`YESTERDAY` only), an unknown source, a literal binding without a value, or a keyword with no reference at run time; `details.reason` (`unknown_parameter` / `type_mismatch` / `unknown_keyword` / `unknown_source` / `literal_invalid` / `no_reference`) and `details.parameter` name why |
 | `schedule.validation.binding_conflict` | 400 | the same parameter is supplied in `parameters` and in `parameter_bindings` — give it one source; the resolver rejects ambiguity instead of applying a precedence rule (`details.parameter`) |
 
+
+### 13.20 Parameter sets
+
+The parameter engine's refusals (#194; the [parameter-engine design record](superpowers/specs/2026-09-21-parameter-engine-design.md) §10). `parameter.validation.*` is the author's document at save — the record's §4 order: shape, the §3 field rules, the graph, the expressions, the template pins, then the dry render and the metadata execution — every failure collected (§17.2's rule), `details.path` naming the field. `parameter.evaluate.*` is the runtime (the record's §5): a whole-request refusal carries its status; the rows marked "—" are never an error RESPONSE — they are reported per parameter in `state.errors[]` of a 200 evaluate, whose `valid` is then `false`. The `parameter.version.*` / `release` / `import` / `authoring` rows are the `template.*` twins of the lifecycle ([Versioning §3.5](versioning.md#35-the-lifecycle-table)). A selector template that interpolates a parent is refused with §13.9's existing `template.validation.parameter_interpolated`. `parameter.in_use` (409) is reserved for the future consumer binding (the record's §13) and is not declared. Landed with the constants — `ParameterErrorCodes` in `modules/parameters` and its mirror `PipelineErrorCodes.Parameters`, pinned equal by reflection (`ParameterErrorCodesTest`), held to this table by `ParameterErrorCodesSpecDriftTest` — and their `ApiErrorCatalog` rows.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `parameter.validation.name_invalid` | 400 | the set name fails the folder grammar pipelines and templates use (`details.reason`: `folder_required` / `grammar` / `missing`, or `immutable` when a write names a different set than the one it addresses — a set is never renamed), or a parameter name fails §6.1's grammar |
+| `parameter.validation.name_reserved` | 400 | a parameter name ending in `_count` or `__<digits>` — the generated bind namespace of a `MULTI` (the record's P29) |
+| `parameter.validation.new_root_requires_confirmation` | 400 | agent surface only — a set under a top-level folder that holds nothing yet, without `confirm_new_root: true` (the pipelines/templates shape); `details.existing_roots` |
+| `parameter.validation.duplicate_name` | 409 | the set name exists in the workspace — discarded sets included, names are unique forever ([Versioning §3.2](versioning.md#32-entity-status-is-derived-names-are-unique-forever)) |
+| `parameter.validation.duplicate_parameter` | 400 | two parameters of one set share a name |
+| `parameter.validation.too_many_parameters` | 400 | more parameters than `datapipelines.parameters.max-parameters-per-set` — refused before any parameter is read |
+| `parameter.validation.body_invalid` | 400 | the document's shape (owner ruling 2026-09-26): an unknown key, a wrong JSON type, a missing structural key or a `depends_on` longer than the set can hold, at any level — `details.path` names it, `details.reason` is `unknown_key` / `wrong_type` / `missing` / `too_long`; every one is reported, and nothing binds until there are none |
+| `parameter.validation.label_invalid` | 400 | a parameter's `label` (or the set's `display_name`) is missing, blank or over 120 characters |
+| `parameter.validation.description_too_long` | 400 | a description (a parameter's or the set's) over 2000 characters |
+| `parameter.validation.type_invalid` | 400 | a `type` outside the ten declarable logical types (`NULL` is a column fact, never a declaration) |
+| `parameter.validation.precision_missing` | 400 | a `DECIMAL` parameter with no `precision` (§6.2's rule, §12.7's twin) |
+| `parameter.validation.scale_missing` | 400 | a `BIGDECIMAL` parameter with no `scale` (§12.7's twin) |
+| `parameter.validation.kind_invalid` | 400 | a `kind` other than `INPUT` / `SELECT`, or none |
+| `parameter.validation.cardinality_invalid` | 400 | a `cardinality` other than `SINGLE` / `MULTI`, or `MULTI` on an `INPUT` (an input is always `SINGLE`) |
+| `parameter.validation.default_type_mismatch` | 400 | `default_value` is not a wire value of the parameter's type — or not an array for a `MULTI` |
+| `parameter.validation.default_not_an_option` | 400 | a `constants` select's `default_value` (or one of a `MULTI`'s members) is not among its option values |
+| `parameter.validation.default_invalid` | 400 | a default — hard-coded, a marked option, a sourced row at save's dry run — breaks the parameter's own constraints, precision or scale (`min: 0` with `default_value: -1`); `details.reason` names the rule |
+| `parameter.validation.source_missing` | 400 | a `SELECT` with no `source` |
+| `parameter.validation.source_ambiguous` | 400 | a `source` stating both `constants` and `template`, neither, or a `template` without its `datasource` (or a `datasource` without a `template`) |
+| `parameter.validation.source_not_allowed` | 400 | `constants` on an `INPUT` — an input's hard-coded value is its `default_value` |
+| `parameter.validation.constraints_on_select` | 400 | `constraints` on a `SELECT` — constraints are the `INPUT`'s |
+| `parameter.validation.constraint_not_applicable` | 400 | a constraint on a type it does not apply to (`pattern` on an `INTEGER`) |
+| `parameter.validation.constraint_invalid` | 400 | a malformed constraint: a bound not in the parameter's type, `min > max`, a negative length, `min_length > max_length` |
+| `parameter.validation.pattern_invalid` | 400 | a `pattern` over 256 characters, not compiling, or using a construct the regex budget refuses (backreferences, lookaround, possessive or atomic groups) |
+| `parameter.validation.format_invalid` | 400 | a `format` whose shape does not fit the type family — any `format` on `STRING`/`BOOLEAN`/`BINARY`, a `kind` on a temporal type, a `pattern` on a numeric one, or an unknown numeric `kind` |
+| `parameter.validation.presentation_invalid` | 400 | a `presentation.control` outside the catalogue ([enums §27](enums.md)) |
+| `parameter.validation.control_not_applicable` | 400 | a catalogued `control` outside its kind × cardinality × type row (the record's §3.7) |
+| `parameter.validation.format_pattern_invalid` | 400 | a temporal `format.pattern` over 64 characters, not compiling as a `DateTimeFormatter` pattern, or naming time fields on a `DATE` (date fields on a `TIME`) |
+| `parameter.validation.option_invalid` | 400 | a `constants` option with a null or mistyped `value`, a missing or empty `display_value`, or a value/label over `max-option-value-chars` / `max-option-label-chars`; `details.reason` |
+| `parameter.validation.option_duplicate` | 400 | two `constants` options share a value (equality is the canonical value's — `1.0` equals `1.00`) |
+| `parameter.validation.multiple_defaults` | 400 | more than one `constants` option marked `is_default` (P7) |
+| `parameter.validation.too_many_options` | 400 | an empty `constants` list, or one longer than `max-options-per-selector` — refused before any option is read |
+| `parameter.validation.dependency_unknown` | 400 | a `depends_on` entry names no parameter of the set |
+| `parameter.validation.dependency_self` | 400 | a `depends_on` entry names the parameter itself |
+| `parameter.validation.dependency_cycle` | 400 | the set's dependency graph (`depends_on`, direct or indirect) has a cycle; `details.cycle` is the path (`a -> b -> a`) |
+| `parameter.validation.bind_undeclared` | 400 | a selector template binds `:name` that is neither a parameter in the carrier's `depends_on` nor an org/platform tier key (§7.2; `execution_id` is absent), or a hand-written `<name>__<digits>` bind |
+| `parameter.validation.ref_undeclared` | 400 | an expression `ref` names a parameter outside the carrier's `depends_on`, or the carrier itself |
+| `parameter.validation.expression_invalid` | 400 | a `hidden_expression`/`disabled_expression` that is not a §7 AST — an unknown `op` or key, a missing operand, an empty `and`/`or`; `details.reason` |
+| `parameter.validation.expression_depth_exceeded` | 400 | an expression deeper than `max-expression-depth` |
+| `parameter.validation.expression_too_large` | 400 | an expression with more nodes than `max-expression-nodes`, or an `in` list over 256 literals |
+| `parameter.validation.expression_cardinality` | 400 | `eq`/`neq`/`in`/`is_null` on a `MULTI` ref, or `contains`/`is_empty` on a `SINGLE` one |
+| `parameter.validation.expression_literal_type` | 400 | a literal not coercible to its ref's type |
+| `parameter.validation.expression_type_unsupported` | 400 | a `BINARY` ref tested by anything but `is_null` |
+| `parameter.validation.template_not_found` | 400 | the pinned template id does not exist in the workspace (§12.6's twin) |
+| `parameter.validation.template_version_not_found` | 400 | the pinned template exists, but not at that version — or only DISCARDED there |
+| `parameter.validation.template_type_mismatch` | 400 | the pinned template is not `type = 'sql'` |
+| `parameter.validation.template_dialect_mismatch` | 400 | the pinned template's dialect differs from the source datasource's |
+| `parameter.validation.template_render_failed` | 400 | the dry render of a selector template against its parents' defaults failed (the record's §4 step 5) |
+| `parameter.validation.datasource_not_found` | 400 | a source's datasource is not visible from the workspace (bound or global) |
+| `parameter.validation.datasource_unreachable` | 400 | the metadata execution could not reach the source's datasource (the record's §4 step 6) — a set whose sources cannot be proven is not saved |
+| `parameter.validation.selector_query_failed` | 400 | the metadata execution reached the datasource and its statement failed — a column, a permission, the read-only gate (owner ruling 2026-09-26); `details.datasource_code` is the datasource's own code |
+| `parameter.validation.selector_columns_invalid` | 400 | a selector's columns are not exactly `value`, `display_value`, `is_default` — or `value` alone for an `INPUT`; `details` name the extra or missing column |
+| `parameter.validation.selector_value_type_mismatch` | 400 | the selector's `value` column type does not pass the record's §6.4 against the declared type (decided from metadata, never rows); `details.hint` |
+| `parameter.validation.selector_order_by_missing` | 400 | a `SELECT`'s rendered SQL carries no `ORDER BY` (P7 — the check proves a clause is present, not that the order is total) |
+| `parameter.validation.selector_probe_unavailable` | 400 | a template-backed source needs the save-time probe and this build wires none — the selector runtime arrives with #194 lane C, and this code leaves the catalog with it (the only code documented as temporary); a `constants`-only set saves without it |
+| `parameter.evaluate.unknown_parameter` | 400 | a `selections` key names no parameter of the set — the whole request is refused (the caller's error) |
+| `parameter.evaluate.too_many_values` | — | not an error response — reported per parameter in `state.errors[]` of a 200 evaluate: a `MULTI` longer than `max-multi-bind-values` |
+| `parameter.evaluate.too_many_binds` | — | not an error response — per parameter in `state.errors[]`: a rendered statement over `max-binds-per-statement` placeholders, every expanded one counted |
+| `parameter.evaluate.selector_rows_invalid` | — | not an error response — per parameter in `state.errors[]`: a selector row violating the option invariants (`details.reason`: `duplicate_value` / `null_value` / `empty_label` / `multiple_defaults`) |
+| `parameter.evaluate.response_too_large` | 413 | the response would exceed `max-evaluate-response-bytes` — the whole request is refused, options are never truncated |
+| `parameter.evaluate.invalid_value_type` | — | not an error response — per parameter in `state.errors[]`: a submitted value in the wrong wire form, not coercible, or a duplicate `MULTI` member |
+| `parameter.evaluate.constraint_violation` | — | not an error response — per parameter in `state.errors[]`: a submitted value breaks a constraint, the precision or the scale; `details.reason` (`min`, `max`, `min_length`, `max_length`, `pattern`, `pattern_budget`, `scale`, `precision`) |
+| `parameter.evaluate.required_missing` | — | not an error response — per parameter in `state.errors[]`: required and nothing resolves (`details.reason`: `no_options` / `no_default` / `no_row`) |
+| `parameter.evaluate.too_many_options` | — | not an error response — per parameter in `state.errors[]`: a selector returned more rows than `max-options-per-selector` |
+| `parameter.evaluate.input_source_multiple_rows` | — | not an error response — per parameter in `state.errors[]`: an `INPUT`'s source template returned two or more rows; `default_value` is used |
+| `parameter.evaluate.selector_value_type_mismatch` | — | not an error response — per parameter in `state.errors[]`: the selector's `value` column no longer passes the record's §6.4 (schemas drift) |
+| `parameter.evaluate.template_unrendered` | 400 | MCP only — an evaluate of a draft set whose pinned DRAFT template changed after the key's last `templates_render` of it (the 139 gate's twin) |
+| `parameter.evaluate.timeout` | 504 | the evaluate's deadline (`evaluate-timeout-seconds`) — the whole request, never a half-form; the house mapping of an executor deadline (`pipeline.execution.timeout`, §13.3) |
+| `parameter.evaluate.selectors_saturated` | — | not an error response — per parameter in `state.errors[]`: the selector bulkhead's queue was already full at admission (decided at once; a deadline reached while queued or running is `parameter.evaluate.timeout` instead); a consumer that surfaces it uses rest-api §4's concurrency-limit shape |
+| `parameter.not_found` | 404 | no such set (or version) in the workspace, hidden by the promoter lens, or discarded on a read/mutate path — indistinguishable by design |
+| `parameter.version.conflict` | 409 | the precondition hash is stale — draft write, release, discard, purge; `details` carry the current hash, status and author ([Versioning §4.2](versioning.md#42-the-precondition-protocol)); an import onto a taken number with a different hash (`details.reason`) |
+| `parameter.version.not_draft` | 409 | release or a draft verb on a set with no DRAFT |
+| `parameter.version.not_released` | 409 | discard of a version that is not RELEASED (drafts are purged, never discarded) |
+| `parameter.version.not_discarded` | 409 | restore of a version that is not DISCARDED |
+| `parameter.version.last_release` | 409 | purge of a released version, or of an entity holding one |
+| `parameter.version.not_eligible` | 409 | switch to a version that is not live and posture-eligible |
+| `parameter.version.confirm_mismatch` | 400 | a destructive verb's typed confirmation did not match (the caller's input was wrong; nothing about the version refused) |
+| `parameter.release.template_not_released` | 409 | release with a pinned template version that is not RELEASED; `details.pins_not_released` lists every one — `release_pinned_templates=true` cascades them in the same transaction ([Versioning §5.3](versioning.md#53-release-lock), 142) |
+| `parameter.import.missing_template` | 400 | an import whose pinned template version is absent on the target — promotion order is templates before sets |
+| `parameter.authoring.disabled` | 403 | `datapipelines.deployment.authoring-enabled=false` refuses every authoring write ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)) |
+
 ---
 
 ## 14. Pipeline Lifecycle Operations
@@ -1648,6 +1736,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.35 | 194b (#194) parameter engine lane B — the frozen model | New **§13.20 Parameter sets**: the `parameter.*` family, 80 codes, one row each — the record's §10 plus the owner's two rulings of 2026-09-26 (`parameter.validation.body_invalid` for the document's shape at every level, `parameter.validation.selector_query_failed` when the save-time probe's statement fails) and the lane's temporary `parameter.validation.selector_probe_unavailable` (gone with lane C). The evaluate's per-parameter codes are "—" (never a response status; reported in `state.errors[]` of a 200); `parameter.evaluate.timeout` is 504 (the house deadline mapping, §13.3 — the record's §14 item 1). Landed with `ParameterErrorCodes`, its mirror `PipelineErrorCodes.Parameters` and the `ApiErrorCatalog` rows. |
 | 2026-09-26 | v1.34 | 194a (#194) parameter engine lane A — the shared validator | §6.1: a parameter gains optional **`constraints`** (`min`, `max`, `min_length`, `max_length`, `pattern`) and **`cardinality`** (`SINGLE`/`MULTI`), the parameter engine's declaration model; both omitted when absent, so no stored body's hash moves. §6.2: every value (and every applied default) is judged by the shared `ParameterValueValidator` with ONE null policy — `null` and absent are unsupplied and resolve as before; **precision and scale are enforced on values** (the second deliberate break, REST API v2.37); `MULTI` is refused until the dashboard round. §12.7 gains `default_invalid`, `constraint_not_applicable`, `constraint_invalid`, `pattern_invalid`, `cardinality_unsupported`; §13.3 gains `pipeline.execution.parameter_constraint_violation` (400, `details.reason`). Additive per §15.2 except the precision/scale enforcement, which is named as a break. |
 | 2026-09-26 | v1.33 | 194a (#194) parameter engine lane A | §6.3: **nothing is trimmed** — a `BIGINTEGER`/`BIGDECIMAL` value with surrounding whitespace is `pipeline.execution.invalid_parameter_type`; the two BIG types were trimmed before parsing until today, a deliberate break recorded in REST API v2.36. `ParameterCoercion` and `ParameterWireEncoder` moved to `typesystem` (made public) so the parameter engine shares the one implementation; the rejection wording is unchanged. |
 | 2026-09-26 | v1.32 | scheduler lane 1 (#9) — numbered after origin/main's v1.31 (232) | New **§13.19 Schedules**: sixteen `schedule.*` codes — `schedule.not_found` / `schedule.run.not_found` (404), the 409 state family (`name_taken`, `revision_conflict`, `run.overlap`, `blocked`, `not_blocked`, `limit.per_workspace`) and the 400 `schedule.validation.*` family (`request_invalid`, `name_invalid`, `cron_invalid`, `timezone_invalid`, `interval_too_short`, `executor_unknown`, `payload_invalid`, `target_not_found`). None is raised while a schedule fires. Landed with `ScheduleErrorCodes` and their `ApiErrorCatalog` rows. |

@@ -436,6 +436,8 @@ class CommonConventionsPlugin : Plugin<Project> {
             // #194: Dag.kt (100% covered) moved to graph; the lane measured 90.19 on the module after the move, minus 2
             // (the house rule) — 90 left a 0.19-point margin a CI runner's coverage could fall under (MISTAKES: the race floor).
             ":modules:dag" to 88,
+            // #194 lane B: measured baseline 91.18 on the module's first Kover run (A.1, the model), minus 2, floored.
+            ":modules:parameters" to 89,
             ":modules:mcp-server" to 94,
             ":modules:web" to 72,
             ":modules:app" to 90,
