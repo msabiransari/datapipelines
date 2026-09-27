@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.76
+**Status:** v1.77
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-09-26 (scheduler lane 3, #9)
+**Last updated:** 2026-09-27 (254, #254/#255/#256)
 
 ---
 
@@ -258,6 +258,17 @@ nav packs to the top; the free space below it is deliberate.
   hides it with the workspace name rather than leaving a word with nothing to qualify; at all
   three widths (§3.6) it is the same element in the same place. The role decides what the rest
   of the app renders — the inventory is [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative).
+
+- **The switcher's options are full-paint facts (#256).** The `<select>` renders from
+  `UiWorkspaceAdvice.workspaceOptions` (`listOwn(...).filter { it.workspaceActive }`) on every
+  FULL paint only — a boosted swap replaces `#app-main` and cannot reach the rail. So any
+  page-route mutation whose success changes the option list navigates in FULL (`hx-boost="false"`,
+  097 §2.1 — the same rule the switch form has always followed): the create form since #170,
+  and deactivate / reactivate / delete since #256, whose guard asserts each verb's before/after
+  option list with no reload the test performs (`WorkspacesCreateBrowserTest`: deactivate → the
+  option is absent without a reload, reactivate → present, delete → absent). The switch itself
+  is the third shell-changing verb and re-issues the session cookie — a full navigation by
+  construction.
 
 **The top bar** (`--header-height`). Breadcrumb (`<group> / <page>`, group muted, page bold),
 the search field **palette** (161), the light/dark toggle, and the avatar menu. The **MCP-key
@@ -1016,6 +1027,7 @@ Content:
 
   Below 768px the page shows the phone band and the editor stays rendered underneath — `.te-body` has no collapse breakpoint today (at 390px the clamp's 220px floor wins over the 50vw ceiling and the source column squeezes toward its `minmax(0, 1fr)` floor beside it), so the handle stays bound there too.
 - **A context row fits its rail (#243).** The key/value rows are flex rows whose inputs carry `min-width: 0` (a flex item's automatic minimum is its intrinsic size, and an `<input>`'s is its `size` attribute — without the zero minimum the row held 476px in a 320px rail and the remove button sat off-screen at every width) and the remove control never yields width; `TemplateEditorContextRowBrowserTest` measures the row's edges against the rail's box at 1100/1440/1920 and at the splitter's 220px floor, for the static row and an Add-Row clone.
+- **The panel head yields before the rail scrolls (#255).** The Render Context head — the `Render Context` h2 and its `Key/Value` / `JSON` tabs — shares the rail, and at the splitter's 220px floor its min-content was ~8px wider than the box: `.te-rail` (a scroll container) scrolled sideways, `scrollWidth 228 > clientWidth 220`, though nothing on the screen suggests a sideways scroll. `.te-panel-head` wraps (`flex-wrap: wrap`, with `min-width: 0` on its h2), so at narrow rail widths the tabs drop below the heading instead of holding the row open; at the 320px default and in the wide source column (the other panel heads) nothing moves. The rail's own contract is pinned beside the row measurement: light and dark, at 1100/1440/1920 and at the floor, `.te-rail`'s `scrollWidth` equals its `clientWidth`.
 - **Phone widths (110): desktop-first by decision, not omission.** Below 768px the page renders a `.app-wide-screen-note` band above the editor — "Open on a wider screen to edit", the template's name, its draft badge (the same `hasDraft`/`draftVersion` pair the header renders) and a link back to the Templates explorer — with the editor itself left rendered underneath.
 
 #### 4.7a The transform face (7d, #7)
@@ -1189,7 +1201,13 @@ the deactivated ones, because this is the screen that brings one back; a member 
 deactivated workspace at all ([Auth §11A.3](auth.md#11a3-deactivation) — deactivation must not be
 a signal anybody can read). **Deactivate**, **Reactivate** and **Delete** are super-admin verbs
 (`workspace.lifecycle`); deactivation purges nothing, ever, and Reactivate is one row away,
-which is why neither carries a typed confirm. The role label is the membership's ONE role
+which is why neither carries a typed confirm. All three navigate in FULL — `hx-boost="false"`
+(#256, the create form's rule): each success changes the SHELL (the switcher's options come
+from `workspaceOptions`, filtered to ACTIVE workspaces, on every full render), and a boosted
+swap replaced only `#app-main`, so a deactivated workspace stayed selectable and a reactivated
+one missing until a manual reload. `WorkspacesCreateBrowserTest` extends #170's no-reload
+assertion to each verb: deactivate → the option is absent, reactivate → present, delete →
+absent. The role label is the membership's ONE role
 (`viewer` / `author` / `promoter` / `workspace admin`) printed by the same `RoleModel.labelOf` the
 shell badge and the members table use — the row's own word ([`WorkspaceRole`](enums.md#8c-workspacerole--the-one-role-a-membership-holds), D1).
 
@@ -1702,6 +1720,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v1.77 | 254 (#254, #255, #256) three small UI defects, the switcher and the rail honest | §3.4: the switcher's options are full-paint facts — every page-route mutation that changes the option list navigates in FULL; the three lifecycle verbs join the create form (#256): deactivate → the option absent without a reload, reactivate → present, delete → absent (`WorkspacesCreateBrowserTest` extends #170's no-reload assertion to each verb's before/after list; on the base the boosted swap left the rail every option rendered before the mutation). §4.7: the panel head yields before the rail scrolls (#255) — `.te-panel-head` wraps and its h2 carries `min-width: 0`, so at the splitter's 220px floor the `Key/Value` / `JSON` tabs drop below the `Render Context` heading instead of holding the rail open at `scrollWidth 228 > clientWidth 220`; the walk pins `scrollWidth == clientWidth` light and dark at 1100/1440/1920 and at the floor (`TemplateEditorContextRowBrowserTest`). |
 | 2026-09-26 | v1.76 | scheduler lane 3 (#9, slice 3) — numbered after origin/main's v1.75 (242b/230 may take it; renumber at merge, keep both) | **§4.20, the form**: a `DATE` parameter's field gains the **binding source** selector — Fixed value (default) / Today / Yesterday; a preset hides the fixed-value input by class and travels in `payload.parameter_bindings`, resolved per run on the schedule's frozen reference; the selection round-trips on edit; a literal binding shows its value and keeps its envelope while untouched. **§4.20, the run dialog**: beside the frozen parameters, **resolved parameters** (`prepared.resolved_parameters`) — what the run executed with. No new route, verb or role; the browser suites gain the bindings cases (`SchedulesBindingsBrowserTest`). |
 | 2026-09-26 | v1.75 | scheduler lane 2 (#9, slice 2) — numbered after origin/main's v1.74 (243) | **§4.20 Schedules, new**: `GET /schedules` (`schedule.read`) — a shell whose every read and write is a call to REST §20 (the scheduler design revision §6: no partial route, reads included): the folder explorer (§20.1 by prefix, a level's folders derived from the names, search over every rendered column), the detail (blocked reason with Unblock beside it; overview; the next five from §20.9 with their offsets; parameters; runs with due / started / took and the execution link), a run's dialog with the MERGED Messages (the run's trail + the execution's durable events, one time order, labelled by source; an unknown run's recovery named), and the one form for create and edit (presets that write the pattern, the timezone, a live §20.3 preview, the current version's declared parameters, field-level refusals, idempotency per attempt, the stale-revision 409 in the form with a reload). §3 the rail's Operate group gains **Schedules** after Executions, for every role. §4.3e gains the page's verb rows (`canAuthor` = the five write rows) and the execution half's `canReadExecutions`. §5.1 Shape D names the page as the second client-originated toast case. |
 | 2026-09-26 | v1.74 | 243 (#243, #170, #159) three small UI defects, measured and pinned | §4.7: a Render Context row fits its rail (#243) — the rows' inputs carry `min-width: 0` and the remove control never yields width, so the row's key, value and × end inside the rail at 1100/1440/1920 and at the splitter's 220px floor, static row and Add-Row clone alike (`TemplateEditorContextRowBrowserTest` measures the edges; on the base the row was 476px in a 320px rail). §4.13: the create form navigates in FULL — `hx-boost="false"` (#170) — because a boosted swap replaces only `#app-main` and the rail's switcher (filled on every full render) kept the pre-create options until a manual reload (`WorkspacesCreateBrowserTest` asserts the row lands in BOTH the table and the switcher). §3.4/§3.6: the 768–1099px band has a search entry point (#159) — a topbar icon button lit only in that band reveals the topbar copy in place (no third copy of the control) and ⌘K drives it, where previously neither copy was displayed and the chord did nothing (`MobileShellBrowserTest`'s band arm, red on the base; plus the phone-width drawer arm the issue named, and HeaderSearchBrowserTest's desktop arm pinning the button absent at ≥1100px). |
