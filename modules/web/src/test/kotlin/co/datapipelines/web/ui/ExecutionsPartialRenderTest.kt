@@ -148,6 +148,28 @@ class ExecutionsPartialRenderTest {
         html shouldContain "selected=\"selected\""
     }
 
+    @Test
+    fun `a scheduled run renders with its origin in the via column (#250 R3)`() {
+        // The row a schedule fired shows SCHEDULE where the trigger rides — its origin at
+        // minimum. The read that puts the row ON the list is the model's findVisible switch;
+        // this pins the row's rendering once it is there.
+        val scheduled = executionRecord().copy(triggeredVia = ExecutionTrigger.SCHEDULE)
+        val html =
+            engine.process(
+                "partials/executions",
+                webContext().apply {
+                    setVariable("executions", listOf(scheduled))
+                    setVariable("pipelineNames", emptyMap<UUID, PipelineName>())
+                    setVariable("offset", 0)
+                    setVariable("pageSize", 25)
+                    setVariable("nextOffset", null)
+                    setVariable("hasMore", false)
+                },
+            )
+
+        html shouldContain ">SCHEDULE<"
+    }
+
     private fun executionRecord() =
         ExecutionRecord(
             executionId = UUID.randomUUID(),

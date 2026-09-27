@@ -454,7 +454,7 @@ Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not
 | Attribute | Value |
 |---|---|
 | URL | `GET /dashboard` |
-| Auth required | Yes (`read`); the Recent executions panel and the run figures follow `execution.read` (D11, 177) — a promoter's dashboard draws neither, and the stats tiles count runs the caller may see (own unless workspace admin). The **Pipelines** tile counts the caller's VIEW (178): for a promoter, the released-and-newer set the lens admits ([Auth §11A.1](auth.md#11a1-the-404-rule)), the same number the rail badge and the explorer show |
+| Auth required | Yes (`read`); the Recent executions panel and the run figures follow `execution.read` (D11, 177) — a promoter's dashboard draws neither, and the stats tiles count runs the caller may see (own plus the workspace's SCHEDULED runs (#250 — R3) unless workspace admin). The **Pipelines** tile counts the caller's VIEW (178): for a promoter, the released-and-newer set the lens admits ([Auth §11A.1](auth.md#11a1-the-404-rule)), the same number the rail badge and the explorer show |
 | Purpose | Landing page — overview of recent activity |
 | Design primitives | `.ds-card`, `.ds-badge`, `.ds-table` |
 | JS | None |
@@ -1041,7 +1041,7 @@ Every user-supplied string — the panes, case and invariant names and messages,
 | Attribute | Value |
 |---|---|
 | URL | `GET /executions` |
-| Auth required | Yes — `execution.read` (D11, 177): a viewer or author sees their OWN runs, a workspace admin (`execution.read_all`) every run of the workspace (endpoint-key runs included), a **promoter is refused by role** (`auth.role_required`) and the rail does not draw the Executions item for one ([§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
+| Auth required | Yes — `execution.read` (D11, 177): a viewer or author sees their OWN runs plus every SCHEDULED run of the workspace (#250 — R3, the same `findVisible` read the REST listing does), a workspace admin (`execution.read_all`) every run of the workspace (endpoint-key runs included), a **promoter is refused by role** (`auth.role_required`) and the rail does not draw the Executions item for one ([§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
 | Purpose | Browse past executions, filter by pipeline/status/date |
 | Design primitives | `.ds-table`, `.ds-badge`, `.ds-input` |
 | JS | None |

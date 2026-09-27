@@ -87,13 +87,13 @@ class ExecutionHistoryPartialControllerTest {
         authenticate()
         val twentyOne = List(21) { record() }
         every {
-            executions.findByUser(workspaceId, userId, null, null, null, null, any(), any())
+            executions.findVisible(workspaceId, userId, null, null, null, null, any(), any())
         } returns twentyOne
 
         controller.listPartial(null, null, null, null, 0, model)
 
         verify {
-            executions.findByUser(workspaceId, userId, null, null, null, null, limit = 21, offset = 0)
+            executions.findVisible(workspaceId, userId, null, null, null, null, limit = 21, offset = 0)
         }
         (model["executions"] as List<*>).size shouldBe 20
         model["hasMore"] shouldBe true
@@ -104,7 +104,7 @@ class ExecutionHistoryPartialControllerTest {
     fun `a full page exactly is the last page - nextOffset null`() {
         authenticate()
         every {
-            executions.findByUser(workspaceId, userId, null, null, null, null, any(), any())
+            executions.findVisible(workspaceId, userId, null, null, null, null, any(), any())
         } returns List(20) { record() }
 
         controller.listPartial(null, null, null, null, 40, model)
@@ -161,7 +161,7 @@ class ExecutionHistoryPartialControllerTest {
     fun `the partial view name is returned`() {
         authenticate()
         every {
-            executions.findByUser(workspaceId, userId, null, null, null, null, any(), any())
+            executions.findVisible(workspaceId, userId, null, null, null, null, any(), any())
         } returns emptyList()
 
         controller.listPartial(null, null, null, null, 0, model) shouldBe "partials/executions"

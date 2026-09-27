@@ -33,14 +33,15 @@ class DashboardPartialController(
         val totalPipelines = pipelines.count(workspaceId, lens.viewFor(principal).pipelines)
         val todayStart = LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC)
 
-        // D11 (2026-09-20): the execution figures follow the `execution.read` row — own runs
-        // unless `execution.read_all`, and NONE for a role the row refuses (the promoter), whose
-        // tiles then honestly read zero rather than counting runs it may not see.
+        // D11 (2026-09-20) + #9 R3 (#250): the execution figures follow the `execution.read`
+        // row — own runs plus the workspace's SCHEDULED runs unless `execution.read_all`, and
+        // NONE for a role the row refuses (the promoter), whose tiles then honestly read zero
+        // rather than counting runs it may not see.
         val recentBatch =
             when {
                 !principal.holds(Permission.EXECUTION_READ) -> emptyList()
                 isAdmin -> executions.findAll(workspaceId, limit = STATS_SAMPLE_SIZE, offset = 0)
-                else -> executions.findByUser(workspaceId, principal.userId, limit = STATS_SAMPLE_SIZE, offset = 0)
+                else -> executions.findVisible(workspaceId, principal.userId, limit = STATS_SAMPLE_SIZE, offset = 0)
             }
 
         val executionsToday = recentBatch.count { it.startedAt >= todayStart }
@@ -64,7 +65,9 @@ class DashboardPartialController(
             if (isAdmin) {
                 executions.findAll(workspaceId, limit = RECENT_COUNT, offset = 0)
             } else {
-                executions.findByUser(workspaceId, principal.userId, limit = RECENT_COUNT, offset = 0)
+                // #9 R3 (#250): the dashboard's recent executions follow the executions screen —
+                // own runs plus every scheduled run of the workspace, one `findVisible` read.
+                executions.findVisible(workspaceId, principal.userId, limit = RECENT_COUNT, offset = 0)
             }
 
         model.addAttribute("executions", executions)
