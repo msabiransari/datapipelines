@@ -292,8 +292,8 @@ class EndpointPublishServiceTest {
     fun `unpublishing another workspace's endpoint reports not-found rather than forbidden`() {
         // A URL is global, but managing one is not — and a refusal must not disclose that an
         // endpoint exists in a workspace the caller cannot see.
-        every { endpoints.findByPath("/theirs/v1/x") } returns
-            endpoint(workspaceId = UUID.fromString("defa0000-0000-0000-0000-0000000000ff"))
+        every { endpoints.findRowByPath("/theirs/v1/x") } returns
+            EndpointRow.Valid(endpoint(workspaceId = UUID.fromString("defa0000-0000-0000-0000-0000000000ff")))
 
         assertAll(
             { service().unpublish(principal(), "/theirs/v1/x") shouldBe false },
@@ -303,11 +303,34 @@ class EndpointPublishServiceTest {
 
     @Test
     fun `unpublishing an endpoint of the caller's workspace removes it and invalidates`() {
-        every { endpoints.findByPath("/mine/v1/x") } returns endpoint()
+        every { endpoints.findRowByPath("/mine/v1/x") } returns EndpointRow.Valid(endpoint())
         every { endpoints.deleteByPath("/mine/v1/x") } returns true
 
         assertAll(
             { service().unpublish(principal(), "/mine/v1/x") shouldBe true },
+            { verify(exactly = 1) { registry.invalidate() } },
+            { verify(exactly = 1) { audit.log("endpoint.unpublished", any(), any(), any(), any(), any()) } },
+        )
+    }
+
+    @Test
+    fun `unpublishing a LEGACY row goes through the same path - the fix #274 offers`() {
+        // The row the mapper skips everywhere else is exactly what unpublishing must reach.
+        every {
+            endpoints.findRowByPath("/nyc/revenue-by-borough")
+        } returns
+            EndpointRow.Legacy(
+                id = UUID.nameUUIDFromBytes("/nyc/revenue-by-borough".toByteArray()),
+                workspaceId = WORKSPACE,
+                pathPattern = "/nyc/revenue-by-borough",
+                pipelineId = UUID.randomUUID(),
+                reason = "Path has 2 segment(s); an endpoint is at least 3 — /<category>/<version>/<path…> (R-EP5).",
+                enabled = false,
+            )
+        every { endpoints.deleteByPath("/nyc/revenue-by-borough") } returns true
+
+        assertAll(
+            { service().unpublish(principal(), "/nyc/revenue-by-borough") shouldBe true },
             { verify(exactly = 1) { registry.invalidate() } },
             { verify(exactly = 1) { audit.log("endpoint.unpublished", any(), any(), any(), any(), any()) } },
         )

@@ -15,8 +15,10 @@ import java.util.UUID
  *
  * [parsed] is the §4.1 parse of [pathPattern], carried on the row so the matcher, the ambiguity
  * check and the tree screen share one parse. A row whose stored pattern no longer parses cannot
- * be constructed — [PublishedEndpoint.of] is the only way in, and the repository refuses to map a
- * row it cannot parse rather than serving something the grammar does not describe.
+ * be constructed — [PublishedEndpoint.of] is the only way in. Since #274 the repository never
+ * feeds it such a row: a stored row that fails today's grammar is mapped as an
+ * [EndpointRow.Legacy] value (retired, flagged with the reason, never served) instead of thrown,
+ * so one old row cannot take the registry read — or the boot — down with it.
  */
 data class PublishedEndpoint(
     val id: UUID,

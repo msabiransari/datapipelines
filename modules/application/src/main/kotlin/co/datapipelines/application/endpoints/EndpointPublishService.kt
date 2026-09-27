@@ -138,7 +138,13 @@ class EndpointPublishService(
         return endpoint
     }
 
-    /** Unpublishes by path. Returns false when nothing was published there. */
+    /**
+     * Unpublishes by path. Returns false when nothing was published there.
+     *
+     * Reads the ROW (valid or legacy), not just the endpoint: unpublishing a legacy row IS the
+     * fix for it (#274), so the write path is the one read that must see what every other read
+     * skips. The visible-or-super-admin rule and the audit are identical for both row kinds.
+     */
     fun unpublish(
         principal: AuthenticatedPrincipal,
         pathPattern: String,
@@ -147,7 +153,7 @@ class EndpointPublishService(
         // Normalised like a publish (R-EP5): the stored form never carries the `/api` prefix,
         // so an addressed `/api/trade/v1/x` names the row published as `/trade/v1/x`.
         val stored = EndpointPath.normalize(pathPattern)
-        val existing = endpoints.findByPath(stored) ?: return false
+        val existing = endpoints.findRowByPath(stored) ?: return false
         // A URL is global, but managing one is not: an endpoint belongs to the workspace that
         // published it, and another workspace's endpoint is invisible rather than forbidden —
         // the same not-found discipline every workspace-scoped read follows.
@@ -172,6 +178,19 @@ class EndpointPublishService(
         val all = endpoints.findByWorkspace(workspaceId)
         val visiblePipelines = visiblePipelineIds(principal, workspaceId) ?: return all
         return all.filter { it.pipelineId in visiblePipelines }
+    }
+
+    /**
+     * The legacy rows of the caller's workspace, flagged (#274) — the listing half of
+     * [list], which returns valid endpoints only. The same promoter lens applies: a hidden
+     * pipeline never leaks through the row that publishes it, so a legacy row whose pipeline
+     * the lens hides is absent here exactly as a valid one would be from [list].
+     */
+    fun listLegacy(principal: AuthenticatedPrincipal): List<EndpointRow.Legacy> {
+        val workspaceId = principal.requireWorkspace().id
+        val legacy = endpoints.findLegacy(workspaceId)
+        val visiblePipelines = visiblePipelineIds(principal, workspaceId) ?: return legacy
+        return legacy.filter { it.pipelineId in visiblePipelines }
     }
 
     /** One endpoint by path, or null when it does not exist, belongs to another workspace, or serves a pipeline the lens hides. */

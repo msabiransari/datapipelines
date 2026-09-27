@@ -2,12 +2,14 @@ package co.datapipelines.application.endpoints
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
+import org.slf4j.LoggerFactory
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.RowCallbackHandler
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.ResultSet
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Persistence for `published_endpoints` (metadata-db §4.13, published-endpoints design §4).
@@ -31,29 +33,70 @@ import java.util.UUID
  * a future caller forgets the lock, and its violation is translated to the same
  * `endpoint.path_conflict` a lock-holding caller would have raised, so the two paths are
  * indistinguishable to a client.
+ *
+ * ## Why every read goes through [EndpointRow] (#274)
+ *
+ * The table holds rows a LATER grammar may refuse: an endpoint published before R-EP5 has a
+ * two-segment path that [EndpointPath.parse] throws on. Every read used to map through
+ * [PublishedEndpoint.of] directly, so ONE such row made [findAll] throw — and the demo seeder's
+ * conflict check ran that at boot, refusing the whole application start. The mapper now parses
+ * defensively: a row today's grammar refuses is an [EndpointRow.Legacy] value carrying the
+ * refusal's reason, skipped by every valid-endpoint read and exposed only through [findLegacy].
+ * Fail closed, never fatal — the same rule the reserved-category check already follows
+ * ([EndpointPath.reservedCategory]'s KDoc).
  */
 class PublishedEndpointRepository(
     private val jdbc: NamedParameterJdbcTemplate,
 ) {
-    /** Every enabled endpoint on the deployment — what the per-instance registry cache holds. */
-    fun findAllEnabled(): List<PublishedEndpoint> = jdbc.query("$SELECT_COLUMNS WHERE is_enabled = TRUE", MAPPER)
+    private val log = LoggerFactory.getLogger(PublishedEndpointRepository::class.java)
 
-    /** Every endpoint, disabled included — the tree screen shows both, flagged. */
-    fun findAll(): List<PublishedEndpoint> = jdbc.query(SELECT_COLUMNS, MAPPER)
+    /**
+     * The once-per-boot guard behind [queryRows]' WARN. A repository is a singleton bean, but its
+     * reads are per request — a counter per ROW or per READ would nag the serve path; ONE line
+     * naming the legacy count is the fact an operator needs (#274).
+     */
+    private val legacyWarned = AtomicBoolean(false)
 
-    /** The endpoints of one workspace — the management listing (§6). */
+    /** Every valid endpoint on the deployment, disabled included. */
+    fun findAll(): List<PublishedEndpoint> = queryRows(SELECT_COLUMNS, emptyMap()).validEndpoints()
+
+    /** Every valid ENABLED endpoint — what the per-instance registry cache holds. */
+    fun findAllEnabled(): List<PublishedEndpoint> =
+        queryRows("$SELECT_COLUMNS WHERE is_enabled = TRUE", emptyMap()).validEndpoints()
+
+    /** The valid endpoints of one workspace — the management listing (§6). */
     fun findByWorkspace(workspaceId: UUID): List<PublishedEndpoint> =
-        jdbc.query("$SELECT_COLUMNS WHERE workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId), MAPPER)
+        queryRows("$SELECT_COLUMNS WHERE workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId)).validEndpoints()
 
-    /** One endpoint by its path — the single-form addressing `?path=` the REST surface uses (§6). */
+    /** One valid endpoint by its path — the single-form addressing `?path=` the REST surface uses (§6). */
     fun findByPath(pathPattern: String): PublishedEndpoint? =
-        jdbc
-            .query("$SELECT_COLUMNS WHERE path_pattern = :path", mapOf("path" to pathPattern), MAPPER)
-            .singleOrNull()
+        queryRows("$SELECT_COLUMNS WHERE path_pattern = :path", mapOf("path" to pathPattern)).validEndpoints().singleOrNull()
+
+    /**
+     * The row at [pathPattern], valid or legacy — what unpublishing needs: the fix for a legacy
+     * row IS an unpublish, so the write path must see the row every other read skips.
+     */
+    fun findRowByPath(pathPattern: String): EndpointRow? =
+        queryRows("$SELECT_COLUMNS WHERE path_pattern = :path", mapOf("path" to pathPattern)).singleOrNull()
+
+    /**
+     * The legacy rows of one workspace, or every legacy row on the deployment when [workspaceId]
+     * is null. A legacy row is listed, flagged with its reason, and unpublishable — never
+     * served, never a conflict partner.
+     */
+    fun findLegacy(workspaceId: UUID?): List<EndpointRow.Legacy> {
+        val rows =
+            if (workspaceId == null) {
+                queryRows(SELECT_COLUMNS, emptyMap())
+            } else {
+                queryRows("$SELECT_COLUMNS WHERE workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId))
+            }
+        return rows.filterIsInstance<EndpointRow.Legacy>()
+    }
 
     /** Whether any endpoint publishes [pipelineId] — what a pipeline delete has to know. */
     fun findByPipeline(pipelineId: UUID): List<PublishedEndpoint> =
-        jdbc.query("$SELECT_COLUMNS WHERE pipeline_id = :pipelineId", mapOf("pipelineId" to pipelineId), MAPPER)
+        queryRows("$SELECT_COLUMNS WHERE pipeline_id = :pipelineId", mapOf("pipelineId" to pipelineId)).validEndpoints()
 
     /**
      * Publishes [endpoint], refusing a pattern that could match the same URL as an existing one.
@@ -153,20 +196,106 @@ class PublishedEndpointRepository(
             VALUES (:id, :workspaceId, :path, :pipelineId, :timeoutSeconds, :description, :isEnabled, :createdBy)
             """.trimIndent()
 
+        /**
+         * Maps one stored row to [EndpointRow]: a parseable path is a [EndpointRow.Valid]
+         * endpoint, anything else is [EndpointRow.Legacy] with the grammar's own refusal as its
+         * reason (bounded — the message is stored data's voice, never a stack trace).
+         */
         val MAPPER =
-            RowMapper { rs: ResultSet, _: Int ->
-                PublishedEndpoint.of(
-                    id = rs.getObject("id", UUID::class.java),
-                    workspaceId = rs.getObject("workspace_id", UUID::class.java),
-                    pathPattern = rs.getString("path_pattern"),
-                    pipelineId = rs.getObject("pipeline_id", UUID::class.java),
-                    timeoutSeconds = rs.getInt("timeout_seconds"),
-                    description = rs.getString("description"),
-                    isEnabled = rs.getBoolean("is_enabled"),
-                    createdBy = rs.getObject("created_by", UUID::class.java),
-                    createdAt = rs.getTimestamp("created_at").toInstant(),
-                    updatedAt = rs.getTimestamp("updated_at").toInstant(),
+            RowMapper<EndpointRow> { rs: ResultSet, _: Int ->
+                val pathPattern = rs.getString("path_pattern")
+                val parsed =
+                    EndpointPath
+                        .parse(pathPattern)
+                        .getOrElse { failure ->
+                            return@RowMapper EndpointRow.Legacy(
+                                id = rs.getObject("id", UUID::class.java),
+                                workspaceId = rs.getObject("workspace_id", UUID::class.java),
+                                pathPattern = pathPattern,
+                                pipelineId = rs.getObject("pipeline_id", UUID::class.java),
+                                reason = boundedReason(failure.message ?: "path is not a legal path (§4.1)"),
+                                enabled = rs.getBoolean("is_enabled"),
+                            )
+                        }
+                EndpointRow.Valid(
+                    PublishedEndpoint(
+                        id = rs.getObject("id", UUID::class.java),
+                        workspaceId = rs.getObject("workspace_id", UUID::class.java),
+                        pathPattern = pathPattern,
+                        pipelineId = rs.getObject("pipeline_id", UUID::class.java),
+                        timeoutSeconds = rs.getInt("timeout_seconds"),
+                        description = rs.getString("description"),
+                        isEnabled = rs.getBoolean("is_enabled"),
+                        createdBy = rs.getObject("created_by", UUID::class.java),
+                        createdAt = rs.getTimestamp("created_at").toInstant(),
+                        updatedAt = rs.getTimestamp("updated_at").toInstant(),
+                        parsed = parsed,
+                    ),
                 )
             }
+
+        /** The reason a legacy row carries: the grammar's own sentence, bounded to a label. */
+        fun boundedReason(message: String): String = message.take(REASON_MAX_LENGTH)
+
+        const val REASON_MAX_LENGTH = 300
     }
+
+    /** Every row of one query, mapped defensively (#274). */
+    private fun queryRows(
+        sql: String,
+        params: Map<String, Any?>,
+    ): List<EndpointRow> {
+        val rows = jdbc.query(sql, params, MAPPER)
+        val legacy = rows.count { it is EndpointRow.Legacy }
+        if (legacy > 0 && legacyWarned.compareAndSet(false, true)) {
+            log.warn(
+                "event=endpoint.legacy_rows count={} message=\"rows whose stored path no longer meets today's " +
+                    "grammar (R-EP5) are retired: never served, never a conflict partner, listed flagged; " +
+                    "unpublishing one is the fix (issue #274)\"",
+                legacy,
+            )
+        }
+        return rows
+    }
+
+    private fun List<EndpointRow>.validEndpoints(): List<PublishedEndpoint> = filterIsInstance<EndpointRow.Valid>().map { it.endpoint }
+}
+
+/**
+ * One row of `published_endpoints` as STORED — the parse verdict, not the parse itself (#274).
+ *
+ * [Valid] carries the endpoint every consumer wants. [Legacy] carries the least a listing needs
+ * to surface a row today's grammar refuses: who owns it, what it claims to serve, whether it is
+ * enabled, and WHY it is refused — the grammar's own message, so the operator reads the rule the
+ * row predates, not an exception. A legacy row is never served (the registry never sees it),
+ * never a conflict partner ([conflictWith] sees valid rows only), and never repaired in place —
+ * unpublishing it and republishing at a legal path is the fix.
+ */
+sealed interface EndpointRow {
+    val id: UUID
+    val workspaceId: UUID
+    val pathPattern: String
+    val enabled: Boolean
+
+    /** A row whose path parses — the ordinary case. */
+    data class Valid(
+        val endpoint: PublishedEndpoint,
+    ) : EndpointRow {
+        override val id: UUID get() = endpoint.id
+        override val workspaceId: UUID get() = endpoint.workspaceId
+        override val pathPattern: String get() = endpoint.pathPattern
+        override val enabled: Boolean get() = endpoint.isEnabled
+    }
+
+    /** A row saved before a later grammar; retired, never fatal (#274). [pipelineId] is the
+     * row's own column, carried so the promoter lens can hide the row the same way it hides a
+     * valid endpoint whose pipeline is out of view. */
+    data class Legacy(
+        override val id: UUID,
+        override val workspaceId: UUID,
+        override val pathPattern: String,
+        val pipelineId: UUID,
+        val reason: String,
+        override val enabled: Boolean,
+    ) : EndpointRow
 }

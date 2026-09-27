@@ -185,6 +185,62 @@ class EndpointPersistenceIntegrationTest {
         refused.code shouldBe PipelineErrorCodes.Endpoint.PATH_CONFLICT
     }
 
+    // ---------------------------------------------------------------- legacy rows (#274)
+
+    @Test
+    fun `a stored row whose path predates R-EP5 is mapped legacy, never thrown away with the boot`() {
+        // The owner's row, verbatim: two segments, enabled, written 2026-09-18 by the
+        // then-legal grammar. Every read used to map through PublishedEndpoint.of and THROW on
+        // this row inside the demo seeder's conflict check — the application refused to boot.
+        insertRaw("/nyc/revenue-by-borough", enabled = true)
+
+        // The valid-read family skips it silently: the registry cache, the listings, the
+        // single-form read all answer as if the row did not exist.
+        endpoints.findAll().map { it.pathPattern } shouldBe emptyList()
+        endpoints.findAllEnabled().shouldBeEmpty()
+        endpoints.findByWorkspace(workspaceId).shouldBeEmpty()
+        endpoints.findByPath("/nyc/revenue-by-borough").shouldBeNull()
+
+        // ...and the legacy read answers it WITH the grammar's own refusal as the reason.
+        val legacy = endpoints.findLegacy(workspaceId).single()
+        legacy.pathPattern shouldBe "/nyc/revenue-by-borough"
+        legacy.enabled shouldBe true
+        legacy.reason shouldContain "at least 3"
+        legacy.workspaceId shouldBe workspaceId
+    }
+
+    @Test
+    fun `a legacy row is never a conflict partner and unpublishing removes it`() {
+        insertRaw("/nyc/revenue-by-borough", enabled = false)
+        transactions.execute {
+            // The seeder's publish path: the conflict check reads the registry, in which the
+            // legacy row no longer appears — publishing under it must succeed, not refuse.
+            endpoints.insert(
+                PublishedEndpoint.of(
+                    id = UUID.randomUUID(),
+                    workspaceId = workspaceId,
+                    pathPattern = "/nyc/v1/{borough}/revenue",
+                    pipelineId = pipelineId,
+                    timeoutSeconds = 60,
+                    description = "",
+                    isEnabled = true,
+                    createdBy = userId,
+                    createdAt = Instant.EPOCH,
+                    updatedAt = Instant.EPOCH,
+                ),
+            )
+        }!!
+
+        // The whole registry read still answers the valid row.
+        endpoints.findAll().map { it.pathPattern } shouldBe listOf("/nyc/v1/{borough}/revenue")
+
+        // And the fix for a legacy row is an unpublish: the row-level read sees it, the delete removes it.
+        endpoints.findRowByPath("/nyc/revenue-by-borough").shouldNotBeNull()
+        endpoints.deleteByPath("/nyc/revenue-by-borough") shouldBe true
+        endpoints.findRowByPath("/nyc/revenue-by-borough").shouldBeNull()
+        endpoints.findLegacy(workspaceId).shouldBeEmpty()
+    }
+
     // ------------------------------------------------------------- endpoint_key_bindings
 
     @Test
@@ -327,6 +383,29 @@ class EndpointPersistenceIntegrationTest {
                 ),
             )
         }!!
+
+    /**
+     * A row exactly as a pre-R-EP5 boot left it — raw SQL, bypassing [PublishedEndpoint.of],
+     * because that is how the row got into the owner's database: written by an OLDER grammar.
+     */
+    private fun insertRaw(
+        path: String,
+        enabled: Boolean,
+    ) = jdbc.update(
+        """
+        INSERT INTO published_endpoints
+            (id, workspace_id, path_pattern, pipeline_id, timeout_seconds, description, is_enabled, created_by, created_at, updated_at)
+        VALUES (:id, :workspaceId, :path, :pipelineId, 30, '', :enabled, :createdBy, NOW(), NOW())
+        """.trimIndent(),
+        mapOf(
+            "id" to UUID.nameUUIDFromBytes(path.toByteArray()),
+            "workspaceId" to workspaceId,
+            "path" to path,
+            "pipelineId" to pipelineId,
+            "enabled" to enabled,
+            "createdBy" to userId,
+        ),
+    )
 
     private fun binding(prefix: String) =
         EndpointKeyBinding(
