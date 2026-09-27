@@ -4,7 +4,26 @@ import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.typesystem.TypeMappingWarning
 import com.fasterxml.jackson.databind.JsonNode
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
+
+/**
+ * The frozen reference time a run executes against (#9 slice 3, A13) — the schedule's logical
+ * occurrence time and its captured IANA timezone, minted by the scheduler at admission and
+ * FROZEN on the run row (design revision §5.1). It is the clock keyword bindings (TODAY,
+ * YESTERDAY) are resolved against, and nothing else: `$current_date` stays the org-zone date at
+ * the ACTUAL start (§7.2 — this carrier does not change the Context), and authoritative
+ * occurrence metadata never enters overridable SQL Context, so this travels on the request, not
+ * in [RunContext]. A PIPELINE node's child request inherits it verbatim, so a whole composition
+ * family resolves its bindings against one logical time.
+ *
+ * Null everywhere except a scheduled/catch-up/Run-now launch: a direct execution has no logical
+ * occurrence time, and every interactive surface leaves it that way.
+ */
+data class ExecutionReference(
+    val at: Instant,
+    val timezone: ZoneId,
+)
 
 /** The whole-pipeline outcome (enums.md §10, authored by rest-api; see [SseEventType] for the layering note). */
 @Suppress("KDocUnresolvedReference")
@@ -98,6 +117,13 @@ data class ExecuteRequest(
      * Released when the execution ends, however it ends.
      */
     val slotLease: SlotLease? = null,
+    /**
+     * The run's frozen logical time ([ExecutionReference], #9 slice 3 / A13) — set only by the
+     * scheduler's launch path; null (every interactive surface, every direct call) means the
+     * execution has no reference time and keyword bindings are unavailable to it. A PIPELINE
+     * node's child request inherits it, so the family resolves bindings on one clock.
+     */
+    val reference: ExecutionReference? = null,
 )
 
 /**

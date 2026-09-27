@@ -516,6 +516,51 @@
       .map(function (k) { return { name: k, spec: parameters[k] || {} }; });
   }
 
+  // ------------------------------------------------------------------ bindings (slice 3)
+
+  /** The keyword presets a DATE parameter's field offers, in form order ("" = fixed value). */
+  var KEYWORD_PRESETS = [
+    { value: "", label: "Fixed value" },
+    { value: "TODAY", label: "Today" },
+    { value: "YESTERDAY", label: "Yesterday" },
+  ];
+
+  function keywordPresets() {
+    return KEYWORD_PRESETS.slice();
+  }
+
+  /**
+   * What a saved schedule's `payload.parameter_bindings` says about [name]: "TODAY",
+   * "YESTERDAY", or "" (no keyword binding — a fixed value, or a literal binding, which is
+   * shown as the value it carries). A keyword binding is exactly `{"source":"keyword","name":…}`.
+   */
+  function keywordOfBinding(bindings, name) {
+    var b = bindings && bindings[name];
+    return b && b.source === "keyword" && (b.name === "TODAY" || b.name === "YESTERDAY") ? b.name : "";
+  }
+
+  /**
+   * The `parameter_bindings` object to send: a keyword entry per presetted name, plus every
+   * literal binding passed through. `sources` maps parameter name → "" | TODAY | YESTERDAY;
+   * `literalBindings` are the saved literal bindings, whose fields stay bound (a presetted
+   * literal's name is the author's choice to keep sending). Only literal bindings whose
+   * `source` is "literal" and that carry a `value` survive — anything else is the server's
+   * refusal, not silently dropped.
+   */
+  function collectBindings(sources, literalBindings) {
+    var out = {};
+    Object.keys(sources || {}).forEach(function (name) {
+      if (sources[name] === "TODAY" || sources[name] === "YESTERDAY") {
+        out[name] = { source: "keyword", name: sources[name] };
+      }
+    });
+    Object.keys(literalBindings || {}).forEach(function (name) {
+      var b = literalBindings[name];
+      if (b && b.source === "literal" && "value" in b && !(name in out)) out[name] = { source: "literal", value: b.value };
+    });
+    return out;
+  }
+
   // ------------------------------------------------------------------ idempotency (L1)
 
   /**
@@ -570,6 +615,9 @@
     collectParameters: collectParameters,
     parameterText: parameterText,
     declaredParameters: declaredParameters,
+    keywordPresets: keywordPresets,
+    keywordOfBinding: keywordOfBinding,
+    collectBindings: collectBindings,
     nextAttempt: nextAttempt,
     uuidFrom: uuidFrom,
   };

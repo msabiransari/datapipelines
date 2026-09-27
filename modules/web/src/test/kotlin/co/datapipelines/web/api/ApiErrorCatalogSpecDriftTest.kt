@@ -257,9 +257,14 @@ class ApiErrorCatalogSpecDriftTest {
          *
          * 221 → 222 with #194 lane A: §13.3's `pipeline.execution.parameter_constraint_violation`
          * (400, an explicit catalog row — the `pipeline.execution.` family default is 500), landed
-         * in the SAME commit as its constant. Re-derived from the document's own parse.
+         * in the SAME commit as its constant; 222 → 224 with #9 slice 3 (the bindings): §13.19 gains
+         * `schedule.validation.binding_invalid` and `schedule.validation.binding_conflict`
+         * (400 — the `schedule.validation.` family default, so no explicit catalog row), landed
+         * in the SAME commit as their `ScheduleErrorCodes` constants, the catalog's mirror in
+         * `PipelineErrorCodes.Schedule` and the adapter that raises them. Both lanes bumped from 221;
+         * re-derived from the MERGED document's own parse at the scheduler-3 merge.
          */
-        const val SECTION_13_ROW_COUNT = 222
+        const val SECTION_13_ROW_COUNT = 224
 
         /**
          * §12's distinct validation codes.

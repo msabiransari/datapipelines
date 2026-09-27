@@ -139,7 +139,12 @@
 
   <!-- One declared parameter of the chosen pipeline's current version (pipeline-contract §6).
        Blank means "not given": the declared default applies, and a required one is refused by
-       the binder beside this field. -->
+       the binder beside this field.
+
+       A DATE parameter's field gains the binding source selector (slice 3, §20.2): the value
+       each run resolves from the schedule's frozen reference — Today (the logical occurrence
+       day) or Yesterday — instead of one fixed literal. The select is populated and shown by
+       form.js for DATE fields only; a preset hides the fixed-value input by class. -->
   <template id="sch-tpl-param">
     <div class="ds-field sch-param">
       <label class="ds-field-label">
@@ -147,7 +152,10 @@
         <span class="ds-badge ds-badge-default u-mono" data-slot="type"></span>
         <span class="ds-badge ds-badge-warning" data-slot="required" hidden>required</span>
       </label>
-      <input type="text" class="ds-input u-full" data-param-input autocomplete="off" spellcheck="false">
+      <div class="sch-param-value">
+        <select class="ds-input" data-param-source hidden aria-label="Value source"></select>
+        <input type="text" class="ds-input u-full" data-param-input autocomplete="off" spellcheck="false">
+      </div>
       <select class="ds-input" data-param-select hidden>
         <option value="">— not given —</option>
         <option value="true">true</option>

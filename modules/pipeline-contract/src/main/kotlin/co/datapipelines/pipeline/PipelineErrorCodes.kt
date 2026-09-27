@@ -1480,5 +1480,11 @@ object PipelineErrorCodes {
 
         /** 400 — the payload names a target the workspace does not hold. */
         const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
+
+        /** 400 — a `parameter_bindings` entry cannot be resolved (#9 slice 3); `details` names why. */
+        const val BINDING_INVALID = "schedule.validation.binding_invalid"
+
+        /** 400 — the same parameter supplied in `parameters` and `parameter_bindings` (#9 slice 3). */
+        const val BINDING_CONFLICT = "schedule.validation.binding_conflict"
     }
 }

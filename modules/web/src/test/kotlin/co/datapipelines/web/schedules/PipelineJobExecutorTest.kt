@@ -8,26 +8,43 @@ import co.datapipelines.auth.UserKind
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.Workspace
 import co.datapipelines.auth.WorkspaceRepository
+import co.datapipelines.executor.ExecuteRequest
 import co.datapipelines.executor.ExecutionEventRecord
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRecord
+import co.datapipelines.executor.ExecutionReference
 import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.executor.ExecutionResult
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.pipeline.Parameter
+import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineRepository
+import co.datapipelines.pipeline.PipelineService
+import co.datapipelines.pipeline.PipelineSettings
+import co.datapipelines.pipeline.PipelineVersionDetail
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.scheduler.Admission
 import co.datapipelines.scheduler.ExecutionOutcome
+import co.datapipelines.scheduler.Launch
 import co.datapipelines.scheduler.Preparation
 import co.datapipelines.scheduler.RunOrigin
 import co.datapipelines.scheduler.RunState
 import co.datapipelines.scheduler.ScheduleErrorCodes
 import co.datapipelines.scheduler.ScheduleException
+import co.datapipelines.scheduler.StartOutcome
 import co.datapipelines.scheduler.TargetViewer
+import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.TextNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -35,6 +52,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.jupiter.api.Test
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 /**
@@ -61,23 +79,27 @@ class PipelineJobExecutorTest {
     private val users = mockk<UserService>()
     private val executions = mockk<ExecutionRepository>()
     private val events = mockk<ExecutionEventRepository>()
+    private val pipelineService = mockk<PipelineService>()
+    private val runner = mockk<RecordingExecutionRunner>()
+    private val executorConfig = mockk<ExecutorConfig>()
     private val adapter =
         PipelineJobExecutor(
             pipelines = pipelines,
-            pipelineService = mockk(),
+            pipelineService = pipelineService,
             workspaces = workspaces,
             users = users,
-            runner = mockk(),
+            runner = runner,
             executions = executions,
             events = events,
             lens = mockk(),
-            executorConfig = mockk(),
+            executorConfig = executorConfig,
             scope = CoroutineScope(Dispatchers.Unconfined),
             mapper = mapper,
         )
 
     private val workspace = Workspace(UUID.randomUUID(), "acme", "Acme", false, null, false, Instant.EPOCH)
     private val executionId = UUID.randomUUID()
+    private val recordId = UUID.randomUUID()
 
     init {
         every { users.systemActor() } returns systemRow()
@@ -196,6 +218,152 @@ class PipelineJobExecutorTest {
             setOf("pipeline:a/p", "pipeline:b/q")
     }
 
+    // ------------------------------------------------------------------------------ bindings (slice 3)
+
+    @Test
+    fun `save - a keyword binding on a required DATE parameter passes the binder, on a STRING it is type_mismatch`() {
+        val datePipeline = executable("as_of_date" to LogicalType.DATE)
+        val stringPipeline = executable("as_of_date" to LogicalType.STRING)
+        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns datePipeline.record
+        every { pipelines.findVersionDetail(workspace.id, datePipeline.record.id, 1) } returns detail()
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, datePipeline.record, 1) } returns datePipeline
+
+        adapter.validate(
+            workspace.id,
+            payloadJson(todayBindingJson),
+            mapper.createObjectNode(),
+        ) shouldBe "pipeline:a/p"
+
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, datePipeline.record, 1) } returns stringPipeline
+        val refused =
+            shouldThrow<ScheduleException> {
+                adapter.validate(
+                    workspace.id,
+                    payloadJson(todayBindingJson),
+                    mapper.createObjectNode(),
+                )
+            }
+        refused.code shouldBe ScheduleErrorCodes.BINDING_INVALID
+        refused.details["reason"] shouldBe "type_mismatch"
+        refused.details["parameter"] shouldBe "as_of_date"
+    }
+
+    @Test
+    fun `save - the same name in parameters and parameter_bindings is the conflict, and a reference key is payload_invalid`() {
+        val bound = executable("as_of_date" to LogicalType.DATE)
+        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns bound.record
+        every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail()
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, bound.record, 1) } returns bound
+
+        val conflict =
+            shouldThrow<ScheduleException> {
+                adapter.validate(
+                    workspace.id,
+                    payloadJson(literalBindingJson),
+                    mapper.readTree("""{"as_of_date":"2026-02-02"}"""),
+                )
+            }
+        conflict.code shouldBe ScheduleErrorCodes.BINDING_CONFLICT
+        conflict.details["parameter"] shouldBe "as_of_date"
+
+        reasonOf("""{"pipeline":"a/p","version":"current","reference_at":"2026-01-01T00:00:00Z"}""") shouldBe "unknown_field"
+        reasonOf(referenceSpoofJson) shouldBe "unknown_field"
+    }
+
+    @Test
+    fun `prepare - bindings resolve on the frozen reference and the snapshot carries resolved_parameters`() {
+        val bound = executable("as_of_date" to LogicalType.DATE, "previous_date" to LogicalType.DATE)
+        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns bound.record
+        every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail()
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, bound.record, 1) } returns bound
+
+        // The record's New York example: the occurrence 2026-09-22 23:55 NY, the actual start the next day.
+        val prepared =
+            adapter.prepare(
+                admission(
+                    payload =
+                        payloadJson(
+                            """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+                                """{"as_of_date":{"source":"keyword","name":"TODAY"},""" +
+                                """"previous_date":{"source":"keyword","name":"YESTERDAY"}}}""",
+                        ),
+                    referenceAt = Instant.parse("2026-09-23T03:55:00Z"),
+                    referenceTimezone = "America/New_York",
+                ),
+            )
+
+        val snapshot = (prepared as Preparation.Prepared).snapshot
+        snapshot["resolved_parameters"]["as_of_date"].asText() shouldBe "2026-09-22"
+        snapshot["resolved_parameters"]["previous_date"].asText() shouldBe "2026-09-21"
+    }
+
+    @Test
+    fun `prepare - a binding the current version no longer declares is parameters_invalid, naming the binding`() {
+        val noLonger = executable("other_date" to LogicalType.DATE)
+        every { pipelines.findByNameAnyStatus(workspace.id, "a/p") } returns noLonger.record
+        every { pipelines.findVersionDetail(workspace.id, noLonger.record.id, 1) } returns detail()
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, noLonger.record, 1) } returns noLonger
+
+        val refused =
+            adapter.prepare(
+                admission(
+                    payload = payloadJson(todayBindingJson),
+                    referenceTimezone = "UTC",
+                ),
+            )
+
+        (refused as Preparation.Refused).let {
+            it.reason shouldBe PipelineJobExecutor.PARAMETERS_INVALID
+            it.block shouldBe true
+            it.message.contains("as_of_date") shouldBe true
+        }
+    }
+
+    @Test
+    fun `start - the request carries the resolved parameters and the frozen reference`() {
+        val bound = executable("as_of_date" to LogicalType.DATE)
+        every { pipelines.findById(workspace.id, bound.record.id) } returns bound.record
+        every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail()
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, bound.record, 1) } returns bound
+        every { executorConfig.result } returns mockk { every { ttlMaxSeconds } returns 3600 }
+        var captured: ExecuteRequest? = null
+        coEvery { runner.run(any(), any(), any(), any(), any()) } coAnswers {
+            captured = firstArg()
+            arg<(UUID) -> Unit>(4).invoke(requireNotNull(captured!!.executionId))
+            ExecutionResult(
+                executionId = captured!!.executionId!!,
+                status = ExecutionStatus.RUNNING,
+                nodeStats = emptyList(),
+                resultRef = null,
+                startedAt = Instant.now(),
+                completedAt = Instant.now(),
+                durationMs = 1,
+            )
+        }
+
+        val outcome =
+            adapter.start(
+                Launch(
+                    admission(
+                        payload = payload("a/p"),
+                        referenceAt = Instant.parse("2026-09-23T03:55:00Z"),
+                        referenceTimezone = "America/New_York",
+                    ),
+                    executionId = executionId,
+                    snapshot =
+                        mapper.readTree(
+                            """{"pipeline_id":"${bound.record.id}","version":1,"body_sha256":"h",""" +
+                                """"resolved_parameters":{"as_of_date":"2026-09-22"}}""",
+                        ),
+                    capacity = mockk(),
+                ),
+            )
+
+        outcome.shouldBeInstanceOf<StartOutcome.Started>()
+        captured!!.reference shouldBe ExecutionReference(Instant.parse("2026-09-23T03:55:00Z"), ZoneId.of("America/New_York"))
+        captured!!.parameters["as_of_date"] shouldBe TextNode("2026-09-22")
+    }
+
     // ------------------------------------------------------------------------------ fixtures
 
     private fun outcomeFor(record: ExecutionRecord?): ExecutionOutcome {
@@ -212,18 +380,71 @@ class PipelineJobExecutorTest {
 
     private fun payload(name: String) = mapper.readTree("""{"pipeline":"$name","version":"current"}""")
 
-    private fun admission() =
-        Admission(
-            UUID.randomUUID(),
-            workspace.id,
-            UUID.randomUUID(),
-            RunOrigin.MANUAL,
-            null,
-            Instant.EPOCH,
-            "UTC",
-            payload("a/p"),
-            mapper.createObjectNode(),
-        )
+    /** A payload spelled out in full — bindings included. */
+    private fun payloadJson(json: String) = mapper.readTree(json)
+
+    private val todayBindingJson =
+        """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+            """{"as_of_date":{"source":"keyword","name":"TODAY"}}}"""
+
+    private val literalBindingJson =
+        """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+            """{"as_of_date":{"source":"literal","value":"2026-01-01"}}}"""
+
+    private val referenceSpoofJson =
+        """{"pipeline":"a/p","version":"current","parameter_bindings":""" +
+            """{"as_of_date":{"source":"keyword","name":"TODAY","reference_at":"2026-01-01T00:00:00Z"}}}"""
+
+    private fun admission(
+        payload: com.fasterxml.jackson.databind.JsonNode = payload("a/p"),
+        parameters: com.fasterxml.jackson.databind.JsonNode = mapper.createObjectNode(),
+        referenceAt: Instant = Instant.EPOCH,
+        referenceTimezone: String = "UTC",
+    ) = Admission(
+        UUID.randomUUID(),
+        workspace.id,
+        UUID.randomUUID(),
+        RunOrigin.MANUAL,
+        null,
+        referenceAt,
+        referenceTimezone,
+        payload,
+        parameters,
+    )
+
+    /** A record + parsed body declaring [params], the shape `findExecutable` returns. */
+    private fun executable(vararg params: Pair<String, LogicalType>): PipelineService.ExecutablePipeline {
+        // A REAL record, not a mock: `start` reads the id back out of the frozen snapshot, and a
+        // mock's unstubbed getter answer would not survive the string interpolation.
+        val record =
+            PipelineRecord(
+                id = recordId,
+                name = "a/p",
+                displayName = "A P",
+                description = "",
+                ownerId = SYSTEM_ID,
+                currentVersion = 1,
+                createdAt = Instant.EPOCH,
+                updatedAt = Instant.EPOCH,
+            )
+        val body =
+            Pipeline(
+                schemaVersion = 1,
+                name = "a/p",
+                displayName = "A P",
+                description = "",
+                settings = PipelineSettings(),
+                parameters = params.toMap().mapValues { Parameter(type = it.value) },
+                nodes = emptyList(),
+            )
+        return PipelineService.ExecutablePipeline(record, 1, "{}", body)
+    }
+
+    private fun detail() =
+        mockk<PipelineVersionDetail> {
+            every { status } returns PipelineVersionStatus.RELEASED
+            every { bodyHash } returns "h"
+        }
 
     private fun pipeline(currentVersion: Int?): PipelineRecord =
         mockk {

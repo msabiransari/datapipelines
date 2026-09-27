@@ -57,6 +57,13 @@
           <summary>What this run was given — the frozen job and parameters</summary>
           <pre class="app-code sch-json" data-slot="payload"></pre>
           <pre class="app-code sch-json" data-slot="parameters"></pre>
+          <!-- Slice 3 (§20.11): what the bindings RESOLVED to on this run's frozen reference —
+               the literal map the execution was launched with. Present when the run was
+               prepared; the frozen parameters above stay exactly what the schedule holds. -->
+          <p class="u-text-sm u-muted sch-resolved-note" data-slot="resolved-note" hidden>
+            Resolved parameters — what this run executed with (its bindings, on its reference time):
+          </p>
+          <pre class="app-code sch-json" data-slot="resolved" hidden></pre>
         </details>
 
         <h3 class="sch-messages-h">Messages</h3>

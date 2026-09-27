@@ -58,6 +58,12 @@ object ScheduleErrorCodes {
     /** 400 — the payload names a target the workspace does not hold. */
     const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
 
+    /** 400 — a `parameter_bindings` entry cannot be resolved; `details.reason` and `details.parameter` name why. */
+    const val BINDING_INVALID = "schedule.validation.binding_invalid"
+
+    /** 400 — the same parameter is supplied in `parameters` and `parameter_bindings`; give it one source. */
+    const val BINDING_CONFLICT = "schedule.validation.binding_conflict"
+
     /**
      * The EXISTING catalog row (pipeline-contract §13.11, 409) a replayed `Idempotency-Key` with a
      * different request answers — the same code an execute replay gets. Spelled here rather than
@@ -85,6 +91,8 @@ object ScheduleErrorCodes {
             EXECUTOR_UNKNOWN,
             PAYLOAD_INVALID,
             TARGET_NOT_FOUND,
+            BINDING_INVALID,
+            BINDING_CONFLICT,
         )
 }
 
