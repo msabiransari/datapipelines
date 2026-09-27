@@ -11,6 +11,10 @@ staging or shipping its rows, until a terminal state — `SUCCESS`, `FAILED` or 
 final result carries `node_stats` (per-node status, durations, row counts, errors) — the
 authoritative per-node record.
 
+History (`executions_list`) lists the runs you fired, and every run a schedule fired — a
+scheduled run is nobody's own, so every role that reads executions sees it; the workspace's
+other interactive runs are visible only through a workspace-admin-role key.
+
 ## Running
 
 `pipelines_execute` is a **single blocking call** — it returns only when the execution reaches

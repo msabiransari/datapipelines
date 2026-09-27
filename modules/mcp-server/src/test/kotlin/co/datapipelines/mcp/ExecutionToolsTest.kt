@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
+import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
@@ -19,7 +20,7 @@ class ExecutionToolsTest {
 
     @Test
     fun `list returns the caller's own executions`() {
-        every { executions.findByUser(any(), McpFixtures.USER, null, null, limit = 50, offset = 0) } returns
+        every { executions.findVisible(any(), McpFixtures.USER, null, null, limit = 50, offset = 0) } returns
             listOf(McpFixtures.executionRecord())
 
         val hits = ExecutionsListTool(executions).call(McpArguments(emptyMap()), ctx) as List<*>
@@ -31,7 +32,7 @@ class ExecutionToolsTest {
     fun `list filters by status`() {
         // D11: the status filter is the repository's (SQL), like the REST listing's — the tool
         // passes it through rather than filtering a page after the fact.
-        every { executions.findByUser(any(), McpFixtures.USER, null, ExecutionStatus.FAILED, limit = 50, offset = 0) } returns
+        every { executions.findVisible(any(), McpFixtures.USER, null, ExecutionStatus.FAILED, limit = 50, offset = 0) } returns
             listOf(McpFixtures.executionRecord(executionId = UUID.randomUUID(), status = ExecutionStatus.FAILED))
 
         val failed = ExecutionsListTool(executions).call(McpArguments(mapOf("status" to "FAILED")), ctx) as List<*>
@@ -41,10 +42,11 @@ class ExecutionToolsTest {
 
     @Test
     fun `list by pipeline hides other users' executions from a non-admin`() {
-        // D11: a non-admin's listing is `findByUser` in SQL — the other user's run never
-        // arrives; the in-memory `visibleTo` is the second line, not the first.
-        every { executions.findByUser(any(), McpFixtures.USER, McpFixtures.PIPELINE_ID, null, limit = 50, offset = 0) } returns
-            listOf(McpFixtures.executionRecord())
+        // D11: a non-admin's listing is `findVisible` in SQL — the other user's interactive run
+        // never arrives; the in-memory `visibleTo` is the second line, not the first.
+        every {
+            executions.findVisible(any(), McpFixtures.USER, McpFixtures.PIPELINE_ID, null, limit = 50, offset = 0)
+        } returns listOf(McpFixtures.executionRecord())
 
         val mine =
             ExecutionsListTool(executions).call(
@@ -56,6 +58,52 @@ class ExecutionToolsTest {
             { mine.size shouldBe 1 },
             { (mine.first() as Map<*, *>)["executed_by"] shouldBe McpFixtures.USER.toString() },
         )
+    }
+
+    @Test
+    fun `list carries the workspace's scheduled runs (#250 R3) and the page stays full`() {
+        // The repository's `findVisible` already encodes R3 in SQL; a full page of scheduled
+        // runs must survive the in-memory defence-in-depth filter INTACT — a page cut before
+        // visibility would silently return fewer rows than `limit` asked for.
+        val scheduled = (1..50).map { McpFixtures.executionRecord(executionId = UUID.randomUUID(), executedBy = McpFixtures.OTHER_USER) }
+            .map { it.copy(triggeredVia = ExecutionTrigger.SCHEDULE) }
+        every { executions.findVisible(any(), McpFixtures.USER, null, null, limit = 50, offset = 0) } returns scheduled
+
+        val hits = ExecutionsListTool(executions).call(McpArguments(mapOf("limit" to 50)), ctx) as List<*>
+
+        hits.size shouldBe 50
+        hits.map { (it as Map<*, *>)["triggered_via"] } shouldContainExactly List(50) { "SCHEDULE" }
+    }
+
+    @Test
+    fun `the in-memory filter still drops a row that is neither own, scheduled, nor admin-visible`() {
+        // Defence in depth, held to be able to fail: if a repository predicate ever widened
+        // past R3, an interactive run of ANOTHER member that arrives anyway must be dropped
+        // here, never listed.
+        every { executions.findVisible(any(), McpFixtures.USER, null, null, limit = 50, offset = 0) } returns
+            listOf(
+                McpFixtures.executionRecord(executionId = UUID.randomUUID()),
+                McpFixtures.executionRecord(executionId = UUID.randomUUID(), executedBy = McpFixtures.OTHER_USER),
+            )
+
+        val hits = ExecutionsListTool(executions).call(McpArguments(emptyMap()), ctx) as List<*>
+
+        hits.map { (it as Map<*, *>)["executed_by"] } shouldContainExactly listOf(McpFixtures.USER.toString())
+    }
+
+    @Test
+    fun `a scheduled run is readable through executions_get without read_all (#250 R3)`() {
+        val fired = McpFixtures.executionRecord(executedBy = McpFixtures.OTHER_USER).copy(triggeredVia = ExecutionTrigger.SCHEDULE)
+        every { executions.findById(any(), McpFixtures.EXECUTION_ID) } returns fired
+
+        @Suppress("UNCHECKED_CAST")
+        val payload =
+            ExecutionsGetTool(executions).call(
+                McpArguments(mapOf("execution_id" to McpFixtures.EXECUTION_ID.toString())),
+                ctx,
+            ) as Map<String, Any?>
+
+        payload["triggered_via"] shouldBe "SCHEDULE"
     }
 
     @Test
