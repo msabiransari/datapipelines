@@ -72,6 +72,9 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo 'Uses `datapipelines.no.such-key` here.'
     echo 'Raises `pipeline.validation.nonexistent_code` here.'
     echo 'Raises `workspace.nonexistent_code` here.'
+    echo 'Raises `schedule.nonexistent_code` here.'
+    echo 'Records `schedule.nonexistent_event` here.'
+    echo 'Logs `scheduler.nonexistent_event` here.'
     echo 'Legacy `terminal_node_id` mention.'
   } >> "$tmp/docs/staging.md"
   # D over the NON-docs scan set, which checks A-C never reach: a header that still
@@ -204,8 +207,14 @@ for p, t in texts.items():
 # STRUCTURED LOG events (observability §3.4B) are checked like every other namespace — before
 # that a doc could cite `mail.sent` freely with nothing defining it.
 # `lake` joins for the LAKE instance lifecycle events defined in observability §3.4C.
+# `schedule` joins in 253 so the schedule.* error codes (pipeline-contract §13.19) and the
+# schedule.* AUDIT events (enums §15, the schedule REST routes' rows) are checked like every
+# other namespace — #9 added three namespaces check C could not see; a misspelt schedule.*
+# code passed the audit (only the drift tests would have caught it). `scheduler` joins beside
+# it for the scheduler.* STRUCTURED LOG events (observability §3.4E); the §3.4 extraction is
+# their definition set. `scheduler.md` — a FILENAME the docs cite — is skipped below like a .js.
 CODE_RE = (r"(?<![.\w-])(?:pipeline|template|datasource|auth|workspace|result|rate_limit|"
-           r"idempotency|type_mapping|mcp|endpoint|mail|lake)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
+           r"idempotency|type_mapping|mcp|endpoint|mail|lake|schedule|scheduler)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
 catalog = set(re.findall(CODE_RE, texts["docs/pipeline-contract.md"]))
 # datasource.validation.* is delegated: pipeline-contract §13.8 names Datasources §9
 # as the defining list, so codes defined there join the catalog.
@@ -223,7 +232,7 @@ sec15 = re.search(r"^## 15\..*?(?=^## 16\.)", enums_txt, re.M | re.S)
 # `workspace` joined the audit namespaces in RBAC round 1 (member_added, member_removed,
 # member_flags_changed, deactivated, reactivated) — enums.md §15 remains the authority that
 # has to DEFINE one before any doc may cite it.
-events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template|workspace|mail)\.[a-z_]+(?:\.[a-z_]+)*",
+events = set(re.findall(r"(?:auth|datasource|mcp|endpoint|pipeline|template|workspace|mail|schedule)\.[a-z_]+(?:\.[a-z_]+)*",
                         sec15.group(0) if sec15 else enums_txt))
 # auth.* events are also cited outside §15 (auth.md §10.1 etc.)
 events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
@@ -238,7 +247,7 @@ events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
 obs_txt = texts.get("docs/observability.md", "")
 sec34 = re.search(r"^#### 3\.4A\b.*?(?=^### )", obs_txt, re.M | re.S)
 if sec34:
-    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
+    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake|scheduler)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
 # PERMISSIONS (#215). The auth.md §7.6 catalog's FIRST column defines every
 # `<functionality>.<permission>` name (`pipeline.read`, `workspace.members.manage`). They share
 # the error codes' domain words but are neither codes nor events, and the catalog is their one
@@ -280,7 +289,7 @@ for p, t in texts.items():
         if NEGATION.search(line):
             continue
         for c in set(re.findall(CODE_RE, line)):
-            if c.startswith(CONFIG_PREFIXES) or c.endswith(".js"):
+            if c.startswith(CONFIG_PREFIXES) or c.endswith(".js") or c.endswith(".md"):
                 continue
             if (c + "(") in line:   # Kotlin method call, e.g. pipeline.copy(...)
                 continue
