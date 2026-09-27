@@ -34,6 +34,11 @@ import java.util.Base64
  * The admin then reads the execution's metadata to COMPLETED: had the closed stream been
  * misread as a client DISCONNECT, the §6.8 grace timer would have cancelled the run and this
  * poll would see `EXECUTION_ABORTED` instead.
+ *
+ * #263 (1) adds the header-switched case through the same real filter and stream: a subscriber
+ * whose session CLAIM names another workspace, opening the stream by `DP-Workspace`, keeps
+ * reading the workspace it OPENED in — the pre-#263 re-judgement mirrored the claim and cut
+ * such a stream at its first write.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -47,6 +52,9 @@ class ExecutionStreamRevocationE2eTest {
 
     private val adminSession get() = E2eSession.jwt(SECRET, ADMIN, "sse230-admin@datapipelines.test", WS_NAME)
     private val memberSession get() = E2eSession.jwt(SECRET, MEMBER, "sse230-member@datapipelines.test", WS_NAME)
+
+    /** #263 (1): the header-switched subscriber — the CLAIM names the second workspace. */
+    private val member2Session get() = E2eSession.jwt(SECRET, MEMBER2, "sse230-member2@datapipelines.test", WS2_NAME)
 
     @Test
     fun `a removed member's open stream is cut at the next write and the execution still completes`() {
@@ -152,6 +160,7 @@ class ExecutionStreamRevocationE2eTest {
     private fun streamBody(
         pipelineId: String,
         session: String,
+        headers: List<Pair<String, String>> = emptyList(),
     ) {
         val request =
             HttpRequest
@@ -160,11 +169,64 @@ class ExecutionStreamRevocationE2eTest {
                 .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
+                .apply { headers.forEach { (name, value) -> header(name, value) } }
                 .POST(HttpRequest.BodyPublishers.ofString("""{"parameters": {}}"""))
                 .build()
         val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
         check(response.statusCode() == 200) { "execute answered ${response.statusCode()}: ${response.body().take(300)}" }
         streamBodies.add(response.body())
+    }
+
+    /**
+     * #263 (1) — a stream opened under a `DP-Workspace` header switch keeps reading while the
+     * switched-to workspace's membership holds. The subscriber's session CLAIM names a different
+     * workspace than the one the execution lives in; the request path resolves the HEADER
+     * ([co.datapipelines.auth.WorkspaceResolutionFilter] stores the resolved context), so the
+     * open-stream re-judgement must ask THAT workspace — not the claim, whose re-resolution
+     * finds no record here and cuts the stream at its first write. Through the real filter and
+     * the real stream: a member of two workspaces executes in W1 by header (claim = W2) and
+     * reads the run to its terminal event.
+     */
+    @Test
+    fun `a stream opened under a DP-Workspace header switch keeps reading the workspace it opened in`() {
+        ensureSeeded()
+        val pipelineId = fixtures()
+
+        // The claim says sse230-ws2; the header switches the request to sse230-ws, where the
+        // pipeline lives. The subscriber the stream captures carries the RESOLVED W1 context.
+        val reader =
+            Thread {
+                streamBody(
+                    pipelineId,
+                    member2Session,
+                    headers = listOf("DP-Workspace" to WS_NAME),
+                )
+            }
+        val failure = arrayOfNulls<Throwable>(1)
+        reader.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, e -> failure[0] = e }
+        reader.start()
+
+        reader.join(STREAM_JOIN_TIMEOUT_MILLIS)
+        if (reader.isAlive) throw AssertionError("the header-switched stream never ended within ${STREAM_JOIN_TIMEOUT_MILLIS} ms")
+        failure[0]?.let { throw it }
+        val body = streamBodies.removeFirst()
+
+        // Reads THROUGH: no policy cut, the terminal sequence served — the pre-#263 shape cut
+        // this stream at its first write (the re-judgement re-resolved the JWT claim instead).
+        // (The wire renders `event:<name>` without a space — Spring's builder, the same
+        // convention the revoked assertions above pin for `:revoked`.)
+        body shouldNotContain ":revoked"
+        body shouldContain "event:pipeline_completed"
+
+        val executionId =
+            E2eSse
+                .parseEvents(body, mapper)
+                .firstOrNull()
+                ?.second
+                ?.get("execution_id")
+                ?.asText()
+        check(executionId != null) { "the header-switched stream carried no execution_id: ${body.take(400)}" }
+        awaitTerminalCompleted(executionId)
     }
 
     // ------------------------------------------------------------------ fixtures (namespaced, idempotent)
@@ -181,9 +243,16 @@ class ExecutionStreamRevocationE2eTest {
                 )
                 statement.execute(
                     """
+                    INSERT INTO workspaces (id, name, display_name) VALUES ('$WS2', '$WS2_NAME', 'SSE230 Second')
+                    ON CONFLICT (id) DO NOTHING
+                    """.trimIndent(),
+                )
+                statement.execute(
+                    """
                     INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
                         ('$ADMIN', 'sse230-admin@datapipelines.test', 'SSE230 Admin', 'test', 'sub-sse230-admin', TRUE, TRUE),
-                        ('$MEMBER', 'sse230-member@datapipelines.test', 'SSE230 Member', 'test', 'sub-sse230-member', TRUE, FALSE)
+                        ('$MEMBER', 'sse230-member@datapipelines.test', 'SSE230 Member', 'test', 'sub-sse230-member', TRUE, FALSE),
+                        ('$MEMBER2', 'sse230-member2@datapipelines.test', 'SSE230 Member2', 'test', 'sub-sse230-member2', TRUE, FALSE)
                     ON CONFLICT (id) DO NOTHING
                     """.trimIndent(),
                 )
@@ -191,7 +260,9 @@ class ExecutionStreamRevocationE2eTest {
                     """
                     INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
                         ('$WS', '$ADMIN', 'workspace_admin'),
-                        ('$WS', '$MEMBER', 'author')
+                        ('$WS', '$MEMBER', 'author'),
+                        ('$WS', '$MEMBER2', 'author'),
+                        ('$WS2', '$MEMBER2', 'viewer')
                     ON CONFLICT DO NOTHING
                     """.trimIndent(),
                 )
@@ -297,8 +368,11 @@ class ExecutionStreamRevocationE2eTest {
     companion object {
         private const val WS = "e2300000-0000-0000-0000-000000000001"
         private const val WS_NAME = "sse230-ws"
+        private const val WS2 = "e2300000-0000-0000-0000-000000000002"
+        private const val WS2_NAME = "sse230-ws2"
         private const val ADMIN = "e2300000-0000-0000-0000-0000000000a1"
         private const val MEMBER = "e2300000-0000-0000-0000-0000000000b2"
+        private const val MEMBER2 = "e2300000-0000-0000-0000-0000000000b3"
         private const val DATASOURCE = "sse230-pg"
         private const val TEMPLATE = "test/sse230_slow.sql"
         private const val PIPELINE = "test/sse230_slowpipe"
