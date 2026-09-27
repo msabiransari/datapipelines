@@ -19,4 +19,13 @@ dependencies {
 
     implementation(libs.jackson.module.kotlin)
     implementation(libs.spring.boot.starter.jdbc) // ParameterSetRepository (§8.1), @ConfigurationProperties
+
+    // The container suite runs the repository and the lifecycle against a real Postgres with the SHIPPED
+    // migrations applied through plain JDBC (module-structure §7.4; Flyway stays in `app`, §3.1 rule 2),
+    // and pins real `templates` rows (TemplateRepository) for the release cascade and the pin checks —
+    // the `templates` edge is allowed by §4.2 and used by TESTS only; main never compiles against it.
+    testImplementation(project(":modules:templates"))
+    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.postgresql)
 }

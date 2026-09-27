@@ -687,10 +687,12 @@ build's `allowedInternalDependencies` map carries the same closed set).
 - `ParameterErrorCodes` — the `parameter.*` family ([Pipeline Contract §13.20](pipeline-contract.md)); `PipelineErrorCodes.Parameters` mirrors it, pinned equal by reflection.
 - `SelectorProbe` — the port the save-time validator's steps 5–6 call (the record's §4): render a pinned selector template, run it with `maxRows = 2`. Lane C implements it over `SelectorRunner`; with none wired a template-backed set is refused `parameter.validation.selector_probe_unavailable`.
 - `ParametersProperties` / `ParametersConfig` — `datapipelines.parameters.*` ([Configuration §3.30](configuration.md#330-parameter-engine-194)).
+- `ParameterSetValidator` — the record's §4 in order (structure, the graph on `graph`'s `Dag<T>`, the expression AST's static rules, the template pins by namespace, the dry run through `SelectorProbe`); `revalidateSources` re-runs steps 4–6 at release and import. `Expr` / `ExpressionParser` / `ExpressionPrinter` / `ExpressionEvaluator` — the §7 AST (lane C evaluates `hidden`/`disabled` with it). `ParameterSetGraph` — the set's DAG (lane C's evaluation order).
+- `ParameterSetRepository` (jdbc; `parameter_sets`, `parameter_set_versions` — V39) and `ParameterSetService` — the versioning §3.5 verb table (draft create/write with the hash precondition, release with the 142 cascade, purge, discard, restore, switch, import), the working-version read rule and the promoter lens. Every method takes the workspace; every statement filters by it.
 
 **Why it is its own module.** The owner's intent (the record's P1): an engine for parameters "independent of anything", a decoupled offering. A single-aggregate module — the definition, its validation and its lifecycle — whose only cross-aggregate facts arrive through `pipeline-contract`'s ports; the templates reverse arrow and promotion are `application`'s (the record's §8.4/§8.5).
 
-**Tests:** the model's strict binding and round trip; the reflection pin between the two code objects; `ParametersConfigKeysSpecDriftTest`.
+**Tests:** the model's strict binding and round trip; the reflection pin between the two code objects; the expression AST (every operator, both cardinalities, the null/empty rules, every cap one past); the validator (every §13.20 validation code reached by a fixture, the probe proven CALLED by a recording fake); the repository and every lifecycle verb against the module's own Postgres container (`ParametersTestDb`, the shipped migrations through plain JDBC) — workspace scoping both ways, the one-draft index, and both races FORCED with a second connection; `ParametersConfigKeysSpecDriftTest`.
 
 ## 6. Version Catalog
 

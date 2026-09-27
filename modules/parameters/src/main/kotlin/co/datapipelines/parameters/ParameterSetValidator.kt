@@ -84,9 +84,14 @@ class ParameterSetValidator(
 
     private val pins = PinRules(templates, templateStatuses, datasources, org.keys + (ContextKeys.PLATFORM - ContextKeys.EXECUTION_ID))
 
+    /**
+     * Record §4 in order. With [dryRun] false, steps 5–6 are left to the caller — the write path skips
+     * them for a body whose hash is unchanged (record §4's last sentence) and calls [dryRun] otherwise.
+     */
     fun validate(
         workspaceId: UUID,
         document: ParameterSetDocument,
+        dryRun: Boolean = true,
     ): ParameterSetValidation {
         val failures = ParameterSetFailures()
         val body = document.body
@@ -97,12 +102,26 @@ class ParameterSetValidator(
         parsed.forEachIndexed { index, expressions -> expressionRules(index, body.parameters[index], expressions, byName, failures) }
         body.parameters.forEachIndexed { index, parameter -> pins.check(workspaceId, index, parameter, byName, failures) }
         val canonical = body.copy(parameters = body.parameters.mapIndexed { index, parameter -> canonical(parameter, parsed[index]) })
-        if (failures.isEmpty && graph != null) SelectorDryRun(probe, inputValidator, org).run(workspaceId, canonical, graph, failures)
+        if (dryRun && failures.isEmpty &&
+            graph != null
+        ) {
+            SelectorDryRun(probe, inputValidator, org).run(workspaceId, canonical, graph, failures)
+        }
         return if (failures.isEmpty) {
             ParameterSetValidation.Valid(ParameterSetDocument(document.name, canonical))
         } else {
             ParameterSetValidation.Invalid(failures.toResult())
         }
+    }
+
+    /** Steps 5–6 alone, on a body that passed steps 1–4 ([validate] with `dryRun = false`). */
+    fun dryRun(
+        workspaceId: UUID,
+        body: ParameterSetBody,
+    ): ValidationResult {
+        val failures = ParameterSetFailures()
+        SelectorDryRun(probe, inputValidator, org).run(workspaceId, body, ParameterSetGraph.of(body), failures)
+        return failures.toResult()
     }
 
     /**
