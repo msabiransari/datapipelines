@@ -110,6 +110,11 @@
   justify-content: space-between;
   gap: var(--gap-sm);
   margin-bottom: var(--gap-sm);
+  /* #255: the head's min-content (heading + tabs) is wider than the splitter's 220px
+     floor, and `.te-rail` — a scroll container — scrolled sideways by the difference.
+     Wrapping lets the tabs drop below the heading at narrow rail widths instead; at the
+     320px default and in the wide source column nothing moves. */
+  flex-wrap: wrap;
 }
 
 /* 079 §D: the preview panel's head sits directly on its pane — the
@@ -125,6 +130,9 @@
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
   margin: 0;
+  /* #255: the heading may shrink inside its wrapped line rather than hold the row's
+     min-content — inert at every width the floor allows today. */
+  min-width: 0;
 }
 
 /* D2/D3 — the editor is the tall surface (~2/3 of the column), the preview
