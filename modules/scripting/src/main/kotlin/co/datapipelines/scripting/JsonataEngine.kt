@@ -21,12 +21,22 @@ import java.time.Instant
  *    bindings, so no state crosses evaluations. Sharing one frame across threads is
  *    the exact defect the conformance suite's falsification red-flags: it would share
  *    one depth counter and one non-thread-safe binding map.
- *  - **Bounds between steps, honestly.** `setRuntimeBounds` checks wall clock and
- *    depth in the evaluate entry/exit callbacks — a single builtin call that overruns
- *    (`$pad`, `$join`, a backtracking regex) runs to completion first; depth is
- *    enforced at every step. Hence [capabilities]: heap and statements are NOT bounded
- *    in-process, and the engine is NOT interruptible. The evaluation pool's
- *    abandonment is the bound that actually stops an overrunning builtin's caller.
+ *  - **Bounds between steps, honestly — counted by the engine (#260).** The engine
+ *    installs its own `setEvaluateEntryCallback`/`setEvaluateExitCallback` hooks and
+ *    counts every evaluate entry and exit on the per-evaluation frame: depth is
+ *    enforced at every step — nested expressions and non-tail lambda recursion alike
+ *    (a tail-recursive call is trampolined by the library and never nests; there the
+ *    wall clock is the bound) — and the wall clock is checked at every entry and exit.
+ *    The library's `Timebox` (what `setRuntimeBounds` installed) returned early from
+ *    both callbacks on `isParallelCall` frames — the evaluator marks the second and
+ *    later object pairs / arguments that way on the frame itself — so one depth unit
+ *    leaked per item on set-level shapes (a 240-row reshape refused at the default
+ *    depth of 100) and the clock check was skipped in exactly those frames. A single
+ *    builtin call that overruns (`$pad`, `$join`, a backtracking regex) still runs to
+ *    completion first — there is no step boundary inside it. Hence [capabilities]:
+ *    heap and statements are NOT bounded in-process, and the engine is NOT
+ *    interruptible. The evaluation pool's abandonment is the bound that actually
+ *    stops an overrunning builtin's caller.
  *  - **No host access.** No Java function is registered anywhere: the body cannot
  *    reach the filesystem, network, environment or system properties. The conformance
  *    suite asserts the builtin catalogue contains no name from a deny-list.
@@ -49,7 +59,11 @@ import java.time.Instant
  * call-time shadow rather than a compile-time scan — a body that never evaluates a
  * clock call never sees it.
  */
-class JsonataEngine : ScriptEngine {
+class JsonataEngine(
+    /** The injected wall clock behind the between-steps bound (#260) — the module's
+     * purity rule leaves the ambient read to [ScriptClock.SYSTEM] alone. */
+    private val clock: ScriptClock = ScriptClock.SYSTEM,
+) : ScriptEngine {
     override val type: ScriptLanguage = ScriptLanguage.JSONATA
 
     override val capabilities: EngineCapabilities =
@@ -94,7 +108,47 @@ class JsonataEngine : ScriptEngine {
             "the CompiledScript was not produced by this engine (${ScriptLanguage.JSONATA})"
         }
         val frame = Jsonata.Frame(null)
-        frame.setRuntimeBounds(limits.wallClock.toMillis(), limits.maxDepth)
+
+        // The depth counter and the clock live in THIS evaluation's closure — one
+        // evaluation, one counter, thread-confined (the frame-per-evaluation rule the
+        // conformance suite's falsification red-flags). `breach` records the typed
+        // refusal the hooks threw: a library path may REPLACE a non-JException while
+        // unwinding (evaluateBinary's and/or short-circuit turns one into
+        // JException("Unexpected")), and the recorded breach — never the wrapper's
+        // text — is what the seam rethrows.
+        var depth = 0
+        var breach: ScriptingException? = null
+        val startedAt = clock.currentTimeMillis()
+
+        fun checkDepth() {
+            if (depth > limits.maxDepth) {
+                val refusal =
+                    ScriptResourceLimitException(
+                        ScriptResourceLimitException.Kind.DEPTH,
+                        "recursion depth exceeded the declared maximum of ${limits.maxDepth}",
+                    )
+                breach = refusal
+                throw refusal
+            }
+        }
+
+        fun checkWallClock() {
+            if (clock.currentTimeMillis() - startedAt > limits.wallClock.toMillis()) {
+                val timeout = ScriptTimeoutException(limits.wallClock, "")
+                breach = timeout
+                throw timeout
+            }
+        }
+
+        frame.setEvaluateEntryCallback { _, _, _ ->
+            depth++
+            checkDepth()
+            checkWallClock()
+        }
+        frame.setEvaluateExitCallback { _, _, _, _ ->
+            depth--
+            checkWallClock()
+        }
         bindClock(frame, limits.now)
         return try {
             JsonataValues.fromEngineOutput(
@@ -103,13 +157,17 @@ class JsonataEngine : ScriptEngine {
         } catch (err: ScriptingException) {
             throw err
         } catch (err: JException) {
-            throw engineException(limits, err)
+            // The hooks' own typed refusal arrives wrapped when a library path replaced
+            // it mid-unwind (evaluateBinary's and/or short-circuit turns a non-JException
+            // into JException("Unexpected")); the recorded breach — never the wrapper's
+            // text — is what gets rethrown. Every remaining JException is a script error.
+            throw breach ?: ScriptEvaluationException(err.message ?: err.error, err)
         } catch (
             @Suppress("TooGenericExceptionCaught") err: RuntimeException,
         ) {
             // The library rethrows builtin failures verbatim after message population;
             // anything else here is an engine or library defect surfacing mid-evaluation.
-            throw ScriptEvaluationException(
+            throw breach ?: ScriptEvaluationException(
                 "evaluation failed unexpectedly: ${err.message ?: err.javaClass.name}",
                 err,
             )
@@ -170,33 +228,6 @@ class JsonataEngine : ScriptEngine {
         return ScriptSyntaxException(at.first, at.second, err.message ?: err.error)
     }
 
-    private fun engineException(
-        limits: EvaluationLimits,
-        err: JException,
-    ): ScriptingException {
-        val text = err.message ?: err.error
-        // Timebox.java throws its raw sentence as the JException "code"; the engine's
-        // message rendering prefixes it ("JSonataException …"), so match on the raw
-        // error text, never on the rendered message.
-        val raw = err.error
-        return when {
-            raw.contains(DEPTH_PREFIX) -> {
-                ScriptResourceLimitException(
-                    ScriptResourceLimitException.Kind.DEPTH,
-                    "recursion depth exceeded the declared maximum of ${limits.maxDepth}",
-                )
-            }
-
-            raw.contains(TIMEOUT_PREFIX) -> {
-                ScriptTimeoutException(limits.wallClock, "")
-            }
-
-            else -> {
-                ScriptEvaluationException(text, err)
-            }
-        }
-    }
-
     /** 1-based line/column for a 0-based character offset (the library's position). */
     private fun lineColumn(
         body: String,
@@ -214,9 +245,5 @@ class JsonataEngine : ScriptEngine {
         /** The library's own signature strings for the two clock builtins. */
         const val SIGNATURE_NOW = "<s?s?:s>"
         const val SIGNATURE_MILLIS = "<:n>"
-
-        /** Timebox.java's two refusal prefixes (checked as `message`, source 0.9.10). */
-        const val DEPTH_PREFIX = "Stack overflow error"
-        const val TIMEOUT_PREFIX = "Expression evaluation timeout"
     }
 }

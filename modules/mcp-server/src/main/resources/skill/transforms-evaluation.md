@@ -15,8 +15,10 @@ check. A `javascript` or `sql`/`html` id passed to evaluate is `template.contrac
 (`rule: type_not_transform`); an unknown one is `template.not_found`.
 
 The bounds: one case ≤ `datapipelines.transform.evaluate-timeout-seconds`, the suite ≤
-`datapipelines.transform.suite-timeout-seconds`; time catches recursion, depth catches
-nesting.
+`datapipelines.transform.suite-timeout-seconds`; the depth bound (`max-depth`, default 100) counts
+every evaluate entry and exit — nested expressions and non-tail lambda recursion alike, and
+set-level work over hundreds of rows evaluates at the default (#260) — while a tail-recursive
+lambda is trampolined by the library, so the wall clock is the bound that catches that shape.
 
 ## The node
 

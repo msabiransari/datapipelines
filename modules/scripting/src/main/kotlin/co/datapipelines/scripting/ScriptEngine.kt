@@ -61,7 +61,7 @@ interface ScriptEngine {
                 maxDepth = DEFAULT_MAX_DEPTH,
             )
 
-        /** The library's own default recursion bound (Timebox maxDepth = 100). */
+        /** The default recursion bound — 100 nested evaluate entries, lambda recursion included (#260). */
         const val DEFAULT_MAX_DEPTH = 100
     }
 }

@@ -19,6 +19,16 @@ import java.util.concurrent.atomic.LongAdder
 fun interface ScriptClock {
     /** Milliseconds since the epoch, same semantics as the JDK wall clock. */
     fun currentTimeMillis(): Long
+
+    companion object {
+        /**
+         * The module's ONE ambient clock read (see [ScriptClock]). `ScriptingPurityTest`
+         * enforces the count: exactly one `currentTimeMillis` occurrence in src/main —
+         * every other reader injects this ([ScriptEvaluationPool.SYSTEM] delegates here,
+         * and so does the JSONata engine's wall-clock bound).
+         */
+        val SYSTEM = ScriptClock { System.currentTimeMillis() }
+    }
 }
 
 /**
@@ -236,9 +246,9 @@ class ScriptEvaluationPool(
         const val DEFAULT_LABEL = "script"
 
         /**
-         * The module's ONE ambient clock read (see [ScriptClock]). `ScriptingPurityTest`
-         * enforces the count: exactly one `currentTimeMillis` occurrence in src/main.
+         * The injected system clock — the ambient read lives on [ScriptClock.SYSTEM],
+         * the single occurrence the purity test counts.
          */
-        val SYSTEM = ScriptClock { System.currentTimeMillis() }
+        val SYSTEM = ScriptClock.SYSTEM
     }
 }
