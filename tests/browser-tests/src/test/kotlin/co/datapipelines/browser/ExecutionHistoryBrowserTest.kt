@@ -58,7 +58,8 @@ class ExecutionHistoryBrowserTest : BrowserSuite() {
         page.navigate("$baseUrl/executions")
         page.waitForURL("**/executions")
         // The htmx-loaded partial carries the rows — wait for the scheduled run's row.
-        page.waitForSelector("text=$scheduledPipeline")
+        // Scoped to #execution-table: the filter bar's <select> options carry the same names.
+        page.locator("#execution-table").locator("text=$scheduledPipeline").first().waitFor()
         val table = page.locator("#execution-table").innerText()
         table.shouldContain("SCHEDULE")
         table.shouldContain(scheduledPipeline)
@@ -90,8 +91,9 @@ class ExecutionHistoryBrowserTest : BrowserSuite() {
                     )
                     statement.execute(
                         """
-                        INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by)
-                        SELECT id, 1, '{}'::jsonb, '$actorId' FROM pipelines WHERE name = '$name'
+                        INSERT INTO pipeline_versions (pipeline_id, version, body_json, created_by, body_hash)
+                        SELECT id, 1, '{}'::jsonb, '$actorId', 'seeded-fixture-hash'
+                          FROM pipelines WHERE name = '$name'
                         """.trimIndent(),
                     )
                     statement.execute(
