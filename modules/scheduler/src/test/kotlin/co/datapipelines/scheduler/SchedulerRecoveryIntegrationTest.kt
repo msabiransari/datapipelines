@@ -5,6 +5,7 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -219,6 +220,21 @@ class SchedulerRecoveryIntegrationTest {
         trail.map { it.seq } shouldContainExactly (1..trail.size).toList()
         trail.last().kind shouldBe TrailKind.FINISHED
         h.runs.find(run.id)!!.state shouldBe RunState.SUCCEEDED
+    }
+
+    @Test
+    fun `the reconciler copies the execution's own timing onto the run - the §20 stamps never answer duration (#258)`() {
+        val started = Instant.parse("2026-09-25T12:00:01Z")
+        val completed = Instant.parse("2026-09-25T12:00:01.017Z")
+
+        val run = startedRun()
+        h.executor.outcomes[run.executionId!!] = ExecutionOutcome.Finished(RunState.SUCCEEDED, null, started, completed)
+        h.reconciler.tick()
+
+        val recorded = h.runs.find(run.id)!!
+        recorded.state shouldBe RunState.SUCCEEDED
+        recorded.executionStartedAt shouldBe started
+        recorded.executionCompletedAt shouldBe completed
     }
 
     private fun onlyRun(): ScheduleRun = h.runsOf(schedule.id).single()

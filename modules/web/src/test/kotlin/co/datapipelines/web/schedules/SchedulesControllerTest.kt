@@ -323,6 +323,29 @@ class SchedulesControllerTest {
             updatedAt = AT,
         )
 
+    /** A finished run whose execution took 17 ms — what §20.10 answers in one read (#258). */
+    private fun finishedRun() =
+        run().copy(
+            state = RunState.SUCCEEDED,
+            executionId = EXECUTION_ID,
+            startedAt = AT,
+            finishedAt = AT.plusSeconds(20), // the reconciler's stamp — NOT what duration means
+            executionStartedAt = AT,
+            executionCompletedAt = AT.plusMillis(17),
+        )
+
+    @Test
+    fun `a finished run carries the execution's own timing and duration - one read, every reader (#258)`() {
+        every { service.runs(workspace, scheduleId, 3, 0, any()) } returns listOf(finishedRun())
+
+        val data = controller.runs(scheduleId, 0, 2).data
+
+        val run = data.items.single()
+        run["execution_started_at"] shouldBe AT.toString()
+        run["execution_completed_at"] shouldBe AT.plusMillis(17).toString()
+        run["execution_duration_ms"] shouldBe 17L
+    }
+
     private class RecordingAudit : AuditEventSink {
         val events = mutableListOf<Pair<String, Map<String, Any?>>>()
 
@@ -341,6 +364,7 @@ class SchedulesControllerTest {
     private companion object {
         val AT: Instant = Instant.parse("2026-09-25T06:00:00Z")
         val RUN_ID: UUID = UUID.fromString("00000000-0000-0000-0000-00000000f00d")
+        val EXECUTION_ID: UUID = UUID.fromString("00000000-0000-0000-0000-00000000e0ec")
         const val BODY =
             """{"name":"finance/daily/revenue","payload":{"pipeline":"finance/revenue","version":"current"},""" +
                 """"cron":"0 6 * * *","timezone":"UTC"}"""

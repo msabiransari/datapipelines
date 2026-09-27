@@ -36,6 +36,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -337,6 +338,14 @@ class SchedulesController(
             "claimed_at" to run.claimedAt?.toString(),
             "started_at" to run.startedAt?.toString(),
             "finished_at" to run.finishedAt?.toString(),
+            // The EXECUTION's own timing (#258): the run's stamps above are claim and reconciler
+            // times; these answer how long the execution took, in this one read.
+            "execution_started_at" to run.executionStartedAt?.toString(),
+            "execution_completed_at" to run.executionCompletedAt?.toString(),
+            "execution_duration_ms" to
+                run.executionStartedAt?.let { s ->
+                    run.executionCompletedAt?.let { e -> Duration.between(s, e).toMillis() }
+                },
         )
 
     private fun runDetailJson(detail: RunDetail): Map<String, Any?> =

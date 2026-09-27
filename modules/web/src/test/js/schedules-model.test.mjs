@@ -119,6 +119,14 @@ test("run chips, origins and activity", () => {
   assert.match(M.blockedText("something_new"), /code below/);
 });
 
+test("#258 - the execution's own duration comes off the run, or nowhere", () => {
+  // The reconciler's copy is the answer: one read, every reader, no per-run execution read.
+  assert.equal(M.executionDurationMs({ execution_duration_ms: 17 }), 17);
+  assert.equal(M.executionDurationMs({}), null);
+  assert.equal(M.executionDurationMs({ execution_duration_ms: "17" }), null); // never a string
+  assert.equal(M.executionDurationMs(null), null);
+});
+
 test("the Messages pane merges the two logs in time order, each line labelled by its source", () => {
   const trail = [
     { seq: 1, kind: "recorded", reason: null, at: "2026-09-26T10:00:00.000Z", details: {} },

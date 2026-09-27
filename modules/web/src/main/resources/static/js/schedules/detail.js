@@ -278,13 +278,17 @@
   }
 
   /**
-   * How long the EXECUTION took — its own `duration_ms` (§10.2), read once per finished
-   * execution and kept: a finished execution's duration never changes. The run's own stamps are
-   * not used for this: §20's `finished_at` is when the reconciler RECORDED the end, up to a tick
-   * after it (a 17 ms pipeline read "took 20 s" off them).
+   * How long the EXECUTION took. The run's own §20 timing (`execution_duration_ms`, copied by the
+   * reconciler from the execution row — #258) answers it in one read, for every reader; the
+   * per-execution read below is only the fallback for runs finished before that field existed
+   * (a finished execution's duration never changes). §20's `finished_at` is not used for this:
+   * it is when the reconciler RECORDED the end, up to a tick after it (a 17 ms pipeline read
+   * "took 20 s" off it).
    */
   function durationFor(run) {
     if (M().isActive(run)) return "running…";
+    var own = M().executionDurationMs(run);
+    if (own !== null) return M().msText(own);
     if (!run.execution_id) return "—";
     var ms = (S.state.durations || {})[run.execution_id];
     return typeof ms === "number" ? M().msText(ms) : "…";
@@ -299,6 +303,7 @@
     }
     S.state.durations = S.state.durations || {};
     c.runs.forEach(function (run) {
+      if (M().executionDurationMs(run) !== null) return; // answered by the run itself (#258)
       var id = run.execution_id;
       if (!id || M().isActive(run) || typeof S.state.durations[id] === "number") return;
       S.state.durations[id] = null; // asked once

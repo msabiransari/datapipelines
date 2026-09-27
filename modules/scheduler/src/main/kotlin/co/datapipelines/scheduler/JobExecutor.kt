@@ -144,10 +144,16 @@ sealed interface ExecutionOutcome {
     /** Still running (the executor's own liveness — heartbeat and sweeper — decides when it is not). */
     data object Running : ExecutionOutcome
 
-    /** Terminal, mapped by the executor onto a run state and reason (record §7.1). */
+    /**
+     * Terminal, mapped by the executor onto a run state and reason (record §7.1). The execution's
+     * own start and end ride along (#258): the reconciler copies them onto the run, whose §20
+     * stamps are claim and reconciler times and cannot answer "how long did it take".
+     */
     data class Finished(
         val state: RunState,
         val reason: String?,
+        val startedAt: Instant? = null,
+        val completedAt: Instant? = null,
     ) : ExecutionOutcome
 
     /** No record under that reference. */

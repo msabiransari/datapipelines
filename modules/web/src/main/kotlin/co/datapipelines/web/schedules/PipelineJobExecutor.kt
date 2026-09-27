@@ -381,27 +381,30 @@ class PipelineJobExecutor(
         }
     }
 
-    /** R6's normative table (record §7.1), from the execution record. */
+    /** R6's normative table (record §7.1), from the execution record — its own timing rides along (#258). */
     private fun outcomeOf(record: ExecutionRecord): ExecutionOutcome =
         when (record.status) {
             ExecutionStatus.RUNNING -> ExecutionOutcome.Running
-            ExecutionStatus.SUCCESS -> ExecutionOutcome.Finished(RunState.SUCCEEDED, null)
-            ExecutionStatus.FAILED -> ExecutionOutcome.Finished(RunState.FAILED, EXECUTION_FAILED)
+            ExecutionStatus.SUCCESS -> ExecutionOutcome.Finished(RunState.SUCCEEDED, null, record.startedAt, record.completedAt)
+            ExecutionStatus.FAILED ->
+                ExecutionOutcome.Finished(RunState.FAILED, EXECUTION_FAILED, record.startedAt, record.completedAt)
             ExecutionStatus.ABORTED -> abortedOutcome(record)
         }
 
     private fun abortedOutcome(record: ExecutionRecord): ExecutionOutcome.Finished {
         // A5: the sweeper's `instance_lost` is NOT a conclusive abort — the worker may be alive.
         val code = record.errorJson?.let { runCatching { mapper.readTree(it).path("code").asText() }.getOrNull() }
-        if (code == PipelineErrorCodes.Execution.INSTANCE_LOST) return ExecutionOutcome.Finished(RunState.UNKNOWN, INSTANCE_LOST)
+        if (code == PipelineErrorCodes.Execution.INSTANCE_LOST) {
+            return ExecutionOutcome.Finished(RunState.UNKNOWN, INSTANCE_LOST, record.startedAt, record.completedAt)
+        }
         val reason =
             events
                 .findByExecution(record.executionId)
                 .lastOrNull { it.eventType == EXECUTION_ABORTED_EVENT }
                 ?.let { runCatching { mapper.readTree(it.payloadJson).path("reason").asText() }.getOrNull() }
         return when (reason) {
-            ABORT_CANCELLED -> ExecutionOutcome.Finished(RunState.CANCELLED, ABORT_CANCELLED)
-            else -> ExecutionOutcome.Finished(RunState.ABORTED, reason?.takeIf { it.isNotBlank() })
+            ABORT_CANCELLED -> ExecutionOutcome.Finished(RunState.CANCELLED, ABORT_CANCELLED, record.startedAt, record.completedAt)
+            else -> ExecutionOutcome.Finished(RunState.ABORTED, reason?.takeIf { it.isNotBlank() }, record.startedAt, record.completedAt)
         }
     }
 

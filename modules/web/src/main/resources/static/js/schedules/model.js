@@ -281,6 +281,17 @@
     return !!(run && ACTIVE[run.state]);
   }
 
+  /**
+   * How long the EXECUTION took, straight off the run (#258): `execution_duration_ms`, copied by
+   * the reconciler from the execution row it already reads. §20's own `finished_at` is when the
+   * RECONCILER recorded the end — up to a tick later — so it never answers this question. A number,
+   * or null when the run carries no execution timing (pre-V40 rows; a run that never launched) —
+   * callers fall back to the per-execution read where they may.
+   */
+  function executionDurationMs(run) {
+    return run && typeof run.execution_duration_ms === "number" ? run.execution_duration_ms : null;
+  }
+
   // A manual run's badge says "manual", not "Run now": beside the verb of that name a badge
   // reading like a button is a second button that does nothing.
   var ORIGIN_TEXT = { cron: "scheduled", catch_up: "catch-up", manual: "manual" };
@@ -603,6 +614,7 @@
     runChip: runChip,
     runStateText: runStateText,
     isActive: isActive,
+    executionDurationMs: executionDurationMs,
     originText: originText,
     blockedText: blockedText,
     unknownText: unknownText,

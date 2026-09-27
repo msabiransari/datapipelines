@@ -131,10 +131,12 @@ class RunReconciler(
             outcome.reason,
             TrailKind.UPDATED_AFTER_UNKNOWN,
             RunLedger.details("execution_id" to run.executionId, "previous_reason" to run.reason),
+            executionStartedAt = outcome.startedAt,
+            executionCompletedAt = outcome.completedAt,
         )
     }
 
-    /** A terminal by R6's table; `unknown` blocks (record §7.1). */
+    /** A terminal by R6's table; `unknown` blocks (record §7.1). The execution's own timing rides along (#258). */
     private fun finish(
         run: ScheduleRun,
         from: Set<RunState>,
@@ -150,6 +152,8 @@ class RunReconciler(
             RunLedger.details("execution_id" to run.executionId),
             block = unknown,
             blockReason = BLOCKED_BY_UNKNOWN_RUN,
+            executionStartedAt = outcome.startedAt,
+            executionCompletedAt = outcome.completedAt,
         )
     }
 

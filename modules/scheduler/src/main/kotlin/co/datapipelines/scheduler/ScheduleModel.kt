@@ -123,9 +123,7 @@ object RunReasons {
     const val CAPACITY = "capacity"
     const val START_UNCONFIRMED = "start_unconfirmed"
     const val START_FAILED = "start_failed"
-}
-
-/** The reason a schedule is blocked by an `unknown` run (record §2.1). An executor refusal blocks under its own reason. */
+}/** The reason a schedule is blocked by an `unknown` run (record §2.1). An executor refusal blocks under its own reason. */
 const val BLOCKED_BY_UNKNOWN_RUN = "run_unknown"
 
 /**
@@ -159,6 +157,14 @@ data class ScheduleRun(
     val startedAt: Instant?,
     val finishedAt: Instant?,
     val updatedAt: Instant,
+    /**
+     * The EXECUTION's own start and end (#258), copied by the reconciler from the row it already
+     * reads: unlike `started_at`/`finished_at` — claim and reconciler stamps — these answer how
+     * long the execution took, in one read, with no `execution.read` needed. Null until a terminal
+     * carrying them is recorded.
+     */
+    val executionStartedAt: Instant? = null,
+    val executionCompletedAt: Instant? = null,
 )
 
 /**

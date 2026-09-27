@@ -79,9 +79,12 @@
     S.time(dlg, "due", dueIso, M().localText(dueIso, timezone));
     S.time(dlg, "started", run.started_at, M().localText(run.started_at, timezone));
     S.time(dlg, "finished", run.finished_at, M().localText(run.finished_at, timezone));
-    // The EXECUTION's own time (§10.2) — see detail.js's durationFor for why not the run's stamps.
-    S.text(dlg, "duration", M().isActive(run) ? "running…" : "—");
-    if (run.execution_id && canReadExecutions()) {
+    // The EXECUTION's own time. The run's own `execution_duration_ms` (#258) answers in one read;
+    // the per-execution read is the fallback for runs finished before that field existed. See
+    // detail.js's durationFor for why §20's `finished_at` is not used.
+    var ownMs = M().executionDurationMs(run);
+    S.text(dlg, "duration", M().isActive(run) ? "running…" : ownMs !== null ? M().msText(ownMs) : "—");
+    if (run.execution_id && ownMs === null && canReadExecutions()) {
       API()
         .execution(run.execution_id)
         .then(function (r) {
