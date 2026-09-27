@@ -26,11 +26,15 @@ import java.util.UUID
  *     no SSE route, §7.7; should that ever change, the pin must join this check).
  *  2. **The live identity** — `users.is_admin` is read per request by the filter, never from a
  *     frozen flag, so the re-judgement reads the same snapshot through the same cache.
- *  3. **The context a new request would resolve now** — [WorkspaceService.resolveForSession],
- *     the request path's own resolution (claim, fallback, D-R8's super-admin branch), through
- *     the membership cache. A removal, a deactivation or a demotion is therefore seen on the
+ *  3. **The workspace the stream OPENED in, re-resolved now** — [WorkspaceService.resolveForSession]
+ *     asked with the subscriber's open-time resolution (the request path's own constructor:
+ *     claim, fallback, D-R8's super-admin branch) through the membership cache. #263: the name
+ *     asked is the one the filter RESOLVED at open — `subscriber.workspace` — not the JWT
+ *     claim, which a `DP-Workspace` header silently overrides on the request path: a stream
+ *     opened under a header switch keeps re-judging the workspace it opened in, while its
+ *     membership's removal, a workspace deactivation or a demotion is still seen on the
  *     instance that performed it at once, and elsewhere within one TTL (§11.4) — the bound P4
- *     accepts.
+ *     accepts. A UI subscriber (no header; claim = resolution) is judged exactly as before.
  *  4. **The route's own two checks** — the declared permission (`execution.read`, the role
  *     matrix) and [visibleTo] (own run / `execution.read_all`), asked of the refreshed
  *     principal. The record is looked up in the workspace the CURRENT context resolves: a
@@ -79,7 +83,14 @@ class ExecutionStreamAuthority(
         // (D-R1), and the resolution below branches on it (D-R8), so a demoted super admin must
         // not resolve a super-admin context their next request could not get.
         val liveIdentity = subscriber.copy(superAdmin = user.isAdmin)
-        val context = workspaces.resolveForSession(liveIdentity, liveIdentity.workspaceName) ?: return false
+        // #263: the claim asked is the OPEN-TIME resolution the filter stamped on the
+        // subscriber (a DP-Workspace header switch included) — re-resolving the JWT claim
+        // instead would judge the stream against a workspace it was never opened in (the
+        // record lookup misses, the equality fallback compares the wrong pair, the stream is
+        // wrongly cut). Null workspace — the pre-#263 principal shape, tests only — falls
+        // back to the claim, the pre-#263 behaviour. The membership in that workspace is
+        // RE-CHECKED by the resolution, so its revocation still cuts at this write.
+        val context = workspaces.resolveForSession(liveIdentity, subscriber.workspace?.name ?: liveIdentity.workspaceName) ?: return false
         val current = liveIdentity.copy(workspace = context)
         if (!current.holds(Permission.EXECUTION_READ)) return false
         val record = executions.findById(context.id, executionId)

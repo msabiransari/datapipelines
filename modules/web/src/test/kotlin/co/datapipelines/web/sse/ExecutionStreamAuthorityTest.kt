@@ -47,6 +47,8 @@ class ExecutionStreamAuthorityTest {
     private val executionId = UUID.randomUUID()
     private val ws =
         Workspace(UUID.randomUUID(), "acme", "acme", isPersonal = false, createdBy = null, isDeleted = false, createdAt = Instant.now())
+    private val wsOther =
+        Workspace(UUID.randomUUID(), "other", "other", isPersonal = false, createdBy = null, isDeleted = false, createdAt = Instant.now())
 
     /** The open-time snapshot: the member was an author with `acme` resolved, claim stamped. */
     private fun subscriberAtOpen(superAdmin: Boolean = false) =
@@ -145,11 +147,14 @@ class ExecutionStreamAuthorityTest {
 
     @Test
     fun `a super admin with a stale claim and one membership keeps reading (#216)`() {
-        // The fallback branch's context carries the instance authority, so the guard's
-        // permission ask succeeds exactly as the request path's would.
+        // The stale claim ("gone-ws") must not demote the instance authority. Since #263 the
+        // re-judgement asks the OPEN-TIME resolution ("acme") rather than the claim, so the
+        // claim is doubly irrelevant — the resolution below still runs the super-admin-aware
+        // constructor (#216's), which is what this test pins.
         liveUser(isAdmin = true)
         every { repository.membershipsOf(userId) } returns listOf(memberRow(WorkspaceRole.VIEWER))
         every { repository.findByName("gone-ws") } returns null
+        every { repository.findByName("acme") } returns ws
         ownRun()
 
         val subscriber = subscriberAtOpen().copy(workspaceName = "gone-ws")
@@ -166,6 +171,52 @@ class ExecutionStreamAuthorityTest {
         authority().mayRead(subscriberAtOpen(), executionId) shouldBe false
 
         memberships(WorkspaceRole.WORKSPACE_ADMIN)
+        authority().mayRead(subscriberAtOpen(), executionId) shouldBe true
+    }
+
+    @Test
+    fun `a header-switched subscriber re-judges the workspace it OPENED in, not the claim (#263)`() {
+        // Opened under `DP-Workspace: acme` while the JWT claim names `other`: the request
+        // path resolved the HEADER, so the re-judgement must re-resolve `acme`. The pre-#263
+        // shape re-resolved the claim instead, found no record there, compared `other` != the
+        // open-time `acme`, and cut the stream at its first write.
+        liveUser()
+        every { repository.membershipsOf(userId) } returns
+            listOf(
+                WorkspaceMembership(ws.id, "acme", WorkspaceRole.AUTHOR, Instant.now(), workspaceActive = true),
+                WorkspaceMembership(wsOther.id, "other", WorkspaceRole.VIEWER, Instant.now(), workspaceActive = true),
+            )
+        every { repository.findByName("acme") } returns ws
+        every { repository.findByName("other") } returns wsOther
+        ownRun()
+
+        val subscriber = subscriberAtOpen().copy(workspaceName = "other")
+
+        authority().mayRead(subscriber, executionId) shouldBe true
+    }
+
+    @Test
+    fun `a header-switched subscriber is cut when the opened workspace's membership is revoked (#263)`() {
+        // The same subscriber: the re-judgement still RE-CHECKS the acme membership through
+        // the cache — the open-time resolution is a claim on the workspace, not an entitlement.
+        liveUser()
+        every { repository.membershipsOf(userId) } returns
+            listOf(WorkspaceMembership(wsOther.id, "other", WorkspaceRole.VIEWER, Instant.now(), workspaceActive = true))
+        every { repository.findByName("acme") } returns ws
+        every { repository.findByName("other") } returns wsOther
+        ownRun()
+
+        val subscriber = subscriberAtOpen().copy(workspaceName = "other")
+
+        authority().mayRead(subscriber, executionId) shouldBe false
+    }
+
+    @Test
+    fun `a UI-shaped subscriber - claim equals the resolution - is judged exactly as before (#263)`() {
+        liveUser()
+        memberships(WorkspaceRole.AUTHOR)
+        ownRun()
+
         authority().mayRead(subscriberAtOpen(), executionId) shouldBe true
     }
 
