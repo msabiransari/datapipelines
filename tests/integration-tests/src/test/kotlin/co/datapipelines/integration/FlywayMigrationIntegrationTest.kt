@@ -139,6 +139,8 @@ class FlywayMigrationIntegrationTest {
                 // #9 scheduler lane 1 — schedules, schedule_runs, schedule_run_events (append-only by
                 // trigger), db-scheduler 16.12.0's own scheduled_tasks, and SCHEDULE in chk_triggered_via.
                 "38|scheduler core|true",
+                // #194 lane B — parameter_sets + parameter_set_versions (the templates shape, one-draft index).
+                "39|parameter sets|true",
             )
     }
 
@@ -396,6 +398,36 @@ class FlywayMigrationIntegrationTest {
                     "WHERE (supersedes IS NOT NULL)",
                 "CREATE INDEX idx_template_implements_fact ON public.template_implements USING btree (fact_id)",
             )
+    }
+
+    /**
+     * #194 (V39) — the parameter engine's two tables, read from the SHIPPED database: the status and
+     * stamp CHECKs the lifecycle relies on and the one-draft partial index (versioning §3.3). The
+     * lifecycle itself is `modules/parameters`' own container suite; this pins that production Flyway
+     * builds the schema that suite runs on.
+     */
+    @Test
+    fun `V39 creates the parameter sets' tables with the lifecycle's checks and the one-draft index`() {
+        query(
+            "SELECT conname FROM pg_constraint WHERE conrelid = 'parameter_set_versions'::regclass AND contype = 'c' ORDER BY conname",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_parameter_set_versions_body",
+                "chk_parameter_set_versions_discard_stamps",
+                "chk_parameter_set_versions_release_stamps",
+                "chk_parameter_set_versions_status",
+                "chk_parameter_set_versions_version",
+                "chk_parameter_set_versions_via",
+            )
+        query(
+            "SELECT pg_get_indexdef(indexrelid) FROM pg_index WHERE indexrelid = 'uq_parameter_set_versions_one_draft'::regclass",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "CREATE UNIQUE INDEX uq_parameter_set_versions_one_draft ON public.parameter_set_versions USING btree (parameter_set_id) " +
+                    "WHERE (status = 'DRAFT'::text)",
+            )
+        columnsOf("parameter_sets") shouldContainExactlyInAnyOrder
+            listOf("id", "workspace_id", "name", "display_name", "description", "current_version", "created_at", "updated_at", "created_by")
     }
 
     /**
@@ -852,7 +884,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the twenty-five tables of metadata-db §4`() {
+    fun `creates exactly the twenty-seven tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -878,6 +910,9 @@ class FlywayMigrationIntegrationTest {
                 "learned_facts",
                 // 137 (V27) — the mail claim rows.
                 "mail_sends",
+                // #194 (V39) — the parameter engine's sets and their versions (metadata-db §4.26/§4.27).
+                "parameter_set_versions",
+                "parameter_sets",
                 // #9 (V38) — the scheduler: db-scheduler's queue, the schedules, their runs and the runs' trail.
                 "scheduled_tasks",
                 "schedule_run_events",
@@ -960,6 +995,11 @@ class FlywayMigrationIntegrationTest {
                 // 137 (V27) — one claim per message identity (user, kind, act).
                 "mail_sends.mail_sends_pkey",
                 "mail_sends.uq_mail_sends_message",
+                // #194 (V39) — a version's (set, version) fetch, the one-draft rule; the set's id and per-workspace name.
+                "parameter_set_versions.parameter_set_versions_pkey",
+                "parameter_set_versions.uq_parameter_set_versions_one_draft",
+                "parameter_sets.parameter_sets_pkey",
+                "parameter_sets.uq_parameter_sets_workspace_name",
                 // 140 (V28) — the latest-run-per-check read.
                 "pipeline_check_runs.idx_pipeline_check_runs_latest",
                 "pipeline_check_runs.pipeline_check_runs_pkey",
@@ -1091,6 +1131,15 @@ class FlywayMigrationIntegrationTest {
                 "chk_learned_facts_via",
                 // 137 (V27) — mail_sends.kind is the closed welcome | password_reset | new_user list.
                 "chk_mail_sends_kind",
+                // #194 (V39) — parameter_sets' pointer floor and parameter_set_versions' version floor, body shape,
+                // release and discard stamps, status and write surface (metadata-db §4.26/§4.27).
+                "chk_parameter_set_versions_body",
+                "chk_parameter_set_versions_discard_stamps",
+                "chk_parameter_set_versions_release_stamps",
+                "chk_parameter_set_versions_status",
+                "chk_parameter_set_versions_version",
+                "chk_parameter_set_versions_via",
+                "chk_parameter_sets_current_version",
                 // 140 (V28) — the surface and verdict closed lists (metadata-db §4.20).
                 "chk_pipeline_check_runs_verdict",
                 "chk_pipeline_check_runs_via",

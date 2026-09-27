@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.33 (single source of truth for every config key)
+**Status:** v1.34 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-26
 
 ---
 
@@ -494,6 +494,30 @@ The scheduler's knobs ([Scheduler](scheduler.md)). Every instance serves the sch
 
 Scheduled runs keep the instance's execution timeout (`datapipelines.executor.execution-timeout-seconds`) and ask for the maximum result TTL (`datapipelines.result.ttl-max-seconds`); there is no scheduler-specific budget in v1. One Spring Boot key is set with them: `management.health.db-scheduler.enabled: false` — the library's health indicator reports DOWN on an API-mode instance (it never starts there), and a dispatcher stall must not restart a pod; watch the scheduler's metrics instead ([Observability §4](observability.md#4-metrics)).
 
+### 3.30 Parameter engine (#194)
+
+The parameter engine's limits ([the design record](superpowers/specs/2026-09-21-parameter-engine-design.md) §11). The save-time validator reads the collection, expression and option caps (every one enforced BEFORE the set's graph is built, and the collection caps before their members are even read), and the shared value validator reads `max-regex-steps` and `max-input-length` — the latter is the ENGINE's `max_length` default for an `INPUT` string that declares none (a pipeline parameter keeps none, record P34). The evaluate keys (the timeouts, the selector bulkhead, the binds and the response budget) are read by the runtime (#194 lane C). Each bound below is enforced at boot (§7) and again when the keys bind (`ParametersProperties` → `ParametersConfig`), naming the key.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.parameters.max-parameters-per-set` | `64` | Parameters in one set. 1..256 |
+| `datapipelines.parameters.max-options-per-selector` | `200` | Options one selector may return; one more is too_many_options. 1..10000 |
+| `datapipelines.parameters.max-multi-bind-values` | `1000` | Values in one MULTI selection. 1..1000 |
+| `datapipelines.parameters.max-binds-per-statement` | `2000` | Placeholders in one rendered selector statement, every expanded one counted. 1..2000 |
+| `datapipelines.parameters.max-option-value-chars` | `1024` | Characters in one option value. 1..65536 |
+| `datapipelines.parameters.max-option-label-chars` | `256` | Characters in one option label. 1..4096 |
+| `datapipelines.parameters.max-input-length` | `4096` | The max_length an INPUT string gets when it declares none. 1..65536 |
+| `datapipelines.parameters.max-expression-depth` | `16` | Nesting depth of a hidden/disabled expression. 1..64 |
+| `datapipelines.parameters.max-expression-nodes` | `128` | Operators in one expression. 1..1024 |
+| `datapipelines.parameters.max-regex-steps` | `100000` | The read budget of a pattern constraint's match. 1000..10000000 |
+| `datapipelines.parameters.evaluate-timeout-seconds` | `30` | Wall clock for one evaluate. 1..300 |
+| `datapipelines.parameters.selector-query-timeout-seconds` | `10` | One selector statement's timeout. 1..evaluate-timeout-seconds |
+| `datapipelines.parameters.max-concurrent-selector-queries` | `4` | Selector statements running at once (the bulkhead). 1..32 |
+| `datapipelines.parameters.max-waiting-selector-queries` | `64` | Selector statements admitted beyond the running ones. 0..1024 |
+| `datapipelines.parameters.max-evaluate-response-bytes` | `4194304` | An evaluate response's byte budget. 65536..67108864 |
+
+No options cache in round one (`selector-cache-ttl-seconds` is deliberately absent — the record's §11: authority-aware keys and invalidation are its price, and it lands when a measured query count says it must).
+
 ---
 
 ## 4. Precedence
@@ -756,6 +780,22 @@ datapipelines:
     shutdown-wait-seconds: ${DATAPIPELINES_SCHEDULER_SHUTDOWN_WAIT_SECONDS:5}
     min-interval-seconds: ${DATAPIPELINES_SCHEDULER_MIN_INTERVAL_SECONDS:300}
     max-schedules-per-workspace: ${DATAPIPELINES_SCHEDULER_MAX_SCHEDULES_PER_WORKSPACE:100}
+  parameters:                      # §3.30 — the parameter engine (#194)
+    max-parameters-per-set: ${DATAPIPELINES_PARAMETERS_MAX_PARAMETERS_PER_SET:64}
+    max-options-per-selector: ${DATAPIPELINES_PARAMETERS_MAX_OPTIONS_PER_SELECTOR:200}
+    max-multi-bind-values: ${DATAPIPELINES_PARAMETERS_MAX_MULTI_BIND_VALUES:1000}
+    max-binds-per-statement: ${DATAPIPELINES_PARAMETERS_MAX_BINDS_PER_STATEMENT:2000}
+    max-option-value-chars: ${DATAPIPELINES_PARAMETERS_MAX_OPTION_VALUE_CHARS:1024}
+    max-option-label-chars: ${DATAPIPELINES_PARAMETERS_MAX_OPTION_LABEL_CHARS:256}
+    max-input-length: ${DATAPIPELINES_PARAMETERS_MAX_INPUT_LENGTH:4096}
+    max-expression-depth: ${DATAPIPELINES_PARAMETERS_MAX_EXPRESSION_DEPTH:16}
+    max-expression-nodes: ${DATAPIPELINES_PARAMETERS_MAX_EXPRESSION_NODES:128}
+    max-regex-steps: ${DATAPIPELINES_PARAMETERS_MAX_REGEX_STEPS:100000}
+    evaluate-timeout-seconds: ${DATAPIPELINES_PARAMETERS_EVALUATE_TIMEOUT_SECONDS:30}
+    selector-query-timeout-seconds: ${DATAPIPELINES_PARAMETERS_SELECTOR_QUERY_TIMEOUT_SECONDS:10}
+    max-concurrent-selector-queries: ${DATAPIPELINES_PARAMETERS_MAX_CONCURRENT_SELECTOR_QUERIES:4}
+    max-waiting-selector-queries: ${DATAPIPELINES_PARAMETERS_MAX_WAITING_SELECTOR_QUERIES:64}
+    max-evaluate-response-bytes: ${DATAPIPELINES_PARAMETERS_MAX_EVALUATE_RESPONSE_BYTES:4194304}
 
 # The scheduler's library reads its own prefix; every value comes from datapipelines.scheduler.*
 # above (§3.29). Framework wiring, not an operator surface.
@@ -851,6 +891,7 @@ On startup, the app validates:
 - **The `hardened` posture (§3.23),** each refusal naming the variable and the posture: `datapipelines.demo` must be empty; no local bootstrap credential may be set (`bootstrap-password` or `bootstrap-password-hash` — local accounts themselves stay allowed); `spring.datasource.url` and `datapipelines.redis.host` must not be loopback (039's dev-profile guard, inverted and reused — "dev convenience must never touch production infrastructure" is the same fact as "a hardened deployment does not run against a laptop's database"); and at least one OIDC provider must be fully configured unless `datapipelines.auth.allow-local-only=true`, which is logged as `event=config.auth_local_only`.
 - **Organisation (§3.21):** `datapipelines.org.fiscal-start-date` is `MM-DD` and a day the calendar has — `02-30` and `13-01` are refused, and a month name (`SEP-15`) is refused with a message naming the `MM-DD` form; `datapipelines.org.week-start` is `monday` or `sunday`; `datapipelines.org.timezone` is an IANA zone id (a fixed offset such as `+02:00` is not one); `datapipelines.org.currency.name` and `.symbol` are non-blank. All four report together — every value is in every Context, so a wrong one is a wrong number in every report the deployment produces.
 - **Transform (§3.28, 7b):** `datapipelines.transform.evaluate-timeout-seconds` ≤ `suite-timeout-seconds`; `abandon-grace-seconds` ≥ 1; `pool-size` ≥ 1 and `pool-queue` ≥ `pool-size`; `max-input-rows`, `max-value-bytes`, `max-string-bytes` and `max-depth` each ≥ 1 — every refusal naming the keys.
+- **Parameter engine (§3.30, #194):** every `datapipelines.parameters.*` key is an integer within its row's bounds, and `selector-query-timeout-seconds` ≤ `evaluate-timeout-seconds` — one statement must fit inside its evaluate; every refusal names the key.
 - **Redis auth:** when `datapipelines.redis.password` is empty (after trimming) and `datapipelines.redis.host` is not loopback — under `development`, log a structured WARN `event=config.redis_no_password` (production Redis holds materialized caller results — [Deployment §9](deployment.md#9-security-hardening-checklist-deployment)); under the **`hardened` posture** it is a REFUSAL naming the key and the host, the same treatment Postgres's password gets as a §2 required key (#189). The refusal replaces the warning; a hardened boot never logs both.
 - `datapipelines.deployment.promotion.server-key` set ⇒ **WARN** (091): the value is deprecated in favour of a `server`-kind API key and is removed next release. Presence only — the warning never carries the secret.
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
@@ -867,6 +908,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.34 | 194b (#194) parameter engine lane B — numbered after origin/main's v1.33 (260) | New **§3.30 Parameter engine**: the fifteen `datapipelines.parameters.*` keys of the design record's §11 with their bounds (enforced at boot by `ConfigValidator` and at binding by `ParametersProperties`); §5's template gains the `parameters:` block as the last child of `datapipelines:`; §7 lists the rule. No options cache (the record's §11). |
 | 2026-09-26 | v1.33 | 260 the depth-accounting fix (#260) — numbered after origin/main's v1.32 (246) | §3.28's `max-depth` row re-stated: the depth bound is counted at every evaluate entry and exit by the engine itself (the library `Timebox` skipped `isParallelCall` frames, leaking a unit per item on set-level shapes until #260), nested evaluation and non-tail lambda recursion included; a tail-recursive lambda is trampolined by the library and the wall clock is its bound. No key, default or binding changed. |
 | 2026-09-26 | v1.32 | 246 (#246) the avatar proxy hardened — numbered after scheduler lane 1's v1.31 (#9, merging at dispatch) | §3.4's `picture-hosts` row says **no port** on both sides: an entry is a bare hostname (unchanged), and a stored picture URL naming a port is refused; it points at auth.md §11.1 for the two other #246 rules (raster types only, one 5 s budget for the whole fetch). No key, default or binding changed. |
 | 2026-09-26 | v1.31 | scheduler lane 1 (#9) — numbered after origin/main's v1.30 (197) | New **§3.29 Scheduler**: the eleven `datapipelines.scheduler.*` keys (dispatch on/off — API mode, threads, polling, heartbeat, tick, max concurrent runs, lateness, catch-up reach, shutdown wait, the two save guards) with their bounds, enforced at binding; `management.health.db-scheduler.enabled: false`. §5 template gains the `scheduler:` block and the top-level `db-scheduler:` wiring fed from it. Status caught up (it read v1.27 after v1.29's row; main's v1.30 row is 197's). |

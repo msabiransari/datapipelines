@@ -162,6 +162,18 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         // #194 — `Dag<T>` now lives in `graph` (same package); the executor builds its DAGs from it.
         ":modules:graph",
     ),
+    // #194 lane B (parameter-engine record §2.2/§2.4) — the parameter engine, layer 4 beside `dag`.
+    // `pipeline-contract` is compiled against (TemplateRef, the name grammars, the template/datasource
+    // ports the save-time validator calls — record §14 item 3, answered); `templates` and `datasources`
+    // are allowed for the selector runtime (lane C) and not declared until something compiles against
+    // them. No `dag`: the engine builds its graph from `graph`'s Dag<T> without the executor's set.
+    ":modules:parameters" to setOf(
+        ":modules:typesystem",
+        ":modules:graph",
+        ":modules:pipeline-contract",
+        ":modules:templates",
+        ":modules:datasources",
+    ),
     // The cross-aggregate use-case layer (056/R6): below `web` and `mcp-server`, above the
     // domain modules. `templates` and `datasources` are allowed here for slices B/C's moves
     // (the import services, promotion) and are not declared in the module's build file until
@@ -174,6 +186,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:datasources",
         ":modules:dag",
         ":modules:auth",
+        // #194 (record §2.4) — promotion and the templates reverse arrow (lane D); allowed ahead, undeclared.
+        ":modules:parameters",
     ),
     ":modules:mcp-server" to setOf(
         ":modules:typesystem",
@@ -184,6 +198,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:dag",
         ":modules:auth",
         ":modules:application",
+        // #194 (record §2.4) — the six parameter-set tools (lane D); allowed ahead, undeclared.
+        ":modules:parameters",
     ),
     ":modules:web" to setOf(
         ":modules:typesystem",
@@ -199,6 +215,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:mcp-server",
         // #9 — the schedules REST surface and the scheduler's composition root (web/config, A3).
         ":modules:scheduler",
+        // #194 (record §2.4) — the parameter-set REST routes and the engine's wiring (lane D); allowed ahead, undeclared.
+        ":modules:parameters",
     ),
     ":modules:app" to setOf(":modules:web"),
     ":tests:integration-tests" to setOf(":modules:app"),

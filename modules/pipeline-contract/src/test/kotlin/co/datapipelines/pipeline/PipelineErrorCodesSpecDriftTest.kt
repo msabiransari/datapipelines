@@ -144,6 +144,11 @@ class PipelineErrorCodesSpecDriftTest {
                 "pipeline.transform.",
                 // #9 — the scheduler's refusals (§13.19).
                 "schedule.",
+                // #194 — the parameter engine (§13.20): both halves of the table, because the save-time
+                // and the runtime families are separate row runs and a truncated parse could drop one.
+                "parameter.validation.",
+                "parameter.evaluate.",
+                "parameter.version.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")
@@ -206,6 +211,9 @@ class PipelineErrorCodesSpecDriftTest {
                 PipelineErrorCodes.Schedule.REVISION_CONFLICT,
                 PipelineErrorCodes.Schedule.BLOCKED,
                 PipelineErrorCodes.Schedule.NOT_BLOCKED,
+                // #194 §13.20 — a parameter set IS the entity (like `template.not_found`): its not-found has
+                // no entity dimension under it. Every other parameter code keeps three segments.
+                PipelineErrorCodes.Parameters.NOT_FOUND,
                 PipelineErrorCodes.Result.EXECUTION_NOT_FOUND,
                 PipelineErrorCodes.Result.EXECUTION_INCOMPLETE,
                 PipelineErrorCodes.Result.EXECUTION_FAILED,

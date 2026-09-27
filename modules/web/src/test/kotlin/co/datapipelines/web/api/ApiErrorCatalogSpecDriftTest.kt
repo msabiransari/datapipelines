@@ -263,8 +263,15 @@ class ApiErrorCatalogSpecDriftTest {
          * in the SAME commit as their `ScheduleErrorCodes` constants, the catalog's mirror in
          * `PipelineErrorCodes.Schedule` and the adapter that raises them. Both lanes bumped from 221;
          * re-derived from the MERGED document's own parse at the scheduler-3 merge.
+         *
+         * 224 → 304 with #194 lane B: the new §13.20 (Parameter sets) — 80 rows, one code each, landed
+         * in the SAME commit as `ParameterErrorCodes`, its mirror `PipelineErrorCodes.Parameters` and
+         * these catalog rows (the family defaults, five EXCEPTIONS, ten NEVER_RETURNED_LIVE per-parameter
+         * evaluate codes). Re-derived from the document's own parse on the lane's base 2e32943e; a lane
+         * merging beside it re-derives again. 304 → 305 in the same lane: the owner's third ruling
+         * (2026-09-27) adds `parameter.validation.input_source_multiple_rows` (400, the family default).
          */
-        const val SECTION_13_ROW_COUNT = 224
+        const val SECTION_13_ROW_COUNT = 305
 
         /**
          * §12's distinct validation codes.

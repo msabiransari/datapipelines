@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.21 (living document — updated as enums evolve)
+**Status:** v1.22 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -492,7 +492,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 **Source:** [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) — the ONLY catalog of concrete error codes. This section registers domains; deliberately no code list here, so there is exactly one place a code can drift from.
 **Used by:** every spec that defines error codes.
 
-Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `datasource.table_not_found`, `datasource.table_forbidden`, `template.not_found`, the bare `template.*` block and citation codes (`template.contract_invalid`, …, `template.implements_unresolved` — about the version's own content, 7b/7e), `rate_limit.exceeded`, `rate_limit.unavailable`, every `semantics.*` code — a learned fact has no sub-entity — `mcp.doc_not_found`, and the schedule's own states: `schedule.not_found`, `schedule.name_taken`, `schedule.revision_conflict`, `schedule.blocked`, `schedule.not_blocked`). Additive-only — never reused, never renamed.
+Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `datasource.table_not_found`, `datasource.table_forbidden`, `template.not_found`, the bare `template.*` block and citation codes (`template.contract_invalid`, …, `template.implements_unresolved` — about the version's own content, 7b/7e), `rate_limit.exceeded`, `rate_limit.unavailable`, every `semantics.*` code — a learned fact has no sub-entity — `mcp.doc_not_found`, the schedule's own states: `schedule.not_found`, `schedule.name_taken`, `schedule.revision_conflict`, `schedule.blocked`, `schedule.not_blocked`, and `parameter.not_found` — a parameter set is the entity). Additive-only — never reused, never renamed.
 
 | Domain | Description | Catalog section |
 |---|---|---|
@@ -516,6 +516,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `template.version.*` | Template draft/release lifecycle | pipeline-contract §13.9 (defined in [Versioning](versioning.md)) |
 | `semantics.*` | The learned semantic layer: recording, evidence, duplicate and drift refusals | pipeline-contract §13.15 (defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md)) |
 | `mcp.*` | The MCP surface's own refusals (the resource surface's not-found is the JSON-RPC protocol's, not a code) | pipeline-contract §13.16 (defined in [MCP §6.2](mcp-server.md#62-tool-definitions)) |
+| `parameter.*` (`parameter.validation.*`, `parameter.evaluate.*`, `parameter.version.*`, `parameter.release.*`, `parameter.import.*`, `parameter.authoring.*`, `parameter.not_found`) | The parameter engine (#194): a parameter set's save-time validation, the evaluate runtime's whole-request and per-parameter refusals (the per-parameter ones are reported in `state.errors[]` of a 200, never as a response status), and the `template.*` twins of the lifecycle | pipeline-contract §13.20 (defined in the [parameter-engine design record](superpowers/specs/2026-09-21-parameter-engine-design.md) §10) |
 | `schedule.*` (incl. `schedule.validation.*`, `schedule.run.*`, `schedule.limit.*`) | Schedule save-time validation, state conflicts and not-found (#9) — never raised while a schedule fires; a run that could not start is a `not_started` run (§24) | pipeline-contract §13.19 (defined in [Scheduler](scheduler.md)) |
 
 **Removed 2026-08-07** (D5): the `auth.rate_limit.*` domain (folded into `rate_limit.exceeded`), the `template.import.*` domain (folded into `template.validation.*`), the `idempotency_key.*` spelling (now `idempotency.*`), and `result.claim_check_expired` (now `result.expired` under the D9 result model).
@@ -725,6 +726,73 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 
 ---
 
+## 27. `ParameterKind` — the two kinds of control (#194)
+
+**Source:** the [parameter-engine record §3.2, P23](superpowers/specs/2026-09-21-parameter-engine-design.md); the Kotlin enum is `ParameterKind` (`parameters`, `ParameterSetModel.kt`).
+**Used by:** the parameter engine; its REST/MCP surfaces (lane D).
+
+| Value | Meaning |
+|---|---|
+| `INPUT` | A value the user TYPES. Always `SINGLE`; its initial value is hard-coded (`default_value`) or comes from a one-row template (`source.template`) |
+| `SELECT` | A value the user PICKS. `SINGLE` or `MULTI`; its options are hard-coded (`source.constants`) or come from a template (`source.template`) |
+
+**Closed.** Any other value is `parameter.validation.kind_invalid`. A third, caller-supplied `FIXED` kind was considered and rejected by the owner (the record's §13).
+
+---
+
+## 28. `SelectorSourceKind` — where a parameter's options or initial value come from (#194)
+
+**Source:** the [parameter-engine record §3.3/§3.4](superpowers/specs/2026-09-21-parameter-engine-design.md); the Kotlin enum is `SelectorSourceKind` (`parameters`), DERIVED from which of `source`'s keys is present — it is never a wire key itself.
+**Used by:** the parameter engine.
+
+| Value | The `source` shape | Meaning |
+|---|---|---|
+| `constants` | `{"constants": [{value, display_value, is_default}, …]}` | Options the author wrote into the definition — the default way to populate a select; no datasource, no query. `SELECT` only |
+| `template` | `{"template": {"id", "version"}, "datasource": "<name>"}` | A pinned `sql` template run on a datasource: a `SELECT`'s option rows, or an `INPUT`'s one-row initial value |
+
+**Closed.** A `source` stating both or neither is `parameter.validation.source_ambiguous`; `constants` on an `INPUT` is `source_not_allowed`.
+
+---
+
+## 29. `PresentationControl` — how a renderer may show a parameter (#194)
+
+**Source:** the [parameter-engine record §3.7, P23c](superpowers/specs/2026-09-21-parameter-engine-design.md); the Kotlin enum is `PresentationControl` (`parameters`). Which values a parameter may name depends on kind × cardinality × type — the record's §3.7 table; the first allowed value of a row is the derived default a renderer receives when none is stated.
+**Used by:** the parameter engine (validation and echo only — nothing reads it for meaning, binding or evaluation).
+
+| Value | Allowed on |
+|---|---|
+| `text` | `INPUT` of every type but `BOOLEAN` (the derived default for `STRING`/`BINARY`) |
+| `textarea` | `INPUT` `STRING`/`BINARY` |
+| `number` | `INPUT` numeric (`INTEGER`, `BIGINTEGER`, `DECIMAL`, `BIGDECIMAL`) — the derived default |
+| `toggle` | `INPUT` `BOOLEAN` — the derived default |
+| `checkbox` | `INPUT` `BOOLEAN` |
+| `calendar` | `INPUT` `DATE` — the derived default |
+| `clock` | `INPUT` `TIME` — the derived default |
+| `datetime` | `INPUT` `TIMESTAMP` — the derived default |
+| `dropdown` | `SELECT` `SINGLE` and `MULTI` — the derived default of both |
+| `radio` | `SELECT` `SINGLE` |
+| `list` | `SELECT` `SINGLE` and `MULTI` |
+| `checkboxes` | `SELECT` `MULTI` |
+
+**Closed but additive** — a new value is a change-log row, never a bump. An unknown value is `parameter.validation.presentation_invalid`; a known one outside its row is `control_not_applicable`.
+
+---
+
+## 30. `NumericFormatKind` — a numeric parameter's display format (#194)
+
+**Source:** the [parameter-engine record §3.7](superpowers/specs/2026-09-21-parameter-engine-design.md); the Kotlin enum is `NumericFormatKind` (`parameters`), the `kind` of a numeric `presentation.format`. A temporal type's format is a `pattern` instead; `STRING`/`BOOLEAN`/`BINARY` take none.
+**Used by:** the parameter engine (validation and echo only).
+
+| Value | Meaning |
+|---|---|
+| `plain` | The number as it is |
+| `currency` | The deployment's currency, carried once per evaluate response as `org` (`datapipelines.org.currency-symbol` / `-name`). Decimal places come from `scale`, never from here |
+| `percent` | As a percentage |
+
+**Closed.** Any other value — or a `kind` on a non-numeric type — is `parameter.validation.format_invalid`.
+
+---
+
 ## Cross-Reference: Where Each Enum Is Authored
 
 | Enum | Authoring spec | Consuming specs |
@@ -756,6 +824,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 | `CheckRunVia` | pipeline-contract (`ReleaseCheckGate.kt`; §21 here is the wire table) | metadata-db (the V28 CHECK), application, mcp-server, rest-api, the UI |
 | `MissedRunPolicy`, `RunOrigin`, `RunState`, `TrailKind` | [scheduler.md](scheduler.md) (`scheduler` declares them; §22–§25 here are the wire tables) | metadata-db (the V38 CHECKs), rest-api §20 |
 | `ParameterCardinality` | pipeline-contract §6.1 (`typesystem` declares it; §26 here is the wire table) | the parameter engine (#194), rest-api, mcp-server |
+| `ParameterKind`, `SelectorSourceKind`, `PresentationControl`, `NumericFormatKind` | the [parameter-engine record §3](superpowers/specs/2026-09-21-parameter-engine-design.md) (`parameters` declares them; §27–§30 here are the wire tables) | rest-api, mcp-server (#194 lane D) |
 
 ---
 
@@ -778,6 +847,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.22 | 194b (#194) parameter engine lane B | New **§27 `ParameterKind`** (`INPUT`, `SELECT`), **§28 `SelectorSourceKind`** (`constants`, `template` — derived, never a wire key), **§29 `PresentationControl`** (twelve controls, the record's §3.7 table) and **§30 `NumericFormatKind`** (`plain`, `currency`, `percent`); §16 registers the `parameter.*` domain (pipeline-contract §13.20) and `parameter.not_found` as its one two-segment code. |
 | 2026-09-26 | v1.21 | 194a (#194) parameter engine lane A | New **§26 `ParameterCardinality`** (`SINGLE`, `MULTI`) — a pipeline parameter's optional `cardinality`, shared with the parameter engine; `MULTI` is refused on a pipeline until the dashboard round. Cross-reference row added. |
 | 2026-09-25 | v1.20 | scheduler lane 1 (#9) | §18 gains **`SCHEDULE`** (V38); the never-shipped `SCHEDULED` placeholder is marked superseded (kept — this document never removes a value). §15 gains the seven **schedule audit events** (`schedule.created` … `schedule.run_requested`). §16 registers the `schedule.*` domain (pipeline-contract §13.19). New **§22 `MissedRunPolicy`**, **§23 `RunOrigin`**, **§24 `RunState`**, **§25 `TrailKind`**. |
 | 2026-09-25 | v1.19 | 7e (#7) the semantic link | §16: the `pipeline.release.*` row names its one WARNING code (`pipeline.release.template_needs_review`, in the release response's `warnings`, never an error), and the two-segment list names the bare `template.*` block/citation codes (7b's, and 7e's `template.implements_unresolved`). No enum value added, removed or renamed. |

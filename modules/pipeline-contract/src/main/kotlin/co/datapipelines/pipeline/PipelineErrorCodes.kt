@@ -1487,4 +1487,174 @@ object PipelineErrorCodes {
         /** 400 — the same parameter supplied in `parameters` and `parameter_bindings` (#9 slice 3). */
         const val BINDING_CONFLICT = "schedule.validation.binding_conflict"
     }
+
+    /**
+     * §13.20 — the parameter engine (#194, record §10). The catalog's copy of `ParameterErrorCodes`
+     * (`modules/parameters`), pinned equal by reflection there (`ParameterErrorCodesTest`); `web`'s
+     * `ApiErrorCatalog` reads these until it depends on the engine (lane D). `SELECTOR_PROBE_UNAVAILABLE`
+     * is the one temporary code — it leaves with #194 lane C.
+     */
+    object Parameters {
+        const val NAME_INVALID = "parameter.validation.name_invalid"
+
+        const val NAME_RESERVED = "parameter.validation.name_reserved"
+
+        const val NEW_ROOT_REQUIRES_CONFIRMATION = "parameter.validation.new_root_requires_confirmation"
+
+        const val DUPLICATE_NAME = "parameter.validation.duplicate_name"
+
+        const val DUPLICATE_PARAMETER = "parameter.validation.duplicate_parameter"
+
+        const val TOO_MANY_PARAMETERS = "parameter.validation.too_many_parameters"
+
+        const val BODY_INVALID = "parameter.validation.body_invalid"
+
+        const val LABEL_INVALID = "parameter.validation.label_invalid"
+
+        const val DESCRIPTION_TOO_LONG = "parameter.validation.description_too_long"
+
+        const val TYPE_INVALID = "parameter.validation.type_invalid"
+
+        const val PRECISION_MISSING = "parameter.validation.precision_missing"
+
+        const val SCALE_MISSING = "parameter.validation.scale_missing"
+
+        const val KIND_INVALID = "parameter.validation.kind_invalid"
+
+        const val CARDINALITY_INVALID = "parameter.validation.cardinality_invalid"
+
+        const val DEFAULT_TYPE_MISMATCH = "parameter.validation.default_type_mismatch"
+
+        const val DEFAULT_NOT_AN_OPTION = "parameter.validation.default_not_an_option"
+
+        const val DEFAULT_INVALID = "parameter.validation.default_invalid"
+
+        const val SOURCE_MISSING = "parameter.validation.source_missing"
+
+        const val SOURCE_AMBIGUOUS = "parameter.validation.source_ambiguous"
+
+        const val SOURCE_NOT_ALLOWED = "parameter.validation.source_not_allowed"
+
+        const val CONSTRAINTS_ON_SELECT = "parameter.validation.constraints_on_select"
+
+        const val CONSTRAINT_NOT_APPLICABLE = "parameter.validation.constraint_not_applicable"
+
+        const val CONSTRAINT_INVALID = "parameter.validation.constraint_invalid"
+
+        const val PATTERN_INVALID = "parameter.validation.pattern_invalid"
+
+        const val FORMAT_INVALID = "parameter.validation.format_invalid"
+
+        const val PRESENTATION_INVALID = "parameter.validation.presentation_invalid"
+
+        const val CONTROL_NOT_APPLICABLE = "parameter.validation.control_not_applicable"
+
+        const val FORMAT_PATTERN_INVALID = "parameter.validation.format_pattern_invalid"
+
+        const val OPTION_INVALID = "parameter.validation.option_invalid"
+
+        const val OPTION_DUPLICATE = "parameter.validation.option_duplicate"
+
+        const val MULTIPLE_DEFAULTS = "parameter.validation.multiple_defaults"
+
+        const val TOO_MANY_OPTIONS = "parameter.validation.too_many_options"
+
+        const val DEPENDENCY_UNKNOWN = "parameter.validation.dependency_unknown"
+
+        const val DEPENDENCY_SELF = "parameter.validation.dependency_self"
+
+        const val DEPENDENCY_CYCLE = "parameter.validation.dependency_cycle"
+
+        const val BIND_UNDECLARED = "parameter.validation.bind_undeclared"
+
+        const val REF_UNDECLARED = "parameter.validation.ref_undeclared"
+
+        const val EXPRESSION_INVALID = "parameter.validation.expression_invalid"
+
+        const val EXPRESSION_DEPTH_EXCEEDED = "parameter.validation.expression_depth_exceeded"
+
+        const val EXPRESSION_TOO_LARGE = "parameter.validation.expression_too_large"
+
+        const val EXPRESSION_CARDINALITY = "parameter.validation.expression_cardinality"
+
+        const val EXPRESSION_LITERAL_TYPE = "parameter.validation.expression_literal_type"
+
+        const val EXPRESSION_TYPE_UNSUPPORTED = "parameter.validation.expression_type_unsupported"
+
+        const val TEMPLATE_NOT_FOUND = "parameter.validation.template_not_found"
+
+        const val TEMPLATE_VERSION_NOT_FOUND = "parameter.validation.template_version_not_found"
+
+        const val TEMPLATE_TYPE_MISMATCH = "parameter.validation.template_type_mismatch"
+
+        const val TEMPLATE_DIALECT_MISMATCH = "parameter.validation.template_dialect_mismatch"
+
+        const val TEMPLATE_RENDER_FAILED = "parameter.validation.template_render_failed"
+
+        const val DATASOURCE_NOT_FOUND = "parameter.validation.datasource_not_found"
+
+        const val DATASOURCE_UNREACHABLE = "parameter.validation.datasource_unreachable"
+
+        const val SELECTOR_QUERY_FAILED = "parameter.validation.selector_query_failed"
+
+        const val SELECTOR_COLUMNS_INVALID = "parameter.validation.selector_columns_invalid"
+
+        const val SELECTOR_VALUE_TYPE_MISMATCH = "parameter.validation.selector_value_type_mismatch"
+
+        const val INPUT_SOURCE_MULTIPLE_ROWS = "parameter.validation.input_source_multiple_rows"
+
+        const val SELECTOR_ORDER_BY_MISSING = "parameter.validation.selector_order_by_missing"
+
+        const val SELECTOR_PROBE_UNAVAILABLE = "parameter.validation.selector_probe_unavailable"
+
+        const val EVALUATE_UNKNOWN_PARAMETER = "parameter.evaluate.unknown_parameter"
+
+        const val EVALUATE_TOO_MANY_VALUES = "parameter.evaluate.too_many_values"
+
+        const val EVALUATE_TOO_MANY_BINDS = "parameter.evaluate.too_many_binds"
+
+        const val EVALUATE_SELECTOR_ROWS_INVALID = "parameter.evaluate.selector_rows_invalid"
+
+        const val EVALUATE_RESPONSE_TOO_LARGE = "parameter.evaluate.response_too_large"
+
+        const val EVALUATE_INVALID_VALUE_TYPE = "parameter.evaluate.invalid_value_type"
+
+        const val EVALUATE_CONSTRAINT_VIOLATION = "parameter.evaluate.constraint_violation"
+
+        const val EVALUATE_REQUIRED_MISSING = "parameter.evaluate.required_missing"
+
+        const val EVALUATE_TOO_MANY_OPTIONS = "parameter.evaluate.too_many_options"
+
+        const val EVALUATE_INPUT_SOURCE_MULTIPLE_ROWS = "parameter.evaluate.input_source_multiple_rows"
+
+        const val EVALUATE_SELECTOR_VALUE_TYPE_MISMATCH = "parameter.evaluate.selector_value_type_mismatch"
+
+        const val EVALUATE_TEMPLATE_UNRENDERED = "parameter.evaluate.template_unrendered"
+
+        const val EVALUATE_TIMEOUT = "parameter.evaluate.timeout"
+
+        const val EVALUATE_SELECTORS_SATURATED = "parameter.evaluate.selectors_saturated"
+
+        const val NOT_FOUND = "parameter.not_found"
+
+        const val VERSION_CONFLICT = "parameter.version.conflict"
+
+        const val VERSION_NOT_DRAFT = "parameter.version.not_draft"
+
+        const val VERSION_NOT_RELEASED = "parameter.version.not_released"
+
+        const val VERSION_NOT_DISCARDED = "parameter.version.not_discarded"
+
+        const val VERSION_LAST_RELEASE = "parameter.version.last_release"
+
+        const val VERSION_NOT_ELIGIBLE = "parameter.version.not_eligible"
+
+        const val VERSION_CONFIRM_MISMATCH = "parameter.version.confirm_mismatch"
+
+        const val RELEASE_TEMPLATE_NOT_RELEASED = "parameter.release.template_not_released"
+
+        const val IMPORT_MISSING_TEMPLATE = "parameter.import.missing_template"
+
+        const val AUTHORING_DISABLED = "parameter.authoring.disabled"
+    }
 }

@@ -58,9 +58,10 @@ class ConfigValidator(
          * `checkExecutorQueryTimeoutByDialect` (#2). 26 since 188 added
          * `PostureRules.checkHardenedRedisPassword` (#189). 27 since 7b added
          * `checkTransformBounds` (#7 — evaluate ≤ suite, abandon-grace ≥ 1). 29 since 224 added
-         * `checkDemoApiKey` and `checkEndpointKeyBudget`.
+         * `checkDemoApiKey` and `checkEndpointKeyBudget`. 30 since #194 lane B added
+         * `ParametersRules.checkParametersBounds` (§3.30).
          */
-        internal const val CHECK_COUNT = 29
+        internal const val CHECK_COUNT = 30
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -131,6 +132,8 @@ class ConfigValidator(
             checkRedisAuthWarning(snapshot, warnings)
             checkOrgSettings(snapshot, violations)
             TransformRules.checkTransformBounds(snapshot, violations)
+            // §3.30 (#194) — the parameter engine's limits, in their own file like the transform bounds.
+            ParametersRules.checkParametersBounds(snapshot, violations)
             // §3.27 (137) — the mail rules live in their own file (MailRules), like the posture ones.
             MailRules.checkMailShape(snapshot, violations)
             MailRules.checkMailHardened(snapshot, violations)
@@ -890,6 +893,8 @@ class ConfigValidator(
                         Long::class.java,
                     ),
                 transformMaxDepth = environment.getProperty("datapipelines.transform.max-depth", Long::class.java),
+                // §3.30 (#194) — the parameter engine's limits, raw strings (a malformed value is a named violation).
+                parameters = ParametersRules.KEYS.associateWith { environment.getProperty(it) },
                 activeProfiles = environment.activeProfiles.toSet(),
                 vendoredThemes = vendoredThemes(),
                 // §3.23 (075) — the org's label, the product's posture, the demo flag, and the
@@ -1121,6 +1126,8 @@ internal data class ConfigSnapshot(
     val transformMaxValueBytes: Long? = null,
     val transformMaxStringBytes: Long? = null,
     val transformMaxDepth: Long? = null,
+    /** §3.30 (#194) — every `datapipelines.parameters.*` key as its raw string (`ParametersRules.KEYS`). */
+    val parameters: Map<String, String?> = emptyMap(),
     val activeProfiles: Set<String>,
     /** Null = no vendored theme assets on the classpath yet (pre-P8) — the §7 theme check defers. */
     val vendoredThemes: Set<String>?,
@@ -1183,6 +1190,7 @@ internal data class ConfigSnapshot(
             "transformMaxValueBytes=$transformMaxValueBytes, " +
             "transformMaxStringBytes=$transformMaxStringBytes, " +
             "transformMaxDepth=$transformMaxDepth, " +
+            "parameters=$parameters, " +
             "orgTimezone=$orgTimezone, " +
             "activeProfiles=$activeProfiles, " +
             "vendoredThemes=$vendoredThemes, " +

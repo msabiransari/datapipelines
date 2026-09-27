@@ -52,6 +52,7 @@ datapipelines/
 │   ├── datasources/                     # [Datasources spec]
 │   ├── staging/                         # [Staging spec]
 │   ├── dag/                             # [DAG Executor spec]
+│   ├── parameters/                      # the parameter engine — parameter sets, #194 (§5.18)
 │   ├── auth/                            # [Auth spec]
 │   ├── scheduler/                       # [Scheduler reference] — durable occurrences, #9 (§5.16)
 │   ├── application/                     # cross-aggregate use cases (§5.13)
@@ -78,6 +79,7 @@ datapipelines/
 | `dag` | [dag-executor.md](dag-executor.md) | DAG data structure, executor (coroutines), node runner, SSE event emitter interface, Redis-backed result store. | `ExecutionRepository` → `pipeline_executions`; `ExecutionEventRepository` → `execution_events`; Redis keys for results / idempotency / cancel flags |
 | `auth` | [auth.md](auth.md) | Users, workspaces + membership (resolution, provisioning, CRUD/member rules — 019's recorded placement: the workspace is an identity concept, membership-checked on every authenticated request exactly like `users`), API keys, JWT sessions, scopes, audit log. | `UserRepository` → `users`; `WorkspaceRepository` → `workspaces`, `workspace_members` (metadata-db §4.11/§4.12); `ApiKeyRepository` → `api_keys`; `AuditLogger` → `audit_log` |
 | `scheduler` | [scheduler.md](scheduler.md) | The pipeline-agnostic scheduler (#9): schedules, their occurrence function, the one dispatcher over db-scheduler, runs and their append-only trail, the generic executor port, capacity admission and reconciliation. Knows no pipeline semantics — the executor adapter lives in `web` (§5.16). | `ScheduleRepository` → `schedules`; `ScheduleRunRepository` → `schedule_runs`, `schedule_run_events`; db-scheduler owns `scheduled_tasks` (created by `app`'s V38) |
+| `parameters` | [parameter-engine design record](superpowers/specs/2026-09-21-parameter-engine-design.md) (this spec, §5.18) | The parameter engine (#194): the parameter-set definition model and its strict binding, the save-time validator (the record's §4), the expression AST, the set's dependency graph (over `graph`'s `Dag<T>`), the versioned lifecycle, the `parameter.*` codes and `datapipelines.parameters.*`. A single-aggregate module: the selector runtime arrives in lane C, the surfaces and the templates reverse arrow in lane D (`application`). | `ParameterSetRepository` → `parameter_sets`, `parameter_set_versions` (created by `app`'s V39) |
 | `application` | (this spec, §5.13) | **Cross-aggregate use cases** — the ones that need more than one domain module and so belong to none of them. Sits below `web` and `mcp-server` so both surfaces share one implementation (ARCH-AUDIT-2026-08 S4, ruling R6). | — (delegates to the owning modules' repositories) |
 | `mcp-server` | [mcp-server.md](mcp-server.md) | MCP transport (Streamable HTTP), tool/resource/prompt definitions. Thin adapter over the same services the REST layer uses. | — (delegates to the owning modules' repositories) |
 | `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. | — (delegates); Redis keys for the post-completion SSE event log and per-user rate-limit counters |
@@ -122,27 +124,28 @@ layer 3
 └──────────────┘ └─────────────┘  scheduler ← typesystem, pipeline-contract (the name grammar only)
 
 layer 4
-┌──────────────┐
-│     dag      │  ← typesystem, calculators, pipeline-contract, templates,
-│  (executor)  │    datasources, staging, scripting, graph
-└──────────────┘
+┌──────────────┐ ┌──────────────┐
+│     dag      │ │  parameters  │  dag ← typesystem, calculators, pipeline-contract, templates,
+│  (executor)  │ │              │        datasources, staging, scripting, graph
+└──────────────┘ └──────────────┘  parameters ← typesystem, graph, pipeline-contract, templates, datasources
 
 layer 5
 ┌──────────────┐
 │ application  │  ← typesystem, scripting, pipeline-contract, templates,
-│ (use cases)  │    datasources, dag, auth
+│ (use cases)  │    datasources, dag, auth, parameters
 └──────────────┘
 
 layer 6
 ┌──────────────┐
 │  mcp-server  │  ← typesystem, calculators, pipeline-contract, templates,
-│              │    datasources, dag, auth, application
+│              │    datasources, dag, auth, application, parameters
 └──────────────┘
 
 layer 7
 ┌──────────────┐
 │     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
-│              │    datasources, staging, dag, auth, application, mcp-server, scheduler
+│              │    datasources, staging, dag, auth, application, mcp-server, scheduler,
+│              │    parameters
 │              │    (declared explicitly, not transitively)
 └──────────────┘
 
@@ -176,9 +179,10 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `auth` | `typesystem` |
 | `scheduler` | `typesystem`, `pipeline-contract` |
 | `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph` |
-| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth` |
-| `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler` |
+| `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
+| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters` |
+| `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app` |
@@ -188,6 +192,7 @@ Notes on the shape (explanatory, not additional rules):
 - The table is acyclic by construction, so "no cycles" needs no separate rule — Gradle enforces it anyway.
 - `calculators`' row is the shortest one in the table on purpose (072, calculators design §0.4/C12). A calculator kind is a **pure function of its inputs**; a row that admitted `datasources` or `dag` would make that a hope rather than a fact, and the executor's freedom to evaluate a kind anywhere, in any order, rests on it. Adding an entry to that row is the edit a reviewer must refuse.
 - `scheduler` lists `pipeline-contract` for exactly ONE thing, the published `PipelineNameGrammar` (a schedule is named like a pipeline — scheduler design revision §6, A2); its `SchedulerBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge. It lists no `dag`, `auth` or `application`: the executor adapter, the capacity lease and the system principal live on `web`'s side of its port.
+- `parameters` (#194) declares what it compiles against — `typesystem` (the shared value validator, `LogicalType`), `graph` (`Dag<T>`) and `pipeline-contract` (`TemplateRef`, the name grammars, the `TemplateDryRenderer` / `DatasourceRegistry` / `TemplateVersionStatuses` / `TemplateReleaser` ports it validates and releases through, `ReadLens`, `AuthoringGuard`). `templates` and `datasources` are allowed for the selector runtime (lane C renders and runs through them) and are not declared until something compiles against them — the `application` precedent. The `parameters` edges of `application`, `mcp-server` and `web` are allowed ahead of lanes C–D the same way (the record's §2.4): nothing declares them yet.
 - `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
@@ -672,6 +677,22 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Why it is its own module.** Parameter-engine record P16/P17 (#194): the parameter engine builds its dependency graph with the house `Dag<T>`, and `dag` — the executor — carries `pipeline-contract`, `templates`, `datasources`, `staging`, Redis and JDBC, so nothing below `application` could depend on it without inheriting that set. The primitive moved **byte-identical** (`git diff -M` shows two 100% renames) and **in the same package**, `co.datapipelines.dag`, so the executor's two importers did not change — the owner's ruling was that the mature executor is not touched. `DagPackageTest` pins the package; renaming it is an executor change, not a tidy-up.
 
 **Tests:** `DagTest` (moved unchanged: topological order, batches, cycle detection and its path, builder refusals, the deep-chain iterative search); `DagPackageTest`.
+
+### 5.18 `parameters`
+
+**Dependencies (internal):** `typesystem`, `graph`, `pipeline-contract` (declared); `templates`, `datasources` (allowed for the selector runtime, lane C — §4.2 note). **Dependencies (external):** `spring-boot-starter-jdbc` (the repository, §8.1), Jackson (BOM-managed). No Redis (§3.1 rule 3).
+
+**Public API (frozen by #194 lane B — the model, the codes, the probe port and the repository's API; lanes C and D build on them):**
+- `ParameterSetBody` / `ParameterDefinition` / `SelectorSource` / `ConstantOption` / `Presentation` — the definition model (the record's §3), bound by `ParameterSetReader` (unknown keys and wrong JSON types refused at every level as `parameter.validation.body_invalid`) and `ParameterSetJson`'s strict mapper. The value-level declaration inside a definition IS `typesystem`'s `ParameterDeclaration` — never a copy.
+- `ParameterErrorCodes` — the `parameter.*` family ([Pipeline Contract §13.20](pipeline-contract.md)); `PipelineErrorCodes.Parameters` mirrors it, pinned equal by reflection.
+- `SelectorProbe` — the port the save-time validator's steps 5–6 call (the record's §4): render a pinned selector template, run it with `maxRows = 2`. Lane C implements it over `SelectorRunner`; with none wired a template-backed set is refused `parameter.validation.selector_probe_unavailable`.
+- `ParametersProperties` / `ParametersConfig` — `datapipelines.parameters.*` ([Configuration §3.30](configuration.md#330-parameter-engine-194)).
+- `ParameterSetValidator` — the record's §4 in order (structure, the graph on `graph`'s `Dag<T>`, the expression AST's static rules, the template pins by namespace, the dry run through `SelectorProbe`); `revalidateSources` re-runs steps 4–6 at release and import. `Expr` / `ExpressionParser` / `ExpressionPrinter` / `ExpressionEvaluator` — the §7 AST (lane C evaluates `hidden`/`disabled` with it). `ParameterSetGraph` — the set's DAG (lane C's evaluation order).
+- `ParameterSetRepository` (jdbc; `parameter_sets`, `parameter_set_versions` — V39) and `ParameterSetService` — the versioning §3.5 verb table (draft create/write with the hash precondition, release with the 142 cascade, purge, discard, restore, switch, import), the working-version read rule and the promoter lens. Every method takes the workspace; every statement filters by it.
+
+**Why it is its own module.** The owner's intent (the record's P1): an engine for parameters "independent of anything", a decoupled offering. A single-aggregate module — the definition, its validation and its lifecycle — whose only cross-aggregate facts arrive through `pipeline-contract`'s ports; the templates reverse arrow and promotion are `application`'s (the record's §8.4/§8.5).
+
+**Tests:** the model's strict binding and round trip; the reflection pin between the two code objects; the expression AST (every operator, both cardinalities, the null/empty rules, every cap one past); the validator (every §13.20 validation code reached by a fixture, the probe proven CALLED by a recording fake); the repository and every lifecycle verb against the module's own Postgres container (`ParametersTestDb`, the shipped migrations through plain JDBC) — workspace scoping both ways, the one-draft index, and both races FORCED with a second connection; `ParametersConfigKeysSpecDriftTest`.
 
 ## 6. Version Catalog
 
@@ -1217,3 +1238,4 @@ Before considering the module structure "ready":
 | 2026-08-28 | §3.1 amendment (promised at 019's merge) | The workspace domain's placement recorded in the responsibility matrix and the `auth` module spec: `WorkspaceRepository` → `workspaces`/`workspace_members`, `WorkspaceService`/types in the public API. No module moves; this documents what 019 built where it built it. |
 | 2026-09-08 | 089 dialect-count fix | The integration-tests dependency note said the dialect catalogs "list the seven" — they have listed eight since 087's LAKE (§4.1). One word, plus the fact that LAKE is embedded too (its suite's container is MinIO, object storage, not a database server). |
 | 2026-09-26 | #194 lane A — `graph` | New layer-0 module `graph` (§3 tree, §3.1 matrix, §4.1 diagram, §4.2 table, new §5.17): the generic `Dag<T>`/`DagBuilder<T>` moved out of `dag` byte-identical and in the same package (`co.datapipelines.dag`), so the parameter engine can build a graph without depending on the executor (parameter-engine record P16/P17). `dag`'s row gains `graph`; §5.6's API and test lists follow. The root build's allowed-dependency map moved with the table. |
+| 2026-09-26 | #194 lane B — `parameters` | 194b | New module `parameters` (§3 tree, §3.1 matrix, §4.1 layer 4 beside `dag`, §4.2 row, new §5.18): the parameter engine's frozen model, codes, probe port and config. Its §4.2 row is the record's §2.4 (`typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources`); it DECLARES `typesystem`, `pipeline-contract` and — from the graph piece — `graph`, and `pipeline-contract` is compiled against (the record's §14 item 3, answered: `TemplateRef`, the name grammars and the template/datasource ports live there). `application`, `mcp-server` and `web` gain the allowed-ahead `parameters` edge (lanes C–D; undeclared). The root map, `COVERAGE_FLOORS` (measured 91.18 − 2 on the first run) and the module's `gradle.lockfile` (no new artifact) ship in the same commit. The record's "layer 2 beside `templates`" predates the #214 redraw: `parameters` depends on `templates`, which is layer 3 — so layer 4. |

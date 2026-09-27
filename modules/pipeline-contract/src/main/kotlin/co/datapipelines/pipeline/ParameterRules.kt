@@ -51,7 +51,7 @@ internal object ParameterRules {
         name: String,
         into: FailureCollector,
     ) {
-        if (PARAMETER_NAME.matches(name)) return
+        if (ParameterNameGrammar.matches(name)) return
         into.add(
             Validation.PARAMETER_NAME_INVALID,
             "parameters.${name.truncateForError()}",
@@ -221,7 +221,4 @@ internal object ParameterRules {
     )
 
     private val VALIDATOR = PipelineParameterValidator.validator
-
-    /** §12.7 — parameter keys: anchored against a leading digit, capped at 63. See [checkName]. */
-    private val PARAMETER_NAME = Regex("^[a-z_][a-z0-9_]{0,62}$")
 }

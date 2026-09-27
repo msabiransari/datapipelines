@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.29 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.30 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-25
@@ -1023,6 +1023,81 @@ CREATE TABLE schedule_run_events (
 
 **db-scheduler's own queue** (V38) — the library's EXACT PostgreSQL DDL at 16.12.0 (`db-scheduler/src/test/resources/postgresql_tables.sql`, tag `v16.12.0`), copied verbatim with its three indexes. The library owns the shape and every write; this schema only creates it. Its `task_data` is JSON (never Java serialization, record §2.2), and the scheduler writes at most a run id there. Rows: one per recurring task (`schedule-dispatcher`, `schedule-reconciler`) and one per enqueued run (`schedule-run`, instance id = the run id), removed when that run's task completes.
 
+### 4.26 `parameter_sets`
+
+**A parameter set** (V39, #194; the [parameter-engine design record](superpowers/specs/2026-09-21-parameter-engine-design.md) §8.1) — the INDEX over a set's versions, the [`templates`](#48-templates) shape addressed like a pipeline: by a UUID.
+
+```sql
+CREATE TABLE parameter_sets (
+    id              UUID        PRIMARY KEY,                    -- the stable id every surface addresses (record P24)
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id),
+    name            TEXT        NOT NULL,                       -- the pipelines/templates folder grammar
+    display_name    TEXT        NOT NULL,                       -- indexes the CURRENT version's body
+    description     TEXT        NOT NULL DEFAULT '',
+    current_version INTEGER     NULL,                           -- the sticky pointer (D60); NULL until the first release
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by      UUID        NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_parameter_sets_workspace_name UNIQUE (workspace_id, name),
+    CONSTRAINT chk_parameter_sets_current_version CHECK (current_version IS NULL OR current_version >= 1)
+);
+```
+
+**Notes:**
+- **`id` has no database default.** The application generates it at create, and an IMPORT keeps the exported one (record P24, the `PipelineImportService` rule), so a set's id is stable across environments — the export key of §5A. Names travel in bodies and `?prefix=` only; a route carries the id.
+- `name` is unique per workspace FOREVER (versioning §3.2, D59): a discarded set keeps its name. It follows the §4.1 folder grammar, enforced in code (`PipelineNameGrammar`) — no DDL gate, because nothing re-validates a set name at run time.
+- **`display_name` / `description` index the CURRENT body** — they are content of `body_json` (the pipeline rule of versioning §3.7, not the templates asymmetry): a release sets them from the released body, and any pointer move (discard's fallback, restore, switch, a first import) re-indexes them from the version it now names. A never-released set shows its create-time values.
+- No entity status column: ACTIVE while a version is DRAFT or RELEASED, DISCARDED when every version is (versioning §3.2).
+- Every statement against this table carries `workspace_id = :workspaceId` (`ParameterSetRepository`): a set of another workspace is absent, never hidden.
+
+### 4.27 `parameter_set_versions`
+
+**One version of a set** (V39) — the [`template_versions`](#49-template_versions) shape minus the template-only columns.
+
+```sql
+CREATE TABLE parameter_set_versions (
+    parameter_set_id UUID        NOT NULL REFERENCES parameter_sets(id) ON DELETE CASCADE,
+    version          INTEGER     NOT NULL,
+    body_json        JSONB       NOT NULL,                     -- the record's §3 document, `name` omitted
+    status           TEXT        NOT NULL DEFAULT 'DRAFT'
+                         CONSTRAINT chk_parameter_set_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
+    body_hash        TEXT        NOT NULL,                     -- SHA-256 (hex) of body_json's JSONB text, computed by the database
+    released_at      TIMESTAMPTZ NULL,
+    released_by      UUID        REFERENCES users(id),
+    discarded_at     TIMESTAMPTZ NULL,
+    discarded_by     UUID        REFERENCES users(id),
+    updated_by       UUID        REFERENCES users(id),
+    updated_at       TIMESTAMPTZ NULL,                         -- DRAFT writes only
+    created_via      TEXT        NOT NULL DEFAULT 'session',
+    updated_via      TEXT        NOT NULL DEFAULT 'session',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by       UUID        NOT NULL REFERENCES users(id),
+    PRIMARY KEY (parameter_set_id, version),
+    CONSTRAINT chk_parameter_set_versions_version CHECK (version >= 1),
+    CONSTRAINT chk_parameter_set_versions_body CHECK (jsonb_typeof(body_json) = 'object' AND NOT (body_json ? 'name')),
+    CONSTRAINT chk_parameter_set_versions_release_stamps CHECK (
+        (status = 'DRAFT' AND released_at IS NULL AND released_by IS NULL)
+        OR (status <> 'DRAFT' AND released_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_parameter_set_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
+    ),
+    CONSTRAINT chk_parameter_set_versions_via CHECK (
+        created_via IN ('session', 'api_key', 'mcp') AND updated_via IN ('session', 'api_key', 'mcp')
+    )
+);
+
+CREATE UNIQUE INDEX uq_parameter_set_versions_one_draft
+    ON parameter_set_versions (parameter_set_id) WHERE status = 'DRAFT';
+```
+
+**Notes:**
+- **The lifecycle is the templates' (versioning §3.5)**: the same statuses, the same one-draft partial index, the same four write paths, the same database-computed hash. The body is the validator's canonical form (expressions reprinted) and the hash is `encode(sha256(convert_to(body_json::text, 'UTF8')), 'hex')` over the JSONB projection — versioning §4.1's PIPELINE rule, one expression in every write, so key order and whitespace never move a hash.
+- **Two constraints can refuse the loser of a first-writer race**, and it is usually the PRIMARY KEY: both writers allocate `max(version) + 1` from the same committed rows, and Postgres checks unique indexes in creation order. `ParameterSetRepository` maps either to `parameter.version.conflict` carrying the winner's state (the pipeline repository's rule; proven by a forced race in the module's container suite).
+- `chk_parameter_set_versions_release_stamps` holds a RELEASED or DISCARDED row to its `released_at` (a release stamps it, an import copies the source's, discard and restore never touch it). The discard-stamps and via CHECKs are the template twins.
+- A version is referenced by nothing else: no execution row (a set is evaluated, never executed), and the templates reverse arrow (record §8.4, lane D) scans `body_json` for pins — no foreign key. So a purge is always a hard delete, and the entity purge cascades.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1111,6 +1186,10 @@ CREATE TABLE schedule_run_events (
 | `scheduled_tasks` | `execution_time_idx` | explicit | db-scheduler's own: due tasks by time (its DDL, verbatim) |
 | `scheduled_tasks` | `last_heartbeat_idx` | explicit | db-scheduler's own: dead-execution detection |
 | `scheduled_tasks` | `priority_execution_time_idx` | explicit | db-scheduler's own: priority polling (priority is off; the index is the library's) |
+| `parameter_sets` | `parameter_sets_pkey` | via PK | Lookup by id — every route and tool addresses a set by it (record P24) |
+| `parameter_sets` | `uq_parameter_sets_workspace_name` | via UNIQUE | V39 (#194): one name per workspace forever; leads the tree browse's bounded range scan ([§4.26](#426-parameter_sets)) |
+| `parameter_set_versions` | `parameter_set_versions_pkey` | via PK | `(parameter_set_id, version)` — every version read |
+| `parameter_set_versions` | `uq_parameter_set_versions_one_draft` | explicit (partial, unique) | V39: the one-DRAFT-per-set rule of versioning §3.3 ([§4.27](#427-parameter_set_versions)) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1163,6 +1242,8 @@ table and the test's expected-table list in the same commit.
 | `schedule_runs` | derived | ScheduleRun | — | — | The runs THIS deployment's scheduler recorded; their executions are this environment's own |
 | `schedule_run_events` | derived | ScheduleRunEvent | — | — | Each run's local trail — produced, never authored |
 | `scheduled_tasks` | derived | ScheduledTask | — | — | db-scheduler's queue of this deployment's pending tasks; library-owned, never transferred |
+| `parameter_sets` | promotable | ParameterSet | `current_version` (sticky; versioning §3.4) | `id` (UUID, portable — an import keeps it, record P24) | The index over the current body; promotion is by name and carries the id (record §8.3) |
+| `parameter_set_versions` | promotable | ParameterSet | per-set `version` — global identity, preserved on import (D5) | `(id, version)` | The artifacts; an import validates against the TARGET's templates and datasources and lands RELEASED (record §8.3) |
 | `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
 
 ---
@@ -1427,6 +1508,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.30 | V39 (#194 lane B, the parameter engine) | New **§4.26 `parameter_sets`** (the index row: a UUID id kept by import, the per-workspace name unique forever, display metadata indexing the CURRENT body, the sticky pointer) and **§4.27 `parameter_set_versions`** (the template_versions shape minus the template-only columns: `body_json` without the name, the database-computed hash, the release/discard/via stamps with CHECKs, the one-draft partial index). §5 gains their four indexes; §5A classifies both promotable. The record's §8.1 said "§4.21/§4.22" — stale since V36/V38 took them. Down path documented in the migration's header and proven on a copy of the demo database. |
 | 2026-09-27 | v1.29 | V40 (scheduler follow-ups, #258) | **§4.23 `schedule_runs` gains the execution's own timing**: `execution_started_at TIMESTAMPTZ NULL` / `execution_completed_at TIMESTAMPTZ NULL` — copied by the reconciler onto the run in the SAME transition that records the terminal state, so rest-api §20.10–§20.12 answer "how long did the execution take" from the run row alone (the run's own `finished_at` is the reconciler's stamp, up to a tick late). Null until such a terminal: runs that never launched and rows finished before V40. Additive; down path in the migration header. |
 | 2026-09-25 | v1.28 | V38 (scheduler lane 1, #9) | New **§4.22 `schedules`**, **§4.23 `schedule_runs`**, **§4.24 `schedule_run_events`** and **§4.25 `scheduled_tasks`** (the [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) §7): the schedules (soft delete with a live-name partial unique index, independent `enabled`/`blocked_*`, the create Idempotency-Key and its hash — L1), their runs (R6's ten states, the frozen context, the executor-owned `prepared_json`, one row per occurrence, one Run now per key, AT MOST ONE ACTIVE RUN per schedule as a partial unique index), the runs' append-only trail (by construction — no trigger, §2), and db-scheduler 16.12.0's own table verbatim. `pipeline_executions.chk_triggered_via` gains `SCHEDULE`. §5 gains the eighteen indexes; §5A classifies `schedules` environment-local (never promoted) and the other three derived. Twenty-five tables. |
 | 2026-09-25 | v1.27 | V37 (keys v2, #233) | **Every key is a robot member of one workspace** (record §10 A13–A19). §4.2 `api_keys`: the `user` kind is renamed `mcp` (A19 — kind is the transport) and `DEFAULT 'mcp'` follows; `role` is the role CHOSEN at creation — `author\|promoter\|workspace_admin` on `mcp` (A13/A14), the transport roles unchanged; `chk_api_keys_kind` is replaced for the rename, `chk_api_keys_role` is replaced — every role-bearing arm spells `role IS NOT NULL` because `role = …` is UNKNOWN for a NULL role and a CHECK passes on UNKNOWN, and the first draft's missing `IS NOT NULL` on the `mcp` arm ADMITTED a live NULL-role row (measured; fixed before merge); `minted_at_login` and its per-`(user, workspace)` unique index are DROPPED (A15 — the login mint is gone), and V37 CONVERTS every live `user`-kind row — the login-minted and the pre-R3 on-demand ones (V31 left the latter `minted_at_login = FALSE`; a row the final CHECK would refuse must not survive): an owner's membership `author\|promoter\|workspace_admin` → identity-backed key with that role, a viewer or membership-less owner → REVOKED, never guessed (B4, NOTICE counts); `created_by` keeps the human creator, whose removal revokes the key (A17/B6). New `uq_api_keys_live_workspace_name` — a live key's NAME is unique per workspace (A18; duplicates disambiguated by the migration, all but the newest gaining the key id's tail). `pipeline_executions.executed_by_key_kind`'s CHECK widens to admit `'mcp'` beside `'user'` for history. §5 index inventory swaps `api_keys_one_live_user_key` for `uq_api_keys_live_workspace_name`. A20 (the 233c correction): the conversion reads the owner's MEMBERSHIP, never `users.is_active` — an inactive owner's key converts and is then refused at request time until the owner is reactivated. |
