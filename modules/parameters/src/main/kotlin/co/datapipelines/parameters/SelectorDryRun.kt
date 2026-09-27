@@ -197,7 +197,7 @@ internal class SelectorDryRun(
         columns.getValue(IS_DEFAULT).takeIf { it.type != LogicalType.BOOLEAN }?.let {
             columnType(parameter, at, IS_DEFAULT, LogicalType.BOOLEAN, it, failures)
         }
-        if (!ORDER_BY.containsMatchIn(withoutCommentsAndStrings(sql))) {
+        if (!ORDER_BY.containsMatchIn(SqlClauseText.blanked(sql))) {
             failures.add(
                 ParameterErrorCodes.SELECTOR_ORDER_BY_MISSING,
                 "$at.template",
@@ -346,14 +346,8 @@ internal class SelectorDryRun(
         val SELECT_COLUMNS = setOf(VALUE, DISPLAY_VALUE, IS_DEFAULT)
         val INPUT_COLUMNS = setOf(VALUE)
 
-        /** P7's check: a clause is PRESENT (not that the order is total), read with comments and literals removed. */
+        /** P7's check: a clause is PRESENT (not that the order is total), read over [SqlClauseText.blanked]. */
         val ORDER_BY = Regex("\\border\\s+by\\b", RegexOption.IGNORE_CASE)
-        private val LINE_COMMENT = Regex("--[^\\n]*")
-        private val BLOCK_COMMENT = Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL)
-        private val STRING_LITERAL = Regex("'(?:[^']|'')*'")
-
-        fun withoutCommentsAndStrings(sql: String): String =
-            STRING_LITERAL.replace(BLOCK_COMMENT.replace(LINE_COMMENT.replace(sql, " "), " "), "''")
 
         fun describe(descriptor: TypeDescriptor): String =
             when {
