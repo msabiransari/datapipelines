@@ -1,9 +1,9 @@
 # Datasources Specification
 
-**Status:** v2.45 (frozen contract — additive-only changes after this point)
+**Status:** v2.46 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-27
 
 ---
 
@@ -458,6 +458,35 @@ No credential decryption happens on this path — the pool already holds the cre
 
 Acquisition timeout (`properties.hikari.connectionTimeout`, 30 000 ms default) exceeded → `pipeline.node.datasource_connection_failed`.
 
+#### Discard — a connection that must never return (#194 lane C)
+
+`ConnectionPool.discard(connection)` says "this connection, leased from this pool, must never
+return to it". `HikariConnectionPool` — every production pool kind, the in-process H2 pool and
+each LAKE generation included — implements it with HikariCP 6.3.3's
+`HikariDataSource.evictConnection`: on a connection its borrower has not closed the eviction is
+immediate — the entry leaves the pool, its physical connection is closed on the pool's close
+executor, the pool refills towards `minimumIdle`, and the borrower's later `close()` returns
+nothing. A pool already shut down, or a connection that is not the pool's, is a no-op; `discard`
+never throws. The interface's default closes the connection — a discard only for a pool that
+does not pool (one fresh physical connection per lease), so a pooling implementation overrides it.
+
+Discard frees the POOL, not the server: measured against Postgres, the backend that was running
+the statement keeps running it after the client side closes (a server notices a vanished client
+only when it next writes). Stopping the statement is `Statement.cancel()`'s job — best effort by
+the JDBC contract — which is why the one caller cancels first and discards second.
+
+The caller is the parameter engine's selector runner, through `ReadOnlyStatementLease` — a sibling
+of the block-shaped lease above for a statement that may have to be ABANDONED from another thread
+(the parameter-engine record §2.5, P31): it runs §7D's read-only gate before any lease, sets the
+statement timeout to the datasource's `query_timeout_seconds` clamped to the caller's ceiling (the
+ceiling itself when the datasource declares none), `maxRows` and `fetchSize` to the caller's row
+budget, and hands back a `LeasedStatement` whose `abandon()` is `cancel()` then `discard`. Its two
+endings exclude each other: once `close()` has returned the connection, `abandon()` does nothing
+— the pool may already have handed it to the next borrower, whose statement a late `cancel()`
+would stop. Guarded by `ConnectionPoolDiscardIntegrationTest` and `ReadOnlyStatementLeaseTest`
+against the module's Postgres container (a sleeping statement discarded mid-flight; falsified with
+`evictConnection` a no-op — the total/active-connections assertion goes red).
+
 ### 5.4 Test pool build (save-time validation)
 
 Datasource create and update run a **test pool build** before the row is written — this is how the passthrough model of §5 stays safe without an allowlist, and it is this entity's instance of the universal validate-on-write principle ([Pipeline Contract §2](pipeline-contract.md#2-design-principles)).
@@ -894,6 +923,8 @@ Shipped in 107 as the MCP tool `sql_probe` ([MCP §6.2.34](mcp-server.md#6234-sq
 | DUCKDB / LAKE | `EXPLAIN <sql>` | the box-drawing plan text; the pruning marker is `Scanning Files: x/y` → `partition_prune x/y` with `partitions_scanned`/`partitions_total`; row estimate from the root's `~N rows` annotation. With no static file filter the marker is ABSENT (and a filter selecting every file is optimized away entirely) — the partitions fields stay null, the honest "no pruning information", never `y/y`. DuckDB 1.5.5.1 still prunes through `CAST`/`UPPER` on the partition column (verified) — a function on the column does NOT defeat the pruning this marker reports |
 | SQLITE | `EXPLAIN QUERY PLAN <sql>` | the `detail` column: `SCAN t` → `seq`, `SEARCH t USING [COVERING] INDEX <name>` → `index:<name>`; no row estimate |
 | ORACLE / MSSQL | none — `plan: null` | `EXPLAIN PLAN FOR` writes a plan TABLE and `SHOWPLAN` needs session state; neither is a read, so no wrapper is declared |
+
+**The gate is shared.** The parameter engine's selector runner (#194) runs every rendered selector through this same `SqlStatementClassifier` gate, before any lease, through `ReadOnlyStatementLease` (§5.3) — a refused statement is a per-parameter error at evaluate and `selector_query_failed` at save, never an execution.
 
 **Parameters are the pipeline grammar's.** `:name` placeholders bind through the same Spring `NamedParameterUtils` binder pipeline SQL uses, so probe SQL parses `:name` exactly the way a template's rendered output does; every referenced name must be supplied in `parameters` with its canonical type (`type` is a LogicalType — `NULL` is not declarable — and `value` its wire string: BIGINTEGER/BIGDECIMAL as decimal text, temporal in ISO forms, BINARY as padded base64; a null value binds SQL NULL). A reference with no supplied value is refused, never bound as null silently; a value that does not parse as its declared type is refused; both are `-32602` argument faults — nothing was leased, nothing ran — and the refusal names the parameter, never the value text.
 
@@ -1679,6 +1710,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v2.46 | 194c (#194) parameter engine lane C — discard | **§5.3:** `ConnectionPool.discard(connection)` — a connection that must never return to its pool — implemented on every pool kind through HikariCP's `evictConnection` (a no-op on a shut-down pool, never throws; the interface default closes, correct only for a non-pooling pool); `ReadOnlyStatementLease`, the selector runner's lease: §7D's gate before the lease, the statement timeout clamped to the caller's ceiling, a `LeasedStatement` whose `abandon()` is `cancel()` then `discard` and which never cancels a connection it already returned. Measured: discard closes the client side only — a Postgres backend keeps sleeping until it next writes, so the cancel comes first. **§7D:** the selector runner shares the gate. The block-shaped lease, `SqlRunner` and `SqlProbe` are unchanged. |
 | 2026-09-25 | v2.45 | 7e (#7) the semantic link | **§7E:** a WORKSPACE rule can be cited by a transform version's `implements` ([Templates §3.4](templates.md#34-implements-and-drift)); `implemented_by` rides every WORKSPACE fact on `semantics_list` and the listing's `definitions`; retiring a cited rule marks the citing versions `needs_review` on read and never edits them; a cited fact cannot be hard-deleted. No datasource behaviour changed. |
 | 2026-09-22 | v2.44 | 186 review M1 (#186) — LAKE joins the in-process gate | **§9:** registering or re-pointing a `LAKE` datasource is a super-admin act like every in-process engine — its embedded DuckDB runs with external access ON and no local-filesystem lock, and the URL form (which classifies it as Server) was the only thing exempting it. Refusal family unchanged (`workspace_forbidden`). A future lake surface decides its own posture; this closes the JDBC-URL path today. |
 | 2026-09-22 | v2.43 | 186 review (#186) — guard escape, `AUTO_SERVER`, pool order | **§5.6:** the URL-carrier guard compares the key the DRIVER sees — H2 splits its settings tail with a backslash escape (`I\\NIT=` is read as `INIT=`), so a backslash never survives into a compared key; `AUTO_SERVER` joins the H2 refusal set (an embedded row must not open a TCP listener). **§4.2A:** the pool builder classifies the URL form BEFORE any caller-supplied init SQL can select a plain pool, so an in-process or Unknown form has no admin-credentialed path whatever the caller passed. Review findings M2, L1, L3 of the 186 security pass; no wire change. |

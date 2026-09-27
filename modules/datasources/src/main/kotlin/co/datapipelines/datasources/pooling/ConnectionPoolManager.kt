@@ -41,6 +41,25 @@ interface ConnectionPool : AutoCloseable {
     fun softEvict() {}
 
     /**
+     * §5.3 — [connection], leased from THIS pool, must never return to it: close its physical
+     * connection now, whatever its borrower is doing with it, and let the pool open a fresh one
+     * in its place. The parameter engine's selector runner calls it on a statement it ABANDONED
+     * at the evaluate's deadline (parameter-engine record §2.5, P31): `Statement.cancel()` is
+     * best effort by the JDBC contract, and a connection whose statement may still be running
+     * must not be handed to the next borrower. The borrower's own later `close()` then has
+     * nothing to return. Never throws.
+     *
+     * The default closes the connection, which is a discard exactly for a pool that does NOT
+     * pool — one fresh physical connection per lease, as the module's test pools are. A POOLING
+     * implementation must override it: for one, closing IS returning. [HikariConnectionPool] —
+     * every production pool kind, the in-process H2 and the lake generations included — overrides
+     * it with `HikariDataSource.evictConnection`.
+     */
+    fun discard(connection: Connection) {
+        runCatching { connection.close() }
+    }
+
+    /**
      * Connections leased out and not yet returned — the reaper's release signal (§5.2).
      *
      * `0` for a pool with no such notion, which makes it immediately reapable. See [softEvict].
@@ -113,6 +132,21 @@ class HikariConnectionPool(
         dataSource.hikariPoolMXBean.softEvictConnections()
     }
 
+    /**
+     * `HikariDataSource.evictConnection` — the pinned HikariCP 6.3.3's per-connection discard: on a
+     * connection its borrower has not closed "the eviction is immediate" — the entry leaves the bag,
+     * its physical connection is closed on the pool's close executor, and the pool refills towards
+     * `minimumIdle`; the borrower's later `close()` finds an evicted entry and returns nothing (its
+     * rollback failure on the dead connection is swallowed for an evicted entry). A connection that
+     * is not this pool's (Hikari checks the proxy class) or a pool already shut down is a no-op —
+     * a shut-down pool has aborted its leases already.
+     */
+    override fun discard(connection: Connection) {
+        if (dataSource.isClosed) return
+        runCatching { dataSource.evictConnection(connection) }
+            .onFailure { LOG.warn("event=pool_discard_failed datasource={} error={}", name, it.javaClass.simpleName) }
+    }
+
     /** Hikari's own `STATE_IN_USE` count; `0` once the pool is shut down. */
     override val activeConnections: Int
         get() = if (dataSource.isClosed) 0 else dataSource.hikariPoolMXBean.activeConnections
@@ -136,6 +170,10 @@ class HikariConnectionPool(
         } finally {
             instanceOwner?.close()
         }
+    }
+
+    private companion object {
+        private val LOG = LoggerFactory.getLogger(HikariConnectionPool::class.java)
     }
 }
 
