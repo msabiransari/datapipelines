@@ -136,6 +136,20 @@ class ScheduleRepository(
         )!!
 
     /**
+     * The workspace row's lock, taken FIRST in the create transaction (#253): it serialises the
+     * cap's count-then-insert against every concurrent create of the same workspace, so the cap
+     * cannot be overshot by N creates that all counted below it. The row always exists (the
+     * schedule carries its FK), so a miss here is a defect that fails the transaction loudly.
+     */
+    fun lockWorkspace(workspaceId: UUID) {
+        jdbc
+            .query(
+                "SELECT id FROM workspaces WHERE id = :ws FOR UPDATE",
+                mapOf("ws" to workspaceId),
+            ) { _, _ -> Unit }
+    }
+
+    /**
      * The edit (record §6): every editable column, the revision bumped, guarded by the expected
      * revision (`If-Match`). Null when the revision moved or the schedule is gone — the caller tells
      * the two apart with a re-read.

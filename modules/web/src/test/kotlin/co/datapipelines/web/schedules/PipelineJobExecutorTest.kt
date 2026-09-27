@@ -37,6 +37,7 @@ import co.datapipelines.scheduler.ScheduleErrorCodes
 import co.datapipelines.scheduler.ScheduleException
 import co.datapipelines.scheduler.StartOutcome
 import co.datapipelines.scheduler.TargetViewer
+import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -362,6 +363,39 @@ class PipelineJobExecutorTest {
         outcome.shouldBeInstanceOf<StartOutcome.Started>()
         captured!!.reference shouldBe ExecutionReference(Instant.parse("2026-09-23T03:55:00Z"), ZoneId.of("America/New_York"))
         captured!!.parameters["as_of_date"] shouldBe TextNode("2026-09-22")
+    }
+
+    @Test
+    fun `start - a refusal before the row exists carries only catalogued values, never the exception's text (#253)`() {
+        val bound = executable("as_of_date" to LogicalType.DATE)
+        every { pipelines.findById(workspace.id, bound.record.id) } returns bound.record
+        every { pipelines.findVersionDetail(workspace.id, bound.record.id, 1) } returns detail()
+        every { pipelineService.findExecutable(workspace.id, ReadLens.Everything, bound.record, 1) } returns bound
+        every { executorConfig.result } returns mockk { every { ttlMaxSeconds } returns 3600 }
+        fun launch() =
+            Launch(
+                admission(payload = payload("a/p")),
+                executionId = executionId,
+                snapshot = mapper.readTree("""{"pipeline_id":"${bound.record.id}","version":1,"body_sha256":"h"}"""),
+                capacity = mockk(),
+            )
+
+        // One of ours: the trail may name the catalogued code and nothing else.
+        coEvery { runner.run(any(), any(), any(), any(), any()) } coAnswers {
+            throw DatapipelinesException("pipeline.execution.driver_exploded", "ORA-01756: quoted string not properly terminated")
+        }
+        val coded = adapter.start(launch()).shouldBeInstanceOf<StartOutcome.NotStarted>()
+        coded.reason shouldBe PipelineJobExecutor.START_REFUSED
+        coded.block shouldBe true
+        coded.message shouldBe "pipeline.execution.driver_exploded"
+
+        // Anything else: the fixed reason — never the exception's message.
+        coEvery { runner.run(any(), any(), any(), any(), any()) } coAnswers {
+            throw IllegalStateException("poucha pond driver exploded mid-connect")
+        }
+        val uncoded = adapter.start(launch()).shouldBeInstanceOf<StartOutcome.NotStarted>()
+        uncoded.message shouldBe PipelineJobExecutor.LAUNCH_REFUSED_WITHOUT_CODE
+        uncoded.message.contains("poucha") shouldBe false
     }
 
     // ------------------------------------------------------------------------------ fixtures

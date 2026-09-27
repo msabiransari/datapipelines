@@ -343,13 +343,17 @@ class SchedulesController(
         runJson(detail.run) +
             mapOf("payload" to detail.run.payload, "parameters" to detail.run.parameters, "trail" to detail.trail.map(::trailJson))
 
+    /**
+     * The trail as §20.11 answers it (#253): the `worker` column (`hostname:pid:suffix`) stays in
+     * the database and the instance's log — it is operator material, never a reader's — so it is
+     * not mapped here.
+     */
     private fun trailJson(event: TrailEvent): Map<String, Any?> =
         linkedMapOf(
             "seq" to event.seq,
             "kind" to event.kind.wire,
             "reason" to event.reason,
             "at" to event.at.toString(),
-            "worker" to event.worker,
             "details" to event.details,
         )
 

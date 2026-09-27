@@ -257,7 +257,9 @@ class SchedulesControllerTest {
         val trail = data["trail"] as List<Map<String, Any?>>
         trail.map { it["seq"] } shouldContainExactly listOf(1, 2)
         trail.map { it["kind"] } shouldContainExactly listOf("recorded", "claimed")
-        trail.last()["worker"] shouldBe "w-1"
+        // #253: the worker's hostname:pid stays in the database and the log, never the response —
+        // even for the event that carried one.
+        trail.last().containsKey("worker") shouldBe false
         data["payload"] shouldBe run().payload
     }
 

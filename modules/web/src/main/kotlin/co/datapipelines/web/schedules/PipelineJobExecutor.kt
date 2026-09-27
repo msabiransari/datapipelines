@@ -345,8 +345,18 @@ class PipelineJobExecutor(
             // The deferred completed exceptionally before the row existed: the launch path refused.
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
+            // #253: the run's trail may carry only catalogued values — the pipeline error code if
+            // the refusal was one of ours, else the fixed reason. The raw exception (driver text
+            // included) stays on this instance's log for the operator, never in the response.
+            LOG.warn(
+                "event=scheduler.start_refused run_id={} execution_id={} message=\"{}\"",
+                request.correlationId,
+                request.executionId,
+                e.toString(),
+                e,
+            )
             val code = (e as? DatapipelinesException)?.code
-            notStarted(START_REFUSED, block = true, listOfNotNull(code, e.message).joinToString(": "))
+            notStarted(START_REFUSED, block = true, code ?: LAUNCH_REFUSED_WITHOUT_CODE)
         }
     }
 
@@ -622,6 +632,9 @@ class PipelineJobExecutor(
         const val AUTHORITY_REFUSED = "authority_refused"
         const val RECORD_UNWRITABLE = "record_unwritable"
         const val START_REFUSED = "start_refused"
+
+        /** The `start_refused` detail when the launch threw something with no catalogued code (#253). */
+        const val LAUNCH_REFUSED_WITHOUT_CODE = "launch_refused"
         const val EXECUTION_FAILED = "execution_failed"
         const val INSTANCE_LOST = "instance_lost"
         const val VERSION_LATEST_REFUSED = "version_latest_refused"

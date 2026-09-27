@@ -55,6 +55,10 @@ class ScheduleService(
         val validated = validate(workspaceId, request)
         return try {
             transactions.execute {
+                // The workspace row's lock serialises the cap's count with every concurrent insert
+                // (#253): count-then-insert under read committed alone lets N creates at the cap
+                // all pass the count and overshoot. One row, one workspace, held to the commit.
+                schedules.lockWorkspace(workspaceId)
                 if (schedules.countLive(workspaceId) >= properties.maxSchedulesPerWorkspace) {
                     throw ScheduleException(
                         ScheduleErrorCodes.LIMIT_PER_WORKSPACE,
@@ -228,8 +232,9 @@ class ScheduleService(
         return try {
             transactions.execute { runNowLocked(workspaceId, id, actor, key, hash) }!!
         } catch (e: DuplicateKeyException) {
-            // A concurrent replay under the same key won the insert: answer it (L1).
-            key?.let { replayRun(id, actor, it, hash!!) } ?: throw e
+            // A concurrent replay under the same key won the insert: answer it (L1). Any OTHER lost
+            // uniqueness is the catalogued overlap answer, never a raw DuplicateKeyException (#253).
+            key?.let { replayRun(id, actor, it, hash!!) } ?: runNowConflictOrOverlap(id, e)
         }
     }
 
@@ -509,7 +514,6 @@ class ScheduleService(
         }
         return trimmed
     }
-
     private fun notFound(id: UUID) =
         ScheduleException(ScheduleErrorCodes.NOT_FOUND, "No schedule '$id' in this workspace.", mapOf("schedule_id" to id.toString()))
 
@@ -600,3 +604,22 @@ private data class Validated(
     val zone: java.time.ZoneId,
     val policy: MissedRunPolicy,
 )
+
+/**
+ * What a Run now insert's LOST uniqueness reduces to (#253): the catalogued `schedule.run.overlap`
+ * 409 with the database's uniqueness as its cause — never a raw `DuplicateKeyException`. Top-level
+ * and internal so the mapping is pinned directly: the database cannot produce the insert conflict
+ * to exercise it end to end (an uncommitted active run holds a FOR KEY SHARE on the schedule row,
+ * so a concurrent Run now serialises at the schedule's lock and answers through the ordinary
+ * `hasActive` guard — observed on `pg_stat_activity` by the race test).
+ */
+internal fun runNowConflictOrOverlap(
+    id: UUID,
+    cause: DuplicateKeyException,
+): Nothing =
+    throw ScheduleException(
+        ScheduleErrorCodes.RUN_OVERLAP,
+        "Schedule '$id' already has a run in progress; a schedule runs one at a time.",
+        mapOf("schedule_id" to id.toString()),
+        cause,
+    )
