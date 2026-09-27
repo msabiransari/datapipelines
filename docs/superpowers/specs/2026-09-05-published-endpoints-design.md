@@ -236,3 +236,9 @@ who retuned one and not the other would get two different clamps on one document
 - Anonymous / embed tokens for public dashboards; per-endpoint rate limits; response caching
   across callers (results are per execution by design); CSV/Arrow via `Accept` (the cursor's
   `format` already serves them); custom domains.
+
+## 8. Change log
+
+| Date | Lane | Change |
+|---|---|---|
+| 2026-09-27 | 274 (#274) | **A stored row that fails a later grammar is retired, never fatal.** R-EP5 landed 2026-09-19 with no migration for the rows the old grammar had already saved, and ONE two-segment row made the repository's row mapper throw inside the demo seeder's conflict check — the application refused to boot. V40 disables such rows and records `retired_reason` (metadata-db §4.13; rows are never deleted); the repository maps a row whose path no longer parses as a typed legacy value — skipped by the serve registry and the conflict check, listed flagged with its reason in the tree and in `endpoints_list`, removable by the existing unpublish verb, logged once per boot at WARN. The seeder catches a per-target failure instead of failing the context: a demo seed is never worth a refused boot. R-EP5 itself stands unchanged — the rows are old, the rule is right. |

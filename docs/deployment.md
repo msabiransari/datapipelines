@@ -522,10 +522,25 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
 
 1. Review release notes for breaking changes.
 2. Backup metadata DB.
-3. Signal shutdown and let the instance drain (§8.3.1 — this is automatic, not a manual step).
-4. Start the new version (migrations apply on startup).
-5. Verify `/health` returns UP.
-6. Restore traffic.
+3. **Pre-deploy check for builds after 2026-09-19 (R-EP5, #274):** a database holding a
+   `published_endpoints` row saved under the old two-segment grammar used to refuse the boot.
+   Since V40 the migration retires such rows (disabled, `retired_reason = 'pre-R-EP5 path'`,
+   never deleted) and the repository skips them regardless, so the upgrade is safe either way;
+   run this to know beforehand what you will see flagged in the API console afterwards:
+
+   ```sql
+   SELECT path_pattern FROM published_endpoints
+    WHERE array_length(string_to_array(trim(both '/' from path_pattern), '/'), 1) < 3;
+   ```
+
+   Zero rows = safe (and always was). Rows listed = they come back disabled and flagged after
+   the upgrade; unpublishing one is the fix. An operator in a hurry on a build OLDER than V40
+   can delete the rows by hand — the demo seeder republishes the demo endpoint at its current
+   path on the next boot.
+4. Signal shutdown and let the instance drain (§8.3.1 — this is automatic, not a manual step).
+5. Start the new version (migrations apply on startup).
+6. Verify `/health` returns UP.
+7. Restore traffic.
 
 For k8s: rolling update via `kubectl rollout`. Each terminated pod flips its readiness and cancels its in-flight executions on the way out (§8.3.1); the `preStop` and `terminationGracePeriodSeconds` settings in §8.3.2 keep that orderly.
 

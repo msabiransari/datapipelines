@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.50 (frozen contract — additive-only changes after this point)
+**Status:** v1.54 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-27
 
 ---
 
@@ -982,7 +982,7 @@ Publish a released pipeline as a `GET` endpoint at `/api/<category>/<version>/<p
 }
 ```
 
-Returns the endpoint's wire shape: `path`, `pipeline` (by NAME), `timeout_seconds`, `description`, `enabled`, `path_variables` and the servable `url`.
+Returns the endpoint's wire shape: `path`, `pipeline` (by NAME), `timeout_seconds`, `description`, `enabled`, `path_variables` and the servable `url`. A legacy path (listed flagged by §6.2.24) resolves as **not-found** here — the single read answers the valid shape only.
 
 #### 6.2.24 `endpoints_list`
 
@@ -1000,7 +1000,7 @@ The published endpoints of the key's pinned workspace.
 }
 ```
 
-Returns `{endpoints: [...]}` in the shape §6.2.23 returns.
+Returns `{endpoints: [...]}` in the shape §6.2.23 returns. Legacy rows (#274) are listed last, flagged: a stored path saved before the current grammar carries `"legacy": true`, its `"reason"` (the grammar's own refusal, bounded), `"enabled"` and the usual `path`/`pipeline`/`url` — no `path_variables`, because there is no parse. A legacy row never serves, never blocks a publish, and `endpoints_delete` removes it.
 
 #### 6.2.25 `endpoints_get`
 
@@ -2252,6 +2252,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v1.54 | 274 (#274) legacy endpoint rows, retired never fatal | **§6.2.24 `endpoints_list` answers legacy rows flagged** — after the valid rows, a stored path saved before the current grammar carries `"legacy": true`, its `"reason"` (the grammar's own refusal, bounded), `"enabled"` and `path`/`pipeline`/`url`; no `path_variables` (there is no parse). **§6.2.25 `endpoints_get`** answers a legacy path not-found (the single read is valid-shape only). **§6.2.26 `endpoints_delete` is the fix** — the descriptions state it; removing the row is the one verb a legacy row supports. No tool added or removed: **42 stays 42**, permissions unchanged (`endpoint.read`, `endpoint.unpublish` — the same rows for legacy rows as for valid ones). The manual's `endpoints` guide carries the one sentence. |
 | 2026-09-27 | v1.53 | 250 (#250, #9 R3) scheduled runs on every surface | **§6.2.13 `executions_list` reads `findVisible`** — own runs plus every `triggered_via = SCHEDULE` run of the workspace (rest-api §10.1's R3), the visibility decided in SQL before the page is cut; `executions_get` and `executions_get_result` answer for a scheduled run the same way (the shared `visibleTo` gains the schedule branch). Descriptions state it; **42 stays 42**, permissions unchanged (`execution.read`, the matrix row untouched). The manual's `executions` guide says the same. |
 | 2026-09-26 | v1.52 | 242b (#242) the narrative by area | **§15 rewritten (the source, the guards)** — the narrative split by functional area: `core.md` is the orientation document (product, retrieval, the universal rules stated once, the area index — 6,353 chars, inside the new 8,000-character bound, whole-document again); seven area guides (`pipelines`, `executions`, `templates`, `transforms`, `datasources`, `lake`, `endpoints` — concepts, workflow, prerequisites, common mistakes, their references with "open when"; O5's `executions` area got its guide); the playbook's judgment split into per-topic references (`pipelines-learning`, `pipelines-dag`, `pipelines-numbers`, `pipelines-verification`, `pipelines-engine-quirks`, `pipelines-do-dont`, `templates-calculators`, `transforms-contracts`, `transforms-evaluation`, `datasources-semantics`), all within the 24,000-character budget. `connecting`'s content became the datasources guide's workflow; `authoring-playbook` and `connecting` now answer with the `pipelines` and `datasources` guides (the record §4 alias contract; one release). New guards: no reserved area name in any served document; the core's 8,000-character pin. No tool surface change: **42 stays 42**, permissions unchanged. |
 | 2026-09-25 | v1.51 | 242a (#242) the manual rendered at boot | **§15 rewritten** — the manual is no longer a repo file but a document set rendered at boot (`DocRenderer`) from narrative resources in the jar (`modules/mcp-server/src/main/resources/skill/`), the boot configuration (typed `${placeholders}` — the timeout budgets the prose quotes) and the catalogs. **§6.2.40 `docs_list`**: optional `area` filter; without it the core plus one entry per area with the area's other documents nested; entries carry `area`, `layer`, `chars`, `over_budget`, `sections` and nested `references`. **§6.2.41 `docs_get`**: optional `section` (by-section read), whole-document answers within the **24,000-character** response budget (`details.reason: document_over_budget` otherwise, section list attached), `next` continuations for split sections, and the one-release **aliases** (`skill`, `authoring-playbook`, `connecting`, `dp-lake`, `error-codes`, `naming`, `node-types`, `pipeline-schema`, `tools`) answering with the successors' bytes. Per-area tools references (`<area>-tools`), `core-error-codes` (generated from the §13 projection) and `pipelines-calculators` join the set as generated documents; `.agents/skills/datapipelines/` and its build tasks (`skillToolsDoc`, `pluginSkillCopy`, `skillArtifacts`) are gone; `docsExport` renders the set to `build/skill-docs/` for the audit. `datapipelines://docs/skill/{name}` and `GET /skill/{name}.md` serve the set by flat name; the plugin is a pointer (§15 Delivery 4). No tool added or removed: **42 stays 42**, permissions unchanged (`docs.read`). |
