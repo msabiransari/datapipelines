@@ -381,7 +381,7 @@ The sender reaches the receiver from INSIDE its container, so `target.base-url` 
 ### 6.4 Kubernetes (recommended for production)
 
 Reference Helm chart in `deploy/helm/`. Includes:
-- `Deployment` (N+ replicas, behind a `Service`).
+- `Deployment` (N+ replicas, behind a `Service`; `terminationGracePeriodSeconds: 40` — #251: the scheduler's admission wait (up to 15 s) plus the drain's flush (up to 20 s) plus Tomcat's graceful shutdown must complete before the pod is killed; the shipped `deploy/compose.yml` sets the matching `stop_grace_period: 40s`).
 - Externalized Postgres (managed recommended).
 - Externalized Redis (managed recommended).
 - `HorizontalPodAutoscaler` (scales on CPU + memory).

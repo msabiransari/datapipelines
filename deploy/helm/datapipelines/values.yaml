@@ -53,7 +53,9 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 1
 
-# §8.3.1/§8.3.2: the drain cancels in-flight executions and flushes within a
-# bounded 20 seconds — 30s covers it with margin. The pod also gets the §8.3.2
-# `preStop: sleep 5` (baked into the Deployment template).
-terminationGracePeriodSeconds: 30
+# §8.3.1/§8.3.2, plus #251's scheduler admission gate: on SIGTERM the scheduler's
+# admission gate closes (up to 15 s), the drain cancels in-flight executions and
+# flushes within a bounded 20 seconds, then Tomcat's graceful shutdown runs — 40s
+# covers the worst case with margin (deploy/compose.yml's stop_grace_period matches).
+# The pod also gets the §8.3.2 `preStop: sleep 5` (baked into the Deployment template).
+terminationGracePeriodSeconds: 40
