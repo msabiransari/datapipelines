@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.18 (revised — see Change Log)
+**Status:** v1.19 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-09-25
@@ -605,11 +605,16 @@ node lands (7c). What is already true and binding:
   `dag-executor-N` thread): a runaway degrades transform capacity, never the rest of the JVM.
   (Corrected at the 7a merge: the first cut returned the slot at abandonment, which let every
   runaway add one more live thread with no ceiling.)
-- **The engine's bounds are between expression steps** (the library's `Timebox` checks wall
-  clock and depth in its evaluate entry/exit callbacks), so a single builtin call that overruns
-  is caught only by the pool's abandonment. The honest-bounds table below is GENERATED from the
+- **The engine's bounds are between expression steps — counted by the engine itself
+  (#260, re-measured 2026-09-26)**: since the 260 fix the engine installs its own
+  evaluate entry/exit hooks (the library `Timebox` returned early on `isParallelCall`
+  frames — the second and later object pairs/arguments — leaking one depth unit per
+  item on set-level shapes and skipping the clock check in those frames), so a single
+  builtin call that overruns is still caught only by the pool's abandonment. The
+  honest-bounds table below is GENERATED from the
   breach suite's record (`modules/scripting`'s `JsonataBreachTest` →
-  `build/reports/jsonata-breach.md`), measured 2026-09-23 on jsonata 0.9.10 in a 512m JVM —
+  `build/reports/jsonata-breach.md`), measured 2026-09-23 on jsonata 0.9.10 in a 512m JVM
+  (deep recursion re-measured 2026-09-26, outcome unchanged) —
   regenerate the report and paste it; the doc never hand-writes the numbers.
 
 | Breach case (record §4.5 corpus) | Measured outcome | The bound that held |
@@ -618,13 +623,16 @@ node lands (7c). What is already true and binding:
 | pad bomb (`$pad("x", 1e8)` — a quadratic builtin loop) | UNBOUNDED — caller timed out on budget; the abandoned thread outlived the grace | the pool: the caller failed on time; the thread was counted and held its slot until it ended |
 | join bomb (`$join` over the range) | REFUSED — the library's own argument cap refuses before any work | the library |
 | regex bomb (`$match(…!, /^(a+)+$/)` on `java.util.regex`) | BOUNDED — resistant: fails fast, no catastrophic backtracking measured; no bound fired | n/a (measured resistant) |
-| deep recursion (self-recursive lambda, depth 100 000) | BOUNDED — `ScriptTimeoutException` on budget; the thread ended inside the grace. **Measured correction:** the library's depth counter skips lambda calls (they mark `isParallelCall`), so TIME, not depth, catches lambda recursion | the engine's between-steps timebox |
+| deep recursion (self-recursive lambda, depth 100 000) | BOUNDED — `ScriptTimeoutException` on budget; the thread ended inside the grace. **Re-measured at #260, outcome unchanged:** the loop is tail-recursive and the library trampolines it — depth stays flat, so TIME catches it (the 7a explanation named `isParallelCall`; the trampoline is the mechanism). A NON-tail-recursive lambda nests for real and the engine's own depth count refuses it at `max-depth` nested calls | the engine's between-steps clock |
 | `$eval` nesting (an eval'd builtin overrun) | UNBOUNDED — same shape as the pad bomb; the eval'd work inherits the evaluation's timebox but reaches no step boundary inside a builtin | the pool |
 | `$now()` | REFUSED — the engine shadows the clock builtins: pinned via `EvaluationLimits.now` (the execution's `current_timestamp`) or refused — a transform is a pure function of its inputs | the engine |
 
-- **The depth bound is real but narrower than the record believed**: it fires on nested
-  EXPRESSIONS (500 nested arrays against a depth of 100 refuses in milliseconds — the
-  conformance suite pins it), not on recursive lambdas.
+- **The depth bound counts every evaluate entry and exit (#260)**: nested EXPRESSIONS
+  (500 nested arrays against a depth of 100 refuses in milliseconds — the conformance
+  suite pins it) and non-tail lambda recursion alike; the library's `isParallelCall`
+  skip no longer leaks a unit per item, so a set-level transform over hundreds of rows
+  evaluates at the default depth of 100. A tail-recursive lambda is trampolined — its
+  depth never grows, and the wall clock is the bound that catches it.
 - **A heap bound is not enforceable in-process; input and output caps bound a well-formed
   evaluation; a malicious body can still exhaust the heap.** `EngineCapabilities` states this
   (`boundsHeap = false`, `interruptible = false`) so the callers document what a limit means
@@ -1560,6 +1568,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.19 | 260 the depth-accounting fix (#260) | §5.3's script-engine bullet and the honest-bounds table re-measured: the library `Timebox` returned early on `isParallelCall` frames (second and later object pairs/arguments), leaking one depth unit per item on set-level shapes and skipping the clock check in those frames — the engine now counts every evaluate entry/exit itself. Deep-recursion row outcome UNCHANGED (the loop is tail-recursive; the library trampolines it; TIME catches it — the trampoline, not `isParallelCall`, is the mechanism); a non-tail-recursive lambda nests for real and depth refuses it at `max-depth` nested calls. No table outcome flipped; the doc never hand-writes the numbers. |
 | 2026-09-25 | v1.18 | scheduler lane 1 (#9) | §5.3 gains the scheduler's row: `ExecutionSlots.acquire` returns a `SlotLease` taken before the scheduler claims a run's start (acquire-before-claim, R4), carried in `ExecuteRequest.slotLease` and adopted by `withSlot`; `max-concurrent-runs` is the system identity's per-user bound. Executions a schedule fires carry `triggeredVia = SCHEDULE` ([Enums §18](enums.md#18-executiontrigger--how-execution-was-initiated)); they run the ordinary path — same emitter, same `execution_events`, no SSE consumer — and a scheduled launch fails closed: the execution runs only once its `RUNNING` row is written (the recording emitter's `failClosedOnRecord`). Status caught up (it read v1.14 after v1.17's row). |
 | 2026-09-24 | v1.17 | 7c the TRANSFORM node (#7) | §6.3.4: the TRANSFORM node's executor — per-mode driving (row streams `result-batch-size` batches off one cursor into `stageRows` sequences; rejects take a second pass; table/value load capped-before-loading and evaluate once), every evaluation on §5.3's pool under the node deadline minus `cancel-grace-seconds`, the §5.1 cover/nullable input checks, the type gate with batch and row numbers, invariants read back from the WRITTEN tempdb tables under `max-input-rows` (and unbounded streaming with none declared), strict, §5.5 atomicity (the sibling table dropped by the executor), the caller-supplied skip, and the lease answer (a `withQuery` read may be open while `stageRows` writes — different connections of the execution's pool, `max-connections` ≥ 2). §6.5: a TRANSFORM reads the same staged tables; §7: `rows_in` / `rows_rejected` / `invariants_checked` on `NodeResult`/`NodeStats`; §8.2: the §13.18 family documented as carried codes. |
 | 2026-09-23 | v1.16 | 7a merge review (#7) | §5.3 "The script engine seam": the evaluation pool is a **bulkhead** — an abandoned evaluation's thread keeps its slot until it ends (the thread, not the caller, returns the permits), so at most `size` evaluation threads are alive, abandoned ones included; a caller waits for a slot at most its own wall clock, then gets the pool-exhausted refusal. The v1.15 wording ("the next evaluation gets a fresh thread immediately") described a pool that released the slot at abandonment, which let every runaway add one more live thread with no ceiling. The pad-bomb row's "bound that held" reads accordingly. |

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.32 (single source of truth for every config key)
+**Status:** v1.33 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-25
 
@@ -472,7 +472,7 @@ The budgets every script evaluation runs under — the save/release test suite o
 | `datapipelines.transform.max-input-rows` | `100000` | Row cap on any table input — the `rows` batch or any table input — refused BEFORE evaluation with the record §4.3's input-cap code (§13.18, 7c) |
 | `datapipelines.transform.max-value-bytes` | `1048576` | Cap on a value/object output (the record §4.3's value-cap code, §13.18, 7c) — a Context value is not a table |
 | `datapipelines.transform.max-string-bytes` | `1048576` | Cap on a single string in any returned row (the same §4.3 code, with the row number) |
-| `datapipelines.transform.max-depth` | `100` | Expression depth bound — time catches recursion, depth catches nesting (the engine's measured bounds, dag-executor §5.3) |
+| `datapipelines.transform.max-depth` | `100` | Expression depth bound — counted at every evaluate entry and exit by the engine itself: nested evaluation, non-tail lambda recursion included; set-level work over hundreds of rows evaluates (the 7a `isParallelCall` leak is gone, #260); a tail-recursive lambda is trampolined by the library and the wall clock is its bound (the engine's measured bounds, dag-executor §5.3) |
 
 ### 3.29 Scheduler (#9)
 
@@ -867,6 +867,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-26 | v1.33 | 260 the depth-accounting fix (#260) — numbered after origin/main's v1.32 (246) | §3.28's `max-depth` row re-stated: the depth bound is counted at every evaluate entry and exit by the engine itself (the library `Timebox` skipped `isParallelCall` frames, leaking a unit per item on set-level shapes until #260), nested evaluation and non-tail lambda recursion included; a tail-recursive lambda is trampolined by the library and the wall clock is its bound. No key, default or binding changed. |
 | 2026-09-26 | v1.32 | 246 (#246) the avatar proxy hardened — numbered after scheduler lane 1's v1.31 (#9, merging at dispatch) | §3.4's `picture-hosts` row says **no port** on both sides: an entry is a bare hostname (unchanged), and a stored picture URL naming a port is refused; it points at auth.md §11.1 for the two other #246 rules (raster types only, one 5 s budget for the whole fetch). No key, default or binding changed. |
 | 2026-09-26 | v1.31 | scheduler lane 1 (#9) — numbered after origin/main's v1.30 (197) | New **§3.29 Scheduler**: the eleven `datapipelines.scheduler.*` keys (dispatch on/off — API mode, threads, polling, heartbeat, tick, max concurrent runs, lateness, catch-up reach, shutdown wait, the two save guards) with their bounds, enforced at binding; `management.health.db-scheduler.enabled: false`. §5 template gains the `scheduler:` block and the top-level `db-scheduler:` wiring fed from it. Status caught up (it read v1.27 after v1.29's row; main's v1.30 row is 197's). |
 | 2026-09-25 | v1.30 | 197 (#197) the avatar proxy | §3.4 gains `datapipelines.auth.oidc.providers[].picture-hosts` (per-provider, default **empty** = the avatar proxy fetches nothing and avatars render initials): bare hostnames only — a scheme, port, path, userinfo or wildcard entry refuses startup, enforced where the allowlist is built (the `trusted-proxies` precedent). The demo `google` provider ships `lh3.googleusercontent.com` — measured, NOT derived from the issuer (`accounts.google.com`). [Auth §11.1](auth.md#111-oidc-provider-configuration) carries the full key story; [Deployment §6.2](deployment.md#62-multi-instance-horizontal-scaling-production) the narrowed CSP row. |
