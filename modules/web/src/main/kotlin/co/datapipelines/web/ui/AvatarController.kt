@@ -66,7 +66,10 @@ import java.util.concurrent.TimeUnit
  *
  * A small TTL cache ([AvatarCache]) keeps a page's renders from re-fetching the provider
  * on every request, and the answer carries `Cache-Control: private` so the browser caches
- * it per user without any shared cache holding user data.
+ * it per user without any shared cache holding user data. A refused or failed fetch is
+ * remembered for the same TTL as a NEGATIVE entry (#254) — a broken or stalling host costs
+ * one fetch per user per TTL, not one per page view — and the 404 carries its own private
+ * browser TTL so the client stops asking while the refusal stands.
  */
 @RestController
 class AvatarController(
@@ -80,8 +83,8 @@ class AvatarController(
     @GetMapping("/avatar")
     @RequiredScope(Permission.PROFILE_READ)
     fun avatar(): ResponseEntity<ByteArray> {
-        val url = storedPictureUrl() ?: return NOT_FOUND
-        val image = cachedOrFetched(url) ?: return NOT_FOUND
+        val url = storedPictureUrl() ?: return notFound()
+        val image = cachedOrFetched(url) ?: return notFound()
         return served(image)
     }
 
@@ -93,11 +96,23 @@ class AvatarController(
         return userRepository.findById(principal.userId)?.profilePictureUrl?.takeIf { it.isNotBlank() }
     }
 
-    /** The cached answer, or one fetch through the fence — the result lands in the cache either way. */
+    /**
+     * The cached answer, or one fetch through the fence — the result lands in the cache either
+     * way. Both outcomes are remembered (#254): a refusal or failure is a negative entry for
+     * the TTL, so a broken picture host costs ONE fetch per user per TTL instead of one per
+     * page view, and a later success replaces the negative at its next [AvatarCache.put].
+     */
     private fun cachedOrFetched(url: String): AvatarImage? {
         cache.get(url)?.let { return it }
-        val uri = validated(url) ?: return null
-        return fetcher.fetch(uri)?.also { cache.put(url, it) }
+        if (cache.refused(url)) return null
+        val uri = validated(url)
+        val fetched = uri?.let { fetcher.fetch(it) }
+        if (uri == null || fetched == null) {
+            cache.putNegative(url)
+            return null
+        }
+        cache.put(url, fetched)
+        return fetched
     }
 
     /**
@@ -127,6 +142,18 @@ class AvatarController(
             .cacheControl(CacheControl.maxAge(BROWSER_MAX_AGE).cachePrivate())
             .body(image.bytes)
 
+    /**
+     * The refusal the browser sees, now with a browser-side TTL of its own (#254): `private`
+     * (the answer is per user, no shared cache may hold it) and capped at [CACHE_TTL] — the
+     * same bound the negative entry server-side stands for, so the browser's retry and the
+     * controller's re-fetch fall due together.
+     */
+    private fun notFound(): ResponseEntity<ByteArray> =
+        ResponseEntity
+            .status(HttpStatus.NOT_FOUND)
+            .cacheControl(CacheControl.maxAge(CACHE_TTL).cachePrivate())
+            .build()
+
     companion object {
         private val log = LoggerFactory.getLogger(AvatarController::class.java)
 
@@ -150,8 +177,6 @@ class AvatarController(
 
         private val CACHE_TTL: Duration = Duration.ofMinutes(5)
         private val BROWSER_MAX_AGE: Duration = Duration.ofMinutes(5)
-
-        private val NOT_FOUND: ResponseEntity<ByteArray> = ResponseEntity.status(HttpStatus.NOT_FOUND).build()
     }
 }
 
@@ -375,16 +400,20 @@ open class AvatarImageFetcher(
 
 /**
  * A tiny bounded TTL cache so a page's renders do not re-fetch the provider host on every
- * request: at most [maxEntries] avatars, each admitted only at [CACHE_ADMIT_MAX_BYTES] or
+ * request: at most [maxEntries] entries, each admitted only at [CACHE_ADMIT_MAX_BYTES] or
  * below (so the worst-case footprint is `maxEntries × CACHE_ADMIT_MAX_BYTES` ≈ 16 MiB),
- * each expiring [ttl] after it was fetched. Synchronized: avatar requests are rare and small.
+ * each expiring [ttl] after it was written. An entry is POSITIVE ([put]) — a served avatar —
+ * or NEGATIVE ([putNegative], #254): a fetch the fence refused or the provider failed. Both
+ * kinds live in this one map under the same bound and the same TTL — a negative costs one
+ * provider fetch per url per [ttl] instead of one per request, and a later success replaces
+ * it. Synchronized: avatar requests are rare and small.
  */
 class AvatarCache(
     private val maxEntries: Int,
     private val ttl: Duration,
 ) {
     private class Entry(
-        val image: AvatarImage,
+        val image: AvatarImage?,
         val fetchedAt: Instant,
     )
 
@@ -393,14 +422,26 @@ class AvatarCache(
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Entry>): Boolean = size > maxEntries
         }
 
+    /** The fresh positive answer, or null — a miss, an expiry, or a negative (see [refused]). */
     @Synchronized
     fun get(url: String): AvatarImage? {
         val entry = entries[url] ?: return null
-        if (Duration.between(entry.fetchedAt, Instant.now()) > ttl) {
+        if (expired(entry)) {
             entries.remove(url)
             return null
         }
         return entry.image
+    }
+
+    /** True while a NEGATIVE entry (#254) stands for [url]: a refusal or failure inside [ttl]. */
+    @Synchronized
+    fun refused(url: String): Boolean {
+        val entry = entries[url] ?: return false
+        if (expired(entry)) {
+            entries.remove(url)
+            return false
+        }
+        return entry.image == null
     }
 
     @Synchronized
@@ -411,6 +452,14 @@ class AvatarCache(
         if (image.bytes.size > CACHE_ADMIT_MAX_BYTES) return
         entries[url] = Entry(image, Instant.now())
     }
+
+    /** Records a refusal or failure (#254) — one entry like any other; [put] replaces it on a later success. */
+    @Synchronized
+    fun putNegative(url: String) {
+        entries[url] = Entry(null, Instant.now())
+    }
+
+    private fun expired(entry: Entry): Boolean = Duration.between(entry.fetchedAt, Instant.now()) > ttl
 
     companion object {
         const val CACHE_ADMIT_MAX_BYTES = AvatarController.CACHE_ADMIT_MAX_BYTES

@@ -22,6 +22,13 @@ import org.junit.jupiter.api.Test
  * (the issue's own numbers), for the static row AND a row cloned by the Add Row control,
  * at 1100 / 1440 / 1920 and at the splitter's 220px floor. Edges print per row, pass or
  * fail — the handback's before/after table is extracted from them.
+ *
+ * #255 extends the fixture with the rail's own contract: at any width the splitter allows
+ * the rail does not scroll SIDEWAYS. On the base, with the handle at the floor, the panel
+ * head (the `Render Context` h2 + the `Key/Value` / `JSON` tabs) held a min-content wider
+ * than 220px and `.te-rail` reported `scrollWidth 228 > clientWidth 220` — nothing suggests
+ * a sideways scroll. The walk runs light AND dark (the wrap is a layout change) across the
+ * three widths, default rail and floor alike.
  */
 class TemplateEditorContextRowBrowserTest : BrowserSuite() {
     @Test
@@ -29,12 +36,12 @@ class TemplateEditorContextRowBrowserTest : BrowserSuite() {
         startTrace()
         val author = seedAndLogin("cxrow", role = "author")
         val name = "test/cxrow_" + suffix()
-        seedTemplate(author, name)
+        seedTemplate(author.page, name)
 
         val offenders = mutableListOf<String>()
         for (width in DESKTOP_WIDTHS) {
             author.page.setViewportSize(width, 900)
-            openEditor(author, name)
+            openEditor(author.page, name)
             offenders += measure(author.page, "static row at $width", expectedRows = 1)
             // A row cloned by the + control carries the same rules (lifecycle.js clones the
             // markup the template ships — one definition must hold for both).
@@ -45,13 +52,87 @@ class TemplateEditorContextRowBrowserTest : BrowserSuite() {
         // The splitter's narrowest rail: a drag far past the 220px floor lands ON the floor
         // (splitter.js clamps), which is the tightest box the product allows the row in.
         author.page.setViewportSize(1440, 900)
-        openEditor(author, name)
+        openEditor(author.page, name)
         dragHandleBy(author.page, -400.0)
         offenders += measure(author.page, "narrowest rail at 1440", expectedRows = 1)
 
         offenders shouldBe emptyList()
         author.close()
     }
+
+    /**
+     * #255 — the rail itself never scrolls sideways, in light and dark, at the three widths
+     * and at the splitter's floor: `.te-rail`'s scrollWidth equals its clientWidth (red on
+     * the base: 228 > 220 with the handle dragged to the floor).
+     */
+    @Test
+    fun `the rail never scrolls sideways - the panel head yields at the narrowest rail`() {
+        startTrace()
+        val user =
+            seedLocalUser(
+                uniqueEmail("cxhead-" + generatedPassword("u").take(8)),
+                generatedPassword("pw"),
+                mustChange = false,
+                isAdmin = false,
+                role = "author",
+            )
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        val name = "test/cxhead_" + suffix()
+        seedTemplate(page, name)
+
+        val offenders = mutableListOf<String>()
+        // The defaults FIRST, both themes: the splitter REMEMBERS the dragged width
+        // (`dp.pane.template-editor-side`), so a floor drag would turn every later "default"
+        // open into a 220px rail and the dark pass would measure the floor mislabelled.
+        for (theme in listOf("light", "dark")) {
+            ensureTheme(theme)
+            for (width in DESKTOP_WIDTHS) {
+                page.setViewportSize(width, 900)
+                openEditor(page, name)
+                offenders += measureRailOverflow(page, "default rail at $width ($theme)")
+            }
+        }
+        // The tightest box the product allows, both themes: a drag far past the 220px floor
+        // lands ON it (splitter.js clamps).
+        for (theme in listOf("light", "dark")) {
+            ensureTheme(theme)
+            page.setViewportSize(1440, 900)
+            openEditor(page, name)
+            dragHandleBy(page, -400.0)
+            offenders += measureRailOverflow(page, "narrowest rail at 1440 ($theme)")
+        }
+
+        offenders shouldBe emptyList()
+    }
+
+    /**
+     * The rail's own box, read in one evaluate: its scrollWidth against its clientWidth.
+     * The measurement prints whether or not the run is green — the handback's table.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun measureRailOverflow(
+        page: Page,
+        where: String,
+    ): List<String> =
+        (
+            page.evaluate(
+                """
+                () => {
+                  const rail = document.querySelector('.te-rail');
+                  if (!rail) return { out: ['no .te-rail rendered'], info: 'no rail' };
+                  const out = [];
+                  if (rail.scrollWidth > rail.clientWidth)
+                    out.push('the rail scrolls sideways: scrollWidth ' + rail.scrollWidth +
+                      ' > clientWidth ' + rail.clientWidth);
+                  return { out, info: 'rail scrollWidth ' + rail.scrollWidth + ', clientWidth ' + rail.clientWidth };
+                }
+                """.trimIndent(),
+            ) as Map<String, Any?>
+        ).let { measured ->
+            println("#255 $where: ${measured["info"]}")
+            (measured["out"] as List<String>).map { msg -> "$where: $msg" }
+        }
 
     // ------------------------------------------------------------------ the measurement
 
@@ -130,21 +211,21 @@ class TemplateEditorContextRowBrowserTest : BrowserSuite() {
     }
 
     private fun openEditor(
-        session: Session,
+        page: Page,
         name: String,
     ) {
-        session.page.navigate("$baseUrl/templates/editor?name=" + java.net.URLEncoder.encode(name, "UTF-8"))
-        session.page.waitForSelector(".te-source")
-        session.page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
+        page.navigate("$baseUrl/templates/editor?name=" + java.net.URLEncoder.encode(name, "UTF-8"))
+        page.waitForSelector(".te-source")
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE)
     }
 
     /** The in-page REST create of the sibling suites; 201 is the fixture's contract. */
     private fun seedTemplate(
-        session: Session,
+        page: Page,
         name: String,
     ) {
         val status =
-            session.page.evaluate(
+            page.evaluate(
                 """async (name) => {
                   const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
                   const res = await fetch('/api/v1/templates', {

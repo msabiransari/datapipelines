@@ -71,9 +71,13 @@
                       th:disabled="${ws.current}">Switch</button>
             </form>
             <!-- §C.3(b) — deactivate/reactivate are INSTANCE verbs (`MANAGE_INSTANCE_WORKSPACES`,
-                 super admin), never a workspace admin's. Deactivation purges nothing, ever. -->
+                 super admin), never a workspace admin's. Deactivation purges nothing, ever.
+                 #256: all three lifecycle verbs navigate in FULL (hx-boost="false", the create
+                 form's and the switch form's rule, 097 §2.1) — each success changes the SHELL,
+                 and a boosted swap replaces only #app-main, so the rail's switcher kept every
+                 option rendered before the mutation until a manual reload. -->
             <form th:action="@{/workspaces/{name}/deactivate(name=${ws.name})}" method="post" class="u-inline"
-                  th:if="${isSuperAdmin == true and ws.active}">
+                  th:if="${isSuperAdmin == true and ws.active}" hx-boost="false">
               <!-- No native confirm (ui-screens §4.3d — the app never blocks on one, and the
                    existing screen carried none). Deactivation purges nothing and Reactivate is
                    the sibling verb one row away; the irreversible one, Delete, is refused by
@@ -81,11 +85,11 @@
               <button type="submit" data-verb="workspace-deactivate" class="ds-button ds-button-ghost ds-button-sm">Deactivate</button>
             </form>
             <form th:action="@{/workspaces/{name}/reactivate(name=${ws.name})}" method="post" class="u-inline"
-                  th:if="${isSuperAdmin == true and !ws.active}">
+                  th:if="${isSuperAdmin == true and !ws.active}" hx-boost="false">
               <button type="submit" data-verb="workspace-reactivate" class="ds-button ds-button-secondary ds-button-sm">Reactivate</button>
             </form>
             <form th:action="@{/workspaces/{name}/delete(name=${ws.name})}" method="post" class="u-inline"
-                  th:if="${isSuperAdmin == true}">
+                  th:if="${isSuperAdmin == true}" hx-boost="false">
               <button type="submit" data-verb="workspace-delete" class="ds-button ds-button-ghost ds-button-sm">Delete</button>
             </form>
           </td>

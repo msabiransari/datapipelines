@@ -29,6 +29,12 @@ import org.junit.jupiter.api.Test
  * The data was never stale server-side: `WorkspaceService.create` invalidates the auth
  * cache, and a super admin's `listOwn` is uncached SQL — the defect was purely which part
  * of the shell the boosted response could reach.
+ *
+ * #256 extends the same assertion to the three lifecycle verbs on the same page:
+ * deactivate, reactivate and delete change the SHELL too (097 §2.1 — the switcher's
+ * options come from `UiWorkspaceAdvice.workspaceOptions`, filled on every FULL render),
+ * so each verb navigates in full and its before/after option list is asserted with no
+ * reload the test performs: deactivate → absent, reactivate → present, delete → absent.
  */
 class WorkspacesCreateBrowserTest : BrowserSuite() {
     @Test
@@ -69,4 +75,57 @@ class WorkspacesCreateBrowserTest : BrowserSuite() {
         page
             .locator("#workspace-switcher option[value='$name']")
             .count() > 0
+
+    /** A lifecycle verb's button on [name]'s row (the template's stable `data-verb` hooks). */
+    private fun rowButton(
+        name: String,
+        verb: String,
+    ): Locator = page.locator("tr", Page.LocatorOptions().setHasText(name)).first().locator("[data-verb='$verb']")
+
+    /**
+     * #256 — the three lifecycle verbs keep the switcher honest: deactivate → the workspace
+     * is ABSENT from the switcher without a reload, reactivate → present again, delete →
+     * absent. Red on the base: the verb rode the shell's hx-boost, the swap replaced only
+     * #app-main, and the rail kept every option rendered before the mutation.
+     */
+    @Test
+    fun `deactivate, reactivate and delete update the switcher without a manual reload`() {
+        startTrace()
+        val user =
+            seedLocalUser(
+                uniqueEmail("wslife-" + generatedPassword("u").take(8)),
+                generatedPassword("pw"),
+                mustChange = false,
+            )
+        login(user.email, user.oneTimePassword)
+        page.waitForURL("**/dashboard")
+
+        // A workspace of its own, never entered (createWorkspaceWithoutEntering's shape):
+        // the fixture's active workspace stays `default` throughout.
+        val name = "wslife" + generatedPassword("w").take(8).lowercase()
+        page.navigate("$baseUrl/workspaces")
+        page.waitForURL("**/workspaces")
+        page.fill("form[action*='/workspaces/create'] input[name=name]", name)
+        page.click("form[action*='/workspaces/create'] button[type=submit]")
+        page.locator("td", Page.LocatorOptions().setHasText(name)).first().waitFor()
+        optionAttached(name).shouldBeTrue()
+
+        // DEACTIVATE → the option leaves the switcher (the server filters inactive workspaces).
+        rowButton(name, "workspace-deactivate").click()
+        rowButton(name, "workspace-reactivate").waitFor() // the table came back fresh already
+        optionAttached(name).shouldBeFalse()
+
+        // REACTIVATE → the option returns.
+        rowButton(name, "workspace-reactivate").click()
+        rowButton(name, "workspace-deactivate").waitFor()
+        optionAttached(name).shouldBeTrue()
+
+        // DELETE → the option leaves again, with the row.
+        rowButton(name, "workspace-delete").click()
+        page
+            .locator("tr", Page.LocatorOptions().setHasText(name))
+            .first()
+            .waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.DETACHED))
+        optionAttached(name).shouldBeFalse()
+    }
 }
