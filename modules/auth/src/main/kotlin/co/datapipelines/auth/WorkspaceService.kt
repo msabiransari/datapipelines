@@ -139,7 +139,7 @@ open class WorkspaceService(
         claimName: String?,
     ): WorkspaceContext? {
         claimName?.let { claimed -> contextFor(principal, claimed)?.let { return it } }
-        activeMemberships(principal.userId).firstOrNull()?.let { return context(principal, it) }
+        activeMemberships(principal.userId).firstOrNull()?.let { return context(principal.isSuperAdmin, it) }
         // D-R8: a super admin with no membership at all still has somewhere to be — the first
         // active workspace on the instance. Without it the one principal who can fix an empty
         // deployment is the one principal who cannot act in it.
@@ -154,6 +154,11 @@ open class WorkspaceService(
     /**
      * What login stamps as `active_workspace` (design §5.1): last-used when it still resolves,
      * else the first active membership, else — D-R11 — a fresh VIEWER membership of `demo`.
+     *
+     * #262: both membership fallbacks build the super-admin-aware context (the helper
+     * [resolveForSession]'s fallback uses), so a super admin's login response — the one
+     * request before [resolveForSession] is asked again — keeps the instance authority
+     * instead of being judged as the membership's role.
      *
      * **The materialise step comes first (113, auth.md §4.6):** every invitation for this
      * email becomes a membership, in the same statement that deletes the invitations, BEFORE
@@ -213,9 +218,9 @@ open class WorkspaceService(
         }
         val memberships = activeMemberships(user.id)
         lastUsedWorkspaceStore?.lastUsed(user.id)?.let { last ->
-            memberships.firstOrNull { it.workspaceName == last }?.let { return context(it) }
+            memberships.firstOrNull { it.workspaceName == last }?.let { return context(user.isAdmin, it) }
         }
-        memberships.firstOrNull()?.let { return context(it) }
+        memberships.firstOrNull()?.let { return context(user.isAdmin, it) }
         return demoWorkspaceSeeder
             ?.joinDemoIfUnaffiliated(user.id)
             ?.also { authCache.invalidateMemberships(user.id) }
@@ -862,17 +867,20 @@ open class WorkspaceService(
         WorkspaceContext(membership.workspaceId, membership.workspaceName, membership.role)
 
     /**
-     * The context a resolved membership yields, for THIS principal. #216: a super admin is a
-     * super admin in EVERY branch of [resolveForSession] — the fallback builds the same
-     * super-admin-aware context the claim branch's `contextFor` does (`superAdmin = true`,
-     * `implicit` per the explicit membership), so a stale claim cannot demote the instance
-     * authority to the membership's role.
+     * The context a resolved membership yields, for THIS principal's instance authority.
+     *
+     * #216: a super admin is a super admin in EVERY branch of [resolveForSession]. #262: the
+     * login stamp ([workspaceForLogin]) asks the SAME helper — the predicate is passed as the
+     * boolean so a caller holding the live `User` row (which is what a login has; it is the
+     * row just authenticated, fresher than any cache) uses the one shape, no third copy. A
+     * non-super-admin's context is byte-identical to the plain member context this helper
+     * replaced: the flag is the only branch.
      */
     private fun context(
-        principal: AuthenticatedPrincipal,
+        isSuperAdmin: Boolean,
         membership: WorkspaceMembership,
     ): WorkspaceContext =
-        if (principal.isSuperAdmin) {
+        if (isSuperAdmin) {
             WorkspaceContext.superAdminOver(membership.workspaceId, membership.workspaceName, membership.role)
         } else {
             context(membership)
