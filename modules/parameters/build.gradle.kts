@@ -1,7 +1,6 @@
 // module-structure.md §5.18 — the parameter engine (#194; parameter-engine design record §2.2).
-// Allowed internal deps (§4.2): typesystem, graph, pipeline-contract, templates, datasources. Declared
-// here only what compiles: the selector runtime (lane C) adds templates/datasources when it renders and
-// runs through them, never before.
+// Allowed internal deps (§4.2): typesystem, graph, pipeline-contract, templates, datasources — all five
+// declared since lane C: the selector runtime renders through `templates` and runs through `datasources`.
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
@@ -16,15 +15,21 @@ dependencies {
     // Dag<T> — the set's dependency graph (record P16): cycle refusal at save, topological order for the
     // dry run and (lane C) the evaluator. Same package as the executor's, `co.datapipelines.dag`.
     implementation(project(":modules:graph"))
+    // The selector runtime (record §6.3, lane C): SelectorRunner renders a pinned template through the
+    // workspace's TemplateEngine (WorkspaceTemplateEngines — the render guards, the per-workspace caches)…
+    implementation(project(":modules:templates"))
+    // …and runs it through the datasource registry's pools: the workspace-visible live read (P31), the
+    // ReadOnlyStatementLease with its gate and its discard handle (record §2.5), ResultRowReader's canonical
+    // decoding and schemaOf (P11 — types from metadata).
+    implementation(project(":modules:datasources"))
 
     implementation(libs.jackson.module.kotlin)
     implementation(libs.spring.boot.starter.jdbc) // ParameterSetRepository (§8.1), @ConfigurationProperties
 
     // The container suite runs the repository and the lifecycle against a real Postgres with the SHIPPED
     // migrations applied through plain JDBC (module-structure §7.4; Flyway stays in `app`, §3.1 rule 2),
-    // and pins real `templates` rows (TemplateRepository) for the release cascade and the pin checks —
-    // the `templates` edge is allowed by §4.2 and used by TESTS only; main never compiles against it.
-    testImplementation(project(":modules:templates"))
+    // pins real `templates` rows (TemplateRepository) for the release cascade and the pin checks, and —
+    // since lane C — is also the CUSTOMER datasource the real SelectorRunner probes and evaluates against.
     testImplementation(libs.testcontainers.junit.jupiter)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.postgresql)

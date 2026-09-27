@@ -55,8 +55,8 @@ sealed interface ParameterSetValidation {
  *    `template_version_not_found`, a DISCARDED version included), is `type = 'sql'`, its dialect is
  *    the datasource's, the datasource is visible, no parent is interpolated (`${}` — the existing
  *    `template.validation.parameter_interpolated`), and every `:bind` resolves by namespace (P30).
- * 5–6. **The dry run** ([SelectorDryRun]) through the [SelectorProbe] port — lane C's runtime;
- *    with none wired a template-backed source is `selector_probe_unavailable`.
+ * 5–6. **The dry run** ([SelectorDryRun]) through the [SelectorProbe] port — lane C's
+ *    [SelectorRunner]: the real render, binds, read-only gate and metadata execution.
  *
  * All four collaborators are `pipeline-contract` PORTS — the same ones a pipeline save validates
  * through — so this module compiles against no template engine and no datasource pool.
@@ -67,7 +67,8 @@ class ParameterSetValidator(
     private val templates: TemplateDryRenderer,
     private val templateStatuses: TemplateVersionStatuses,
     private val datasources: DatasourceRegistry,
-    private val probe: SelectorProbe? = null,
+    /** Steps 5–6's dry run (record §4) — REQUIRED since lane C: [SelectorRunner] in production. */
+    private val probe: SelectorProbe,
     /** The deployment's org tier — its keys are bindable without a dependency (P30). */
     private val org: OrgContext = OrgContext.DEFAULTS,
 ) {

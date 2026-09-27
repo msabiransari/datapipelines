@@ -9,12 +9,11 @@ import java.util.UUID
  * each template-backed source, then run the rendered statement with `maxRows = 2` to prove its
  * columns, its `value` type and (for an `INPUT`) its row count, before anything is saved.
  *
- * A PORT, declared by lane B and implemented by lane C over `SelectorRunner` (record §15): the
- * runtime renders through `templates`' engine and runs through `datasources`' pools, which this
- * module does not compile against yet. The validator calls it exactly where §4 says, and a
- * construction with none wired refuses a template-backed save with
- * `parameter.validation.selector_probe_unavailable` — a set whose sources cannot be proven is not
- * saved (the owner's refuse-at-the-entry-point principle). A `constants`-only set never calls it.
+ * A PORT, declared by lane B and implemented by lane C: [SelectorRunner] renders through
+ * `templates`' engine and runs through `datasources`' pools. The validator calls it exactly where
+ * §4 says and REQUIRES it (lane C retired the `selector_probe_unavailable` stand-in): a set whose
+ * sources cannot be proven is not saved (the owner's refuse-at-the-entry-point principle). A
+ * `constants`-only set never calls it.
  *
  * ## The contract an implementation keeps
  *

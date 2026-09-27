@@ -30,7 +30,7 @@ class ParameterSetValidatorTest {
     private val probe = RecordingProbe()
 
     private fun validator(
-        probe: SelectorProbe? = this.probe,
+        probe: SelectorProbe = this.probe,
         config: ParametersConfig = ParametersConfig(),
     ) = ParameterSetValidator(config, templates, templates, FakeDatasources(), probe)
 
@@ -78,10 +78,9 @@ class ParameterSetValidatorTest {
         }
 
         @Test
-        fun `a constants-only set saves without ever calling the probe - and without one wired at all`() {
+        fun `a constants-only set saves without ever calling the probe`() {
             val constants = set(ParameterSetFixtures.countryJson(), ParameterSetFixtures.amountJson())
             validate(constants).shouldBeInstanceOf<ParameterSetValidation.Valid>()
-            validate(constants, validator(probe = null)).shouldBeInstanceOf<ParameterSetValidation.Valid>()
             probe.renders shouldBe emptyList()
             probe.probes shouldBe emptyList()
         }
@@ -420,11 +419,6 @@ class ParameterSetValidatorTest {
             statement.datasource shouldBe "warehouse"
             statement.maxRows shouldBe 2
             statement.binds["country"] shouldBe "USA"
-        }
-
-        @Test
-        fun `no probe wired - a template-backed source is selector_probe_unavailable`() {
-            failures(cascade, validator(probe = null)).single().code shouldBe ParameterErrorCodes.SELECTOR_PROBE_UNAVAILABLE
         }
 
         @Test

@@ -57,6 +57,11 @@ internal object ParametersTestDb {
     /** A connection OUTSIDE the pool — the forced races hold a transaction open on it while the pool works. */
     fun rawConnection(): Connection = DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password)
 
+    /** The container's JDBC coordinates — lane C's CUSTOMER datasource points at the same database (`CustomerDb`). */
+    val jdbcUrl: String get() = postgres.jdbcUrl
+    val username: String get() = postgres.username
+    val password: String get() = postgres.password
+
     fun reset() {
         jdbc.jdbcTemplate.execute("TRUNCATE parameter_set_versions, parameter_sets, template_versions, templates CASCADE")
         jdbc.jdbcTemplate.execute(

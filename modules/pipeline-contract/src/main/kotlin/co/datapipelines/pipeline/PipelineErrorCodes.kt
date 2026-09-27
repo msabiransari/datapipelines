@@ -1491,8 +1491,9 @@ object PipelineErrorCodes {
     /**
      * §13.20 — the parameter engine (#194, record §10). The catalog's copy of `ParameterErrorCodes`
      * (`modules/parameters`), pinned equal by reflection there (`ParameterErrorCodesTest`); `web`'s
-     * `ApiErrorCatalog` reads these until it depends on the engine (lane D). `SELECTOR_PROBE_UNAVAILABLE`
-     * is the one temporary code — it leaves with #194 lane C.
+     * `ApiErrorCatalog` reads these until it depends on the engine (lane D). Lane B's one temporary
+     * code, `selector_probe_unavailable`, left with #194 lane C (the selector runtime made the probe
+     * required).
      */
     object Parameters {
         const val NAME_INVALID = "parameter.validation.name_invalid"
@@ -1604,8 +1605,6 @@ object PipelineErrorCodes {
         const val INPUT_SOURCE_MULTIPLE_ROWS = "parameter.validation.input_source_multiple_rows"
 
         const val SELECTOR_ORDER_BY_MISSING = "parameter.validation.selector_order_by_missing"
-
-        const val SELECTOR_PROBE_UNAVAILABLE = "parameter.validation.selector_probe_unavailable"
 
         const val EVALUATE_UNKNOWN_PARAMETER = "parameter.evaluate.unknown_parameter"
 

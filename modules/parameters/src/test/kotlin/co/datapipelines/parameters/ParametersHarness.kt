@@ -13,6 +13,7 @@ import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.SqlBindScanner
 import co.datapipelines.templates.TemplateDraft
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.Dialect
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -23,13 +24,17 @@ import java.util.UUID
  * validator and [ParameterSetService] over the shared database, a metadata `TransactionTemplate`, and
  * the template ports implemented over the REAL `templates` tables ([TemplateRepository]): a pin's
  * status, its body's binds (`SqlBindScanner`, the production scan) and the 142 cascade's release all
- * read and write real rows, so the release's atomicity is the database's, not a fake's. The datasource
- * registry and the selector probe stay fakes (the runtime is lane C's).
+ * read and write real rows, so the release's atomicity is the database's, not a fake's. The
+ * pipeline-contract datasource port stays a fake; the selector probe is the RECORDING fake by default
+ * and — given [customers] (lane C) — the REAL [SelectorRunner]: the workspace's template engine over
+ * the same real template rows, the customer registry's real HikariCP pools over the container.
  */
 internal class ParametersHarness(
     authoringEnabled: Boolean = true,
     val probe: RecordingProbe = RecordingProbe(),
     datasources: FakeDatasources = FakeDatasources(),
+    customers: CustomerRegistry? = null,
+    val config: ParametersConfig = ParametersConfig(),
 ) {
     val jdbc = ParametersTestDb.jdbc
     val repository = ParameterSetRepository(jdbc)
@@ -81,7 +86,13 @@ internal class ParametersHarness(
             TemplateRef(id, version)
         }
 
-    val validator = ParameterSetValidator(ParametersConfig(), registry, statuses, datasources, probe)
+    /** The production render path: one engine per workspace over the real template rows (the web wiring's constants). */
+    val engines = WorkspaceTemplateEngines(templates, cacheSize = 64, renderTimeoutMs = 5_000, maxOutputChars = 1_000_000)
+
+    /** The real selector runtime — present when the harness is given a customer registry. */
+    val runner: SelectorRunner? = customers?.let { SelectorRunner(engines, it, config) }
+
+    val validator = ParameterSetValidator(config, registry, statuses, datasources, runner ?: probe)
     val service = ParameterSetService(repository, validator, AuthoringGuard(authoringEnabled), statuses, releaser, transactions)
 
     /** Seeds an `sql` template (POSTGRES — the fake `warehouse`'s dialect) and answers its pin. */
