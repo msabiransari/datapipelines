@@ -1,4 +1,4 @@
-# Parameter engine — design record (2026-09-21, draft 5.5 — lane A delivered; the record corrected where the tree disagreed)
+# Parameter engine — design record (2026-09-21, draft 5.6 — lane B delivered; its corrections are §16's C-rows)
 
 **Updated 2026-09-25:** the owner's clarification supersedes the earlier hidden/disabled
 value rule. These states govern control interaction; every current selected value is read,
@@ -999,14 +999,21 @@ host side.
 
 ## 14. Open items (the lane confirms; none blocks dispatch)
 
-1. The exact HTTP status for `parameter.evaluate.timeout` per rest-api §4's existing mapping of
-   executor deadlines (the doc, not memory, decides).
+1. ~~The exact HTTP status for `parameter.evaluate.timeout` per rest-api §4's existing mapping of
+   executor deadlines (the doc, not memory, decides).~~ — answered by lane B: **504**, the house mapping of an
+   executor deadline (`pipeline.execution.timeout`, `pipeline.node.timeout`, `pipeline.transform.timeout` are all
+   504 in pipeline-contract §13); §13.20 and `ApiErrorCatalog` carry it (§16, C2).
 2. Whether `readonly` datasource classification (datasources.md §7D) already covers the selector
    runner's gate or a second classifier call is needed — reuse `SqlStatementClassifier` either way.
-3. `TemplateRef`'s package (templates vs pipeline-contract) decides whether `parameters` declares
-   `pipeline-contract` at all; the §2.4 row allows it, the build file lists it only if compiled against.
-4. The V-number: the next free one at merge time (V38 is main's latest on 2026-09-26; in-flight
-   lanes may claim numbers first).
+3. ~~`TemplateRef`'s package (templates vs pipeline-contract) decides whether `parameters` declares
+   `pipeline-contract` at all; the §2.4 row allows it, the build file lists it only if compiled against.~~ —
+   answered by lane B: `TemplateRef` is `pipeline-contract`'s, and so are the four ports the validator calls
+   (`TemplateDryRenderer`, `DatasourceRegistry`, `TemplateVersionStatuses`, `TemplateReleaser`), the two name
+   grammars, `ReadLens`, `AuthoringGuard` and `ValidationFailure`: `parameters` DECLARES `pipeline-contract`
+   (§16, C3). `templates` and `datasources` stay allowed and undeclared in main (lane C's runtime).
+4. ~~The V-number: the next free one at merge time (V38 is main's latest on 2026-09-26; in-flight
+   lanes may claim numbers first).~~ — answered by lane B: **V39** (`V39__parameter_sets.sql`), documented in
+   metadata-db **§4.26/§4.27** (§16, C4).
 5. The MCP tool count and every pinned literal: read from the tree at dispatch, never from this
    record (Astra's item 12).
 6. ~~Whether the published-endpoint place (query-string values) needs a decoding step before the
@@ -1032,10 +1039,37 @@ on every handback).
 
 ---
 
+## 16. Lane B's corrections (C-rows, 2026-09-26)
+
+Lane B (#194, `feat/parameter-engine-core`, base `2e32943e`) built §3, §4, §7, §8.1–§8.3, §10 and §11. The
+**model froze in `b141ebcf`** (`ParameterSetBody` / `ParameterDefinition` / `SelectorSource` / `Presentation`,
+`ParameterErrorCodes` with its `PipelineErrorCodes.Parameters` mirror, the `SelectorProbe` port,
+`ParametersProperties` / `ParametersConfig`); the **repository's and the service's API froze in `83e4d7c5`**.
+Where this record and the tree — or the owner's mid-lane rulings — disagreed, the tree and the rulings won;
+each such spot is a row here. None changes an owner decision (P1–P34).
+
+| # | Record said | As built, and why |
+|---|---|---|
+| C1 | §10's validation family | Three codes added by **owner rulings** (asked before the code that needed them): `parameter.validation.body_invalid` (the document's SHAPE at every level — an unknown key, a wrong JSON type, a missing structural key, a `depends_on` longer than the set; `details.path` + `details.reason` `unknown_key` / `wrong_type` / `missing` / `too_long`; 2026-09-26), `parameter.validation.selector_query_failed` (step 6 reached the datasource and its STATEMENT failed — `details.datasource_code`; `datasource_unreachable` is for connection failures only; 2026-09-26) and `parameter.validation.input_source_multiple_rows` (a database-fed `INPUT` returned two rows at save's dry run — §4 step 6 named the check but no code; 2026-09-27). Plus the brief's temporary `parameter.validation.selector_probe_unavailable` (400, the validation family — a template-backed save before lane C wires the probe; §13.20 says it leaves with lane C). 81 codes in §13.20, one row each. |
+| C2 | §10's "200 (in `errors[]`)" / "inline" statuses; §14 item 1 | The evaluate's per-parameter codes are **"—"** in §13.20 — never a response status; the catalog's drift parser admits a status or "—", and "200" would claim a status the code never has. `parameter.evaluate.timeout` is **504** (§14 item 1, answered). |
+| C3 | §2.4: `parameters` "layer 2 beside `templates`"; §14 item 3 | **Layer 4 beside `dag`** — it depends on `templates`, which is layer 3 since the #214 redraw. It DECLARES `typesystem`, `graph`, `pipeline-contract` (item 3, answered above); `templates` is a TEST dependency only (the container suite pins real template rows). `application`, `mcp-server` and `web` got their allowed-ahead `parameters` edge (the root map is compared with §4.2 both ways). |
+| C4 | §8.1: "metadata-db §4.21/§4.22"; "the `templates` table's shape"; §14 item 4 | **V39, metadata-db §4.26/§4.27** (V36 took §4.21, V38 §4.22–§4.25). The table SHAPE is the templates'; the metadata SEMANTICS are the pipelines': `body_json` carries `display_name`/`description`, so the index row indexes the CURRENT body and is re-indexed on every pointer move (release, discard's fallback, restore, switch, a first import); the hash is the pipelines' rule (the database hashes the JSONB projection of the canonical body). `id` has no database default — the application generates it and an import KEEPS it (P24). A release-stamps CHECK was added (`status <> DRAFT ⇒ released_at`). |
+| C5 | §3.1: no rule for the set's `display_name` / `description` | They take the parameter's `label` / `description` rules — `label_invalid` (1–120, not blank) and `description_too_long` (≤ 2000), `details.path` naming the set field. Unbounded author text echoed into refusals was not acceptable. |
+| C6 | §8.1/§3.3 (via versioning §3.3): the race loser "violates the one-draft index" | The loser usually collides on the version **primary key** first — both writers allocate `max + 1` from the same committed rows, and Postgres checks unique indexes in creation order. Found by the FORCED race test (the index-only mapping answered a raw `DuplicateKeyException`); both constraints now map to `parameter.version.conflict` with the winner's state — as `PipelineRepository` already did. `TemplateRepository` maps only its index (a follow-up issue). |
+| C7 | §4: "steps 5–6 … are skipped for a body whose `body_hash` is unchanged" | Implemented (the draft write computes the canonical body's hash with the database's own expression and skips the dry run when it equals the working version's). Added: the dry run runs only on a document that passed steps 1–4 — a refused document never earns a query against a customer database. |
+| C8 | §4 step 3: expressions after the graph | The expressions are PARSED in step 1 (their depth and operator caps hold BEFORE the graph is built — the brief's bound-before-graph rule); their §7.2 static rules stay step 3. |
+| C9 | §7.1: "nodes ≤ `max-expression-nodes` (128)" beside "`in`'s list is 1..256 literals" | `max-expression-nodes` counts OPERATOR nodes; a ref and its literals belong to their operator (whose `in` list is capped at 256 separately). Counting every object would make a legal 256-literal `in` exceed the default 128. |
+| C10 | §7 (grammar only) | An unknown key INSIDE an expression is `expression_invalid` (`details.reason = unknown_key`) — the AST is its own grammar and that is its catch-all; `body_invalid` covers the document's schema levels. |
+| C11 | §3.3: option values "coerced at save" | Judged by the full shared validator as a `SINGLE` of the parameter's type — so a `DECIMAL(5,2)` option `1.234` is `option_invalid` (`reason = scale`), as a submitted value would be. Uniqueness is canonical (`1.0` = `1.00` → `option_duplicate`). |
+| C12 | §4 step 6 / §6.2: the three columns "by alias" | Column names compare case-insensitively (H2 and Oracle report unquoted aliases upper-case); `display_value` / `is_default` of the wrong type are `selector_columns_invalid` with `details.reason`. A pinned DISCARDED version is `template_version_not_found` (`reason = discarded`) — versioning §3.5's pin rule. |
+| C13 | §11 / the brief: "configuration §3.28 is the newest block — yours is the next" | **§3.30** — the scheduler took §3.29. Bounds enforced at boot (`ConfigValidator`'s `ParametersRules`, whose twins of `ParametersKey` a drift test holds equal) and at binding (`ParametersProperties.toConfig()`); `CHECK_COUNT` 29 → 30. |
+| C14 | §8.2: the authoring-disabled refusal | Implemented on every authoring write. Not yet: versioning §5.5's BOOT rule (authoring disabled while drafts exist refuses startup) covers pipelines and templates only — parameter-set drafts join it when the engine is wired into the application (lane D). |
+
 ## Change log
 
 | date | version | change |
 |---|---|---|
+| 2026-09-26 | draft 5.6 | Lane B delivered on `feat/parameter-engine-core` (not merged): the model froze in `b141ebcf`, the expression AST `d5827642`, the save-time validator `4fbf52fe`, V39 with the repository and the service `83e4d7c5`. New §16 records its corrections C1–C14 (three owner rulings of 2026-09-26/27 among them); §14 items 1, 3 and 4 answered. |
 | 2026-09-26 | draft 5.5 | Lane A delivered (`a5290bbe`, merged) and the record corrected where the tree disagreed: no test asserted the trim (P28, §2.3 — the refusals are new red-first tests); the three mid-lane rulings recorded as P32 (precision/scale bind pipeline values — break 2, rest-api v2.37), P33 (`pipeline.execution.parameter_constraint_violation`), P34 (limits as typesystem constants; no pipeline `max_length` default — §3.5 says the default is the engine's); §6.4 gains the `BIGDECIMAL(p,s)` source row `TypeWidening` implements; §12's regex fixture is the measured `(.*a){12}` (the classic nested quantifier is linear on JDK 21); §14 item 6 answered (decode first, one binder). Follow-ups #264 (a node's parameter values are type-checked only at save) and #265 (`sql_probe`'s own coercion still trims). The merge's security pass found two bounds that did not hold, fixed on main in the same landing (`2e7f8866`): `PatternGuard.matches` catches the `StackOverflowError` an alternation inside a repetition raises before the budget and reports it as the budget refusal (§3.5 — the read budget alone was not the bound); the precision check's arithmetic is in `Long` (an exponent near 2³¹ overflowed `Int` and was accepted). Also: `\p{L}+` no longer refused as possessive; a bound renders through `BigDecimal.toString()` in messages (a huge exponent was an OOME). Filed #267 (`ParameterCoercion.decimal()` unguarded on `DoubleNode(Infinity)`, pre-existing) and #268 (a pre-#194 body carrying an ignored `constraints`/`cardinality` key throws at bind). |
 | 2026-09-26 | draft 5.4 | Astra's fourth-round item: `selectors_saturated` (inline, 200) and `timeout` (whole request) could race when a caller waited for a slot until the deadline. Precedence made explicit in P31, §5.2 step 3, §10 and §12: a queue already full at admission is an immediate inline `selectors_saturated`; a deadline that expires while a submission is queued or running is the whole-request `timeout`. Nothing else changed. |
 | 2026-09-26 | draft 5.3 | Astra's third round (three items). (1) The cancel failure path named a discard protocol `modules/datasources` does not have: new §2.5 assigns `ConnectionPool.discard(connection)` to lane C (HikariCP 6.3.3's `evictConnection`, every pool kind is HikariCP-backed, container test); §5.2 step 3 rewritten around a `SelectorPool` bulkhead — the `ScriptEvaluationPool` shape — where the worker THREAD owns its slot until the driver returns (abandoned workers counted against the bound), the deadline is a `withTimeout` on the await and never on the worker, saturation is `selectors_saturated` within the deadline (§10, 200 inline; 429 shape when surfaced), `max-waiting-selector-queries` joins §11, the metric becomes the gauge `parameters.selectors.abandoned` (the sibling of `transform.evaluations.abandoned`); P31, §12 and lane C's row follow. (2) The §10 header still required `skillArtifacts` and a `references/error-codes.md` that no longer exists: now `core-error-codes` via `docs_get`, `docsExport` + `DocSetGoldenTest`; the 5.2 row's claim corrected in place. (3) §13a.1: an empty selector shows the errors the server returned — `required_missing` only when required. |

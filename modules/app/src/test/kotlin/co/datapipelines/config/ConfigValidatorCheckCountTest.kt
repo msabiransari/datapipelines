@@ -67,6 +67,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/TransformRules.kt",
                 // 224 — the demo-key and key-budget rules, split out for the same size reason.
                 "modules/app/src/main/kotlin/co/datapipelines/config/DemoApiRules.kt",
+                // #194 — the §3.30 parameter-engine bounds, split out like the transform ones.
+                "modules/app/src/main/kotlin/co/datapipelines/config/ParametersRules.kt",
             )
     }
 }
