@@ -70,8 +70,7 @@ class ExecutionStreamAuthority(
      * static string either way). A subscriber with no recorded expiry is not expiry-judged:
      * production sessions always carry one; the null case is the pre-#263 shape.
      */
-    fun hasExpired(subscriber: AuthenticatedPrincipal): Boolean =
-        subscriber.sessionExpiresAtMillis?.let { nowMillis() >= it } ?: false
+    fun hasExpired(subscriber: AuthenticatedPrincipal): Boolean = subscriber.sessionExpiresAtMillis?.let { nowMillis() >= it } ?: false
 
     /**
      * True while [subscriber] may still read [executionId] — the same verdict a fresh request

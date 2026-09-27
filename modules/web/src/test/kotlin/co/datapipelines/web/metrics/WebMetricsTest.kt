@@ -7,9 +7,9 @@ import co.datapipelines.web.sse.ExecutionStream
 import co.datapipelines.web.sse.ExecutionStreamAuthority
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
