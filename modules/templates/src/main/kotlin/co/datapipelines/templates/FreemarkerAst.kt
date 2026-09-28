@@ -90,6 +90,15 @@ internal object FreemarkerAst {
     /** One `<#if …>` / `<#elseif …>` / `<#else>` branch; its description prints the branch's condition. */
     const val CONDITIONAL_BLOCK = "freemarker.core.ConditionalBlock"
 
+    /**
+     * `<#assign x = e>` / `<#local …>` / `<#global …>` (and, with a `scope`/`namespace`
+     * attribute, the `AssignmentInstruction` container's child nodes) — the node whose
+     * description prints the target and the value expression (285's taint). A freestanding
+     * assignment prints `#assign x = region`; a container child prints `x = region` with no
+     * keyword. Pinned in [FreemarkerAstDriftTest].
+     */
+    const val ASSIGNMENT = "freemarker.core.Assignment"
+
     /** [element]'s own class name — the node-identity check every caller uses. */
     fun typeOf(element: TemplateElement): String = element.javaClass.name
 

@@ -44,9 +44,34 @@ class FreemarkerAstDriftTest {
             FreemarkerAst.MIXED_CONTENT to "SELECT \${a} FROM t",
             FreemarkerAst.DOLLAR_VARIABLE to "\${x}",
             FreemarkerAst.ITERATOR_BLOCK to "<#list rows as x></#list>",
+            // #285 — the taint matches on the assignment node; a rename would silently disarm it.
+            FreemarkerAst.ASSIGNMENT to "<#assign x = 1>",
         ).forEach { (expected, body) ->
             withClue("$body must still parse to $expected") { rootTypeOf(body) shouldBe expected }
         }
+    }
+
+    @Test
+    fun `the assignment descriptions the 285 taint parses still print in their pinned shapes`() {
+        // Verified against the pinned 2.3.34 jar (2026-09-28): a freestanding assignment prints
+        // its keyword, target, operator and value; a `scope`/`namespace` attribute prints as a
+        // child of an `#assign-container` with NO keyword — target, operator, value still — and
+        // `<#local>` prints its own keyword inside the macro.
+        fun assignments(body: String): List<String> {
+            val descriptions = mutableListOf<String>()
+            FreemarkerAst.visitExcludingComments(parse(body).rootTreeNode) { element ->
+                if (FreemarkerAst.typeOf(element) == FreemarkerAst.ASSIGNMENT) descriptions += FreemarkerAst.ownText(element)
+            }
+            return descriptions
+        }
+
+        assignments("<#assign x = region>") shouldBe listOf("#assign x = region")
+        assignments("<#assign x += region>") shouldBe listOf("#assign x += region")
+        assignments("<#global x = region>") shouldBe listOf("#global x = region")
+        assignments("<#macro m><#local x = region></#macro>") shouldBe listOf("#local x = region")
+
+        // The container: the real assignment and the directive's own parameter, side by side.
+        assignments("<#assign x = region scope=\"global\">") shouldBe listOf("x = region", "scope = \"global\"")
     }
 
     @Test

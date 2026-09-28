@@ -97,6 +97,49 @@ class TemplateDryRendererImplTest {
     }
 
     @Test
+    fun `interpolatedParameters reports a value assigned from a declared parameter - the direct indirection (#285)`() {
+        // RED FIRST: `<#assign x = region>${x}` writes the caller's value into the SQL text
+        // through `x`, and the scan reported nothing.
+        registry.put(TemplateFixtures.version("test/indirect.sql", body = "SELECT 1 WHERE a = '<#assign x = region>\${x}'"))
+
+        dryRenderer.interpolatedParameters(workspaceId, TemplateRef("test/indirect.sql", 1), setOf("region")) shouldBe
+            listOf("region")
+    }
+
+    @Test
+    fun `interpolatedParameters reports the transitive indirection through two assignments (#285)`() {
+        registry.put(
+            TemplateFixtures.version("test/chain.sql", body = "SELECT '<#assign x = region><#assign y = x>\${y}'"),
+        )
+
+        dryRenderer.interpolatedParameters(workspaceId, TemplateRef("test/chain.sql", 1), setOf("region")) shouldBe
+            listOf("region")
+    }
+
+    @Test
+    fun `interpolatedParameters stays clean when an assignment carries a literal`() {
+        // The taint follows REFERENCES, not assignments as such: `1` carries nothing of the caller.
+        registry.put(TemplateFixtures.version("test/literal.sql", body = "SELECT 1 WHERE a = '<#assign x = 1>\${x}'"))
+
+        dryRenderer.interpolatedParameters(workspaceId, TemplateRef("test/literal.sql", 1), setOf("customer_id")) shouldBe
+            emptyList()
+    }
+
+    @Test
+    fun `interpolatedParameters stays clean when a macro parameter shadows a tainted name`() {
+        // Shadowing clears as it does for direct references: inside `m`, `region` is the LOCAL.
+        registry.put(
+            TemplateFixtures.version(
+                "test/shadowed.sql",
+                body = "SELECT '<#assign t = region><#macro m region>\${region}\${t}</#macro>'",
+            ),
+        )
+
+        dryRenderer.interpolatedParameters(workspaceId, TemplateRef("test/shadowed.sql", 1), setOf("region")) shouldBe
+            listOf("region") // only ${t} — read AFTER the macro definition, outside the shadow — is the parameter's path
+    }
+
+    @Test
     fun `interpolatedParameters is empty when the body interpolates nothing declared`() {
         dryRenderer
             .interpolatedParameters(workspaceId, TemplateRef("test/fetch.sql", 1), setOf("customer_id"))
