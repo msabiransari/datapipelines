@@ -36,7 +36,17 @@ import java.time.Instant
  *    completion first — there is no step boundary inside it. Hence [capabilities]:
  *    heap and statements are NOT bounded in-process, and the engine is NOT
  *    interruptible. The evaluation pool's abandonment is the bound that actually
- *    stops an overrunning builtin's caller.
+ *    stops an overrunning builtin's caller — and the SANDBOX bound against a hostile
+ *    body (owner ruling 2026-09-28, record §4.5); the hooks are a runaway guard.
+ *  - **The hooks cannot be unbound by the body (#272).** They are frame variables the
+ *    library looks up by name, so a body that binds `$__evaluate_entry` switches them
+ *    off. [compile] refuses every bind of a `__` name, read from the parsed AST
+ *    ([JsonataReservedNames]); `$eval`, which parses at evaluate time and binds in the
+ *    CALLING frame, is shadowed so its string meets the same check before it runs.
+ *  - **The seam rethrows what escaped (#272).** [JsonataEvaluationGuard.escaped] reads
+ *    the cause chain (a `$sort` comparator wraps), then a refusal still pending under a
+ *    library replacement (the `and`/`or` short-circuit, `$eval`); a refusal the library
+ *    swallowed and went on past never labels a later error.
  *  - **No host access.** No Java function is registered anywhere: the body cannot
  *    reach the filesystem, network, environment or system properties. The conformance
  *    suite asserts the builtin catalogue contains no name from a deny-list.
@@ -55,9 +65,10 @@ import java.time.Instant
  *
  * A malicious body can still exhaust the heap (see dag-executor.md's honest-bounds
  * table); input and output caps at the callers bound a well-formed evaluation. The
- * AST is not inspectable through the library's public API, so the clock refusal is a
- * call-time shadow rather than a compile-time scan — a body that never evaluates a
- * clock call never sees it.
+ * AST's fields are not public: the reserved-name walk reads them reflectively, resolved
+ * when it loads so a library that renames one fails every compile rather than the walk
+ * going blind. The clock refusal stays a call-time shadow rather than a compile-time
+ * scan — a body that never evaluates a clock call never sees it.
  */
 class JsonataEngine(
     /** The injected wall clock behind the between-steps bound (#260) — the module's
@@ -95,7 +106,22 @@ class JsonataEngine(
                         (deferred.firstOrNull()?.message ?: "unknown"),
             )
         }
+        refuseReservedBinds(body, expr)
         return JsonataCompiledScript(body, expr)
+    }
+
+    /**
+     * A body that binds a `__` name is refused before it can run (#272, see the class KDoc).
+     * The walk reads the tree the library just parsed — the one that will evaluate — so
+     * compile parses once, as before the check existed.
+     */
+    private fun refuseReservedBinds(
+        body: String,
+        expr: Jsonata,
+    ) {
+        val bind = JsonataReservedNames.firstReservedBind(expr) ?: return
+        val at = lineColumn(body, bind.position.coerceAtLeast(0))
+        throw ScriptSyntaxException(at.first, at.second, JsonataReservedNames.refusal(bind))
     }
 
     override fun evaluate(
@@ -109,70 +135,66 @@ class JsonataEngine(
         }
         val frame = Jsonata.Frame(null)
 
-        // The depth counter and the clock live in THIS evaluation's closure — one
-        // evaluation, one counter, thread-confined (the frame-per-evaluation rule the
-        // conformance suite's falsification red-flags). `breach` records the typed
-        // refusal the hooks threw: a library path may REPLACE a non-JException while
-        // unwinding (evaluateBinary's and/or short-circuit turns one into
-        // JException("Unexpected")), and the recorded breach — never the wrapper's
-        // text — is what the seam rethrows.
-        var depth = 0
-        var breach: ScriptingException? = null
-        val startedAt = clock.currentTimeMillis()
-
-        fun checkDepth() {
-            if (depth > limits.maxDepth) {
-                val refusal =
-                    ScriptResourceLimitException(
-                        ScriptResourceLimitException.Kind.DEPTH,
-                        "recursion depth exceeded the declared maximum of ${limits.maxDepth}",
-                    )
-                breach = refusal
-                throw refusal
-            }
-        }
-
-        fun checkWallClock() {
-            if (clock.currentTimeMillis() - startedAt > limits.wallClock.toMillis()) {
-                val timeout = ScriptTimeoutException(limits.wallClock, "")
-                breach = timeout
-                throw timeout
-            }
-        }
-
-        frame.setEvaluateEntryCallback { _, _, _ ->
-            depth++
-            checkDepth()
-            checkWallClock()
-        }
-        frame.setEvaluateExitCallback { _, _, _, _ ->
-            depth--
-            checkWallClock()
-        }
-        bindClock(frame, limits.now)
+        // One guard per evaluation — one depth counter, one clock start, one pending
+        // refusal, thread-confined (the frame-per-evaluation rule the conformance suite's
+        // falsification red-flags).
+        val guard = JsonataEvaluationGuard(limits, clock)
+        frame.setEvaluateEntryCallback { _, _, _ -> guard.onEntry() }
+        frame.setEvaluateExitCallback { _, _, _, _ -> guard.onExit() }
+        bindClock(frame, limits.now, guard)
+        bindEval(frame, guard)
         return try {
             JsonataValues.fromEngineOutput(
                 compiled.expr.evaluate(JsonataValues.toEngineInput(input), frame),
             )
-        } catch (err: ScriptingException) {
-            throw err
-        } catch (err: JException) {
-            // The hooks' own typed refusal arrives wrapped when a library path replaced
-            // it mid-unwind (evaluateBinary's and/or short-circuit turns a non-JException
-            // into JException("Unexpected")); the recorded breach — never the wrapper's
-            // text — is what gets rethrown. Every remaining JException is a script error.
-            throw breach ?: ScriptEvaluationException(err.message ?: err.error, err)
         } catch (
             @Suppress("TooGenericExceptionCaught") err: RuntimeException,
         ) {
-            // The library rethrows builtin failures verbatim after message population;
-            // anything else here is an engine or library defect surfacing mid-evaluation.
-            throw breach ?: ScriptEvaluationException(
-                "evaluation failed unexpectedly: ${err.message ?: err.javaClass.name}",
-                err,
-            )
+            // Every failure — the engine's own refusal, a library script error, or a library
+            // or engine defect surfacing mid-evaluation — is classified by what escaped.
+            throw guard.escaped(err)
         }
     }
+
+    /**
+     * Shadows `$eval` for this evaluation (#272): the string is parsed with the library's
+     * own parser and a reserved bind is refused BEFORE the library evaluates it in the
+     * calling frame. Anything else — including a string that does not parse, which keeps
+     * the library's own D3120 — goes to the library's `$eval` unchanged.
+     */
+    private fun bindEval(
+        frame: Jsonata.Frame,
+        guard: JsonataEvaluationGuard,
+    ) {
+        frame.bind(
+            "eval",
+            Jsonata.JFunction(
+                Jsonata.JFunctionCallable { _, args ->
+                    val expr = args.getOrNull(0) as String?
+                    reservedBindIn(expr)?.let { bind ->
+                        throw guard.refuse(
+                            ScriptEvaluationException("\$eval refused: ${JsonataReservedNames.refusal(bind)}"),
+                        )
+                    }
+                    Functions.functionEval(expr, args.getOrNull(1))
+                },
+                SIGNATURE_EVAL,
+            ),
+        )
+    }
+
+    private fun reservedBindIn(expr: String?): JsonataReservedNames.Bind? =
+        if (expr == null) {
+            null
+        } else {
+            try {
+                JsonataReservedNames.firstReservedBind(expr)
+            } catch (
+                @Suppress("SwallowedException") err: JException,
+            ) {
+                null // the library's own parse refuses it next, as D3120
+            }
+        }
 
     /**
      * Shadows the library's clock builtins for this evaluation — pinned to [now] when
@@ -181,10 +203,11 @@ class JsonataEngine(
     private fun bindClock(
         frame: Jsonata.Frame,
         now: Instant?,
+        guard: JsonataEvaluationGuard,
     ) {
         if (now == null) {
-            frame.bind("now", refusingClockFunction("now"))
-            frame.bind("millis", refusingClockFunction("millis"))
+            frame.bind("now", refusingClockFunction("now", guard))
+            frame.bind("millis", refusingClockFunction("millis", guard))
         } else {
             val millis = now.toEpochMilli()
             frame.bind(
@@ -212,11 +235,16 @@ class JsonataEngine(
             signature,
         )
 
-    private fun refusingClockFunction(name: String): Jsonata.JFunction =
+    private fun refusingClockFunction(
+        name: String,
+        guard: JsonataEvaluationGuard,
+    ): Jsonata.JFunction =
         clockFunction(SIGNATURE_NOW) { _, _ ->
-            throw ScriptEvaluationException(
-                "$name() is not available: a transform is a pure function of its inputs — " +
-                    "pin EvaluationLimits.now so the clock is an input, or remove the clock call",
+            throw guard.refuse(
+                ScriptEvaluationException(
+                    "$name() is not available: a transform is a pure function of its inputs — " +
+                        "pin EvaluationLimits.now so the clock is an input, or remove the clock call",
+                ),
             )
         }
 
@@ -245,5 +273,8 @@ class JsonataEngine(
         /** The library's own signature strings for the two clock builtins. */
         const val SIGNATURE_NOW = "<s?s?:s>"
         const val SIGNATURE_MILLIS = "<:n>"
+
+        /** The library's own signature for `$eval` (`Jsonata.java` registers it so). */
+        const val SIGNATURE_EVAL = "<sx?:x>"
     }
 }

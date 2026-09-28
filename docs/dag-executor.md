@@ -1,9 +1,9 @@
 # DAG Executor Specification
 
-**Status:** v1.19 (revised — see Change Log)
+**Status:** v1.20 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-28
 
 ---
 
@@ -628,7 +628,13 @@ node lands (7c). What is already true and binding:
 | deep recursion (self-recursive lambda, depth 100 000) | BOUNDED — `ScriptTimeoutException` on budget; the thread ended inside the grace. **Re-measured at #260, outcome unchanged:** the loop is tail-recursive and the library trampolines it — depth stays flat, so TIME catches it (the 7a explanation named `isParallelCall`; the trampoline is the mechanism). A NON-tail-recursive lambda nests for real and the engine's own depth count refuses it at `max-depth` nested calls | the engine's between-steps clock |
 | `$eval` nesting (an eval'd builtin overrun) | UNBOUNDED — same shape as the pad bomb; the eval'd work inherits the evaluation's timebox but reaches no step boundary inside a builtin | the pool |
 | `$now()` | REFUSED — the engine shadows the clock builtins: pinned via `EvaluationLimits.now` (the execution's `current_timestamp`) or refused — a transform is a pure function of its inputs | the engine |
+| hook rebind (`$__evaluate_entry := …`, `$__evaluate_exit := …`, then a tail loop — #272) | REFUSED — `ScriptSyntaxException` (`template.validation.syntax_error`) at compile: a body may not bind a `__` name. Before the refusal (measured 2026-09-28) UNBOUNDED: both hooks were off and the loop outlived the grace | the engine, at compile |
+| hook rebind through `$eval` (the same two binds as eval'd strings — #272) | REFUSED — `ScriptEvaluationException` (`pipeline.transform.evaluation_failed`): the engine's `$eval` shadow checks the string before the library runs it. Before (measured 2026-09-28) UNBOUNDED, as above | the engine's `$eval` shadow |
 
+- **The pool is the sandbox bound; the hooks are a runaway guard (owner ruling 2026-09-28,
+  #272; transform-nodes record §4.5).** The hooks are frame variables the library looks up by
+  name, so the engine refuses any body that binds a `__` name (compile) and checks every
+  `$eval`'d string the same way before it runs; a hostile body is bounded by the pool.
 - **The depth bound counts every evaluate entry and exit (#260)**: nested EXPRESSIONS
   (500 nested arrays against a depth of 100 refuses in milliseconds — the conformance
   suite pins it) and non-tail lambda recursion alike; the library's `isParallelCall`
@@ -1595,3 +1601,4 @@ document a customer can read before they need it.
 | 2026-09-07 | v1.7 | 087 connector seams | §6.4.3: **write-back identifiers are quoted in the TARGET dialect's vocabulary**, routed through `DialectAdapter.quoteIdentifier` ([Datasources §4.2](datasources.md#42-dialect-adapter-interface)) — backticks for MySQL, brackets for MSSQL, the doubled `"` everywhere else. They were `"…"` unconditionally, which a MySQL server without `ANSI_QUOTES` reads as string literals: `INSERT INTO "orders" ("order") VALUES (?)` is a syntax error there, and the failure is invisible until a table or column is named like a reserved word — the case quoting exists for. §6.4.1's tempdb CTAS is unchanged: its target is the staging engine, whose vocabulary IS the doubled `"`. No wire, catalog or classification change. |
 | 2026-09-26 | v1.18 (no bump) | #194 lane A | §3: `Dag<T>` now lives in `modules/graph` (same package, `co.datapipelines.dag`), moved byte-identical so the parameter engine can use it without depending on the executor. No behaviour, API or import changed. |
 | 2026-09-28 | v1.19 (no bump) | lane 283 (#289) | §5.3's honest-bounds note: the breach suite runs in its own task, `:modules:scripting:breachSuite` (its own source set and 512m JVM, under `check`); the report's path and the table are unchanged. No behaviour changed. |
+| 2026-09-28 | v1.20 | lane 298 (#272) | §5.3: the honest-bounds table gains the two hook-rebind rows (REFUSED at compile, and through the `$eval` shadow; both measured UNBOUNDED before the fix) and the owner's ruling — the pool is the sandbox bound, the between-steps hooks a runaway guard. The engine refuses a body that binds a `__` name and rethrows the refusal that escaped (the cause chain, then one still pending under a library replacement). |

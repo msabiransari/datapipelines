@@ -22,9 +22,11 @@ import java.time.Duration
  *  - a single builtin call that overruns (`$pad`, `$join`, a backtracking regex) runs
  *    to completion first — for that shape the evaluation pool's abandonment is the
  *    bound, proven through the pool below;
- *  - `$eval` cannot see a bind-expression (`:=`) at all — the library's eval-string
- *    parser refuses it — so an eval'd body that overruns is proven bounded THROUGH
- *    THE POOL, which is the bound §4.3 documents for anything inside a builtin.
+ *  - an eval'd body that overruns inside a builtin is proven bounded THROUGH THE POOL,
+ *    which is the bound §4.3 documents for anything inside a builtin. (The 7a note that
+ *    `$eval` "cannot see a bind-expression" was wrong — measured 2026-09-28, #272: it
+ *    parses binds and a top-level eval'd bind lands in the CALLING frame; the engine's
+ *    `$eval` shadow refuses a reserved one, `JsonataReservedNamesTest`.)
  */
 class JsonataEngineBoundsTest {
     /** A self-recursive lambda — the canonical JSONata non-terminating expression. */

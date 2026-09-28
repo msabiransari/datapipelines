@@ -123,6 +123,28 @@ class JsonataBreachTest {
                 Outcome.REFUSED,
                 "completed (no bound fired) - miscalibrated case",
             ),
+            // #272: the hooks ARE frame variables the library looks up through the chain, so a
+            // body that binds them to null runs every deeper step unbounded. Measured before the
+            // compile refusal (2026-09-28): the tail loop below outlived the grace (UNBOUNDED).
+            // Last in the corpus on purpose: were the refusal ever lost, the runaway thread it
+            // leaves behind would burn a core under every case measured after it.
+            Case(
+                "hook-rebind",
+                "( \$__evaluate_entry := \$nonexistent; \$__evaluate_exit := \$nonexistent; " +
+                    "\$f := function(\$x){ \$f(\$x + 1) }; \$f(0) )",
+                Outcome.REFUSED,
+                "completed (no bound fired) - miscalibrated case",
+            ),
+            // The same rebind through `$eval`, which parses at evaluate time and binds in the
+            // CALLING frame: no compile-time walk can see it, so the engine's `$eval` shadow
+            // checks the string before it runs.
+            Case(
+                "hook-rebind-eval",
+                "( \$eval(\"\$__evaluate_entry := \$nonexistent\"); \$eval(\"\$__evaluate_exit := \$nonexistent\"); " +
+                    "\$f := function(\$x){ \$f(\$x + 1) }; \$f(0) )",
+                Outcome.REFUSED,
+                "completed (no bound fired) - miscalibrated case",
+            ),
         )
 
     @Test
@@ -146,8 +168,8 @@ class JsonataBreachTest {
             }
         }
 
-        // Non-vacuity: the corpus is the record's seven, every row materialised.
-        rows.size shouldBe 7
+        // Non-vacuity: the corpus is the record's seven plus #272's two rebinds, every row materialised.
+        rows.size shouldBe 9
         Files.readAllLines(report).size shouldBe (rows.size + 4)
     }
 
@@ -212,7 +234,6 @@ class JsonataBreachTest {
         start: Long,
     ): Row {
         val pool = ScriptEvaluationPool(1, 1, GRACE, ScriptEvaluationPool.SYSTEM)
-        val script = engine.compile(case.body)
         val limits = EvaluationLimits(Duration.ofSeconds(2), 100)
         var evidence: String
         var outcome: Outcome
@@ -220,6 +241,9 @@ class JsonataBreachTest {
         val threadHeapBlowout = AtomicReference<OutOfMemoryError?>(null)
 
         try {
+            // Inside the classified block: a refusal at COMPILE (the reserved-name walk, #272)
+            // is a REFUSED row like any other typed refusal.
+            val script = engine.compile(case.body)
             result =
                 pool.run(limits, case.name) {
                     try {
