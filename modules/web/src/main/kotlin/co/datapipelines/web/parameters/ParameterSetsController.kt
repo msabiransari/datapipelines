@@ -89,7 +89,9 @@ class ParameterSetsController(
         val workspaceId = principal.requireWorkspace().id
         val view = lens.viewFor(principal).parameterSets
         val loaded = sets.findWorking(workspaceId, view, id) ?: throw ApiErrors.parameterNotFound(id.toString())
-        val draft = repository.findDraft(workspaceId, id)
+        // 178b, the pipelines mould (PipelineService.findDraft): a promoter never sees a draft
+        // pointer — the draft is read only under the whole view (the 194d merge's security pass, F2).
+        val draft = if (view.isEverything) repository.findDraft(workspaceId, id) else null
         return ApiResponse.of(ParameterSetResponses.full(loaded.record, loaded.body, loaded.detail, draft))
     }
 
@@ -299,7 +301,14 @@ class ParameterSetsController(
         @PathVariable id: UUID,
     ): ApiResponse<Map<String, Any?>> {
         val principal = currentPrincipal()
-        return ApiResponse.of(transfer.export(principal.requireWorkspace().id, id))
+        val workspaceId = principal.requireWorkspace().id
+        val view = lens.viewFor(principal).parameterSets
+        // The promoter lens on the export read, the pipelines mould (PipelineTransferController):
+        // a hidden set exports as an absent one — never a body, never an existence oracle
+        // (auth §7.6's `lens` cell on this route; the 194d merge's security pass, F1).
+        val record = repository.findRecord(workspaceId, id) ?: throw ApiErrors.parameterNotFound(id.toString())
+        if (!view.admits(record.name)) throw ApiErrors.parameterNotFound(id.toString())
+        return ApiResponse.of(transfer.export(workspaceId, id))
     }
 
     /** §21 — import (§8.3): templates first, then the set; the exported id is KEPT (P24; C29 refuses a taken id). */

@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.57 (frozen contract — additive-only changes after this point)
+**Status:** v1.58 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-28
@@ -1802,7 +1802,7 @@ Read one set by id: the WORKING version's full §3 document (every parameter's t
 }
 ```
 
-**Permission:** `parameter_set.read`. **Returns:** `{id, name, display_name, description, version, status, body_hash, current_version, draft?, document}`. **Errors:** an unknown id is `parameter.not_found`.
+**Permission:** `parameter_set.read`. **Returns:** `{id, name, display_name, description, version, status, body_hash, current_version, draft?, document}` — `draft` is null under a promoter's narrowing lens (a promoter never sees a draft pointer, 178; `pipelines_get`'s rule). **Errors:** an unknown id is `parameter.not_found`.
 
 #### 6.2.46 `parameter_sets_create`
 
@@ -2399,6 +2399,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.58 | the 194d merge's security pass | **§6.2.45 `parameter_sets_get`: `draft` is null under a narrowing lens** — the promoter never sees a draft pointer (178, `pipelines_get`'s rule); the tool had re-read the draft unlensed after the lensed working read. `parameter_sets_create`'s 094 new-root check now lists the WHOLE root level (it listed one root, so a name under any other existing root was refused as new). |
 | 2026-09-28 | v1.57 | 194d (#194) the parameter engine's tools — renumbered at merge after 279's v1.55 and 286's v1.56 | **§6.1: 42 → 48 tools — the six `parameter_sets_*`** (the record's §9.1; addressed by id per P24, no release/switch tool — none exists for pipelines or templates either): `parameter_sets_list`/`get` (reads; the promoter lens), `_create`/`_update` (writes; full save-time validation; the 094 new-root confirmation; the §13a.2 ask-before-a-MULTI-without-a-hint rule in the description), `_evaluate` (the §5 runtime; a VIEWER row per C24; the 139 gate's twin — a DRAFT evaluate whose pinned DRAFT template postdates the key's last `templates_render` of it refuses `parameter.evaluate.template_unrendered`, read from the same audit table), `_purge_draft` (versioning §5.4, hash-guarded, the write audit). New §6.2.44–6.2.49. The manual gains the `parameters` area; the matrix places the six on the nine `parameter_set.*` rows. |
 | 2026-09-28 | v1.56 | 286 (#275) — numbered after 279's v1.55 at merge (landed before 194d) | **§7.3's role filtering**: the executions resource listing reads what `executions_list` reads — `findVisible` (own runs plus every `triggered_via = SCHEDULE` run of the workspace) under `execution.read`, `findAll` under `execution.read_all`; until #275 it read own-only `findByUser` for every key, admins included, so a scheduled run was on the tool's list and missing from the resources. No tool or URI changed. |
 | 2026-09-28 | v1.55 | 279 (#279) the request-body cap | **§3 names the transport's cap**: the platform's filter (pipeline-contract §13.21, [Configuration §3.31](configuration.md#331-web-request-limits)) sits ahead of the transport servlet, refusing a body over `datapipelines.web.max-request-bytes` with the same `413 request.body_too_large` envelope REST answers; the transport's JSON mapper carries the stated Jackson `StreamReadConstraints`. No tool, no schema, no permission change. |

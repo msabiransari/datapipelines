@@ -135,7 +135,9 @@ class ParameterSetsGetTool(
         val id = args.requiredUuid("id")
         val view = lens.viewFor(ctx.principal)
         val loaded = sets.findWorking(workspaceId, view.parameterSets, id) ?: throw McpNotFound.parameterSet(id)
-        val draft = repository.findDraft(workspaceId, id)
+        // Null under a narrowing lens: a promoter never sees a draft pointer (178; the pipelines_get
+        // shape — the 194d merge's security pass, F2).
+        val draft = if (view.parameterSets.isEverything) repository.findDraft(workspaceId, id) else null
         return mapOf(
             "id" to loaded.record.id.toString(),
             "name" to loaded.record.name,
@@ -252,7 +254,7 @@ class ParameterSetsCreateTool(
             name = name,
             confirmed = args.boolean(NewRootConfirmation.ARG),
             code = co.datapipelines.parameters.ParameterErrorCodes.NEW_ROOT_REQUIRES_CONFIRMATION,
-        ) { repository.listChildFolders(workspaceId, prefix = null, limit = 1).map { it.segment } }
+        ) { repository.listChildFolders(workspaceId, prefix = null).map { it.segment } }
         val document =
             ParameterSetReader(config).readOrThrow(
                 ParameterSetJson.mapper.readTree(documentJson(args, name)),

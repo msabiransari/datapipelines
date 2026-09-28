@@ -667,6 +667,13 @@
     });
   }
 
+  // htmx's history restore re-creates every <script> in the cached body, so this file used to
+  // run again on every Back — a second observer, a second DataTable per restored table and a
+  // second registry entry each time (the 287 merge's security pass, O1). Wire once, the
+  // shell.js idiom: the observer below lives on the persistent <body> and upgrades the
+  // restored tables itself.
+  if (window.__dpDataTableInit) return;
+  window.__dpDataTableInit = true;
   upgrade(document);
   if (typeof MutationObserver !== "undefined") {
     new MutationObserver(onMutations).observe(document.body, { childList: true, subtree: true });

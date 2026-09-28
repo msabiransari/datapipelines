@@ -270,12 +270,16 @@ class DataTableBrowserTest : BrowserSuite() {
         page.locator("$frame table[data-dt-ready] tbody tr[data-href]").first().waitFor()
         settle()
         withClue("the enhancer wrote its widths through the CSSOM") { styledElements(frame) shouldNotBe 0 }
+        val wired = page.evaluate("() => window.__dpHistoryStyleCleanups.length")
         page.locator("nav a[href='/dashboard']").click()
         page.waitForURL("**/dashboard")
         page.goBack()
         page.waitForURL("**/executions**")
         page.locator("$frame table[data-dt-ready] tbody tr[data-href]").first().waitFor()
         settle()
+        // htmx re-creates the cached body's scripts on Back: data-table.js must wire once (a second
+        // registry entry here meant a second observer and a second instance per restored table).
+        withClue("data-table.js wired once across Back") { page.evaluate("() => window.__dpHistoryStyleCleanups.length") shouldBe wired }
         page.locator("$frame thead .dt-sort").count() shouldBe 7
         withClue("the restored table was re-measured") { geometry(frame)["sbw"] shouldBe "${geometry(frame)["measured"]}px" }
         withClue("CSP after Back") { drainOwnCsp().shouldBeEmpty() }

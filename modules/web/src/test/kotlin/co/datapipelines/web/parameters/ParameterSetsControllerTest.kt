@@ -1,5 +1,7 @@
 package co.datapipelines.web.parameters
 
+import co.datapipelines.application.lens.LensedView
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
@@ -13,6 +15,7 @@ import co.datapipelines.parameters.ParameterSetVersion
 import co.datapipelines.parameters.ParameterSetVersionDetail
 import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.ApiErrorCatalog
 import io.kotest.assertions.throwables.shouldThrow
@@ -119,6 +122,47 @@ class ParameterSetsControllerTest {
 
         error.code shouldBe "parameter.not_found"
         statusOf(error.code) shouldBe HttpStatus.NOT_FOUND
+    }
+
+    /** The same controller under a lens that admits only [admitted] — the promoter's view (178). */
+    private fun narrowed(vararg admitted: String) =
+        ParameterSetsController(
+            sets,
+            repository,
+            evaluator,
+            transfer,
+            config,
+            PromoterLens { LensedView(ReadLens.Everything, ReadLens.Everything, parameterSets = ReadLens.Only(admitted.toSet())) },
+        )
+
+    @Test
+    fun `export under a narrowing lens that hides the set is the catalogued 404 - no body, no existence oracle`() {
+        authenticate()
+        every { repository.findRecord(workspaceId, setId) } returns record
+
+        val error = shouldThrow<co.datapipelines.web.api.ApiException> { narrowed("acme/other/set").export(setId) }
+
+        error.code shouldBe "parameter.not_found"
+        statusOf(error.code) shouldBe HttpStatus.NOT_FOUND
+        verify(exactly = 0) { transfer.export(any(), any()) }
+    }
+
+    @Test
+    fun `get under a narrowing lens that admits the set carries no draft pointer - the draft is never even read`() {
+        authenticate()
+        val released =
+            ParameterSetVersion(
+                record.copy(currentVersion = 1),
+                draftDetail.copy(status = PipelineVersionStatus.RELEASED),
+                bodyOf(),
+            )
+        every { sets.findWorking(workspaceId, any(), setId) } returns released
+        every { repository.findDraft(workspaceId, setId) } returns draftDetail.copy(version = 2)
+
+        val response = narrowed(record.name).get(setId)
+
+        response.data.has("draft") shouldBe false
+        verify(exactly = 0) { repository.findDraft(any(), any()) }
     }
 
     @Test
