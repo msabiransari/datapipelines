@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.30 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.31 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-27
 
 ---
 
@@ -613,6 +613,7 @@ CREATE TABLE published_endpoints (
     timeout_seconds  INTEGER     NOT NULL,   -- clamped by config at write time
     description      TEXT        NOT NULL DEFAULT '',
     is_enabled       BOOLEAN     NOT NULL DEFAULT TRUE,
+    retired_reason   TEXT        NULL,       -- NULL = a normal row; 'pre-R-EP5 path' = retired (#274)
     created_by       UUID        NOT NULL REFERENCES users(id),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -625,6 +626,7 @@ CREATE INDEX idx_published_endpoints_pipeline ON published_endpoints(pipeline_id
 
 **Notes:**
 - **`UNIQUE (path_pattern)` is deployment-wide, not per-workspace, on purpose.** A URL is global: `GET /api/lending/v1/home` has exactly one meaning on a deployment, so two workspaces cannot both own it. `workspace_id` says who may manage the row and whose datasources the pipeline runs against — it does not namespace the path. A per-workspace constraint would let two rows claim one URL and make request-time resolution ambiguous.
+- **`retired_reason` (V41, #274) — a stored row that fails a later grammar is retired, never fatal.** R-EP5 (2026-09-19) made three segments the floor, and rows written before that day under the then-legal two-segment grammar parse against nothing: the row mapper threw inside the demo seeder's conflict check and refused the whole boot. V40 disables every row whose path has fewer than three segments and records why (`retired_reason = 'pre-R-EP5 path'`; NULL is a normal row). Rows are never deleted — the listing shows them flagged with the reason, and unpublishing one is the operator's deliberate act. Independently of this column, the repository maps a row whose path no longer parses as a legacy value and keeps it out of the serve registry and the conflict check, so a database V40 has not reached yet still boots; the column is what makes the row read back as an ordinary disabled row everywhere else. The migration's down path (documented in the file's header) re-enables every row the reason names — V40 cannot distinguish "disabled by V40" from "disabled by an operator before V40" — and drops the column.
 - The constraint is not the whole uniqueness rule. `/a/{x}` and `/a/b` are different strings that match the same URL; that overlap is refused at publish time in the application (`endpoint.path_conflict`), under a transaction-scoped advisory lock so two concurrent publishes cannot both pass the check. The constraint is the second line, catching exact duplication.
 - The row pins a **pipeline, not a version**: the latest RELEASED version is resolved at request time, which is why the read-only rule is re-checked on every serve and not only at publish.
 - `timeout_seconds` is clamped to the `datapipelines.endpoints.timeout-min-seconds` / `datapipelines.endpoints.timeout-max-seconds` bounds when written, deliberately **not** by a CHECK constraint — the bounds are configuration an operator may retune, and a row written under the old bounds must keep serving rather than make the table unreadable.
@@ -1508,6 +1510,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v1.31 | V41 (#274) | §4.13 `published_endpoints` gains `retired_reason TEXT NULL` (NULL = a normal row), and V41 retires every row whose stored path has fewer than three segments — the R-EP5 rows saved before 2026-09-19 made the row mapper throw at boot (#274). `is_enabled` goes FALSE with the reason `'pre-R-EP5 path'`; rows are never deleted (the listing flags them; unpublishing is the fix). The repository's legacy mapping is the fail-closed second half — a row whose path fails today's grammar never reaches the serve registry or the conflict check even without this migration. Down path is in the migration header (re-enables every retired row; the column cannot distinguish its own disables from an operator's). |
 | 2026-09-26 | v1.30 | V39 (#194 lane B, the parameter engine) | New **§4.26 `parameter_sets`** (the index row: a UUID id kept by import, the per-workspace name unique forever, display metadata indexing the CURRENT body, the sticky pointer) and **§4.27 `parameter_set_versions`** (the template_versions shape minus the template-only columns: `body_json` without the name, the database-computed hash, the release/discard/via stamps with CHECKs, the one-draft partial index). §5 gains their four indexes; §5A classifies both promotable. The record's §8.1 said "§4.21/§4.22" — stale since V36/V38 took them. Down path documented in the migration's header and proven on a copy of the demo database. |
 | 2026-09-27 | v1.29 | V40 (scheduler follow-ups, #258) | **§4.23 `schedule_runs` gains the execution's own timing**: `execution_started_at TIMESTAMPTZ NULL` / `execution_completed_at TIMESTAMPTZ NULL` — copied by the reconciler onto the run in the SAME transition that records the terminal state, so rest-api §20.10–§20.12 answer "how long did the execution take" from the run row alone (the run's own `finished_at` is the reconciler's stamp, up to a tick late). Null until such a terminal: runs that never launched and rows finished before V40. Additive; down path in the migration header. |
 | 2026-09-25 | v1.28 | V38 (scheduler lane 1, #9) | New **§4.22 `schedules`**, **§4.23 `schedule_runs`**, **§4.24 `schedule_run_events`** and **§4.25 `scheduled_tasks`** (the [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) §7): the schedules (soft delete with a live-name partial unique index, independent `enabled`/`blocked_*`, the create Idempotency-Key and its hash — L1), their runs (R6's ten states, the frozen context, the executor-owned `prepared_json`, one row per occurrence, one Run now per key, AT MOST ONE ACTIVE RUN per schedule as a partial unique index), the runs' append-only trail (by construction — no trigger, §2), and db-scheduler 16.12.0's own table verbatim. `pipeline_executions.chk_triggered_via` gains `SCHEDULE`. §5 gains the eighteen indexes; §5A classifies `schedules` environment-local (never promoted) and the other three derived. Twenty-five tables. |

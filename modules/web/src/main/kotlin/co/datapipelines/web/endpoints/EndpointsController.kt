@@ -3,6 +3,7 @@ package co.datapipelines.web.endpoints
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
 import co.datapipelines.application.endpoints.EndpointPublishService
+import co.datapipelines.application.endpoints.EndpointRow
 import co.datapipelines.application.endpoints.PublishedEndpoint
 import co.datapipelines.auth.ApiKey
 import co.datapipelines.auth.ApiKeyKind
@@ -102,7 +103,15 @@ class EndpointsController(
                 ).toResponse(),
         )
 
-    /** §19.5 — the workspace's endpoints, or one of them with `?path=`. */
+    /**
+     * §19.5 — the workspace's endpoints, or one of them with `?path=`.
+     *
+     * The listing is valid rows followed by legacy rows (#274): a stored row whose path fails
+     * today's grammar is retired — it answers `legacy: true` with its reason, `enabled: false`
+     * once V41 has run, and its only offered verb is the DELETE below. A single read (`?path=`)
+     * resolves valid rows only: a legacy path is not an endpoint the API can describe in the
+     * valid shape, and the listing is where its flag lives.
+     */
     @GetMapping
     @RequiredScope(Permission.ENDPOINT_READ)
     fun list(
@@ -110,14 +119,20 @@ class EndpointsController(
     ): ApiResponse<Any> {
         val principal = currentPrincipal()
         return if (path == null) {
-            ApiResponse.of(publishing.list(principal).map { it.toResponse() })
+            val rows =
+                publishing.list(principal).map { it.toResponse() } +
+                    publishing.listLegacy(principal).map { it.toLegacyResponse() }
+            ApiResponse.of(rows)
         } else {
             val endpoint = publishing.get(principal, path) ?: throw notFound(path)
             ApiResponse.of(endpoint.toResponse())
         }
     }
 
-    /** §19.5 — unpublish. Idempotent-ish: an unknown path is a 404, never a silent success. */
+    /**
+     * §19.5 — unpublish. Idempotent-ish: an unknown path is a 404, never a silent success.
+     * This is also the FIX for a legacy row (#274) — the one verb the tree offers it.
+     */
     @DeleteMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @RequiredScope(Permission.ENDPOINT_UNPUBLISH)
@@ -248,5 +263,22 @@ class EndpointsController(
             "bindings" to bindings.findByPrefixes(listOf(pathPattern), workspaceId).map { it.apiKeyId },
             "created_at" to createdAt.toString(),
             "updated_at" to updatedAt.toString(),
+        )
+
+    /**
+     * The legacy row's shape (#274): the keys a client needs to recognise and act on it —
+     * `path`, `pipeline`, `enabled`, `legacy`, `reason`, `url` — and deliberately NOT the
+     * valid shape's parse-derived fields (no `path_variables`: there is no parse). The reason
+     * is the grammar's own refusal, bounded at the mapper; it is stored data's voice, never an
+     * exception's.
+     */
+    private fun EndpointRow.Legacy.toLegacyResponse(): Map<String, Any?> =
+        mapOf(
+            "path" to pathPattern,
+            "pipeline" to pipelines.findById(workspaceId, pipelineId)?.name,
+            "enabled" to enabled,
+            "legacy" to true,
+            "reason" to reason,
+            "url" to "/api$pathPattern",
         )
 }

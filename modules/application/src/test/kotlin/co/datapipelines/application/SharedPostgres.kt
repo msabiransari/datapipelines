@@ -73,6 +73,32 @@ internal object SharedPostgres {
             setDriverClassName(postgres.driverClassName)
         }
 
+    /**
+     * A fresh EMPTY database on the shared Postgres, for a suite that builds a PARTIAL schema
+     * on purpose — a migration suite that must apply the shipped scripts up to V<n-1>, seed
+     * pre-migration rows, and run its subject by hand (#274). The same shape `SharedE2e`
+     * keeps for the integration module.
+     */
+    fun scratchDatabase(name: String): ScratchRef {
+        val database = "scratch_$name"
+        withAdminConnection(postgres) { statement ->
+            statement.execute("""DROP DATABASE IF EXISTS "$database" WITH (FORCE)""")
+            statement.execute("""CREATE DATABASE "$database" OWNER "$USER"""")
+        }
+        return ScratchRef(
+            jdbcUrl = urlFor(postgres, database),
+            username = USER,
+            password = PASSWORD,
+        )
+    }
+
+    /** The endpoint of a scratch database — [SharedE2e.SharedPostgresRef]'s shape, restated locally. */
+    data class ScratchRef(
+        val jdbcUrl: String,
+        val username: String,
+        val password: String,
+    )
+
     private fun boot(container: PostgreSQLContainer<*>) {
         container.start()
         // Drop every database this container may still hold (its own first-boot default on a

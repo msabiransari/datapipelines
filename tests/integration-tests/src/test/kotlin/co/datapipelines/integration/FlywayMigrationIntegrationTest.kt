@@ -143,6 +143,7 @@ class FlywayMigrationIntegrationTest {
                 "39|parameter sets|true",
                 // #258 (V40) — the run carries the execution's own timing (scheduler follow-ups, lane 253).
                 "40|schedule run execution timing|true",
+                "41|retire pre rep5 endpoint rows|true",
             )
     }
 

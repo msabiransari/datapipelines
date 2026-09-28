@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.41 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.42 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-09-26
+**Last updated:** 2026-09-27
 
 ---
 
@@ -2143,6 +2143,18 @@ answers a **promoter** through the lens (178, [Auth §11A.1](auth.md#11a1-the-40
 listed iff its pipeline is visible to that principal, so a hidden pipeline never leaks through
 the endpoint that publishes it.
 
+**Legacy rows (#274).** A stored row whose `path_pattern` predates the current grammar — fewer
+than three segments, saved before R-EP5 — is **retired, never fatal**: it cannot boot-refuse the
+deployment ([metadata-db §4.13](metadata-db.md#413-published_endpoints)) and it never serves. The
+listing answers it after the valid rows with the keys `path`, `pipeline`, `enabled`,
+**`legacy: true`** and **`reason`** — the path grammar's own refusal, bounded — plus `url`; it
+carries none of the valid shape's parse-derived fields (`path_variables`, `bindings`,
+timestamps), because there is no parse. Once V41 has run its `enabled` is `false`; a single read
+(`?path=`) resolves valid rows only and answers the legacy path `404`, like the serve path. The
+one verb the legacy row supports is **`DELETE`** — the same unpublish route, unchanged — which
+removes it; republishing at a current-grammar path is the replacement. The API console page lists
+the row flagged with the same reason and offers only that verb.
+
 Bindings are `POST` / `DELETE /api/v1/endpoints/bindings`, and since 179 (D17) they are a
 **workspace admin's verb** (`api_key.bind` — associating a credential with an endpoint tree is
 no longer the publisher's). A prefix is refused with `endpoint.path_invalid` unless it is the
@@ -2354,6 +2366,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v2.42 | 274 (#274) legacy endpoint rows, retired never fatal | **§19.5's listing carries legacy rows.** A stored `published_endpoints` row whose path predates R-EP5 (fewer than three segments — the shape that made the row mapper throw inside the demo seeder's conflict check and refuse the boot) is now retired: the `GET /api/v1/endpoints` listing answers it flagged (`legacy: true`, `reason`, `enabled`) after the valid rows, in the MCP listing too; a single read (`?path=`) and the serve path answer it `404`; the existing `DELETE /api/v1/endpoints` removes it — the one verb the row supports, offered by the API console with its reason. No route, permission or status code changed; the wire shape of a valid row is byte-identical to v2.40. V40 (metadata-db §4.13) disables such rows in the database and records `retired_reason`; the repository's defensive mapping makes the boot itself immune regardless. |
 | 2026-09-27 | v2.41 | scheduler follow-ups (#258, #261) — numbered after origin/main's v2.38 (scheduler-3) at dispatch | Additive. **§20's run object carries the EXECUTION's own timing** — `execution_started_at`, `execution_completed_at`, `execution_duration_ms` — copied by the reconciler from the execution row it already reads (V40's two nullable columns on `schedule_runs`); the run's own `finished_at` stays the reconciler's stamp and is documented as never answering "how long did it take". A runs list answers duration per run in one read, for every member who may read the schedule, including readers without `execution.read`. **§20 names people beside their ids** — `created_by_name` / `updated_by_name` on the schedule, `requested_by_name` on the run (#261): display names resolved in one batched read per response (the pipelines explorer's `ActorNames`), a stamp whose user row is gone falling back to the id's short form. The trail JSON no longer carries `worker` (#253). |
 | 2026-09-27 | v2.40 | 250 (#250, #259) R3 on every surface — the split ends | No route, field or code changes. **§10.1's R3 paragraph now states "every surface"**: the UI's execution lists (the executions screen, the dashboard's recent executions and run figures) and MCP's `executions_list`/`executions_get`/`executions_get_result` read the same `findVisible` predicate the REST listing does — own runs plus every `triggered_via = SCHEDULE` run of the workspace — so the temporary split (REST only) is closed. **§4.3b of ui-screens**: the pipelines explorer's Usage tab gains a Schedules heading (#259) — the schedules whose `target_ref` names the pipeline, read through `ScheduleService.listByTarget` under the promoter lens; a schedule is not refusal evidence and the tab badge does not count it. Numbered v2.40 after origin/main's v2.39 (262) at lane time. |
 | 2026-09-26 | v2.39 | 262 (#263, with #262) | §6.8's revoked-subscriber paragraph extended — no route, status or wire shape changed. The re-judged workspace is the one the stream OPENED in (a `DP-Workspace` header switch's resolution, not the stamped claim), so a header-switched stream keeps reading the workspace it was opened in while that membership holds; and a write at or past the session token's `exp` ends the stream with the same final `revoked` comment (the duration timer's `close_reason` gains `expired`, [Observability §4.1](observability.md#41-metric-naming)). |
