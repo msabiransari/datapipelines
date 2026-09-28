@@ -9,8 +9,9 @@
 # exactly those in a few minutes so the full gate runs once.
 #
 # Five stages, each its own bare gradle invocation writing to a log FILE (no pipes —
-# DEVELOPMENT.md §9.4): (1) lint + the four root audits over the whole tree; (2) the UNFILTERED test task of
-# every `modules/*` module the diff touched; (2b) for the two `tests/*` modules, ONLY the
+# DEVELOPMENT.md §9.4): (1) lint + the four root audits over the whole tree; (2) `check` of every
+# `modules/*` module the diff touched — its unfiltered tests, every other test task it carries
+# (scripting's breachSuite) and its coverage floor, reported as a number; (2b) for the two `tests/*` modules, ONLY the
 # test classes the diff changed or added (their build file changed → the whole module),
 # with the zero-test guard skipped — the E2E and browser suites are the expensive part of
 # a full build, and the orchestrator's gate on the merge SHA runs them whole; (3) the
@@ -56,16 +57,49 @@ lint=$(run "$LOGDIR/1-lint.log" ktlintCheck detekt composeEnvAudit composeArgvSe
 echo "  1 lint + root audits (ktlintCheck detekt composeEnvAudit composeArgvSecretsAudit verifyModuleDependencies verifyVerificationMetadataDocs)  EXIT=$lint"
 [ "$lint" -ne 0 ] && grep -E 'ktlint|detekt|\.kt:[0-9]+|audit:|^\s+[0-9]+ |verifyModule|verifyVerification|What went wrong' "$LOGDIR/1-lint.log" | grep -vE '^> Task|UP-TO-DATE' | head -24 | sed 's/^/      /'
 
-# --- 2. unfiltered tests of the touched modules ---------------------------------
+# --- 2. the touched modules' check: every test task and the coverage floor ------
+# `<module>:check` is that module's slice of the gate's `build`: the unfiltered `test`, every
+# other Test task the module hangs off check (scripting's breachSuite), their zero-test guards,
+# web's editorJsTest, and koverVerify — the coverage FLOOR. `<module>:test` alone reached only
+# the first: 2026-09-28's landing failed two gates on floors no pregate had run, and a scripting
+# change's pregate skipped the breach suite in its own module (#297). Lint and the root audits
+# that also hang off check are UP-TO-DATE from stage 1. koverXmlReport rides along so each
+# floor is reported as a number beside its verdict.
 if [ -n "$touched" ]; then
-  tasks=$(echo "$touched" | sed 's/$/:test/' | tr '\n' ' ')
-  # shellcheck disable=SC2086
-  mod=$(run "$LOGDIR/2-touched-modules.log" $tasks --continue)
+  tasks=()
+  for m in $touched; do
+    tasks+=("$m:check" "$m:koverXmlReport")
+    # A report left by an EARLIER run would be read below as this run's number.
+    rm -f "modules/${m##*:}/build/reports/kover/report.xml"
+  done
+  mod=$(run "$LOGDIR/2-touched-modules.log" "${tasks[@]}" --continue)
 else
   mod=0
 fi
-echo "  2 touched modules' tests (unfiltered)              EXIT=$mod"
-[ "$mod" -ne 0 ] && grep -E 'FAILED$|> Task .* FAILED' "$LOGDIR/2-touched-modules.log" | head -20 | sed 's/^/      /'
+echo "  2 touched modules' check (all test tasks + coverage floor)  EXIT=$mod"
+[ "$mod" -ne 0 ] && grep -E 'FAILED$|> Task .* FAILED|violated' "$LOGDIR/2-touched-modules.log" | head -20 | sed 's/^/      /'
+# The number behind each floor: line coverage from the module's own Kover XML (the counters
+# koverVerify's line rule reads), the floor from COVERAGE_FLOORS. Informational — the verdict is
+# koverVerify's exit above; a module with no report is one whose tests failed or never ran.
+for m in $touched; do
+  dir="modules/${m##*:}"; xml="$dir/build/reports/kover/report.xml"
+  floor=$(grep -oE "\"$m\" to [0-9]+" buildSrc/src/main/kotlin/CommonConventionsPlugin.kt | grep -oE '[0-9]+$')
+  if [ -f "$xml" ]; then
+    python3 - "$xml" "$m" "${floor:-none}" <<'PY'
+import sys, xml.etree.ElementTree as ET
+xml, module, floor = sys.argv[1:4]
+line = next((c for c in ET.parse(xml).getroot().findall("counter") if c.get("type") == "LINE"), None)
+if line is None:
+    print(f"     {module}: no LINE counter in {xml}")
+else:
+    covered, missed = int(line.get("covered")), int(line.get("missed"))
+    pct = 100.0 * covered / (covered + missed) if covered + missed else 100.0
+    print(f"     {module}: line coverage {pct:.2f}% ({covered}/{covered + missed}), floor {floor}")
+PY
+  else
+    echo "     $m: no coverage report ($xml) — read $LOGDIR/2-touched-modules.log"
+  fi
+done
 
 # --- 2b. tests/* modules: the changed test classes only -------------------------
 # A changed `tests/<m>/build.gradle.kts` means the knobs changed → that module unfiltered.

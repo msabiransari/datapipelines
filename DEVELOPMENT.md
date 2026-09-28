@@ -731,8 +731,11 @@ recount) for the verdict. Filtered runs are for iterating; the gate is unfiltere
 minutes, exactly what a targeted test run cannot see and the full gate keeps finding two or
 three runs late: (1) `ktlintCheck detekt` plus the four root audits (`composeEnvAudit`,
 `composeArgvSecretsAudit`, `verifyModuleDependencies`, `verifyVerificationMetadataDocs` — they hang
-off every module's `check`, so the gate's `build` reaches them before any test); (2) the **unfiltered** `test` task
-of every module the diff touched (so `verifyTestsExecuted` stays meaningful); (3) the
+off every module's `check`, so the gate's `build` reaches them before any test); (2) `check` of
+every module the diff touched — its **unfiltered** `test` (so `verifyTestsExecuted` stays
+meaningful), every other test task it carries (scripting's `breachSuite`, web's `editorJsTest`) and
+its coverage floor (`koverVerify`), each floor printed as a number beside it (2026-09-28's landing
+failed two gates on floors no pregate had run, #297); (3) the
 cross-cutting guard classes, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
