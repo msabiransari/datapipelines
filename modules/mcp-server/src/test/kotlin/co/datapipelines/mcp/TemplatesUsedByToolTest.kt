@@ -19,7 +19,7 @@ import java.util.UUID
  * owns the tool's argument handling and wire shape.
  */
 class TemplatesUsedByToolTest {
-    private val usage = mockk<TemplateUsageService>()
+    private val usage = mockk<co.datapipelines.application.templates.TemplateUsage>()
     private val ctx = McpFixtures.ctx()
     private val tool = TemplatesUsedByTool(usage, McpFixtures.EVERYTHING_LENS)
 
@@ -34,12 +34,14 @@ class TemplatesUsedByToolTest {
 
     @Test
     fun `the payload names pipeline, node and carrying pipeline version - enough to act on`() {
-        every { usage.usedBy(any(), any(), any(), "fetch_orders.sql", 2) } returns
-            TemplateUsageService.UsedBy(
+        every { usage.usedBy(any(), any(), "fetch_orders.sql", 2) } returns
+            co.datapipelines.application.templates.TemplateUsage.Combined(
                 templateId = "fetch_orders.sql",
                 version = 2,
-                references = listOf(reference("p1", "fetch"), reference("p2", "load", status = PipelineVersionStatus.DRAFT)),
                 pipelineCount = 2,
+                pipelineReferences =
+                    listOf(reference("p1", "fetch"), reference("p2", "load", status = PipelineVersionStatus.DRAFT)),
+                parameterSetReferences = emptyList(),
             )
 
         val payload = tool.call(McpArguments(mapOf("id" to "fetch_orders.sql", "version" to 2)), ctx) as Map<*, *>
@@ -63,7 +65,7 @@ class TemplatesUsedByToolTest {
 
     @Test
     fun `an unknown template is the catalogued not-found, a missing version a protocol error`() {
-        every { usage.usedBy(any(), any(), any(), "nope.sql", 1) } throws
+        every { usage.usedBy(any(), any(), "nope.sql", 1) } throws
             co.datapipelines.typesystem.DatapipelinesException(
                 code = co.datapipelines.pipeline.PipelineErrorCodes.Template.NOT_FOUND,
                 message = "Template 'nope.sql' does not exist.",

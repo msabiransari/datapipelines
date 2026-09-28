@@ -33,10 +33,21 @@ import java.util.UUID
  * repository underneath is the double, so each test names the query it is about.
  */
 class TemplateUiControllerTest {
+
+    /** 194d — the COMPOSED reverse arrow the model takes (the record's §8.4). */
+    private fun composedUsage(
+        templates: co.datapipelines.templates.TemplateRepository,
+        pipelines: PipelineRepository,
+    ): co.datapipelines.application.templates.TemplateUsage =
+        co.datapipelines.application.templates.TemplateUsage(
+            TemplateUsageService(templates, pipelines),
+            io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(relaxed = true),
+        )
+
     private val repository = mockk<TemplateRepository>()
     private val themeResolver = mockk<ThemeResolver>()
     private val pipelines = mockk<PipelineRepository>()
-    private val browse = co.datapipelines.web.templateBrowseModelOver(repository, TemplateUsageService(repository, pipelines))
+    private val browse = co.datapipelines.web.templateBrowseModelOver(repository, composedUsage(repository, pipelines))
     private val controller = TemplateUiController(browse, themeResolver, co.datapipelines.web.EVERYTHING_LENS)
     private val partialController =
         TemplatePartialController(

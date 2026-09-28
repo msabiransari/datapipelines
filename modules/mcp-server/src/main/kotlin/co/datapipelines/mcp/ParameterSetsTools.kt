@@ -101,6 +101,7 @@ class ParameterSetsListTool(
 class ParameterSetsGetTool(
     private val sets: ParameterSetService,
     private val repository: ParameterSetRepository,
+    private val templates: co.datapipelines.templates.TemplateRepository,
     private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
@@ -153,7 +154,35 @@ class ParameterSetsGetTool(
                     )
                 },
             "document" to documentOf(loaded),
+            // The record's §8.4 — the pipelines_get upgrade signal's twin: a pin below the
+            // template's latest RELEASED version is surfaced, never applied.
+            "upgrade_available" to upgradeAvailable(workspaceId, loaded),
         )
+    }
+
+    /** One row per pin whose template has a NEWER RELEASED version; a pin of a DRAFT is not an upgrade. */
+    private fun upgradeAvailable(
+        workspaceId: UUID,
+        loaded: ParameterSetVersion,
+    ): List<Map<String, Any?>> {
+        val pins = loaded.body.parameters.mapNotNull { it.source?.template }.distinct()
+        val latest = templates.findCurrentVersions(workspaceId, pins.map { it.id }.toSet())
+        return pins.mapNotNull { ref ->
+            val newest = latest[ref.id] ?: return@mapNotNull null
+            if (ref.version < newest) {
+                mapOf(
+                    "parameter" to
+                        loaded.body.parameters
+                            .firstOrNull { it.source?.template == ref }
+                            ?.name,
+                    "template_id" to ref.id,
+                    "pinned" to ref.version,
+                    "latest_released" to newest,
+                )
+            } else {
+                null
+            }
+        }
     }
 
     /** The §3 document as stored — the strict mapper's projection (the definitions' one wire form). */

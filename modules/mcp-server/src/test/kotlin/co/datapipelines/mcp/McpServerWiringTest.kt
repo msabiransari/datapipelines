@@ -48,13 +48,21 @@ class McpServerWiringTest {
         val templateValidator = mockk<TemplateValidator>()
         val engines = mockk<WorkspaceTemplateEngines>()
         val introspector = mockk<SchemaIntrospector>()
-        val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
+        val usage =
+            co.datapipelines.application.templates.TemplateUsage(
+                co.datapipelines.templates.TemplateUsageService(templates, pipelines),
+                io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(),
+            )
         val service = McpFixtures.pipelineService(pipelines, validator, authoringGuard)
         val drafts = co.datapipelines.templates.TemplateDraftService(templates, authoringGuard, mockk(relaxed = true))
         val semantics = mockk<co.datapipelines.application.semantics.SemanticsService>()
         return listOf(
             PipelinesListTool(service, McpFixtures.EVERYTHING_LENS),
-            PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS),
+            PipelinesGetTool(
+                service,
+                co.datapipelines.templates.TemplateUsageService(templates, pipelines),
+                McpFixtures.EVERYTHING_LENS,
+            ),
             PipelineExecuteTool(service, executor, executions, resultStore, resultUrls),
             PipelinesExecuteNodeTool(
                 co.datapipelines.templates.NodeSqlResolver(pipelines, templates, engines),
@@ -71,7 +79,7 @@ class McpServerWiringTest {
             TemplatesRenderTool(templates, engines),
             // 7b — the transform evaluator, appended the way the shipped bean does.
             TemplatesEvaluateTool(mockk<co.datapipelines.application.templates.TemplateEvaluateService>()),
-            TemplatesPurgeDraftTool(templates, usage, authoringGuard),
+            TemplatesPurgeDraftTool(templates, usage, authoringGuard, McpFixtures.EVERYTHING_LENS),
             DatasourcesListTool(datasources, lens = McpFixtures.EVERYTHING_LENS),
             DatasourcesGetTool(datasources, lens = McpFixtures.EVERYTHING_LENS),
             DatasourcesTestTool(datasources),
@@ -111,7 +119,7 @@ class McpServerWiringTest {
     private fun parameterSetTools(): List<McpTool> =
         listOf(
             ParameterSetsListTool(mockk(), McpFixtures.EVERYTHING_LENS),
-            ParameterSetsGetTool(mockk(), mockk(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsGetTool(mockk(), mockk(), mockk(), McpFixtures.EVERYTHING_LENS),
             ParameterSetsCreateTool(mockk(), mockk(), co.datapipelines.parameters.ParametersConfig(), McpFixtures.EVERYTHING_LENS),
             ParameterSetsUpdateTool(mockk(), co.datapipelines.parameters.ParametersConfig(), McpFixtures.EVERYTHING_LENS),
             ParameterSetsEvaluateTool(mockk(), mockk(), mockk(), mockk(), mockk(), McpFixtures.EVERYTHING_LENS),

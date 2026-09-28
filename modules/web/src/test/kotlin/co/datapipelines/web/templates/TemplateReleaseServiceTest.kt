@@ -30,7 +30,9 @@ class TemplateReleaseServiceTest {
     private val templates = mockk<TemplateRepository>()
     private val validator = mockk<TemplateValidator>()
     private val pipelines = mockk<PipelineRepository>()
-    private val service = TemplateReleaseService(templates, validator, AuthoringGuard(true), pipelines)
+    private val parameterSets = mockk<co.datapipelines.parameters.ParameterSetTemplatePins>()
+    private val service =
+        TemplateReleaseService(templates, validator, AuthoringGuard(true), pipelines, parameterSets)
 
     private val workspaceId = UUID.randomUUID()
     private val actor = UUID.randomUUID()
@@ -41,6 +43,15 @@ class TemplateReleaseServiceTest {
             version = version,
             status = PipelineVersionStatus.DRAFT,
             bodyHash = "draft-hash-$version",
+            createdAt = Instant.EPOCH,
+            createdBy = actor,
+        )
+
+    private fun summary(version: Int) =
+        co.datapipelines.templates.TemplateVersionSummary(
+            id = "test/t.sql",
+            version = version,
+            status = PipelineVersionStatus.DRAFT,
             createdAt = Instant.EPOCH,
             createdBy = actor,
         )
@@ -56,6 +67,47 @@ class TemplateReleaseServiceTest {
             createdAt = Instant.EPOCH,
             createdBy = actor,
         )
+
+    @Test
+    fun `purgeEntity refuses when a PARAMETER SET alone pins any version of the template - 194d`() {
+        // The record's §8.4 red: a template pinned by a set alone was deletable. The set
+        // scanner is the evidence that closes it; the pipeline scan stays empty.
+        every { templates.existsId(workspaceId, "test/t.sql") } returns true
+        every { templates.listVersions(workspaceId, "test/t.sql") } returns listOf(summary(1))
+        every { pipelines.findAnyVersionTemplatePins(workspaceId, "test/t.sql") } returns emptyList()
+        every { parameterSets.anyVersionPins(workspaceId, "test/t.sql") } returns
+            listOf(
+                co.datapipelines.parameters.ParameterSetPin(
+                    setId = UUID.randomUUID(),
+                    setName = "acme/sales/pins_only",
+                    parameter = "state",
+                    setVersion = 1,
+                    versionStatus = PipelineVersionStatus.DRAFT,
+                    pinnedVersion = 1,
+                ),
+            )
+
+        val error =
+            shouldThrow<DatapipelinesException> {
+                service.purgeEntity(workspaceId, "test/t.sql")
+            }
+
+        error.code shouldBe PipelineErrorCodes.Template.IN_USE
+        error.details["referencing_parameter_sets"] shouldBe listOf("acme/sales/pins_only")
+    }
+
+    @Test
+    fun `purgeEntity proceeds when nothing - pipeline or set - pins any version`() {
+        every { templates.existsId(workspaceId, "test/t.sql") } returns true
+        every { templates.listVersions(workspaceId, "test/t.sql") } returns listOf(summary(1))
+        every { pipelines.findAnyVersionTemplatePins(workspaceId, "test/t.sql") } returns emptyList()
+        every { parameterSets.anyVersionPins(workspaceId, "test/t.sql") } returns emptyList()
+        every { templates.deleteTemplateRow(workspaceId, "test/t.sql") } returns true
+
+        service.purgeEntity(workspaceId, "test/t.sql")
+
+        verify(exactly = 1) { templates.deleteTemplateRow(workspaceId, "test/t.sql") }
+    }
 
     @Test
     @Suppress("LongMethod") // the fixture is the point: an exhausted pool, a real validator, a stored transform draft
@@ -104,7 +156,14 @@ class TemplateReleaseServiceTest {
                 co.datapipelines.templates.LibraryResolver { _ -> emptyRegistry },
                 suiteRunner = runner,
             )
-        val releaseService = TemplateReleaseService(templates, realValidator, AuthoringGuard(true), pipelines)
+        val releaseService =
+            TemplateReleaseService(
+                templates,
+                realValidator,
+                AuthoringGuard(true),
+                pipelines,
+                io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(),
+            )
 
         val contract =
             co.datapipelines.templates.TransformContract(

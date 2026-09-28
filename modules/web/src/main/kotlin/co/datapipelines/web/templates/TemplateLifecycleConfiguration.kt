@@ -6,6 +6,7 @@ import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import org.springframework.context.annotation.Bean
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.context.annotation.Configuration
 
 /**
@@ -26,6 +27,10 @@ class TemplateLifecycleConfiguration {
         // 7e — the citation rows the write lands `implements` in (inherit or replace).
         citations: co.datapipelines.templates.TemplateImplementsRepository,
     ): TemplateDraftService = TemplateDraftService(templates, authoring, citations)
+    @Bean
+    fun parameterSetTemplatePins(
+        jdbc: NamedParameterJdbcTemplate,
+    ): co.datapipelines.parameters.ParameterSetTemplatePins = co.datapipelines.parameters.ParameterSetTemplatePins(jdbc)
 
     @Bean
     fun templateReleaseService(
@@ -33,5 +38,8 @@ class TemplateLifecycleConfiguration {
         validator: TemplateValidator,
         authoring: AuthoringGuard,
         pipelines: PipelineRepository,
-    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring, pipelines)
+        // #194 lane D — the delete guards cover parameter-set pins (the record's §8.4).
+        parameterSets: co.datapipelines.parameters.ParameterSetTemplatePins,
+    ): TemplateReleaseService =
+        TemplateReleaseService(templates, validator, authoring, pipelines, parameterSets)
 }

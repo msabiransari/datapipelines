@@ -344,14 +344,16 @@ questions — never one query**:
 
 | Question | Scans | Drives |
 |---|---|---|
-| *Who is using `t@2` right now?* | each pipeline's **working version** — the draft when one exists, else the latest released (the §7 read rule, [Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)) | the `templates_used_by` MCP tool, the template screen's per-version in-use count, the pipeline read's upgrade signal |
-| *Is it safe to remove `t`?* | **any pipeline version, ever** — historical versions are immutable and executable, so their pins are real references | the `409 template.in_use` delete refusal (§5.1) |
+| *Who is using `t@2` right now?* | each pipeline's **working version** — the draft when one exists, else the latest released (the §7 read rule, [Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)) — **and, since #194 lane D, each parameter set's working version** (the same rule over `parameter_set_versions`) | the `templates_used_by` MCP tool (pipeline rows **and set rows**), the template screen's per-version in-use count (sets included), the pipeline read's upgrade signal — and, since lane D, the set read's `upgrade_available` per pinned template |
+| *Is it safe to remove `t`?* | **any pipeline version, ever**, and **any parameter-set version, ever** — historical versions are immutable and executable, so their pins are real references | the `409 template.in_use` delete refusal (§5.1), whose `details` now carry `referencing_parameter_sets` beside `pinned_by` |
 
 The split is load-bearing in both directions: a working-version-only delete guard would let a
 still-pinned historical version be removed, and an any-version used-by listing would nag about
 pins no working pipeline carries anymore. Each answer names the **pipeline, the node id within
 it, and the pipeline version carrying the pin** — a fact an author can go and change, not just
-a count.
+a count. On the set arm it names the **set, the parameter, and the set version carrying the
+pin** (the record's §8.4); the two scans compose in `application`'s `TemplateUsage`, so the
+tool, the screen and the guard cannot disagree about what a reference is.
 
 The pipeline read carries the forward-side signal: when a node's pinned template has a **newer
 released** version, the MCP `pipelines_get` response states it (`upgrade_available`: node,

@@ -167,6 +167,13 @@ class McpServerAutoConfiguration {
     ): List<McpTool> {
         val runtime =
             inlineRuntime(pipelines, templates, templateEngines, datasources, introspector, jdbc)
+        // 040's used-by service COMPOSED with the parameter-set scanner (the record's §8.4):
+        // a set-only pin is a real reference to every guard and listing here.
+        val usage =
+            co.datapipelines.application.templates.TemplateUsage(
+                runtime.usage,
+                co.datapipelines.parameters.ParameterSetTemplatePins(jdbc),
+            )
         // The authoring capability (versioning §5.5), read from the same property web's guard
         // bean reads — immutable config, so two instances cannot disagree. The template tools
         // still take it, until slice B.
@@ -191,7 +198,7 @@ class McpServerAutoConfiguration {
             ) +
             templateTools(
                 templateService,
-                runtime.usage,
+                usage,
                 templates,
                 authoring,
                 templateValidator,
@@ -345,7 +352,7 @@ class McpServerAutoConfiguration {
     @Suppress("LongParameterList")
     private fun templateTools(
         templateService: TemplateService,
-        usage: co.datapipelines.templates.TemplateUsageService,
+        usage: co.datapipelines.application.templates.TemplateUsage,
         templates: TemplateRepository,
         authoring: AuthoringGuard,
         templateValidator: TemplateValidator,
@@ -365,7 +372,7 @@ class McpServerAutoConfiguration {
             // route calls, a plain parameter by the 068/074 pattern.
             TemplatesEvaluateTool(templateEvaluateService),
             // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
-            TemplatesPurgeDraftTool(templates, usage, authoring),
+            TemplatesPurgeDraftTool(templates, usage, authoring, lens),
         )
 
     /** The two pipeline read tools, extracted at 194d when the list passed detekt's length. */
@@ -394,7 +401,7 @@ class McpServerAutoConfiguration {
     ): List<McpTool> =
         listOf(
             ParameterSetsListTool(sets, lens),
-            ParameterSetsGetTool(sets, repository, lens),
+            ParameterSetsGetTool(sets, repository, templates, lens),
             ParameterSetsCreateTool(sets, repository, config, lens),
             ParameterSetsUpdateTool(sets, config, lens),
             ParameterSetsEvaluateTool(sets, repository, evaluator, learnings, templates, lens),

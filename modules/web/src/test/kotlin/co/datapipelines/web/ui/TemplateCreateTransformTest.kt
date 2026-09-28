@@ -35,11 +35,22 @@ import java.util.UUID
  * suite. The one write, `TemplateRepository.create`, is captured for its argument.
  */
 class TemplateCreateTransformTest {
+
+    /** 194d — the COMPOSED reverse arrow the model takes (the record's §8.4). */
+    private fun composedUsage(
+        templates: co.datapipelines.templates.TemplateRepository,
+        pipelines: PipelineRepository,
+    ): co.datapipelines.application.templates.TemplateUsage =
+        co.datapipelines.application.templates.TemplateUsage(
+            TemplateUsageService(templates, pipelines),
+            io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(relaxed = true),
+        )
+
     private val repository = mockk<TemplateRepository>()
     private val controller =
         TemplatePartialController(
             repository,
-            co.datapipelines.web.templateBrowseModelOver(repository, TemplateUsageService(repository, mockk<PipelineRepository>())),
+            co.datapipelines.web.templateBrowseModelOver(repository, composedUsage(repository, mockk<PipelineRepository>())),
             TransformFixtures.validator(),
             mockk<AuthoringGuard>(relaxed = true),
             co.datapipelines.web.EVERYTHING_LENS,

@@ -10,7 +10,7 @@ import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
-import co.datapipelines.templates.TemplateUsageService
+import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.typesystem.Dialect
 import org.springframework.ui.Model
 import java.security.MessageDigest
@@ -44,7 +44,7 @@ import java.util.UUID
  */
 class TemplateBrowseModel(
     private val templates: TemplateService,
-    private val usage: TemplateUsageService,
+    private val usage: TemplateUsage,
     private val executions: ExecutionRepository,
     private val actors: ActorNames,
 ) {
@@ -223,7 +223,7 @@ class TemplateBrowseModel(
         model.addAttribute("currentReleaseVersion", currentRelease)
         val versions = templates.listVersions(workspaceId, view.templates, id)
         val names = actors.lookup(versions.map { it.createdBy })
-        val inUse = usage.inUseCounts(workspaceId, id)
+        val inUse = usage.inUseCounts(workspaceId, view, id)
         val now = Instant.now()
         model.addAttribute("draftVersion", draft?.version)
         model.addAttribute("draftHash", draft?.bodyHash)
@@ -263,7 +263,7 @@ class TemplateBrowseModel(
         model.addAttribute("interpolations", interpolations(template.body))
 
         // 178/178b: neither a hidden pipeline nor a visible one's DRAFT pin leaks through the reverse arrow.
-        val pins = usage.referencedAnywhere(workspaceId, view.templates, view.pipelines, id)
+        val pins = usage.pipelinesReferencedAnywhere(workspaceId, view, id)
         model.addAttribute("usedBy", pins)
         model.addAttribute("usedByCount", pins.map { it.pipelineId }.distinct().size)
         model.addAttribute("runCount", pins.map { it.pipelineId }.distinct().size)
@@ -296,7 +296,7 @@ class TemplateBrowseModel(
         if (!templates.existsId(workspaceId, view.templates, id)) return fillRunRows(model, emptyList())
         val pipelineIds =
             usage
-                .referencedAnywhere(workspaceId, view.templates, view.pipelines, id)
+                .pipelinesReferencedAnywhere(workspaceId, view, id)
                 .map { it.pipelineId }
                 .distinct()
                 .take(USED_BY_FANOUT)
