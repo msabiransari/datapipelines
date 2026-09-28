@@ -185,3 +185,34 @@ test("the result panel opens in failure mode with the same view-model", () => {
   assert.equal(panel.failure.code, "pipeline.node.datasource_connection_failed");
   assert.equal(editor.resultPanel.failure.code, "pipeline.node.datasource_connection_failed");
 });
+
+/* 195 — the failure card renders paths under the CSP build, so the strings the
+   template used to concatenate inline are precomputed in the view-model. */
+
+test("the view-model precomputes the summary line and the per-level strings (195)", () => {
+  const PEErrorDetails = loadErrorDetails();
+  const view = PEErrorDetails.build(CONNECTION_FAILURE.error);
+  // The 057 markup's summary: the summary line reads exactly as `'· root: ' + rootCause`.
+  assert.equal(view.rootCauseLine, "· root: " + view.rootCause);
+  // The exception chain's per-level bindings: title, message, joined frames.
+  assert.equal(view.levels.length, view.chain.length);
+  view.levels.forEach((level, idx) => {
+    assert.equal(level.title, (idx === 0 ? "Root cause: " : "Caused by: ") + view.chain[idx].cls);
+    assert.equal(level.message, view.chain[idx].message);
+    assert.equal(level.framesText, (view.chain[idx].frames || []).join("\n"));
+  });
+  assert.match(view.levels[0].title, /^Root cause: org\.postgresql\.util\.PSQLException$/);
+  assert.match(view.levels[view.levels.length - 1].title, /^Caused by: /);
+});
+
+test("the precomputed strings are null/empty exactly when their sections hide (195)", () => {
+  const PEErrorDetails = loadErrorDetails();
+  const structured = {
+    code: "pipeline.node.datasource_connection_failed",
+    message: "boom",
+  };
+  const view = PEErrorDetails.build(structured);
+  assert.equal(view.chain, null);
+  assert.equal(view.rootCauseLine, null);
+  assert.deepEqual(view.levels, []);
+});

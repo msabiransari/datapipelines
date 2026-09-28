@@ -19,6 +19,12 @@
    * node the Details tab is showing. What does NOT live here: the result rows
    * (result.js), the events list (events.js), the failure RENDERING
    * (details.js's PEErrorDetails.build), and every focus/DOM effect (init.js).
+   *
+   * 195 — the editor runs Alpine's CSP build, whose expressions are pure property
+   * paths (no operators, no literals, no call syntax), so the comparisons the
+   * template used to inline (`tab === 'details' ? 'true' : 'false'`) moved into
+   * the getters below. They stay PURE — same fields underneath, the node tests
+   * assert them exactly as the browser renders them.
    */
 
   var OPEN = "open";
@@ -52,8 +58,8 @@
 
       /* --- transitions (the table, and nothing else) ----------------------------
        * The template reads `state`, `tab`, `errors.length` and `resultsRows`
-       * DIRECTLY — no derived getters here, so an Alpine proxy has nothing to
-       * preserve and the node tests assert the same fields the browser renders. */
+       * DIRECTLY where a path suffices; the derived getters below exist because
+       * the CSP build cannot inline the comparisons they replace. */
 
       /**
        * A node was selected (card tap, list row, the card's expand button, Enter):
@@ -97,6 +103,12 @@
        * node_failed. The FIRST failure of a run raises the dock onto Errors from
        * collapsed and takes the tab; every later one appends and moves the badge,
        * leaving the state and the tab exactly where the user put them (065, kept).
+       *
+       * Each entry carries two accessors the template reads as paths: `label`
+       * (the summary line the 057 markup rendered inline) and `view` (the
+       * failure view-model, built lazily by details.js's PEErrorDetails so this
+       * module stays DOM-free and renderer-free — the accessor resolves nothing
+       * until the browser template, or a test with a stub, reads it).
        */
       nodeFailed: function (nodeId, record) {
         var first = this.errors.length === 0;
@@ -113,6 +125,16 @@
             key: key,
             nodeId: nodeId || (record && record.node && record.node.id) || null,
             record: record || null,
+            get label() {
+              var r = this.record || {};
+              return (this.nodeId || "—") + " · " + (r.code || "unknown");
+            },
+            get view() {
+              if (!this.record) return null;
+              return typeof window !== "undefined" && window.PEErrorDetails
+                ? window.PEErrorDetails.build(this.record)
+                : null;
+            },
           });
         }
         if (first) {
@@ -134,6 +156,62 @@
         this.state = OPEN;
         this.tab = tab;
         return this.state;
+      },
+
+      /* The four tab buttons: the CSP build cannot pass an argument, so each tab
+         gets its own no-arg selector over the one transition above. */
+      selectDetails: function () {
+        return this.selectTab(DETAILS);
+      },
+      selectResults: function () {
+        return this.selectTab(RESULTS);
+      },
+      selectErrors: function () {
+        return this.selectTab(ERRORS);
+      },
+      selectEvents: function () {
+        return this.selectTab(EVENTS);
+      },
+
+      /* --- derived state the template reads as paths (195; see the header) ----- */
+
+      get dockIsOpen() {
+        return this.state === OPEN;
+      },
+      get dockIsCollapsed() {
+        return this.state === COLLAPSED;
+      },
+      get collapsedClass() {
+        return this.state === COLLAPSED ? "pe-dock-collapsed" : "";
+      },
+      get detailsActive() {
+        return this.tab === DETAILS;
+      },
+      get resultsActive() {
+        return this.tab === RESULTS;
+      },
+      get errorsActive() {
+        return this.tab === ERRORS;
+      },
+      get eventsActive() {
+        return this.tab === EVENTS;
+      },
+      /* x-bind:aria-selected needs the STRING form — a boolean false would remove
+         the attribute (bind()'s falsy rule), and ARIA wants it present saying "false". */
+      get detailsAria() {
+        return this.tab === DETAILS ? "true" : "false";
+      },
+      get resultsAria() {
+        return this.tab === RESULTS ? "true" : "false";
+      },
+      get errorsAria() {
+        return this.tab === ERRORS ? "true" : "false";
+      },
+      get eventsAria() {
+        return this.tab === EVENTS ? "true" : "false";
+      },
+      get noErrors() {
+        return this.errors.length === 0;
       },
 
       /**

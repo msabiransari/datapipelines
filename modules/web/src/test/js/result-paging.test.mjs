@@ -113,3 +113,49 @@ test("single-page result: has_more false, totalPages 1, no pager drift", () => {
   assert.equal(panel.hasNext, false);
   assert.equal(panel.pageSize, 50);
 });
+
+/* 195 — the CSP build's cell and download bindings are paths, so the positional
+   lookup (row[col]) is materialized as displayRows and the three download links
+   carry precomputed hrefs on the editor's panel copy. */
+
+test("displayRows: one cells array per row, column order, values copied verbatim", () => {
+  const { panel } = setup();
+  panel.showData({ ...pagePayload(0, undefined, 2500, 3), result_url: "/api/v1/executions/e1/result" });
+  assert.equal(panel.displayRows.length, 3);
+  const first = panel.displayRows[0];
+  assert.equal(first.idx, 0);
+  assert.deepEqual(
+    first.cells.map((c) => c.c),
+    ["n", "label", "amount"],
+    "cells in column order — the inner x-for iterates them directly",
+  );
+  assert.deepEqual(
+    first.cells.map((c) => c.v),
+    [1, "row-1", 1.5],
+    "the same r[col] reads the template made",
+  );
+  assert.equal(panel.editor.resultPanel.displayRows, panel.displayRows, "the template reads the editor's copy");
+});
+
+test("displayRows survives a cursor page load", async () => {
+  const { panel } = setup();
+  panel.showData({ ...pagePayload(0, undefined, 2500, 1000), result_url: "/api/v1/executions/e1/result" });
+  panel.loadPage(3);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(panel.displayRows.length, 500);
+  assert.equal(panel.displayRows[0].cells[0].v, 2001, "page 3's first value");
+});
+
+test("download hrefs: the cursor endpoint + format, '#' when there is no endpoint", () => {
+  const { panel } = setup();
+  panel.showData({ ...pagePayload(0, undefined, 2500, 3), result_url: "/api/v1/executions/e1/result" });
+  assert.equal(panel.editor.resultPanel.downloadJsonHref, "/api/v1/executions/e1/result?format=json");
+  assert.equal(panel.editor.resultPanel.downloadCsvHref, "/api/v1/executions/e1/result?format=csv");
+  assert.equal(panel.editor.resultPanel.downloadArrowHref, "/api/v1/executions/e1/result?format=arrow");
+
+  const bare = new ResultPanel({ resultPanel: {} });
+  bare.syncToEditor();
+  assert.equal(bare.editor.resultPanel.downloadJsonHref, "#");
+  assert.equal(bare.editor.resultPanel.downloadCsvHref, "#");
+  assert.equal(bare.editor.resultPanel.downloadArrowHref, "#");
+});

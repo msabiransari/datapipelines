@@ -325,8 +325,9 @@ class TemplateTreeRenderTest {
         // One value, rendered twice — the truncated text is never the only copy (§9.4).
         // 080: the rule moved from the inspector's template link to the Details tab's
         // key/value grid, where every row's dd carries the same string in both places.
-        html shouldContain "x-bind:title=\"row[1]\""
-        html shouldContain "x-text=\"row[1]\""
+        // 195: rows are {k, v} objects — the CSP build's bindings are paths.
+        html shouldContain "x-bind:title=\"row.v\""
+        html shouldContain "x-text=\"row.v\""
         // …and the SQL partial's own template link keeps its pe-path form.
         val partial =
             render("partials/pipeline-node-sql") {

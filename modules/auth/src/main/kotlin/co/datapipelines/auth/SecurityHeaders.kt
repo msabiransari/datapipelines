@@ -18,7 +18,7 @@ import java.util.Base64
  * a Spring upgrade could have changed the posture with no test going red. There was no
  * `Content-Security-Policy`, no `Referrer-Policy` and no `Permissions-Policy` at all.
  *
- * ## The policy has no `'unsafe-inline'`, no nonce and no `'unsafe-eval'`
+ * ## No `'unsafe-inline'`, no nonce, and — since 195 — no `'unsafe-eval'` anywhere
  * Every script the product runs is a file under `/js` or `/vendor` and every style a file
  * under `/css` or `/vendor`: 188 moved the five executing inline `<script>` blocks and the
  * twenty-one `on*=` handlers the templates carried into the page scripts
@@ -29,17 +29,29 @@ import java.util.Base64
  * one rule that holds on every surface. JSON and JSON-LD data blocks are not scripts to
  * CSP (they never execute) and need nothing.
  *
- * ## The one exception: the pipeline editor's `'unsafe-eval'` and one stylesheet hash
- * `pipelines/editor.html` is the only page that loads Alpine.js, and Alpine 3.14.1 compiles
- * every `x-*` expression with the `AsyncFunction` constructor — `eval` to CSP. Porting the
- * editor's 131 expressions to the CSP build of Alpine is its own lane (#195); until then
- * the route [isEditorRoute] names alone carries `script-src 'self' 'unsafe-eval'` (owner ruling 2026-09-21:
- * route-scoped exemption over a global relaxation), pinned by `SecurityHeadersTest`.
- * The same page's Cytoscape 3 injects one `<style>` element at init —
- * [CYTOSCAPE_STYLESHEET], verbatim from the vendored file — so the editor's `style-src`
- * admits that ONE sheet by its SHA-256 (a hash source covers a `<style>` element without
- * `'unsafe-hashes'`; nothing else inline is admitted). The test derives the hash from the
- * vendored source, so a Cytoscape bump that changes the sheet goes red rather than blocked.
+ * ## The one policy, and the retired editor exemption (#195)
+ * 188 shipped with one route-scoped exception: `GET /pipelines/{id}/editor` carried
+ * `script-src 'self' 'unsafe-eval'` because the STANDARD Alpine build compiles every
+ * expression with the `AsyncFunction` constructor — `eval` to CSP (owner ruling
+ * 2026-09-21: route-scoped over global). 195 retired it: the editor's page swapped to
+ * Alpine's CSP build (`@alpinejs/csp`, the same 3.14.1, vendored at the same path — the
+ * vendor-manifest records the tarball), every expression in `pipelines/editor.html` was
+ * rewritten as a property path (a getter or no-arg method on the component or a pure
+ * module), and THIS object lost `CSP_POLICY_EDITOR` and `isEditorRoute`. One policy
+ * covers every policed route; `SecurityHeadersTest` pins the absence of the directive on
+ * the editor route too, and the browser suite's zero-violation collector is the live
+ * proof the page needs no eval.
+ *
+ * ## The one stylesheet hash
+ * The editor page's Cytoscape 3 injects one `<style>` element at init —
+ * [CYTOSCAPE_STYLESHEET], verbatim from the vendored file — so `style-src` admits that
+ * ONE sheet by its SHA-256 (a hash source covers a `<style>` element without
+ * `'unsafe-hashes'`; nothing else inline is admitted). Since 195 the hash sits in THE
+ * policy rather than an editor-only variant: a hash names exactly that sheet and nothing
+ * else, so on the routes that never load Cytoscape it permits a style element that never
+ * occurs — no route's posture is weakened by carrying it. The test derives the hash from
+ * the vendored source, so a Cytoscape bump that changes the sheet goes red rather than
+ * blocked.
  *
  * `/sitemap.xml` carries no policy at all: it is an XML data document with no script or
  * style of its own, and the only inline style that ever touches it is the browser's own
@@ -63,22 +75,14 @@ object SecurityHeaders {
     /** Minimal: the product uses none of these, so no page may ask for them. */
     const val PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
 
-    /**
-     * The route that carries [CSP_POLICY_EDITOR] — the pipeline editor's full-document GET
-     * (`PipelineEditorController`), matched on its exact three-segment shape so no other
-     * route under `/pipelines` inherits the relaxation. Class-level KDoc says why.
-     */
-    private val EDITOR_PATH = Regex("^/pipelines/[^/]+/editor$")
-
     private const val SCRIPT_SRC_SELF = "script-src 'self'"
-    private const val STYLE_SRC_SELF = "style-src 'self'"
 
     /** The XML data document the browser's own viewer styles — no policy (class KDoc). */
     private const val SITEMAP_PATH = "/sitemap.xml"
 
     /**
      * The one stylesheet Cytoscape 3 (`static/vendor/cytoscape/cytoscape.min.js`) injects
-     * into `<head>` at init, character for character — hashed into the editor's `style-src`.
+     * into `<head>` at init, character for character — hashed into `style-src`.
      */
     const val CYTOSCAPE_STYLESHEET = ".__________cytoscape_container { position: relative; }"
 
@@ -89,6 +93,14 @@ object SecurityHeaders {
         val digest = MessageDigest.getInstance("SHA-256").digest(sheet.toByteArray(Charsets.UTF_8))
         return "'sha256-" + Base64.getEncoder().encodeToString(digest) + "'"
     }
+
+    /**
+     * `style-src 'self'` plus [CYTOSCAPE_STYLESHEET_HASH] — the one `<style>` the
+     * editor page's Cytoscape injects at init, admitted by hash on every route
+     * (class KDoc: on routes that never load Cytoscape it permits nothing that
+     * occurs; carrying it keeps ONE policy for every policed route).
+     */
+    private val STYLE_SRC = "style-src 'self' $CYTOSCAPE_STYLESHEET_HASH"
 
     /**
      * `img-src` names no external host (#197): the OIDC profile picture
@@ -103,7 +115,7 @@ object SecurityHeaders {
         listOf(
             "default-src 'self'",
             SCRIPT_SRC_SELF,
-            STYLE_SRC_SELF,
+            STYLE_SRC,
             "img-src 'self' data:",
             "font-src 'self'",
             "connect-src 'self'",
@@ -113,35 +125,17 @@ object SecurityHeaders {
             "object-src 'none'",
         )
 
-    /** The policy every response carries but the editor's. */
+    /** The policy every policed response carries — the one policy (195). */
     val CSP_POLICY: String = DIRECTIVES.joinToString("; ")
-
-    /**
-     * [CSP_POLICY] with `'unsafe-eval'` on `script-src` and Cytoscape's sheet hash on
-     * `style-src` — nothing else differs. See the class KDoc.
-     */
-    val CSP_POLICY_EDITOR: String =
-        DIRECTIVES.joinToString("; ") {
-            when (it) {
-                SCRIPT_SRC_SELF -> "$it 'unsafe-eval'"
-                STYLE_SRC_SELF -> "$it $CYTOSCAPE_STYLESHEET_HASH"
-                else -> it
-            }
-        }
-
-    /** True for the one route that gets [CSP_POLICY_EDITOR]. */
-    fun isEditorRoute(request: HttpServletRequest): Boolean = EDITOR_PATH.matches(request.appPath())
 
     /** True for the one route that gets no policy (the sitemap — class KDoc). */
     fun isUnpolicedRoute(request: HttpServletRequest): Boolean = request.appPath() == SITEMAP_PATH
 
-    /** The CSP header writers, in the order [SecurityConfig] registers them. */
+    /** The CSP header writer, in the order [SecurityConfig] registers them. */
     fun cspWriters(): List<HeaderWriter> {
-        val editor = RequestMatcher { isEditorRoute(it) }
-        val everythingElse = RequestMatcher { !isEditorRoute(it) && !isUnpolicedRoute(it) }
+        val everythingButSitemap = RequestMatcher { !isUnpolicedRoute(it) }
         return listOf(
-            DelegatingRequestMatcherHeaderWriter(editor, StaticHeadersWriter(CSP_HEADER, CSP_POLICY_EDITOR)),
-            DelegatingRequestMatcherHeaderWriter(everythingElse, StaticHeadersWriter(CSP_HEADER, CSP_POLICY)),
+            DelegatingRequestMatcherHeaderWriter(everythingButSitemap, StaticHeadersWriter(CSP_HEADER, CSP_POLICY)),
         )
     }
 }

@@ -7,6 +7,7 @@
     this.data = null;
     this.columns = [];
     this.rows = [];
+    this.displayRows = [];
     this.page = 1;
     this.totalPages = 1;
     this.pageSize = 0;
@@ -55,6 +56,24 @@
     return Math.max(1, Math.ceil(totalRows / (pageSize || 1)));
   }
 
+  /*
+   * 195 — the CSP build's cell expression is a path (`cell.v`), so the positional
+   * lookup the template used to inline (`row[col]`) is materialized here, once per
+   * page render: each row becomes { idx, cells: [{ c, v }] } in column order.
+   * Values are copied verbatim — the same r[col] reads the template made, missing
+   * keys included.
+   */
+  function displayRows(columns, rows) {
+    return (rows || []).map(function (r) {
+      return {
+        idx: r.__idx,
+        cells: (columns || []).map(function (c) {
+          return { c: c, v: r[c] };
+        }),
+      };
+    });
+  }
+
   ResultPanel.prototype.showData = function (payload) {
     var self = this;
     self.visible = true;
@@ -81,6 +100,7 @@
     self.page = payload.page || 1;
     self.hasPrev = self.page > 1;
     self.hasNext = payload.has_more !== undefined ? payload.has_more : self.page < self.totalPages;
+    self.displayRows = displayRows(self.columns, self.rows);
     if (self.expired) {
       self.expired = false;
     }
@@ -159,6 +179,7 @@
         self.totalPages = totalPagesFrom(pl.total_rows, self.pageSize);
         self.hasPrev = self.page > 1;
         self.hasNext = pl.has_more !== undefined ? pl.has_more : false;
+        self.displayRows = displayRows(self.columns, self.rows);
         self.syncToEditor();
       })
       .catch(function (err) {
@@ -173,6 +194,7 @@
     rp.failure = this.failure;
     rp.columns = this.columns;
     rp.rows = this.rows;
+    rp.displayRows = this.displayRows;
     rp.page = this.page;
     rp.totalPages = this.totalPages;
     rp.hasPrev = this.hasPrev;
@@ -180,9 +202,19 @@
     rp.ttlSeconds = this.ttlSeconds;
     rp.expired = this.expired;
     rp.cursorEndpoint = this.cursorEndpoint;
+    /* 195: the three download links are paths in the template now — the format
+       argument the old expression passed cannot be spelled in the CSP build. */
+    rp.downloadJsonHref = downloadHref(this.cursorEndpoint, "json");
+    rp.downloadCsvHref = downloadHref(this.cursorEndpoint, "csv");
+    rp.downloadArrowHref = downloadHref(this.cursorEndpoint, "arrow");
     if (rp.ttlInterval) clearInterval(rp.ttlInterval);
     rp.ttlInterval = this.ttlInterval;
   };
+
+  /** The downloads' href: the cursor endpoint + the format, "#" when there is none. */
+  function downloadHref(endpoint, format) {
+    return endpoint ? endpoint + "?format=" + format : "#";
+  }
 
   ResultPanel.prototype.hide = function () {
     this.visible = false;

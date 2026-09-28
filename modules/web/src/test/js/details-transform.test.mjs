@@ -49,9 +49,17 @@ function fresh() {
   editor.transformPins = {};
 }
 
+
+// 195: detailsMeta now returns {k, v} rows (the CSP build's template bindings are
+// paths — bracket reads like row[0] are not spellable). The maps below read the
+// same facts under the same keys.
+function rowsToMap(rows) {
+  return Object.fromEntries(rows.map((r) => [r.k, r.v]));
+}
+
 test("a TRANSFORM's Details before its pin resolves: the node's own facts, and 'resolving…' for the template's", () => {
   fresh();
-  const map = Object.fromEntries(editor.detailsMeta(ROW));
+  const map = rowsToMap(editor.detailsMeta(ROW));
   assert.equal(map.Template, "acme/shape/order_lines.jsonata @ v3");
   assert.equal(map.Language, "resolving…");
   assert.equal(map.Mode, "resolving…", "the mode is the contract's — never the node's (§3.1)");
@@ -67,7 +75,7 @@ test("a TRANSFORM's Details before its pin resolves: the node's own facts, and '
 test("with the pin resolved: the language and the mode, and the needs-review row when flagged", () => {
   fresh();
   editor.transformPins["acme/shape/order_lines.jsonata@3"] = { language: "jsonata", mode: "row", rejects: true, needsReview: true };
-  const map = Object.fromEntries(editor.detailsMeta(Object.assign({}, ROW, { strict: true })));
+  const map = rowsToMap(editor.detailsMeta(Object.assign({}, ROW, { strict: true })));
   assert.equal(map.Language, "jsonata");
   assert.equal(map.Mode, "row");
   assert.equal(map.Strict, "yes — any reject fails the node");

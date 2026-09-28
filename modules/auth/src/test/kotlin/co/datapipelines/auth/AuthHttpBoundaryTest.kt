@@ -350,8 +350,9 @@ class AuthHttpBoundaryTest {
                 // No HSTS from the app — the edge's header (deployment.md §6.2).
                 h.getFirst("Strict-Transport-Security") shouldBe null
                 h[SecurityHeaders.CSP_HEADER]?.size shouldBe 1
-                h.getFirst(SecurityHeaders.CSP_HEADER) shouldBe
-                    if (path.endsWith("/editor")) SecurityHeaders.CSP_POLICY_EDITOR else SecurityHeaders.CSP_POLICY
+                // 195: ONE policy on every policed route — the editor's old eval
+                // exemption is retired, so the path never picks a variant.
+                h.getFirst(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY
             }
         }
     }

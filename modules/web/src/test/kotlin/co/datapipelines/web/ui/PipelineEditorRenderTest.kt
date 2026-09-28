@@ -41,10 +41,10 @@ class PipelineEditorRenderTest {
 
         html shouldContain "class=\"pe-dock\""
         html shouldContain "role=\"tablist\""
-        html shouldContain "dock.selectTab('details')"
-        html shouldContain "dock.selectTab('results')"
-        html shouldContain "dock.selectTab('errors')"
-        html shouldContain "dock.selectTab('events')"
+        html shouldContain "@click=\"selectDetailsTab\""
+        html shouldContain "@click=\"selectResultsTab\""
+        html shouldContain "@click=\"selectErrorsTab\""
+        html shouldContain "@click=\"selectEventsTab\""
         html shouldContain "id=\"pe-pane-details\""
         html shouldContain "id=\"pe-pane-results\""
         html shouldContain "id=\"pe-pane-errors\""
@@ -71,7 +71,7 @@ class PipelineEditorRenderTest {
 
         html shouldContain "aria-label=\"Collapse dock\""
         html shouldContain "aria-label=\"Restore dock\""
-        html shouldContain "dock.toggleCollapse()"
+        html shouldContain "@click=\"toggleDock\""
         html shouldNotContain "aria-label=\"Close results\""
         html shouldNotContain "resultPanel.visible = false"
     }
@@ -86,14 +86,16 @@ class PipelineEditorRenderTest {
         val html = render()
 
         html shouldContain "Select a node to see its source, template, output and last run."
-        html shouldContain "detailsMeta(selectedNode)"
+        html shouldContain "x-for=\"row in selectedDetailsMeta\""
         html shouldContain "class=\"pe-kv\""
         html shouldContain "id=\"pe-node-sql\""
         html shouldContain "id=\"pe-node-def\""
-        html shouldContain "isSqlNode(selectedNode)"
-        html shouldContain "definitionHtml(selectedNode)"
-        // §8.2/§9.6: the template link goes to the route that exists, /templates/editor?name=.
-        html shouldContain "/templates/editor?name='"
+        html shouldContain "x-show=\"selectedIsSqlNode\""
+        html shouldContain "x-html=\"selectedDefinitionHtml\""
+        // §8.2/§9.6: the template link targets /templates/editor?name= — since 195 the URL
+        // is built by the component's selectedTemplateHref getter (the CSP build's template
+        // bindings are paths), and the template binds it by name.
+        html shouldContain "x-bind:href=\"selectedTemplateHref\""
     }
 
     /**
@@ -104,9 +106,9 @@ class PipelineEditorRenderTest {
     fun `the tab badges are wired - results rows, errors danger count, events live count`() {
         val html = render()
 
-        html shouldContain "dock.resultsRows"
-        html shouldContain "dock.errors.length > 0 ? 'pe-dock-count-err'"
-        html shouldContain "eventsLog.count()"
+        html shouldContain "x-text=\"resultsBadgeText\""
+        html shouldContain "x-bind:class=\"errorsBadgeClass\""
+        html shouldContain "x-text=\"eventsCount\""
         html shouldContain "dock.resultsStale"
     }
 
@@ -119,7 +121,7 @@ class PipelineEditorRenderTest {
         val html = render()
 
         html shouldNotContain "resultPanel.failure"
-        html shouldContain "failureView(entry.record)"
+        html shouldContain "x-text=\"entry.view.code\""
         html shouldContain "entry in dock.errors"
         html shouldContain "No failures in this run."
     }
@@ -135,7 +137,7 @@ class PipelineEditorRenderTest {
 
         // The count is client-side (the loaded body JSON); the verdict summary's URL points at
         // the read-only checks partial for the WORKING version (the release, in this fixture).
-        html shouldContain "(pipeline.checks || []).length"
+        html shouldContain "x-show=\"checksPresent\""
         html shouldContain "id=\"pe-checks-latest\""
         html shouldContain "data-checks-url=\"/partials/pipelines/$LEAF_ID/versions/1/checks\""
     }
@@ -153,8 +155,8 @@ class PipelineEditorRenderTest {
         html shouldContain "lucide-sprite.svg#maximize"
         html shouldContain "lucide-sprite.svg#zoom-in"
         html shouldContain "aria-label=\"Graph view controls\""
-        html shouldContain "graph.fitToView()"
-        html shouldContain "graph.resetView()"
+        html shouldContain "@click=\"fitGraph\""
+        html shouldContain "@click=\"resetGraph\""
         html shouldContain "/vendor/design-system/icons.css"
         html shouldContain "ds-icon ds-icon-md"
         html shouldContain "class=\"pe-hint\""
@@ -168,11 +170,12 @@ class PipelineEditorRenderTest {
 
         html shouldContain "<table class=\"ds-table\">"
         html shouldNotContain "pe-result-table\""
-        // 027b C is restyled, not rewired: the pager keeps its exact bindings.
-        html shouldContain "resultPanel.prevPage()"
-        html shouldContain "resultPanel.nextPage()"
-        html shouldContain "resultPanel.hasPrev"
-        html shouldContain "resultPanel.hasNext"
+        // 027b C is restyled, not rewired: the pager keeps its exact bindings (195 —
+        // the disabled flags are component getters; the CSP build forbids the negation).
+        html shouldContain "@click=\"resultPanel.prevPage\""
+        html shouldContain "@click=\"resultPanel.nextPage\""
+        html shouldContain "x-bind:disabled=\"noPrevPage\""
+        html shouldContain "x-bind:disabled=\"noNextPage\""
     }
 
     /**
@@ -187,12 +190,12 @@ class PipelineEditorRenderTest {
         // 085 §B: the &larr; entity is the sprite's arrow-left now (xs — a text-link glyph).
         html shouldContain "lucide-sprite.svg#arrow-left"
         html shouldContain " Pipelines</a>"
-        html shouldContain "crumbPath()"
-        html shouldContain "crumbName()"
+        html shouldContain "crumbPath"
+        html shouldContain "crumbName"
         html shouldContain "pe-vchip"
-        html shouldContain "statusClass()"
+        html shouldContain "statusClass"
         html shouldContain "runStatus.text"
-        html shouldContain "executePipeline()"
+        html shouldContain "@click=\"executePipeline\""
     }
 
     /**

@@ -35,6 +35,9 @@
   <script th:src="@{/js/pipeline-editor/dock.js}"></script>
   <script th:src="@{/js/pipeline-editor/events.js}"></script>
   <script th:src="@{/js/pipeline-editor/node-ops.js}"></script>
+  <!-- 195: the Parameters sidebar's field view models — pure, node-tested, read
+       by init.js and the template's paths. -->
+  <script th:src="@{/js/pipeline-editor/param-fields.js}"></script>
   <script th:src="@{/js/pipeline-editor/init.js}"></script>
   <script th:src="@{/js/pipeline-editor/sql-highlight.js}"></script>
   <script th:src="@{/js/pipeline-editor/graph.js}"></script>
@@ -78,15 +81,22 @@
   <!--/* 151/#144 — `data-can-execute` is the SAME `canExecute` that renders the toolbar's
          Execute below, stamped once for the script: the canvas's Start marker is a run
          trigger exactly when this is "true", and nothing in JS re-derives the right. */-->
-  <div x-data="pipelineEditor()" x-init="init()" class="pe-root" th:attr="data-can-execute=${canExecute == true}">
+  <!-- 195: every Alpine expression on this page is a PROPERTY PATH — the CSP
+       build evaluates x-* values as names (getters/methods resolved on the
+       component; no operators, no literals, no call syntax). The component is
+       registered as `pipelineEditor` (init.js's alpine:init listener); its
+       init() runs automatically. Where a value needed computing, the name below
+       names a getter or no-arg method on the component (init.js), or on a pure
+       module it delegates to (dock.js, result.js, param-fields.js). -->
+  <div x-data="pipelineEditor" class="pe-root" th:attr="data-can-execute=${canExecute == true}">
 
     <!-- Top bar (080 §D — the mock's 52px bar): back, crumb (folder muted + name
          bold), version chip, run status, Execute. -->
     <div class="pe-topbar">
       <a th:href="@{/pipelines}" class="pe-back"><svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-left"></use></svg> Pipelines</a>
       <div class="pe-crumb">
-        <span class="pe-crumb-path" x-show="crumbPath()" x-text="crumbPath()"></span>
-        <span class="pe-crumb-name" x-text="crumbName()"></span>
+        <span class="pe-crumb-path" x-show="crumbPath" x-text="crumbPath"></span>
+        <span class="pe-crumb-name" x-text="crumbName"></span>
         <span class="pe-vchip" th:classappend="${hasDraft} ? 'pe-vchip-draft'"
               th:text="${hasDraft} ? 'v' + ${draftVersion} + ' · draft pending release' : 'v' + ${releasedVersion} + ' · released'">v1 · released</span>
       </div>
@@ -117,17 +127,17 @@
         </button>
       </div>
       <div class="pe-spacer"></div>
-      <div class="pe-status" x-bind:class="statusClass()" role="status">
+      <div class="pe-status" x-bind:class="statusClass" role="status">
         <span class="pe-status-dot"></span><span x-text="runStatus.text">Idle</span>
       </div>
-      <button th:if="${canExecute}" data-verb="pipeline-execute" class="pe-run" x-bind:disabled="isExecuting" @click="executePipeline()">
+      <button th:if="${canExecute}" data-verb="pipeline-execute" class="pe-run" x-bind:disabled="isExecuting" @click="executePipeline">
         <!-- 085 §B: the sprite's play, not a hand-drawn filled triangle — one icon
              source, and the stroke glyph matches the canvas controls beside it. -->
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#play"></use></svg>
-        <span x-show="!isExecuting">Execute</span>
+        <span x-show="notExecuting">Execute</span>
         <span x-show="isExecuting">Running…</span>
       </button>
-      <button th:if="${canExecute}" data-verb="execution-cancel" x-show="isExecuting" class="ds-button ds-button-danger ds-button-sm" @click="cancelExecution()">
+      <button th:if="${canExecute}" data-verb="execution-cancel" x-show="isExecuting" class="ds-button ds-button-danger ds-button-sm" @click="cancelExecution">
         <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#square"></use></svg>
         Cancel
       </button>
@@ -136,7 +146,7 @@
     <!-- Execution status banner (connection loss / recovery) -->
     <div x-show="banner.text" class="pe-banner" x-bind:class="banner.type" role="alert" x-cloak>
       <span x-text="banner.text"></span>
-      <button class="pe-banner-dismiss" @click="banner.text = ''" aria-label="Dismiss"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
+      <button class="pe-banner-dismiss" @click="dismissBanner" aria-label="Dismiss"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
     </div>
 
     <div class="pe-body">
@@ -155,34 +165,39 @@
           </div>
           <div class="pe-field">
             <label class="pe-label">Description</label>
-            <div class="pe-value u-pre-line" x-text="pipeline.description || '—'"></div>
+            <div class="pe-value u-pre-line" x-text="pipelineDescriptionText"></div>
           </div>
           <div class="pe-field">
             <label class="pe-label">Version</label>
             <div class="pe-value" x-text="pipeline.version"></div>
           </div>
-          <template x-if="pipeline.settings && pipeline.settings.tempdb && pipeline.settings.tempdb.engine !== 'H2'">
+          <template x-if="hasCustomStagingEngine">
             <div class="pe-field">
               <label class="pe-label">Staging Engine</label>
-              <div class="pe-value" x-text="pipeline.settings.tempdb.engine"></div>
+              <div class="pe-value" x-text="stagingEngineText"></div>
             </div>
           </template>
         </div>
 
         <div class="pe-sidebar-section" x-show="paramKeys.length">
           <h2 class="pe-sidebar-heading">Parameters</h2>
-          <template x-for="key in paramKeys" :key="key">
+          <!-- 195: one view model per key (param-fields.js) — placeholder, description,
+               type and the override branch are precomputed there; the input's value is
+               bound (not x-model — the CSP build's setter is a synthesized expression
+               the path evaluator cannot resolve) and @input lands it on the component. -->
+          <template x-for="field in paramFields" :key="field.key">
             <div class="pe-field">
-              <label class="pe-label" x-text="key"></label>
-              <template x-if="parameterOverrides[key] !== undefined">
-                <input type="text" class="pe-input" x-model="parameterOverrides[key]"
-                  @input="onParameterInput()"
-                  x-bind:placeholder="parameters[key].default ? 'Default: ' + JSON.stringify(parameters[key].default) : (parameters[key].required ? 'Required' : 'Optional')" />
+              <label class="pe-label" x-text="field.key"></label>
+              <template x-if="field.hasOverride">
+                <input type="text" class="pe-input" x-bind:value="field.override"
+                  x-bind:data-key="field.key"
+                  @input="onParameterInput"
+                  x-bind:placeholder="field.placeholderText" />
               </template>
-              <template x-if="parameterOverrides[key] === undefined">
-                <div class="pe-value pe-value-muted" x-text="parameters[key]?.description || '—'"></div>
+              <template x-if="field.hasNoOverride">
+                <div class="pe-value pe-value-muted" x-text="field.descriptionText"></div>
               </template>
-              <span class="pe-type-badge" x-text="parameters[key]?.type"></span>
+              <span class="pe-type-badge" x-text="field.type"></span>
             </div>
           </template>
         </div>
@@ -212,20 +227,20 @@
              Native buttons — keyboard reachable by tab, no shortcut layer to own. -->
         <div class="pe-graph-controls" role="toolbar" aria-label="Graph view controls">
           <button type="button"
-                  @click="graph && graph.fitToView()" title="Fit graph to view (F)" aria-label="Fit graph to view">
+                  @click="fitGraph" title="Fit graph to view (F)" aria-label="Fit graph to view">
             <svg class="ds-icon ds-icon-md" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#maximize"></use></svg>
           </button>
           <button type="button"
-                  @click="graph && graph.resetView()" title="Reset zoom (100%)" aria-label="Reset zoom to 100 percent">
+                  @click="resetGraph" title="Reset zoom (100%)" aria-label="Reset zoom to 100 percent">
             <svg class="ds-icon ds-icon-md" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#rotate-ccw"></use></svg>
           </button>
           <hr>
           <button type="button"
-                  @click="graph && graph.zoomBy(1.25)" title="Zoom in" aria-label="Zoom in">
+                  @click="zoomIn" title="Zoom in" aria-label="Zoom in">
             <svg class="ds-icon ds-icon-md" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#zoom-in"></use></svg>
           </button>
           <button type="button"
-                  @click="graph && graph.zoomBy(0.8)" title="Zoom out" aria-label="Zoom out">
+                  @click="zoomOut" title="Zoom out" aria-label="Zoom out">
             <svg class="ds-icon ds-icon-md" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#zoom-out"></use></svg>
           </button>
         </div>
@@ -241,7 +256,7 @@
           <ul id="pe-node-list" role="listbox" class="pe-node-list" aria-label="Pipeline nodes" tabindex="0"></ul>
 
           <div class="pe-legend" aria-hidden="true">
-            <template x-for="chip in legendChips()" :key="chip.label">
+            <template x-for="chip in legendChips" :key="chip.label">
               <span class="pe-legend-chip"><i x-bind:data-type="chip.type"></i><span x-text="chip.label"></span></span>
             </template>
           </div>
@@ -261,7 +276,7 @@
          (Details is its landing tab — the 065 inspector overlay moved here), one
          chevron collapse, no close. State lives in dock.js, the events log in
          events.js; both pure so node --test owns the transition tables. -->
-    <section class="pe-dock" x-bind:class="dock.state === 'collapsed' ? 'pe-dock-collapsed' : ''"
+    <section class="pe-dock" x-bind:class="dock.collapsedClass"
              aria-label="Node details, execution results, errors and events">
       <!-- 104 §B — the height handle, on the dock's top edge. The owner could min/max the
            dock but not size it; this is the drag. `role="separator"` with the value pair is
@@ -272,43 +287,43 @@
       <div class="pe-dock-tabs" role="tablist" aria-label="Editor dock">
         <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-details"
                 aria-controls="pe-pane-details"
-                x-bind:aria-selected="dock.tab === 'details' ? 'true' : 'false'"
-                @click="dock.selectTab('details')">
+                x-bind:aria-selected="dock.detailsAria"
+                @click="selectDetailsTab">
           Details
         </button>
         <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-results"
                 aria-controls="pe-pane-results"
-                x-bind:aria-selected="dock.tab === 'results' ? 'true' : 'false'"
-                @click="dock.selectTab('results')">
+                x-bind:aria-selected="dock.resultsAria"
+                @click="selectResultsTab">
           Results
-          <span class="pe-dock-count" x-bind:class="dock.hasResults && !resultPanel.expired ? 'pe-dock-count-ok' : ''"
-                x-text="dock.hasResults && dock.resultsRows !== null ? dock.resultsRows : '—'"></span>
+          <span class="pe-dock-count" x-bind:class="resultsBadgeClass"
+                x-text="resultsBadgeText"></span>
           <span class="pe-dock-stale" x-show="dock.resultsStale">previous run</span>
         </button>
         <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-errors"
                 aria-controls="pe-pane-errors"
-                x-bind:aria-selected="dock.tab === 'errors' ? 'true' : 'false'"
-                @click="dock.selectTab('errors')">
+                x-bind:aria-selected="dock.errorsAria"
+                @click="selectErrorsTab">
           Errors
-          <span class="pe-dock-count" x-bind:class="dock.errors.length > 0 ? 'pe-dock-count-err' : ''"
+          <span class="pe-dock-count" x-bind:class="errorsBadgeClass"
                 x-text="dock.errors.length"></span>
         </button>
         <button type="button" class="pe-dock-tab" role="tab" id="pe-dock-tab-events"
                 aria-controls="pe-pane-events"
-                x-bind:aria-selected="dock.tab === 'events' ? 'true' : 'false'"
-                @click="dock.selectTab('events')">
+                x-bind:aria-selected="dock.eventsAria"
+                @click="selectEventsTab">
           Events
-          <span class="pe-dock-count" x-text="eventsLog.count()"></span>
+          <span class="pe-dock-count" x-text="eventsCount"></span>
         </button>
         <span class="pe-grow"></span>
         <!-- One control, two labels: collapse while open, restore while collapsed
              (065's chevron, kept; the glyphs are the sprite's own #minus/#maximize). -->
-        <button type="button" class="pe-dock-toggle" x-show="dock.state === 'open'"
-                @click="dock.toggleCollapse()" aria-label="Collapse dock">
+        <button type="button" class="pe-dock-toggle" x-show="dock.dockIsOpen"
+                @click="toggleDock" aria-label="Collapse dock">
           <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#minus"></use></svg>
         </button>
-        <button type="button" class="pe-dock-toggle" x-show="dock.state === 'collapsed'"
-                @click="dock.toggleCollapse()" aria-label="Restore dock">
+        <button type="button" class="pe-dock-toggle" x-show="dock.dockIsCollapsed"
+                @click="toggleDock" aria-label="Restore dock">
           <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#maximize"></use></svg>
         </button>
       </div>
@@ -319,57 +334,57 @@
            child mapping. -->
       <div class="pe-dock-body" id="pe-pane-details" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-details"
-           x-show="dock.tab === 'details'">
+           x-show="dock.detailsActive">
         <!-- 140: the loaded body's release checks. The count is read off the client-side body
              JSON; the latest verdicts lazy-load from the read-only checks partial (init.js
              fires the GET only when the body declares any). -->
-        <div class="pe-field" x-show="(pipeline.checks || []).length > 0">
+        <div class="pe-field" x-show="checksPresent">
           <label class="pe-label">Checks</label>
           <div class="pe-value"
-               x-text="(pipeline.checks || []).length + ' check' + ((pipeline.checks || []).length === 1 ? '' : 's') + ' on this version'"></div>
+               x-text="checksCountText"></div>
           <div id="pe-checks-latest"
                th:attr="data-checks-url=@{'/partials/pipelines/{id}/versions/{version}/checks'(id=${pipelineId}, version=${hasDraft ? draftVersion : releasedVersion})}"></div>
         </div>
-        <div class="pe-empty" x-show="!selectedNode">Select a node to see its source, template, output and last run.</div>
+        <div class="pe-empty" x-show="noSelection">Select a node to see its source, template, output and last run.</div>
         <template x-if="selectedNode">
-          <div class="pe-details" x-bind:data-type="detailsTypeToken(selectedNode)">
+          <div class="pe-details" x-bind:data-type="selectedDetailsTypeToken">
             <div class="pe-details-meta">
               <div class="pe-details-h">
-                <span class="pe-card-tile" x-html="detailsIcon(selectedNode)"></span>
+                <span class="pe-card-tile" x-html="selectedDetailsIcon"></span>
                 <div>
                   <div class="pe-details-id" x-text="selectedNode.id"></div>
-                  <div class="pe-details-kind" x-text="String(selectedNode.type || '').toLowerCase()"></div>
+                  <div class="pe-details-kind" x-text="selectedTypeText"></div>
                   <!-- 7d (§8.2): the pinned transform version cites a retired fact (lane 7e's flag,
                        read off the resolved pin — init.js transformPinFor). -->
                   <span class="ds-badge ds-badge-warning" data-needs-review
-                        x-show="(transformPinFor(selectedNode) || {}).needsReview === true">needs review</span>
+                        x-show="selectedNeedsReview">needs review</span>
                 </div>
               </div>
               <dl class="pe-kv">
-                <template x-for="row in detailsMeta(selectedNode)" :key="row[0]">
+                <template x-for="row in selectedDetailsMeta" :key="row.k">
                   <div class="pe-kv-row">
-                    <dt x-text="row[0]"></dt>
-                    <dd x-text="row[1]" x-bind:title="row[1]"></dd>
+                    <dt x-text="row.k"></dt>
+                    <dd x-text="row.v" x-bind:title="row.v"></dd>
                   </div>
                 </template>
               </dl>
             </div>
             <div class="pe-sqlwrap">
               <div class="pe-sql-head">
-                <span x-text="detailsSqlHead(selectedNode)"></span>
+                <span x-text="selectedSqlHead"></span>
                 <span id="pe-node-sql-spinner" class="htmx-indicator ds-spinner" aria-hidden="true"></span>
-                <a x-show="selectedNode.template && selectedNode.template.id"
-                   x-bind:href="'/templates/editor?name=' + encodeURIComponent(selectedNode.template ? selectedNode.template.id : '')"
+                <a x-show="hasSelectedTemplate"
+                   x-bind:href="selectedTemplateHref"
                    hx-boost="false">Open template <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
-                <a x-show="selectedNode.type === 'PIPELINE' && selectedNode.pipeline"
-                   x-bind:href="'/pipelines?q=' + encodeURIComponent(selectedNode.pipeline ? selectedNode.pipeline.name : '')">Open child <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
+                <a x-show="hasSelectedChild"
+                   x-bind:href="selectedChildHref">Open child <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
               </div>
               <!-- Filled by htmx.ajax on selection change for SQL-backed node types;
                    the URL carries §6.3 wire parameters built by the page's own
                    coerceValue (init.js). -->
-              <div id="pe-node-sql" x-show="isSqlNode(selectedNode)"></div>
+              <div id="pe-node-sql" x-show="selectedIsSqlNode"></div>
               <!-- CALCULATOR evaluation / PIPELINE child mapping, built client-side. -->
-              <pre class="pe-sql" id="pe-node-def" x-show="!isSqlNode(selectedNode)" x-html="definitionHtml(selectedNode)"></pre>
+              <pre class="pe-sql" id="pe-node-def" x-show="selectedIsNotSqlNode" x-html="selectedDefinitionHtml"></pre>
             </div>
           </div>
         </template>
@@ -379,13 +394,13 @@
            the 027b-frozen paging row and the downloads. -->
       <div class="pe-dock-body" id="pe-pane-results" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-results"
-           x-show="dock.tab === 'results'">
-        <div class="pe-empty" x-show="!resultPanel.data && !resultPanel.expired">Run the pipeline to see the caller output here.</div>
-        <div x-show="resultPanel.ttlSeconds > 0" class="pe-result-ttl" x-text="'Expires in ' + resultPanel.ttlSeconds + 's'"></div>
+           x-show="dock.resultsActive">
+        <div class="pe-empty" x-show="resultsEmpty">Run the pipeline to see the caller output here.</div>
+        <div x-show="ttlRunning" class="pe-result-ttl" x-text="ttlText"></div>
         <div x-show="resultPanel.expired" class="pe-result-expired-card">
           <p>Result expired — re-run the pipeline to see the latest data.</p>
         </div>
-        <div x-show="!resultPanel.expired && resultPanel.data" class="pe-result-body">
+        <div x-show="resultsReady" class="pe-result-body">
           <!-- 282 (#282): the dock's result grid is a data-table frame FIXED by its pane
                (`dt-fill` takes the rest of the column; ui-screens §3.7): the header and the first
                column hold while a wide result scrolls both ways, one line per row, and the sort
@@ -401,10 +416,13 @@
                 </tr>
               </thead>
               <tbody>
-                <template x-for="row in resultPanel.rows" :key="row.__idx">
+                <!-- 195: each row's cells are materialized in column order by result.js
+                     (displayRows) — the positional read the old inner loop made
+                     (row[col]) is not a path the CSP build can evaluate. -->
+                <template x-for="row in resultPanel.displayRows" :key="row.idx">
                   <tr>
-                    <template x-for="col in resultPanel.columns" :key="col">
-                      <td x-text="row[col]"></td>
+                    <template x-for="cell in row.cells" :key="cell.c">
+                      <td x-text="cell.v"></td>
                     </template>
                   </tr>
                 </template>
@@ -417,15 +435,15 @@
                  prevPage/nextPage and hasPrev/hasNext keep their exact bindings;
                  limit-authoritative, total_rows-denominated arithmetic lives in
                  result.js. -->
-            <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.prevPage()" x-bind:disabled="!resultPanel.hasPrev">Prev</button>
-            <span class="pe-result-page-info" x-text="'Page ' + resultPanel.page + ' / ' + resultPanel.totalPages"></span>
-            <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.nextPage()" x-bind:disabled="!resultPanel.hasNext">Next</button>
+            <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.prevPage" x-bind:disabled="noPrevPage">Prev</button>
+            <span class="pe-result-page-info" x-text="pageInfoText"></span>
+            <button class="ds-button ds-button-ghost ds-button-sm" @click="resultPanel.nextPage" x-bind:disabled="noNextPage">Next</button>
             <!-- 076 §B: downloads are full navigations, never boosted — a boosted
                  fetch would try to swap a file response into #app-main. -->
             <div class="pe-result-downloads">
-              <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false" x-bind:href="resultPanel.downloadUrl('json')">JSON</a>
-              <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false" x-bind:href="resultPanel.downloadUrl('csv')">CSV</a>
-              <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false" x-bind:href="resultPanel.downloadUrl('arrow')">Arrow</a>
+              <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false" x-bind:href="resultPanel.downloadJsonHref">JSON</a>
+              <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false" x-bind:href="resultPanel.downloadCsvHref">CSV</a>
+              <a class="ds-button ds-button-ghost ds-button-sm" hx-boost="false" x-bind:href="resultPanel.downloadArrowHref">Arrow</a>
             </div>
           </div>
         </div>
@@ -435,45 +453,50 @@
            markup, driven by the same failureView(record) — same record, read-only. -->
       <div class="pe-dock-body" id="pe-pane-errors" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-errors"
-           x-show="dock.tab === 'errors'">
-        <div class="pe-empty" x-show="dock.errors.length === 0">No failures in this run.</div>
+           x-show="dock.errorsActive">
+        <div class="pe-empty" x-show="dock.noErrors">No failures in this run.</div>
+        <!-- 195: each entry carries its summary `label` and its lazily built failure
+             `view` (dock.js accessors over details.js's PEErrorDetails) — the inline
+             x-data object this card used to scope (`{ view: failureView(...) }`) is
+             an expression the CSP build cannot evaluate, and every binding below is
+             a path off the entry instead. -->
         <template x-for="entry in dock.errors" :key="entry.key">
           <div class="pe-dock-error">
             <div class="pe-dock-error-summary">
-              <code class="pe-error-code" x-text="(entry.nodeId || '—') + ' · ' + (entry.record.code || 'unknown')"></code>
+              <code class="pe-error-code" x-text="entry.label"></code>
             </div>
             <template x-if="entry.record">
-              <div class="pe-result-failure" x-data="{ view: failureView(entry.record) }">
+              <div class="pe-result-failure">
                 <div class="pe-failure-summary">
-                  <span class="ds-badge ds-badge-danger" x-text="view.code"></span>
-                  <span class="pe-failure-message" x-text="view.message"></span>
+                  <span class="ds-badge ds-badge-danger" x-text="entry.view.code"></span>
+                  <span class="pe-failure-message" x-text="entry.view.message"></span>
                 </div>
                 <div class="pe-failure-meta">
-                  <span x-show="view.correlationId">correlation id <code class="pe-error-corr" x-text="view.correlationId"></code></span>
-                  <span x-show="view.nodeLine" x-text="view.nodeLine"></span>
+                  <span x-show="entry.view.correlationId">correlation id <code class="pe-error-corr" x-text="entry.view.correlationId"></code></span>
+                  <span x-show="entry.view.nodeLine" x-text="entry.view.nodeLine"></span>
                 </div>
-                <template x-if="view.sql">
+                <template x-if="entry.view.sql">
                   <div class="pe-field">
                     <label class="pe-label">SQL</label>
                     <div class="pe-sql-block">
-                      <pre class="pe-sql"><code class="pe-sql-code" x-text="view.sql"></code></pre>
+                      <pre class="pe-sql"><code class="pe-sql-code" x-text="entry.view.sql"></code></pre>
                     </div>
                   </div>
                 </template>
-                <template x-if="view.chain">
+                <template x-if="entry.view.chain">
                   <details class="pe-error-exception" open>
-                    <summary>Exception <span class="pe-error-root" x-text="'· root: ' + view.rootCause"></span></summary>
-                    <template x-for="(level, idx) in view.chain" :key="idx">
+                    <summary>Exception <span class="pe-error-root" x-text="entry.view.rootCauseLine"></span></summary>
+                    <template x-for="level in entry.view.levels" :key="index">
                       <div class="pe-error-level">
-                        <div class="pe-error-level-title" x-text="(idx === 0 ? 'Root cause: ' : 'Caused by: ') + level.cls"></div>
+                        <div class="pe-error-level-title" x-text="level.title"></div>
                         <div class="pe-error-level-message" x-text="level.message"></div>
-                        <pre class="pe-error-frames" x-text="level.frames.join('\n')"></pre>
+                        <pre class="pe-error-frames" x-text="level.framesText"></pre>
                       </div>
                     </template>
                   </details>
                 </template>
                 <button type="button" class="ds-button ds-button-ghost ds-button-sm pe-copy"
-                        x-bind:data-copy="view.copyText" data-copy-label="Failure detail">
+                        x-bind:data-copy="entry.view.copyText" data-copy-label="Failure detail">
                   Copy failure detail
                 </button>
               </div>
@@ -487,24 +510,24 @@
            the log's live count. -->
       <div class="pe-dock-body" id="pe-pane-events" role="tabpanel" x-cloak
            aria-labelledby="pe-dock-tab-events"
-           x-show="dock.tab === 'events'">
-        <div class="pe-empty" x-show="eventsLog.count() === 0">Every event the execution stream emits lands here, in order — the toast only ever announces the terminal one.</div>
+           x-show="dock.eventsActive">
+        <div class="pe-empty" x-show="noEvents">Every event the execution stream emits lands here, in order — the toast only ever announces the terminal one.</div>
         <div class="pe-events" id="pe-event-list"></div>
       </div>
     </section>
 
     <!-- Error modal -->
-    <div x-show="errorModal.visible" class="pe-modal-backdrop" @click.self="errorModal.hide()" x-cloak>
+    <div x-show="errorModal.visible" class="pe-modal-backdrop" @click.self="hideErrorModal" x-cloak>
       <div class="pe-modal" role="alertdialog" aria-label="Execution error">
         <div class="pe-modal-header">
           <h2>Execution Failed</h2>
-          <button @click="errorModal.hide()" aria-label="Close"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
+          <button @click="hideErrorModal" aria-label="Close"><svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#x"></use></svg></button>
         </div>
         <div class="pe-modal-body">
           <p x-text="errorModal.message"></p>
         </div>
         <div class="pe-modal-footer">
-          <button class="ds-button ds-button-ghost" @click="errorModal.hide()">Dismiss</button>
+          <button class="ds-button ds-button-ghost" @click="hideErrorModal">Dismiss</button>
         </div>
       </div>
     </div>

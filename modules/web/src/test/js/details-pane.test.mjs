@@ -66,13 +66,26 @@ const CHILD = {
   output: { target: "tempdb", table: "rainy_vs_dry" },
 };
 
+
+// 195: detailsMeta now returns {k, v} rows (the CSP build's template bindings are
+// paths — bracket reads like row[0] are not spellable). The maps below read the
+// same facts under the same keys.
+function rowsToMap(rows) {
+  return Object.fromEntries(rows.map((r) => [r.k, r.v]));
+}
+
 test("a DQL node's Details: source, template, output, parameters", () => {
   editor.parameters = { run_fiscal_quarter: { type: "STRING" } };
   editor.paramKeys = ["run_fiscal_quarter"];
   editor.pipeline = { settings: {} };
   editor.nodeStates = {};
   const meta = editor.detailsMeta(DQL);
-  const map = Object.fromEntries(meta);
+  const map = rowsToMap(meta);
+  assert.equal(
+    meta.every((r) => typeof r.k === "string" && "v" in r),
+    true,
+    "every row is a {k, v} object — the shape the template's paths bind",
+  );
   assert.equal(map.Source, "sample-trips");
   assert.equal(map.Template, "nyc/mobility/trips_by_borough @ v2");
   assert.equal(map.Output, "tempdb → table trips_by_borough");
@@ -87,7 +100,7 @@ test("a DQL node's Details: source, template, output, parameters", () => {
 test("a CALCULATOR node's Details: kind, inputs with resolved values, writes, value", () => {
   editor.contextValues = { current_date: "2026-09-05", org_fiscal_start_date: "01-01" };
   editor.nodeValues = { fiscal_quarter: "2026-Q3" };
-  const map = Object.fromEntries(editor.detailsMeta(CALC));
+  const map = rowsToMap(editor.detailsMeta(CALC));
   assert.equal(map.Kind, "fiscal_quarter");
   assert.equal(
     map.Inputs,
@@ -109,7 +122,7 @@ test("a CALCULATOR node's Details: kind, inputs with resolved values, writes, va
 test("a multi-output CALCULATOR node's Details: the mapping in Writes, every value in Value (121)", () => {
   editor.contextValues = { current_date: "2026-09-05" };
   editor.nodeValues = { window: { window_start: "2026-04-01", window_end: "2026-06-30" } };
-  const map = Object.fromEntries(editor.detailsMeta(CALC_MULTI));
+  const map = rowsToMap(editor.detailsMeta(CALC_MULTI));
   assert.equal(map.Writes, "end → window_end · start → window_start", "the mapping, output → key — sorted: JSONB does not preserve key order");
   assert.equal(map.Value, 'window_start = "2026-04-01" · window_end = "2026-06-30"', "every key the one evaluation wrote");
   assert.equal(editor.outputText(CALC_MULTI), "context keys window_end, window_start");
@@ -122,7 +135,7 @@ test("a multi-output CALCULATOR node's Details: the mapping in Writes, every val
 
 test("a PIPELINE node's Details: child, parameter mapping, output, child execution id", () => {
   editor.childExecutions = { rainy_vs_dry: "a91f0c2e-1234" };
-  const map = Object.fromEntries(editor.detailsMeta(CHILD));
+  const map = rowsToMap(editor.detailsMeta(CHILD));
   assert.equal(map.Child, "nyc/mobility/rainy_vs_dry_ridership @ v1");
   assert.equal(map.Parameters, "window_start ← ${window_start}");
   assert.equal(map.Output, "tempdb → table rainy_vs_dry");
@@ -173,14 +186,14 @@ test("a node's own settings.timeout_seconds shows on Details as this node's budg
   editor.pipeline = { settings: {} };
   editor.nodeStates = {};
   const withOwn = { ...DQL, settings: { timeout_seconds: 600 } };
-  const map = Object.fromEntries(editor.detailsMeta(withOwn));
+  const map = rowsToMap(editor.detailsMeta(withOwn));
   assert.equal(map.Timeout, "600s (this node)");
 });
 
 test("a PIPELINE node with no timeout says the child's deadline bounds it, not a number (108 §A)", () => {
   editor.nodeStates = {};
   editor.childExecutions = {};
-  const map = Object.fromEntries(editor.detailsMeta(CHILD));
+  const map = rowsToMap(editor.detailsMeta(CHILD));
   // The node deadline exempts a PIPELINE node that declares none — quoting the operator default
   // here would name a budget that never applies to it.
   assert.equal(map.Timeout, "child execution's own deadline");
@@ -191,27 +204,27 @@ test("a DQL node with no query_timeout_seconds names the operator tiers generica
   editor.paramKeys = [];
   editor.pipeline = { settings: {} };
   editor.nodeStates = {};
-  const map = Object.fromEntries(editor.detailsMeta(DQL));
+  const map = rowsToMap(editor.detailsMeta(DQL));
   assert.equal(map["Query Timeout"], "operator default (datasource, per-dialect, or datapipelines.executor.node-query-timeout-seconds)");
 });
 
 test("a node's own query_timeout_seconds shows on Details as this node's statement budget (156, #2)", () => {
   editor.pipeline = { settings: {} };
   const withOwn = { ...DQL, settings: { query_timeout_seconds: 120 } };
-  const map = Object.fromEntries(editor.detailsMeta(withOwn));
+  const map = rowsToMap(editor.detailsMeta(withOwn));
   assert.equal(map["Query Timeout"], "120s (this node)");
 });
 
 test("the pipeline's query_timeout_seconds shows as the row's default when the node declares none (156, #2)", () => {
   editor.pipeline = { settings: { query_timeout_seconds: 300 } };
-  const map = Object.fromEntries(editor.detailsMeta(DQL));
+  const map = rowsToMap(editor.detailsMeta(DQL));
   assert.equal(map["Query Timeout"], "300s (pipeline default)");
 });
 
 test("a node's own query_timeout_seconds wins over the pipeline's default (156, #2)", () => {
   editor.pipeline = { settings: { query_timeout_seconds: 300 } };
   const withOwn = { ...DQL, settings: { query_timeout_seconds: 45 } };
-  const map = Object.fromEntries(editor.detailsMeta(withOwn));
+  const map = rowsToMap(editor.detailsMeta(withOwn));
   assert.equal(map["Query Timeout"], "45s (this node)");
 });
 
@@ -220,8 +233,8 @@ test("PIPELINE and CALCULATOR nodes carry no Query Timeout row - neither runs a 
   editor.childExecutions = {};
   editor.contextValues = {};
   editor.nodeValues = {};
-  const pipelineMap = Object.fromEntries(editor.detailsMeta(CHILD));
-  const calcMap = Object.fromEntries(editor.detailsMeta(CALC));
+  const pipelineMap = rowsToMap(editor.detailsMeta(CHILD));
+  const calcMap = rowsToMap(editor.detailsMeta(CALC));
   assert.equal("Query Timeout" in pipelineMap, false);
   assert.equal("Query Timeout" in calcMap, false);
 });
@@ -240,10 +253,10 @@ test("Details: Depends on names each ordering with its state; Required by lists 
   editor.nodes = [PRODUCER, DDL, C1, C2];
   editor.nodesById = Object.fromEntries(editor.nodes.map((n) => [n.id, n]));
   editor.nodeStates = { stg_rides: "success", mk_index: "running", by_zone: "idle", by_hour: "idle" };
-  const producer = Object.fromEntries(editor.detailsMeta(PRODUCER));
+  const producer = rowsToMap(editor.detailsMeta(PRODUCER));
   assert.equal(producer["Depends on"], undefined, "a root waits for nothing — no empty row");
   assert.equal(producer["Required by"], "mk_index · by_zone · by_hour");
-  const c1 = Object.fromEntries(editor.detailsMeta(C1));
+  const c1 = rowsToMap(editor.detailsMeta(C1));
   assert.equal(c1["Depends on"], "stg_rides (done) · mk_index (running)", "the DDL ordering is an ordering like any other");
   assert.equal(c1["Required by"], undefined, "a leaf has no dependents — no empty row");
   for (const v of Object.values(c1)) assert.ok(!/\d+ rows/.test(String(v)) || v === c1.Output, "no transfer count on a link row");
