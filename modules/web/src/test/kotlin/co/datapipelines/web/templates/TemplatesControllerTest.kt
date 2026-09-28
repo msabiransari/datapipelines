@@ -679,4 +679,19 @@ class TemplatesControllerTest {
         val data = controller.import(body).data
         data["imported"] shouldBe 2
     }
+
+    @Test
+    fun `create and update read their body under the stated constraints - past the depth or not JSON is the named 400 (#291)`() {
+        // Pre-fix: a malformed body reached the 500 backstop (a raw JsonParseException), and a
+        // body nested past §13.21's depth parsed under Jackson's default of 1000.
+        authenticate()
+        val deep = "{\"id\":" + "[".repeat(100) + "]".repeat(100) + "}"
+        listOf(deep, "{\"id\": ").forEach { body ->
+            listOf<() -> Unit>({ controller.create(body) }, { controller.update("\"1\"", body) }).forEach { call ->
+                val refusal = shouldThrow<ApiException> { call() }
+                refusal.code shouldBe "template.validation.schema_version_unsupported"
+                refusal.details["reason"] shouldBe "malformed_json"
+            }
+        }
+    }
 }

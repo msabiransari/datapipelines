@@ -3,6 +3,7 @@ package co.datapipelines.web.templates
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.CitableFacts
 import co.datapipelines.templates.ImplementsIds
@@ -19,6 +20,7 @@ import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.TransformBlocks
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.api.RequestBodies
 import com.fasterxml.jackson.databind.node.ObjectNode
 import java.time.Instant
 import java.util.UUID
@@ -98,7 +100,7 @@ class TemplateImportService(
     @Suppress("ThrowsCount") // a boundary maps each distinct failure to its own catalogued 4xx
     private fun importEntries(body: String): List<Pair<TemplateDraft, Preserved?>> {
         val tree =
-            MAPPER.readTree(body) as? ObjectNode
+            RequestBodies.readTree(REQUEST_MAPPER, body, ApiErrors::malformedTemplateBody) as? ObjectNode
                 ?: throw ApiException(
                     PipelineErrorCodes.Template.SCHEMA_VERSION_UNSUPPORTED,
                     "The import request body must be a JSON object.",
@@ -291,6 +293,9 @@ class TemplateImportService(
 
     private companion object {
         val MAPPER = TemplateJson.objectMapper()
+
+        /** [MAPPER]'s request copy — what the import body is read with (#291). */
+        val REQUEST_MAPPER = RequestLimits.requestMapper(MAPPER)
 
         /** Reflected client input is bounded before it reaches an error message. */
         const val MAX_ECHOED_VALUE_CHARS = 64

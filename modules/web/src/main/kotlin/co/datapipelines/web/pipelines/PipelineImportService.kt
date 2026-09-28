@@ -13,11 +13,13 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineSerializer
 import co.datapipelines.pipeline.PipelineValidator
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.api.RequestBodies
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.springframework.dao.DuplicateKeyException
@@ -80,7 +82,9 @@ class PipelineImportService(
         workspaceId: UUID,
         actorId: UUID,
     ): Imported {
-        val tree = MAPPER.readTree(body) as? ObjectNode ?: throw ApiErrors.malformedPipelineBody(IllegalArgumentException("not an object"))
+        val tree =
+            RequestBodies.readTree(REQUEST_MAPPER, body, ApiErrors::malformedPipelineBody) as? ObjectNode
+                ?: throw ApiErrors.malformedPipelineBody(IllegalArgumentException("not an object"))
         val requestedId =
             tree.remove("id")?.takeIf { it.isTextual }?.let { raw ->
                 runCatching { UUID.fromString(raw.asText()) }.getOrNull()
@@ -449,6 +453,9 @@ class PipelineImportService(
         const val ORG_PREFIX = "org_"
 
         val MAPPER = PipelineJson.objectMapper()
+
+        /** [MAPPER]'s request copy — what the import body is read with (#291). */
+        val REQUEST_MAPPER = RequestLimits.requestMapper(MAPPER)
 
         /**
          * Server-assigned fields an import payload may carry from an export; never

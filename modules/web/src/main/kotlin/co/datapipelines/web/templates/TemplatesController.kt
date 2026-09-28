@@ -5,6 +5,7 @@ import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.CreateLifecycle
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.templates.Template
@@ -28,6 +29,7 @@ import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
+import co.datapipelines.web.api.RequestBodies
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.writeSurface
 import co.datapipelines.web.pipelines.IfMatchHeader
@@ -110,7 +112,7 @@ class TemplatesController(
         authoring.requireTemplateAuthoring()
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val draft = validator.validateOrThrow(deserializer.readOrThrow(body), workspaceId)
+        val draft = validator.validateOrThrow(bindOrThrow(readBody(body)), workspaceId)
         // D55: authoring lands version 1 DRAFT (`status: "DRAFT"` in the response); a human
         // releases it. The RELEASED create belongs to the import path alone. 7e: the draft
         // service lands the stated `implements` on that version (the MCP twin's one path).
@@ -281,7 +283,7 @@ class TemplatesController(
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val tree = MAPPER.readTree(body)
+        val tree = readBody(body)
         if (tree is ObjectNode) inheritFromWorking(tree, workspaceId)
         val draft = validator.validateOrThrow(bindOrThrow(tree), workspaceId)
         val id =
@@ -732,19 +734,15 @@ class TemplatesController(
         )
     }
 
+    /**
+     * Every `String` body this controller takes, read under §13.21's stated constraints (#291):
+     * not JSON, or nested past the bound, is the family's catalogued malformed-body 400.
+     */
+    private fun readBody(body: String): JsonNode = RequestBodies.readTree(REQUEST_MAPPER, body, ApiErrors::malformedTemplateBody)
+
     /** The request body as a JSON object, or the catalogued malformed-body refusal. */
     private fun objectOf(body: String): ObjectNode {
-        val tree =
-            try {
-                MAPPER.readTree(body)
-            } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
-                throw ApiException(
-                    PipelineErrorCodes.Template.SCHEMA_VERSION_UNSUPPORTED,
-                    "The request body must be a JSON object.",
-                    mapOf(ApiErrors.REASON to ApiErrors.MALFORMED_JSON),
-                    e,
-                )
-            }
+        val tree = readBody(body)
         return tree as? ObjectNode
             ?: throw ApiException(
                 PipelineErrorCodes.Template.SCHEMA_VERSION_UNSUPPORTED,
@@ -824,6 +822,9 @@ class TemplatesController(
 
     private companion object {
         val MAPPER = TemplateJson.objectMapper()
+
+        /** [MAPPER]'s request copy — the only mapper a request body is parsed with here (#291). */
+        val REQUEST_MAPPER = RequestLimits.requestMapper(MAPPER)
 
         const val MAX_ECHOED_VALUE_CHARS = 32
     }

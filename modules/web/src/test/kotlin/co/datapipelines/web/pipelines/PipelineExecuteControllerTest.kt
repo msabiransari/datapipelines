@@ -178,4 +178,41 @@ class PipelineExecuteControllerTest {
             .code shouldBe "pipeline.execution.invalid_parameter_type"
         verify(exactly = 0) { launcher.launch(any()) }
     }
+
+    @Test
+    fun `a number the plain-decimal echo cannot write is the caller's 400 naming the parameter (#291)`() {
+        // Pre-fix: WRITE_BIGDECIMAL_AS_PLAIN refused scale -10000 with a JsonGenerationException
+        // that no handler catches — a 500 for the caller's own value.
+        authenticate()
+        every { pipelines.findById(any(), pipelineId) } returns record
+        val refusal =
+            shouldThrow<ApiException> {
+                controller.execute(pipelineId, """{"parameters":{"ok":1.5,"start":1e10000}}""", request())
+            }
+        refusal.code shouldBe "pipeline.execution.invalid_parameter_type"
+        refusal.details["parameter"] shouldBe "start"
+        refusal.details["reason"] shouldBe "too_many_digits"
+        verify(exactly = 0) { launcher.launch(any()) }
+    }
+
+    @Test
+    fun `a body past the stated nesting depth, or not JSON at all, is the route's named 400 (#291)`() {
+        authenticate()
+        every { pipelines.findById(any(), pipelineId) } returns record
+        val deep = "{\"parameters\":{\"x\":" + "[".repeat(99) + "]".repeat(99) + "}}"
+        listOf(deep, "{\"parameters\": ").forEach { body ->
+            val refusal = shouldThrow<ApiException> { controller.execute(pipelineId, body, request()) }
+            refusal.code shouldBe "pipeline.execution.invalid_parameter_type"
+            refusal.details["reason"] shouldBe "malformed_json"
+        }
+        verify(exactly = 0) { launcher.launch(any()) }
+    }
+
+    @Test
+    fun `the body is read before the pipeline is looked up - a malformed one costs no query (#291)`() {
+        authenticate()
+        shouldThrow<ApiException> { controller.execute(UUID.randomUUID(), "{", request()) }
+            .details["reason"] shouldBe "malformed_json"
+        verify(exactly = 0) { pipelines.findById(any(), any()) }
+    }
 }
