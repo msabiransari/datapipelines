@@ -1,9 +1,9 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.14 — #9: a schedule is a pointer-following dependent (§3.4)
+**Status:** v1.15 — #276: the draft race maps the version primary key as well as the one-draft index (§3.3)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-28
 
 ---
 
@@ -149,9 +149,15 @@ CREATE UNIQUE INDEX uq_pipeline_versions_one_draft
 ```
 
 This is what makes the write rule race-safe: two simultaneous first-writers both see
-"released", both attempt the draft insert — one wins; the loser's insert violates the index
-and surfaces as `pipeline.version.conflict` pointing at the new draft's hash (§4). The loser
-must re-read and rebase.
+"released", both attempt the draft insert — one wins; the loser's insert violates a unique
+constraint and surfaces as `pipeline.version.conflict` pointing at the new draft's hash (§4).
+The loser must re-read and rebase. **Which constraint** (#276): both writers allocate the same
+`max + 1` below from the same committed rows, so the loser normally collides on the version
+table's PRIMARY KEY (`(pipeline_id, version)` / `(template_id, version)`) before it reaches the
+one-draft index — Postgres checks unique indexes in creation order, and the key is the older.
+Every repository that writes a draft (pipelines, templates, parameter sets) maps BOTH to its
+`…version.conflict`; mapping the index alone answers the race with a raw driver error
+(measured for templates by a forced race: `TemplateRepositoryIntegrationTest`).
 
 **Number allocation.** A draft **pre-allocates** `max(existing version) + 1` — never
 `current_version + 1`, because the pointer can be NULL (D55) and a DISCARDED row keeps its
@@ -1331,6 +1337,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.15 | 286 (#276) | §3.3 names the constraint the race loser actually hits: both first writers allocate the same `max + 1`, so the loser collides on the version PRIMARY KEY before the one-draft index. `TemplateRepository.mappingDraftRace` mapped only the index and answered a first-draft race with a raw `DuplicateKeyException` (measured by a forced race — the winner's row held uncommitted until Postgres reported the contender blocked); it now maps both, as `PipelineRepository` and `ParameterSetRepository` do. No lifecycle rule changed. |
 | 2026-09-25 | v1.14 | scheduler lane 1 (#9) | §3.4: the schedule dependent is #9's (was "092"), follows the pointer wherever it points, drafts included (R5); a NULL pointer makes a schedule record a `not_started` / `pointer_null` run and **block** — "records a refused run" was the draft's wording (scheduler design revision A16). |
 | 2026-09-21 | v1.13 | 178 (#178) | §10.2's rule is now also the **promoter lens** ([Auth §11A.1](auth.md#11a1-the-404-rule)): computed once per request (`PromotableView`) for pipelines AND templates — the template arm stated for the first time — and read by the promotion page and by every promoter read alike; the push path's root guard decides "not newer" from the same object (a same-hash root at a higher number is refused `promotion.not_newer` with "same content", where the page already hid it). The 2026-09-20 verb ownership corrected in the lifecycle-verbs block: release and switch are the author's (D8), promote the promoter's. |
 | 2026-09-19 | v1.12 | 172 (#172) | The serving table's published-endpoint row follows the re-rooted URL shape (R-EP5, `/api/<category>/<version>/<path…>`); the rule — the endpoint serves whatever the pointer names — is unchanged. |
