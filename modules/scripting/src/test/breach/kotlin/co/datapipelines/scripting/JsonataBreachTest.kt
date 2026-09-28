@@ -39,9 +39,25 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * The table published in dag-executor.md is pasted from this suite's report — the
  * measurement is the authority; the doc never hand-writes it.
+ *
+ * **Its own task, its own JVM (#289).** The suite runs alone in `:modules:scripting:breachSuite`
+ * (its own source set, a 512m test JVM of its own, wired under `check`), never inside the
+ * module's `test`. On CI run 36365034218 (2026-09-28, a 2-vCPU runner) an `OutOfMemoryError`
+ * reached the test thread outside the old guard — at the evidence string of the OOM branch
+ * itself — JUnit rethrew it (the one error it treats as unrecoverable), the Gradle test worker
+ * died, and the module's 62 other tests lost their verdict with it. Two rules keep a heap event
+ * a ROW rather than a dead worker:
+ *
+ *  - everything after the bomb — the classification, the evidence strings, the heap delta, the
+ *    row — runs inside one `OutOfMemoryError` guard ([measure]); an OOM that reaches the test
+ *    thread there is recorded UNBOUNDED once the heap has drained, and nothing is allocated
+ *    before it has;
+ *  - every case starts from a `System.gc()` and a headroom check: a case that starts with more
+ *    than [MAX_HELD_AT_START_MB] of the heap still held is recorded SKIPPED with the numbers and
+ *    fails the prediction check by name — an environment verdict, never a silent pass.
  */
 class JsonataBreachTest {
-    private enum class Outcome { REFUSED, BOUNDED, UNBOUNDED }
+    private enum class Outcome { REFUSED, BOUNDED, UNBOUNDED, SKIPPED }
 
     private data class Row(
         val case: String,
@@ -111,6 +127,13 @@ class JsonataBreachTest {
 
     @Test
     fun `every bomb's measured outcome matches the prediction, and the report lands`() {
+        // The corpus is calibrated for a 512m JVM: a larger heap lets the big cases complete,
+        // a smaller one blows the small ones — either way the table would lie. Refuse to measure.
+        val maxHeapMb = Runtime.getRuntime().maxMemory() / MB
+        withClue("the breach suite runs in breachSuite's own ${HEAP_MB}m JVM; this JVM's max heap is $maxHeapMb MB") {
+            (maxHeapMb in HEAP_FLOOR_MB..HEAP_MB) shouldBe true
+        }
+
         val rows = cases.map { measure(it) }
         val report = writeReport(rows)
 
@@ -141,13 +164,56 @@ class JsonataBreachTest {
      * already detached and the abandoned thread dies of it inside the grace), the
      * outcome is the same heap event and reads UNBOUNDED. Liveness at the grace alone
      * cannot tell "ended because the heap blew" from "ended because it finished".
+     *
+     * The heap blowout on the TEST thread (#289) is the guard around all of it: whatever the
+     * classification or the bookkeeping allocates after the bomb — the evidence strings, the
+     * heap delta, the row — an `OutOfMemoryError` there is the case's heap event, recorded
+     * UNBOUNDED after [awaitHeadroom]. No case starts with more than [MAX_HELD_AT_START_MB] held.
      */
     private fun measure(case: Case): Row {
+        val heapBefore = usedHeapMb()
+        val headroom = Runtime.getRuntime().maxMemory() / MB - heapBefore
+        // The start state, in the XML's system-out: a surprising row on a runner is read against it.
+        println("breach case ${case.name}: starts with $headroom MB free after gc ($heapBefore MB in use)")
+        if (heapBefore > MAX_HELD_AT_START_MB) {
+            return Row(
+                case.name,
+                Outcome.SKIPPED,
+                "no headroom: $heapBefore MB still held after gc at the case's start (at most $MAX_HELD_AT_START_MB; " +
+                    "$headroom MB free) - not measured (an environment verdict; re-run before reading it as a bound)",
+                0,
+                0,
+            )
+        }
+        val start = System.nanoTime()
+        return try {
+            classify(case, heapBefore, start)
+        } catch (
+            @Suppress("SwallowedException") err: OutOfMemoryError,
+        ) {
+            // The heap blew on THIS thread after the bomb: the heap event is the outcome. Nothing
+            // is allocated until the heap has drained (the old measure died at exactly this point,
+            // building its evidence string); the row's numbers are read after it has.
+            awaitHeadroom()
+            Row(
+                case.name,
+                Outcome.UNBOUNDED,
+                TEST_THREAD_BLOWOUT,
+                (System.nanoTime() - start) / NANOS_PER_SECOND,
+                usedHeapMb() - heapBefore,
+            )
+        }
+    }
+
+    /** The bomb and everything after it — [measure]'s guarded body. */
+    private fun classify(
+        case: Case,
+        heapBefore: Long,
+        start: Long,
+    ): Row {
         val pool = ScriptEvaluationPool(1, 1, GRACE, ScriptEvaluationPool.SYSTEM)
         val script = engine.compile(case.body)
         val limits = EvaluationLimits(Duration.ofSeconds(2), 100)
-        val heapBefore = usedHeapMb()
-        val start = System.nanoTime()
         var evidence: String
         var outcome: Outcome
         var result: Any? = null
@@ -198,7 +264,7 @@ class JsonataBreachTest {
             evidence = "${err.javaClass.simpleName}(${err.code}): ${err.message?.take(60)}"
         }
 
-        val seconds = (System.nanoTime() - start) / 1_000_000_000
+        val seconds = (System.nanoTime() - start) / NANOS_PER_SECOND
         val heapDelta = usedHeapMb() - heapBefore
         result = null
         return Row(case.name, outcome, evidence, seconds, heapDelta)
@@ -228,7 +294,24 @@ class JsonataBreachTest {
         System.gc()
         Thread.sleep(50)
         System.gc()
-        return (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
+        return (runtime.totalMemory() - runtime.freeMemory()) / MB
+    }
+
+    /**
+     * Waits until no more than [MAX_HELD_AT_START_MB] is held again — at most [DRAIN_NANOS], since
+     * a runaway thread may still hold the heap — WITHOUT allocating: it runs right after an
+     * `OutOfMemoryError` on this thread, where one more allocation is one more OOM. Only natives
+     * and arithmetic here.
+     */
+    @Suppress("ExplicitGarbageCollectionCall") // draining the heap is the point; gc is the only lever
+    private fun awaitHeadroom() {
+        val runtime = Runtime.getRuntime()
+        val deadline = System.nanoTime() + DRAIN_NANOS
+        while (System.nanoTime() < deadline) {
+            System.gc()
+            if (runtime.totalMemory() - runtime.freeMemory() <= MAX_HELD_AT_START_MB * MB) return
+            Thread.sleep(DRAIN_POLL_MS)
+        }
     }
 
     /** The repo root is the nearest ancestor holding `settings.gradle.kts` (the house locator). */
@@ -243,5 +326,31 @@ class JsonataBreachTest {
     private companion object {
         /** A.6's grace for the 1/1 pool: 5 seconds. */
         val GRACE: Duration = Duration.ofSeconds(5)
+
+        const val MB = 1024L * 1024L
+
+        /** The heap the corpus is calibrated for — breachSuite's `maxHeapSize` (the module's build file). */
+        const val HEAP_MB = 512L
+
+        /** `-Xmx512m` reads as 512 MB on G1 and a survivor space less on the serial/parallel collectors. */
+        const val HEAP_FLOOR_MB = HEAP_MB * 7 / 8
+
+        /**
+         * The most a case may start with still held (after gc) and be measured. The corpus is
+         * calibrated on a JVM that starts every case with nearly all of its 512m free: measured
+         * 2026-09-28, 8–9 MB in use at every case's start (503–504 MB free). Past this a bomb's
+         * outcome says more about what an earlier case left behind than about the bomb. Relative
+         * to the JVM's own max, so a collector that reports a smaller `maxMemory` cannot trip it.
+         */
+        const val MAX_HELD_AT_START_MB = 128L
+
+        /** How long [awaitHeadroom] waits for a blown heap to drain before the row is written anyway (30 s). */
+        const val DRAIN_NANOS = 30_000_000_000L
+        const val DRAIN_POLL_MS = 100L
+        const val NANOS_PER_SECOND = 1_000_000_000L
+
+        /** A constant, so recording the test thread's blowout allocates no evidence string. */
+        const val TEST_THREAD_BLOWOUT =
+            "OutOfMemoryError on the test thread after the bomb (classification or bookkeeping); recorded once the heap drained"
     }
 }

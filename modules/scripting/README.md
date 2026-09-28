@@ -68,16 +68,17 @@ the pool's abandonment log.
 ./gradlew --write-verification-metadata sha256 --write-locks resolveAndLockAll
 
 # The breach suite: measures every bomb under one budget and writes the report whose
-# table dag-executor.md §5.3 publishes. The test JVM runs at 512m on purpose (the build
-# file) so the heap cases are honest:
-./gradlew :modules:scripting:test && cat modules/scripting/build/reports/jsonata-breach.md
+# table dag-executor.md §5.3 publishes. It runs ALONE in its own task and its own 512m
+# test JVM (#289 — the build file; `check`, so every `build` runs it too) so the heap
+# cases are honest and a heap event can never take the module's other tests with it:
+./gradlew :modules:scripting:breachSuite && cat modules/scripting/build/reports/jsonata-breach.md
 ```
 
 ## Tests
 
 `ScriptEngineConformanceTest` (parameterised over every engine — the JS round adds an
-instance, not cases), `JsonataBreachTest` (the measured corpus; a prediction mismatch
-fails the build), `JsonataEngineParallelDeterminismTest` (32 threads × 1000 evaluations
+instance, not cases), `JsonataBreachTest` (the measured corpus, in `src/test/breach` and the
+`breachSuite` task; a prediction mismatch fails the build), `JsonataEngineParallelDeterminismTest` (32 threads × 1000 evaluations
 against pre-computed single-threaded results), `JsonataEngineBoundsTest`,
 `JsonataEngineEvaluateTest`, `JsonataEngineCompileTest`, `JsonataEngineNoHostAccessTest`,
 `ScriptEvaluationPoolTest`, `TypeGateTest` (the §5.3 table, 42 cases), `CanonicalJsonTest`,
