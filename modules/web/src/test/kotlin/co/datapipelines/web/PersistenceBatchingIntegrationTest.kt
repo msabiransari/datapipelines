@@ -289,6 +289,10 @@ class PersistenceBatchingIntegrationTest {
                 release()
             }
             withClue("2 × record-max-wait-ms ($SHORT_WAIT_MS) plus slack, measured $tookMs ms") { tookMs shouldBeLessThan BOUND_MS }
+            // …and it DID wait for its row: an emit acknowledged from memory would return at once.
+            withClue("the emit waited for the store it could not reach — the #266 ruling, measured $tookMs ms") {
+                (tookMs >= SHORT_WAIT_MS) shouldBe true
+            }
             awaitCondition { rig.events.findByExecution(id).any { it.eventType == "execution_aborted" } }
             rig.eventLog.replay(id)!!.any { it.eventName == "execution_aborted" } shouldBe true
             rig.events.findByExecution(id).map { it.eventId } shouldBe listOf(1, 2)
