@@ -38,7 +38,7 @@ import java.util.UUID
  * sample ([TypeSamples], the pipelines' one table). Execute-time values (`execution_id`) are absent.
  */
 internal class SelectorDryRun(
-    private val probe: SelectorProbe?,
+    private val probe: SelectorProbe,
     private val inputValidator: ParameterValueValidator,
     private val org: OrgContext,
 ) {
@@ -73,17 +73,6 @@ internal class SelectorDryRun(
         val source = checkNotNull(parameter.source)
         val ref = checkNotNull(source.template)
         val datasource = checkNotNull(source.datasource)
-        val probe =
-            this.probe ?: run {
-                failures.add(
-                    ParameterErrorCodes.SELECTOR_PROBE_UNAVAILABLE,
-                    "$at.template",
-                    "A template-backed source is proven by a dry run this build cannot perform yet (#194 lane C); " +
-                        "use constants, or save once the selector runtime ships.",
-                    mapOf("parameter" to parameter.name.safeEcho()),
-                )
-                return staticDefault(parameter)
-            }
         val (context, binds) = contextFor(parameter, resolved, graph)
         val sql =
             when (val render = probe.render(workspaceId, ref, context)) {

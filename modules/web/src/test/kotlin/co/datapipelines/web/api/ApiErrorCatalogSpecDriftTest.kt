@@ -270,8 +270,13 @@ class ApiErrorCatalogSpecDriftTest {
          * evaluate codes). Re-derived from the document's own parse on the lane's base 2e32943e; a lane
          * merging beside it re-derives again. 304 → 305 in the same lane: the owner's third ruling
          * (2026-09-27) adds `parameter.validation.input_source_multiple_rows` (400, the family default).
+         *
+         * 305 → 304 with #194 lane C: §13.20 loses `parameter.validation.selector_probe_unavailable` —
+         * the one code lane B documented as temporary — in the SAME commit as its constant, its mirror
+         * and the selector runtime that made the probe required. Re-derived from the document's own
+         * parse on the lane's base 3790e778 (305 there); a lane merging beside it re-derives again.
          */
-        const val SECTION_13_ROW_COUNT = 305
+        const val SECTION_13_ROW_COUNT = 304
 
         /**
          * §12's distinct validation codes.

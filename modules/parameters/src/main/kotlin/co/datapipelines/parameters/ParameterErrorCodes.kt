@@ -197,12 +197,6 @@ object ParameterErrorCodes {
     /** A `SELECT`'s rendered SQL carries no `ORDER BY` (P7). */
     const val SELECTOR_ORDER_BY_MISSING = "parameter.validation.selector_order_by_missing"
 
-    /**
-     * A template-backed source needs the save-time probe and this build wires none — the selector
-     * runtime arrives with #194 lane C, and this code goes with it (pipeline-contract §13.20).
-     */
-    const val SELECTOR_PROBE_UNAVAILABLE = "parameter.validation.selector_probe_unavailable"
-
     // ---- evaluate (record §5; the runtime is lane C's) ----------------------------------------------
 
     /** 400 — a `selections` key names no parameter of the set; the whole request is refused. */
