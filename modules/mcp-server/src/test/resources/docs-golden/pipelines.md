@@ -32,9 +32,10 @@ an agent made here.
 3. **Render before you create.** `templates_render` with representative values — save-time
    validation is parse-only, so this is your check that the SQL is what you meant. Mandatory
    for every template the pipeline pins, **including one you create after the pipeline exists:
-   the run is not its render**. For tempdb sources read `validation_status` — `incomplete`
-   means H2 stopped at a missing staged table and checked nothing after it
-   (`pipelines-engine-quirks`).
+   the run is not its render**. A render shows the SQL, not that H2 accepts it: for a tempdb
+   template, `sql_probe {"name": "tempdb"}` the rendered statement and read its
+   `validation_status` — `incomplete` means H2 stopped at a missing staged table and checked
+   nothing after it (`pipelines-engine-quirks`).
 4. **Create the pipeline.** `pipelines_create` with declared parameters, node references,
    `depends_on` wiring and `output` blocks; save-time validation dry-renders every template.
    Every node carries a one-sentence description: what it ships and at what grain. **The
