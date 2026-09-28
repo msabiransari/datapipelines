@@ -283,8 +283,12 @@ class ApiErrorCatalogSpecDriftTest {
          *
          * 304 + 1 = 305 at the 280 merge (2026-09-27): the two lanes moved the count in opposite
          * directions on the same base; re-derived from the merged document's own parse.
+         *
+         * 305 → 306 with #279: the new §13.21 (Request limits) gains `request.body_too_large` (413),
+         * landed in the SAME commit as its `PipelineErrorCodes.Request` constant, its catalog row and
+         * the `AuthErrors` anchor. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 305
+        const val SECTION_13_ROW_COUNT = 306
 
         /**
          * §12's distinct validation codes.

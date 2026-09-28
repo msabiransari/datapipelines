@@ -1,6 +1,11 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.pipeline.RequestLimits
+import com.fasterxml.jackson.core.JsonFactory
+import com.fasterxml.jackson.core.StreamReadConstraints
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
+import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper
 import io.modelcontextprotocol.server.McpServer
 import io.modelcontextprotocol.server.McpStatelessServerFeatures
 import io.modelcontextprotocol.server.McpStatelessServerHandler
@@ -87,13 +92,34 @@ object McpServerFactory {
     /**
      * Builds the transport servlet. Register it at [ENDPOINT]; [McpAuthFilter] must run in front
      * of it.
+     *
+     * The transport is handed an explicit Jackson mapper built over the stated request
+     * constraints (pipeline-contract §13.21, #279) rather than the ServiceLoader default's bare
+     * `ObjectMapper`: the transport is where an inbound JSON-RPC body is parsed, so the
+     * `StreamReadConstraints` that bound a hostile-but-within-the-cap body on REST bind the MCP
+     * surface too. The constraints' numbers come from `pipeline-contract`'s [RequestLimits] —
+     * the one constants home `web`'s REST mapper also reads — so the two surfaces cannot drift.
      */
     fun transport(): HttpServletStatelessServerTransport =
         HttpServletStatelessServerTransport
             .builder()
             .messageEndpoint(ENDPOINT)
+            .jsonMapper(JacksonMcpJsonMapper(ObjectMapper(constrainedJsonFactory())))
             .contextExtractor { request: HttpServletRequest -> transportContext(request) }
             .build()
+
+    /** The `JsonFactory` carrying §13.21's stated constraints (the same numbers `web` builds with). */
+    private fun constrainedJsonFactory(): JsonFactory =
+        JsonFactory
+            .builder()
+            .streamReadConstraints(
+                StreamReadConstraints
+                    .builder()
+                    .maxNestingDepth(RequestLimits.MAX_NESTING_DEPTH)
+                    .maxStringLength(RequestLimits.MAX_STRING_LENGTH)
+                    .maxNumberLength(RequestLimits.MAX_NUMBER_LENGTH)
+                    .build(),
+            ).build()
 
     /**
      * Builds the server over [transport] and installs the resource handler.

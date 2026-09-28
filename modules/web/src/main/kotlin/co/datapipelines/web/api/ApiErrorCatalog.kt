@@ -112,6 +112,10 @@ object ApiErrorCatalog {
             "parameter.release." to HttpStatus.CONFLICT,
             "parameter.import." to HttpStatus.BAD_REQUEST,
             "parameter.authoring." to HttpStatus.FORBIDDEN,
+            // #279 §13.21 — the request-body cap: one code, and it IS the 413 (the family has no
+            // other status to default away from), wired explicitly so the code owns a row rather
+            // than being absorbed by the catalog's unknown-code 500.
+            "request." to HttpStatus.PAYLOAD_TOO_LARGE,
         )
 
     /** Every code whose status differs from its family default (§13, rest-api §7.6). */
@@ -440,6 +444,9 @@ object ApiErrorCatalog {
             "parameter.import." to "This parameter set can't be imported here yet. The details say what is missing.",
             "parameter.authoring." to "Parameter sets can't be edited on this server. Edit them where authoring is enabled and promote.",
             "parameter." to "We couldn't find that parameter set.",
+            // #279 §13.21 — the body the caller sent is over the platform's cap; nothing about the
+            // server refused them, so the sentence points at the payload.
+            "request." to "That request is too large. Send less data and try again.",
         )
 
     private val USER_MESSAGE_OVERRIDES: Map<String, String> =

@@ -2,6 +2,7 @@ package co.datapipelines.web.config
 
 import co.datapipelines.executor.ErrorDetail
 import co.datapipelines.pipeline.OrgContext
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.typesystem.Dialect
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
@@ -45,6 +46,32 @@ data class RateLimitProperties(
     init {
         require(requestsPerSecond > 0) { "datapipelines.rate-limit.requests-per-second must be > 0" }
         require(requestsPerMinute > 0) { "datapipelines.rate-limit.requests-per-minute must be > 0" }
+    }
+}
+
+/**
+ * The `datapipelines.web.*` keys ([Configuration §3.31](../../../../../../../docs/configuration.md)) —
+ * the platform's request limits (#279, pipeline-contract §13.21).
+ *
+ * The default here MUST equal the default in configuration.md §3.31 — that document is the
+ * single authority, and a binding class that quietly disagrees with it is a second authority.
+ * Both spellings read the constant from `pipeline-contract`'s [RequestLimits], so they cannot
+ * drift from each other or from the MCP surface.
+ */
+@ConfigurationProperties(prefix = "datapipelines.web")
+data class RequestLimitsProperties(
+    /**
+     * `max-request-bytes` — the request-body cap the [co.datapipelines.web.requestlimits.RequestBodyCapFilter]
+     * enforces on both JSON surfaces (`/api/v1` and `/mcp`), refused with
+     * `413 request.body_too_large` before any parser reads the body.
+     */
+    val maxRequestBytes: Long = RequestLimits.DEFAULT_MAX_REQUEST_BYTES,
+) {
+    init {
+        require(maxRequestBytes in RequestLimits.MIN_REQUEST_BYTES..RequestLimits.MAX_REQUEST_BYTES) {
+            "datapipelines.web.max-request-bytes must be in " +
+                "${RequestLimits.MIN_REQUEST_BYTES}..${RequestLimits.MAX_REQUEST_BYTES}; got $maxRequestBytes"
+        }
     }
 }
 

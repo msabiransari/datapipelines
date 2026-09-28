@@ -149,6 +149,8 @@ class PipelineErrorCodesSpecDriftTest {
                 "parameter.validation.",
                 "parameter.evaluate.",
                 "parameter.version.",
+                // #279 — the request limits (§13.21).
+                "request.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")
@@ -168,6 +170,8 @@ class PipelineErrorCodesSpecDriftTest {
                 // 123 — the introspector's table-level not-found/forbidden, same two-segment shape.
                 PipelineErrorCodes.Datasource.TABLE_NOT_FOUND,
                 PipelineErrorCodes.Datasource.TABLE_FORBIDDEN,
+                // #279 §13.21 — the body itself is the refused thing; no entity dimension.
+                PipelineErrorCodes.Request.BODY_TOO_LARGE,
                 // 112 — the ROLE axis has no entity dimension: these are properties of the
                 // caller's membership, not of a thing they named (RBAC design §2).
                 PipelineErrorCodes.Auth.ROLE_REQUIRED,

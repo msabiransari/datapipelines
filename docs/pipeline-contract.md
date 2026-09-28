@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.37 (revised — see Change Log)
+**Status:** v1.38 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-27
+**Last updated:** 2026-09-28
 
 ---
 
@@ -1497,8 +1497,17 @@ The parameter engine's refusals (#194; the [parameter-engine design record](supe
 | `parameter.import.missing_template` | 400 | an import whose pinned template version is absent on the target — promotion order is templates before sets |
 | `parameter.authoring.disabled` | 403 | `datapipelines.deployment.authoring-enabled=false` refuses every authoring write ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)) |
 
----
 
+### 13.21 Request limits
+
+The platform's transport-level refusals (#279; [Configuration §3.31](configuration.md#331-web-request-limits)). A body over `datapipelines.web.max-request-bytes` is refused at a servlet filter on BOTH JSON surfaces — REST `/api/v1` and MCP `/mcp` — before authentication and before any parser reads a byte of it, so no handler, tool or permission is involved and the refusal carries no principal data (the envelope's `correlation_id` and this code only). The cap is a byte count on the REQUEST body; a response's budget is a different key (`parameter.evaluate.response_too_large` above). Jackson's `StreamReadConstraints` (nesting depth 100, string length 4M chars, number length 1000 digits) are stated explicitly on every request-body mapper rather than inherited, so a body WITHIN the cap that is adversarial for the parser is refused by the parser as a 400 (`details.reason: malformed_json`), not answered from an inherited default that could change under a version bump.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `request.body_too_large` | 413 | the request body exceeds `datapipelines.web.max-request-bytes` — refused before any handler; `details.limit_bytes` names the cap in effect |
+
+
+---
 ## 14. Pipeline Lifecycle Operations
 
 This section sketches the CRUD operations. Full HTTP details are in the [REST API spec](rest-api.md).
@@ -1737,6 +1746,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.38 | 279 (#279) the request-body cap | New **§13.21 Request limits**: `request.body_too_large` (413) — the one transport-level code, raised by the platform's body-cap filter on `/api/v1` and `/mcp` before authentication and before any parser. Jackson's `StreamReadConstraints` are stated explicitly on every request-body mapper (nesting 100, string 4M chars, number 1000 digits). Landed in the SAME commit as the `PipelineErrorCodes.Request` constant, the `ApiErrorCatalog` rows and the `AuthErrors` anchor row. |
 | 2026-09-27 | v1.37 | #280 the schedule form says what is wrong | **§13.19** gains `schedule.validation.target_not_released` (400, the `schedule.validation.` family default) — the payload names a pipeline with no current version to follow, release it or switch its current version then save again (`details.pipeline`). It was a `payload_invalid` / `details.reason=pointer_null` refusal before, one code shared with the shape and size refusals, so a static per-code user message could not say "release it"; `payload_invalid`'s description loses that clause and keeps the shape reasons. The save's `message` keeps its sentence; the run side's `pointer_null` reasons are untouched. Landed in the SAME commit as the constants in `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` and the executor that raises it. |
 | 2026-09-27 | v1.36 | 194c (#194) parameter engine lane C — the selector runtime | **§13.20** loses `parameter.validation.selector_probe_unavailable`, the one code lane B documented as temporary: the selector runtime (`SelectorRunner`) implements the save-time probe and `ParameterSetValidator` now REQUIRES it, so a template-backed source is always proven by a real dry run. The constant, its `PipelineErrorCodes.Parameters` mirror and this row leave in one commit; the §13 row count moves 305 → 304 on this lane's base. The evaluate rows say what the runtime taught: `selector_rows_invalid`'s further reasons (`value_too_long`, `label_too_long`, `columns`), a sourced `INPUT` row under `constraint_violation` / `selector_value_type_mismatch`, and the section's intro names the other families' codes a failed selector reports on its parameter. No code or status changed beyond the retirement. |
 | 2026-09-26 | v1.35 | 194b (#194) parameter engine lane B — the frozen model | New **§13.20 Parameter sets**: the `parameter.*` family, 81 codes, one row each — the record's §10 plus the owner's three rulings of 2026-09-26/27 (`parameter.validation.body_invalid` for the document's shape at every level, `parameter.validation.selector_query_failed` when the save-time probe's statement fails, `parameter.validation.input_source_multiple_rows` when a database-fed input's dry run returns two rows) and the lane's temporary `parameter.validation.selector_probe_unavailable` (gone with lane C). The evaluate's per-parameter codes are "—" (never a response status; reported in `state.errors[]` of a 200); `parameter.evaluate.timeout` is 504 (the house deadline mapping, §13.3 — the record's §14 item 1). Landed with `ParameterErrorCodes`, its mirror `PipelineErrorCodes.Parameters` and the `ApiErrorCatalog` rows. |

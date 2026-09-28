@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.34 (single source of truth for every config key)
+**Status:** v1.35 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-26
 
@@ -201,6 +201,7 @@ There is deliberately **no fail-open key**. When the limiter's Redis is unreacha
 |---|---|---|---|
 | `server.port` | `SERVER_PORT` | `8080` | HTTP port |
 | `spring.datasource.hikari.maximum-pool-size` | `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `10` | Metadata DB connection pool size |
+| `server.tomcat.max-swallow-size` | `SERVER_TOMCAT_MAX_SWALLOW_SIZE` | `2MB` | How much of a REFUSED request body Tomcat may drain before closing the connection (#279) — the counterpart of the request-body cap ([§3.31](#331-web-request-limits)); an abandoned over-cap upload costs the connection, never the server |
 
 ### 3.14 Framework wiring keys
 
@@ -518,6 +519,18 @@ The parameter engine's limits ([the design record](superpowers/specs/2026-09-21-
 
 No options cache in round one (`selector-cache-ttl-seconds` is deliberately absent — the record's §11: authority-aware keys and invalidation are its price, and it lands when a measured query count says it must).
 
+### 3.31 Web — request limits (#279)
+
+The platform-wide request-body cap (pipeline-contract §13.21, [REST API §4.2](rest-api.md#42-error-envelope)): a JSON request body over the cap is refused with `413 request.body_too_large` at a servlet filter on BOTH surfaces — `/api/v1` and `/mcp` — before authentication and before any parser reads the body, so no handler, tool or permission is involved. The filter refuses without buffering: a declared `Content-Length` over the cap is refused unread; a chunked body is counted through a wrapping stream that never pulls a byte past the cap. Jackson's `StreamReadConstraints` — nesting depth **100**, string length **4,000,000** characters, number length **1000** digits — are stated explicitly on the request mappers of both surfaces rather than inherited from the pinned Jackson 2.21.5's defaults (depth 1000, string 20,000,000, number 1000), so a within-cap body that is adversarial for the parser is refused by the parser as a 400.
+
+The bound below is enforced at boot (§7, `checkRequestLimits`) and again when the key binds (`RequestLimitsProperties`).
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.web.max-request-bytes` | `2097152` | The largest request body in bytes (2 MiB). Refused over-cap on `/api/v1` and `/mcp` with `413 request.body_too_large` (`details.limit_bytes`). 65536..67108864 |
+
+Tomcat's swallow budget is the cap's counterpart on the connection: `server.tomcat.max-swallow-size` (default `2MB`, [§3.13](#313-server)) bounds how much of a REFUSED body the container drains before closing it, so an abandoned over-cap upload costs the connection, never the server.
+
 ---
 
 ## 4. Precedence
@@ -566,6 +579,9 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  tomcat:
+    # §3.13 — the swallow budget beside the request-body cap (§3.31, #279)
+    max-swallow-size: ${SERVER_TOMCAT_MAX_SWALLOW_SIZE:2MB}
 
 management:                      # §3.14 — actuator on the management port ONLY
   server:
@@ -797,6 +813,9 @@ datapipelines:
     max-waiting-selector-queries: ${DATAPIPELINES_PARAMETERS_MAX_WAITING_SELECTOR_QUERIES:64}
     max-evaluate-response-bytes: ${DATAPIPELINES_PARAMETERS_MAX_EVALUATE_RESPONSE_BYTES:4194304}
 
+  web:                             # §3.31 — request limits (#279)
+    max-request-bytes: ${DATAPIPELINES_WEB_MAX_REQUEST_BYTES:2097152}
+
 # The scheduler's library reads its own prefix; every value comes from datapipelines.scheduler.*
 # above (§3.29). Framework wiring, not an operator surface.
 db-scheduler:
@@ -892,6 +911,7 @@ On startup, the app validates:
 - **Organisation (§3.21):** `datapipelines.org.fiscal-start-date` is `MM-DD` and a day the calendar has — `02-30` and `13-01` are refused, and a month name (`SEP-15`) is refused with a message naming the `MM-DD` form; `datapipelines.org.week-start` is `monday` or `sunday`; `datapipelines.org.timezone` is an IANA zone id (a fixed offset such as `+02:00` is not one); `datapipelines.org.currency.name` and `.symbol` are non-blank. All four report together — every value is in every Context, so a wrong one is a wrong number in every report the deployment produces.
 - **Transform (§3.28, 7b):** `datapipelines.transform.evaluate-timeout-seconds` ≤ `suite-timeout-seconds`; `abandon-grace-seconds` ≥ 1; `pool-size` ≥ 1 and `pool-queue` ≥ `pool-size`; `max-input-rows`, `max-value-bytes`, `max-string-bytes` and `max-depth` each ≥ 1 — every refusal naming the keys.
 - **Parameter engine (§3.30, #194):** every `datapipelines.parameters.*` key is an integer within its row's bounds, and `selector-query-timeout-seconds` ≤ `evaluate-timeout-seconds` — one statement must fit inside its evaluate; every refusal names the key.
+- **Request limits (§3.31, #279):** `datapipelines.web.max-request-bytes` is an integer within its row's bounds (65536..67108864) — the cap bounds every JSON request body on `/api/v1` and `/mcp`; a malformed or out-of-window value names the key and the window.
 - **Redis auth:** when `datapipelines.redis.password` is empty (after trimming) and `datapipelines.redis.host` is not loopback — under `development`, log a structured WARN `event=config.redis_no_password` (production Redis holds materialized caller results — [Deployment §9](deployment.md#9-security-hardening-checklist-deployment)); under the **`hardened` posture** it is a REFUSAL naming the key and the host, the same treatment Postgres's password gets as a §2 required key (#189). The refusal replaces the warning; a hardened boot never logs both.
 - `datapipelines.deployment.promotion.server-key` set ⇒ **WARN** (091): the value is deprecated in favour of a `server`-kind API key and is removed next release. Presence only — the warning never carries the secret.
 - `datapipelines.deployment.promotion.target.base-url` is not set without `datapipelines.deployment.promotion.target.server-key` (§3.19) — the violation names both keys. The target's pre-shared key is what authenticates the push, so a target without one would have every promotion refused at the far end, at the end of a UI action a human took. The reverse is not a violation: a `server-key` with no target is an ordinary receiver.
@@ -905,6 +925,8 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 ---
 
 ## Appendix A: Change Log
+
+| 2026-09-28 | v1.35 | 279 (#279) the request-body cap | New **§3.31 Web — request limits**: `datapipelines.web.max-request-bytes` (default 2 MiB, 65536..67108864), the platform-wide request-body cap refused `413 request.body_too_large` on `/api/v1` and `/mcp` before any handler or parser (pipeline-contract §13.21); §3.13 gains the `server.tomcat.max-swallow-size` row (default 2MB) that bounds draining a refused body; §5's template gains the `web:` block appended after the whole `datapipelines:` tree; §7 lists the rule (check 31). The stated Jackson `StreamReadConstraints` (nesting 100, string 4M chars, number 1000 digits) are recorded in §3.31's prose — they are constants of the request mappers, not operator keys. |
 
 | Date | Version | Author | Change |
 |---|---|---|---|
