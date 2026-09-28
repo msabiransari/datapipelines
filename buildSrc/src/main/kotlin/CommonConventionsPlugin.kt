@@ -415,6 +415,8 @@ class CommonConventionsPlugin : Plugin<Project> {
             ":modules:typesystem" to 96,
             // #194: measured baseline 100.0 on the module's first Kover run (DagTest moved with Dag.kt), minus 2.
             ":modules:graph" to 98,
+            // #266: measured baseline 97.27 on the module's first Kover run (30 tests), minus 2, floored.
+            ":modules:persistence" to 95,
             // 072: measured baseline 95.9 on the module's first Kover run, minus 2, floored.
             ":modules:calculators" to 93,
             // 7a: measured baseline 91.4 on the module's first Kover run, minus 2, floored.
