@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.web.CapturingSseEmitter
 import co.datapipelines.web.sse.ExecutionStream
 import co.datapipelines.web.sse.ExecutionStreamAuthority
+import co.datapipelines.web.sse.StreamVerdict
 import com.fasterxml.jackson.databind.json.JsonMapper
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -16,9 +17,10 @@ import java.util.UUID
 /**
  * #263 — the duration timer's `close_reason` closed set at the cut boundary: an expired token
  * is its own value beside `revoked` (the same policy cut — the run keeps running), and never a
- * `client_disconnect`. Reads the REAL registry's recorded tag, so a deleted `isExpired` ask in
- * the stream guard turns this red (the mock's `hasExpired` answer would never be consulted and
- * the flag would stay false — the assertion is the recorded tag, not the mock).
+ * `client_disconnect`. Reads the REAL registry's recorded tag, so a stream guard that stopped
+ * carrying the verdict's reason turns this red (#271: the reason is the ONE verdict's —
+ * `ExecutionStreamAuthority.verdict` — never a second ask; the assertion is the recorded tag,
+ * not the mock).
  */
 class WebMetricsTest {
     private val registry = SimpleMeterRegistry()
@@ -31,8 +33,7 @@ class WebMetricsTest {
     @Test
     fun `a cut whose subscriber's token has expired records close_reason expired`() {
         val judge = mockk<ExecutionStreamAuthority>()
-        every { judge.mayRead(any(), any()) } returns false
-        every { judge.hasExpired(any()) } returns true
+        every { judge.verdict(any(), any()) } returns StreamVerdict.EXPIRED
         val stream = ExecutionStream(executionId, userId, CapturingSseEmitter(), mapper, subscriber = subscriber, authority = judge)
 
         stream.heartbeat() shouldBe false
@@ -44,8 +45,7 @@ class WebMetricsTest {
     @Test
     fun `a cut whose subscriber's standing was revoked records close_reason revoked`() {
         val judge = mockk<ExecutionStreamAuthority>()
-        every { judge.mayRead(any(), any()) } returns false
-        every { judge.hasExpired(any()) } returns false
+        every { judge.verdict(any(), any()) } returns StreamVerdict.REVOKED
         val stream = ExecutionStream(executionId, userId, CapturingSseEmitter(), mapper, subscriber = subscriber, authority = judge)
 
         stream.heartbeat() shouldBe false
