@@ -1,9 +1,9 @@
 # MCP Server Specification
 
-**Status:** v1.54 (frozen contract — additive-only changes after this point)
+**Status:** v1.55 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
-**Last updated:** 2026-09-27
+**Last updated:** 2026-09-28
 
 ---
 
@@ -68,6 +68,8 @@ Headers:
 Exactly one credential carrier is required, and the two are equivalent: `DP-API-Key` (the REST convention, [REST API §3.6](rest-api.md#36-custom-header-registry)) or `Authorization: Bearer dpk_...` for MCP clients that can only set the standard Authorization header. Both route through the identical API-key validation path — see §4.1 and [Auth §8.5](auth.md#85-mcp-endpoint-mcp). Session JWTs (`dp_session` cookie, or a Bearer token that is not a `dpk_` key) are **not** accepted on `/mcp`.
 
 Server response: JSON for single-message exchanges, `text/event-stream` for streamed responses.
+
+**The request-body cap reaches `/mcp` first** (#279, pipeline-contract §13.21): the platform's cap filter is a servlet filter registered ahead of the transport servlet, so a body over `datapipelines.web.max-request-bytes` ([Configuration §3.31](configuration.md#331-web-request-limits)) is refused with the same `413 request.body_too_large` envelope REST answers — the MCP SDK reads the whole body before its dispatcher parses anything, so the filter is the surface's only cap. A declared `Content-Length` over the cap is refused unread; a chunked over-cap body is cut off mid-read by the counting stream (the SDK answers its own JSON-RPC error there — the body never parses, which is the cap's contract). The transport's JSON mapper carries the same stated Jackson `StreamReadConstraints` (nesting 100, string 4M chars, number 1000 digits) as the REST surface's, built from the same constants.
 
 ### 3.3 Session lifecycle
 
@@ -2252,6 +2254,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.55 | 279 (#279) the request-body cap | **§3 names the transport's cap**: the platform's filter (pipeline-contract §13.21, [Configuration §3.31](configuration.md#331-web-request-limits)) sits ahead of the transport servlet, refusing a body over `datapipelines.web.max-request-bytes` with the same `413 request.body_too_large` envelope REST answers; the transport's JSON mapper carries the stated Jackson `StreamReadConstraints`. No tool, no schema, no permission change. |
 | 2026-09-27 | v1.54 | 274 (#274) legacy endpoint rows, retired never fatal | **§6.2.24 `endpoints_list` answers legacy rows flagged** — after the valid rows, a stored path saved before the current grammar carries `"legacy": true`, its `"reason"` (the grammar's own refusal, bounded), `"enabled"` and `path`/`pipeline`/`url`; no `path_variables` (there is no parse). **§6.2.25 `endpoints_get`** answers a legacy path not-found (the single read is valid-shape only). **§6.2.26 `endpoints_delete` is the fix** — the descriptions state it; removing the row is the one verb a legacy row supports. No tool added or removed: **42 stays 42**, permissions unchanged (`endpoint.read`, `endpoint.unpublish` — the same rows for legacy rows as for valid ones). The manual's `endpoints` guide carries the one sentence. |
 | 2026-09-27 | v1.53 | 250 (#250, #9 R3) scheduled runs on every surface | **§6.2.13 `executions_list` reads `findVisible`** — own runs plus every `triggered_via = SCHEDULE` run of the workspace (rest-api §10.1's R3), the visibility decided in SQL before the page is cut; `executions_get` and `executions_get_result` answer for a scheduled run the same way (the shared `visibleTo` gains the schedule branch). Descriptions state it; **42 stays 42**, permissions unchanged (`execution.read`, the matrix row untouched). The manual's `executions` guide says the same. |
 | 2026-09-26 | v1.52 | 242b (#242) the narrative by area | **§15 rewritten (the source, the guards)** — the narrative split by functional area: `core.md` is the orientation document (product, retrieval, the universal rules stated once, the area index — 6,353 chars, inside the new 8,000-character bound, whole-document again); seven area guides (`pipelines`, `executions`, `templates`, `transforms`, `datasources`, `lake`, `endpoints` — concepts, workflow, prerequisites, common mistakes, their references with "open when"; O5's `executions` area got its guide); the playbook's judgment split into per-topic references (`pipelines-learning`, `pipelines-dag`, `pipelines-numbers`, `pipelines-verification`, `pipelines-engine-quirks`, `pipelines-do-dont`, `templates-calculators`, `transforms-contracts`, `transforms-evaluation`, `datasources-semantics`), all within the 24,000-character budget. `connecting`'s content became the datasources guide's workflow; `authoring-playbook` and `connecting` now answer with the `pipelines` and `datasources` guides (the record §4 alias contract; one release). New guards: no reserved area name in any served document; the core's 8,000-character pin. No tool surface change: **42 stays 42**, permissions unchanged. |

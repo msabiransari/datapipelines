@@ -79,6 +79,12 @@ server:
     # also closes the Host-header-poisoned absolute redirect. Pinned by the redirect
     # assertions in LocalLoginE2eTest / LocalAdminSeedE2eTest / MailNoticesE2eTest.
     use-relative-redirects: true
+    # #279 (configuration.md §3.13): how much of a REFUSED request body Tomcat may drain
+    # before closing the connection. The request-body cap (`datapipelines.web.max-request-bytes`,
+    # §3.31) refuses an over-cap body without reading the rest; this bounds the swallow that
+    # keeps a keep-alive connection usable when the remainder is small and closes it when it
+    # is not — an abandoned over-cap upload costs the connection, never the server.
+    max-swallow-size: ${SERVER_TOMCAT_MAX_SWALLOW_SIZE:2MB}
 
 # Actuator: the HealthEndpoint bean backs the root-level /health, /ready and /info
 # controllers (observability.md §6). NO /actuator path is reachable on the
@@ -527,6 +533,15 @@ datapipelines:
     max-concurrent-selector-queries: ${DATAPIPELINES_PARAMETERS_MAX_CONCURRENT_SELECTOR_QUERIES:4}
     max-waiting-selector-queries: ${DATAPIPELINES_PARAMETERS_MAX_WAITING_SELECTOR_QUERIES:64}
     max-evaluate-response-bytes: ${DATAPIPELINES_PARAMETERS_MAX_EVALUATE_RESPONSE_BYTES:4194304}
+
+  # Request limits (#279, pipeline-contract §13.21) — the platform-wide request-body cap.
+  # Appended after the whole datapipelines: tree on purpose: a block inserted between two
+  # existing ones reparents its followers silently (MISTAKES.md, the YAML entry).
+  # The filter refuses a body over this cap with 413 request.body_too_large on /api/v1 and
+  # /mcp, before any handler or parser; bounds and default are configuration.md §3.31, and
+  # the §7 validator checks them at startup.
+  web:
+    max-request-bytes: ${DATAPIPELINES_WEB_MAX_REQUEST_BYTES:2097152}
 
 # db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
 # (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a

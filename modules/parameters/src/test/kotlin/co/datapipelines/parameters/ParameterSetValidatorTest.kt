@@ -13,9 +13,12 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertTimeoutPreemptively
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -136,6 +139,22 @@ class ParameterSetValidatorTest {
             codes(param(type = "DECIMAL")) shouldBe listOf(ParameterErrorCodes.PRECISION_MISSING)
             codes(param(type = "BIGDECIMAL")) shouldBe listOf(ParameterErrorCodes.SCALE_MISSING)
             codes(param(extra = """, "cardinality": "MULTI" """)) shouldBe listOf(ParameterErrorCodes.CARDINALITY_INVALID)
+        }
+
+        @Test
+        fun `default_value - a textual BIGDECIMAL over the digit cap is refused unparsed (#278)`() {
+            // The 194b security pass F3, at the parameter set's own save step: the textual default
+            // reaches the shared validator's coercion, so the §6.3 digit cap answers here too —
+            // `too_many_digits` in the refusal message, before any parse can spend seconds.
+            val megabyte = "9".repeat(1_000_000)
+            assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+                failures(
+                    set(param(type = "BIGDECIMAL", extra = """, "scale": 2, "default_value": "$megabyte" """)),
+                ).single().let {
+                    it.code shouldBe ParameterErrorCodes.DEFAULT_TYPE_MISMATCH
+                    it.message shouldContain "too_many_digits"
+                }
+            }
         }
 
         @Test
@@ -332,6 +351,28 @@ class ParameterSetValidatorTest {
             ).single().let {
                 it.code shouldBe ParameterErrorCodes.REF_UNDECLARED
                 it.path shouldBe "parameters[1].disabled_expression.arg.ref"
+            }
+        }
+
+        @Test
+        fun `an expression literal over the digit cap is refused unparsed (#278)`() {
+            // The same inheritance through the OTHER coercion caller: ExpressionSemantics checks a
+            // literal against its ref's type through ParameterCoercion, so the §6.3 cap answers at
+            // save with `expression_literal_type` and the same `too_many_digits` token.
+            val megabyte = "9".repeat(1_000_000)
+            val withLiteral =
+                """, "depends_on": ["big"], "disabled_expression": """ +
+                    """{ "op": "eq", "left": { "ref": "big" }, "right": { "literal": "$megabyte" } } """
+            assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+                failures(
+                    set(
+                        param("big", type = "BIGDECIMAL", extra = """, "scale": 2 """),
+                        param("p", extra = withLiteral),
+                    ),
+                ).single().let {
+                    it.code shouldBe ParameterErrorCodes.EXPRESSION_LITERAL_TYPE
+                    it.message shouldContain "too_many_digits"
+                }
             }
         }
     }

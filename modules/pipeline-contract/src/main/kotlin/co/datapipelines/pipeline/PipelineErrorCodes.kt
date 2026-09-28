@@ -1000,6 +1000,21 @@ object PipelineErrorCodes {
         const val STORAGE_UNAVAILABLE = "result.storage_unavailable"
     }
 
+    /**
+     * §13.21 (#279) — request limits. Two-segment like `rate_limit.exceeded`: the domain has
+     * no entity dimension — the request body itself is the thing refused. Raised by `web`'s
+     * request-body cap filter, before any handler and before any parser.
+     */
+    object Request {
+        /**
+         * §13.21 — the request body is larger than `datapipelines.web.max-request-bytes`.
+         * HTTP 413, refused at the filter on both JSON surfaces (`/api/v1` and `/mcp`),
+         * before authentication reads a principal and before any parser reads the body.
+         * `details.limit_bytes` names the cap in effect.
+         */
+        const val BODY_TOO_LARGE = "request.body_too_large"
+    }
+
     /** §13.11 — rate limiting / idempotency. */
     object Limits {
         /** Single code for every layer — REST, MCP, login (D5). */

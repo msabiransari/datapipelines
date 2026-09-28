@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.42 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.43 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-27
@@ -131,6 +131,8 @@ Every 4xx and 5xx response uses this shape:
 - `user_message` — non-technical message safe to display to end users. May be localized in future.
 - `details` — structured, code-specific. Each error code documents its `details` shape.
 - `doc_url` — link to the public docs: the [Pipeline Contract §13 catalog](pipeline-contract.md#13-error-code-catalog) at the anchor of the section listing the code's family (there is no per-code page).
+
+One envelope answers **before any handler**: a request body over the platform cap ([Configuration §3.31](configuration.md#331-web-request-limits)) is refused at a servlet filter with `413 request.body_too_large` (`details.limit_bytes`) on `/api/v1` and `/mcp` alike — the one 413 this API answers, carried before authentication and before any parser reads the body (pipeline-contract §13.21).
 
 ### 4.3 Pagination envelope
 
@@ -2363,6 +2365,8 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 ---
 
 ## Appendix A: Change Log
+
+| 2026-09-28 | v2.43 | 279 (#279) the request-body cap | **§4.2 names the envelope's one pre-handler answer.** A request body over `datapipelines.web.max-request-bytes` ([Configuration §3.31](configuration.md#331-web-request-limits)) is refused at a servlet filter with `413 request.body_too_large` (`details.limit_bytes`) on `/api/v1` and `/mcp`, before authentication and before any parser reads the body — the new §13.21 (pipeline-contract v1.38). Jackson's `StreamReadConstraints` (nesting 100, string 4M chars, number 1000 digits) are stated on the request mappers of both surfaces rather than inherited; a within-cap body the parser refuses still answers the malformed-body 400. No route, permission or existing code changed. |
 
 | Date | Version | Author | Change |
 |---|---|---|---|

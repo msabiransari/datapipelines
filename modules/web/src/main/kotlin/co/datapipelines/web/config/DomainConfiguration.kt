@@ -66,6 +66,7 @@ import co.datapipelines.pipeline.DatasourceRegistry as ContractDatasourceRegistr
 @EnableConfigurationProperties(
     SseProperties::class,
     RateLimitProperties::class,
+    RequestLimitsProperties::class,
     ResultProperties::class,
     EndpointsProperties::class,
     ExecutorProperties::class,

@@ -132,6 +132,32 @@ class ApiExceptionHandler {
         )
     }
 
+    /**
+     * A `Transfer-Encoding: chunked` body refused by the platform's counting wrapper at the
+     * byte past `datapipelines.web.max-request-bytes` (#279, pipeline-contract §13.21). The
+     * marker is thrown by the request-cap filter's stream delegate, so no parser ever reads a
+     * byte beyond the cap; this handler gives it the same envelope the filter writes for a
+     * declared `Content-Length` over the cap — one code, one status, one `details` shape.
+     */
+    @ExceptionHandler(co.datapipelines.web.requestlimits.RequestBodyCapFilter.RequestBodyTooLargeException::class)
+    fun onBodyTooLarge(
+        error: co.datapipelines.web.requestlimits.RequestBodyCapFilter.RequestBodyTooLargeException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> {
+        log.debug("413 {} {}: request body over the cap", request.method, request.requestURI)
+        return ResponseEntity
+            .status(ApiErrorCatalog.statusFor(PipelineErrorCodes.Request.BODY_TOO_LARGE))
+            .contentType(JSON)
+            .body(
+                ApiErrorResponse.of(
+                    code = PipelineErrorCodes.Request.BODY_TOO_LARGE,
+                    message = "Request body exceeded the ${error.limitBytes}-byte cap; refused before any parser read it.",
+                    details = mapOf("limit_bytes" to error.limitBytes),
+                    userMessage = ApiErrorCatalog.userMessageFor(PipelineErrorCodes.Request.BODY_TOO_LARGE),
+                ),
+            )
+    }
+
     /** A query/path parameter that is missing or the wrong type (rest-api §4.3, §7.2). */
     @ExceptionHandler(MethodArgumentTypeMismatchException::class, MissingServletRequestParameterException::class)
     fun onBadParameter(

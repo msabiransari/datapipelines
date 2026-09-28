@@ -220,6 +220,10 @@ object AuthErrorCodes {
             // web catalogue rows but without this anchor, so doc_url fell to the catalog top —
             // AuthErrorSpecDriftTest caught it on the merge SHA.
             "parameter." to "1320-parameter-sets",
+            // #279 — the platform's request-limit refusals (§13.21). Without this row every
+            // `request.body_too_large` envelope's doc_url lands on the catalog top — the 194b
+            // lesson, refused in the same commit as the family.
+            "request." to "1321-request-limits",
         )
 }
 

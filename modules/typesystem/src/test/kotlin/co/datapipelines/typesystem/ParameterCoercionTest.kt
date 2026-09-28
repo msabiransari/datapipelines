@@ -4,10 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertTimeoutPreemptively
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -158,6 +161,52 @@ class ParameterCoercionTest {
 
         outcome.shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
         outcome.reason.contains("x".repeat(MAX_REFLECTED_VALUE_LENGTH + 1)) shouldBe false
+    }
+
+    @Test
+    fun `a megabyte of digits is refused unparsed, within the time bound (#278)`() {
+        // The 194b security pass F3: the parse of an n-digit string is O(n²) on JDK 21 — a
+        // megabyte of digits spent seconds of CPU BEFORE any check ran. The cap refuses on
+        // `text.length`, O(1), before BigInteger/BigDecimal see the text; the reason carries
+        // the `too_many_digits` token every surface reports.
+        val megabyte = "9".repeat(1_000_000)
+        listOf(LogicalType.BIGINTEGER, LogicalType.BIGDECIMAL).forEach { type ->
+            assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+                val outcome = ParameterCoercion.coerce(type, parseJson("\"$megabyte\""))
+                val rejected = outcome.shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
+                rejected.reason shouldStartWith "too_many_digits:"
+            }
+        }
+    }
+
+    @Test
+    fun `a value at the digit cap is accepted and one past it is refused`() {
+        val atCap = "9".repeat(ParameterCoercion.MAX_NUMERIC_DIGITS)
+        val pastCap = "9".repeat(ParameterCoercion.MAX_NUMERIC_DIGITS + 1)
+
+        // BIGDECIMAL at the cap coerces (nothing else binds it here); one digit more refuses.
+        coerced(LogicalType.BIGDECIMAL, "\"$atCap\"") shouldBe BigDecimal(atCap)
+        val rejected =
+            ParameterCoercion
+                .coerce(LogicalType.BIGDECIMAL, parseJson("\"$pastCap\""))
+                .shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
+        rejected.reason shouldStartWith "too_many_digits:"
+
+        // BIGINTEGER's own int64 bound still answers first for values the cap admits —
+        // 19 digits parse and are refused as out of range, exactly as before #278.
+        rejected(LogicalType.BIGINTEGER, "\"${"9".repeat(100)}\"")
+    }
+
+    @Test
+    fun `an injected limit overrides the default digit cap (the P34 shape)`() {
+        val past = "9".repeat(101)
+        val outcome =
+            ParameterCoercion.coerce(
+                LogicalType.BIGDECIMAL,
+                parseJson("\"$past\""),
+                maxNumericDigits = 100,
+            )
+        outcome.shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>().reason shouldStartWith "too_many_digits:"
     }
 
     /** Parsed with a default mapper — `pipeline-contract`'s `Fixtures.json` did the same before the move (#194). */

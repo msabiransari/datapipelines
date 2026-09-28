@@ -58,6 +58,7 @@ object ParameterCoercion {
     fun coerce(
         type: LogicalType,
         node: JsonNode,
+        maxNumericDigits: Int = MAX_NUMERIC_DIGITS,
     ): Outcome =
         when (type) {
             LogicalType.INTEGER -> integer(node)
@@ -66,9 +67,9 @@ object ParameterCoercion {
 
             LogicalType.BOOLEAN -> if (node.isBoolean) ok(node.booleanValue()) else wrongForm(type, node, "a JSON boolean")
 
-            LogicalType.BIGINTEGER -> bigInteger(node)
+            LogicalType.BIGINTEGER -> bigInteger(node, maxNumericDigits)
 
-            LogicalType.BIGDECIMAL -> bigDecimal(node)
+            LogicalType.BIGDECIMAL -> bigDecimal(node, maxNumericDigits)
 
             LogicalType.STRING -> if (node.isTextual) ok(node.asText()) else wrongForm(type, node, "a JSON string")
 
@@ -96,22 +97,52 @@ object ParameterCoercion {
     private fun decimal(node: JsonNode): Outcome =
         if (node.isNumber) ok(node.decimalValue()) else wrongForm(LogicalType.DECIMAL, node, "a JSON number")
 
-    private fun bigInteger(node: JsonNode): Outcome {
+    /**
+     * The two textual BIG paths (#278): on JDK 21 the parse of an n-digit string is O(n²) —
+     * schoolbook multiply-add per 9-digit group — so a megabyte of digits costs seconds of CPU
+     * from ONE authenticated value. The `text.length` check is O(1) and refuses BEFORE any
+     * parsing, as `too_many_digits` under the same `invalid_parameter_type` refusal; the number
+     * is stated in pipeline-contract §6.3. `ExpressionSemantics`, `DeclarationCompiler` and
+     * `ParameterBinder` reach the same paths, so a textual `default_value` and an expression
+     * literal inherit the cap wherever they coerce.
+     */
+    private fun bigInteger(
+        node: JsonNode,
+        maxNumericDigits: Int,
+    ): Outcome {
         if (!node.isTextual) return wrongForm(LogicalType.BIGINTEGER, node, "a JSON string")
-        val parsed = runCatching { BigInteger(node.asText()) }.getOrNull()
+        val text = node.asText()
+        if (text.length > maxNumericDigits) return tooManyDigits(LogicalType.BIGINTEGER, text.length, maxNumericDigits)
+        val parsed = runCatching { BigInteger(text) }.getOrNull()
         return when {
-            parsed == null -> Outcome.Rejected("BIGINTEGER value is not an integer: '${node.asText().truncateForError()}'")
+            parsed == null -> Outcome.Rejected("BIGINTEGER value is not an integer: '${text.truncateForError()}'")
             parsed.bitLength() >= Long.SIZE_BITS -> Outcome.Rejected("BIGINTEGER is int64; value is out of range")
             else -> ok(parsed)
         }
     }
 
-    private fun bigDecimal(node: JsonNode): Outcome {
+    private fun bigDecimal(
+        node: JsonNode,
+        maxNumericDigits: Int,
+    ): Outcome {
         if (!node.isTextual) return wrongForm(LogicalType.BIGDECIMAL, node, "a JSON string")
-        val parsed = runCatching { BigDecimal(node.asText()) }.getOrNull()
+        val text = node.asText()
+        if (text.length > maxNumericDigits) return tooManyDigits(LogicalType.BIGDECIMAL, text.length, maxNumericDigits)
+        val parsed = runCatching { BigDecimal(text) }.getOrNull()
         return parsed?.let(::ok)
-            ?: Outcome.Rejected("BIGDECIMAL value is not a number: '${node.asText().truncateForError()}'")
+            ?: Outcome.Rejected("BIGDECIMAL value is not a number: '${text.truncateForError()}'")
     }
+
+    /** The `too_many_digits` refusal — the token leads so every surface's details carry it greppable. */
+    private fun tooManyDigits(
+        type: LogicalType,
+        digits: Int,
+        cap: Int,
+    ): Outcome =
+        Outcome.Rejected(
+            "too_many_digits: $type text is $digits digits long; at most $cap are accepted before parsing " +
+                "(pipeline-contract §6.3)",
+        )
 
     /**
      * §6.3 — `BINARY` takes **padded** standard base64 (RFC 4648 §4, length ≡ 0 mod 4).
@@ -179,6 +210,15 @@ object ParameterCoercion {
         )
 
     private const val BASE64_QUANTUM = 4
+
+    /**
+     * #278 — the most digits a textual `BIGINTEGER`/`BIGDECIMAL` value may carry
+     * before it is refused UNPARSED. 1024 digits — the same window as the engine's
+     * `max-option-value-chars` — is far above any legitimate numeric text and far below the
+     * megabyte strings the quadratic parse turns into seconds of CPU. The default of
+     * [ParameterValueLimits.maxNumericDigits]; the number is stated in pipeline-contract §6.3.
+     */
+    const val MAX_NUMERIC_DIGITS = 1024
 
     /**
      * §6.3 — `DATE` is exactly `YYYY-MM-DD`.

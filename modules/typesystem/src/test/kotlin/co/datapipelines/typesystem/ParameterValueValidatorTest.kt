@@ -11,6 +11,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertTimeoutPreemptively
@@ -400,6 +401,18 @@ class ParameterValueValidatorTest {
     fun `validate refuses to judge by a declaration that would not have saved`() {
         shouldThrow<IllegalArgumentException> {
             validator.validate(ParameterDeclaration(LogicalType.STRING, constraints = ParameterConstraints(pattern = "(")), json("\"x\""))
+        }
+    }
+
+    @Test
+    fun `the validator passes its digit limit to the coercion - a megabyte is refused unparsed, fast (#278)`() {
+        val megabyte = "9".repeat(1_000_000)
+        val capped = ParameterValueValidator(ParameterValueLimits(maxNumericDigits = 100))
+        assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+            val outcome = capped.validate(ParameterDeclaration(LogicalType.BIGDECIMAL), json("\"$megabyte\""))
+            val refusal = outcome.shouldBeInstanceOf<ParameterValueOutcome.Refused>().refusal
+            refusal.rule shouldBe ParameterValueRule.INVALID_VALUE_TYPE
+            refusal.message shouldStartWith "too_many_digits:"
         }
     }
 

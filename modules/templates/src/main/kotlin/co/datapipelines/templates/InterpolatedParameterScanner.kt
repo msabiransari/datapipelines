@@ -58,6 +58,20 @@ internal object InterpolatedParameterScanner {
      * structure on it is the same hole as interpolating it, one directive earlier (078 A1).
      * Guarded names are therefore reported from BOTH positions; [declared]-only names only from
      * interpolations.
+     *
+     * ## The assignment taint (#285, option (a) of the issue)
+     *
+     * An indirection — `<#assign x = region>${x}` — writes the caller's value into the SQL text
+     * through a name the scan did not report, so the walk follows it: an `<#assign>`/`<#local>`/
+     * `<#global>` whose VALUE expression references a declared, guarded or already-tainted name
+     * makes its TARGET a reference from that point on. The taint is transitive (y = x carries it),
+     * order-respecting (a `${}` is judged against the taints created before it in source order)
+     * and cleared by shadowing exactly as the direct references are (a macro parameter or loop
+     * variable shadowing a tainted name is clean). A literal value taints nothing:
+     * `<#assign x = 1>${x}` stays legal. Option (c) of the issue — rendering selectors without
+     * the parents' values — is refused by the parameter-engine record (§5.2 renders parents'
+     * values on purpose); option (b), refusing `.vars` access wholesale, would break the
+     * special-variable spellings `ef372199` deliberately reports.
      */
     fun scan(
         body: String,
@@ -67,7 +81,7 @@ internal object InterpolatedParameterScanner {
         if (declared.isEmpty() && guarded.isEmpty()) return emptyList()
         val parsed = TemplateBodyParser.parse(body) as? BodyParse.Parsed ?: return emptyList()
         val found = LinkedHashSet<String>()
-        walk(parsed.template.rootTreeNode, declared, guarded, emptySet(), found)
+        walk(parsed.template.rootTreeNode, declared, guarded, emptySet(), mutableMapOf(), found)
         return found.toList()
     }
 
@@ -76,12 +90,20 @@ internal object InterpolatedParameterScanner {
         declared: Set<String>,
         guarded: Set<String>,
         shadowed: Set<String>,
+        tainted: MutableMap<String, Set<String>>,
         found: MutableSet<String>,
     ) {
         if (element == null) return
         when (FreemarkerAst.typeOf(element)) {
             FreemarkerAst.DOLLAR_VARIABLE -> {
-                reportMatches(FreemarkerAst.ownText(element), declared + guarded, shadowed, found)
+                val expression = FreemarkerAst.ownText(element)
+                reportMatches(expression, declared + guarded, shadowed, found)
+                // An alias of a declared value — `x` assigned from `region` — reports the
+                // DECLARED sources it carries, never the alias: the caller refuses the
+                // parameter whose value would land in the SQL text.
+                tainted.forEach { (alias, sources) ->
+                    if (alias !in shadowed && isReferencedIn(expression, alias)) found += sources
+                }
                 return // the interpolation's expression subtree is not template elements
             }
 
@@ -91,17 +113,21 @@ internal object InterpolatedParameterScanner {
                 reportMatches(FreemarkerAst.ownText(element), guarded, shadowed, found)
             }
 
+            FreemarkerAst.ASSIGNMENT -> {
+                taintAssignment(FreemarkerAst.ownText(element), declared + guarded, shadowed, tainted)
+            }
+
             FreemarkerAst.MACRO -> {
-                walkChildren(element, declared, guarded, shadowed + macroParameters(FreemarkerAst.ownText(element)), found)
+                walkChildren(element, declared, guarded, shadowed + macroParameters(FreemarkerAst.ownText(element)), tainted, found)
                 return
             }
 
             FreemarkerAst.ITERATOR_BLOCK -> {
-                walkChildren(element, declared, guarded, shadowed + loopVariableOf(FreemarkerAst.ownText(element)), found)
+                walkChildren(element, declared, guarded, shadowed + loopVariableOf(FreemarkerAst.ownText(element)), tainted, found)
                 return
             }
         }
-        walkChildren(element, declared, guarded, shadowed, found)
+        walkChildren(element, declared, guarded, shadowed, tainted, found)
     }
 
     private fun walkChildren(
@@ -109,8 +135,9 @@ internal object InterpolatedParameterScanner {
         declared: Set<String>,
         guarded: Set<String>,
         shadowed: Set<String>,
+        tainted: MutableMap<String, Set<String>>,
         found: MutableSet<String>,
-    ) = FreemarkerAst.childrenOf(element).forEach { walk(it, declared, guarded, shadowed, found) }
+    ): Unit = FreemarkerAst.childrenOf(element).forEach { walk(it, declared, guarded, shadowed, tainted, found) }
 
     /** Every [names] entry used as a variable in [expression] and not shadowed here. */
     private fun reportMatches(
@@ -120,6 +147,54 @@ internal object InterpolatedParameterScanner {
         found: MutableSet<String>,
     ) = names.forEach { name ->
         if (name !in shadowed && isReferencedIn(expression, name)) found += name
+    }
+
+    /**
+     * The taint rule for one assignment node's description (the shapes pinned in
+     * [FreemarkerAstDriftTest]): a freestanding `<#assign x = e>` prints `#assign x = e`
+     * (`#local`/`#global` likewise), and a `scope`/`namespace` attribute inside an
+     * `AssignmentInstruction` container prints `scope = "global"` — the two words reserved for
+     * the directive's own parameters are skipped so they are never read as targets. When the
+     * value expression references a watched name (a declared or guarded parameter directly, or
+     * an already-tainted alias) that is not [shadowed] here, the target becomes tainted with
+     * that name's SOURCES — so `y = x` carries `region` itself to wherever `y` interpolates.
+     */
+    private fun taintAssignment(
+        description: String,
+        watched: Set<String>,
+        shadowed: Set<String>,
+        tainted: MutableMap<String, Set<String>>,
+    ) {
+        val body =
+            when {
+                description.startsWith(ASSIGN_KEYWORD) -> description.removePrefix(ASSIGN_KEYWORD)
+                description.startsWith(LOCAL_KEYWORD) -> description.removePrefix(LOCAL_KEYWORD)
+                description.startsWith(GLOBAL_KEYWORD) -> description.removePrefix(GLOBAL_KEYWORD)
+                else -> description
+            }
+        val operator = ASSIGNMENT_OPERATOR.find(body) ?: return
+        val target = operator.groupValues[GROUP_TARGET]
+        val value = operator.groupValues[GROUP_VALUE]
+        if (target in KEYWORD_TARGETS) return
+        val sources = taintSources(value, watched, shadowed, tainted)
+        if (sources.isNotEmpty()) tainted[target] = (tainted[target] ?: emptySet()) + sources
+    }
+
+    /** The parameter names [value] carries: watched names it references directly, and what tainted aliases carry. */
+    private fun taintSources(
+        value: String,
+        watched: Set<String>,
+        shadowed: Set<String>,
+        tainted: Map<String, Set<String>>,
+    ): Set<String> {
+        val sources = mutableSetOf<String>()
+        watched.forEach { name ->
+            if (name !in shadowed && isReferencedIn(value, name)) sources += name
+        }
+        tainted.forEach { (alias, carried) ->
+            if (alias !in shadowed && isReferencedIn(value, alias)) sources += carried
+        }
+        return sources
     }
 
     /**
@@ -170,6 +245,30 @@ internal object InterpolatedParameterScanner {
 
     /** FreeMarker's special variables that resolve a name against the data model (`.vars.x` is `x`). */
     private const val SPECIAL_VARIABLES = "vars|data_model|globals|main|namespace|locals"
+
+    /** The assignment descriptions' three directive keywords (verified on the pinned 2.3.34 jar). */
+    private const val ASSIGN_KEYWORD = "#assign "
+    private const val LOCAL_KEYWORD = "#local "
+    private const val GLOBAL_KEYWORD = "#global "
+
+    /**
+     * The directive's own parameters print as assignment children of an `AssignmentInstruction`
+     * container (`scope = "global"`, `namespace = .namespace`) — targets that are never
+     * variables, so they are never tainted.
+     */
+    private val KEYWORD_TARGETS = setOf("scope", "namespace")
+
+    /**
+     * `TARGET (op) VALUE` of one assignment description: the target identifier, a simple or
+     * compound assignment operator, and the value expression text. An increment (`#assign x++`)
+     * carries no operator and taints nothing — it reads and writes an existing variable, which
+     * the taint of that variable already covers.
+     */
+    private val ASSIGNMENT_OPERATOR = Regex("""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(\+=|-=|\*=|/=|%=|=)\s*(.*)$""")
+
+    /** The regex groups of [ASSIGNMENT_OPERATOR] (detekt's magic-number rule, honoured at the source). */
+    private const val GROUP_TARGET = 1
+    private const val GROUP_VALUE = 3
 
     private val IDENTIFIER = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
 
