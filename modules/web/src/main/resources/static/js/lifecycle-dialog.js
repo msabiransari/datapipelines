@@ -313,6 +313,25 @@
     closeMenus();
   });
 
+  // 287 (#287): a placed menu's list carries the measured `--vmenu-*` inline custom
+  // properties, which htmx's history snapshot would serialise into a `style` attribute the
+  // CSP refuses on Back. Registered with shell.js's one `htmx:beforeHistorySave` cleanup
+  // registry (window.__dpHistoryStyleCleanups): open menus close first — the snapshot, like
+  // the shell's own skeletons and busy marks, carries no transient chrome — and the
+  // placement props come off every list in the outgoing copy (they are the ONLY inline
+  // styles this script writes; the restored menu is re-placed on its next open). The guard
+  // keeps the ONE registration from stacking: this file re-evaluates on every boosted
+  // arrival of a screen that loads it.
+  if (!window.__dpVmenuHistoryCleanupArmed) {
+    window.__dpVmenuHistoryCleanupArmed = true;
+    (window.__dpHistoryStyleCleanups = window.__dpHistoryStyleCleanups || []).push(function (root) {
+      if (!root || !root.querySelectorAll) return;
+      closeMenus();
+      var lists = root.querySelectorAll(".tplx-vmenu-list[style]");
+      for (var i = 0; i < lists.length; i++) lists[i].removeAttribute("style");
+    });
+  }
+
   var api = {
     confirmMatches: confirmMatches, closeDialog: closeDialog, closeMenus: closeMenus,
     menuPlacement: menuPlacement, minCharsMet: minCharsMet, consentMet: consentMet,

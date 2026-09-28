@@ -11,6 +11,8 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.doubles.shouldBeGreaterThan
+import io.kotest.matchers.ints.shouldBeGreaterThan
+import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.AfterAll
@@ -104,6 +106,17 @@ class DataTableBrowserTest : BrowserSuite() {
         shoot("executions-cap-1440-dark")
 
         sortFlipsTheDurationColumn(frame)
+
+        // 288 #1, the htmx half: the pager replaces the whole frame, so page 2 arrives with
+        // the server's order and no held sort — the state a fresh table has by construction.
+        page.locator("#execution-table button:has-text('Next')").click()
+        page.locator("$frame table[data-dt-ready] tbody tr[data-href]").first().waitFor()
+        settle()
+        withClue("the htmx page swap cleared the client sort") {
+            page.locator("$frame thead th:nth-child(5)").getAttribute("aria-sort") shouldBe "none"
+            page.locator("$frame thead th:nth-child(5) .dt-sort").getAttribute("title") shouldBe "Sort this page by Duration"
+        }
+
         aDragMovesOneColumn(frame)
 
         // Keyboard: a row is focusable and Enter opens it through the shell's own click handler.
@@ -114,7 +127,130 @@ class DataTableBrowserTest : BrowserSuite() {
     }
 
     /**
-     * htmx caches `#app-main` as MARKUP before a boosted swap and re-parses it on Back. The
+     * 288 #4 — a FIXED viewport is a scroll area: the enhancer gives it `tabindex="0"` (the
+     * markup renders -1, programmatically focusable only, so Tab could never reach it) and the
+     * sheet a visible ring (`DataTableCssTokenTest` pins the rule; the browser proves the
+     * behaviour — a focused viewport answers ArrowDown with scroll).
+     */
+    @Test
+    fun `a fixed viewport is keyboard-scrollable - focusable by tab and scrolled by the arrows`() {
+        useRealScrollbars()
+        val admin = seedLocalUser(uniqueEmail("dtv-" + generatedPassword("u").take(8)), generatedPassword("pw"), mustChange = false)
+        val pipelineId = seedPipelineWithRuns("test/dtv-" + generatedPassword("p").take(8).lowercase(), admin.email, runs = 24)
+        login(admin.email, admin.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        page.navigate("$baseUrl/executions?pipeline_id=$pipelineId")
+        val frame = "#execution-table .dt-frame"
+        page.locator("$frame table[data-dt-ready] tbody tr[data-href]").first().waitFor()
+        val viewport = "$frame > .dt-viewport"
+        withClue("the enhancer owns the interactive state: tabindex 0") {
+            page.evaluate("(sel) => document.querySelector(sel).getAttribute('tabindex')", viewport) shouldBe "0"
+        }
+        page.evaluate("(sel) => { const v = document.querySelector(sel); v.scrollTop = 0; }", viewport)
+        page.locator(viewport).focus()
+        page.keyboard().press("ArrowDown")
+        settle()
+        val scrollTop = page.evaluate("(sel) => document.querySelector(sel).scrollTop", viewport) as Number
+        withClue("ArrowDown scrolled the focused viewport (scrollTop=$scrollTop)") {
+            scrollTop.toDouble() shouldBeGreaterThan 0.0
+        }
+    }
+
+    /**
+     * 288 #1 — a paged table after a page change. Two producers, two truths, one rule: a page
+     * whose ROWS ARE NEW (the htmx pagers replace the frame; any keyed-by-content re-render)
+     * clears the client sort — the server's order shows and every `aria-sort` returns to none.
+     * The DOCK's cursor paging re-renders its rows IN PLACE (Alpine, index-keyed: page 2
+     * reuses page 1's `<tr>` elements), so the held sort persists by element identity — and
+     * says so: the button's title names the held sort beside the `aria-sort`. Red on the base:
+     * the title kept the inert wording while the sort silently held.
+     */
+    @Test
+    fun `the dock's held sort across a page change is stated by its button, not silent`() {
+        useRealScrollbars()
+        val admin = seedLocalUser(uniqueEmail("dtc-" + generatedPassword("u").take(8)), generatedPassword("pw"), mustChange = false)
+        login(admin.email, admin.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        createWorkspace("dtc" + generatedPassword("w").take(8).lowercase())
+        val datasource = "dt-src-" + generatedPassword("d").take(6).lowercase()
+        EditorRunFixtures.registerSourceDatasource(page, baseUrl, datasource) shouldBe emptyList<String>()
+        val pipelineId = createWideResultPipeline(datasource, rows = 2000)
+        page.navigate("$baseUrl/pipelines/$pipelineId/editor")
+        page.locator(".pe-card").first().waitFor()
+        page.locator("[data-verb='pipeline-execute']").click()
+        page.locator(".pe-status:has-text('Completed')").waitFor(Locator.WaitForOptions().setTimeout(RUN_TIMEOUT_MS))
+        page.locator("#pe-dock-tab-results").click()
+        val frame = "#pe-pane-results .dt-frame"
+        page.locator("$frame table[data-dt-ready] tbody tr").nth(30).waitFor()
+        page.locator("$frame thead th .dt-sort").first().waitFor()
+
+        val th = page.locator("$frame thead th").first()
+        val sortButton = th.locator(".dt-sort")
+        th.getAttribute("aria-sort") shouldBe "none"
+        sortButton.getAttribute("title") shouldBe "Sort this page by row_id"
+        sortButton.click()
+        th.getAttribute("aria-sort") shouldBe "ascending"
+
+        page.locator(".pe-result-actions button:has-text('Next')").click()
+        page.locator(".pe-result-page-info:has-text('Page 2 ')").waitFor()
+        settle()
+        withClue("the held sort across the dock's in-place page change is stated by the title") {
+            th.getAttribute("aria-sort") shouldBe "ascending"
+            sortButton.getAttribute("title") shouldBe "Sorting this page by row_id — click for highest first"
+        }
+    }
+
+    /**
+     * 288 #2 — the observer's discovery costs one subtree query per TOP-LEVEL root, not one
+     * per added node: a boosted swap's whole subtree used to be queried once per element
+     * (every child re-queried its own subtree). The test instruments the page's
+     * querySelectorAll to count calls carrying the data-table selector — a call only the
+     * component's own discovery makes — across two boosted navigations. The base's count for
+     * the identical action is recorded beside this test's in the lane's evidence
+     * (notes/evidence/287-ui-followups/observer-before.log / observer-after.log); the fix
+     * lands in single digits. The ceiling is generous — htmx, shell and the page scripts'
+     * own querySelectorAll calls carry other selectors and are not counted.
+     */
+    @Test
+    fun `the observer discovers a swapped table with one query per top-level root`() {
+        useRealScrollbars()
+        val admin = seedLocalUser(uniqueEmail("dto-" + generatedPassword("u").take(8)), generatedPassword("pw"), mustChange = false)
+        seedPipelineWithRuns("test/dto-" + generatedPassword("p").take(8).lowercase(), admin.email, runs = 24)
+        login(admin.email, admin.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        page.navigate("$baseUrl/executions")
+        page.locator("#execution-table .dt-frame table[data-dt-ready] tbody tr[data-href]").first().waitFor()
+        settle()
+        page.evaluate(
+            """() => {
+              window.__dtQueries = 0;
+              window.__origQSA = Element.prototype.querySelectorAll;
+              Element.prototype.querySelectorAll = function (sel) {
+                if (typeof sel === 'string' && sel.indexOf('dt-frame') !== -1) window.__dtQueries++;
+                return window.__origQSA.apply(this, arguments);
+              };
+            }""",
+        )
+        // Two boosted navigations between table-bearing pages: the dashboard's recent
+        // executions and the executions list swap in both directions.
+        page.locator("nav a[href='/dashboard']").click()
+        page.waitForURL("**/dashboard")
+        settle()
+        page.locator("nav a[href='/executions']").click()
+        page.waitForURL("**/executions**")
+        page.locator("#execution-table .dt-frame table[data-dt-ready] tbody tr[data-href]").first().waitFor()
+        settle()
+        val queries = (page.evaluate("() => window.__dtQueries") as Number).toInt()
+        page.evaluate("() => { Element.prototype.querySelectorAll = window.__origQSA; }")
+        withClue("data-table discovery queries across two boosted swaps: $queries") {
+            queries shouldBeGreaterThan 0
+            queries shouldBeLessThan 25
+        }
+    }
+
+    /**
+     * htmx caches the page (the history element is `document.body` — no `hx-history-elt` in
+     * the layout) as MARKUP before a boosted swap and re-parses it on Back. The
      * enhancer's widths and measured variables are CSSOM writes; serialised into the snapshot
      * they would come back as `style` attributes, which `style-src 'self'` refuses — measured on
      * the lane instance with the cleanup removed: 9 violations on one Back, one per styled
@@ -291,8 +427,9 @@ class DataTableBrowserTest : BrowserSuite() {
         header.locator(".dt-sort").click()
         header.getAttribute("aria-sort") shouldBe "descending"
         parseMs(columnTexts(frame, 5).first()) shouldBe durations.filterNotNull().max()
-        withClue("the button says it sorts this page") {
-            header.locator(".dt-sort").getAttribute("title") shouldBe "Sort this page by Duration"
+        withClue("the button says it sorts this page, and says the held sort (288 #1)") {
+            header.locator(".dt-sort").getAttribute("title") shouldBe
+                "Sorting this page by Duration — click to clear"
         }
     }
 
@@ -520,16 +657,21 @@ class DataTableBrowserTest : BrowserSuite() {
     }
 
     /**
-     * A caller result 17 columns wide and 200 rows long, generated by the suite's own Postgres —
+     * A caller result 17 columns wide and [rows] long, generated by the suite's own Postgres —
      * wide enough that the dock scrolls sideways past 300px at 1440 and long enough to scroll down.
+     * [rows] past the result store's page size (1000, ResultConfig) makes the dock's Next
+     * button live (a second cursor page).
      */
-    private fun createWideResultPipeline(datasource: String): String {
+    private fun createWideResultPipeline(
+        datasource: String,
+        rows: Int = 200,
+    ): String {
         val slug = "dtw" + generatedPassword("t").take(6).lowercase()
         val columns =
             (1..16).joinToString(", ") { c ->
                 if (c % 3 == 0) "g * $c AS amount_$c" else "md5((g * $c)::text) AS text_column_$c"
             }
-        EditorRunFixtures.createTemplate(page, "test/${slug}_wide.sql", "SELECT g AS row_id, $columns FROM generate_series(1, 200) g")
+        EditorRunFixtures.createTemplate(page, "test/${slug}_wide.sql", "SELECT g AS row_id, $columns FROM generate_series(1, $rows) g")
         return EditorRunFixtures.postPipeline(
             page,
             "test/$slug",

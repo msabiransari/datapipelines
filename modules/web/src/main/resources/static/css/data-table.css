@@ -91,6 +91,10 @@
 /* ------------------------------------------------------------------ the frame */
 
 .dt-frame {
+  /* The component's own length contracts (288 #3: kept as named custom properties, not design
+     tokens — they are decisions about THIS component that the script READS by name (cssPx on
+     --dt-col-min/--dt-col-max), the exact mechanism ui-screens §3.7 names for "the lengths
+     with no token". The design system's spacing scale stops far below a 22rem viewport.) */
   --dt-sbw: 0px;                 /* measured: the viewport's scrollbar width */
   --dt-head-h: 0px;              /* measured: the header row's height */
   --dt-surface: var(--surface-default);
@@ -333,6 +337,15 @@
   border-radius: var(--radius-sm);
 }
 
+/* 288 (#288): the viewport is keyboard-scrollable — the enhancer gives it tabindex="0" — and
+   focusable is only honest with a visible ring. The negative offset keeps it INSIDE the
+   viewport's box, where scrolling happens; the idiom (2px, --border-focus) is the dt-sort
+   ring's. */
+.dt-viewport:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
 /* The sprite's chevron-right, turned: up = ascending, down = descending. */
 .dt-sort-ic {
   flex: none;
@@ -366,16 +379,19 @@ th.num > .dt-sort { flex-direction: row-reverse; }
   top: 25%;
   bottom: 25%;
   right: var(--space-1);
-  width: 1px;
+  width: 1px; /* the app's hairline — the width every `1px solid var(--border-*)` border uses */
   background: var(--border-subtle);
 }
 
 .dt-resizer:hover::after,
 .dt-resizer.is-active::after {
-  width: 2px;
+  width: 2px; /* the hover state doubles the hairline — a deliberate two-step, not a scale step */
   background: var(--border-focus);
 }
 
+/* 288 (#288): the !important is the point of the state — a global drag flag must beat the
+   row and cell cursors (`.app-row-clickable tr[data-href]` outranks this selector on
+   specificity alone) for as long as the drag lasts, whatever the pointer is over. */
 :root.dt-resizing,
 :root.dt-resizing * {
   cursor: col-resize !important;
@@ -405,15 +421,20 @@ th.num > .dt-sort { flex-direction: row-reverse; }
 
 .dt-skeleton-row .dt-skel {
   display: block;
-  height: 0.85em;
-  width: 70%;
+  height: 0.85em; /* type-relative: the bar scales with the cell's own font */
+  width: 70%; /* the preview's varied bar lengths, by position — classes, never an inline width */
   border-radius: var(--radius-sm);
   background: linear-gradient(90deg, var(--surface-inset) 25%, var(--surface-active) 50%, var(--surface-inset) 75%);
   background-size: 200% 100%;
-  animation: dt-shimmer 1.2s linear infinite;
+  /* 288 (#288): the cycle is a duration token (--duration-slower, 500ms — the sheet's only
+     animation; the house precedent is app.css's ds-spin, whose vendored 1s became the same
+     token). Off entirely under prefers-reduced-motion below. */
+  animation: dt-shimmer var(--duration-slower) linear infinite;
 }
 
-/* The preview's varied bar lengths, by position — classes, never an inline width. */
+/* The preview's varied bar lengths, by position — classes, never an inline width. The
+   percentages are the skeleton's illustrative geometry (a fraction of the cell, not a
+   design decision any token expresses). */
 .dt-skeleton-row td:nth-child(3n + 2) .dt-skel { width: 45%; }
 .dt-skeleton-row td:nth-child(3n) .dt-skel { width: 58%; }
 .dt-skeleton-row td.num .dt-skel { margin-left: auto; }
