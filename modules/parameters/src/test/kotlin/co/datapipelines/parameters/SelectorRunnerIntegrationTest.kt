@@ -193,6 +193,23 @@ class SelectorRunnerIntegrationTest {
     }
 
     @Test
+    fun `an Instant bind reaches Postgres as timestamptz - the tier's current_timestamp and a TIMESTAMP parent`() {
+        // The 194c security pass, observation 1: spring-jdbc's TYPE_UNKNOWN path hands an Instant to
+        // setObject, which pgjdbc cannot infer a type for — every evaluate binding :current_timestamp
+        // or a TIMESTAMP parent failed. The lease converts before binding; this is the falsification.
+        val probed =
+            runner
+                .probe(
+                    workspace,
+                    CustomerDb.WAREHOUSE,
+                    "SELECT region, amount FROM sel.orders WHERE placed_at <= :current_timestamp ORDER BY region",
+                    mapOf("current_timestamp" to Instant.parse("2026-09-02T12:00:00Z")),
+                    10,
+                ).shouldBeInstanceOf<SelectorProbeOutcome.Probed>()
+        probed.rows.map { it[0] } shouldBe listOf("NY", "ON")
+    }
+
+    @Test
     fun `maxRows bounds what is read`() {
         rows(runner.probe(workspace, CustomerDb.WAREHOUSE, "SELECT name AS value FROM sel.city ORDER BY name", emptyMap(), 2)).size shouldBe
             2

@@ -75,6 +75,28 @@ class TemplateDryRendererImplTest {
     }
 
     @Test
+    fun `interpolatedParameters reports a declared name reached through a FreeMarker special variable`() {
+        // The 194c security pass: `${.vars.x}` and `${.data_model.x}` resolve to the data model exactly
+        // as `${x}` does, so a caller's VALUE would land in SQL text past the guard. The `.`-prefixed
+        // rule below must not exempt the special variables.
+        registry.put(TemplateFixtures.version("test/vars.sql", body = "SELECT 1 WHERE a = '\${.vars.customer_id}'"))
+        registry.put(TemplateFixtures.version("test/model.sql", body = "SELECT 1 WHERE a = '\${.data_model.customer_id}'"))
+
+        dryRenderer.interpolatedParameters(workspaceId, TemplateRef("test/vars.sql", 1), setOf("customer_id")) shouldBe
+            listOf("customer_id")
+        dryRenderer.interpolatedParameters(workspaceId, TemplateRef("test/model.sql", 1), setOf("customer_id")) shouldBe
+            listOf("customer_id")
+    }
+
+    @Test
+    fun `interpolatedParameters ignores a member of another value that merely shares the name`() {
+        // `x.customer_id` cannot resolve to the flat parameter `customer_id` — the rule the fix above keeps.
+        registry.put(TemplateFixtures.version("test/member.sql", body = "SELECT 1 WHERE a = '\${x.customer_id}'"))
+
+        dryRenderer.interpolatedParameters(workspaceId, TemplateRef("test/member.sql", 1), setOf("customer_id")) shouldBe emptyList()
+    }
+
+    @Test
     fun `interpolatedParameters is empty when the body interpolates nothing declared`() {
         dryRenderer
             .interpolatedParameters(workspaceId, TemplateRef("test/fetch.sql", 1), setOf("customer_id"))

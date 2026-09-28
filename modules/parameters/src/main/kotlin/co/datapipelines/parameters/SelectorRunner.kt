@@ -246,6 +246,9 @@ class SelectorRunner(
 
         @Suppress("ReturnCount") // one early answer per stage that can refuse
         override fun run(): SelectorRun {
+            // A caller cancelled between the pool's admission and the worker's start spends no render,
+            // no resolve and no metadata read on a result nobody reads (the 194c pass, observation 6).
+            if (abandoned.get()) return ABANDONED
             val text =
                 sql ?: when (val rendered = checkNotNull(render).invoke()) {
                     is Rendering.Sql -> rendered.sql
@@ -279,7 +282,7 @@ class SelectorRunner(
                 leased.set(statement)
                 // abandon() may have run between open() returning and the set above: honour it now.
                 if (abandoned.get()) statement.abandon()
-                statement.use { it.query { rs -> read(rs, datasource) } }
+                statement.use { it.query { rs -> read(rs, datasource, maxRows) } }
             } catch (e: SqlProbeRefusalException) {
                 SelectorRun.Failed(
                     PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED,
@@ -310,10 +313,13 @@ class SelectorRunner(
     private fun read(
         rs: ResultSet,
         datasource: Datasource,
+        maxRows: Int,
     ): SelectorRun.Rows {
         val columns = ResultRowReader.schemaOf(rs.metaData, datasource.dialect).columns
         val rows = ArrayList<List<Any?>>()
-        while (rs.next()) {
+        // `statement.maxRows` is the driver's promise; the counter is ours — a driver that ignores
+        // setMaxRows would otherwise read the whole result into memory before the cap refuses it.
+        while (rows.size < maxRows && rs.next()) {
             rows +=
                 columns.mapIndexed { index, column -> SelectorValues.canonical(ResultRowReader.readValue(rs, index + 1, column), column) }
         }

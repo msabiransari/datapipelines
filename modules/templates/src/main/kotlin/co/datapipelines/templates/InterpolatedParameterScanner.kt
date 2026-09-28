@@ -125,12 +125,21 @@ internal object InterpolatedParameterScanner {
     /**
      * [name] used as a variable in an interpolation expression — identifier-bounded, and not
      * after a `.`, because declared parameters are flat scalars and `x.customer_id` can never
-     * resolve to the parameter named `customer_id`.
+     * resolve to the parameter named `customer_id` — EXCEPT after one of FreeMarker's special
+     * variables that expose the data model: `${.vars.customer_id}`, `${.data_model.customer_id}`
+     * (and `.globals`, `.main`, `.namespace`, `.locals`) resolve exactly as `${customer_id}` does,
+     * so a caller's value would land in SQL text past this guard (the 194c security pass; verified
+     * on the pinned FreeMarker — the interpolation's description prints the dotted path verbatim).
+     * The bracket forms `${.vars["customer_id"]}` were always caught: a quote precedes the name.
      */
     private fun isReferencedIn(
         expression: String,
         name: String,
-    ): Boolean = Regex("(?<![A-Za-z0-9_.])${Regex.escape(name)}(?![A-Za-z0-9_])").containsMatchIn(expression)
+    ): Boolean {
+        val bare = Regex("(?<![A-Za-z0-9_.])${Regex.escape(name)}(?![A-Za-z0-9_])")
+        val throughSpecialVariable = Regex("(?<![A-Za-z0-9_])\\.(?:$SPECIAL_VARIABLES)\\.${Regex.escape(name)}(?![A-Za-z0-9_])")
+        return bare.containsMatchIn(expression) || throughSpecialVariable.containsMatchIn(expression)
+    }
 
     /**
      * The parameter names of a `<#macro>`/`<#function>` element. Both spellings print through
@@ -158,6 +167,9 @@ internal object InterpolatedParameterScanner {
     /** The loop variable of `<#list rows as x>` — prints as `#list rows as x`. */
     private fun loopVariableOf(description: String): Set<String> =
         LOOP_VARIABLE.find(description)?.let { setOf(it.groupValues[1]) } ?: emptySet()
+
+    /** FreeMarker's special variables that resolve a name against the data model (`.vars.x` is `x`). */
+    private const val SPECIAL_VARIABLES = "vars|data_model|globals|main|namespace|locals"
 
     private val IDENTIFIER = Regex("""[A-Za-z_][A-Za-z0-9_]*""")
 

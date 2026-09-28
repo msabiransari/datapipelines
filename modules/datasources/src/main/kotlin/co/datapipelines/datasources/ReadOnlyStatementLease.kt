@@ -7,8 +7,22 @@ import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * The JDBC form of a canonical value: spring-jdbc's `TYPE_UNKNOWN` path hands anything but a String,
+ * a `java.util.Date` or a Calendar to `setObject`, and pgjdbc cannot infer a type for an `Instant`
+ * ("Can't infer the SQL type to use for an instance of java.time.Instant") — the house repositories
+ * convert first, and so does this lease: an `Instant` binds as an `OffsetDateTime` at UTC, which every
+ * pinned driver maps to `timestamptz`. Every other canonical value (String, BigDecimal, BigInteger,
+ * Boolean, Int, LocalDate, LocalTime, LocalDateTime) already binds through the driver's own table.
+ * Found by the 194c security pass (observation 1); `SelectorRunnerIntegrationTest` binds one.
+ */
+private fun jdbcForm(value: Any?): Any? = if (value is Instant) OffsetDateTime.ofInstant(value, ZoneOffset.UTC) else value
 
 /**
  * The lease the parameter engine's selector runner reads through (parameter-engine record §2.5,
@@ -73,7 +87,7 @@ class ReadOnlyStatementLease(
                 statement.fetchSize = maxRows
                 statement.maxRows = maxRows
                 bindValues.forEachIndexed { index, value ->
-                    StatementCreatorUtils.setParameterValue(statement, index + 1, SqlTypeValue.TYPE_UNKNOWN, value)
+                    StatementCreatorUtils.setParameterValue(statement, index + 1, SqlTypeValue.TYPE_UNKNOWN, jdbcForm(value))
                 }
             } catch (e: SQLException) {
                 runCatching { statement.close() }
