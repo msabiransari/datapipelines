@@ -33,7 +33,12 @@
     <p class="ds-empty-description">No agent has recorded a fact about this datasource that this workspace can see.</p>
   </div>
 
-  <table class="ds-table u-mb-md" th:unless="${#lists.isEmpty(facts)}" id="ds-facts-table">
+  <!-- 282 (#282): a FIXED data-table frame (ui-screens §3.7) — facts are prose and a busy
+       datasource carries many, so the header holds while they scroll (in the dialog and on the
+       lake detail page alike). -->
+  <div class="dt-frame dt-scroll u-mb-md" th:unless="${#lists.isEmpty(facts)}">
+    <div class="dt-viewport" tabindex="-1">
+  <table class="ds-table" id="ds-facts-table">
     <thead>
       <tr>
         <th>Object</th>
@@ -41,7 +46,7 @@
         <th>Fact</th>
         <th>Trust</th>
         <th>Evidence</th>
-        <th>Recorded</th>
+        <th data-type="date">Recorded</th>
       </tr>
     </thead>
     <tbody>
@@ -66,7 +71,7 @@
           <span th:if="${f['evidence_summary']} != null" th:text="${f['evidence_summary']}">amount=1250 | amount=300</span>
           <span th:if="${f['evidence_summary']} == null" class="u-secondary">none — asserted</span>
         </td>
-        <td class="u-secondary u-text-sm">
+        <td class="u-secondary u-text-sm" th:attr="data-sort-value=${f['recorded_at']}">
           <span th:text="${f['recorded_at']}">2026-09-11T10:00:00Z</span>
           <span class="ds-badge ds-badge-default" th:text="${f['recorded_via']}">mcp</span>
           <!-- D-S9: a fact another workspace established arrives with its evidence and trust,
@@ -78,6 +83,8 @@
       </tr>
     </tbody>
   </table>
+    </div>
+  </div>
 </div>
 
 </th:block>

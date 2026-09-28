@@ -62,14 +62,17 @@
   <th:block th:if="${family.size() > 1}">
     <div class="ds-card u-mb-lg">
       <h2 class="ds-title u-mb-md">Execution Family</h2>
+      <!-- 282 (#282): a PAGE-FLOW data-table frame (ui-screens §3.7). -->
+      <div class="dt-frame">
+        <div class="dt-viewport" tabindex="-1">
       <table class="ds-table">
         <thead>
           <tr>
             <th>Execution</th>
             <th>Role</th>
             <th>Status</th>
-            <th>Started</th>
-            <th>Duration</th>
+            <th data-type="date">Started</th>
+            <th data-type="number">Duration</th>
           </tr>
         </thead>
         <tbody>
@@ -94,6 +97,8 @@
           </tr>
         </tbody>
       </table>
+        </div>
+      </div>
     </div>
   </th:block>
 

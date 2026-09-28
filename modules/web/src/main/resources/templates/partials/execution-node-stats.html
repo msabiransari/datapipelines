@@ -1,4 +1,8 @@
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="stats(nodeStats)">
+  <!-- 282 (#282): a PAGE-FLOW data-table frame (ui-screens §3.7), since a pipeline has few nodes.
+       No long dash in this comment either: the render test counts the ones this partial emits. -->
+  <div class="dt-frame">
+    <div class="dt-viewport" tabindex="-1">
   <table class="ds-table">
     <thead>
       <tr>
@@ -37,4 +41,6 @@
       </th:block>
     </tbody>
   </table>
+    </div>
+  </div>
 </th:block>

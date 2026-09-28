@@ -4,6 +4,10 @@
        counts, the per-state time share and whether the write committed. A node whose
        last sample is not terminal is shown exactly so — the execution ended around it —
        and never as committed. Identifier columns are mono, numbers are `.num` (§3.3). -->
+  <!-- 282 (#282): a PAGE-FLOW data-table frame (ui-screens §3.7); nine columns, so on a narrow
+       screen it scrolls inside its box with the node id frozen at the left. -->
+  <div class="dt-frame dt-freeze">
+    <div class="dt-viewport" tabindex="-1">
   <table class="ds-table" data-node-operations>
     <thead>
       <tr>
@@ -42,4 +46,6 @@
       </tr>
     </tbody>
   </table>
+    </div>
+  </div>
 </th:block>

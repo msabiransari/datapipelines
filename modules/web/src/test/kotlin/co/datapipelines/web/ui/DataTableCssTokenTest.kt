@@ -3,13 +3,15 @@ package co.datapipelines.web.ui
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
+import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver
 
 /**
- * 282 (#282) — the house data table's two files.
+ * 282 (#282) — the house data table's two files and the sweep that put every table in it.
  *
  *  - `data-table.css` is tokens-only (CLAUDE.md rule 3), which `AppCssTokenAuditTest` does not
  *    cover (it scopes itself to app.css by name): no literal colour, every font size a step of
@@ -19,10 +21,14 @@ import org.junit.jupiter.api.Test
  *    folds app.css's table layers and must win over them) and BEFORE the page sheets whose table
  *    tweaks build on it; the script after shell.js, whose `[data-href]` click handler Enter
  *    reuses;
- *  - the legacy table layers are gone from app.css (its boxed block and the `.u-scroll-x`
- *    rules) — so one rule set draws a table.
+ *  - the legacy table layers are gone from where they lived (app.css's boxed block and
+ *    `.u-scroll-x` rules, template-tree.css's `.tplx-fit-table`) — so one rule set draws a table;
+ *  - every `<table>` in an app template sits DIRECTLY in a `.dt-viewport` inside a `.dt-frame`
+ *    (ui-screens §3.7) — the next table a screen adds is framed, or this names it.
  */
 class DataTableCssTokenTest {
+    private val resolver = PathMatchingResourcePatternResolver(javaClass.classLoader)
+
     private fun read(path: String): String = requireNotNull(javaClass.classLoader.getResource(path)) { path }.readText()
 
     private val css = read("static/css/data-table.css")
@@ -74,11 +80,54 @@ class DataTableCssTokenTest {
         app shouldNotContain ".ds-table thead th"
         app shouldNotContain ".u-scroll-x"
         app shouldNotContain ".app-card-table .ds-table"
+        read("static/css/template-tree.css").withoutComments() shouldNotContain ".tplx-fit-table"
+        read("static/css/pipeline-editor.css").withoutComments() shouldNotContain ".pe-result-table-container thead th"
         // …and live here.
         css shouldContain ".dt-viewport > .ds-table thead th {"
         css shouldContain "position: sticky;"
     }
 
+    @Test
+    fun `every table in an app template sits in a data-table frame`() {
+        val templates =
+            resolver
+                .getResources("classpath*:templates/**/*.html")
+                .filter { it.filename != null && "/templates/site/" !in it.url.toString() }
+                .associate {
+                    it.url.toString().substringAfter("/templates/") to
+                        it.inputStream
+                            .readBytes()
+                            .decodeToString()
+                            .withoutHtmlComments()
+                }
+        val tables = templates.flatMap { (name, source) -> TABLE.findAll(source).map { name to it.range.first }.toList() }
+        // Non-vacuity: 22 tables in 19 templates on the lane's base (the brief's grep).
+        tables.size shouldBeGreaterThanOrEqual 22
+        val unframed =
+            tables
+                .filterNot { (name, at) ->
+                    // The two opening tags right before the table: the viewport, then the frame.
+                    val before =
+                        OPENING_TAG
+                            .findAll(templates.getValue(name).substring(0, at))
+                            .toList()
+                            .takeLast(2)
+                            .map { it.value }
+                    before.size == 2 && before[1].contains("dt-viewport") && before[0].contains("dt-frame")
+                }.map { (name, _) -> name }
+        withClue("wrap each in <div class=\"dt-frame …\"><div class=\"dt-viewport\" tabindex=\"-1\"> (ui-screens §3.7)") {
+            unframed.shouldBeEmpty()
+        }
+    }
+
     private fun String.withoutComments(): String = replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "")
 
+    private fun String.withoutHtmlComments(): String = replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
+
+    private companion object {
+        val TABLE = Regex("""<table\b""")
+
+        /** An opening `<div …>` — the frame and the viewport are divs, and nothing may sit between them and the table. */
+        val OPENING_TAG = Regex("""<(?!/)[a-zA-Z][^>]*>""")
+    }
 }

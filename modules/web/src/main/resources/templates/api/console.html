@@ -27,7 +27,10 @@
         <span class="app-card-note" th:text="${#lists.size(endpoints)} + ' live'">3 live</span>
       </div>
 
-      <table class="ds-table" th:if="${not #lists.isEmpty(endpoints)}">
+      <!-- 282 (#282): a PAGE-FLOW data-table frame, flush with the card (ui-screens §3.7). -->
+      <div class="dt-frame dt-flush" th:if="${not #lists.isEmpty(endpoints)}">
+        <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table">
         <thead>
         <tr>
           <th>Path</th>
@@ -72,6 +75,8 @@
         </tr>
         </tbody>
       </table>
+        </div>
+      </div>
 
       <div class="app-card-b" th:if="${#lists.isEmpty(endpoints)}">
         <div class="app-empty">

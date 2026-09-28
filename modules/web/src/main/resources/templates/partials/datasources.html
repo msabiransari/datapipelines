@@ -35,7 +35,12 @@
          states the rule and why `hidden` is the wrong half of it).
          .ds-table brings its own border, radius, header fill and row hover (app.css) —
          no zebra striping, no per-cell padding; inside a card it drops its own border. -->
+    <!-- 282 (#282): a PAGE-FLOW data-table frame, flush with the card (ui-screens §3.7): the name
+         column is frozen, so when the URL column pushes the table past its frame the row keeps
+         its name while the viewport scrolls sideways; the sort sorts THIS page (25 a page). -->
     <div class="ds-card app-card-table">
+      <div class="dt-frame dt-flush dt-freeze" data-dt-paged>
+        <div class="dt-viewport" tabindex="-1">
       <table class="ds-table">
         <thead>
           <tr>
@@ -45,7 +50,7 @@
             <th>URL</th>
             <th>Username</th>
             <th>Last test</th>
-            <th class="num">Actions</th>
+            <th class="num" data-sort="off">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -148,6 +153,8 @@
           </tr>
         </tbody>
       </table>
+        </div>
+      </div>
     </div>
 
     <th:block th:with="prevUrl=@{/partials/datasources(q=${q}, dialect=${selectedDialect}, offset=${offset - 25})},

@@ -609,12 +609,9 @@ details[open] > .tpl-summary > .tpl-icon-folder-open {
   overflow: auto;
 }
 
-/* "A table exactly as wide as its content, never the full row" (the mock's legend). A
-   three-column parameter table stretched to a 1900px column is four fields and a desert. */
-.tplx-fit-table {
-  width: auto;
-  min-width: 0;
-}
+/* 282 (#282): `.tplx-fit-table` ("a table exactly as wide as its content, never the full row"
+   — the mock's legend) is the data table's `.dt-fit` frame modifier now (data-table.css); the
+   parameter and occurrence tables that wore it are data-table frames. */
 
 /* ---- the acting column's tabbed card ---- */
 

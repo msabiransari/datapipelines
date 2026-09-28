@@ -386,7 +386,12 @@
           <p>Result expired — re-run the pipeline to see the latest data.</p>
         </div>
         <div x-show="!resultPanel.expired && resultPanel.data" class="pe-result-body">
-          <div class="pe-result-table-container">
+          <!-- 282 (#282): the dock's result grid is a data-table frame FIXED by its pane
+               (`dt-fill` takes the rest of the column; ui-screens §3.7): the header and the first
+               column hold while a wide result scrolls both ways, one line per row, and the sort
+               sorts THIS page (the paging row below is the cursor's). -->
+          <div class="pe-result-table-container dt-frame dt-fill dt-nowrap dt-freeze" data-dt-paged>
+            <div class="dt-viewport" tabindex="-1">
             <table class="ds-table">
               <thead>
                 <tr>
@@ -405,6 +410,7 @@
                 </template>
               </tbody>
             </table>
+            </div>
           </div>
           <div class="pe-result-actions">
             <!-- Client-side cursor paging over a stored result (027b C, frozen):

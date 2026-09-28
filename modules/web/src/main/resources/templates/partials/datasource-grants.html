@@ -30,13 +30,16 @@
       <p class="ds-empty-description">No workspace can see this datasource yet. Grant it below.</p>
     </div>
 
-    <table class="ds-table u-mb-md" th:unless="${#lists.isEmpty(grants)}" id="ds-grants-table">
+    <!-- 282 (#282): a PAGE-FLOW data-table frame (ui-screens §3.7). -->
+    <div class="dt-frame u-mb-md" th:unless="${#lists.isEmpty(grants)}">
+      <div class="dt-viewport" tabindex="-1">
+    <table class="ds-table" id="ds-grants-table">
       <thead>
         <tr>
           <th>Workspace</th>
           <th>Granted by</th>
-          <th>When</th>
-          <th class="num">Actions</th>
+          <th data-type="date">When</th>
+          <th class="num" data-sort="off">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -60,6 +63,8 @@
         </tr>
       </tbody>
     </table>
+      </div>
+    </div>
 
     <form th:attr="hx-post=@{/partials/datasources/{name}/grants(name=${datasource.name})},
                    hx-target='#ds-dialog', hx-swap='innerHTML'"
