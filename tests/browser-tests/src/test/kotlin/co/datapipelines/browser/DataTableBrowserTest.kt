@@ -316,12 +316,16 @@ class DataTableBrowserTest : BrowserSuite() {
               const frame = document.querySelector(sel);
               const v = frame.querySelector(':scope > .dt-viewport');
               const table = v.querySelector(':scope > table');
-              // The sticky CELL, not the row: Chromium moves the cells and leaves the <tr>'s box
+              // The sticky CELLS, not the row: Chromium moves the cells and leaves the <tr>'s box
               // where it was, so the row's rect reads "scrolled away" while the header is in place.
-              const head = table.tHead.rows[0].cells[0];
+              // EVERY cell, reported as the one furthest from the viewport's top: a frozen first
+              // cell is sticky for a second reason (dt-freeze) and alone could not show a header
+              // that lost its own sticky rule (F1 left the dock green until this read them all).
+              const viewportTop = v.getBoundingClientRect().top;
+              const tops = Array.from(table.tHead.rows[0].cells).map(c => c.getBoundingClientRect().top);
               const cap = getComputedStyle(frame, '::after');
               return {
-                viewportTop: v.getBoundingClientRect().top, headTop: head.getBoundingClientRect().top,
+                viewportTop, headTop: tops.reduce((w, t) => Math.abs(t - viewportTop) > Math.abs(w - viewportTop) ? t : w),
                 scrollTop: v.scrollTop, scrollable: v.scrollHeight - v.clientHeight,
                 sbw: frame.style.getPropertyValue('--dt-sbw'), measured: v.offsetWidth - v.clientWidth,
                 headH: frame.style.getPropertyValue('--dt-head-h'), headRowH: table.tHead.getBoundingClientRect().height,
