@@ -378,6 +378,28 @@ class ParameterSetService(
             .mapNotNull { repository.findCurrent(workspaceId, it.id) }
     }
 
+    /**
+     * The truthful total of [listChildSets] over the WHOLE level — what `total` reports and
+     * `has_more` pages against (#300, observation 7; rest-api §5.7). The everything lens counts
+     * in SQL ([ParameterSetRepository.countChildSets]); a narrowing lens counts IN MEMORY with
+     * the very predicate [listChildSets] filters by — unpaged, over the same `findCurrentVersions`
+     * read — so the count and the listing can never drift apart. A promoter learns how many sets
+     * HER LENS admits, never how many the workspace holds.
+     */
+    fun countChildSets(
+        workspaceId: UUID,
+        lens: ReadLens,
+        prefix: String?,
+    ): Int =
+        if (lens.isEverything) {
+            repository.countChildSets(workspaceId, prefix)
+        } else {
+            val scope = scope(prefix)
+            repository
+                .findCurrentVersions(workspaceId)
+                .count { lens.admits(it.name) && it.name.startsWith(scope) && '/' !in it.name.removePrefix(scope) }
+        }
+
     /** The promoter lens's input — every live set's current RELEASED version (versioning §10.2). */
     fun currentVersions(workspaceId: UUID): List<CurrentParameterSetVersion> = repository.findCurrentVersions(workspaceId)
 

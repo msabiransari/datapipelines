@@ -18,6 +18,7 @@ import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import java.time.Instant
 import java.util.UUID
 
@@ -103,6 +104,51 @@ class ParameterSetPromotionTest {
         val refusal = shouldThrow<ApiException> { promotion.apply(entry, workspaceId, actor) }
 
         refusal.code shouldBe ParameterErrorCodes.BODY_INVALID
+    }
+
+    @Test
+    fun `a batch entry with no id refuses body_invalid - never the uncatalogued 500`() {
+        val entry = ParameterSetResponses.full(record, document.body, detail) as ObjectNode
+        entry.remove("id")
+        every { sets.import(any(), any(), any()) } answers { throw IllegalStateException("must not be reached") }
+
+        val refusal = shouldThrow<ApiException> { promotion.apply(entry, workspaceId, actor) }
+
+        assertAll(
+            { refusal.code shouldBe ParameterErrorCodes.BODY_INVALID },
+            { refusal.details["path"] shouldBe "id" },
+            { refusal.details["reason"] shouldBe "missing" },
+        )
+    }
+
+    @Test
+    fun `a batch entry whose id is not a UUID refuses body_invalid wrong_type`() {
+        val entry = ParameterSetResponses.full(record, document.body, detail) as ObjectNode
+        entry.put("id", "not-a-uuid")
+        every { sets.import(any(), any(), any()) } answers { throw IllegalStateException("must not be reached") }
+
+        val refusal = shouldThrow<ApiException> { promotion.apply(entry, workspaceId, actor) }
+
+        assertAll(
+            { refusal.code shouldBe ParameterErrorCodes.BODY_INVALID },
+            { refusal.details["path"] shouldBe "id" },
+            { refusal.details["reason"] shouldBe "wrong_type" },
+        )
+    }
+
+    @Test
+    fun `a batch entry with a blank name refuses body_invalid - the name is never an empty string`() {
+        val entry = ParameterSetResponses.full(record, document.body, detail) as ObjectNode
+        entry.put("name", " ")
+        every { sets.import(any(), any(), any()) } answers { throw IllegalStateException("must not be reached") }
+
+        val refusal = shouldThrow<ApiException> { promotion.apply(entry, workspaceId, actor) }
+
+        assertAll(
+            { refusal.code shouldBe ParameterErrorCodes.BODY_INVALID },
+            { refusal.details["path"] shouldBe "name" },
+            { refusal.details["reason"] shouldBe "missing" },
+        )
     }
 
     private companion object {
