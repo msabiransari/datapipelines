@@ -83,6 +83,45 @@ class EndpointPublishServiceTest {
     }
 
     @Test
+    fun `listLegacy carries the workspace's legacy rows, and the same lens hides a hidden pipeline's row`() {
+        // #274's listing half: without a lens every legacy row of the caller's workspace and no pipeline
+        // read; under a narrowing lens the row of a hidden pipeline is absent, as a valid endpoint's would be.
+        val hiddenPipeline = UUID.fromString("00000000-0000-0000-0000-0000000000e6")
+
+        fun legacy(
+            path: String,
+            pipelineId: UUID,
+        ) = EndpointRow.Legacy(
+            id = UUID.randomUUID(),
+            workspaceId = WORKSPACE,
+            pathPattern = path,
+            pipelineId = pipelineId,
+            reason = "a path needs at least 3 segments",
+            enabled = false,
+        )
+        every { endpoints.findLegacy(WORKSPACE) } returns listOf(legacy("/nyc/mine", PIPELINE_ID), legacy("/nyc/hidden", hiddenPipeline))
+
+        service().listLegacy(principal()).map { it.pathPattern } shouldBe listOf("/nyc/mine", "/nyc/hidden")
+
+        val lens = ReadLens.Only(setOf(PIPELINE_NAME))
+        every { pipelines.list(WORKSPACE, lens, null, null, null) } returns
+            listOf(
+                PipelineRecord(
+                    id = PIPELINE_ID,
+                    name = PIPELINE_NAME,
+                    displayName = PIPELINE_NAME,
+                    description = "",
+                    ownerId = ACTOR,
+                    currentVersion = 1,
+                    createdAt = Instant.EPOCH,
+                    updatedAt = Instant.EPOCH,
+                ),
+            )
+        service(lens = PromoterLens { LensedView(lens, ReadLens.NOTHING) }).listLegacy(principal()).map { it.pathPattern } shouldBe
+            listOf("/nyc/mine")
+    }
+
+    @Test
     fun `under a narrowing lens an endpoint is visible iff its pipeline is`() {
         val hiddenPipeline = UUID.fromString("00000000-0000-0000-0000-0000000000e6")
         val visible = endpoint()
