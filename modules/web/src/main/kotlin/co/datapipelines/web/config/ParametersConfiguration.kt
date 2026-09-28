@@ -63,26 +63,6 @@ class ParametersConfiguration {
         config: ParametersConfig,
     ): SelectorRunner = SelectorRunner(templateEngines, datasources, config)
 
-    /** The lensed status read the validator's pin rules and the release guard ask (the `ParametersHarness` lambda). */
-    @Bean
-    fun parameterTemplateVersionStatuses(templates: co.datapipelines.templates.TemplateRepository): TemplateVersionStatuses =
-        TemplateVersionStatuses { workspaceId, id, version ->
-            templates.findVersionStatus(workspaceId, id, version)
-        }
-
-    /** The 142 cascade's write, through the template's OWN release path (the fail-loud `NONE` default replaced by the real one). */
-    @Bean
-    fun parameterTemplateReleaser(templates: co.datapipelines.templates.TemplateRepository): TemplateReleaser =
-        TemplateReleaser { workspaceId, id, version, actor ->
-            val draft =
-                checkNotNull(templates.findDraftDetail(workspaceId, id)) {
-                    "cannot release template $id@$version with the parameter set: no draft"
-                }
-            check(draft.version == version) { "the draft of $id is v${draft.version}, the pin names v$version" }
-            checkNotNull(templates.releaseDraft(workspaceId, id, draft.bodyHash, actor)) { "release of $id failed" }
-            TemplateRef(id, version)
-        }
-
     @Bean
     fun parameterSetValidator(
         config: ParametersConfig,

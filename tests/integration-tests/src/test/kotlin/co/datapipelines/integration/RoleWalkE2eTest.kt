@@ -79,6 +79,10 @@ import javax.crypto.spec.SecretKeySpec
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    // #194 lane D grew the walked surface by 16 routes; the walk sends ~190 per role and the
+    // §12 per-user limiter (100/s) would answer some with a 429 — neither a refusal nor a
+    // reach (the PermissionSeamE2eTest precedent).
+    properties = ["datapipelines.rate-limit.requests-per-second=100000", "datapipelines.rate-limit.requests-per-minute=1000000"],
 )
 class RoleWalkE2eTest {
     @LocalServerPort

@@ -143,9 +143,6 @@ class McpServerAutoConfiguration {
         parameterSetRepository: co.datapipelines.parameters.ParameterSetRepository,
         parameterEvaluator: co.datapipelines.parameters.ParameterEvaluator,
         parametersProperties: co.datapipelines.parameters.ParametersProperties,
-        // 139 — the render-freshness learnings, for the draft evaluate's template_unrendered twin
-        // (the same audit table the pipeline execute gate reads).
-        mcpToolLearnings: co.datapipelines.application.mcp.McpToolLearnings,
         // 178 — the promoter lens (declared by `web`'s PromotionConfiguration as the `application`
         // port) and the template read façade (declared by `templates`), so the read tools
         // narrow exactly as REST and the UI do. Plain parameters, the 068/074 pattern.
@@ -231,7 +228,9 @@ class McpServerAutoConfiguration {
                 parameterSetRepository,
                 parameterEvaluator,
                 parametersProperties.toConfig(),
-                mcpToolLearnings,
+                // 139's audit reader, built inline (the entryPointChecks discipline): the draft
+                // evaluate's template_unrendered twin reads the same table.
+                co.datapipelines.application.mcp.McpToolLearnings(jdbc),
                 templates,
                 lens,
             )

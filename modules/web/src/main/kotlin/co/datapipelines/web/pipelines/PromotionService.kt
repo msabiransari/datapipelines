@@ -141,8 +141,19 @@ class PromotionService(
         workspaceId: UUID,
         workspaceName: String,
         names: List<String>,
-        /** #194 lane D — the parameter-set roots, pushed after the templates and before the pipelines (§8.3). */
-        parameterSetNames: List<String> = emptyList(),
+    ): PromotionWire.Applied = promote(workspaceId, workspaceName, names, emptyList())
+
+    fun promote(
+        workspaceId: UUID,
+        workspaceName: String,
+        names: List<String>,
+        /**
+         * #194 lane D — the parameter-set roots, pushed after the templates and before the
+         * pipelines (§8.3). A DELIBERATE overload, not a defaulted parameter: the promotion
+         * E2E invokes `promote` reflectively by the three-argument signature, and a Kotlin
+         * default would silently remove it.
+         */
+        parameterSetNames: List<String>,
     ): PromotionWire.Applied {
         require(names.isNotEmpty() || parameterSetNames.isNotEmpty()) { "promote() needs at least one root" }
         // FRESH, never the lens's cached copy: §10.3's guards run against the target as it is
