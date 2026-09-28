@@ -2,6 +2,7 @@ package co.datapipelines.scripting
 
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.util.concurrent.Callable
@@ -188,5 +189,48 @@ class ScriptEvaluationPoolTest {
         caught.shouldNotBeNull() as ScriptEvaluationException
         (caught.cause is InterruptedException) shouldBe true
         Thread.interrupted() // clear the flag for the rest of the suite
+    }
+
+    /**
+     * A 1-of-1 pool whose evaluation thread is HELD for [HANDOVER_HOLD_MS] after its work ends and
+     * before it returns its permits (#295): the widest the handover window gets, so a caller answered
+     * before the permits are back is refused its own next submission on every run, not only on a
+     * 2-vCPU runner (`SelectorPool` lost exactly this race on CI and never on the dev box, 303d8b51).
+     */
+    private fun heldPool(): ScriptEvaluationPool =
+        ScriptEvaluationPool(
+            1,
+            1,
+            Duration.ofMillis(250),
+            ScriptEvaluationPool.SYSTEM,
+            beforePermitsReturn = { Thread.sleep(HANDOVER_HOLD_MS) },
+        )
+
+    @Test
+    fun `three back-to-back runs on a 1-of-1 pool are each admitted - an answer means the slot is back`() {
+        val p = heldPool()
+
+        repeat(3) { i -> p.run(limits(Duration.ofSeconds(5))) { i } shouldBe i }
+
+        p.abandoned.sum() shouldBe 0
+    }
+
+    @Test
+    fun `three back-to-back failing runs on a 1-of-1 pool each report the work's failure, never exhaustion`() {
+        val p = heldPool()
+
+        repeat(3) {
+            val caught =
+                runCatching {
+                    p.run(limits(Duration.ofSeconds(5))) { throw ScriptEvaluationException("the body failed") }
+                }.exceptionOrNull()
+            // Exhaustion here would be the caller refused by its own just-finished evaluation.
+            caught.shouldBeInstanceOf<ScriptEvaluationException>().message shouldBe "the body failed"
+        }
+    }
+
+    private companion object {
+        /** How long the seam holds the finishing thread — far past any scheduler's resume latency. */
+        const val HANDOVER_HOLD_MS = 200L
     }
 }
