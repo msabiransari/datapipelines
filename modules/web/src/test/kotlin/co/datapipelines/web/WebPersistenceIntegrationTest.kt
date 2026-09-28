@@ -15,14 +15,20 @@ import co.datapipelines.executor.NodeStatus
 import co.datapipelines.executor.RedisResultStore
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultStore
+import co.datapipelines.persistence.BatchingConfig
+import co.datapipelines.persistence.BatchingHooks
+import co.datapipelines.persistence.BatchingWriter
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.web.config.RateLimitProperties
 import co.datapipelines.web.executions.ResultCursor
 import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.ratelimit.RateLimitFilter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
+import co.datapipelines.web.sse.BatchedEventRecorder
 import co.datapipelines.web.sse.ExecutionContext
+import co.datapipelines.web.sse.ExecutionEventRowSink
 import co.datapipelines.web.sse.LoggedSseEvent
+import co.datapipelines.web.sse.ReplayLogSink
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.WebEventEmitter
 import com.fasterxml.jackson.databind.json.JsonMapper
@@ -51,6 +57,7 @@ import java.sql.DriverManager
 import java.sql.ResultSet
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -188,30 +195,15 @@ class WebPersistenceIntegrationTest {
             // #266 B.2/B.3: the production path — both writers over the real stores — must leave
             // exactly what the direct path leaves: the row RUNNING → SUCCESS, events 1..5 in the
             // durable record and in the replay, correlation id on every payload.
-            val config = co.datapipelines.persistence.BatchingConfig()
-            val rows =
-                co.datapipelines.persistence.BatchingWriter(
-                    "execution_events",
-                    config,
-                    co.datapipelines.web.sse
-                        .ExecutionEventRowSink(events),
-                )
-            val replay =
-                co.datapipelines.persistence.BatchingWriter(
-                    "replay_log",
-                    config,
-                    co.datapipelines.web.sse
-                        .ReplayLogSink(eventLog),
-                )
+            val rows = BatchingWriter("execution_events", BatchingConfig(), ExecutionEventRowSink(events))
+            val replay = BatchingWriter("replay_log", BatchingConfig(), ReplayLogSink(eventLog))
             // Non-vacuity: the direct path leaves the same rows, so the writers must be SEEN committing
             // them — an emitter that ignored its recorder stayed green here before (#266 F18).
             val rowsCommitted = AtomicInteger()
             val replayCommitted = AtomicInteger()
             rows.hooks = committedCounter(rowsCommitted)
             replay.hooks = committedCounter(replayCommitted)
-            val direct =
-                java.util.concurrent.Executors
-                    .newSingleThreadExecutor()
+            val direct = Executors.newSingleThreadExecutor()
             try {
                 val executionId = UUID.randomUUID()
                 val correlationId = UUID.randomUUID()
@@ -224,9 +216,7 @@ class WebPersistenceIntegrationTest {
                         eventRepository = events,
                         executionRepository = executions,
                         persistenceDispatcher = Dispatchers.Default,
-                        eventRecorder =
-                            co.datapipelines.web.sse
-                                .BatchedEventRecorder(rows, replay, eventLog, direct),
+                        eventRecorder = BatchedEventRecorder(rows, replay, eventLog, direct),
                     )
                 val started = Instant.parse("2026-08-05T14:30:00Z")
                 val stats = NodeStats("n1", NodeStatus.SUCCESS, started, started.plusMillis(900), 900, 10, 100)
@@ -259,7 +249,7 @@ class WebPersistenceIntegrationTest {
         }
 
     private fun committedCounter(count: AtomicInteger) =
-        object : co.datapipelines.persistence.BatchingHooks {
+        object : BatchingHooks {
             override fun onCommitted(lagNanos: Long) {
                 count.incrementAndGet()
             }
