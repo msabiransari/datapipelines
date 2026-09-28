@@ -53,21 +53,23 @@ class AuditLogger(
     ) {
         val row = AuditRow(event, userId, keyId, sourceIp, userAgent, objectMapper.writeValueAsString(details))
         val inTransaction = TransactionSynchronizationManager.isActualTransactionActive()
+        // ONE decision, logged and then acted on: the line reports the path the row really takes.
+        val batching = writer.takeUnless { inTransaction }
         // Which path a row takes, per event name — the #266 A.1 probe reads this; an operator can too.
         log.debug(
             "event=audit.write audit_event={} path={}",
             event,
             when {
+                batching != null -> PATH_BATCHED
                 inTransaction -> PATH_TRANSACTIONAL
-                writer == null -> PATH_DIRECT
-                else -> PATH_BATCHED
+                else -> PATH_DIRECT
             },
         )
-        if (writer == null || inTransaction) {
+        if (batching == null) {
             insertDirect(row)
             return
         }
-        val outcome = writer.record(row)
+        val outcome = batching.record(row)
         if (outcome is Outcome.Failed) {
             // The writer has logged the cause with the row's ids; this is the line the audit trail
             // has always carried for a lost row.
