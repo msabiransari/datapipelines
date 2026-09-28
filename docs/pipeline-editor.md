@@ -1504,13 +1504,13 @@ Each library is downloaded as a pre-built UMD bundle and committed to `modules/w
        "source": "https://unpkg.com/dagre@0.8.5/dist/dagre.min.js",
        "license": "MIT"
      },
-     "alpinejs": {
-       "version": "3.14.1",
-       "file": "vendor/alpinejs/alpine.min.js",
-       "sha256": "...",
-       "source": "https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js",
-       "license": "MIT"
-     }
+    "alpinejs": {
+      "version": "3.14.1",
+      "file": "vendor/alpinejs/alpine.min.js",
+      "sha256": "...",
+      "source": "https://registry.npmjs.org/@alpinejs/csp/-/alpinejs-csp-3.14.1.tgz (the CSP build's dist/cdn.min.js — 195: the editor's expressions are pure property paths)",
+      "license": "MIT"
+    }
    }
    ```
 4. A CI check verifies the SHA-256 hashes match the manifest.

@@ -179,8 +179,8 @@
   "alpinejs": {
     "version": "3.14.1",
     "file": "vendor/alpinejs/alpine.min.js",
-    "sha256": "358d9afbb1ab5befa2f48061a30776e5bcd7707f410a606ba985f98bc3b1c034",
-    "source": "https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js",
+    "sha256": "40f00d7aaa543eabd17c3a0f79ce2ac62e6be17caa9564527c20ec39152bb157",
+    "source": "https://registry.npmjs.org/@alpinejs/csp/-/alpinejs-csp-3.14.1.tgz (the CSP build's dist/cdn.min.js; tarball sha256 ab76984420bcc7e30d96b39338b4715bf514275de4d8b466c36bca5b178ca46a)",
     "license": "MIT"
   },
   "inter": {

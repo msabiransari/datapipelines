@@ -11,6 +11,7 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldNotBeBlank
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
@@ -159,13 +160,12 @@ class ApplicationSmokeTest {
                 h.getFirst("Strict-Transport-Security") shouldBe null
             }
         }
-        // The one route with a different policy: the pipeline editor (Alpine's eval, #195,
-        // and the hash of the one <style> Cytoscape injects — SecurityHeaders says why).
+        // 195: the editor's route takes the SAME policy — the eval exemption 188
+        // scoped onto it is retired (the page runs Alpine's CSP build), and the one
+        // `<style>` hash Cytoscape injects rides `style-src` on every route.
         val editor = rest.getForEntity("/pipelines/00000000-0000-0000-0000-000000000000/editor", String::class.java)
-        editor.headers.getFirst("Content-Security-Policy") shouldBe
-            CSP_POLICY
-                .replace("script-src 'self'", "script-src 'self' 'unsafe-eval'")
-                .replace("style-src 'self'", "style-src 'self' 'sha256-pgvDUBa4IjFA2yuSJ2cqcyxmNYJMborsd0ORcRv9vw8='")
+        editor.headers.getFirst("Content-Security-Policy") shouldBe CSP_POLICY
+        editor.headers.getFirst("Content-Security-Policy") shouldNotContain "unsafe-eval"
         // And the one route with none: the sitemap (an XML data document).
         val sitemap = rest.getForEntity("/sitemap.xml", String::class.java)
         sitemap.headers.getFirst("Content-Security-Policy") shouldBe null
@@ -197,11 +197,14 @@ class ApplicationSmokeTest {
         /**
          * The policy as a LITERAL, not `SecurityHeaders.CSP_POLICY`: `app` depends on `web`
          * only (module-structure §4.2), and a wire assertion should read the header the way
-         * an operator does — as the string the browser receives (188).
+         * an operator does — as the string the browser receives (188). Since 195 the
+         * `style-src` hash of the one `<style>` Cytoscape injects rides on EVERY route
+         * (a hash admits exactly that sheet; the class KDoc says why one policy).
          */
         const val CSP_POLICY =
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
-                "connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
+            "default-src 'self'; script-src 'self'; style-src 'self' 'sha256-pgvDUBa4IjFA2yuSJ2cqcyxmNYJMborsd0ORcRv9vw8='; " +
+                "img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; " +
+                "form-action 'self'; object-src 'none'"
 
         /** The module's shared containers — started on first touch, migrated by the first context's Flyway. */
         private val postgres get() = SharedPostgres.postgres

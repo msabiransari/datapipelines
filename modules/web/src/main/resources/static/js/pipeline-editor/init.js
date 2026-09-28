@@ -93,6 +93,9 @@
       nodesById: {},
       parameters: {},
       paramKeys: [],
+      /* 195: the Parameters sidebar's field view models (param-fields.js) — the
+         strings and branches the template used to compute inline. */
+      paramFields: [],
       parameterOverrides: {},
       nodeStates: {},
       /* 057: node_id → the wire error object from that node's node_failed. */
@@ -140,6 +143,7 @@
         failure: null,
         columns: [],
         rows: [],
+        displayRows: [],
         page: 1,
         totalPages: 1,
         hasPrev: false,
@@ -148,6 +152,9 @@
         ttlInterval: null,
         expired: false,
         cursorEndpoint: null,
+        downloadJsonHref: "#",
+        downloadCsvHref: "#",
+        downloadArrowHref: "#",
 
         prevPage: function () {},
         nextPage: function () {},
@@ -190,6 +197,9 @@
             overrides[k] = "";
           });
           self.parameterOverrides = overrides;
+          // 195: the sidebar's per-field view models — placeholder, description,
+          // type, branch flags — built once here, read as paths by the template.
+          self.paramFields = window.PEParamFields ? window.PEParamFields.buildParamFields(self.parameters) : [];
 
           self.resultPanelInstance = new ResultPanel(self);
           self.setupResultPanelMethods();
@@ -444,43 +454,46 @@
        * kind / inputs (each expression beside what the last run resolved it to) /
        * writes / value; a PIPELINE gets child / parameters / output / execution; a
        * TRANSFORM (7d) gets template / language / mode / inputs / output / rejects / strict.
+       * Rows are {k, v} objects (195: the CSP build's :key and cell bindings are
+       * paths — row[0]/row[1] bracket reads are not spellable).
        */
       detailsMeta: function (node) {
         if (!node) return [];
         var self = this;
         var rows = [];
+        var push = function (k, v) { rows.push({ k: k, v: v }); };
         var type = String(node.type || "").toUpperCase();
         if (type === "CALCULATOR") {
-          rows.push(["Kind", node.kind || "—"]);
+          push("Kind", node.kind || "—");
           var inputs = self.calculatorInputs(node);
-          rows.push([
+          push(
             "Inputs",
             inputs.length
               ? inputs.map(function (i) {
                   return i.name + " = " + i.expression + (i.resolved !== null ? " → " + i.resolved : "");
                 }).join(" · ")
-              : "—",
-          ]);
+              : "—"
+          );
           // 121: a multi-output node lists the MAPPING — each output → its key —
           // where a single node lists the one key it writes.
-          rows.push(["Writes", self.calculatorWrites(node)]);
+          push("Writes", self.calculatorWrites(node));
           var value = self.calculatorValue(node);
-          rows.push(["Value", value !== null ? value : "—"]);
+          push("Value", value !== null ? value : "—");
         } else if (type === "PIPELINE") {
           var child = node.pipeline || {};
-          rows.push(["Child", (child.name || "—") + (child.version ? " @ v" + child.version : "")]);
+          push("Child", (child.name || "—") + (child.version ? " @ v" + child.version : ""));
           var params = node.parameters ? Object.keys(node.parameters) : [];
-          rows.push([
+          push(
             "Parameters",
             params.length
               ? params.map(function (k) { return k + " ← " + node.parameters[k]; }).join(" · ")
-              : "—",
-          ]);
-          rows.push(["Output", self.outputText(node)]);
+              : "—"
+          );
+          push("Output", self.outputText(node));
           var childExec = self.childExecutions[node.id];
-          rows.push(["Execution", childExec ? childExec + " (child)" : "—"]);
+          push("Execution", childExec ? childExec + " (child)" : "—");
         } else if (type === "TRANSFORM") {
-          self.transformRows(node).forEach(function (row) { rows.push(row); });
+          self.transformRows(node).forEach(function (row) { rows.push({ k: row[0], v: row[1] }); });
         } else {
           var source = node.source || "tempdb";
           if (node.source === "tempdb") {
@@ -490,35 +503,35 @@
                 : "H2";
             source = "tempdb (" + engine + ", per-execution)";
           }
-          rows.push(["Source", source]);
-          rows.push(["Template", self.templateRefText(node)]);
-          rows.push(["Output", self.outputText(node)]);
-          rows.push(["Parameters", self.paramKeys.length ? self.paramKeys.join(", ") : "—"]);
+          push("Source", source);
+          push("Template", self.templateRefText(node));
+          push("Output", self.outputText(node));
+          push("Parameters", self.paramKeys.length ? self.paramKeys.join(", ") : "—");
         }
         // 108 §A — the node's own wall-clock deadline (pipeline-contract §4.11). Shown for EVERY
         // node type, including the two above, because the deadline applies to all of them and a
         // reader who cannot see it on a CALCULATOR would reasonably conclude it does not.
         // "Default" names where the number comes from when the node declares none: an author
         // debugging a `pipeline.node.timeout` needs to know whether THIS node set the budget.
-        rows.push(["Timeout", self.nodeTimeoutText(node)]);
+        push("Timeout", self.nodeTimeoutText(node));
         // 156, #2 — the SQL statement budget, distinct from the wall-clock deadline above:
         // that one bounds the whole node (render → materialize); this one bounds one
         // `execute*` call and is the DRIVER's, not the executor's.
         var queryTimeout = self.nodeQueryTimeoutText(node);
-        if (queryTimeout) rows.push(["Query Timeout", queryTimeout]);
+        if (queryTimeout) push("Query Timeout", queryTimeout);
         // 151 (#127): the node's ORDERINGS in words — what it waits for (each with its
         // state) and what waits for it. These are the arrows, read without the canvas;
         // no count belongs on either row, because an arrow is never a transfer.
         var waits = self.dependencyRows(node);
-        if (waits.dependsOn) rows.push(["Depends on", waits.dependsOn]);
-        if (waits.requiredBy) rows.push(["Required by", waits.requiredBy]);
+        if (waits.dependsOn) push("Depends on", waits.dependsOn);
+        if (waits.requiredBy) push("Required by", waits.requiredBy);
         var state = self.nodeStates[node.id];
-        if (state && state !== "idle") rows.push(["Last run", state]);
+        if (state && state !== "idle") push("Last run", state);
         // 149: the measured operation — what the node is doing (or did), where its output
         // went, the cumulative counts, the per-state time share and whether the write
         // committed. Only what was observed: an operation without a terminal sample says
         // "Commit not observed", never "Committed"; there is no percentage to show.
-        self.operationRows(node.id).forEach(function (row) { rows.push(row); });
+        self.operationRows(node.id).forEach(function (row) { rows.push({ k: row[0], v: row[1] }); });
         return rows;
       },
 
@@ -881,9 +894,17 @@
       },
 
       /* Typing in an override box must not fire a render per keystroke — the same
-         ~300ms debounce the list screens use for search. */
-      onParameterInput: function () {
+         ~300ms debounce the list screens use for search.
+         195: @input hands the handler the event (the CSP build passes it as the
+         first argument); the field is resolved from the input's data-key, and the
+         value lands in parameterOverrides[key] AND the field's own `override`. */
+      onParameterInput: function (evt) {
         var self = this;
+        var target = evt && evt.target ? evt.target : null;
+        var key = target && target.getAttribute ? target.getAttribute("data-key") : null;
+        if (key && window.PEParamFields) {
+          window.PEParamFields.applyParameterInput(self, key, target ? target.value : "");
+        }
         if (self.sqlReloadTimer) clearTimeout(self.sqlReloadTimer);
         self.sqlReloadTimer = setTimeout(function () {
           self.loadNodeSql();
@@ -958,12 +979,6 @@
         var err = payload && payload.error;
         this.recordFailure((err && err.node && err.node.id) || null, err);
         this.showError((err && (err.user_message || err.message)) || "Pipeline execution failed");
-      },
-
-      /* The failure renderer (details.js) — plain so Alpine expressions stay small
-         and node --test can drive it. */
-      failureView: function (error) {
-        return window.PEErrorDetails ? window.PEErrorDetails.build(error) : null;
       },
 
       showError: function (msg) {
@@ -1096,6 +1111,175 @@
       announceStatus: function (msg) {
         announceStatus(msg);
       },
+
+      /* ------------------------------------------------- 195: the CSP getters
+       * Alpine's CSP build evaluates every x-* value as a property path: no
+       * operators, no literals, no call syntax. Every comparison, fallback and
+       * concatenation the template used to inline lives in the getters and
+       * no-arg methods below, named for what the template shows. Each reads its
+       * inputs through `this` (the merged Alpine scope) so reactivity tracks. */
+
+      /* --- top bar --- */
+      get notExecuting() {
+        return !this.isExecuting;
+      },
+      dismissBanner: function () {
+        this.banner.text = "";
+      },
+
+      /* --- settings sidebar --- */
+      get pipelineDescriptionText() {
+        return this.pipeline.description || "—";
+      },
+      get hasCustomStagingEngine() {
+        return !!(
+          this.pipeline.settings &&
+          this.pipeline.settings.tempdb &&
+          this.pipeline.settings.tempdb.engine !== "H2"
+        );
+      },
+      get stagingEngineText() {
+        return this.pipeline.settings && this.pipeline.settings.tempdb
+          ? this.pipeline.settings.tempdb.engine
+          : undefined;
+      },
+
+      /* --- graph controls (the old expressions guarded with `graph &&`) --- */
+      fitGraph: function () {
+        if (this.graph && this.graph.fitToView) this.graph.fitToView();
+      },
+      resetGraph: function () {
+        if (this.graph && this.graph.resetView) this.graph.resetView();
+      },
+      zoomIn: function () {
+        if (this.graph && this.graph.zoomBy) this.graph.zoomBy(1.25);
+      },
+      zoomOut: function () {
+        if (this.graph && this.graph.zoomBy) this.graph.zoomBy(0.8);
+      },
+
+      /* --- the dock's badges (dock state + result panel, read together) --- */
+      get resultsBadgeClass() {
+        return this.dock.hasResults && !this.resultPanel.expired ? "pe-dock-count-ok" : "";
+      },
+      get resultsBadgeText() {
+        return this.dock.hasResults && this.dock.resultsRows !== null ? this.dock.resultsRows : "—";
+      },
+      get errorsBadgeClass() {
+        return this.dock.errors.length > 0 ? "pe-dock-count-err" : "";
+      },
+
+      /* The dock's and the events log's METHODS are delegated here on purpose:
+         the CSP evaluator auto-calls a resolved function with `this` = the merged
+         scope, so a nested object's own method (`dock.selectDetails`,
+         `eventsLog.count`) would run with the wrong `this` and read undefined.
+         Getters are safe (they are invoked during the property read, on their own
+         object) — that is why the predicates stay on dock.js and only the
+         ACTIONS are delegated. Every delegation calls through with the right
+         `this`. */
+      selectDetailsTab: function () {
+        this.dock.selectDetails();
+      },
+      selectResultsTab: function () {
+        this.dock.selectResults();
+      },
+      selectErrorsTab: function () {
+        this.dock.selectErrors();
+      },
+      selectEventsTab: function () {
+        this.dock.selectEvents();
+      },
+      toggleDock: function () {
+        this.dock.toggleCollapse();
+      },
+      get eventsCount() {
+        return this.eventsLog.count();
+      },
+      get noEvents() {
+        return this.eventsLog.count() === 0;
+      },
+
+      /* --- the Details pane (the old expressions took selectedNode as an argument) --- */
+      get noSelection() {
+        return !this.selectedNode;
+      },
+      get checksPresent() {
+        return ((this.pipeline.checks || []).length) > 0;
+      },
+      get checksCountText() {
+        var n = (this.pipeline.checks || []).length;
+        return n + " check" + (n === 1 ? "" : "s") + " on this version";
+      },
+      get selectedDetailsTypeToken() {
+        return this.detailsTypeToken(this.selectedNode);
+      },
+      get selectedDetailsIcon() {
+        return this.detailsIcon(this.selectedNode);
+      },
+      get selectedTypeText() {
+        return String((this.selectedNode && this.selectedNode.type) || "").toLowerCase();
+      },
+      get selectedNeedsReview() {
+        var pin = this.transformPinFor(this.selectedNode);
+        return !!(pin && pin.needsReview === true);
+      },
+      get selectedDetailsMeta() {
+        return this.detailsMeta(this.selectedNode);
+      },
+      get selectedSqlHead() {
+        return this.detailsSqlHead(this.selectedNode);
+      },
+      get hasSelectedTemplate() {
+        return !!(this.selectedNode && this.selectedNode.template && this.selectedNode.template.id);
+      },
+      get selectedTemplateHref() {
+        var n = this.selectedNode;
+        return "/templates/editor?name=" + encodeURIComponent(n && n.template ? n.template.id : "");
+      },
+      get hasSelectedChild() {
+        return !!(this.selectedNode && this.selectedNode.type === "PIPELINE" && this.selectedNode.pipeline);
+      },
+      get selectedChildHref() {
+        var n = this.selectedNode;
+        return "/pipelines?q=" + encodeURIComponent(n && n.pipeline ? n.pipeline.name : "");
+      },
+      get selectedIsSqlNode() {
+        return !!(this.selectedNode && this.isSqlNode(this.selectedNode));
+      },
+      get selectedIsNotSqlNode() {
+        return !!(this.selectedNode && !this.isSqlNode(this.selectedNode));
+      },
+      get selectedDefinitionHtml() {
+        return this.definitionHtml(this.selectedNode);
+      },
+
+      /* --- the Results pane --- */
+      get resultsEmpty() {
+        return !this.resultPanel.data && !this.resultPanel.expired;
+      },
+      get ttlRunning() {
+        return this.resultPanel.ttlSeconds > 0;
+      },
+      get ttlText() {
+        return "Expires in " + this.resultPanel.ttlSeconds + "s";
+      },
+      get resultsReady() {
+        return !this.resultPanel.expired && !!this.resultPanel.data;
+      },
+      get noPrevPage() {
+        return !this.resultPanel.hasPrev;
+      },
+      get noNextPage() {
+        return !this.resultPanel.hasNext;
+      },
+      get pageInfoText() {
+        return "Page " + this.resultPanel.page + " / " + this.resultPanel.totalPages;
+      },
+
+      /* --- the error modal --- */
+      hideErrorModal: function () {
+        this.errorModal.hide();
+      },
     };
   }
 
@@ -1202,6 +1386,21 @@
         window.Alpine.destroyTree(root);
       }
       window.Alpine.initTree(root);
+    });
+  }
+
+  /*
+   * 195 — the component registers itself under the CSP build's rule: `x-data`
+   * may only NAME a component registered with Alpine.data (no inline object, no
+   * call). alpine:init fires when the deferred alpine.min.js boots, after every
+   * parser-blocking script on the page — this file included — has run, so the
+   * listener below is in place in time.
+   */
+  if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("alpine:init", function () {
+      if (typeof window !== "undefined" && window.Alpine && window.Alpine.data) {
+        window.Alpine.data("pipelineEditor", pipelineEditor);
+      }
     });
   }
 

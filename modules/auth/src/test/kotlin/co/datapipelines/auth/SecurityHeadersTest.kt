@@ -9,14 +9,16 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 
 /**
- * [SecurityHeaders] — the CSP CONTRACT (#188), in the shape `WebCorsConfigurationTest` holds
- * for CORS: the policy strings themselves, and the writers run against mock requests so the
- * route split is proven on the object the filter chain uses, not on prose.
+ * [SecurityHeaders] — the CSP CONTRACT (#188, one policy since #195), in the shape
+ * `WebCorsConfigurationTest` holds for CORS: the policy strings themselves, and the
+ * writer run against mock requests so the header is proven on the object the filter
+ * chain uses, not on prose.
  *
- * The property pinned hardest: no policy anywhere carries `'unsafe-inline'`, and
- * `'unsafe-eval'` appears on exactly one route's `script-src` — never on `style-src`, never
- * elsewhere. `AuthHttpBoundaryTest` and the app module's smoke test read the same headers
- * off the wire.
+ * The property pinned hardest: no policy anywhere carries `'unsafe-inline'`, a nonce,
+ * or `'unsafe-eval'` — the editor's route-scoped eval exemption 188 shipped is retired
+ * (195: the page runs Alpine's CSP build), and the test below pins its ABSENCE on the
+ * editor route explicitly. `AuthHttpBoundaryTest` and the app module's smoke test read
+ * the same headers off the wire.
  */
 class SecurityHeadersTest {
     private fun headersFor(uri: String): MockHttpServletResponse {
@@ -30,7 +32,7 @@ class SecurityHeadersTest {
         SecurityHeaders.CSP_POLICY shouldNotContain "unsafe-inline"
         SecurityHeaders.CSP_POLICY shouldNotContain "unsafe-eval"
         SecurityHeaders.CSP_POLICY shouldNotContain "nonce"
-        SecurityHeaders.CSP_POLICY shouldStartWith "default-src 'self'; script-src 'self'; style-src 'self'; "
+        SecurityHeaders.CSP_POLICY shouldStartWith "default-src 'self'; script-src 'self'; style-src 'self' 'sha256-"
         SecurityHeaders.CSP_POLICY shouldContain "frame-ancestors 'self'"
         SecurityHeaders.CSP_POLICY shouldContain "base-uri 'self'"
         SecurityHeaders.CSP_POLICY shouldContain "form-action 'self'"
@@ -53,15 +55,28 @@ class SecurityHeadersTest {
         headersFor("/dashboard").getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY
     }
 
+    /**
+     * 195 — the exemption's retirement record, in the negative: the eval directive 188
+     * scoped onto `GET /pipelines/{id}/editor` is gone from the object AND from the
+     * header that route actually receives. Falsified by re-appending ` 'unsafe-eval'`
+     * to the `script-src 'self'` constant in the DIRECTIVES assembly — the first
+     * assertion goes red naming the directive.
+     */
     @Test
-    fun `the editor policy relaxes script-src with unsafe-eval and style-src with Cytoscape's one sheet hash - nothing else`() {
-        SecurityHeaders.CSP_POLICY_EDITOR shouldContain "script-src 'self' 'unsafe-eval'; style-src 'self' 'sha256-"
-        SecurityHeaders.CSP_POLICY_EDITOR shouldNotContain "unsafe-inline"
-        SecurityHeaders.CSP_POLICY_EDITOR shouldNotContain "unsafe-hashes"
-        // Everything but those two additions is the base policy, character for character.
-        SecurityHeaders.CSP_POLICY_EDITOR
-            .replace(" 'unsafe-eval'", "")
-            .replace(" " + SecurityHeaders.CYTOSCAPE_STYLESHEET_HASH, "") shouldBe SecurityHeaders.CSP_POLICY
+    fun `no response carries unsafe-eval - the editor route included`() {
+        SecurityHeaders.CSP_POLICY shouldNotContain "unsafe-eval"
+        headersFor("/pipelines/abc-123/editor").getHeader(SecurityHeaders.CSP_HEADER) shouldNotContain "unsafe-eval"
+        headersFor("/pipelines/abc-123/editor").getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY
+    }
+
+    @Test
+    fun `style-src admits Cytoscape's one sheet by hash and nothing else inline`() {
+        SecurityHeaders.CSP_POLICY shouldContain "style-src 'self' 'sha256-"
+        SecurityHeaders.CSP_POLICY shouldNotContain "unsafe-inline"
+        SecurityHeaders.CSP_POLICY shouldNotContain "unsafe-hashes"
+        // The style-src directive is exactly self + the one hash, nothing more.
+        val styleSrc = SecurityHeaders.CSP_POLICY.split("; ").first { it.startsWith("style-src") }
+        styleSrc shouldBe "style-src 'self' " + SecurityHeaders.CYTOSCAPE_STYLESHEET_HASH
     }
 
     /**
@@ -97,10 +112,10 @@ class SecurityHeadersTest {
     }
 
     @Test
-    fun `exactly the editor's full-document route gets the eval policy`() {
-        headersFor("/pipelines/abc-123/editor").getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY_EDITOR
-        // Its neighbours do not: the list, the pipeline's own page, a partial under it, and a
-        // longer path that happens to end in /editor.
+    fun `every policed route gets the one policy - the editor's included, its neighbours unchanged`() {
+        // The editor's full-document GET — the route the exemption used to sit on —
+        // takes the same policy as everything else.
+        headersFor("/pipelines/abc-123/editor").getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY
         listOf(
             "/pipelines",
             "/pipelines/abc-123",
@@ -116,7 +131,7 @@ class SecurityHeadersTest {
     }
 
     @Test
-    fun `every response gets exactly one policy - the two matchers are complementary`() {
+    fun `every response gets exactly one policy - the single writer`() {
         listOf("/pipelines/abc-123/editor", "/pipelines", "/").forEach { uri ->
             headersFor(uri).getHeaders(SecurityHeaders.CSP_HEADER).size shouldBe 1
         }
@@ -127,6 +142,6 @@ class SecurityHeadersTest {
         val response = MockHttpServletResponse()
         val request = MockHttpServletRequest("GET", "/dp/pipelines/abc-123/editor").apply { contextPath = "/dp" }
         SecurityHeaders.cspWriters().forEach { it.writeHeaders(request, response) }
-        response.getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY_EDITOR
+        response.getHeader(SecurityHeaders.CSP_HEADER) shouldBe SecurityHeaders.CSP_POLICY
     }
 }

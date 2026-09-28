@@ -341,9 +341,9 @@ class ShellRenderTest {
     fun `the editor's result downloads are full navigations`() {
         val html = engine.process("pipelines/editor", webContext().apply { fillEditor() })
 
-        html shouldContain "hx-boost=\"false\" x-bind:href=\"resultPanel.downloadUrl('json')\""
-        html shouldContain "hx-boost=\"false\" x-bind:href=\"resultPanel.downloadUrl('csv')\""
-        html shouldContain "hx-boost=\"false\" x-bind:href=\"resultPanel.downloadUrl('arrow')\""
+        html shouldContain "hx-boost=\"false\" x-bind:href=\"resultPanel.downloadJsonHref\""
+        html shouldContain "hx-boost=\"false\" x-bind:href=\"resultPanel.downloadCsvHref\""
+        html shouldContain "hx-boost=\"false\" x-bind:href=\"resultPanel.downloadArrowHref\""
     }
 
     private fun WebContext.fillList() {

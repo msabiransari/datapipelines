@@ -52,8 +52,9 @@ class AlpineCloakAuditTest {
     @Test
     fun `the sweep actually finds Alpine roots`() {
         // The second non-vacuity floor, and the sharper one: the app has few Alpine roots,
-        // so a pattern that matched none would look exactly like a clean audit.
-        templates.values.sumOf { X_DATA_TAG.findAll(it).count() } shouldBeGreaterThanOrEqual 2
+        // so a pattern that matched none would look exactly like a clean audit. (195 removed
+        // the failure card's inline x-data — the editor's root is the page's only one.)
+        templates.values.sumOf { X_DATA_TAG.findAll(it).count() } shouldBeGreaterThanOrEqual 1
     }
 
     @Test
@@ -71,14 +72,16 @@ class AlpineCloakAuditTest {
     }
 
     /**
-     * The exception list is the audit's weak point: with both of today's roots named in it,
+     * The exception list is the audit's weak point: with today's one root named in it,
      * the sweep above would stay green while saying nothing. Pinning its SIZE is what makes
-     * a third exception a deliberate, reviewed act instead of a one-line regex tweak — the
-     * same reason `InlineWidthAuditTest` asserts its allowlist is empty.
+     * a second exception a deliberate, reviewed act instead of a one-line regex tweak — the
+     * same reason `InlineWidthAuditTest` asserts its allowlist is empty. (195 removed the
+     * failure card's inline x-data entirely — an entry for a tag that no longer exists
+     * would only mask a reintroduction.)
      */
     @Test
-    fun `the named exceptions are exactly the two that are argued for`() {
-        CLOAKED_BY_ANCESTOR.size shouldBe 2
+    fun `the named exceptions are exactly the one that is argued for`() {
+        CLOAKED_BY_ANCESTOR.size shouldBe 1
     }
 
     @Test
@@ -98,12 +101,10 @@ class AlpineCloakAuditTest {
         val X_DATA_TAG = Regex("""<[a-zA-Z][^>]*\sx-data[^>]*>""")
 
         /**
-         * The two Alpine roots that do not carry their own `x-cloak`, each with the reason
+         * The one Alpine root that does not carry its own `x-cloak`, with the reason
          * recorded so it has to be re-argued rather than inherited — the house allowlist
          * pattern (`InlineWidthAuditTest.ALLOWED`).
          *
-         *  - the per-result failure view lives inside `#pe-pane-results`, a dock pane that
-         *    carries `x-cloak` itself, so it is already hidden with its ancestor;
          *  - `.pe-root` MUST NOT be cloaked. Measured (090): `display:none` on it hides
          *    `#cy-canvas` while Cytoscape initialises against that element, so the graph is
          *    built in a zero-size container and never recovers — no node cards render, and
@@ -113,11 +114,16 @@ class AlpineCloakAuditTest {
          *    the flash would have been; the root itself is a flex container of
          *    server-rendered chrome. Cloaking it trades a flash nobody measured for an
          *    editor that does not work.
+         *
+         * (195 removed the second former entry — the failure card's inline
+         * `x-data="{ view: failureView(...) }"`, which the CSP build cannot evaluate;
+         * the card is scoped by `#pe-pane-errors`'s own `x-cloak` and its bindings are
+         * paths off the dock's error entries now. An entry for a tag that no longer
+         * exists would only mask a reintroduction.)
          */
         val CLOAKED_BY_ANCESTOR =
             setOf(
-                """x-data="{ view: failureView(entry.record) }"""",
-                """x-data="pipelineEditor()"""",
+                """x-data="pipelineEditor"""",
             )
     }
 }

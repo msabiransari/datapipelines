@@ -58,6 +58,17 @@
         nodeLine: error.node ? this.nodeLine(error.node) : null,
         sql: error.sql || null,
         rootCause: rootCause,
+        /* 195: the CSP build renders paths, not concatenations — `chain` and
+           `rootCause` stay for copyText and the tests, and every string the
+           failure card shows inline is precomputed here. */
+        rootCauseLine: rootCause === null ? null : "· root: " + rootCause,
+        levels: (chain || []).map(function (level, idx) {
+          return {
+            title: (idx === 0 ? "Root cause: " : "Caused by: ") + level.cls,
+            message: level.message,
+            framesText: (level.frames || []).join("\n"),
+          };
+        }),
         chain: chain,
         detailsText: error.details ? JSON.stringify(error.details, null, 2) : null,
         copyText: this.copyText(error, chain, rootCause),

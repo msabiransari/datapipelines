@@ -187,3 +187,80 @@ test("a collapsed dock KEEPS its badge — the header strip is what stays on scr
   d.nodeFailed("c", failure("c3"));
   assert.equal(d.errors.length, 3, "and the count keeps moving while collapsed");
 });
+
+/* 195 — the editor's template runs on Alpine's CSP build, whose expressions are
+   pure property paths. The comparisons the template used to inline live in the
+   getters below; every assertion here is a value the template binds by name. */
+
+test("the four no-arg tab selectors drive the same transition as selectTab", () => {
+  const d = loadDock();
+  d.selectResults();
+  assert.equal(d.tab, "results");
+  assert.equal(d.state, "open");
+  d.selectErrors();
+  assert.equal(d.tab, "errors");
+  d.selectEvents();
+  assert.equal(d.tab, "events");
+  d.selectDetails();
+  assert.equal(d.tab, "details");
+  d.toggleCollapse();
+  d.selectDetails();
+  assert.equal(d.state, "open", "a selector from collapsed restores, like selectTab");
+});
+
+test("tab predicates and the ARIA strings read off `tab`", () => {
+  const d = loadDock();
+  assert.equal(d.detailsActive, true);
+  assert.equal(d.resultsActive, false);
+  assert.equal(d.errorsActive, false);
+  assert.equal(d.eventsActive, false);
+  assert.equal(d.detailsAria, "true");
+  assert.equal(d.resultsAria, "false");
+  assert.equal(d.errorsAria, "false");
+  assert.equal(d.eventsAria, "false");
+  d.selectTab("results");
+  assert.equal(d.detailsAria, "false");
+  assert.equal(d.resultsAria, "true");
+  assert.equal(d.resultsActive, true);
+});
+
+test("state predicates and the collapsed class read off `state`", () => {
+  const d = loadDock();
+  assert.equal(d.dockIsOpen, true);
+  assert.equal(d.dockIsCollapsed, false);
+  assert.equal(d.collapsedClass, "");
+  d.toggleCollapse();
+  assert.equal(d.dockIsOpen, false);
+  assert.equal(d.dockIsCollapsed, true);
+  assert.equal(d.collapsedClass, "pe-dock-collapsed");
+});
+
+test("noErrors mirrors errors.length === 0", () => {
+  const d = loadDock();
+  assert.equal(d.noErrors, true);
+  d.nodeFailed("a", failure("x"));
+  assert.equal(d.noErrors, false);
+});
+
+test("each failure entry carries its summary label and its lazily built view", () => {
+  globalThis.window = { PEErrorDetails: { build: (err) => ({ code: err.code, built: true }) } };
+  try {
+    const d = loadDock();
+    d.nodeFailed("stage_daily_trips", failure("pipeline.node.sql_error"));
+    const entry = d.errors[0];
+    assert.equal(entry.label, "stage_daily_trips · pipeline.node.sql_error");
+    assert.deepEqual(entry.view, { code: "pipeline.node.sql_error", built: true });
+    // A record-less entry: label keeps the em-dash + unknown shape, view stays null.
+    d.nodeFailed(null, null);
+    const bare = d.errors[1];
+    assert.equal(bare.label, "— · unknown");
+    assert.equal(bare.view, null);
+    // No renderer on the page: the view accessor resolves to null, nothing throws.
+    delete globalThis.window.PEErrorDetails;
+    const d2 = loadDock();
+    d2.nodeFailed("a", failure("y"));
+    assert.equal(d2.errors[0].view, null);
+  } finally {
+    delete globalThis.window;
+  }
+});
