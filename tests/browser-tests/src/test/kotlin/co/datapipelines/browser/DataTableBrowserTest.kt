@@ -199,6 +199,7 @@ class DataTableBrowserTest : BrowserSuite() {
             sortButton.getAttribute("title") shouldBe "Sorting this page by row_id — click for highest first"
         }
     }
+
     /**
      * 288 #2 — the observer's discovery costs one subtree query per TOP-LEVEL root, not one
      * per added node: a boosted swap's whole subtree used to be queried once per element
@@ -246,8 +247,10 @@ class DataTableBrowserTest : BrowserSuite() {
             queries shouldBeLessThan 25
         }
     }
+
     /**
-     * htmx caches `#app-main` as MARKUP before a boosted swap and re-parses it on Back. The
+     * htmx caches the page (the history element is `document.body` — no `hx-history-elt` in
+     * the layout) as MARKUP before a boosted swap and re-parses it on Back. The
      * enhancer's widths and measured variables are CSSOM writes; serialised into the snapshot
      * they would come back as `style` attributes, which `style-src 'self'` refuses — measured on
      * the lane instance with the cleanup removed: 9 violations on one Back, one per styled

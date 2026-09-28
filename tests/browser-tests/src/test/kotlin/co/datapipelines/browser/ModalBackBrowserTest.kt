@@ -32,7 +32,6 @@ import java.util.UUID
  * build/reports/287-screenshots/ for the handback.
  */
 class ModalBackBrowserTest : BrowserSuite() {
-
     @Test
     fun `the register datasource modal - open, close, boosted away, back - no refused inline style`() {
         val admin = seedLocalUser(uniqueEmail("mbr-" + generatedPassword("u").take(8)), generatedPassword("pw"), mustChange = false)
@@ -125,11 +124,26 @@ class ModalBackBrowserTest : BrowserSuite() {
             ensureTheme(mode)
             page.setViewportSize(1440, 900)
             page.navigate("$baseUrl/datasources")
-            walkAndShoot("#register-modal", "[data-action='datasource-register-open']", "[data-action='datasource-register-close']", "datasources-after-back-$mode")
+            walkAndShoot(
+                "#register-modal",
+                "[data-action='datasource-register-open']",
+                "[data-action='datasource-register-close']",
+                "datasources-after-back-$mode",
+            )
             page.navigate("$baseUrl/api-keys")
-            walkAndShoot("#key-modal", "[data-action='key-modal-open']", "[data-action='key-modal-close']", "api-keys-after-back-$mode")
+            walkAndShoot(
+                "#key-modal",
+                "[data-action='key-modal-open']",
+                "[data-action='key-modal-close']",
+                "api-keys-after-back-$mode",
+            )
             page.navigate("$baseUrl/templates")
-            walkAndShoot("#create-template-modal", "[data-action='template-create-open']", "[data-action='template-create-close']", "templates-after-back-$mode")
+            walkAndShoot(
+                "#create-template-modal",
+                "[data-action='template-create-open']",
+                "[data-action='template-create-close']",
+                "templates-after-back-$mode",
+            )
         }
         withClue("CSP violations across the screens walk") { drainCspViolations().shouldBeEmpty() }
     }
@@ -213,7 +227,7 @@ class ModalBackBrowserTest : BrowserSuite() {
             """() => {
               const list = document.querySelector('details.tplx-vmenu[open] .tplx-vmenu-list');
               return !!list && list.style.getPropertyValue('--vmenu-top').endsWith('px');
-            }"""
+            }""",
         ) as Boolean
 
     /** On the restored page: no open menu, and no `.tplx-vmenu-list` carries a `style` attribute. */
@@ -223,7 +237,7 @@ class ModalBackBrowserTest : BrowserSuite() {
                 """() => ({
                   open: document.querySelectorAll('details.tplx-vmenu[open]').length,
                   styled: document.querySelectorAll('.tplx-vmenu-list[style]').length,
-                })"""
+                })""",
             ) as Map<*, *>
         state["open"] shouldBe 0
         state["styled"] shouldBe 0
