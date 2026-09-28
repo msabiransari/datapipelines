@@ -28,21 +28,16 @@ class DashboardPartialController(
     fun stats(model: Model): String {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val isAdmin = principal.holds(Permission.EXECUTION_READ_ALL)
-
         val totalPipelines = pipelines.count(workspaceId, lens.viewFor(principal).pipelines)
         val todayStart = LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC)
 
-        // D11 (2026-09-20) + #9 R3 (#250): the execution figures follow the `execution.read`
-        // row — own runs plus the workspace's SCHEDULED runs unless `execution.read_all`, and
-        // NONE for a role the row refuses (the promoter), whose tiles then honestly read zero
-        // rather than counting runs it may not see.
-        val recentBatch =
-            when {
-                !principal.holds(Permission.EXECUTION_READ) -> emptyList()
-                isAdmin -> executions.findAll(workspaceId, limit = STATS_SAMPLE_SIZE, offset = 0)
-                else -> executions.findVisible(workspaceId, principal.userId, limit = STATS_SAMPLE_SIZE, offset = 0)
-            }
+        // D11 (2026-09-20) + #9 R3 (#250) + #293: the execution figures follow `visibleTo`'s
+        // rule, decided in SQL — every run with `execution.read_all`; own runs plus the
+        // workspace's SCHEDULED runs with `execution.read`; and a role the row refuses (the
+        // promoter, whose route here is `pipeline.read`) its OWN runs — the answer the explorers'
+        // Runs tabs and the search palette already gave the same promoter. Before #293 the tiles
+        // read zero for a promoter who could see their runs one click away.
+        val recentBatch = executions.listVisibleTo(principal, workspaceId, pipelineId = null, status = null, limit = STATS_SAMPLE_SIZE)
 
         val executionsToday = recentBatch.count { it.startedAt >= todayStart }
         val successCount = recentBatch.count { it.status == ExecutionStatus.SUCCESS }

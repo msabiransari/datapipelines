@@ -10,7 +10,8 @@ import java.util.UUID
 /**
  * The runs a UI list shows [principal] (#275): `co.datapipelines.web.api.visibleTo`'s row rule,
  * decided in SQL so a list is cut after visibility — the ONE read behind the search palette's
- * executions group and the pipeline and template explorers' Runs tabs.
+ * executions group, the pipeline and template explorers' Runs tabs, and (#293) the dashboard's
+ * stat tiles.
  *
  * - `execution.read_all` (the workspace admin, the super admin) → every run of the workspace
  *   ([ExecutionRepository.findAll]);
@@ -20,8 +21,8 @@ import java.util.UUID
  *   `pipeline.read` / `template.read` routes, so a promoter reaches them without `execution.read`;
  *   R3's scheduled arm is that row's, exactly as in `visibleTo`, and never the pane's.
  *
- * The executions screen, the dashboard and the REST list keep their two-arm forks: their routes
- * declare `execution.read`, so the third arm is unreachable there.
+ * The executions screen, the dashboard's recent-executions pane and the REST list keep their
+ * two-arm forks: their routes declare `execution.read`, so the third arm is unreachable there.
  */
 fun ExecutionRepository.listVisibleTo(
     principal: AuthenticatedPrincipal,

@@ -196,6 +196,13 @@ class ApiConsoleController(
         val url: String,
         val reason: String,
         val enabled: Boolean,
+        /**
+         * #293: [path] is the stored path itself — the echo was not cut — so an unpublish BY
+         * [path] addresses this row. False for a database-written path past the grammar's limit:
+         * its cut echo names a path no row is stored at (or, worse, a different row stored at
+         * exactly the cut), so the console withholds the verb there.
+         */
+        val addressable: Boolean = true,
     ) {
         companion object {
             /**
@@ -209,6 +216,7 @@ class ApiConsoleController(
                     url = PUBLISHED_PREFIX + echoed,
                     reason = legacy.reason,
                     enabled = legacy.enabled,
+                    addressable = !EndpointPath.isEchoCut(legacy.pathPattern),
                 )
             }
         }

@@ -215,4 +215,29 @@ class ApiConsoleRenderTest {
         viewer shouldNotContain ">Unpublish<"
         viewer shouldNotContain "hx-delete"
     }
+
+    @Test
+    fun `a legacy row whose echoed path was cut offers no unpublish - the call would address another path (#293)`() {
+        // Only a database write stores a path past the grammar's 200 characters; its echo is cut
+        // (#286), and an unpublish of the ECHO would target a different row — or one that exists
+        // at exactly the cut path. The row stays listed, with its reason; the verb is withheld.
+        val long = "/nyc/" + "x".repeat(1_000)
+        val row =
+            ApiConsoleController.LegacyEndpointRow.of(
+                co.datapipelines.application.endpoints.EndpointRow.Legacy(
+                    id = java.util.UUID.randomUUID(),
+                    workspaceId = java.util.UUID.randomUUID(),
+                    pathPattern = long,
+                    pipelineId = java.util.UUID.randomUUID(),
+                    reason = "Path is ${long.length} characters; the limit is 200 (§4.1).",
+                    enabled = true,
+                ),
+            )
+        val html = render { setVariable("legacyEndpoints", listOf(row)) }
+
+        html shouldContain ">Legacy<"
+        html shouldNotContain "hx-delete"
+        html shouldNotContain ">Unpublish<"
+        html shouldContain "longer than the console shows"
+    }
 }

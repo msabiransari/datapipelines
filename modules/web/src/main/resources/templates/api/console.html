@@ -113,11 +113,15 @@
                    route, no new permission. The row removes itself on success; the server's
                    @RequiredScope is the guard, the markup only hides the verb from roles the
                    `endpoint.unpublish` row refuses. -->
+              <!-- #293: never on a row whose echoed path was cut (a database-written path past the
+                   grammar's limit): an unpublish of the echo would address a different path. -->
               <button type="button" class="ds-button ds-button-ghost ds-button-sm"
-                      th:if="${canAuthor == true or canAdminWorkspace == true or isSuperAdmin == true}"
+                      th:if="${l.addressable and (canAuthor == true or canAdminWorkspace == true or isSuperAdmin == true)}"
                       th:attr="hx-delete=@{/api/v1/endpoints(path=${l.path})}"
                       hx-confirm="Unpublish this legacy path? It never serves under today's grammar."
                       hx-target="closest tr" hx-swap="delete">Unpublish</button>
+              <span class="app-card-note app-flush" th:unless="${l.addressable}">This stored path is longer than the console shows —
+                only a database write can store one, and an operator removes it there.</span>
             </td>
           </tr>
           </tbody>

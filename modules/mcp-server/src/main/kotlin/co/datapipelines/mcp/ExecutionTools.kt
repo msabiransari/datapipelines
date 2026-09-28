@@ -28,10 +28,21 @@ import java.util.UUID
  * "not yours" code. The distinction is invisible to a legitimate caller and mirrors the
  * `result.execution_not_found` row of §6.2.15's error table.
  */
-internal fun ExecutionRecord.visibleTo(ctx: McpToolContext): Boolean =
+internal fun ExecutionRecord.visibleTo(
+    ctx: McpToolContext,
+    readPermission: Permission,
+): Boolean =
     isOwnRunOf(ctx.principal.userId) ||
         ctx.principal.holds(Permission.EXECUTION_READ_ALL) ||
-        (triggeredVia == ExecutionTrigger.SCHEDULE && ctx.principal.holds(Permission.EXECUTION_READ))
+        (triggeredVia == ExecutionTrigger.SCHEDULE && ctx.principal.holds(readPermission))
+
+/**
+ * The catalogue row [tool] is admitted by (#293): what [visibleTo]'s scheduled branch asks of a
+ * tool, read from [McpToolCatalog] rather than restated, so the code and the catalogue cannot
+ * drift apart. A tool with no row is a wiring defect and fails loudly at construction.
+ */
+internal fun catalogueRowOf(tool: McpSchema.Tool): Permission =
+    checkNotNull(McpToolCatalog.permissionOf(tool.name())) { "tool '${tool.name()}' has no McpToolCatalog row" }
 
 /** [visibleTo]'s twin for the cancel verb: own runs, or any with `execution.cancel_all` (#215). */
 internal fun ExecutionRecord.cancellableBy(ctx: McpToolContext): Boolean =
@@ -102,6 +113,9 @@ class ExecutionsListTool(
                 """.trimIndent(),
         )
 
+    /** This tool's catalogue row — the permission [visibleTo]'s scheduled branch asks (#293). */
+    private val readRow = catalogueRowOf(definition)
+
     override fun call(
         args: McpArguments,
         ctx: McpToolContext,
@@ -122,7 +136,7 @@ class ExecutionsListTool(
                 executions.findVisible(workspaceId, ctx.principal.userId, pipelineId, wanted, limit = limit)
             }
         return candidates
-            .filter { it.visibleTo(ctx) }
+            .filter { it.visibleTo(ctx, readRow) }
             .map { it.toMcpMetadata() }
     }
 
@@ -163,13 +177,16 @@ class ExecutionsGetTool(
                 """.trimIndent(),
         )
 
+    /** This tool's catalogue row — the permission [visibleTo]'s scheduled branch asks (#293). */
+    private val readRow = catalogueRowOf(definition)
+
     override fun call(
         args: McpArguments,
         ctx: McpToolContext,
     ): Any {
         val workspaceId = ctx.principal.requireWorkspace().id
         val id = args.requiredUuid("execution_id")
-        val record = executions.findById(workspaceId, id)?.takeIf { it.visibleTo(ctx) } ?: throw McpNotFound.execution(id)
+        val record = executions.findById(workspaceId, id)?.takeIf { it.visibleTo(ctx, readRow) } ?: throw McpNotFound.execution(id)
         return record.toMcpMetadata()
     }
 }

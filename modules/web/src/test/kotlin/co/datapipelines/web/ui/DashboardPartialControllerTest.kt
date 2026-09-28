@@ -47,7 +47,10 @@ class DashboardPartialControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(workspaceAdmin: Boolean = false) {
+    private fun authenticate(
+        workspaceAdmin: Boolean = false,
+        role: WorkspaceRole = if (workspaceAdmin) WorkspaceRole.WORKSPACE_ADMIN else WorkspaceRole.VIEWER,
+    ) {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
                 AuthenticatedPrincipal(
@@ -61,7 +64,7 @@ class DashboardPartialControllerTest {
                             "acme",
                             // RBAC round 1: "an admin sees the workspace's runs" is the CAPABILITY
                             // now — `Scope.ADMIN` is a scope no principal can hold (D-R1, O-2).
-                            if (workspaceAdmin) WorkspaceRole.WORKSPACE_ADMIN else WorkspaceRole.VIEWER,
+                            role,
                         ),
                 ),
                 null,
@@ -151,5 +154,25 @@ class DashboardPartialControllerTest {
         controller.recentExecutions(model)
 
         model["executions"] shouldBe batch
+    }
+
+    @Test
+    fun `a promoter's tiles count their OWN runs - every surface answers as visibleTo does (#293)`() {
+        // Pre-fix the promoter's tiles read none (`!holds(execution.read) -> emptyList()`) while
+        // the explorers' Runs tabs and the search palette showed the same promoter their own runs.
+        // The ruling (orchestrator default, 2026-09-28): the dashboard agrees — own runs, in SQL
+        // (the D11 pattern), never the workspace's and never the scheduled arm.
+        authenticate(role = WorkspaceRole.PROMOTER)
+        every { pipelines.countAll(workspaceId) } returns 0
+        val own = listOf(record(ExecutionStatus.SUCCESS), record(ExecutionStatus.FAILED))
+        every { executions.findByUser(workspaceId, userId, null, null, null, null, any(), any()) } returns own
+
+        controller.stats(model)
+
+        verify(exactly = 1) { executions.findByUser(workspaceId, userId, null, null, null, null, any(), any()) }
+        verify(exactly = 0) { executions.findVisible(any(), any(), any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { executions.findAll(any(), any(), any(), any(), any(), any(), any()) }
+        model["executionsToday"] shouldBe 2
+        model["successRate"] shouldBe 50
     }
 }
