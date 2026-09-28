@@ -59,7 +59,11 @@ class AnalyticalGuidanceRulesTest {
         }
         val text = section!!.markdown
         val weight =
-            WEIGHT_PHRASE.find(text)?.groupValues?.get(1)?.toLong()
+            WEIGHT_PHRASE
+                .find(text)
+                ?.groupValues
+                ?.get(1)
+                ?.toLong()
                 ?: error("the worked case no longer states its sampling weight as 'a stated 1 in N'")
         val rows = tableRows(text)
         withClue("the worked case's table has fewer than three sites — a ranking needs a field") {
@@ -93,12 +97,22 @@ class AnalyticalGuidanceRulesTest {
         markdown
             .lines()
             .filter { it.startsWith("|") }
-            .map { line -> line.trim().trim('|').split('|').map { it.trim() } }
+            .map { cellsOf(it) }
             .filter { cells -> cells.size == 5 && cells.drop(1).all { NUMBER.matches(it) } }
             .map { cells ->
-                val n = cells.drop(1).map { it.replace(",", "").toLong() }
+                val n = cells.drop(1).map { wholeNumber(it) }
                 CaseRow(cells[0], n[0], n[1], n[2], n[3])
             }
+
+    /** A table row's cells, the outer pipes dropped and each cell trimmed. */
+    private fun cellsOf(line: String): List<String> =
+        line
+            .trim()
+            .trim('|')
+            .split('|')
+            .map { it.trim() }
+
+    private fun wholeNumber(cell: String): Long = cell.replace(",", "").toLong()
 
     /** The document's text with every line trimmed and joined by one space — wrapping is free. */
     private fun joined(doc: Doc): String = doc.markdown.lines().joinToString(" ") { it.trim() }
