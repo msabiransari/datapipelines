@@ -95,14 +95,20 @@ data class ParameterDeclaration(
  *   (P31): past it the match is refused as `pattern_budget`, whatever the pattern does.
  * @property defaultMaxLength the `max_length` a `STRING`/`BINARY` value gets when its declaration
  *   states none; null means unbounded — a pipeline's behaviour before and after #194.
+ * @property maxNumericDigits the digit cap the two textual BIG paths check BEFORE parsing
+ *   (#278, P34 shape): the parse of an n-digit string is O(n²) on JDK 21, so the cap is what
+ *   bounds the CPU one value can spend. Defaults to [ParameterCoercion.MAX_NUMERIC_DIGITS] —
+ *   the number stated in pipeline-contract §6.3.
  */
 data class ParameterValueLimits(
     val maxRegexReads: Long = DEFAULT_MAX_REGEX_READS,
     val defaultMaxLength: Int? = null,
+    val maxNumericDigits: Int = ParameterCoercion.MAX_NUMERIC_DIGITS,
 ) {
     init {
         require(maxRegexReads > 0) { "maxRegexReads must be positive; got $maxRegexReads" }
         require(defaultMaxLength == null || defaultMaxLength >= 0) { "defaultMaxLength must be non-negative; got $defaultMaxLength" }
+        require(maxNumericDigits > 0) { "maxNumericDigits must be positive; got $maxNumericDigits" }
     }
 
     companion object {

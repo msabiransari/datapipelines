@@ -75,7 +75,7 @@ class ParameterValueValidator(
         rules: CompiledRules,
         node: JsonNode,
     ): ParameterValueOutcome =
-        when (val coerced = ParameterCoercion.coerce(declaration.type, node)) {
+        when (val coerced = ParameterCoercion.coerce(declaration.type, node, limits.maxNumericDigits)) {
             is ParameterCoercion.Outcome.Rejected -> {
                 refused(ParameterValueRule.INVALID_VALUE_TYPE, coerced.reason)
             }
