@@ -108,9 +108,9 @@ class SecurityConfig(
                 // (deployment.md §6.2). Spring's writer only fires on a request the container
                 // sees as secure, so this is explicit rather than a change in behaviour.
                 headers.httpStrictTransportSecurity { it.disable() }
-                // The CSP is two writers, not `contentSecurityPolicy { }`: the pipeline
-                // editor's route carries `'unsafe-eval'` for Alpine.js (#195) and nothing
-                // else does — the matchers are complementary, so every response gets exactly one.
+                // The CSP is ONE writer over every policed route (#195 retired the editor's
+                // `'unsafe-eval'` exemption: the editor runs Alpine's CSP build), kept as a
+                // list so a second policy, if one ever returns, lands beside it deliberately.
                 SecurityHeaders.cspWriters().forEach { headers.addHeaderWriter(it) }
             }.authorizeHttpRequests { auth ->
                 // Async re-dispatches (SSE completion, rest-api §6) and error dispatches
