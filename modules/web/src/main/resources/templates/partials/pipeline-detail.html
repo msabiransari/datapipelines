@@ -82,11 +82,12 @@
                 th:attr="hx-get=@{'/partials/pipelines/{id}/lifecycle/switch'(id=${pipeline.id})},
                          hx-target='#px-dialog', hx-swap='innerHTML'">Switch…</button>
 
-        <!-- The editor is a full document load, never a boosted swap: its Alpine root
-             (x-data="pipelineEditor()") is initialised by alpine.min.js the moment the
-             swapped markup lands, racing the editor scripts that define it — every
-             binding then throws "pipelineEditor is not defined" and the page has no
-             Execute, no dock, no inspector (found live 2026-09-05, first walk after 076). -->
+        <!-- The editor is a full document load, never a boosted swap: the editor page's
+             scripts (init.js, graph.js) load WITH the document, so Alpine's CSP build binds
+             the registered `pipelineEditor` component as the page paints. On a boosted swap
+             the bindings evaluate the instant the markup lands — before those scripts have
+             executed — and the page has no Execute, no dock, no inspector (found live
+             2026-09-05, first walk after 076; the facts link joined this rule in #149). -->
         <a class="ds-button ds-button-primary ds-button-sm tplx-detail-open" hx-boost="false"
            th:href="@{'/pipelines/' + ${pipeline.id} + '/editor'}" th:title="${pipeline.name}">Open in editor</a>
       </div>
