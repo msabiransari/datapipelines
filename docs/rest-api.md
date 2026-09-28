@@ -2005,7 +2005,7 @@ Apply one batch. **All of it, or none of it** ([§10.4](versioning.md#104-push-o
 }
 ```
 
-`parameter_sets` (#194 lane D) are the §21.4 export envelopes, applied in the same one transaction AFTER the templates (a set's pins must resolve) and BEFORE the pipelines — the record's §8.3 order. A pin the batch does not bring is `400 parameter.import.missing_template`; the id is KEPT (P24) and an id held by another workspace's set refuses `409 parameter.version.conflict` / `id_taken` (C29).
+`parameter_sets` (#194 lane D) are the §21.4 envelopes' `parameter_set` NODES (a whole envelope as an entry is refused by the strict bind), applied in the same one transaction AFTER the templates (a set's pins must resolve) and BEFORE the pipelines — the record's §8.3 order. A pin the batch does not bring is `400 parameter.import.missing_template`; the id is KEPT (P24) and an id held by another workspace's set refuses `409 parameter.version.conflict` / `id_taken` (C29).
 
 `templates` and `pipelines` arrive **in push order** — template versions in the transitive `imports_json` closure first, then child pipelines, then their parents (children before parents) — and are applied in the order given. The receiver does not re-derive the closure: the sender owns that rule (§10.4), and a second implementation of it here would be a second thing to keep correct. Entries already present at the same version and hash are omitted by the sender and are an idempotent no-op if sent anyway.
 
