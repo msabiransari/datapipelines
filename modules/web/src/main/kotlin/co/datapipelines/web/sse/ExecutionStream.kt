@@ -195,14 +195,16 @@ class ExecutionStream(
         val judge = authority ?: return true
         val principal = subscriber ?: return true
         if (revoked.get()) return false
-        // [ExecutionStreamAuthority.mayRead] never throws — an unsettleable answer is its own
+        // [ExecutionStreamAuthority.verdict] never throws — an unsettleable answer is its own
         // refusal (fail closed, in the log). #263: the expiry refusal carries the same final
         // comment (a static string either way); only the metric's close reason differs, so the
-        // expired flag is recorded here for [co.datapipelines.web.metrics.WebMetrics].
-        val allowed = judge.mayRead(principal, executionId)
+        // expired flag is recorded here for [co.datapipelines.web.metrics.WebMetrics] — from the
+        // SAME judgement that refused (#271), never a second read of the clock.
+        val verdict = judge.verdict(principal, executionId)
+        val allowed = verdict == StreamVerdict.ALLOWED
         if (!allowed) {
             revoked.set(true)
-            if (judge.hasExpired(principal)) expired.set(true)
+            if (verdict == StreamVerdict.EXPIRED) expired.set(true)
             log.info("SSE stream of execution {} cut: the subscriber's authority no longer holds (#230, P4).", executionId)
             runCatching { emitter.send(SseEmitter.event().comment(REVOKED_COMMENT)) }
             close()

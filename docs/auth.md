@@ -1,6 +1,6 @@
 # Auth & Security Specification
 
-**Status:** v3.16 (revised — see Change Log)
+**Status:** v3.18 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
 **Last updated:** 2026-09-27
@@ -126,6 +126,9 @@ The `provider` field stores the **OIDC registration name** as configured by the 
    user with NO membership at all, so somebody removed from `demo` on purpose is not re-added
    by their next login. It lives in `WorkspaceService.workspaceForLogin`, shared by both
    credential paths: the owner's rule is about logging in, not about which provider did it.
+   All three stamps — last-used, first membership, the demo join — are built by the one
+   super-admin-aware helper `resolveForSession` uses (#262, #271): a super admin's login
+   response keeps the instance authority whichever fallback stamped it.
 
    A user still with nothing selectable — `demo` deactivated, or never seeded — stamps
    nothing. They authenticate fine and every workspace-scoped operation is refused; round 2
@@ -1712,6 +1715,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v3.18 | 286 (#271) — numbered after 194d's v3.17 (in flight; renumber at merge, keep both) | **§4.2 step 4**: the demo join — the login stamp's third fallback — is built by the same super-admin-aware helper as the last-used and first-membership stamps (#262 covered two of three; the join returned a plain VIEWER context for a super admin with no membership — inert while both callers read only `.name`). **§11.4's stream re-judgement** is ONE verdict carrying its reason (`ExecutionStreamAuthority.verdict`: allowed / expired / revoked): the live stream no longer re-asks the clock after a refusal, so a token expiring in between can no longer tag a standing revocation `expired`. No route, permission or row changed. |
 | 2026-09-27 | v3.16 | 254 (#254) the avatar proxy remembers a refusal | §11.1: a refused or failed fetch enters the same bounded TTL cache as a NEGATIVE entry — one provider fetch per user per TTL instead of one per page view — and the 404 carries `Cache-Control: private, max-age=<ttl seconds>`, so a stalling picture host cannot hold a request thread on every page view and the browser stops asking while the refusal stands; a later success replaces the negative entry. No route, permission or fence rule changed; the cache stays one map with one entry bound. `AvatarControllerTest` red-first (a counting fetcher stub saw two fetches on the base; the header absent). |
 | 2026-09-27 | v3.15 | 250 landing (#250, #259) — R3 on every surface | §7.6 `execution.read`: the row's R3 clause no longer says "not yet the UI lists or MCP" — the UI's execution lists and the MCP execution tools apply R3 since 250 (the key's own role deciding); no cell changed. |
 | 2026-09-26 | v3.14 | 262 (#262, with #263) the login stamp and the stream's claim | **§11.4**: the open-stream re-judgement asks the workspace the stream OPENED in (the filter's resolved context — a `DP-Workspace` header switch included), not the JWT claim, whose re-resolution wrongly cut a header-switched stream at its first write; and it judges the validated token's `exp`, which the subscriber now carries from the claims the credential filter already validated — a write at or past it ends the stream with the same final comment, `close_reason` **`expired`** (the closed set, [Observability §4.1](observability.md#41-metric-naming)). No route, permission or row changed. **§5 (262)**: `workspaceForLogin`'s two membership fallbacks build the super-admin-aware context `resolveForSession`'s fallback builds (#216's helper — the predicate is the just-authenticated `User` row's live `is_admin`), so a super admin's login response keeps the instance authority instead of one request's demotion. |

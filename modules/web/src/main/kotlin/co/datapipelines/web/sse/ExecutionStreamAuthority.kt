@@ -65,10 +65,11 @@ class ExecutionStreamAuthority(
 
     /**
      * #263: has [subscriber]'s validated session token expired? Pure — the carried `exp` and
-     * the clock, no store read — so the stream guards ask it again after a refusal to tell an
-     * expired cut from a revoked one for the close reason (the final comment is the same
-     * static string either way). A subscriber with no recorded expiry is not expiry-judged:
-     * production sessions always carry one; the null case is the pre-#263 shape.
+     * the clock, no store read. [verdict] asks it first and carries the answer as the close
+     * reason (#271 — a guard that asked again after a refusal could see a token expire in
+     * between); the final comment is the same static string either way. A subscriber with no
+     * recorded expiry is not expiry-judged: production sessions always carry one; the null case
+     * is the pre-#263 shape.
      */
     fun hasExpired(subscriber: AuthenticatedPrincipal): Boolean = subscriber.sessionExpiresAtMillis?.let { nowMillis() >= it } ?: false
 
@@ -80,14 +81,28 @@ class ExecutionStreamAuthority(
     fun mayRead(
         subscriber: AuthenticatedPrincipal,
         executionId: UUID,
-    ): Boolean =
+    ): Boolean = verdict(subscriber, executionId) == StreamVerdict.ALLOWED
+
+    /**
+     * [mayRead] with the REASON carried (#271): judged ONCE, so a caller picking a close reason
+     * never asks the clock a second time — a token expiring between a refusal and a later
+     * [hasExpired] would tag a standing revocation as an expiry. Never throws, like [mayRead].
+     */
+    fun verdict(
+        subscriber: AuthenticatedPrincipal,
+        executionId: UUID,
+    ): StreamVerdict =
         try {
-            judge(subscriber, executionId)
+            when {
+                hasExpired(subscriber) -> StreamVerdict.EXPIRED
+                judge(subscriber, executionId) -> StreamVerdict.ALLOWED
+                else -> StreamVerdict.REVOKED
+            }
         } catch (
             @Suppress("TooGenericExceptionCaught") e: RuntimeException,
         ) {
             log.warn("Authority re-judge for execution {} failed; answering REFUSED (fail closed).", executionId, e)
-            false
+            StreamVerdict.REVOKED
         }
 
     @Suppress("ReturnCount") // one guarded refusal per rule; a merged expression would hide which rule fired
@@ -95,11 +110,10 @@ class ExecutionStreamAuthority(
         subscriber: AuthenticatedPrincipal,
         executionId: UUID,
     ): Boolean {
-        // #263 first — before any store read: a token past its `exp` ends the stream at this
-        // write regardless of how healthy the rest of the standing is, the same cut a fresh
-        // request would meet at the credential filter (its validate throws on the same
-        // comparison). A null expiry is not judged — the pre-#263 shape.
-        if (hasExpired(subscriber)) return false
+        // #263's expiry is judged first, by [verdict], before any store read: a token past its
+        // `exp` ends the stream at this write regardless of how healthy the rest of the standing
+        // is, the same cut a fresh request would meet at the credential filter. What reaches
+        // here is the standing itself.
         if (liveness.check(subscriber.userId, pin = null) != null) return false
         val user = users.snapshot(subscriber.userId) ?: return false
         // The identity refresh FIRST: `is_admin` is a per-request read on the request path
@@ -127,4 +141,14 @@ class ExecutionStreamAuthority(
         // here) — so the open-time visibility verdict stands for this window.
         return context.id == subscriber.workspace?.id
     }
+}
+
+/**
+ * One judgement of a stream's subscriber (#271): may they still read, and if not, WHY — the
+ * close reason the duration metric records (observability §4.2: `expired` vs `revoked`).
+ */
+enum class StreamVerdict {
+    ALLOWED,
+    EXPIRED,
+    REVOKED,
 }

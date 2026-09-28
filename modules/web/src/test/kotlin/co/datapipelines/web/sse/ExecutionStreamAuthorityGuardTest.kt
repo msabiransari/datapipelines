@@ -34,10 +34,11 @@ class ExecutionStreamAuthorityGuardTest {
     private fun authority(vararg verdicts: Boolean): ExecutionStreamAuthority {
         val judge = mockk<ExecutionStreamAuthority>()
         var call = 0
-        every { judge.mayRead(any(), any()) } answers { verdicts[call++ % verdicts.size] }
-        // #263: the guard asks this after a refusal to pick the close reason; these tests pin
-        // the revoked shape, so every cut here is a standing revocation, none an expiry.
-        every { judge.hasExpired(any()) } returns false
+        // #271: the guard asks ONE verdict carrying its reason; these tests pin the revoked
+        // shape, so every cut here is a standing revocation, none an expiry.
+        every { judge.verdict(any(), any()) } answers {
+            if (verdicts[call++ % verdicts.size]) StreamVerdict.ALLOWED else StreamVerdict.REVOKED
+        }
         return judge
     }
 

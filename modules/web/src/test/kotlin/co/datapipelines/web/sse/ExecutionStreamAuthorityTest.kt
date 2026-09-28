@@ -310,6 +310,33 @@ class ExecutionStreamAuthorityTest {
         emitter.eventNames() shouldBe listOf("execution_started")
     }
 
+    @Test
+    fun `a revocation whose token expires between the verdict and the close reason is tagged revoked, not expired (#271)`() {
+        // The authority judges once and carries the reason: before #271 the stream re-asked
+        // hasExpired AFTER mayRead refused, so a token expiring in between tagged a standing
+        // revocation (the member was removed) as `expired`. The clock here ticks past the
+        // expiry on its SECOND read — the first is the verdict's own expiry check.
+        val reads = AtomicLong(0)
+        liveUser()
+        memberships()
+        ownRun()
+
+        val stream =
+            ExecutionStream(
+                executionId,
+                userId,
+                CapturingSseEmitter(),
+                JsonMapper.builder().build(),
+                subscriber = subscriberAtOpen().copy(sessionExpiresAtMillis = 1_000_500L),
+                authority = authority({ if (reads.getAndIncrement() == 0L) 1_000_000L else 1_000_500L }),
+            )
+
+        stream.send("node_started", 1, emptyMap()) shouldBe false
+
+        stream.isRevoked shouldBe true
+        stream.isExpired shouldBe false
+    }
+
     private fun workspaceService() =
         WorkspaceService(
             repository,
