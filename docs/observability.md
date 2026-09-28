@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.15 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.16 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-25
@@ -174,6 +174,17 @@ The scheduler ([Scheduler](scheduler.md)) logs its own work under `scheduler.*`.
 | WARN | `scheduler.admission_wait_expired` | Shutdown: launches were still in progress when `shutdown-wait-seconds` ran out; their runs reconcile from the execution record | `launching`, `wait_ms` |
 
 A `scheduler.schedule_blocked` needs a person. A steady `scheduler.run_not_started` means `max-concurrent-runs` is too low for this instance's schedules, or runs are too long for their cadence — `datapipelines.scheduler.capacity.retries` (§4.1) is the leading signal.
+
+#### 3.4F The legacy endpoint events (#274, #286)
+
+A `published_endpoints` row whose stored path fails today's grammar is RETIRED, never fatal ([Metadata DB §4.13](metadata-db.md#413-published_endpoints)): never served, listed flagged, unpublishing it is the fix. Two lines say so to an operator; both carry a COUNT, never a path.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| WARN | `endpoint.legacy_rows` | Once per JVM, on the first repository query that meets a legacy row. `at_least` is THAT query's count — a floor, not the deployment's total (after V41 the registry warm-up reads enabled rows only, so the first sighting is usually one workspace's listing) | `at_least` |
+| WARN | `endpoint.promotion_legacy_omitted` | A promotion batch was built and legacy rows over its promoted pipelines were left out — the target's grammar would refuse them | `count` |
+
+Neither is an alert: the API console lists every legacy row with its reason. A steady `promotion_legacy_omitted` means an endpoint that will not reach the target until someone republishes it at a legal path.
 
 ### 3.5 Log destination
 
@@ -436,6 +447,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.16 | 286 (#286) | New **§3.4F the legacy endpoint events**: `endpoint.legacy_rows` (#274's once-per-JVM WARN, its field now `at_least` — the first query's count is a floor) and `endpoint.promotion_legacy_omitted` (#286 — a promotion batch left legacy rows out; before #274 the batch threw, after it the omission was silent). Both carry a count, never a path. |
 | 2026-09-26 | v1.15 | 262 (#263) | §4.1 `datapipelines.sse.stream.duration`'s `close_reason` closed set gains **`expired`**: the same policy cut as `revoked` — the subscriber's re-judgement refuses a write, the final comment is the same static string, the execution keeps running — where the refusal was the subscriber's validated token passing its `exp` (#263), so an expired token is never counted as a standing revocation or a `client_disconnect`. |
 | 2026-09-26 | v1.14 | 230 (#230, security-assurance P4) | §4.2 `datapipelines.sse.stream.duration`'s `close_reason` closed set gains **`revoked`**: a stream cut by the subscriber-authority re-judgement before a write. Recorded BEFORE the terminal question — a cut stream has no terminal event of its own, and counting it as `client_disconnect` would feed D7's cancellation story a reader it never had; the execution deliberately keeps running (P4's first half). |
 | 2026-09-25 | v1.13 | scheduler lane 1 (#9) | New **§3.4E the scheduler events** (`scheduler.started` / `api_mode` / `dispatched` / `reconciled` / `run_not_started` / `schedule_blocked` / `start_failed` / `inspect_refused` / `admission_closed` / `admission_wait_expired`) and four scheduler metrics in §4.1 (`occurrences{outcome}`, `runs.finished{state}`, `capacity.retries`, `runs.in_flight`). §6.1: no scheduler health component — db-scheduler's indicator is disabled. `docs-audit.sh` check C does not extract `scheduler.*` yet (#252; the same gap v1.7 names for `lake.*`). |
