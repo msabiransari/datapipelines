@@ -325,25 +325,53 @@ class PipelinePartialControllerTest {
     }
 
     @Test
-    fun `106 - a runs fragment over a NON-admin principal asks only for that user's runs`() {
+    fun `106 + #275 - a runs fragment over a NON-admin member reads her own runs plus the workspace's scheduled runs`() {
         // The execution-history screen's rule, restated at the second surface over the same
-        // rows: the principal in this spec holds AUTHOR, so `findByUser` is the read, and a
-        // strict mock means calling `findAll` instead would fail rather than pass quietly.
+        // rows: the principal in this spec holds AUTHOR, so `findVisible` (own runs OR
+        // `triggered_via = SCHEDULE`, R3) is the read, and a strict mock means calling `findAll`
+        // — or the pre-#275 own-only `findByUser` — would fail rather than pass quietly.
         val id = UUID.randomUUID()
         val executions = mockk<co.datapipelines.executor.ExecutionRepository>()
         // 178: the runs pane resolves the pipeline through the caller's view before reading runs.
         every { repository.findById(workspaceId, id) } returns record("acme/runs", id = id)
-        every { executions.findByUser(workspaceId, userId, id, null, null, null, 20, 0) } returns emptyList()
-        val runsController =
-            PipelinePartialController(
-                co.datapipelines.web.pipelineBrowseModelOver(repository, service, executions = executions),
-                co.datapipelines.web.EVERYTHING_LENS,
-            )
+        every { executions.findVisible(workspaceId, userId, id, null, null, null, 20, 0) } returns emptyList()
 
-        runsController.runs(model, id) shouldBe "partials/pipeline-runs"
+        runsControllerOver(executions).runs(model, id) shouldBe "partials/pipeline-runs"
+
+        verify(exactly = 1) { executions.findVisible(workspaceId, userId, id, null, null, null, 20, 0) }
+    }
+
+    @Test
+    fun `#275 - a runs fragment over a promoter reads her own runs only - R3's scheduled arm is execution_read's`() {
+        // The pane is a `pipeline.read` route, so the promoter reaches it; the promoter holds no
+        // `execution.read`, so the scheduled runs R3 lifts are not hers — as in `visibleTo`.
+        SecurityContextHolder.getContext().authentication =
+            UsernamePasswordAuthenticationToken(
+                AuthenticatedPrincipal(
+                    userId,
+                    "a@b.c",
+                    "A",
+                    AuthMethod.OIDC,
+                    workspace = WorkspaceContext(workspaceId, "acme", co.datapipelines.auth.WorkspaceRole.PROMOTER),
+                ),
+                null,
+                emptyList(),
+            )
+        val id = UUID.randomUUID()
+        val executions = mockk<co.datapipelines.executor.ExecutionRepository>()
+        every { repository.findById(workspaceId, id) } returns record("acme/runs", id = id)
+        every { executions.findByUser(workspaceId, userId, id, null, null, null, 20, 0) } returns emptyList()
+
+        runsControllerOver(executions).runs(model, id) shouldBe "partials/pipeline-runs"
 
         verify(exactly = 1) { executions.findByUser(workspaceId, userId, id, null, null, null, 20, 0) }
     }
+
+    private fun runsControllerOver(executions: co.datapipelines.executor.ExecutionRepository) =
+        PipelinePartialController(
+            co.datapipelines.web.pipelineBrowseModelOver(repository, service, executions = executions),
+            co.datapipelines.web.EVERYTHING_LENS,
+        )
 
     @Test
     fun `an id that no longer names a live pipeline renders the quiet not-found pane`() {

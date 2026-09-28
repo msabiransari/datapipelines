@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.43 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.46 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-27
@@ -1511,7 +1511,7 @@ result is unexpired):
 
 Ownership (roles design D11, ratified 2026-09-20 — [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) `execution.read`): a **workspace admin** (or super admin — `execution.read_all`) reads every execution in the workspace, optionally pipeline-narrowed; a **viewer** or **author** reads only their OWN runs — `executed_by = self` and not started through an endpoint key; a **promoter** is refused the list, the read, the result and the replay by role (`403 auth.role_required`) before any row is consulted. The filter is SQL, so the page is cut after it and `has_more` is honest. Another member's execution is `404 result.execution_not_found` on the single reads, never 403 ([Auth §11A.1](auth.md#11a1-the-404-rule)).
 
-**Scheduled runs (#9, ruling R3).** An execution a schedule fired (`triggered_via = SCHEDULE`) is nobody's own — it ran as the system identity — so it is visible to **every member whose role reaches `execution.read`**, on every surface: this list and §10.2, §10.3, §10.3A and the result read, the UI's execution lists (the executions screen and the dashboard, #250), and MCP's `executions_list`, `executions_get` and `executions_get_result` (#250 — the key's own role decides, keys v2). The read is one SQL predicate (`findVisible` — own runs `OR triggered_via = 'SCHEDULE'`, workspace-scoped), so every surface cuts its page after visibility and the surfaces cannot disagree. It lifts visibility, never ownership: cancelling one (§10.4) still needs `execution.cancel_all`.
+**Scheduled runs (#9, ruling R3).** An execution a schedule fired (`triggered_via = SCHEDULE`) is nobody's own — it ran as the system identity — so it is visible to **every member whose role reaches `execution.read`**, on every surface: this list and §10.2, §10.3, §10.3A and the result read, the UI's execution lists (the executions screen and the dashboard, #250; the search palette's executions group and the pipeline and template explorers' Runs tabs, #275), and MCP's `executions_list`, `executions_get` and `executions_get_result` and its executions resource listing (#250, #275 — the key's own role decides, keys v2). A role WITHOUT `execution.read` that still reaches a runs pane through `pipeline.read` / `template.read` — the promoter, on the explorers' Runs tabs and the search palette — sees its own runs only: the scheduled arm is `execution.read`'s, never the pane's. The read is one SQL predicate (`findVisible` — own runs `OR triggered_via = 'SCHEDULE'`, workspace-scoped), so every surface cuts its page after visibility and the surfaces cannot disagree. It lifts visibility, never ownership: cancelling one (§10.4) still needs `execution.cancel_all`.
 
 ### 10.2 Get execution metadata
 
@@ -2097,7 +2097,10 @@ at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carrie
   Nothing is trimmed: `?amount=%2012.50%20` is refused exactly as the execute body refuses
   `" 12.50 "` (the v2.36 break, #194). A value that breaks a declared rule of its parameter —
   a `constraints` bound, length or pattern, or the declared precision/scale — is
-  `pipeline.execution.parameter_constraint_violation` (v2.37, pipeline-contract §6.2);
+  `pipeline.execution.parameter_constraint_violation` (v2.37, pipeline-contract §6.2); a value
+  judged against a STORED declaration today's save refuses (a body saved before #194 with a
+  `constraints` block or `cardinality` then ignored) is `409 pipeline.execution.parameter_declaration_invalid`
+  (v2.45, #268) — the pipeline must be re-saved;
 - a value over 4 KB is `endpoint.request.value_too_large`.
 
 Headers: `DP-Result-TTL-Seconds` (§7.4's clamp) and `DP-Result-Page-Rows` (R-EP4, clamped to
@@ -2155,7 +2158,7 @@ timestamps), because there is no parse. Once V41 has run its `enabled` is `false
 (`?path=`) resolves valid rows only and answers the legacy path `404`, like the serve path. The
 one verb the legacy row supports is **`DELETE`** — the same unpublish route, unchanged — which
 removes it; republishing at a current-grammar path is the replacement. The API console page lists
-the row flagged with the same reason and offers only that verb. The flag is the parse verdict taken on every read, not the `retired_reason` column (an audit marker); a legacy `path` is echoed as stored, and a row malformed in a way V41's two-segment predicate does not name is listed `legacy: true` with `enabled: true` and is never served either.
+the row flagged with the same reason and offers only that verb. The flag is the parse verdict taken on every read, not the `retired_reason` column (an audit marker); a legacy `path` (and its `url`) is echoed as stored up to the grammar's 200 characters and cut there (#286 — `path_pattern` is `TEXT` with no CHECK, so only a database write can store a longer one; every API write has been held to 200 since the registry was born, so every row the product wrote is echoed exactly and stays addressable by `DELETE ?path=`, and a longer one is unpublished by its full stored path), and a row malformed in a way V41's two-segment predicate does not name is listed `legacy: true` with `enabled: true` and is never served either. A **promotion** batch (§10.5) never carries a legacy row — the target's grammar would refuse it — and the sender logs the omission (`event=endpoint.promotion_legacy_omitted`, the count over the promoted pipelines, never a path); the promotion result does not list it.
 
 Bindings are `POST` / `DELETE /api/v1/endpoints/bindings`, and since 179 (D17) they are a
 **workspace admin's verb** (`api_key.bind` — associating a credential with an endpoint tree is
@@ -2366,6 +2369,9 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 ## Appendix A: Change Log
 
+| 2026-09-28 | v2.46 | 286 (#268) a stored declaration save refuses | **Additive code.** Every API surface that binds pipeline parameters (execute, `pipelines_execute`, release checks, schedules) answers `409 pipeline.execution.parameter_declaration_invalid` (pipeline-contract §13.3) when a supplied value or an applied default is judged against a stored declaration today's save refuses — `details.reasons` names the §12.7 codes. A published endpoint keeps its caller-facing envelope: the same refusal is reported inside `400 endpoint.request.invalid`, `details.errors` carrying the binder's re-save sentence (the 286 merge's security pass, observation 1). Before, such a declaration (only a body saved before #194 can hold one) reached the validator's `IllegalArgumentException`: a 500. |
+| 2026-09-28 | v2.45 | 286 (#286) legacy endpoint rows — the security pass's follow-ups | No route or field changes. **§19.5**: a legacy row's `path` and `url` are echoed cut at the grammar's 200 characters (they were echoed unbounded — only a database write can store a longer path, and the model keeps the stored one because unpublish is BY PATH); a promotion batch omits a legacy row and the sender now LOGS the omission with its count (before #274 the batch threw; after it the row was left out without a word). The repository's deployment-wide `findLegacy(null)` read, which had no caller, is gone. |
+| 2026-09-28 | v2.44 | 286 (#275) — renumbered at merge after 279's v2.43 R3 on the four lists that still read own-only | No route, field or code changes. **§10.1's R3 paragraph stands and names the four surfaces it now covers**: the search palette's executions group, the pipeline and template explorers' Runs tabs, and MCP's executions resource listing read `findVisible` for a member with `execution.read` (they read own-only `findByUser` until #275 — narrower than the sentence, never wider), `findAll` with `execution.read_all`. The paragraph also says what the panes' route permission implies: the explorers' Runs tabs and the palette are `pipeline.read` / `template.read` routes, so a promoter reaches them without `execution.read` and sees her own runs only — R3's scheduled arm is `execution.read`'s (`ScheduledRunSurfacesE2eTest`, whose promoter case is falsified with the arm opened). |
 | 2026-09-28 | v2.43 | 279 (#279) the request-body cap | **§4.2 names the envelope's one pre-handler answer.** A request body over `datapipelines.web.max-request-bytes` ([Configuration §3.31](configuration.md#331-web-request-limits)) is refused at a servlet filter with `413 request.body_too_large` (`details.limit_bytes`) on `/api/v1` and `/mcp`, before authentication and before any parser reads the body — the new §13.21 (pipeline-contract v1.38). Jackson's `StreamReadConstraints` (nesting 100, string 4M chars, number 1000 digits) are stated on the request mappers of both surfaces rather than inherited; a within-cap body the parser refuses still answers the malformed-body 400. No route, permission or existing code changed. |
 
 | Date | Version | Author | Change |

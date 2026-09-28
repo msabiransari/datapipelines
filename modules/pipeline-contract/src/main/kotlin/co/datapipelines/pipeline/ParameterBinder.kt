@@ -2,6 +2,7 @@ package co.datapipelines.pipeline
 
 import co.datapipelines.calculators.CalculatorInput
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterCardinality
 import co.datapipelines.typesystem.ParameterCoercion
 import co.datapipelines.typesystem.ParameterValueOutcome
 import co.datapipelines.typesystem.ParameterValueRefusal
@@ -60,6 +61,18 @@ import java.time.LocalTime
  * and this binder resolves it as it always has: the declaration's `default` (judged by the same
  * validator), then the `required` refusal, then an optional parameter bound to null. Byte for
  * byte today's behaviour for every declaration without constraints.
+ *
+ * ## A stored declaration save would refuse today (#268)
+ *
+ * The validator trusts its declaration — save checks it (P28) — and throws on one that would not
+ * have saved. A body saved before #194 can carry one: `Parameter` ignored unknown keys then, so a
+ * `constraints` block or a `cardinality` rode in unchecked. Where such a declaration is USED — a
+ * supplied value, or a default being applied — this binder answers
+ * `pipeline.execution.parameter_declaration_invalid` (`details.reasons`: the save-time codes)
+ * instead of letting the throw become a 500; a `MULTI` is refused the same way, as save refuses it,
+ * rather than silently bound as a list. A broken declaration nothing judges (unsupplied, no
+ * default) binds exactly as before, so a pipeline whose broken optional parameter is never sent
+ * keeps running.
  */
 class ParameterBinder(
     private val parameters: Map<String, Parameter>,
@@ -81,6 +94,11 @@ class ParameterBinder(
         val bound = LinkedHashMap<String, Any?>()
 
         parameters.forEach { (name, parameter) ->
+            val refusedDeclaration = if (judges(parameter, inputs[name])) storedDeclarationRefusal(name, parameter) else null
+            if (refusedDeclaration != null) {
+                failures += refusedDeclaration
+                return@forEach
+            }
             when (val supplied = VALIDATOR.validate(parameter.declaration, inputs[name])) {
                 is ParameterValueOutcome.Accepted -> bound[name] = supplied.value
                 is ParameterValueOutcome.Refused -> failures += refusal(name, parameter, supplied.refusal)
@@ -171,6 +189,47 @@ class ParameterBinder(
             is ParameterValueOutcome.Refused -> failures += refusal(name, parameter, default.refusal)
             ParameterValueOutcome.Unsupplied -> if (parameter.required) failures += requiredMissing(name) else bound[name] = null
         }
+    }
+
+    /** True when binding [parameter] will consult its declaration: a value was supplied, or a default will be applied. */
+    private fun judges(
+        parameter: Parameter,
+        value: JsonNode?,
+    ): Boolean {
+        val supplied = value != null && !value.isNull && !value.isMissingNode
+        return supplied || parameter.default?.isNull == false
+    }
+
+    /**
+     * `pipeline.execution.parameter_declaration_invalid` (§13.3, #268) when [parameter]'s stored
+     * declaration is one save refuses today — its constraints (the validator's own
+     * `checkDeclaration`) or a cardinality other than `SINGLE` — else null. The message names the
+     * first problem, bounded; `details.reasons` lists every save-time code, so the author knows
+     * what the re-save must fix.
+     */
+    private fun storedDeclarationRefusal(
+        name: String,
+        parameter: Parameter,
+    ): ValidationFailure? {
+        val problems = VALIDATOR.checkDeclaration(parameter.declaration)
+        val cardinality = parameter.declaration.cardinality
+        val unsupportedCardinality = cardinality != ParameterCardinality.SINGLE
+        if (problems.isEmpty() && !unsupportedCardinality) return null
+        val reasons =
+            (
+                problems.map { it.rule.saveCode() } +
+                    listOfNotNull(PipelineErrorCodes.Validation.CARDINALITY_UNSUPPORTED.takeIf { unsupportedCardinality })
+            ).distinct()
+        val first = problems.firstOrNull()?.message ?: "cardinality ${cardinality.wire} is not supported for a pipeline parameter"
+        return validationFailure(
+            code = PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID,
+            path = "parameters.${name.truncateForError()}",
+            message =
+                "Parameter '${name.truncateForError()}' is stored with a declaration today's rules refuse " +
+                    "(${first.truncateForError()}); it was saved before those rules were checked. Re-save the pipeline " +
+                    "with a valid declaration.",
+            details = mapOf("parameter" to name.truncateForError(), "declared_type" to parameter.type.wire, "reasons" to reasons),
+        )
     }
 
     /** The validator's refusal in this surface's codes: a wrong form keeps `invalid_parameter_type` and its wording. */

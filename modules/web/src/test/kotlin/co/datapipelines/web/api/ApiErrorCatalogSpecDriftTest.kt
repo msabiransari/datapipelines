@@ -287,8 +287,13 @@ class ApiErrorCatalogSpecDriftTest {
          * 305 → 306 with #279: the new §13.21 (Request limits) gains `request.body_too_large` (413),
          * landed in the SAME commit as its `PipelineErrorCodes.Request` constant, its catalog row and
          * the `AuthErrors` anchor. Re-derived from the document's own parse.
+         *
+         * 306 → 307 at the 286 merge with #268 (lane 286, on origin/main dd7d807a): §13.3 gains
+         * `pipeline.execution.parameter_declaration_invalid` (409, an explicit catalog row — the
+         * `pipeline.execution.` family default is 500), landed in the SAME commit as its constant.
+         * 279's §13.21 row (above) landed first; the merged document parses to 307.
          */
-        const val SECTION_13_ROW_COUNT = 306
+        const val SECTION_13_ROW_COUNT = 307
 
         /**
          * §12's distinct validation codes.

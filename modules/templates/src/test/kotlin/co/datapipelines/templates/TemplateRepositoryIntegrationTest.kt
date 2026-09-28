@@ -834,6 +834,94 @@ class TemplateRepositoryIntegrationTest {
         thrown.mostSpecificCause.message?.contains("uq_template_versions_one_draft") shouldBe true
     }
 
+    /**
+     * #276: two first writers over the same released version both allocate `MAX(version) + 1`, so
+     * the loser's insert collides on the version PRIMARY KEY before it reaches the one-draft index
+     * (the PK, V4, is older than the index, V6). FORCED with a held lock — the winner's draft row
+     * stays uncommitted until Postgres reports the contender blocked on it — never timed.
+     */
+    @Test
+    fun `the first-draft race, FORCED - the loser collides on the version PK and answers version_conflict with the winner's state`() {
+        forcedFirstDraftRace()
+    }
+
+    @Test
+    fun `the race loser's winner read is its OWN workspace's - a same-named template's draft elsewhere changes nothing (#276)`() {
+        // Template names are per workspace. The loser's read of the winner looked the draft up
+        // by NAME alone, so a same-named template with a draft in another workspace made it two
+        // rows, singleOrNull answered null, and the conflict carried no hash to rebase on — or,
+        // had the winner's row gone first, the OTHER workspace's draft state.
+        val other = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO workspaces (id, name, display_name) VALUES (:id, 'other', 'Other')",
+            mapOf("id" to other),
+        )
+        repository.createReleased(other, draft(), actor)
+        val otherReleased = checkNotNull(repository.findLatest(other, "test/fetch_orders.sql"))
+        checkNotNull(
+            repository.createDraft(
+                other,
+                "test/fetch_orders.sql",
+                draft(body = "SELECT 7"),
+                otherReleased.bodyHash,
+                actor,
+                WriteSurface.SESSION,
+            ),
+        )
+
+        forcedFirstDraftRace()
+    }
+
+    private fun forcedFirstDraftRace() {
+        repository.createReleased(workspaceId, draft(), actor)
+        val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
+        val templateId =
+            checkNotNull(
+                jdbc.queryForObject(
+                    "SELECT id FROM templates WHERE name = 'test/fetch_orders.sql' AND workspace_id = :ws",
+                    mapOf("ws" to workspaceId),
+                    UUID::class.java,
+                ),
+            )
+
+        ForcedRace
+            .holdingThenCommitting(
+                hold = { c ->
+                    c
+                        .prepareStatement(
+                            "INSERT INTO template_versions" +
+                                " (template_id, version, engine, dialect, is_library, imports_json, body, body_hash, status, created_by)" +
+                                " VALUES (?, 2, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 2', 'winner-hash', 'DRAFT', ?)",
+                        ).use {
+                            it.setObject(1, templateId)
+                            it.setObject(2, actor)
+                            it.executeUpdate() shouldBe 1
+                        }
+                },
+                contender = {
+                    repository.createDraft(
+                        workspaceId,
+                        "test/fetch_orders.sql",
+                        draft(body = "SELECT 3"),
+                        released.bodyHash,
+                        actor,
+                        WriteSurface.SESSION,
+                    )
+                },
+            ).let { outcome ->
+                val loser = outcome.shouldBeFailure<co.datapipelines.typesystem.DatapipelinesException>()
+                loser.code shouldBe PipelineErrorCodes.Template.VERSION_CONFLICT
+                loser.details["current_body_hash"] shouldBe "winner-hash"
+                loser.details["current_status"] shouldBe "DRAFT"
+                // The race this test exists for is the PK collision, not the index one.
+                val violated = (loser.cause as org.springframework.dao.DuplicateKeyException).mostSpecificCause.message.orEmpty()
+                withClue(violated) { violated.contains("template_versions_pkey") shouldBe true }
+                // The caller-facing message names no constraint and carries no driver text.
+                loser.message.orEmpty().contains("duplicate key") shouldBe false
+            }
+        checkNotNull(repository.findDraftDetail(workspaceId, "test/fetch_orders.sql")).bodyHash shouldBe "winner-hash"
+    }
+
     @Test
     fun `the template draft service branches, and a stale base is a version conflict`() {
         val service = TemplateDraftService(repository, co.datapipelines.pipeline.AuthoringGuard(true), TemplateImplementsRepository(jdbc))

@@ -281,6 +281,37 @@ class WorkspaceServiceTest {
     }
 
     @Test
+    fun `a super admin whose first login joins demo keeps super-admin authority on that stamp (#271, #262's twin)`() {
+        // The THIRD fallback: #262 routed the last-used and first-membership stamps through the
+        // one helper; the demo join still returned the seeder's plain VIEWER context.
+        every { lastUsed.lastUsed(userId) } returns null
+        principal(memberships = emptyList())
+        val demo = WorkspaceContext(UUID.randomUUID(), "demo", WorkspaceRole.VIEWER)
+        every { demoSeeder.joinDemoIfUnaffiliated(userId) } returns demo
+
+        val stamped =
+            service().workspaceForLogin(user().copy(isAdmin = true), "alice@company.com", LoginMethod.PWD)
+                ?: error("a first login with a reachable demo stamps demo")
+
+        stamped.id shouldBe demo.id
+        stamped.name shouldBe "demo"
+        stamped.superAdmin shouldBe true
+        // The join made a VIEWER membership — an explicit role, so the context is not implicit.
+        stamped.implicit shouldBe false
+        stamped.heldRole shouldBe WorkspaceContext.SUPER_ADMIN_WIRE
+    }
+
+    @Test
+    fun `a non-super-admin's demo-join stamp is byte-identical to the seeder's context (#271 golden)`() {
+        every { lastUsed.lastUsed(userId) } returns null
+        principal(memberships = emptyList())
+        val demo = WorkspaceContext(UUID.randomUUID(), "demo", WorkspaceRole.VIEWER)
+        every { demoSeeder.joinDemoIfUnaffiliated(userId) } returns demo
+
+        service().workspaceForLogin(user(), "alice@company.com", LoginMethod.PWD) shouldBe demo
+    }
+
+    @Test
     fun `no membership and no reachable demo stamps NOTHING - round 2 draws that page`() {
         every { lastUsed.lastUsed(userId) } returns null
         principal(memberships = emptyList())

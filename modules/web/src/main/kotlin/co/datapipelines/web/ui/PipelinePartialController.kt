@@ -91,9 +91,10 @@ class PipelinePartialController(
      * The acting column's **Runs** tab — this pipeline's last 20 executions, loaded on the
      * tab's first click and then swapped in place.
      *
-     * Visibility is the execution-history screen's, unchanged: an admin sees the workspace's
-     * runs, everyone else sees their own. A second surface over the same rows is not a wider
-     * one — that would be a read-scope hole opened by a UI convenience.
+     * Visibility is the execution-history screen's ([PipelineBrowseModel.fillRuns], #275): an
+     * admin sees the workspace's runs, a member with `execution.read` her own plus the
+     * scheduled runs (R3), a promoter her own only. A second surface over the same rows is not
+     * a wider one — that would be a read-scope hole opened by a UI convenience.
      */
     @GetMapping("/partials/pipelines/{id}/runs")
     @RequiredScope(Permission.PIPELINE_READ)
@@ -107,8 +108,7 @@ class PipelinePartialController(
             principal.requireWorkspace().id,
             lens.viewFor(principal),
             id,
-            principal.userId,
-            principal.holds(Permission.EXECUTION_READ_ALL),
+            principal,
         )
     }
 

@@ -111,6 +111,81 @@ class ParameterBinderValidationTest {
         failure.details["reason"] shouldBe "min"
     }
 
+    // ---------------------------------------------------------------- #268: a body saved before #194
+
+    /**
+     * Saved before #194: `Parameter` ignored unknown keys then, so a `constraints` block and a
+     * `cardinality` rode into the stored body unchecked. Read back today, the declaration is one
+     * save now refuses; binding must answer a catalogued refusal where the validator would throw
+     * `IllegalArgumentException` (a 500).
+     */
+    private val stored =
+        PipelineDeserializer()
+            .readOrThrow(
+                """
+                {"schema_version": 1, "name": "legacy_limits", "display_name": "Legacy limits", "description": "d",
+                 "settings": {"tempdb": {"engine": "H2"}},
+                 "parameters": {
+                   "limit":   {"type": "INTEGER", "constraints": {"min": 10, "max": 1}},
+                   "floor":   {"type": "INTEGER", "default": 5, "constraints": {"min": 10, "max": 1}},
+                   "regions": {"type": "STRING", "cardinality": "MULTI"},
+                   "unused":  {"type": "INTEGER", "constraints": {"min": 10, "max": 1}}
+                 },
+                 "nodes": [{"id": "a", "description": "d", "type": "DQL", "source": "pg-prod",
+                            "template": {"id": "test/t.sql", "version": 1}, "depends_on": []}]}
+                """.trimIndent(),
+            ).parameters
+
+    @Test
+    fun `#268 - a supplied value against a stored declaration save would refuse is parameter_declaration_invalid, not a throw`() {
+        val failure =
+            ParameterBinder(mapOf("limit" to stored.getValue("limit")))
+                .bind(mapOf("limit" to Fixtures.json("5")))
+                .shouldBeInstanceOf<ParameterBindingResult.Rejected>()
+                .failures
+                .single()
+
+        failure.code shouldBe PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID
+        failure.path shouldBe "parameters.limit"
+        failure.details["parameter"] shouldBe "limit"
+        failure.details["reasons"] shouldBe listOf(PipelineErrorCodes.Validation.CONSTRAINT_INVALID)
+    }
+
+    @Test
+    fun `#268 - a stored default applied against such a declaration is refused the same way`() {
+        ParameterBinder(mapOf("floor" to stored.getValue("floor")))
+            .bind(emptyMap())
+            .shouldBeInstanceOf<ParameterBindingResult.Rejected>()
+            .failures
+            .single()
+            .code shouldBe PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID
+    }
+
+    @Test
+    fun `#268 - a stored MULTI is refused at bind as save refuses it, never silently bound as a list`() {
+        val failure =
+            ParameterBinder(mapOf("regions" to stored.getValue("regions")))
+                .bind(mapOf("regions" to Fixtures.json("\"EU\"")))
+                .shouldBeInstanceOf<ParameterBindingResult.Rejected>()
+                .failures
+                .single()
+
+        failure.code shouldBe PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID
+        failure.details["reasons"] shouldBe listOf(PipelineErrorCodes.Validation.CARDINALITY_UNSUPPORTED)
+    }
+
+    @Test
+    fun `#268 - a broken declaration nothing judges - unsupplied, no default - binds as before`() {
+        // The refusal is at the point of use, where the validator threw: a pipeline whose broken
+        // optional parameter is never sent keeps running exactly as it did before #194.
+        val bound =
+            ParameterBinder(mapOf("unused" to stored.getValue("unused")))
+                .bind(emptyMap())
+                .shouldBeInstanceOf<ParameterBindingResult.Bound>()
+                .context
+        bound["unused"].shouldBeNull()
+    }
+
     private fun bind(vararg inputs: Pair<String, String>): ParameterBindingResult =
         binder.bind(mapOf("region" to Fixtures.json("\"EU\"")) + inputs.associate { (name, json) -> name to Fixtures.json(json) })
 }

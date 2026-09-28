@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.auth.Permission
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.mcp.docs.DocSet
@@ -33,8 +34,9 @@ data class McpResourcePage(
  *
  * **Role filtering** (§7.3, §13 checklist): the listing shows only what the calling key may read —
  * each kind under its role read permission ([McpResourcePermissions], #215), so a promoter's key
- * lists no executions; executions additionally apply the ownership rule ([visibleTo]), so two
- * agents see different resource sets on the same server.
+ * lists no executions; executions additionally apply the ownership rule ([visibleTo], read in
+ * SQL as `executions_list` reads it — own plus scheduled runs, or all with `execution.read_all`),
+ * so two agents see different resource sets on the same server.
  *
  * **Executions are windowed to the last 24 hours.** Older ones stay readable by direct URI
  * ([McpResourceReader]) — they are simply not enumerated, because an unbounded execution history
@@ -238,14 +240,27 @@ class McpResourceCatalog(
         return (listOf(collection) + items).drop(offset).take(limit)
     }
 
+    /**
+     * The executions kind (#275): `executions_list`'s read — every run of the workspace with
+     * `execution.read_all`, otherwise the key's own runs plus every SCHEDULED run (`findVisible`,
+     * #9 R3) — so the resource listing and the tool cannot disagree. The kind is listed only under
+     * `execution.read` ([McpResourcePermissions]), so no third arm is reachable here; [visibleTo]
+     * stays as defence in depth, a no-op over what the read returned.
+     */
     private fun executionDescriptors(
         offset: Int,
         limit: Int,
         ctx: McpToolContext,
     ): List<McpSchema.Resource> {
         val since = clock.instant().minus(EXECUTION_WINDOW)
-        return executions
-            .findByUser(ctx.principal.requireWorkspace().id, ctx.principal.userId, limit = limit, offset = offset)
+        val workspaceId = ctx.principal.requireWorkspace().id
+        val candidates =
+            if (ctx.principal.holds(Permission.EXECUTION_READ_ALL)) {
+                executions.findAll(workspaceId, limit = limit, offset = offset)
+            } else {
+                executions.findVisible(workspaceId, ctx.principal.userId, limit = limit, offset = offset)
+            }
+        return candidates
             .filter { it.startedAt.isAfter(since) && it.visibleTo(ctx) }
             .map {
                 descriptor(

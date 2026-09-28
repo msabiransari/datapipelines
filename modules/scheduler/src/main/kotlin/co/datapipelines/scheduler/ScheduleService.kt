@@ -315,6 +315,13 @@ class ScheduleService(
      * and a client advancing by the items it received re-read rows it already had. The workspace's
      * live list is therefore read in windows (bounded by [LENS_SCAN_LIMIT]; the per-workspace cap
      * keeps it small), filtered through the executors' lenses, and sliced.
+     *
+     * The windows are KEYSET pages (#277): each continues after the last name the previous one
+     * read, so a create or delete committing between two windows can neither duplicate nor drop a
+     * visible row (an OFFSET window shifted by one and skipped the row at the boundary — measured).
+     * No transaction spans the walk: the lens may read the promotion target's inventory, and a
+     * snapshot held across that call would hold a metadata connection with it. The across-request
+     * `offset` a client pages by remains an offset, as for every list reader.
      */
     fun list(
         workspaceId: UUID,
@@ -330,12 +337,14 @@ class ScheduleService(
         }
         if (!viewer.narrowed) return schedules.listLive(workspaceId, prefix, limit, offset)
         val admitted = ArrayList<Schedule>()
-        var windowOffset = 0
-        while (admitted.size < offset + limit && windowOffset < LENS_SCAN_LIMIT) {
-            val window = schedules.listLive(workspaceId, prefix, LENS_WINDOW, windowOffset)
+        var after: String? = null
+        var scanned = 0
+        while (admitted.size < offset + limit && scanned < LENS_SCAN_LIMIT) {
+            val window = schedules.listLiveAfter(workspaceId, prefix, after, LENS_WINDOW)
             admitted += admittedOf(window, workspaceId, viewer)
             if (window.size < LENS_WINDOW) break
-            windowOffset += LENS_WINDOW
+            after = window.last().name
+            scanned += LENS_WINDOW
         }
         return admitted.drop(offset).take(limit)
     }

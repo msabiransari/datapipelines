@@ -140,6 +140,10 @@ object ApiErrorCatalog {
             // §13.3 / #194 — a value breaking a declared constraint, precision or scale: 400 like
             // its invalid_parameter_type sibling — the execute input is not acceptable, nothing ran.
             PipelineErrorCodes.Execution.PARAMETER_CONSTRAINT_VIOLATION to HttpStatus.BAD_REQUEST,
+            // §13.3 / #268 — a value judged against a STORED declaration save refuses today (a body
+            // saved before #194): 409, not 400 — the request is well formed; the stored pipeline is
+            // what conflicts with today's rules, and a re-save is the fix, not a different value.
+            PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID to HttpStatus.CONFLICT,
             // §13.3 / 121 — a proper subset of a multi-output node's keys: 400 like its
             // invalid_parameter_type sibling — the execute input is not acceptable, nothing ran.
             PipelineErrorCodes.Execution.CALCULATOR_KEYS_PARTIAL to HttpStatus.BAD_REQUEST,

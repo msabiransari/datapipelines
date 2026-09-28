@@ -221,9 +221,12 @@ open class WorkspaceService(
             memberships.firstOrNull { it.workspaceName == last }?.let { return context(user.isAdmin, it) }
         }
         memberships.firstOrNull()?.let { return context(user.isAdmin, it) }
+        // #271: the demo join is the third fallback and gets the same helper as the two above —
+        // the seeder answers a plain member context; a super admin's stamp keeps its authority.
         return demoWorkspaceSeeder
             ?.joinDemoIfUnaffiliated(user.id)
             ?.also { authCache.invalidateMemberships(user.id) }
+            ?.let { joined -> context(user.isAdmin, joined) }
     }
 
     /**
@@ -879,11 +882,21 @@ open class WorkspaceService(
     private fun context(
         isSuperAdmin: Boolean,
         membership: WorkspaceMembership,
+    ): WorkspaceContext = context(isSuperAdmin, context(membership))
+
+    /**
+     * [context]'s one branch over an already-built member context — the form the demo join
+     * answers with (#271: the login stamp's third fallback), so all three login fallbacks and
+     * every [resolveForSession] branch share the one super-admin shape.
+     */
+    private fun context(
+        isSuperAdmin: Boolean,
+        member: WorkspaceContext,
     ): WorkspaceContext =
         if (isSuperAdmin) {
-            WorkspaceContext.superAdminOver(membership.workspaceId, membership.workspaceName, membership.role)
+            WorkspaceContext.superAdminOver(member.id, member.name, member.role)
         } else {
-            context(membership)
+            member
         }
 
     /**

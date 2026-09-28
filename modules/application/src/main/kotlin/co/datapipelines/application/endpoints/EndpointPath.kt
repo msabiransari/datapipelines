@@ -53,6 +53,16 @@ object EndpointPath {
     const val MAX_LENGTH = 200
     const val MAX_SEGMENTS = 10
 
+    /**
+     * A STORED path as a surface echoes it (#286): cut at [MAX_LENGTH]. `path_pattern` is `TEXT`
+     * with no CHECK, so only a database write can store a longer one — every API write has been
+     * held to the limit since the registry was born — and the REST listing, `endpoints_list` and
+     * the API console must not echo a legacy row's path unbounded. The model keeps the stored
+     * path: unpublish is BY PATH, so a row within the limit (every row the product wrote) is
+     * echoed exactly and stays addressable; a longer one is unpublished by its full stored path.
+     */
+    fun echoBounded(stored: String): String = stored.take(MAX_LENGTH)
+
     /** R-EP5 — the shape floor: category, version, and at least one path segment. */
     const val MIN_SEGMENTS = 3
 

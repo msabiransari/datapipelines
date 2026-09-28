@@ -2,6 +2,7 @@ package co.datapipelines.web.endpoints
 
 import co.datapipelines.application.endpoints.EndpointKeyBindingRepository
 import co.datapipelines.application.endpoints.EndpointKeyService
+import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
 import co.datapipelines.application.endpoints.PublishedEndpoint
@@ -270,15 +271,18 @@ class EndpointsController(
      * `path`, `pipeline`, `enabled`, `legacy`, `reason`, `url` — and deliberately NOT the
      * valid shape's parse-derived fields (no `path_variables`: there is no parse). The reason
      * is the grammar's own refusal, bounded at the mapper; it is stored data's voice, never an
-     * exception's.
+     * exception's. The path is echoed bounded too (#286, [EndpointPath.echoBounded]):
+     * only a database write can store one past the grammar's limit.
      */
-    private fun EndpointRow.Legacy.toLegacyResponse(): Map<String, Any?> =
-        mapOf(
-            "path" to pathPattern,
+    private fun EndpointRow.Legacy.toLegacyResponse(): Map<String, Any?> {
+        val echoed = EndpointPath.echoBounded(pathPattern)
+        return mapOf(
+            "path" to echoed,
             "pipeline" to pipelines.findById(workspaceId, pipelineId)?.name,
             "enabled" to enabled,
             "legacy" to true,
             "reason" to reason,
-            "url" to "/api$pathPattern",
+            "url" to "/api$echoed",
         )
+    }
 }

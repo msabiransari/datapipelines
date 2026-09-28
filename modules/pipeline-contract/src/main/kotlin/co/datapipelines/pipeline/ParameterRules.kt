@@ -135,11 +135,7 @@ internal object ParameterRules {
         val problems = VALIDATOR.checkDeclaration(parameter.declaration)
         problems.forEach { problem ->
             into.add(
-                when (problem.rule) {
-                    DeclarationRule.CONSTRAINT_NOT_APPLICABLE -> Validation.CONSTRAINT_NOT_APPLICABLE
-                    DeclarationRule.CONSTRAINT_INVALID -> Validation.CONSTRAINT_INVALID
-                    DeclarationRule.PATTERN_INVALID -> Validation.PATTERN_INVALID
-                },
+                problem.rule.saveCode(),
                 "parameters.${name.truncateForError()}.constraints.${problem.constraint}",
                 "Parameter '${name.truncateForError()}': ${problem.message}.",
                 mapOf(
@@ -222,3 +218,15 @@ internal object ParameterRules {
 
     private val VALIDATOR = PipelineParameterValidator.validator
 }
+
+/**
+ * A declaration problem's §12.7 save-time code — the ONE mapping, read by the save path
+ * ([ParameterRules]) and by the bind path's refusal of a stored declaration save would refuse
+ * today ([ParameterBinder], #268), so the two can never name a problem differently.
+ */
+internal fun DeclarationRule.saveCode(): String =
+    when (this) {
+        DeclarationRule.CONSTRAINT_NOT_APPLICABLE -> Validation.CONSTRAINT_NOT_APPLICABLE
+        DeclarationRule.CONSTRAINT_INVALID -> Validation.CONSTRAINT_INVALID
+        DeclarationRule.PATTERN_INVALID -> Validation.PATTERN_INVALID
+    }

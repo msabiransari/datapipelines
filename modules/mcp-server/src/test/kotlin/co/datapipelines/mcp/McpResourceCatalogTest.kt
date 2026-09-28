@@ -5,6 +5,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.templates.TemplateRepository
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -62,7 +63,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(any(), null) } returns emptyList()
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
-        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findVisible(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
     }
 
     @Test
@@ -74,7 +75,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(any(), null) } returns many
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
-        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findVisible(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val first = catalog.list(ctx, null)
         val second = catalog.list(ctx, first.nextCursor)
@@ -103,7 +104,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(any(), null) } returns listOf(McpFixtures.pipelineRecord())
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns listOf(McpFixtures.template())
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns listOf(McpFixtures.datasource())
-        every { executions.findByUser(any(), McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
+        every { executions.findVisible(any(), McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
             listOf(McpFixtures.executionRecord(startedAt = now.minusSeconds(60)))
 
         val page = catalog.list(ctx, null)
@@ -124,7 +125,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(any(), null) } returns emptyList()
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
-        every { executions.findByUser(any(), McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
+        every { executions.findVisible(any(), McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
             listOf(
                 McpFixtures.executionRecord(startedAt = now.minusSeconds(3_600)),
                 McpFixtures.executionRecord(executionId = UUID.randomUUID(), startedAt = now.minusSeconds(90_000)),
@@ -139,15 +140,30 @@ class McpResourceCatalogTest {
     }
 
     @Test
-    fun `the listing is scoped to the caller's own executions`() {
+    fun `a member's listing is her own runs plus the scheduled runs - executions_list's read, never the workspace alone (#275)`() {
         every { pipelines.findAll(any(), null) } returns emptyList()
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
-        every { executions.findByUser(any(), McpFixtures.OTHER_USER, any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findVisible(any(), McpFixtures.OTHER_USER, any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val page = catalog.list(McpFixtures.ctx(userId = McpFixtures.OTHER_USER), null)
 
         page.resources.none { it.uri().startsWith("datapipelines://executions/") } shouldBe true
+        // A strict mock: the pre-#275 own-only `findByUser`, or `findAll`, would fail here.
+        verify(exactly = 1) { executions.findVisible(any(), McpFixtures.OTHER_USER, null, null, null, null, any(), any()) }
+    }
+
+    @Test
+    fun `an admin-role key's listing reads the workspace's runs, as executions_list does (#275)`() {
+        every { pipelines.findAll(any(), null) } returns emptyList()
+        every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
+        every { executions.findAll(any(), null, null, null, null, any(), any()) } returns
+            listOf(McpFixtures.executionRecord(executedBy = McpFixtures.OTHER_USER, startedAt = now.minusSeconds(60)))
+
+        val page = catalog.list(McpFixtures.ctx(workspace = McpFixtures.WORKSPACE_ADMIN), null)
+
+        page.resources.map { it.uri() } shouldContain "datapipelines://executions/${McpFixtures.EXECUTION_ID}"
     }
 
     @Test
@@ -155,7 +171,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(any(), null) } returns listOf(McpFixtures.pipelineRecord())
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns listOf(McpFixtures.template())
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
-        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findVisible(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val page = catalog.list(ctx, null)
         val entities = page.resources.drop(skillUris.size)
@@ -209,7 +225,7 @@ class McpResourceCatalogTest {
         every { pipelines.findAll(any(), null) } returns emptyList()
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
-        every { executions.findByUser(any(), McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
+        every { executions.findVisible(any(), McpFixtures.USER, any(), any(), any(), any(), any(), any()) } returns
             listOf(McpFixtures.executionRecord(startedAt = now.minusSeconds(60)))
         val promoter =
             McpFixtures.ctx(
@@ -225,7 +241,7 @@ class McpResourceCatalogTest {
 
         assertAll(
             { page.resources.map { it.uri() } shouldContainExactly skillUris + listOf("datapipelines://datasources") },
-            { verify(exactly = 0) { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } },
+            { verify(exactly = 0) { executions.findVisible(any(), any(), any(), any(), any(), any(), any(), any()) } },
         )
     }
 
@@ -245,7 +261,7 @@ class McpResourceCatalogTest {
             }
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
-        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findVisible(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         catalog.list(ctx, null)
 
@@ -259,7 +275,7 @@ class McpResourceCatalogTest {
         every { templates.list(any(), any(), any(), any(), 5, any()) } returns listOf(McpFixtures.template(id = "t6"))
         every { templates.list(any(), any(), any(), any(), 0, any()) } returns listOf(McpFixtures.template(id = "t1"))
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
-        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findVisible(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val page = catalog.list(ctx, McpResourceCursor(McpResourceUri.TEMPLATES, 5).encode())
 

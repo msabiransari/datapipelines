@@ -1,6 +1,6 @@
 # Scheduler Specification
 
-**Status:** v1.3 (slices 1–3 of #9 — the core, the Schedules page, and the bindings; notifications and the application credential are later slices)
+**Status:** v1.4 (slices 1–3 of #9 — the core, the Schedules page, and the bindings; notifications and the application credential are later slices)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
@@ -154,7 +154,7 @@ A schedule fires as the **system identity** — the one `System` account every d
 
 The system identity holds exactly three permissions, in every workspace: `pipeline.read`, `pipeline.execute` and `execution.read`. It holds no role, no instance permission and no credential: there is no API key, no session and no password for it, and a request that tried to present it is refused. Every launch still ASKS for `pipeline.execute` — a scheduled run is not exempt from permissions because it is internal.
 
-What people may do (auth.md §7.6): every member **reads** schedules (a promoter through the promoter lens); authors, workspace admins and super admins **create, edit, pause, resume, unblock, delete and Run now**. Executions a schedule fired are visible to every member with `execution.read`, not only to their executor — visibility, not ownership: cancelling one still needs `execution.cancel_all`.
+What people may do (auth.md §7.6): every member **reads** schedules (a promoter through the promoter lens — the list pages over the schedules the lens admits, read in keyset windows so a create or delete between two windows neither duplicates nor drops a visible one, #257, #277); authors, workspace admins and super admins **create, edit, pause, resume, unblock, delete and Run now**. Executions a schedule fired are visible to every member with `execution.read`, not only to their executor — visibility, not ownership: cancelling one still needs `execution.cancel_all`.
 
 Isolation is per workspace: a schedule, its runs and the pipeline it names all belong to one workspace, and an id from another answers `404`.
 
@@ -180,7 +180,7 @@ If an instance dies, its in-progress tasks are revived elsewhere after six misse
 
 On shutdown the instance first stops admitting — a run not yet claimed stays `queued` and is picked up by another instance or after restart — then waits up to `shutdown-wait-seconds` (default 5) for launches in progress to reach "started", and only then do the local executions drain. A scheduled execution cut off by the drain ends `aborted` / `shutdown`: a conclusive outcome that does not block. Under `skip` that occurrence does not run again.
 
-The drain can need 20 seconds, and the admission gate's wait up to 15 more. A container runtime whose stop grace is shorter (Docker's default is 10 s) kills the process first; the executions it cut off then end as lost instances, which the scheduler records as `unknown`, blocking. The shipped `deploy/compose.yml` gives the application container a stop grace period of 40 s (the admission wait + the drain + Tomcat's own graceful shutdown), and the Helm chart's `terminationGracePeriodSeconds` matches (#251).
+The drain can need 20 seconds, and the admission gate's wait up to 15 more. A container runtime whose stop grace is shorter (Docker's default is 10 s) kills the process first; the executions it cut off then end as lost instances, which the scheduler records as `unknown`, blocking. The shipped `deploy/compose.yml` gives the application container a stop grace period of 50 s, and the Helm chart's `terminationGracePeriodSeconds` matches (#251, #277). The arithmetic, at the configured maximum: the admission wait (at most 15 s) + the drain (20 s) + Tomcat's graceful shutdown (10 s) = 45 s, plus Helm's 5 s `preStop` sleep = 50 s — at 40 s the three scheduler phases alone reached 40 under Helm and left Tomcat nothing ([Deployment §8.3.2](deployment.md#832-kubernetes-pod-lifecycle); `ShutdownGraceArithmeticTest` pins it).
 
 ### 8.3 Watching it
 
@@ -206,6 +206,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.4 | 286 (#277) | §8.2: the stop grace is 50 s in both shipped files, with the arithmetic at the configured maximum (admission ≤ 15 + drain 20 + Tomcat 10, + Helm's 5 s preStop); at 40 s Tomcat had nothing left under Helm. §6: the promoter's list reads its windows by keyset (`ScheduleRepository.listLiveAfter`): a create or delete committing between two windows of one walk can no longer duplicate or drop a visible row. |
 | 2026-09-27 | v1.3 | #280 | §2.1: a SAVE whose pipeline has no current version to follow is refused `400 schedule.validation.target_not_released` (§13.19's new row — it was `payload_invalid` / `pointer_null`, one code shared with the shape refusals); the run side's `pointer_null` refusal and block are untouched. The form names the absence at pick time with the same words (UI Screens v1.79). |
 | 2026-09-26 | v1.2 | scheduler lane 3 (#9) | §2.1: the payload's optional additive `parameter_bindings` key and the snapshot's `resolved_parameters`. New **§2.2 Bindings**: the two keywords on the frozen reference time (the schedule's zone, its logical occurrence day — not the actual start), the calendar-day YESTERDAY, the exact allowlist, the one-source rule, binding fit and blocking, and what the run detail shows. §9 records bindings as delivered. |
 | 2026-09-26 | v1.1 | scheduler lane 2 (#9) | §8.4 **the page**: the Schedules page (UI Screens §4.20) is a client of REST §20 and nothing more — what it shows (the next five, the blocked reason beside Unblock, a run's merged messages) is this spec made visible. §9 records the page as delivered. |

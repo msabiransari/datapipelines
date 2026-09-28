@@ -88,6 +88,7 @@ class PromotionEndpointKeysTest {
         every { pipelines.findByName(WORKSPACE_ID, "lending_home") } returns record
         every { pipelines.findById(WORKSPACE_ID, pipelineId) } returns record
         every { endpoints.findByWorkspace(WORKSPACE_ID) } returns listOf(published("/lending/v1/home", pipelineId))
+        every { endpoints.findLegacy(WORKSPACE_ID) } returns emptyList()
         every { bindings.findByWorkspace(WORKSPACE_ID) } returns
             listOf(binding("/lending/v1/home", "dpk_AAAAAAAAAAAA", WORKSPACE_ID))
         every { apiKeys.findById("dpk_AAAAAAAAAAAA") } returns key("dpk_AAAAAAAAAAAA", "ci-lending")

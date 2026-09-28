@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
 import co.datapipelines.application.endpoints.PublishedEndpoint
@@ -64,17 +65,20 @@ object EndpointsTools {
      * The wire shape of one LEGACY row (#274) — a stored path today's grammar refuses, retired
      * rather than fatal. It carries `legacy: true`, its `reason` (the grammar's own refusal,
      * bounded) and the keys a caller needs to act on it; no `path_variables`, because there is
-     * no parse. Unpublishing it (`endpoints_delete`) is the fix.
+     * no parse. Unpublishing it (`endpoints_delete`) is the fix. The path is echoed bounded too
+     * (#286, [EndpointPath.echoBounded]).
      */
-    internal fun EndpointRow.Legacy.toLegacyResponse(pipelines: PipelineRepository): Map<String, Any?> =
-        mapOf(
-            "path" to pathPattern,
+    internal fun EndpointRow.Legacy.toLegacyResponse(pipelines: PipelineRepository): Map<String, Any?> {
+        val echoed = EndpointPath.echoBounded(pathPattern)
+        return mapOf(
+            "path" to echoed,
             "pipeline" to pipelines.findById(workspaceId, pipelineId)?.name,
             "enabled" to enabled,
             "legacy" to true,
             "reason" to reason,
-            "url" to "/api$pathPattern",
+            "url" to "/api$echoed",
         )
+    }
 
     /** `endpoints_create` (mcp-server.md §6.2.23). Permission: `endpoint.publish`. Mutating. */
     class CreateTool(

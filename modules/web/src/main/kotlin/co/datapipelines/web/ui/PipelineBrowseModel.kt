@@ -358,27 +358,26 @@ class PipelineBrowseModel(
     /**
      * Fills [model] for the Runs tab — this pipeline's last [RUNS_LIMIT] executions.
      *
-     * Visibility follows the execution history screen exactly ([ExecutionHistoryPartialController]):
-     * an admin sees the workspace's runs, everyone else sees their own. A second surface over
-     * the same rows must not be a wider one.
+     * Visibility follows the execution history screen ([ExecutionHistoryPartialController])
+     * through [listVisibleTo] (#275): an admin sees the workspace's runs, a member with
+     * `execution.read` her own plus the workspace's SCHEDULED runs (#9 R3), and a role without
+     * it — the promoter, who reaches this `pipeline.read` pane — her own only. A second surface
+     * over the same rows must not be a wider one.
      */
     fun fillRuns(
         model: Model,
         workspaceId: UUID,
         view: LensedView,
         pipelineId: UUID,
-        userId: UUID,
-        isAdmin: Boolean,
+        principal: AuthenticatedPrincipal,
     ): String {
         val rows =
             // 178: a pipeline the lens hides has no runs to show — the executions are the
             // pipeline's, and the pane must answer for it exactly as for an absent id.
             if (pipelines.findRecord(workspaceId, view.pipelines, pipelineId) == null) {
                 emptyList()
-            } else if (isAdmin) {
-                executions.findAll(workspaceId, pipelineId, limit = RUNS_LIMIT)
             } else {
-                executions.findByUser(workspaceId, userId, pipelineId, limit = RUNS_LIMIT)
+                executions.listVisibleTo(principal, workspaceId, pipelineId, status = null, limit = RUNS_LIMIT)
             }
         model.addAttribute("runs", rows)
         model.addAttribute("runActors", actors.lookup(rows.map { it.executedBy }))

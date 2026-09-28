@@ -566,19 +566,31 @@ class TemplateRepository(
         }
 
     /**
-     * Translates the one-draft partial index violation into §13.9's
-     * `template.version.conflict` carrying the WINNER's draft state (versioning §3.3/§6):
-     * the loser of two simultaneous first-writes must re-read and rebase.
+     * Translates the draft race into §13.9's `template.version.conflict` carrying the WINNER's
+     * draft state (versioning §3.3/§6): the loser of two simultaneous first-writes must re-read
+     * and rebase.
+     *
+     * Two constraints, one race (#276): both writers allocate `MAX(version) + 1` from the same
+     * committed rows, so the loser collides on the version PRIMARY KEY ([DRAFT_PK], V4) before it
+     * reaches the one-draft index ([DRAFT_INDEX], V6) — Postgres checks unique indexes in creation
+     * order. Measured by the forced race in `TemplateRepositoryIntegrationTest`; the index-only
+     * mapping answered it with a raw `DuplicateKeyException`. `PipelineRepository` and
+     * `ParameterSetRepository` map the same pair.
      */
     private fun <T> mappingDraftRace(
+        workspaceId: UUID,
         templateId: String,
         block: () -> T,
     ): T =
         try {
             block()
         } catch (e: org.springframework.dao.DuplicateKeyException) {
-            if (e.mostSpecificCause.message?.contains(DRAFT_INDEX) != true) throw e
-            val winner = findDraftDetailUnchecked(templateId)
+            val violated = e.mostSpecificCause.message.orEmpty()
+            if (DRAFT_INDEX !in violated && DRAFT_PK !in violated) throw e
+            // The winner is read in the CALLER's workspace (#276): a template name is unique per
+            // workspace only, and a by-name read saw another workspace's same-named draft too —
+            // two rows, no winner, a conflict with no hash to rebase on.
+            val winner = findDraftDetail(workspaceId, templateId)
             throw co.datapipelines.typesystem.DatapipelinesException(
                 code = PipelineErrorCodes.Template.VERSION_CONFLICT,
                 message = "Template was modified by someone else after you loaded it.",
@@ -715,21 +727,6 @@ class TemplateRepository(
             ),
         )
 
-    /** The race-loser's read of the winner — workspace unchecked because the INSERT already established the caller's scope. */
-    private fun findDraftDetailUnchecked(templateId: String): TemplateVersionDetail? =
-        jdbc
-            .query(
-                """
-                SELECT t.name AS template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                       v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
-                       v.created_via, v.updated_via
-                  FROM template_versions v JOIN templates t ON t.id = v.template_id
-                 WHERE t.name = :name AND v.status = 'DRAFT'
-                """.trimIndent(),
-                mapOf("name" to templateId),
-                DETAIL_MAPPER,
-            ).singleOrNull()
-
     // ---------------------------------------------------------------------------------------------
     // Lifecycle writes (versioning §5/§6)
     // ---------------------------------------------------------------------------------------------
@@ -760,7 +757,7 @@ class TemplateRepository(
         actor: UUID,
         via: WriteSurface,
     ): TemplateVersionDetail? =
-        mappingDraftRace(id) {
+        mappingDraftRace(workspaceId, id) {
             jdbc
                 .query(
                     CREATE_DRAFT_SQL,
@@ -1231,6 +1228,9 @@ class TemplateRepository(
 
         /** The one-draft partial unique index (versioning §3.3, V6). */
         private const val DRAFT_INDEX = "uq_template_versions_one_draft"
+
+        /** The version table's primary key — a concurrent draft-create computing the same next number (#276). */
+        private const val DRAFT_PK = "template_versions_pkey"
 
         /**
          * The canonical-hash SQL expression over a template's version-owned fields — the SAME

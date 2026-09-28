@@ -316,7 +316,7 @@ class McpResourceReaderTest {
         every { templates.list(any(), any(), any(), any(), any(), any()) } returns advertised
         every { pipelines.findAll(any(), null) } returns emptyList()
         every { datasources.listVisible(null, McpFixtures.WORKSPACE_ID) } returns emptyList()
-        every { executions.findByUser(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        every { executions.findVisible(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
 
         val catalog =
             McpResourceCatalog(

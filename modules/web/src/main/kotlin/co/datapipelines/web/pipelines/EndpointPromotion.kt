@@ -9,6 +9,8 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.typesystem.DatapipelinesException
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /**
@@ -54,12 +56,27 @@ class EndpointPromotion(
      * neighbour's key NAME into this batch — and on the target, [apply] would bind the target's
      * key of that name to this path, or [refuseIfKeysMissing] would refuse the whole batch for
      * a name this workspace never chose.
+     *
+     * A LEGACY row (#274 — a stored path today's grammar refuses; the target's would too) is
+     * never an entry: [PublishedEndpointRepository.findByWorkspace] reads valid rows only. The
+     * omission is not silent (#286): the rows over the promoted pipelines are counted and logged
+     * — a count, never a path — so an operator knows the endpoint did not travel. The fix is the
+     * console's: unpublish the legacy row and republish at a legal path.
      */
     fun entriesFor(
         workspaceId: UUID,
         promotedPipelineNames: List<String>,
     ): List<PromotionWire.EndpointEntry> {
         val promotedIds = promotedPipelineNames.mapNotNull { pipelines.findByName(workspaceId, it)?.id }.toSet()
+        val omitted = endpoints.findLegacy(workspaceId).count { it.pipelineId in promotedIds }
+        if (omitted > 0) {
+            log.warn(
+                "event=endpoint.promotion_legacy_omitted count={} message=\"legacy endpoint rows over the promoted " +
+                    "pipelines are not in the batch: their stored path fails today's grammar (R-EP5); unpublish and " +
+                    "republish at a legal path to promote them (issues #274, #286)\"",
+                omitted,
+            )
+        }
         val allBindings = bindings.findByWorkspace(workspaceId)
         return endpoints
             .findByWorkspace(workspaceId)
@@ -141,5 +158,9 @@ class EndpointPromotion(
                 keys.bind(promoter, key.id, entry.path)
             }
         }
+    }
+
+    private companion object {
+        val log: Logger = LoggerFactory.getLogger(EndpointPromotion::class.java)
     }
 }
