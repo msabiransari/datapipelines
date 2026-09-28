@@ -22,6 +22,9 @@ dependencies {
     // #9: the schedules REST surface, the pipeline executor adapter and the scheduler's ports'
     // implementations (web/config is the composition root — scheduler design revision §6.2, A3).
     implementation(project(":modules:scheduler"))
+    // #266: the execution-event record's and the replay log's batching writers, their recorder and
+    // their metrics (module-structure §5.19).
+    implementation(project(":modules:persistence"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.actuator)

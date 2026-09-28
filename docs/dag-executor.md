@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.20 (revised — see Change Log)
+**Status:** v1.21 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-09-28
@@ -1361,6 +1361,31 @@ The `EventEmitter` implementation routes events to:
 
 Events continue to be emitted while no consumer is attached — the emitter never blocks on a reader. But a **missing consumer is not indefinitely tolerated**: if the SSE stream drops before the terminal event, the SSE layer starts the `datapipelines.sse.disconnect-grace-seconds` timer and cancels the execution when it elapses (§8.3). Executions do not outlive the caller that asked for them.
 
+### 10.1 How an emitted event becomes durable (#266)
+
+**The contract: `emit` returns only after the event's durable row and replay-log entry are written — or known not to be.** Nothing is acknowledged from memory. That is what keeps per-execution order (the executor awaits each `emit`, so a later event cannot overtake an earlier one) and read-after-emit visibility (a client, an MCP key or the scheduler that learns of an event can read it back). The #266 ruling keeps it for every event that exists today; the dashboard's fire-and-forget event (D27) will use the writers' non-awaited `submit`, which has no caller yet.
+
+**Who writes what.** The live SSE send happens first and never waits for any of this ([REST API §6.8](rest-api.md#68-client-disconnect)). Then, in `web`'s emitter:
+
+| Write | How | Why |
+|---|---|---|
+| `pipeline_executions` RUNNING row (on `execution_started`) | one direct INSERT on the `dp-event-persist` pool, awaited, BEFORE the event row | the event row's foreign key; the scheduler's start barrier waits on it, fail-closed for scheduled runs ([Scheduler](scheduler.md)) |
+| the `execution_events` row | the **execution-events batching writer** | group commit: N executions share one JDBC batch in ONE transaction (`ExecutionEventRepository.appendAll`) |
+| the Redis replay-log entry | the **replay-log batching writer** | one pipelined `MULTI`/`EXEC` per batch: per execution one `RPUSH` of its entries and one `EXPIRE` |
+| the terminal UPDATE (on `pipeline_completed` / `pipeline_failed` / `execution_aborted`) | one direct UPDATE on the pool, awaited, AFTER the terminal event's own row | as before #266 |
+
+Both writers are `modules/persistence`'s `BatchingWriter` ([Module Structure §5.19](module-structure.md#519-persistence)), partitioned by execution id: one execution's items share one writer thread and are written FIFO, so the durable order is the emit order; items of different executions queued behind the same commit form the next batch. There is no linger at idle — a lone event is written the moment it arrives — and `linger-ms` applies only to a writer that found ≥ 2 items queued behind its previous commit ([Configuration §3.32](configuration.md#332-persistence-batching-266)). `datapipelines.persistence.enabled: false` restores one write per event per store.
+
+**Retry dedup.** A failed batch is retried one item at a time, in order. The event row's `INSERT … ON CONFLICT (execution_id, event_id) DO NOTHING` makes a re-sent row a no-op, and every row the clause skipped is compared by content with the row holding its key: a DIFFERENT event on a taken sequence number (the emitter lost count) is still refused, exactly as the single-row `append` refuses it. The replay serves each event id once, the first stored copy.
+
+**Failures.** Unchanged in kind: a write that fails is logged at WARN and swallowed — the emitter never throws for its bookkeeping. What batching adds is isolation: one row the store refuses (a taken id with different content, a payload JSONB cannot hold) fails alone — the rest of its batch commits — and is counted as `datapipelines.persistence.failures{kind=poison}` ([Observability §4](observability.md)).
+
+**Bounded.** `emitTerminal` runs its emit under `NonCancellable` (§8.3), so the wait must end on its own: each writer waits at most `record-max-wait-ms` for its batch; after that the emitter takes the event back from the queue and writes it directly on the pool, waiting at most as long again; an event already inside a commit that has not answered by then is recorded `indeterminate` (counted, WARNed) and the emit returns. A store that has stopped answering therefore costs an emit at most `2 × record-max-wait-ms` per store for the event writes. **Honest limit:** the RUNNING insert and the terminal UPDATE are single direct statements with no timeout of their own, exactly as before #266 — against a metadata database that accepts connections but never answers, they wait for it.
+
+**Cancellation.** As before: an `emit` on an already-cancelled job persists nothing (the refusal the single persistence hop always had — which is why `emitTerminal` runs under `NonCancellable`); once persistence has started it finishes, and a cancellation that landed meanwhile is rethrown afterwards.
+
+**Shutdown and crash.** `ExecutionDrainLifecycle` still reaches `liveExecutions = 0` only after every execution's `finally` — and every event emitted before it was awaited, so nothing an execution emitted is left queued. The writers drain afterwards ([Observability §7](observability.md)). On a crash (`SIGKILL`), an event whose `emit` had not returned had no effect beyond it: the executor had not proceeded past it, so the outcome for that execution is "not completed", never "completed without a record" — the stale sweep (§8.3) reaps its RUNNING row as for any dead instance. The only acknowledged-but-unwritten window is the `submit` path's queue, which has no caller yet.
+
 ---
 
 ## 11. Idempotency
@@ -1602,3 +1627,4 @@ document a customer can read before they need it.
 | 2026-09-26 | v1.18 (no bump) | #194 lane A | §3: `Dag<T>` now lives in `modules/graph` (same package, `co.datapipelines.dag`), moved byte-identical so the parameter engine can use it without depending on the executor. No behaviour, API or import changed. |
 | 2026-09-28 | v1.19 (no bump) | lane 283 (#289) | §5.3's honest-bounds note: the breach suite runs in its own task, `:modules:scripting:breachSuite` (its own source set and 512m JVM, under `check`); the report's path and the table are unchanged. No behaviour changed. |
 | 2026-09-28 | v1.20 | lane 298 (#272) | §5.3: the honest-bounds table gains the two hook-rebind rows (REFUSED at compile, and through the `$eval` shadow; both measured UNBOUNDED before the fix) and the owner's ruling — the pool is the sandbox bound, the between-steps hooks a runaway guard. The engine refuses a body that binds a `__` name and rethrows the refusal that escaped (the cause chain, then one still pending under a library replacement). |
+| 2026-09-28 | v1.21 | lane 266 (#266) — the brief named v1.20, which lane 298 had taken | New **§10.1 How an emitted event becomes durable**: `emit` still awaits its durable writes (the #266 ruling); the event row and the replay-log entry go through two `BatchingWriter`s (`modules/persistence`, partitioned by execution id — per-execution FIFO, group commit, no linger at idle), the RUNNING insert and the terminal UPDATE stay direct single statements; `appendAll`'s one-transaction batch with the `ON CONFLICT (execution_id, event_id)` retry dedup and the content check that still refuses a lost count; poison isolation; the bound (at most `2 × record-max-wait-ms` per store, then `indeterminate`) and its honest limit (the two direct row writes have none); cancellation, shutdown and crash semantics. |

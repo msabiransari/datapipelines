@@ -141,6 +141,11 @@ class SubPipelineExecutionRunner(
      * [ExecutionStreamLauncher]; null only in module-slice wiring.
      */
     private val transformSupport: co.datapipelines.executor.TransformSupport? = null,
+    /**
+     * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
+     * null in module-slice wiring and unit tests, where the emitter's direct default applies.
+     */
+    private val eventRecorder: co.datapipelines.web.sse.ExecutionEventRecorder? = null,
 ) : SubPipelineRunner {
     private val log = LoggerFactory.getLogger(SubPipelineExecutionRunner::class.java)
 
@@ -330,6 +335,7 @@ class SubPipelineExecutionRunner(
                 eventRepository = eventRepository,
                 executionRepository = executionRepository,
                 persistenceDispatcher = persistenceDispatcher,
+                eventRecorder = eventRecorder,
             )
         return try {
             (executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId)).execute(request)

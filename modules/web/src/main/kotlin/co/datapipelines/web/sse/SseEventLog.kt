@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessException
+import org.springframework.data.redis.core.RedisOperations
+import org.springframework.data.redis.core.SessionCallback
 import org.springframework.data.redis.core.StringRedisTemplate
 import java.time.Duration
 import java.util.UUID
@@ -14,6 +16,16 @@ data class LoggedSseEvent(
     val eventId: Int,
     val eventName: String,
     val payload: Map<String, Any?>,
+)
+
+/**
+ * One replay-log entry, serialized once by [SseEventLog.entry] — so the batching writer can weigh it
+ * against its byte bounds and a payload that cannot be serialized fails before it is queued.
+ */
+data class ReplayLogEntry(
+    val executionId: UUID,
+    val eventId: Int,
+    val json: String,
 )
 
 /**
@@ -62,9 +74,49 @@ class SseEventLog(
         }
     }
 
+    /** Serializes [event] for [appendAll]; throws when the payload cannot be serialized (the caller's WARN). */
+    fun entry(
+        executionId: UUID,
+        event: LoggedSseEvent,
+    ): ReplayLogEntry = ReplayLogEntry(executionId, event.eventId, mapper.writeValueAsString(event))
+
+    /**
+     * Appends a batch — entries of any number of executions — in ONE pipelined round trip, as ONE
+     * `MULTI`/`EXEC`: per execution one variadic `RPUSH` of its entries in order and one `EXPIRE`
+     * (#266 B.2; [append] costs two round trips per event and re-sets the TTL on every one).
+     *
+     * **Throws** on failure, unlike [append]: its caller is the batching writer, which counts the
+     * failure, retries the batch one entry at a time, and hands the outcome back to the emitter —
+     * whose WARN is the same "replay will be incomplete" this class has always logged. The
+     * transaction keeps a failed batch from half-applying; a batch whose `EXEC` reply was lost may
+     * be re-sent and land twice, which [replay] absorbs by keeping the first entry per event id.
+     */
+    fun appendAll(entries: List<ReplayLogEntry>) {
+        if (entries.isEmpty()) return
+        val byExecution = entries.groupBy({ it.executionId }, { it.json })
+        redis.executePipelined(
+            object : SessionCallback<Any?> {
+                override fun <K : Any?, V : Any?> execute(operations: RedisOperations<K, V>): Any? {
+                    @Suppress("UNCHECKED_CAST") // a StringRedisTemplate's operations are <String, String>
+                    val ops = operations as RedisOperations<String, String>
+                    ops.multi()
+                    byExecution.forEach { (executionId, values) ->
+                        ops.opsForList().rightPushAll(key(executionId), values)
+                        ops.expire(key(executionId), RETENTION)
+                    }
+                    ops.exec()
+                    return null
+                }
+            },
+        )
+    }
+
     /**
      * The stored stream in original order, or null when the log has expired or never existed —
      * which §10.3 answers with `410`, and which the caller must distinguish from an empty list.
+     *
+     * Each event id is served ONCE, the first stored copy (#266): the batched append is
+     * at-least-once, and a client resuming by `Last-Event-ID` must never see an event twice.
      */
     fun replay(executionId: UUID): List<LoggedSseEvent>? {
         val stored =
@@ -75,11 +127,12 @@ class SseEventLog(
                 return null
             }
         if (stored.isNullOrEmpty()) return null
-        return stored.mapNotNull { raw ->
-            runCatching { mapper.readValue<LoggedSseEvent>(raw) }
-                .onFailure { log.warn("Unreadable event in the log for execution {}; skipped.", executionId, it) }
-                .getOrNull()
-        }
+        return stored
+            .mapNotNull { raw ->
+                runCatching { mapper.readValue<LoggedSseEvent>(raw) }
+                    .onFailure { log.warn("Unreadable event in the log for execution {}; skipped.", executionId, it) }
+                    .getOrNull()
+            }.distinctBy { it.eventId }
     }
 
     private fun key(executionId: UUID) = "$KEY_PREFIX$executionId"

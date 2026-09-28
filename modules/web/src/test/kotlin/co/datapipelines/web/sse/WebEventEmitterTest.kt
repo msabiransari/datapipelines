@@ -21,6 +21,7 @@ import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifyOrder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -417,6 +418,98 @@ class WebEventEmitterTest {
             recorded shouldBe false
         }
 
+    /**
+     * #266 B.3: through the BATCHED recorder, two executions whose emits interleave on ONE writer
+     * (one partition, one thread, shared batches) each keep their own 1..N order in what the store
+     * receives — the writers are FIFO per execution and the emit is still awaited. Red if the
+     * recorder stopped awaiting (a later event could overtake) or the writer reordered a batch.
+     */
+    @Test
+    fun `two executions interleaving on one writer keep their own 1-to-N order in the recorded store`() =
+        runTest {
+            every { executionRepository.create(any()) } answers { firstArg() }
+            every { executionRepository.complete(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns true
+            every { eventLog.entry(any(), any()) } answers {
+                ReplayLogEntry(firstArg(), secondArg<LoggedSseEvent>().eventId, "{}")
+            }
+            val rowsSink = RecordingSink<co.datapipelines.executor.ExecutionEventRecord> { it.executionId }
+            val replaySink = RecordingSink<ReplayLogEntry> { it.executionId }
+            val config = co.datapipelines.persistence.BatchingConfig(writers = 1)
+            val rows = co.datapipelines.persistence.BatchingWriter("rows", config, rowsSink)
+            val replay = co.datapipelines.persistence.BatchingWriter("replay", config, replaySink)
+            val direct =
+                java.util.concurrent.Executors
+                    .newSingleThreadExecutor()
+            try {
+                val recorder = BatchedEventRecorder(rows, replay, eventLog, direct)
+                val executions = listOf(UUID.randomUUID(), UUID.randomUUID())
+                kotlinx.coroutines.coroutineScope {
+                    executions.forEach { id ->
+                        launch(Dispatchers.Default) {
+                            val emitter =
+                                WebEventEmitter(
+                                    context =
+                                        ExecutionContext(
+                                            pipelineId,
+                                            3,
+                                            userId,
+                                            correlationId,
+                                            ExecutionTrigger.REST,
+                                            "{}",
+                                            workspaceId,
+                                        ),
+                                    stream = null,
+                                    streams = registry,
+                                    eventLog = eventLog,
+                                    eventRepository = eventRepository,
+                                    executionRepository = executionRepository,
+                                    persistenceDispatcher = Dispatchers.Default,
+                                    eventRecorder = recorder,
+                                )
+                            emitter.emit(ExecutionStarted(id, pipelineId, 3, emptyMap(), startedAt = NOW))
+                            repeat(INTERLEAVED) { n -> emitter.emit(NodeStarted(id, "n$n", NOW)) }
+                            emitter.emit(PipelineCompleted(id, pipelineId, 3, NOW, NOW.plusMillis(900), 900, emptyList()))
+                        }
+                    }
+                }
+                val expected = (1..INTERLEAVED + 2).toList()
+                executions.forEach { id ->
+                    rowsSink.items().filter { it.executionId == id }.map { it.eventId } shouldBe expected
+                    replaySink.items().filter { it.executionId == id }.map { it.eventId } shouldBe expected
+                }
+                // Non-vacuity: the two executions really did share the one writer's batches.
+                rowsSink.batches().any { batch -> batch.map { it.executionId }.toSet().size == 2 } shouldBe true
+                verify(exactly = 0) { eventRepository.append(any<UUID>(), any(), any(), any(), any()) }
+            } finally {
+                rows.close()
+                replay.close()
+                direct.shutdownNow()
+            }
+        }
+
+    /** An in-memory store for the batched recorder: every batch, in commit order. */
+    private class RecordingSink<T>(
+        private val key: (T) -> Any,
+    ) : co.datapipelines.persistence.BatchSink<T> {
+        private val batches = java.util.Collections.synchronizedList(mutableListOf<List<T>>())
+
+        fun batches(): List<List<T>> = synchronized(batches) { batches.toList() }
+
+        fun items(): List<T> = batches().flatten()
+
+        override fun write(items: List<T>) {
+            // A short commit, so emits from the other execution queue up behind it and share the next batch.
+            Thread.sleep(1)
+            batches += items
+        }
+
+        override fun partitionKey(item: T): Any = key(item)
+
+        override fun sizeOf(item: T): Int = 1
+
+        override fun describe(item: T): String = item.toString()
+    }
+
     private fun hookedEmitter(
         failClosed: Boolean = false,
         onRecorded: (UUID) -> Unit = {},
@@ -437,5 +530,6 @@ class WebEventEmitterTest {
 
     private companion object {
         val NOW: Instant = Instant.parse("2026-08-05T14:30:00Z")
+        const val INTERLEAVED = 60
     }
 }

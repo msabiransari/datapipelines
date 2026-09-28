@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.17 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.18 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-28
 
 ---
 
@@ -186,6 +186,25 @@ A `published_endpoints` row whose stored path fails today's grammar is RETIRED, 
 
 Neither is an alert: the API console lists every legacy row with its reason. A steady `promotion_legacy_omitted` means an endpoint that will not reach the target until someone republishes it at a legal path.
 
+#### 3.4G The persistence events (#266)
+
+The batching writers in front of the audit log, the execution-event record and the replay log ([DAG Executor §10.1](dag-executor.md#101-how-an-emitted-event-becomes-durable-266), [Auth §10.1A](auth.md#101a-delivery-durable-before-log-returns-266), [Configuration §3.32](configuration.md#332-persistence-batching-266)) log under `persistence.*`; `writer` is the store (`audit`, `execution_events`, `replay_log`). An item is named by its ids only (`item`, `failed_items`: execution and event id, or audit event name, user id and key id) — never a payload or `details` (§9.2).
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| WARN | `persistence.batch_retried` | A batch threw; it was retried one item at a time, in order | `writer`, `batch`, `committed`, `failed`, `failed_items` (each with its kind), `cause` (the exception class) |
+| WARN | `persistence.write_failed` | A batch of ONE item threw (no retry is possible) | `writer`, `kind`, `item` |
+| WARN | `persistence.direct_write_failed` | A caller's own write (after `record-max-wait-ms`, a full queue or shutdown) threw | `writer`, `kind`, `item` |
+| WARN | `persistence.indeterminate` | The emitter stopped waiting after `2 × record-max-wait-ms` while a write of the item was still running — it may yet land | `writer`, `items`, `wait_ms` |
+| WARN | `persistence.direct_write_abandoned` | The emitter's direct write never started within its bound and never will — the item is NOT written | `writer`, `item` |
+| WARN | `persistence.saturated` | The queue is full: callers are writing directly, `submit` is refusing. At most once per 10 s per writer — a state, not an event per item | `writer`, `queued`, `max_events`, `queued_bytes`, `max_bytes` |
+| ERROR | `persistence.writer_died` | A writer thread ended on an `Error`; its batch was failed so no caller waits on it, and its partition's later items are written directly by their callers | `writer`, `partition` |
+| INFO | `shutdown.persistence_drain_started` | Shutdown, after the web server's graceful drain: every writer starts its bounded drain, in parallel | `writers` |
+| INFO | `persistence.drained` / `shutdown.persistence_drained` | A writer flushed everything it held | `writer` (`lost`, `in_flight` on the second) |
+| WARN | `persistence.drain_incomplete` | A writer's drain reached `shutdown-drain-ms` with items left: `lost` were never written (only `submit` items can be — nothing awaits them), `in_flight` were inside a commit and may or may not have landed | `writer`, `lost`, `in_flight`, `drain_ms` |
+
+The emitter and the audit sink keep their own lines too — `Durable event … not written (kind)`, `SSE event log append failed … (replay will be incomplete)`, `audit_log write failed … kind=…` — the ones operators have always searched for. A steady `persistence.saturated` or a rising `datapipelines.persistence.fallbacks{reason=timeout}` (§4.1) means the store cannot keep up; `batch_retried` with `kind=poison` means rows the store refuses, which no retry will fix.
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -250,6 +269,20 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.scheduler.runs.finished` | counter | `state` (`succeeded`/`failed`/`cancelled`/`aborted`/`unknown`/`not_started`/`skipped`) | Runs reaching a final state. A run whose `unknown` is later settled by the real outcome counts once for each |
 | `datapipelines.scheduler.capacity.retries` | counter | (none) | Admissions refused for capacity and retried 30 s later (R4). Rising means `max-concurrent-runs` is saturated |
 | `datapipelines.scheduler.runs.in_flight` | gauge | (none) | Scheduled executions holding a capacity slot on this instance, at most `max-concurrent-runs` |
+
+**Persistence batching** (#266, §3.4G) — one set per batching writer, every metric tagged `store` (`audit`/`execution_events`/`replay_log`), bound by `WebMetrics.bindPersistence`:
+
+| Metric | Type | Tags | Description |
+|---|---|---|---|
+| `datapipelines.persistence.batch.size` | distribution summary | `store` | Items per committed batch (singles retried after a failed batch count as batches of one) |
+| `datapipelines.persistence.batch.duration` | timer | `store` | The store's time to commit one batch |
+| `datapipelines.persistence.lag` | timer | `store` | Per item, enqueue to durable — the time a caller waited for its own row |
+| `datapipelines.persistence.queue.depth` | gauge | `store` | Items admitted and not yet finished (queued or inside a commit); bounded by `queue-max-events` |
+| `datapipelines.persistence.queue.bytes` | gauge | `store` | The same in bytes; bounded by `queue-max-bytes` |
+| `datapipelines.persistence.failures` | counter | `store`, `kind` (`poison`/`write_failed`/`indeterminate`/`abandoned`/`drain_lost`) | Items not written, or not known to be. `poison`: the store refused the row (skipped, its batch committed). `write_failed`: the store was unavailable. `indeterminate`: the emitter's bounded wait ended with the write still running. `abandoned`: the emitter's direct write never started. `drain_lost`: left at the shutdown drain's deadline |
+| `datapipelines.persistence.fallbacks` | counter | `store`, `reason` (`timeout`/`saturated`/`stopped`) | Items a CALLER wrote itself: its batch took longer than `record-max-wait-ms`, the queue stayed full, or the writer had stopped |
+| `datapipelines.persistence.batches.retried` | counter | `store` | Batches that threw and were retried one item at a time |
+| `datapipelines.persistence.dropped` | counter | `store` | `submit` calls refused (queue full or stopped) — the only items ever dropped without a caller waiting; no production caller yet |
 
 ### 4.2 Exposure
 
@@ -358,7 +391,9 @@ Already covered in [Auth spec §10](auth.md#10-audit-log) (event catalog §10.1,
 
 - Append-only table in the metadata DB.
 - Structured events (auth events, admin actions) — the catalog in Auth §10.1 is authoritative; there are no password or lockout events, because authentication is OIDC-only.
-- Retention governed by `datapipelines.audit.retention-days` ([configuration.md](configuration.md)).
+- Retention governed by `datapipelines.audit.retention-days` ([configuration.md](configuration.md)) — **documented, not yet implemented**: nothing binds the key or deletes rows (#266 finding).
+- **Delivery (#266).** A row is committed before `AuditEventSink.log` returns — batched outside a transaction, on the caller's own connection inside one ([Auth §10.1A](auth.md#101a-delivery-durable-before-log-returns-266)). The same holds for every execution event ([DAG Executor §10.1](dag-executor.md#101-how-an-emitted-event-becomes-durable-266)).
+- **The loss window, stated.** No awaited row — audit or event — is ever acknowledged before it is durable, so a crash cannot lose a row whose caller proceeded: a caller interrupted mid-write had not proceeded (for an execution, the outcome is "not completed", never "completed without a record"). The batching writers' non-awaited `submit` path is the one exception — its queue at the moment of a crash, and whatever the shutdown drain could not write by `shutdown-drain-ms` (`persistence.drain_incomplete`, `failures{kind=drain_lost}`) — and it has no production caller yet (the dashboard's refresh event, D27, will be its first).
 
 The audit log captures **who did what when** for compliance / forensic purposes. The general log captures **what happened in the system** for debugging.
 
@@ -447,6 +482,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.18 | 266 (#266) persistence batching | New **§3.4G the persistence events** (`persistence.batch_retried`, `write_failed`, `direct_write_failed`, `indeterminate`, `direct_write_abandoned`, `saturated` — at most once per 10 s — `writer_died`, `drained`, `drain_incomplete`, and the two `shutdown.persistence_*` lines); §4.1 gains the **persistence batching** table (`datapipelines.persistence.*`: batch size and duration, lag, queue depth and bytes, failures by `kind`, fallbacks by `reason`, retried batches, dropped submissions — every one tagged `store`); §7 states the delivery rule and the loss window (only the non-awaited `submit` path, no caller yet) and marks audit retention as documented-not-implemented. |
 | 2026-09-28 | v1.17 | 298 (#293) the log-served streams' cut | §4.1's `datapipelines.sse.stream.duration` row: the timer covers the live stream; the log-served streams (replay, idempotent-retry follow) record no duration and tag their cut's log line `close_reason=expired` or `close_reason=revoked` from the same verdict that refused (#271's one-judgement rule) — before, every log-served cut read as a revocation. |
 | 2026-09-28 | v1.16 | 286 (#286) | New **§3.4F the legacy endpoint events**: `endpoint.legacy_rows` (#274's once-per-JVM WARN, its field now `at_least` — the first query's count is a floor) and `endpoint.promotion_legacy_omitted` (#286 — a promotion batch left legacy rows out; before #274 the batch threw, after it the omission was silent). Both carry a count, never a path. |
 | 2026-09-26 | v1.15 | 262 (#263) | §4.1 `datapipelines.sse.stream.duration`'s `close_reason` closed set gains **`expired`**: the same policy cut as `revoked` — the subscriber's re-judgement refuses a write, the final comment is the same static string, the execution keeps running — where the refusal was the subscriber's validated token passing its `exp` (#263), so an expired token is never counted as a standing revocation or a `client_disconnect`. |

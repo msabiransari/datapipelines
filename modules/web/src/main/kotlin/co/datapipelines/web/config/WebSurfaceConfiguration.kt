@@ -22,6 +22,7 @@ import co.datapipelines.executor.ResultUrlFactory
 import co.datapipelines.executor.SubPipelineRunner
 import co.datapipelines.executor.WritebackRunner
 import co.datapipelines.mcp.McpExecutionRunner
+import co.datapipelines.persistence.BatchingWriter
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.staging.StagingFactory
 import co.datapipelines.templates.WorkspaceTemplateEngines
@@ -36,6 +37,7 @@ import co.datapipelines.web.pipelines.SubPipelineExecutionRunner
 import co.datapipelines.web.pipelines.WebIdempotencyMetrics
 import co.datapipelines.web.ratelimit.RateLimiter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
+import co.datapipelines.web.sse.ExecutionEventRecorder
 import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.SseJson
@@ -47,6 +49,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.core.StringRedisTemplate
@@ -141,7 +144,13 @@ class WebSurfaceConfiguration {
     fun webMetrics(
         registry: MeterRegistry,
         streams: ExecutionStreamRegistry,
-    ): WebMetrics = WebMetrics(registry).also { it.bindStreams(streams) }
+        // #266 — every batching writer in the context (audit, execution_events, replay_log).
+        writers: ObjectProvider<BatchingWriter<*>>,
+    ): WebMetrics =
+        WebMetrics(registry).also { metrics ->
+            metrics.bindStreams(streams)
+            writers.orderedStream().forEach(metrics::bindPersistence)
+        }
 
     @Bean
     fun resultCursor(
@@ -205,6 +214,7 @@ class WebSurfaceConfiguration {
         eventLog: SseEventLog,
         eventRepository: ExecutionEventRepository,
         executionRepository: ExecutionRepository,
+        eventRecorder: ExecutionEventRecorder,
     ): SubPipelineRunner =
         SubPipelineExecutionRunner(
             pipelines = pipelines,
@@ -227,6 +237,7 @@ class WebSurfaceConfiguration {
             eventRepository = eventRepository,
             executionRepository = executionRepository,
             transformSupport = transformSupport,
+            eventRecorder = eventRecorder,
         )
 
     /**
@@ -276,6 +287,7 @@ class WebSurfaceConfiguration {
         launcher: ExecutionLauncher,
         scope: CoroutineScope,
         subPipelineRunner: SubPipelineRunner,
+        eventRecorder: ExecutionEventRecorder,
     ): ExecutionStreamLauncher =
         ExecutionStreamLauncher(
             templateEngines = templateEngines,
@@ -304,6 +316,7 @@ class WebSurfaceConfiguration {
             scope = scope,
             subPipelineRunner = subPipelineRunner,
             transformSupport = transformSupport,
+            eventRecorder = eventRecorder,
         )
 
     /**
@@ -335,6 +348,7 @@ class WebSurfaceConfiguration {
         eventRepository: ExecutionEventRepository,
         executionRepository: ExecutionRepository,
         subPipelineRunner: SubPipelineRunner,
+        eventRecorder: ExecutionEventRecorder,
     ): RecordingExecutionRunner =
         RecordingExecutionRunner(
             templateEngines = templateEngines,
@@ -357,6 +371,7 @@ class WebSurfaceConfiguration {
             executionRepository = executionRepository,
             subPipelineRunner = subPipelineRunner,
             transformSupport = transformSupport,
+            eventRecorder = eventRecorder,
         )
 
     /**

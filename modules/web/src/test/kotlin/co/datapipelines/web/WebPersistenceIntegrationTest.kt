@@ -22,6 +22,7 @@ import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.ratelimit.RateLimitFilter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import co.datapipelines.web.sse.ExecutionContext
+import co.datapipelines.web.sse.LoggedSseEvent
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.WebEventEmitter
 import com.fasterxml.jackson.databind.json.JsonMapper
@@ -180,6 +181,146 @@ class WebPersistenceIntegrationTest {
         }
 
     @Test
+    fun `the same sequence through the BATCHED recorder lands the same rows and the same replay, 1 to N`() =
+        runBlocking<Unit> {
+            // #266 B.2/B.3: the production path — both writers over the real stores — must leave
+            // exactly what the direct path leaves: the row RUNNING → SUCCESS, events 1..5 in the
+            // durable record and in the replay, correlation id on every payload.
+            val config = co.datapipelines.persistence.BatchingConfig()
+            val rows =
+                co.datapipelines.persistence.BatchingWriter(
+                    "execution_events",
+                    config,
+                    co.datapipelines.web.sse
+                        .ExecutionEventRowSink(events),
+                )
+            val replay =
+                co.datapipelines.persistence.BatchingWriter(
+                    "replay_log",
+                    config,
+                    co.datapipelines.web.sse
+                        .ReplayLogSink(eventLog),
+                )
+            val direct =
+                java.util.concurrent.Executors
+                    .newSingleThreadExecutor()
+            try {
+                val executionId = UUID.randomUUID()
+                val correlationId = UUID.randomUUID()
+                val emitter =
+                    WebEventEmitter(
+                        context = ExecutionContext(pipelineId, 1, userId, correlationId, ExecutionTrigger.REST, "{}", DEFAULT_WORKSPACE_ID),
+                        stream = null,
+                        streams = mockkRegistry(),
+                        eventLog = eventLog,
+                        eventRepository = events,
+                        executionRepository = executions,
+                        persistenceDispatcher = Dispatchers.Default,
+                        eventRecorder =
+                            co.datapipelines.web.sse
+                                .BatchedEventRecorder(rows, replay, eventLog, direct),
+                    )
+                val started = Instant.parse("2026-08-05T14:30:00Z")
+                val stats = NodeStats("n1", NodeStatus.SUCCESS, started, started.plusMillis(900), 900, 10, 100)
+                emitter.emit(ExecutionStarted(executionId, pipelineId, 1, emptyMap(), startedAt = started))
+                emitter.emit(NodeStarted(executionId, "n1", started))
+                emitter.emit(NodeCompleted(executionId, "n1", stats))
+                emitter.emit(PipelineCompleted(executionId, pipelineId, 1, started, started.plusMillis(900), 900, listOf(stats)))
+                emitter.emit(DataReady(executionId, pipelineId, emptyList(), emptyList(), 0, false, "http://x/result", started, 300))
+
+                // Awaited: every emit returned only after its row and its replay entry were written.
+                executions.findById(DEFAULT_WORKSPACE_ID, executionId).shouldNotBeNull().status shouldBe ExecutionStatus.SUCCESS
+                val stored = events.findByExecution(executionId)
+                stored.map { it.eventId } shouldBe listOf(1, 2, 3, 4, 5)
+                stored.forEach {
+                    co.datapipelines.executor.ExecutorJson.mapper
+                        .readTree(it.payloadJson)
+                        .get("correlation_id")
+                        .asText() shouldBe correlationId.toString()
+                }
+                eventLog.replay(executionId).shouldNotBeNull().map { it.eventId } shouldBe listOf(1, 2, 3, 4, 5)
+            } finally {
+                rows.close()
+                replay.close()
+                direct.shutdownNow()
+            }
+        }
+
+    @Test
+    fun `a batched replay-log append is one round trip - one RPUSH and one EXPIRE per execution, order kept, TTL still one hour`() {
+        // #266 B.2: N events of two executions in ONE pipelined MULTI/EXEC. Counted on the server
+        // itself (INFO commandstats): two RPUSH, two EXPIRE — not one pair per event, which is what
+        // append() costs. Red if appendAll loops append().
+        val first = UUID.randomUUID()
+        val second = UUID.randomUUID()
+        val entries =
+            (1..BATCH_EVENTS).flatMap { id ->
+                listOf(
+                    eventLog.entry(first, LoggedSseEvent(id, "node_started", mapOf("n" to id))),
+                    eventLog.entry(second, LoggedSseEvent(id, "node_started", mapOf("n" to id))),
+                )
+            }
+        val before = commandCalls()
+
+        eventLog.appendAll(entries)
+
+        val after = commandCalls()
+        // The data commands only: reading INFO opens its own connection (hello, client|setinfo, info).
+        // A Duration expiry reaches Redis as PEXPIRE — same one-hour TTL, asserted below.
+        val delta =
+            after
+                .filterKeys { it in setOf("rpush", "expire", "pexpire", "multi", "exec") }
+                .mapValues { (command, calls) -> calls - before.getOrDefault(command, 0) }
+                .filterValues { it > 0 }
+        delta shouldBe mapOf("rpush" to 2, "pexpire" to 2, "multi" to 1, "exec" to 1)
+        eventLog.replay(first).shouldNotBeNull().map { it.eventId } shouldBe (1..BATCH_EVENTS).toList()
+        eventLog.replay(second).shouldNotBeNull().map { it.eventId } shouldBe (1..BATCH_EVENTS).toList()
+        val ttl = redis.getExpire("dp:events:$first").shouldNotBeNull()
+        (ttl in (ONE_HOUR_SECONDS - TTL_SLACK_SECONDS)..ONE_HOUR_SECONDS) shouldBe true
+    }
+
+    @Test
+    fun `the replay serves each event id once - a re-sent batch never duplicates what clients see`() {
+        // The replay log's retry dedup: the Redis list is at-least-once (a batch whose EXEC reply
+        // was lost is re-sent by the writer), so the replay keeps the first entry per event id.
+        val executionId = UUID.randomUUID()
+        val batch = (1..3).map { eventLog.entry(executionId, LoggedSseEvent(it, "node_started", mapOf("n" to it))) }
+        eventLog.appendAll(batch)
+        eventLog.appendAll(batch.subList(1, 3))
+
+        eventLog.replay(executionId).shouldNotBeNull().map { it.eventId } shouldBe listOf(1, 2, 3)
+    }
+
+    @Test
+    fun `a batched replay-log append against a stopped Redis throws - the writer counts it, the caller is told`() {
+        val disposable = TestRedis.disposable()
+        try {
+            val log = SseEventLog(disposable.template, co.datapipelines.executor.ExecutorJson.mapper)
+            disposable.stopServer()
+            val entry = log.entry(UUID.randomUUID(), LoggedSseEvent(1, "node_started", emptyMap()))
+            runCatching { log.appendAll(listOf(entry)) }.isFailure shouldBe true
+        } finally {
+            disposable.close()
+        }
+    }
+
+    /** `INFO commandstats` → command → calls, read off the server that did the work. */
+    private fun commandCalls(): Map<String, Int> =
+        redis.connectionFactory
+            .shouldNotBeNull()
+            .connection
+            .use { connection ->
+                connection
+                    .serverCommands()
+                    .info("commandstats")
+                    .shouldNotBeNull()
+                    .entries
+                    .associate { (k, v) ->
+                        k.toString().removePrefix("cmdstat_") to Regex("calls=(\\d+)").find(v.toString())!!.groupValues[1].toInt()
+                    }
+            }
+
+    @Test
     fun `the rate limiter holds its counts in Redis`() {
         // Real Redis, pinned clock: the fixed window must not roll over mid-test.
         //
@@ -330,6 +471,10 @@ class WebPersistenceIntegrationTest {
         )
 
     private companion object {
+        const val BATCH_EVENTS = 50
+        const val ONE_HOUR_SECONDS = 3_600L
+        const val TTL_SLACK_SECONDS = 60L
+
         /** The V4-seeded `default` workspace the pipeline fixture and every repository read are scoped to. */
         val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
     }
