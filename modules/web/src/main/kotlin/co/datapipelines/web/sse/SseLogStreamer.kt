@@ -207,16 +207,25 @@ class SseLogStreamer(
     ): Boolean {
         val judge = authority ?: return true
         if (subscriber == null) return true
-        // [ExecutionStreamAuthority.mayRead] never throws — an unsettleable answer is its own
-        // refusal (fail closed, in the log).
-        val allowed = judge.mayRead(subscriber, executionId)
-        if (!allowed) {
-            log.info("SSE log stream of execution {} cut: the subscriber's authority no longer holds (#230, P4).", executionId)
+        // [ExecutionStreamAuthority.verdict] never throws — an unsettleable answer is its own
+        // refusal (fail closed, in the log). #293: the cut is tagged with the SAME judgement's
+        // reason — `expired` for a token past its `exp`, `revoked` otherwise (observability
+        // §4.2's close reasons, which the live stream's metric already records) — never a second
+        // read of the clock (#271). The final comment is the same static string either way.
+        val verdict = judge.verdict(subscriber, executionId)
+        if (verdict != StreamVerdict.ALLOWED) {
+            val closeReason = if (verdict == StreamVerdict.EXPIRED) CLOSE_EXPIRED else CLOSE_REVOKED
+            log.info(
+                "SSE log stream of execution {} cut, close_reason={}: {}.",
+                executionId,
+                closeReason,
+                if (verdict == StreamVerdict.EXPIRED) EXPIRED_WHY else REVOKED_WHY,
+            )
             runCatching { emitter.send(SseEmitter.event().comment(REVOKED_COMMENT)) }
             cancel(emitter)
             completeQuietly(emitter, executionId)
         }
-        return allowed
+        return verdict == StreamVerdict.ALLOWED
     }
 
     private fun cancel(emitter: SseEmitter) {
@@ -257,6 +266,13 @@ class SseLogStreamer(
 
     private companion object {
         const val NEVER_TIMEOUT = 0L
+
+        /** observability §4.2's close reasons, as the live stream's duration metric records them. */
+        const val CLOSE_EXPIRED = "expired"
+        const val CLOSE_REVOKED = "revoked"
+
+        const val EXPIRED_WHY = "the subscriber's session token passed its exp (#263)"
+        const val REVOKED_WHY = "the subscriber's authority no longer holds (#230, P4)"
 
         /**
          * #230 (P4) — the final comment a cut stream carries. A comment, not an event: the

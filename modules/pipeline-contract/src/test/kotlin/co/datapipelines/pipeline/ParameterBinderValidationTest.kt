@@ -2,6 +2,7 @@ package co.datapipelines.pipeline
 
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterConstraints
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
@@ -184,6 +185,26 @@ class ParameterBinderValidationTest {
                 .shouldBeInstanceOf<ParameterBindingResult.Bound>()
                 .context
         bound["unused"].shouldBeNull()
+    }
+
+    @Test
+    fun `#298 - a stored-declaration refusal outranks a caller's value error, whatever the order - the server's fault names the status`() {
+        // Pre-fix: the exception took the FIRST failure's code, so a caller's own bad value on a
+        // parameter declared before the broken one turned the 409 into a 400 carrying the
+        // server's refusal among its details.
+        val mixed =
+            LinkedHashMap<String, Parameter>().apply {
+                put("count", Parameter(type = LogicalType.INTEGER))
+                put("limit", stored.getValue("limit"))
+            }
+        val refusal =
+            shouldThrow<PipelineValidationException> {
+                ParameterBinder(mixed).bindOrThrow(mapOf("count" to Fixtures.json("\"x\""), "limit" to Fixtures.json("5")))
+            }
+        refusal.code shouldBe PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID
+        // Both failures still travel: the caller learns its own mistake beside the server's.
+        refusal.result.codes shouldBe
+            listOf(PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE, PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID)
     }
 
     private fun bind(vararg inputs: Pair<String, String>): ParameterBindingResult =

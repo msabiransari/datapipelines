@@ -1,8 +1,7 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.pipeline.RequestLimits
-import com.fasterxml.jackson.core.JsonFactory
-import com.fasterxml.jackson.core.StreamReadConstraints
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper
@@ -97,29 +96,33 @@ object McpServerFactory {
      * constraints (pipeline-contract §13.21, #279) rather than the ServiceLoader default's bare
      * `ObjectMapper`: the transport is where an inbound JSON-RPC body is parsed, so the
      * `StreamReadConstraints` that bound a hostile-but-within-the-cap body on REST bind the MCP
-     * surface too. The constraints' numbers come from `pipeline-contract`'s [RequestLimits] —
-     * the one constants home `web`'s REST mapper also reads — so the two surfaces cannot drift.
+     * surface too. The factory is `pipeline-contract`'s [RequestLimits.jsonFactory] — the one
+     * home `web`'s REST mapper is also built from — so the two surfaces cannot drift.
      */
     fun transport(): HttpServletStatelessServerTransport =
         HttpServletStatelessServerTransport
             .builder()
             .messageEndpoint(ENDPOINT)
-            .jsonMapper(JacksonMcpJsonMapper(ObjectMapper(constrainedJsonFactory())))
+            .jsonMapper(JacksonMcpJsonMapper(transportMapper()))
             .contextExtractor { request: HttpServletRequest -> transportContext(request) }
             .build()
 
-    /** The `JsonFactory` carrying §13.21's stated constraints (the same numbers `web` builds with). */
-    private fun constrainedJsonFactory(): JsonFactory =
-        JsonFactory
-            .builder()
-            .streamReadConstraints(
-                StreamReadConstraints
-                    .builder()
-                    .maxNestingDepth(RequestLimits.MAX_NESTING_DEPTH)
-                    .maxStringLength(RequestLimits.MAX_STRING_LENGTH)
-                    .maxNumberLength(RequestLimits.MAX_NUMBER_LENGTH)
-                    .build(),
-            ).build()
+    /**
+     * The transport's mapper: §13.21's constraints, and no exception internals on the wire (#291).
+     *
+     * The SDK answers an unreadable body — malformed, or nested past the bound — and its other
+     * transport refusals by writing its `McpError` EXCEPTION through this mapper. Bare, that
+     * serialized the whole throwable: `stackTrace` (class, file and line of every frame),
+     * `cause`, `suppressed` — measured on `/mcp`, a 400 whose body was a stack trace, the
+     * topology disclosure observability §6.4 forbids. The mix-in keeps what the SDK means to
+     * send (its JSON-RPC error and message) and drops the rest, for every throwable.
+     */
+    internal fun transportMapper(): ObjectMapper =
+        ObjectMapper(RequestLimits.jsonFactory()).addMixIn(Throwable::class.java, WireThrowable::class.java)
+
+    /** The throwable properties that never reach a caller ([transportMapper]). */
+    @JsonIgnoreProperties("stackTrace", "cause", "suppressed", "localizedMessage")
+    private abstract class WireThrowable
 
     /**
      * Builds the server over [transport] and installs the resource handler.

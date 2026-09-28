@@ -261,7 +261,7 @@ class McpResourceCatalog(
                 executions.findVisible(workspaceId, ctx.principal.userId, limit = limit, offset = offset)
             }
         return candidates
-            .filter { it.startedAt.isAfter(since) && it.visibleTo(ctx) }
+            .filter { it.startedAt.isAfter(since) && it.visibleTo(ctx, Permission.EXECUTION_READ) }
             .map {
                 descriptor(
                     uri = McpResourceUri.execution(it.executionId),

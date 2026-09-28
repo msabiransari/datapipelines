@@ -193,7 +193,8 @@ class PublishedEndpointRepository(
         /**
          * Maps one stored row to [EndpointRow]: a parseable path is a [EndpointRow.Valid]
          * endpoint, anything else is [EndpointRow.Legacy] with the grammar's own refusal as its
-         * reason (bounded — the message is stored data's voice, never a stack trace).
+         * reason (bounded — the message is stored data's voice, never a stack trace), or the length
+         * sentence when the stored path is longer than its echo shows ([EndpointPath.legacyReason], #298).
          */
         val MAPPER =
             RowMapper<EndpointRow> { rs: ResultSet, _: Int ->
@@ -207,7 +208,10 @@ class PublishedEndpointRepository(
                                 workspaceId = rs.getObject("workspace_id", UUID::class.java),
                                 pathPattern = pathPattern,
                                 pipelineId = rs.getObject("pipeline_id", UUID::class.java),
-                                reason = boundedReason(failure.message ?: "path is not a legal path (§4.1)"),
+                                reason =
+                                    boundedReason(
+                                        EndpointPath.legacyReason(pathPattern, failure.message ?: "path is not a legal path (§4.1)"),
+                                    ),
                                 enabled = rs.getBoolean("is_enabled"),
                             )
                         }

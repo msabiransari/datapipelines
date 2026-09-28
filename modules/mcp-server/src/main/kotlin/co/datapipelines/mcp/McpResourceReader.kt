@@ -2,6 +2,7 @@ package co.datapipelines.mcp
 
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuditEventSink
+import co.datapipelines.auth.Permission
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
@@ -212,7 +213,8 @@ class McpResourceReader(
         ctx: McpToolContext,
         uri: String,
     ): String {
-        val record = executions.findById(workspaceId, executionId)?.takeIf { it.visibleTo(ctx) } ?: throw notFound(uri)
+        val record =
+            executions.findById(workspaceId, executionId)?.takeIf { it.visibleTo(ctx, Permission.EXECUTION_READ) } ?: throw notFound(uri)
         return ExecutorJson.write(record.toMcpMetadata())
     }
 
@@ -231,7 +233,7 @@ class McpResourceReader(
         ctx: McpToolContext,
         uri: String,
     ): String {
-        executions.findById(workspaceId, executionId)?.takeIf { it.visibleTo(ctx) } ?: throw notFound(uri)
+        executions.findById(workspaceId, executionId)?.takeIf { it.visibleTo(ctx, Permission.EXECUTION_READ) } ?: throw notFound(uri)
         return events.findByExecution(executionId).joinToString(separator = "\n") { record ->
             "id: ${record.eventId}\nevent: ${record.eventType}\ndata: ${record.payloadJson}\n"
         }

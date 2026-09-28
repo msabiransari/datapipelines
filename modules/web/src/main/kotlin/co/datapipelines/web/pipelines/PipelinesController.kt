@@ -5,15 +5,18 @@ import co.datapipelines.auth.AuditEventSink
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
 import co.datapipelines.pipeline.CheckRunVia
+import co.datapipelines.pipeline.PipelineJson
 import co.datapipelines.pipeline.PipelineRecord
 import co.datapipelines.pipeline.PipelineReleaseService
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.CorrelationId
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
+import co.datapipelines.web.api.RequestBodies
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.writeSurface
 import com.fasterxml.jackson.databind.JsonNode
@@ -84,6 +87,7 @@ class PipelinesController(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
+        readableOrRefused(body)
         val saved = pipelines.create(principal.requireWorkspace().id, body, principal.userId, principal.writeSurface())
         return ApiResponse.of(PipelineResponses.full(saved.record, saved.bodyJson, saved.version, saved.draft))
     }
@@ -215,6 +219,7 @@ class PipelinesController(
         // The precondition is checked BEFORE the body is parsed: a caller that did not
         // participate in the hash protocol at all should not burn validation first.
         val expectedHash = IfMatchHeader.required(ifMatch)
+        readableOrRefused(body)
         val principal = currentPrincipal()
         val saved =
             pipelines.update(
@@ -539,5 +544,21 @@ class PipelinesController(
                 "has_more" to level.hasMore,
             ),
         )
+    }
+
+    /**
+     * The entry-point read of a create/update body (#291): the service binds the TEXT (it
+     * stores it), so the body is read once here under §13.21's stated constraints first — not
+     * JSON, or nested past the bound, is the pipeline family's malformed-body 400 before the
+     * service parses anything with the domain mapper (measured before: a malformed body was a
+     * 500 on both routes).
+     */
+    private fun readableOrRefused(body: String) {
+        RequestBodies.readTree(REQUEST_MAPPER, body, ApiErrors::malformedPipelineBody)
+    }
+
+    private companion object {
+        /** `PipelineJson`'s request copy — what a pipeline body is first read with (#291). */
+        val REQUEST_MAPPER = RequestLimits.requestMapper(PipelineJson.objectMapper())
     }
 }

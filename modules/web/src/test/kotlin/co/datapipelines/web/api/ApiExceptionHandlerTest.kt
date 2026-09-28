@@ -39,6 +39,26 @@ class ApiExceptionHandlerTest {
         @GetMapping("/probe/unexpected")
         fun unexpected(): Nothing = error("boom")
 
+        /** #298 — the binder's mixed refusal: the caller's bad value first, the stored declaration second. */
+        @GetMapping("/probe/mixed-refusal")
+        fun mixedRefusal(): Nothing =
+            throw co.datapipelines.pipeline.PipelineValidationException(
+                co.datapipelines.pipeline.ValidationResult(
+                    listOf(
+                        co.datapipelines.pipeline.ValidationFailure(
+                            PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                            "parameters.count",
+                            "not an integer",
+                        ),
+                        co.datapipelines.pipeline.ValidationFailure(
+                            PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID,
+                            "parameters.limit",
+                            "stored with a declaration today's rules refuse",
+                        ),
+                    ),
+                ),
+            )
+
         @GetMapping("/probe/unreachable")
         fun unreachable(): Nothing =
             throw co.datapipelines.typesystem.DatapipelinesException(
@@ -138,6 +158,17 @@ class ApiExceptionHandlerTest {
             .andExpect(jsonPath("$.error.user_message").exists())
             .andExpect(jsonPath("$.error.doc_url").value("https://datapipelines.co/docs/pipeline-contract#133-pipeline-execution-run-time"))
             .andExpect(jsonPath("$.correlation_id").exists())
+    }
+
+    @Test
+    fun `a mixed refusal answers the server's status - the stored declaration outranks the caller's value (#298)`() {
+        mvc
+            .perform(get("/probe/mixed-refusal"))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error.code").value(PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID))
+            // Both failures still travel, in the order they were found.
+            .andExpect(jsonPath("$.error.details.failures[0].code").value(PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE))
+            .andExpect(jsonPath("$.error.details.failures[1].code").value(PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID))
     }
 
     @Test

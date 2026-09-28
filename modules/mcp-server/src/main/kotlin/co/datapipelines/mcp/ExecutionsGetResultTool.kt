@@ -79,6 +79,12 @@ class ExecutionsGetResultTool(
                 """.trimIndent(),
         )
 
+    /**
+     * This tool's catalogue row, `execution.result.read` — what [visibleTo]'s scheduled branch asks here
+     * (#293: it asked `execution.read` for all three execution tools).
+     */
+    private val readRow = catalogueRowOf(definition)
+
     override fun call(
         args: McpArguments,
         ctx: McpToolContext,
@@ -148,7 +154,7 @@ class ExecutionsGetResultTool(
         ctx: McpToolContext,
     ): ExecutionRecord {
         val record =
-            executions.findById(ctx.principal.requireWorkspace().id, executionId)?.takeIf { it.visibleTo(ctx) }
+            executions.findById(ctx.principal.requireWorkspace().id, executionId)?.takeIf { it.visibleTo(ctx, readRow) }
                 ?: throw McpNotFound.execution(executionId)
         notReadable(record)?.let { throw it }
         return record

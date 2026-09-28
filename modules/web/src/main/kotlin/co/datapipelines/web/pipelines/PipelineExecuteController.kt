@@ -6,13 +6,16 @@ import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.CorrelationId
+import co.datapipelines.web.api.RequestBodies
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.config.idempotencyKey
 import co.datapipelines.web.config.requestedResultPageRows
 import co.datapipelines.web.config.requestedResultTtlSeconds
+import com.fasterxml.jackson.core.exc.StreamWriteException
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import jakarta.servlet.http.HttpServletRequest
@@ -63,13 +66,17 @@ class PipelineExecuteController(
     ): SseEmitter {
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
-        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
 
+        // The whole request is read and validated BEFORE anything is looked up — the pipeline
+        // itself included since #291: a body that is not JSON, a malformed `version` or
+        // `parameters`, or a parameter the echo cannot write is the caller's own 400 and must
+        // not cost a query. (A malformed body answers 400 whatever the id; it reveals nothing
+        // about which pipelines exist.)
         val tree = parseBody(body)
-        // The whole request is read and validated BEFORE anything is looked up: a malformed
-        // `version` or `parameters` is the caller's own 400 and must not cost a query.
         val explicitVersion = versionOf(tree)
         val parametersNode = parametersOf(tree)
+        val parametersJson = echoOf(parametersNode)
+        val record = pipelines.findRecord(workspaceId, ReadLens.Everything, id) ?: throw ApiErrors.pipelineNotFound(id.toString())
         // D56: with no `version` in the body, run the WORKING version — the draft when one
         // exists, else the latest release. Resolved by the aggregate (PipelineService), the same
         // call `pipelines_execute` makes; null only for a pipeline whose sole draft was
@@ -92,7 +99,7 @@ class PipelineExecuteController(
                 pipeline = executable.pipeline,
                 principal = principal,
                 parameters = parameters,
-                parametersJson = MAPPER.writeValueAsString(parametersNode),
+                parametersJson = parametersJson,
                 correlationId = CorrelationId.currentUuid() ?: UUID.randomUUID(),
                 resultTtlSeconds = request.requestedResultTtlSeconds(),
                 // R-EP4: ONE contract for DP-Result-Page-Rows across this surface and a
@@ -106,7 +113,16 @@ class PipelineExecuteController(
 
     private fun parseBody(body: String?): ObjectNode {
         if (body.isNullOrBlank()) return MAPPER.createObjectNode()
-        return MAPPER.readTree(body) as? ObjectNode
+        val tree =
+            RequestBodies.readTree(REQUEST_MAPPER, body) { e ->
+                ApiException(
+                    PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                    "The execute request body could not be read: ${e.originalMessage?.take(MAX_READ_ERROR_CHARS)}",
+                    mapOf(ApiErrors.REASON to ApiErrors.MALFORMED_JSON),
+                    e,
+                )
+            }
+        return tree as? ObjectNode
             ?: throw ApiException(
                 PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
                 "The execute request body must be a JSON object.",
@@ -134,6 +150,40 @@ class PipelineExecuteController(
         return node.asInt()
     }
 
+    /**
+     * The parameter object's echo — what the idempotency hash and the execution row's
+     * `parameters_json` are computed over (#291).
+     *
+     * [MAPPER] writes floats as plain decimal text (`WRITE_BIGDECIMAL_AS_PLAIN`), and a JSON
+     * number such as `1e10000` has a scale no plain rendering allows (Jackson refuses a scale
+     * past ±9999): the caller's own value, so the caller's 400 naming the parameter, with
+     * §6.3's `too_many_digits` token — never the 500 a raw generation failure used to reach. A
+     * write that fails for any other reason is our defect and keeps its 500.
+     */
+    private fun echoOf(parameters: ObjectNode): String =
+        try {
+            MAPPER.writeValueAsString(parameters)
+        } catch (e: StreamWriteException) {
+            val offending = parameters.properties().firstOrNull { (_, value) -> !writable(value) }?.key ?: throw e
+            throw ApiException(
+                PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE,
+                "too_many_digits: parameter '${offending.take(MAX_ECHOED_VALUE_CHARS)}' is a number no plain decimal " +
+                    "rendering can carry; send large values as strings within pipeline-contract §6.3's digit cap",
+                mapOf("parameter" to offending.take(MAX_ECHOED_VALUE_CHARS), ApiErrors.REASON to TOO_MANY_DIGITS),
+                e,
+            )
+        }
+
+    private fun writable(value: JsonNode): Boolean =
+        try {
+            MAPPER.writeValueAsString(value)
+            true
+        } catch (
+            @Suppress("SwallowedException") e: StreamWriteException,
+        ) {
+            false
+        }
+
     /** Optional `parameters` object; a non-object value is a type error, never coerced. */
     private fun parametersOf(tree: ObjectNode): ObjectNode {
         val node = tree.get("parameters") ?: return MAPPER.createObjectNode()
@@ -147,6 +197,15 @@ class PipelineExecuteController(
 
     private companion object {
         val MAPPER = ExecutorJson.mapper
+
+        /** [MAPPER]'s request copy — what the execute body is read with (#291). */
+        val REQUEST_MAPPER = RequestLimits.requestMapper(MAPPER)
+
+        /** The `details.reason` §6.3's magnitude refusal carries (`ParameterCoercion`'s token). */
+        const val TOO_MANY_DIGITS = "too_many_digits"
+
+        /** Jackson's own reason for an unreadable body, bounded before it reaches the envelope. */
+        const val MAX_READ_ERROR_CHARS = 200
 
         /** Reflected client input is bounded before it reaches an error message. */
         const val MAX_ECHOED_VALUE_CHARS = 64

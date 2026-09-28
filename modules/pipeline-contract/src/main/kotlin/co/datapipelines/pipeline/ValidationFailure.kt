@@ -55,15 +55,19 @@ data class ValidationResult(
  * the save path, which returns [ValidationResult] so the author sees every failure at once.
  *
  * The exception's `code` is the **first** failure's code (the unified error response carries
- * one code); the full list travels in `details["failures"]`, which is what the REST layer
- * renders. Extends `DatapipelinesException` per module-structure §4.3 — every module's
- * exceptions share that base and it lives in `typesystem`, the one module everyone may
- * depend on.
+ * one code), with one precedence rule (#298): a failure the SERVER owns — a stored declaration
+ * today's rules refuse ([SERVER_FAULT_CODES]) — outranks every failure the caller caused, so a
+ * caller's own bad value listed earlier cannot turn the server's 409 into a 400. The full list
+ * travels in `details["failures"]` in its original order, which is what the REST layer renders.
+ * Extends `DatapipelinesException` per module-structure §4.3 — every module's exceptions share
+ * that base and it lives in `typesystem`, the one module everyone may depend on.
  */
 class PipelineValidationException(
     val result: ValidationResult,
 ) : DatapipelinesException(
-        code = result.failures.firstOrNull()?.code ?: PipelineErrorCodes.Validation.EMPTY_PIPELINE,
+        code =
+            (result.failures.firstOrNull { it.code in SERVER_FAULT_CODES } ?: result.failures.firstOrNull())?.code
+                ?: PipelineErrorCodes.Validation.EMPTY_PIPELINE,
         message = "Pipeline validation failed with ${result.failures.size} error(s): ${result.codes.joinToString()}",
         details =
             mapOf(
@@ -73,3 +77,11 @@ class PipelineValidationException(
                     },
             ),
     )
+
+/**
+ * The failure codes that name a SERVER-side defect rather than the caller's (#298): the stored
+ * declaration save would refuse today (`pipeline.execution.parameter_declaration_invalid`, 409).
+ * When one is among a result's failures it names [PipelineValidationException]'s code — and so
+ * the status — whatever order the failures were found in.
+ */
+internal val SERVER_FAULT_CODES: Set<String> = setOf(PipelineErrorCodes.Execution.PARAMETER_DECLARATION_INVALID)

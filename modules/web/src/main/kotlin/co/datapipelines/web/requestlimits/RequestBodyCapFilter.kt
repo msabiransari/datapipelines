@@ -5,8 +5,6 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.config.RequestLimitsProperties
-import com.fasterxml.jackson.core.JsonFactory
-import com.fasterxml.jackson.core.StreamReadConstraints
 import jakarta.servlet.FilterChain
 import jakarta.servlet.ReadListener
 import jakarta.servlet.ServletInputStream
@@ -234,21 +232,14 @@ class RequestLimitsConfiguration {
     /**
      * The REST surface's ONE mapper — Spring Boot's auto-configured `ObjectMapper`, which every
      * `web` and `app` collaborator injects and which the request message converters read bodies
-     * through — is built over a `JsonFactory` carrying the stated [StreamReadConstraints],
-     * never the pinned version's inherited defaults (pipeline-contract §13.21). The MCP
-     * transport's mapper carries the same constraints, built from the same constants in
-     * [co.datapipelines.mcp.McpServerFactory].
+     * through — is built over [RequestLimits.jsonFactory], never the pinned version's inherited
+     * defaults (pipeline-contract §13.21). The MCP transport's mapper is built over the same
+     * factory in [co.datapipelines.mcp.McpServerFactory], and every route that parses its own
+     * `String` body reads it through [RequestLimits.requestMapper] (#291).
      */
     @Bean
     fun requestStreamReadConstraintsCustomizer(): Jackson2ObjectMapperBuilderCustomizer =
-        Jackson2ObjectMapperBuilderCustomizer { builder ->
-            builder.factory(
-                JsonFactory
-                    .builder()
-                    .streamReadConstraints(streamReadConstraints())
-                    .build(),
-            )
-        }
+        Jackson2ObjectMapperBuilderCustomizer { builder -> builder.factory(RequestLimits.jsonFactory()) }
 
     companion object {
         /**
@@ -257,14 +248,5 @@ class RequestLimitsConfiguration {
          * are not spelled in this comment: Kotlin block comments nest on the slash-star sequence.)
          */
         val URL_PATTERNS: List<String> = listOf("/api/v1/*", "/mcp", "/mcp/*")
-
-        /** The stated constraints, from the one constants home (`pipeline-contract`'s [RequestLimits]). */
-        fun streamReadConstraints(): StreamReadConstraints =
-            StreamReadConstraints
-                .builder()
-                .maxNestingDepth(RequestLimits.MAX_NESTING_DEPTH)
-                .maxStringLength(RequestLimits.MAX_STRING_LENGTH)
-                .maxNumberLength(RequestLimits.MAX_NUMBER_LENGTH)
-                .build()
     }
 }
