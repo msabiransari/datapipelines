@@ -35,7 +35,8 @@ find out — passing `parameters` for every `:name` the statement binds (else `i
 the scratch checks the statement, not values, so any representative value of the right type
 will do). Read `validation_status`: `executed` validated the statement; `incomplete` means H2
 stopped at a missing staged table and checked nothing after it — finish it as
-`pipelines-dag`'s ladder says (a `VALUES` restatement, or the node run with its real inputs).
+`pipelines-dag`'s ladder says (a `VALUES` restatement, or `pipelines_execute`, whose run
+stages the real inputs; standalone `pipelines_execute_node` refuses a tempdb source).
 And `rows` is a reserved word on MySQL and DuckDB — alias a count `AS n`, never `AS rows`.
 
 ### 6.4 A source node sees only its own datasource

@@ -18,17 +18,19 @@ output proves consistency, not that the right quantity was computed.
    count as an event and still be unfit for a per-mile or per-minute metric — separate the
    two populations when they differ, and say so.
 2. **Normalize before you combine.** Two quantities enter one total, one share, one
-   comparison or one ranking only when they are the same kind of thing. A sampled count and a
-   census count are not: apply the stated sampling weight to every sampled count BEFORE the
-   sum, the share and the rank. A constant multiplier preserves order only when it
-   multiplies the whole score; applied to one summand it reorders — so "scaling this
-   component cannot change the ranking" is a claim to disprove, never to assume. Keep three
-   quantities distinct in the output and its labels: observed sample support (rows you saw),
-   the estimated population count (support × weight) and a census count. When no rate is
-   stated, a sample can be compared only with itself, and using a within-sample ratio to
-   estimate a population ratio requires a justified sampling assumption. Independent sampling
-   does not make a finite sample's ratio exactly equal to the population's or make every
-   ratio estimator unbiased; state the assumption and uncertainty.
+   comparison or one ranking only when they are the same kind of thing, and the description
+   says why they are: the same population and inclusion policy, the same unit, each at its
+   stated weight. A sampled count and a census count are not: apply the stated sampling
+   weight to every sampled count BEFORE the sum, the share and the rank. A constant multiplier
+   preserves order only when it multiplies the whole score; applied to one summand it
+   reorders — so "scaling this component cannot change the ranking" is a claim to disprove,
+   never to assume (the worked case below). Keep three quantities distinct in the output and
+   its labels: observed sample support (rows you saw), the estimated population count
+   (support × weight) and a census count. When no rate is stated, a sample can be compared
+   only with itself, and using a within-sample ratio to estimate a population ratio requires
+   a justified sampling assumption. Independent sampling does not make a finite sample's ratio
+   exactly equal to the population's or make every ratio estimator unbiased; state the
+   assumption and uncertainty.
 3. **Reuse a helper by its formula, not its name.** Before importing a shared macro or
    metric, read what it computes: its numerator and denominator, its precision, and what it
    does with a missing value. A helper that ROUNDS is a presentation helper — reused inside a
@@ -77,6 +79,30 @@ output proves consistency, not that the right quantity was computed.
 Then verify the QUESTION (`pipelines-verification`): derive the check from the question and
 the source facts — population, weights, denominators and all — never from the SQL you just
 wrote.
+
+## A worked case — weighting changes the winners
+
+Invented numbers. The question: which of three sites had the most visits in one month? Visits
+arrive through two channels that never overlap — walk-ins, every one counted at the gate (a
+census), and bookings, logged by a feed that keeps a stated 1 in 4 of them (a sample: weight
+4). Both count visits, neither counts a visit the other does, and each enters at its stated
+weight: that is the comparability the description states.
+
+| Site | Walk-ins (census) | Booking rows observed | Walk-ins + rows | Walk-ins + 4 × rows |
+|---|---|---|---|---|
+| Alder | 900 | 50 | 950 | 1,100 |
+| Birch | 700 | 150 | 850 | 1,300 |
+| Cedar | 800 | 100 | 900 | 1,200 |
+
+The unweighted column names Alder; the question's answer is Birch, and the whole order
+reverses. Multiplying the WHOLE unweighted score by any positive constant keeps Alder first —
+only weighting the sampled summand moves it. The output keeps the three quantities apart:
+Birch's 1,300 is 700 counted plus 600 estimated from 150 observed rows, and the reply shows
+that support beside the estimate. Birch's lead over Cedar is 100 estimated visits — 25
+observed rows' worth — a gap in a sampled estimate, not statistical stability; the reply says
+so. And a check that re-runs "walk-ins + rows" reproduces 950 / 850 / 900 and agrees with the
+wrong answer; only a check derived from the question — visits per site, each channel at its
+stated weight — can disagree with it (`pipelines-verification`).
 
 ## Preserve meaning across aggregation steps
 

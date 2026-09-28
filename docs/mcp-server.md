@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.58 (frozen contract — additive-only changes after this point)
+**Status:** v1.59 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-28
@@ -2378,6 +2378,30 @@ they may not list them). `./gradlew :modules:mcp-server:docsExport` writes the s
 set to `build/skill-docs/` for `scripts/docs-audit.sh` (its checks A–C run over the exported
 files) and for a human who wants to read what the server serves without booting it.
 
+**The analytical rules (#116).** External authoring runs (#111) executed cleanly, reconciled
+their own arithmetic, and still answered the wrong question: a sampled count added unweighted
+to a full count to rank, on the claim that scaling one summand cannot reorder a ranking; a
+difference ranked after its parts were rounded; a volume floor read as support for every
+subgroup; an absent sampled group reported as zero; a verification that re-ran the authored
+formula and therefore agreed with it. The rules are one decision sequence, not a list of
+incidents: `pipelines-numbers` holds the measurement contract (population, inclusion policy,
+unit and sampling weight stated, with why the inputs are comparable, before anything is
+combined), normalising every sampled count before a total, share or ranking, reusing a helper
+by its formula and precision, precision carried to the output boundary with a stated
+tie-break and a verified cutoff, and support and missingness shown beside each estimate;
+`pipelines-verification` holds verification derived again from the question and its source
+weights — every requested dimension, the cutoff and its neighbours, output reconciliation kept
+distinct from source-only checks and proxies — the door exercised with an alternate and an
+uncovered input, and approved definitions recorded through shared semantics rather than a
+client's memory. Timeouts (effective limits first; partitioning only with exact coverage and
+additive recombination) are `pipelines-dag`'s, and the tempdb probe's `incomplete` outcome
+(#119) is explained there and in `pipelines-engine-quirks`. The guide's steps 1½ and 5 name
+the weighting rule and the derived-verification rule, so an author meets both without opening
+a reference, and `pipelines-numbers` carries one worked case — invented sites, invented
+numbers — in which weighting the sampled feed changes the winner. Guidance lowers the rate of
+this failure; it cannot demonstrate adherence. The fresh-client run #111 tracks is that
+evidence.
+
 **The guards**, each able to go red: the core ≤ 400 lines with prose no line folding past the
 readable column, and within its 8,000-character orientation bound (242b); `instructions`
 within 1,843 characters and bytes, every phrase an agent must see inside the first 2,048
@@ -2388,7 +2412,9 @@ rendered error-code reference; every node type in the node-types narrative and e
 calculator kind in the catalog; no reserved area name (`scheduling`, `reporting`,
 `dashboards`) appearing in any served document until the lane that ships it adds the area
 (242b); golden tests pinning each narrative document's rendered text (a changed placeholder
-turns them red); no demo content anywhere in the rendered set; documents and sections within
+turns them red); the weighting rule and the derived-verification rule present in the guide
+and in their references, and the worked case's table adding up with a different winner once
+weighted (#116); no demo content anywhere in the rendered set; documents and sections within
 the 24,000-character response budget; the two resource URIs read, list and 404 correctly;
 `GET /skill.md` 200 `text/markdown` anonymous and `GET /skill/nope.md` 404 in the envelope;
 the audit green over the exported set.
@@ -2399,6 +2425,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.59 | 116 (#116) the authoring guidance | **§15: the analytical rules — no surface change.** The #111 runs executed and reconciled their own arithmetic while answering the wrong question (an unweighted sampled count added to a full count to rank; a verification that re-ran the authored formula). Lane 147's rules, moved by 242b into `pipelines-numbers` and `pipelines-verification`, were audited against #116 clause by clause and kept; the gaps closed: rule 2 now requires the description to say WHY combined inputs are comparable; `pipelines-numbers` gains one worked case (invented sites and numbers) in which weighting the sampled feed changes the winner and a recomputation of the authored formula agrees with the wrong answer; the pipelines guide's steps 1½ and 5 and its common-mistakes line name the weighting rule and the derived-verification rule; `pipelines-engine-quirks` § 6.3 names `pipelines_execute` as the way to finish an `incomplete` tempdb probe (it said "the node run", which read as `pipelines_execute_node`, which refuses tempdb — #119's review correction); the guide's step 3 says a render shows the SQL, not that H2 accepts it, and sends a tempdb template's rendered statement to `sql_probe` for its `validation_status` (the step read as if `templates_render` returned that field; only `sql_probe` does). New guard `AnalyticalGuidanceRulesTest` over the rendered set: the two rules in the guide and in their references, and the worked case's table adding up with a different winner once weighted. The core is untouched. |
 | 2026-09-28 | v1.58 | the 194d merge's security pass | **§6.2.45 `parameter_sets_get`: `draft` is null under a narrowing lens** — the promoter never sees a draft pointer (178, `pipelines_get`'s rule); the tool had re-read the draft unlensed after the lensed working read. `parameter_sets_create`'s 094 new-root check now lists the WHOLE root level (it listed one root, so a name under any other existing root was refused as new). |
 | 2026-09-28 | v1.57 | 194d (#194) the parameter engine's tools — renumbered at merge after 279's v1.55 and 286's v1.56 | **§6.1: 42 → 48 tools — the six `parameter_sets_*`** (the record's §9.1; addressed by id per P24, no release/switch tool — none exists for pipelines or templates either): `parameter_sets_list`/`get` (reads; the promoter lens), `_create`/`_update` (writes; full save-time validation; the 094 new-root confirmation; the §13a.2 ask-before-a-MULTI-without-a-hint rule in the description), `_evaluate` (the §5 runtime; a VIEWER row per C24; the 139 gate's twin — a DRAFT evaluate whose pinned DRAFT template postdates the key's last `templates_render` of it refuses `parameter.evaluate.template_unrendered`, read from the same audit table), `_purge_draft` (versioning §5.4, hash-guarded, the write audit). New §6.2.44–6.2.49. The manual gains the `parameters` area; the matrix places the six on the nine `parameter_set.*` rows. |
 | 2026-09-28 | v1.56 | 286 (#275) — numbered after 279's v1.55 at merge (landed before 194d) | **§7.3's role filtering**: the executions resource listing reads what `executions_list` reads — `findVisible` (own runs plus every `triggered_via = SCHEDULE` run of the workspace) under `execution.read`, `findAll` under `execution.read_all`; until #275 it read own-only `findByUser` for every key, admins included, so a scheduled run was on the tool's list and missing from the resources. No tool or URI changed. |
