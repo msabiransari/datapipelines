@@ -14,10 +14,11 @@ import org.junit.jupiter.api.Test
  *  - `data-table.css` is tokens-only (CLAUDE.md rule 3), which `AppCssTokenAuditTest` does not
  *    cover (it scopes itself to app.css by name): no literal colour, every font size a step of
  *    the type scale — the rules `SchedulesCssTokenTest` holds schedules.css to;
- *  - the sheet loads from the layout for every page (tables are on most screens, and 090's rule
+ *  - both files load from the layout for every page (tables are on most screens, and 090's rule
  *    — ui-screens §3.0 — says no page carries its own sheet): the sheet right AFTER app.css (it
  *    folds app.css's table layers and must win over them) and BEFORE the page sheets whose table
- *    tweaks build on it;
+ *    tweaks build on it; the script after shell.js, whose `[data-href]` click handler Enter
+ *    reuses;
  *  - the legacy table layers are gone from app.css (its boxed block and the `.u-scroll-x`
  *    rules) — so one rule set draws a table.
  */
@@ -51,7 +52,7 @@ class DataTableCssTokenTest {
     }
 
     @Test
-    fun `the sheet loads after app css and before the page sheets`() {
+    fun `the sheet loads after app css and before the page sheets, the script after the shell`() {
         val layout = read("templates/layouts/default.html")
         val head = layout.substringBefore("</head>")
         val sheet = head.indexOf("@{/css/data-table.css}")
@@ -59,6 +60,10 @@ class DataTableCssTokenTest {
         (sheet > head.indexOf("@{/css/app.css}")) shouldBe true
         (sheet < head.indexOf("@{/css/template-tree.css}")) shouldBe true
         (sheet < head.indexOf("@{/css/schedules.css}")) shouldBe true
+        val body = layout.substringAfter("</head>")
+        val script = body.indexOf("@{/js/data-table.js}")
+        script shouldBeGreaterThan -1
+        (script > body.indexOf("@{/js/shell.js}")) shouldBe true
     }
 
     @Test
