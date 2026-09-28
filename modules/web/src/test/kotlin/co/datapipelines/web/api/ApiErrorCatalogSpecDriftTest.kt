@@ -275,8 +275,16 @@ class ApiErrorCatalogSpecDriftTest {
          * the one code lane B documented as temporary — in the SAME commit as its constant, its mirror
          * and the selector runtime that made the probe required. Re-derived from the document's own
          * parse on the lane's base 3790e778 (305 there); a lane merging beside it re-derives again.
+         *
+         * 305 → 306 with #280 (on its own base): §13.19 gains `schedule.validation.target_not_released` (400 — the
+         * `schedule.validation.` family default, so no explicit catalog row), landed in the SAME
+         * commit as its constants in `ScheduleErrorCodes` and `PipelineErrorCodes.Schedule` and the
+         * executor that raises it. Re-derived from the document's own parse.
+         *
+         * 304 + 1 = 305 at the 280 merge (2026-09-27): the two lanes moved the count in opposite
+         * directions on the same base; re-derived from the merged document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 304
+        const val SECTION_13_ROW_COUNT = 305
 
         /**
          * §12's distinct validation codes.

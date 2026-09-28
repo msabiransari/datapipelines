@@ -1,6 +1,7 @@
 package co.datapipelines.web.api
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.scheduler.ScheduleErrorCodes
 import org.springframework.http.HttpStatus
 
 /**
@@ -509,6 +510,33 @@ object ApiErrorCatalog {
                 "We couldn't check your request against our limits just now, so it wasn't run. Try again shortly.",
             PipelineErrorCodes.Limits.IDEMPOTENCY_KEY_REUSED to
                 "That idempotency key was already used with a different request. Use a new key.",
+            // #280 — every schedule code the form places at a field (static/js/schedules/model.js
+            // FIELD_BY_CODE) gets its OWN sentence: the family line ("Check the reported field and
+            // try again.") is what the person saw while the server's refusal named the rule, which
+            // is exactly the defect. All rows are STATIC strings — specifics travel in `message`
+            // and `details`, never here. `ApiErrorCatalogUserMessageTest` holds this set to the
+            // codes FIELD_BY_CODE names.
+            ScheduleErrorCodes.NAME_INVALID to
+                "A schedule name is a folder path: 2 to 10 lower-case segments separated by `/`, like `finance/daily/revenue`. " +
+                "No leading slash, no spaces or capitals.",
+            ScheduleErrorCodes.CRON_INVALID to
+                "That isn't a five-field cron pattern (minute, hour, day of month, month, day of week). " +
+                "Pick a preset, or fix the pattern.",
+            ScheduleErrorCodes.NAME_TAKEN to
+                "Another schedule in this workspace already has that name. Pick a different name.",
+            ScheduleErrorCodes.INTERVAL_TOO_SHORT to
+                "This pattern runs more often than this server allows — two runs must be at least five minutes apart.",
+            ScheduleErrorCodes.TIMEZONE_INVALID to
+                "Pick a region from the list — a fixed offset like `+02:00` isn't a timezone.",
+            ScheduleErrorCodes.TARGET_NOT_FOUND to
+                "No pipeline by that name exists in this workspace. Pick one from the suggestions.",
+            ScheduleErrorCodes.TARGET_NOT_RELEASED to
+                "This pipeline has no released version yet. Release it (or switch its current version), then schedule it.",
+            ScheduleErrorCodes.PAYLOAD_INVALID to
+                "This schedule's job doesn't have the right shape — it must name one pipeline of this workspace " +
+                "with the version set to `current`.",
+            ScheduleErrorCodes.EXECUTOR_UNKNOWN to
+                "That kind of job can't be scheduled on this server.",
             PipelineErrorCodes.Versioning.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
             PipelineErrorCodes.Template.AUTHORING_DISABLED to RECEIVER_USER_MESSAGE,
         )

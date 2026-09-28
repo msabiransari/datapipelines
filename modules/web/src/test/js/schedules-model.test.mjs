@@ -188,6 +188,7 @@ test("a §20 refusal lands beside the field it names, or is a toast", () => {
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.interval_too_short" }), { field: "cron" });
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.timezone_invalid" }), { field: "timezone" });
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_found" }), { field: "pipeline" });
+  assert.deepEqual(M.fieldForError({ code: "schedule.validation.target_not_released" }), { field: "pipeline" });
   assert.deepEqual(M.fieldForError({ code: "schedule.validation.request_invalid", details: { field: "payload" } }), { field: "pipeline" });
   assert.equal(M.fieldForError({ code: "schedule.validation.request_invalid", details: { field: "If-Match" } }), null);
   assert.equal(M.fieldForError({ code: "schedule.limit.per_workspace" }), null);

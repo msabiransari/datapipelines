@@ -452,6 +452,7 @@
     "schedule.validation.timezone_invalid": "timezone",
     "schedule.validation.payload_invalid": "pipeline",
     "schedule.validation.target_not_found": "pipeline",
+    "schedule.validation.target_not_released": "pipeline",
     "schedule.validation.executor_unknown": "pipeline",
   };
 

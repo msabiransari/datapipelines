@@ -1481,6 +1481,9 @@ object PipelineErrorCodes {
         /** 400 — the payload names a target the workspace does not hold. */
         const val TARGET_NOT_FOUND = "schedule.validation.target_not_found"
 
+        /** 400 — the payload names a pipeline with no current version to follow (#280). */
+        const val TARGET_NOT_RELEASED = "schedule.validation.target_not_released"
+
         /** 400 — a `parameter_bindings` entry cannot be resolved (#9 slice 3); `details` names why. */
         const val BINDING_INVALID = "schedule.validation.binding_invalid"
 

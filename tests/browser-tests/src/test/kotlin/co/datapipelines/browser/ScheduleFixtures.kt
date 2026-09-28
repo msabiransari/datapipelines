@@ -65,19 +65,40 @@ internal object ScheduleFixtures {
         page: Page,
         name: String,
     ): String {
-        val created =
-            send(
-                page,
-                "POST",
-                "/api/v1/pipelines",
-                """{"name":"$name","display_name":"${name.substringAfterLast('/')}","description":"scheduler-2 fixture",""" +
-                    """"parameters":{"$PARAMETER":{"type":"INTEGER","required":true,"description":"How many rows one batch holds."}},""" +
-                    """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
-                    """"inputs":{"date":"2026-08-14","fiscal_start":"09-15"}}]}""",
-            )
+        val created = createPipeline(page, name, "scheduler-2 fixture")
         check(created.status == 201) { "pipeline create ${created.status}: ${created.body.take(400)}" }
         return release(page, idIn(created.body))
     }
+
+    /**
+     * A calculator pipeline that was NEVER released (#280): the draft is live, `current_version`
+     * is null — the shape `PipelineJobExecutor.validate` refuses with
+     * `schedule.validation.target_not_released` and the form names at pick time. Returns its id.
+     */
+    fun draftPipeline(
+        page: Page,
+        name: String,
+    ): String {
+        val created = createPipeline(page, name, "scheduler-280 fixture")
+        check(created.status == 201) { "pipeline create ${created.status}: ${created.body.take(400)}" }
+        return idIn(created.body)
+    }
+
+    /** The calculator body both pipeline fixtures share (one required INTEGER parameter). */
+    private fun createPipeline(
+        page: Page,
+        name: String,
+        description: String,
+    ): ScheduleFixtures.Response =
+        send(
+            page,
+            "POST",
+            "/api/v1/pipelines",
+            """{"name":"$name","display_name":"${name.substringAfterLast('/')}","description":"$description",""" +
+                """"parameters":{"$PARAMETER":{"type":"INTEGER","required":true,"description":"How many rows one batch holds."}},""" +
+                """"nodes":[{"id":"fq","type":"CALCULATOR","kind":"fiscal_quarter","context_key":"run_fiscal_quarter",""" +
+                """"inputs":{"date":"2026-08-14","fiscal_start":"09-15"}}]}""",
+        )
 
     /**
      * A released pipeline declaring one REQUIRED DATE parameter ([DATE_PARAMETER]) whose
