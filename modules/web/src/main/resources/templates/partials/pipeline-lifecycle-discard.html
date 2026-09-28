@@ -34,6 +34,25 @@
       </p>
       <p class="u-secondary u-text-sm u-mb-md">Discard is reversible — Restore brings it back.</p>
 
+      <!-- #273: the schedules that run this pipeline, from the SAME read the Usage tab makes
+           (lensed for the caller). The discard succeeds, and each of these then blocks at its
+           next run — the pointer it follows is gone — until repointed or deleted. -->
+      <th:block th:if="${!#lists.isEmpty(dlg.schedules)}">
+        <p class="u-secondary u-text-sm" data-discard-schedules-note>
+          <strong>Schedules that run this pipeline</strong> — discarding does not pause them:
+          at its next run each blocks (the pointer is gone) until repointed or deleted.
+        </p>
+        <ul class="u-text-sm u-mb-md" data-discard-schedules>
+          <li th:each="s : ${dlg.schedules}">
+            <span class="u-mono" th:text="${s.name}">reports/nightly</span>
+            <span class="ds-badge ds-badge-default" th:text="${s.state}">enabled</span>
+            <span class="u-muted u-text-xs">
+              next run <span th:text="${s.nextRunLabel}">2026-10-01 03:00 UTC</span>
+            </span>
+          </li>
+        </ul>
+      </th:block>
+
       <form th:attr="hx-post=@{'/partials/pipelines/{id}/lifecycle/discard'(id=${dlg.id}, version=${dlg.version})},
                        hx-target='#pipeline-detail', hx-swap='innerHTML'">
         <button th:if="${canAuthor == true}" type="submit" data-verb="pipeline-discard-confirm" class="ds-button ds-button-danger u-full" hx-disabled-elt="this"

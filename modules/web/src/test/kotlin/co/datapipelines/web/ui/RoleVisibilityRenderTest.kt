@@ -878,8 +878,53 @@ class RoleVisibilityRenderTest {
         setVariable("panes", TransformPanes.of(stored))
     }
 
-    // ------------------------------------------------------------------ 7e: the semantic link
+    // ------------------------------------------------------------------ #273: the discard dialog's schedules
 
+    /**
+     * #273 — the discard dialog's schedules evidence is a READ inside an existing dialog: it
+     * renders for whoever the dialog renders for, unchanged (viewer sees the dialog today as
+     * little as before; the route's `pipeline.version.manage` admits author / ws admin / super
+     * admin). The promoter cell is R3's — only the schedules the lens admits, which is the
+     * read's own `PrincipalTargetViewer` arm, exercised in the model test and the browser
+     * suite; what is pinned HERE is the template contract for a promoter's booleans: the
+     * evidence is present, and the one verb (the confirm) is not — a promoter discards nothing.
+     */
+    @Test
+    fun `the discard dialog's schedules evidence renders for a promoter's booleans - the confirm does not`() {
+        val promoter =
+            render("partials/pipeline-lifecycle-discard") {
+                setVariable(
+                    "dlg",
+                    PipelineLifecycleDialogModel.DiscardDialog(
+                        id = java.util.UUID.fromString("22222222-2222-2222-2222-222222222222"),
+                        name = "nyc/mobility/probe",
+                        version = 2,
+                        isCurrent = true,
+                        fallback = "v1 becomes current.",
+                        pinnerPipelines = emptyList(),
+                        schedules =
+                            listOf(
+                                PipelineLifecycleDialogModel.ScheduleEvidence(
+                                    java.util.UUID.fromString("33333333-3333-3333-3333-333333333333"),
+                                    "reports/nightly",
+                                    "enabled",
+                                    "2026-10-01 03:00 UTC",
+                                ),
+                            ),
+                    ),
+                )
+                setVariable("from", "explorer")
+                withRoles(
+                    RoleModel.NONE.copy(canRead = true, canPromote = true, roleLabel = "promoter"),
+                )
+            }
+
+        promoter shouldContain "data-discard-schedules"
+        promoter shouldContain ">reports/nightly</span>"
+        promoter shouldNotContain "data-verb=\"pipeline-discard-confirm\""
+    }
+
+    // ------------------------------------------------------------------ 7e: the semantic link
     /**
      * 7e (#7, transform-nodes design §9.4 — "No new UI verb: the marker and the warning row are
      * text") — the release dialog's needs-review rows carry NO verb, for every role that holds

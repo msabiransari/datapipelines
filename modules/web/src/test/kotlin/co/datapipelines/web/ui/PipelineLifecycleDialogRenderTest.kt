@@ -275,6 +275,58 @@ class PipelineLifecycleDialogRenderTest {
         html shouldContain ">Discard v2</button>"
     }
 
+    /**
+     * #273 — the schedules that run the pipeline render as evidence above the confirm: one
+     * row per schedule, the name through `th:text`, the Usage tab's condition badge and the
+     * stored next occurrence; the note names the consequence (the discard succeeds, the
+     * schedule then blocks at its next run).
+     */
+    @Test
+    fun `discard - the schedules that run the pipeline render above the confirm with name, state and next run`() {
+        val html =
+            render("partials/pipeline-lifecycle-discard") {
+                setVariable(
+                    "dlg",
+                    discardDialog().copy(
+                        schedules =
+                            listOf(
+                                PipelineLifecycleDialogModel.ScheduleEvidence(
+                                    UUID.randomUUID(),
+                                    "reports/nightly",
+                                    "enabled",
+                                    "2026-10-01 03:00 UTC",
+                                ),
+                                PipelineLifecycleDialogModel.ScheduleEvidence(
+                                    UUID.randomUUID(),
+                                    "reports/backfill",
+                                    "paused",
+                                    null,
+                                ),
+                            ),
+                    ),
+                )
+                setVariable("from", "explorer")
+            }
+
+        html shouldContain "data-discard-schedules"
+        html shouldContain "Schedules that run this pipeline"
+        html shouldContain "blocks (the pointer is gone) until repointed or deleted"
+        html shouldContain ">reports/nightly</span>"
+        html shouldContain ">enabled</span>"
+        html shouldContain ">2026-10-01 03:00 UTC</span>"
+        html shouldContain ">reports/backfill</span>"
+        html shouldContain ">paused</span>"
+        html shouldContain ">Discard v2</button>"
+    }
+
+    @Test
+    fun `discard - no schedules renders no schedules section`() {
+        val html = renderDiscard()
+
+        html shouldNotContain "data-discard-schedules"
+        html shouldContain ">Discard v2</button>"
+    }
+
     @Test
     fun `restore - states the pointer outcome both ways`() {
         val moves =
