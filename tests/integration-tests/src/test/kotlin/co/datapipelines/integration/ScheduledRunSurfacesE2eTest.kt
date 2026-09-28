@@ -204,7 +204,12 @@ class ScheduledRunSurfacesE2eTest {
         private const val WANDA = "ada00000-0000-0000-0000-000000000275"
         private const val PAM = "bbb00000-0000-0000-0000-000000000275"
 
-        /** The scheduler's system identity stand-in: a scheduled run is executed by no member (R2). */
+        /**
+         * The executor of the scheduled run: a non-member `service` identity. NOT a second
+         * `kind = 'system'` row — the system identity is a singleton other suites look up by kind
+         * (SchedulerE2eTest's `systemActorId`), and a second one in the shared database made them
+         * read this fixture's id. Visibility needs only `triggered_via = SCHEDULE` (R3).
+         */
         private const val SCHEDULER = "5c500000-0000-0000-0000-000000000275"
         private const val PIPE_ID = "a1b00000-0000-0000-0000-000000000275"
         private const val PIPE_NAME = "acme/scheduled_surfaces"
@@ -289,7 +294,7 @@ class ScheduledRunSurfacesE2eTest {
                 """.trimIndent(),
                 """
                 INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES
-                    ('$SCHEDULER', 'scheduler-275@system.invalid', 'Scheduler', 'system', 'scheduler-275', TRUE, FALSE, 'system'),
+                    ('$SCHEDULER', 'scheduler-275@keys.invalid', 'Scheduler stand-in', 'key', 'scheduler-275', TRUE, FALSE, 'service'),
                     ('$ALICE_KEY_IDENTITY', '${ALICE_KEY.id.lowercase()}@keys.invalid', 'alice-275-key', 'key', '${ALICE_KEY.id}', TRUE, FALSE, 'service'),
                     ('$WANDA_KEY_IDENTITY', '${WANDA_KEY.id.lowercase()}@keys.invalid', 'wanda-275-key', 'key', '${WANDA_KEY.id}', TRUE, FALSE, 'service')
                 """.trimIndent(),
