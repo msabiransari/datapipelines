@@ -206,10 +206,16 @@ class ParameterEvaluatorIntegrationTest {
                 "SELECT 'B' AS value, 'B' AS display_value, TRUE AS is_default FROM pg_sleep(30) WHERE :a IS NOT NULL ORDER BY 1",
             )
         val set = EvaluatorFixtures.version(select("a", slow), select("b", stuck, listOf("a")), workspace = workspace)
-        val oneSecond = ParametersConfig(evaluateTimeoutSeconds = 1, selectorQueryTimeoutSeconds = 1)
+        // The deadline must land INSIDE the child's statement for there to be anything to abandon: the
+        // parent's 0.6 s sleep plus this test's cold start (a fresh harness per test - the first
+        // connection of a new pool, the first render of two templates) has to fit before it. At 1 s the
+        // budget was 0.4 s and a loaded gate (12 workers, six forks) spent it: the deadline fell between
+        // the two statements, the request timed out correctly and `abandoned` was 0. Two seconds leaves
+        // 1.4 s; the answer still arrives at the deadline, not after the 30 s statement.
+        val twoSeconds = ParametersConfig(evaluateTimeoutSeconds = 2, selectorQueryTimeoutSeconds = 2)
         val begun = System.nanoTime()
 
-        val refused = shouldThrow<DatapipelinesException> { evaluator(oneSecond).evaluateBlocking(workspace, set, emptyMap()) }
+        val refused = shouldThrow<DatapipelinesException> { evaluator(twoSeconds).evaluateBlocking(workspace, set, emptyMap()) }
 
         refused.code shouldBe ParameterErrorCodes.EVALUATE_TIMEOUT
         withClue("answered at the deadline, not after the 30 s statement") {
