@@ -31,8 +31,8 @@ class ParameterSetPromotion(
 ) {
     /**
      * The sender's entry for [name]'s current release, or null when it is not promotable
-     * (no release). [refuseIfStale] applies §10.3's guards: released and NEWER than the
-     * target's entry — the same rule the pipeline roots get, the page's rule verbatim.
+     * (no release). §10.3's guards: released and NEWER than the target's entry — the same
+     * rule the pipeline roots get, the page's rule verbatim.
      */
     fun entryFor(
         workspaceId: UUID,
@@ -41,14 +41,32 @@ class ParameterSetPromotion(
     ): JsonNode? {
         val record = repository.findRecordByName(workspaceId, name) ?: return null
         val current = record.currentVersion ?: return null
-        val detail =
-            repository.findVersionDetail(workspaceId, record.id, current)
-                ?: return null
-        if (detail.status != PipelineVersionStatus.RELEASED) return null
-        if (target != null && (target.bodyHash == detail.bodyHash || current <= target.currentVersion)) {
-            return null // same hash or not newer: nothing to push (§10.2 — hash is for machines)
-        }
-        val version = repository.findVersion(workspaceId, record.id, current) ?: return null
+        val detail = detailOr404less(workspaceId, record.id, current) ?: return null
+        val promotable = detail.status == PipelineVersionStatus.RELEASED && newer(detail, current, target)
+        val version = if (promotable) repository.findVersion(workspaceId, record.id, current) else null
+        return payloadOf(record, detail, version, current)
+    }
+
+    private fun detailOr404less(
+        workspaceId: UUID,
+        id: UUID,
+        current: Int,
+    ): co.datapipelines.parameters.ParameterSetVersionDetail? = repository.findVersionDetail(workspaceId, id, current)
+
+    /** §10.2: same hash or not newer is nothing to push (hash is for machines). */
+    private fun newer(
+        detail: co.datapipelines.parameters.ParameterSetVersionDetail,
+        current: Int,
+        target: PromotionWire.Entry?,
+    ): Boolean = target == null || (target.bodyHash != detail.bodyHash && current > target.currentVersion)
+
+    private fun payloadOf(
+        record: co.datapipelines.parameters.ParameterSetRecord,
+        detail: co.datapipelines.parameters.ParameterSetVersionDetail,
+        version: co.datapipelines.parameters.ParameterSetVersion?,
+        current: Int,
+    ): JsonNode? {
+        if (version == null) return null
         val payload = ParameterSetResponses.full(record, version.body, detail) as ObjectNode
         payload.put("version", current)
         payload.put("body_hash", detail.bodyHash)
@@ -62,8 +80,12 @@ class ParameterSetPromotion(
             .path("parameters")
             .asSequence()
             .asIterable()
-            .mapNotNull { it.path("source").path("template").takeIf { ref -> ref.has("id") } }
-            .map { TemplateRef(it.path("id").asText(), it.path("version").asInt()) }
+            .mapNotNull { parameter ->
+                parameter
+                    .path("source")
+                    .path("template")
+                    .takeIf { ref -> ref.has("id") }
+            }.map { ref -> TemplateRef(ref.path("id").asText(), ref.path("version").asInt()) }
             .distinct()
             .toList()
 
@@ -85,7 +107,12 @@ class ParameterSetPromotion(
         val name = entry.path("name").asText()
         val version = entry.get("version")?.takeIf(JsonNode::isInt)?.asInt()
         val bodyHash = entry.get("body_hash")?.takeIf(JsonNode::isTextual)?.asText()
-        val releasedAt = entry.get("released_at")?.takeIf(JsonNode::isTextual)?.asText()?.let(Instant::parse)
+        val releasedAt =
+            entry
+                .get("released_at")
+                ?.takeIf(JsonNode::isTextual)
+                ?.asText()
+                ?.let(Instant::parse)
         val body =
             runCatching { MAPPER.treeToValue(entry, co.datapipelines.parameters.ParameterSetBody::class.java) }.getOrNull()
                 ?: throw ApiErrors.malformedParameterSetBody()

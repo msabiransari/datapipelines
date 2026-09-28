@@ -38,8 +38,17 @@ class PromotableViews(
         // fail-closed answer rather than a 403 from a read that never named a workspace.
         val workspace = principal.workspace ?: return unavailable("no_workspace")
         return when (val computed = compute(workspace.id, workspace.name)) {
-            is Computed.Ready -> LensedView(computed.view.pipelineLens, computed.view.templateLens, parameterSets = computed.view.parameterSetLens)
-            is Computed.Unavailable -> unavailable(computed.reason)
+            is Computed.Ready -> {
+                LensedView(
+                    computed.view.pipelineLens,
+                    computed.view.templateLens,
+                    parameterSets = computed.view.parameterSetLens,
+                )
+            }
+
+            is Computed.Unavailable -> {
+                unavailable(computed.reason)
+            }
         }
     }
 

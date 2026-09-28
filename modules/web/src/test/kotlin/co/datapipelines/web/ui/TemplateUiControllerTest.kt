@@ -33,7 +33,6 @@ import java.util.UUID
  * repository underneath is the double, so each test names the query it is about.
  */
 class TemplateUiControllerTest {
-
     /** 194d — the COMPOSED reverse arrow the model takes (the record's §8.4). */
     private fun composedUsage(
         templates: co.datapipelines.templates.TemplateRepository,

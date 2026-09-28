@@ -35,7 +35,6 @@ import java.util.UUID
  * suite. The one write, `TemplateRepository.create`, is captured for its argument.
  */
 class TemplateCreateTransformTest {
-
     /** 194d — the COMPOSED reverse arrow the model takes (the record's §8.4). */
     private fun composedUsage(
         templates: co.datapipelines.templates.TemplateRepository,

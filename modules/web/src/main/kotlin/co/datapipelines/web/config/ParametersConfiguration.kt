@@ -158,5 +158,6 @@ class ParametersConfiguration {
             .builder("parameters.selectors.abandoned") {
                 pool.abandonedThreadsAlive() // prune the dead worker threads with the scrape
                 pool.abandoned.sum().toDouble()
-            }.description(GAUGE_DESCRIPTION).register(meters)
+            }.description(GAUGE_DESCRIPTION)
+            .register(meters)
 }

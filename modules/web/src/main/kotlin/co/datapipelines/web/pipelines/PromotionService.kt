@@ -154,13 +154,23 @@ class PromotionService(
         names.distinct().forEach { name -> closure.addRoot(name, inventory) }
         // #194 lane D — the set roots AFTER the templates: their pins merge into the batch's
         // template closure, the payloads ride the set slot (§8.3's order).
+        val promotion = parameterSetPromotion
         val setEntries =
-            parameterSetPromotion?.let { promotion ->
-                parameterSetNames
-                    .distinct()
-                    .mapNotNull { name -> promotion.entryFor(workspaceId, name, inventory.parameterSetByName()[name]) }
-                    .also { entries -> entries.flatMap { promotion.templatePins(it) }.forEach(closure::addTemplate) }
-            }.orEmpty()
+            if (promotion != null) {
+                val targets = inventory.parameterSetByName()
+                val entries =
+                    parameterSetNames
+                        .distinct()
+                        .mapNotNull { name ->
+                            promotion.entryFor(workspaceId, name, targets[name])
+                        }
+                entries
+                    .flatMap { promotion.templatePins(it) }
+                    .forEach(closure::addTemplate)
+                entries
+            } else {
+                emptyList()
+            }
         verifyDatasources(closure, inventory)
 
         val batch =

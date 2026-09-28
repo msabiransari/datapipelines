@@ -45,7 +45,6 @@ import java.util.UUID
  * controller are what actually hold.
  */
 class TemplateCreatePartialTest {
-
     /** 194d — the COMPOSED reverse arrow the model takes (the record's §8.4). */
     private fun composedUsage(
         templates: co.datapipelines.templates.TemplateRepository,

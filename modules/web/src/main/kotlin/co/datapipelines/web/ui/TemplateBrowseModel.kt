@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
+import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -10,7 +11,6 @@ import co.datapipelines.templates.TemplateFolder
 import co.datapipelines.templates.TemplateNameGrammar
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateService
-import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.typesystem.Dialect
 import org.springframework.ui.Model
 import java.security.MessageDigest

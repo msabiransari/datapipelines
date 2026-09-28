@@ -106,7 +106,8 @@ class PromotionConfiguration {
         sets: co.datapipelines.parameters.ParameterSetService,
         templates: TemplateRepository,
     ): co.datapipelines.web.parameters.ParameterSetPromotion =
-        co.datapipelines.web.parameters.ParameterSetPromotion(repository, sets, templates)
+        co.datapipelines.web.parameters
+            .ParameterSetPromotion(repository, sets, templates)
 
     /** 074 — the endpoint half of a promotion batch, sender and receiver rules in one place. */
     @Bean

@@ -6,8 +6,8 @@ import co.datapipelines.templates.TemplateDraftService
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import org.springframework.context.annotation.Bean
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 
 /**
  * The version-lifecycle services of the template surface (versioning.md §5/§6).
@@ -27,10 +27,10 @@ class TemplateLifecycleConfiguration {
         // 7e — the citation rows the write lands `implements` in (inherit or replace).
         citations: co.datapipelines.templates.TemplateImplementsRepository,
     ): TemplateDraftService = TemplateDraftService(templates, authoring, citations)
+
     @Bean
-    fun parameterSetTemplatePins(
-        jdbc: NamedParameterJdbcTemplate,
-    ): co.datapipelines.parameters.ParameterSetTemplatePins = co.datapipelines.parameters.ParameterSetTemplatePins(jdbc)
+    fun parameterSetTemplatePins(jdbc: NamedParameterJdbcTemplate): co.datapipelines.parameters.ParameterSetTemplatePins =
+        co.datapipelines.parameters.ParameterSetTemplatePins(jdbc)
 
     @Bean
     fun templateReleaseService(
