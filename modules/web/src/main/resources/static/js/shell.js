@@ -109,7 +109,11 @@
  *    cleanup on window.__dpHistoryStyleCleanups (an array of fns taking the
  *    history element); the SAME beforeHistorySave listener runs them after the
  *    skeleton strip — one listener, one seam, each script stripping only its
- *    own write set.
+ *    own write set. The cleanups run on the LIVE page, an instant before it is
+ *    snapshotted and replaced — htmx clones the history element only after the
+ *    event (301 #301) — so the widths a strip removes are re-measured on the
+ *    restored copy by the upgrade, and a future partial swap carrying
+ *    hx-push-url would lose its live state at the save (none exists today).
  *
  * 103 §A/§B added the FEEDBACK AND ATMOSPHERE layer — measured against
  * algoschool.app (notes T195), which has zero hx-boost and still reads as the
@@ -1061,7 +1065,8 @@
        restored page carries no orphan of one. 287 (#287): it carries no style
        attribute a script wrote either — the registered cleanups (data-table's
        widths and measured variables, the version menu's placement) strip their
-       own write set from the outgoing copy before htmx serialises it. */
+       own write set from the LIVE page an instant before htmx snapshots and
+       replaces it (the clone happens after the event — 301 #301). */
     doc.body.addEventListener("htmx:beforeHistorySave", function (evt) {
       busy.snapshotClean();
       var cleanups = window.__dpHistoryStyleCleanups;

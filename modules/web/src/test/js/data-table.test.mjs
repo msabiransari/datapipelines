@@ -166,3 +166,32 @@ test("a held sort says so (288 #1): the title names the active state, beside the
   assert.equal(T.activeSortTitle("Name", "ascending", false), "Sorting by Name — click for highest first");
   assert.equal(T.activeSortTitle("Name", "descending", false), "Sorting by Name — click to clear");
 });
+
+test("a page whose rows are ALL new is a replacement (288 #1, the index() seam — 301 #301)", () => {
+  // Page 2 arrives as fresh elements: the client sort clears (the server's order shows).
+  const page1 = [{}, {}, {}];
+  const order = new FakeOrder();
+  page1.forEach((tr) => order.set(tr, order.next++));
+  assert.equal(T.allRowsNew([{}, {}, {}], order.map), true, "a replaced page clears the sort");
+
+  // A row EDIT — some rows keep their natural index — keeps the sort.
+  const kept = page1[0];
+  assert.equal(T.allRowsNew([kept, {}, {}], order.map), false);
+
+  // An APPEND — the old rows are still known — keeps it; so does a keyed re-render of
+  // the same elements (the dock's index-keyed rows).
+  assert.equal(T.allRowsNew(page1, order.map), false);
+  assert.equal(T.allRowsNew([], order.map), false, "an empty batch decides nothing");
+});
+
+/** WeakMap without the DOM: the same has/set surface the decision reads. */
+class FakeOrder {
+  map = new Map();
+  next = 0;
+  has(tr) {
+    return this.map.has(tr);
+  }
+  set(tr, i) {
+    this.map.set(tr, i);
+  }
+}

@@ -15,6 +15,7 @@ import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.web.schedules.PipelineJobExecutor
 import java.time.Instant
 import java.util.UUID
 
@@ -49,6 +50,13 @@ class PipelineLifecycleDialogModel(
      */
     private val reviewMarks: TemplateReviewMarks = TemplateReviewMarks.NONE,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
+    /**
+     * #273 — the discard dialog's schedules evidence: the scheduler's by-target read, the SAME
+     * `listByTarget` the Usage tab makes (no new scheduler query), through the caller's
+     * [co.datapipelines.scheduler.TargetViewer] — a promoter's view is R3's (only the schedules
+     * the lens admits).
+     */
+    private val schedules: co.datapipelines.scheduler.ScheduleService,
 ) {
     /** "v3 is not draft" and friends: a dialog for a shape the table refuses still OPENS. */
     data class Refusal(
@@ -264,6 +272,20 @@ class PipelineLifecycleDialogModel(
 
     // ------------------------------------------------------------------ discard
 
+    /**
+     * One schedule whose target names the pipeline (#273) — the evidence a discard's dialog
+     * carries beside the pin scan: the discard SUCCEEDS, and each of these then blocks at its
+     * next run (the pointer it follows is gone) until repointed or deleted. [state] is the
+     * Usage tab's vocabulary (`enabled` / `paused` / `blocked` — [co.datapipelines.scheduler.Schedule.condition]).
+     */
+    data class ScheduleEvidence(
+        val id: UUID,
+        val name: String,
+        val state: String,
+        /** The stored next occurrence (`schedules.next_due_at`); null renders "—". */
+        val nextRunLabel: String?,
+    )
+
     /** The Discard dialog: reversible, but it can move the pointer (D60) — so it says where to. */
     data class DiscardDialog(
         val id: UUID,
@@ -273,6 +295,8 @@ class PipelineLifecycleDialogModel(
         /** What §3.4's fallback will do when THIS version is the pointer; null when it is not. */
         val fallback: String?,
         val pinnerPipelines: List<PinnerView>,
+        /** #273 — the live schedules that run this pipeline, by name; empty renders no section. */
+        val schedules: List<ScheduleEvidence> = emptyList(),
     )
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -280,6 +304,9 @@ class PipelineLifecycleDialogModel(
         workspaceId: UUID,
         id: UUID,
         version: Int,
+        /** #273 — the SAME lens the Usage tab's schedule read asks ([PrincipalTargetViewer]); a
+         * lensed principal sees only the schedules the lens admits, never a second answer. */
+        viewer: co.datapipelines.scheduler.TargetViewer,
     ): DiscardDialog {
         val record = repository.findByIdAnyStatus(workspaceId, id) ?: throw notFound(id)
         val detail =
@@ -311,7 +338,14 @@ class PipelineLifecycleDialogModel(
             } else {
                 null
             }
-        return DiscardDialog(id, record.name, version, isCurrent, fallback, pinners)
+        // #273 — the scheduler's existing by-target read (the one the Usage tab makes; no new
+        // query), through the caller's lens. A read failure propagates: a dialog that says
+        // "no schedules" when the read broke would read as a safe discard.
+        val runsOnIt =
+            schedules
+                .listByTarget(workspaceId, PipelineJobExecutor.TARGET_PREFIX + record.name, viewer)
+                .map { ScheduleEvidence(it.id, it.name, it.condition, it.nextDueAt?.let(RelativeTime::absolute)) }
+        return DiscardDialog(id, record.name, version, isCurrent, fallback, pinners, runsOnIt)
     }
 
     // ------------------------------------------------------------------ restore

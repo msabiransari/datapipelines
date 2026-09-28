@@ -165,6 +165,37 @@ class DataTableBrowserTest : BrowserSuite() {
     }
 
     /**
+     * 301 #301 — the tab stop follows the scrolling: a viewport that cannot scroll (a
+     * page-flow frame that FITS — the sheet's `overflow: clip`, not a scroll container) keeps
+     * the markup's inert `tabindex="-1"` even after the enhancer runs, so Tab never stops on a
+     * box that answers no arrows and draws no ring. The keyboard test above is the other half:
+     * a FIXED viewport that overflows still gets `0`. Red on the pre-fix tree: the enhancer set
+     * `0` on every viewport, this page's included.
+     */
+    @Test
+    fun `a page-flow viewport that fits keeps the inert tabindex - no tab stop on a box that scrolls nothing`() {
+        useRealScrollbars()
+        val admin = seedLocalUser(uniqueEmail("dtf-" + generatedPassword("u").take(8)), generatedPassword("pw"), mustChange = false)
+        seedUsers("dtf-" + generatedPassword("s").take(6).lowercase(), count = 12)
+        login(admin.email, admin.oneTimePassword)
+        page.waitForURL("**/dashboard")
+        // A wide window: the users table FITS its frame (page-flow, dt-fits, overflow clip —
+        // the suite's emails are long, 1920 gives the columns room).
+        page.setViewportSize(1920, 900)
+        page.navigate("$baseUrl/admin/users")
+        val frame = ".app-main .dt-frame"
+        page.locator("$frame table[data-dt-ready] tbody tr").first().waitFor()
+        settle()
+        val viewport = "$frame > .dt-viewport"
+        withClue("the frame fit its window (dt-fits — otherwise this page is not the case under test)") {
+            (page.evaluate("(sel) => document.querySelector(sel).classList.contains('dt-fits')", frame) as Boolean) shouldBe true
+        }
+        withClue("a fitting page-flow viewport is no tab stop") {
+            page.evaluate("(sel) => document.querySelector(sel).getAttribute('tabindex')", viewport) shouldBe "-1"
+        }
+    }
+
+    /**
      * 288 #1 — a paged table after a page change. Two producers, two truths, one rule: a page
      * whose ROWS ARE NEW (the htmx pagers replace the frame; any keyed-by-content re-render)
      * clears the client sort — the server's order shows and every `aria-sort` returns to none.
@@ -214,9 +245,8 @@ class DataTableBrowserTest : BrowserSuite() {
      * (every child re-queried its own subtree). The test instruments the page's
      * querySelectorAll to count calls carrying the data-table selector — a call only the
      * component's own discovery makes — across two boosted navigations. The base's count for
-     * the identical action is recorded beside this test's in the lane's evidence
-     * (notes/evidence/287-ui-followups/observer-before.log / observer-after.log); the fix
-     * lands in single digits. The ceiling is generous — htmx, shell and the page scripts'
+     * the identical action was 51, the fix's is 10 (the lane's m1 evidence); the fix lands in
+     * single digits. The ceiling is generous — htmx, shell and the page scripts'
      * own querySelectorAll calls carry other selectors and are not counted.
      */
     @Test
