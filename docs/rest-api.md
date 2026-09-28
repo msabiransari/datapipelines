@@ -132,7 +132,7 @@ Every 4xx and 5xx response uses this shape:
 - `details` — structured, code-specific. Each error code documents its `details` shape.
 - `doc_url` — link to the public docs: the [Pipeline Contract §13 catalog](pipeline-contract.md#13-error-code-catalog) at the anchor of the section listing the code's family (there is no per-code page).
 
-One envelope answers **before any handler**: a request body over the platform cap ([Configuration §3.31](configuration.md#331-web-request-limits)) is refused at a servlet filter with `413 request.body_too_large` (`details.limit_bytes`) on `/api/v1` and `/mcp` alike — the one 413 this API answers, carried before authentication and before any parser reads the body (pipeline-contract §13.21).
+One envelope answers **before any handler**: a request body over the platform cap ([Configuration §3.31](configuration.md#331-web-request-limits)) is refused at a servlet filter with `413 request.body_too_large` (`details.limit_bytes`) on `/api/v1` and `/mcp` alike — the pre-handler 413 (the parameter engine's evaluate response budget answers 413 too — pipeline-contract §13.20), carried before authentication and before any parser reads the body (pipeline-contract §13.21).
 
 ### 4.3 Pagination envelope
 

@@ -123,11 +123,62 @@ internal object InterpolatedParameterScanner {
             }
 
             FreemarkerAst.ITERATOR_BLOCK -> {
-                walkChildren(element, declared, guarded, shadowed + loopVariableOf(FreemarkerAst.ownText(element)), tainted, found)
+                walkIterator(element, declared, guarded, shadowed, tainted, found)
                 return
+            }
+
+            FreemarkerAst.UNIFIED_CALL -> {
+                reportCallArguments(FreemarkerAst.ownText(element), declared + guarded, shadowed, tainted, found)
             }
         }
         walkChildren(element, declared, guarded, shadowed, tainted, found)
+    }
+
+    /**
+     * `<#list region?split(",") as r>${r}` carries the parameter's value through the loop
+     * variable (the 279 pass, finding 3): the variables are TAINTED with the list expression's
+     * sources when it has any, and shadow an outer meaning otherwise.
+     */
+    @Suppress("LongParameterList") // the walk's state, passed in — as walk() and walkChildren() take it
+    private fun walkIterator(
+        element: TemplateElement,
+        declared: Set<String>,
+        guarded: Set<String>,
+        shadowed: Set<String>,
+        tainted: MutableMap<String, Set<String>>,
+        found: MutableSet<String>,
+    ) {
+        val description = FreemarkerAst.ownText(element)
+        val loopVariables = loopVariablesOf(description)
+        val sources = taintSources(listExpressionOf(description), declared + guarded, shadowed, tainted)
+        if (sources.isEmpty()) {
+            walkChildren(element, declared, guarded, shadowed + loopVariables, tainted, found)
+        } else {
+            val scoped = LinkedHashMap(tainted)
+            loopVariables.forEach { scoped[it] = sources }
+            walkChildren(element, declared, guarded, shadowed - loopVariables, scoped, found)
+        }
+    }
+
+    /**
+     * `<@where v=region/>` hands the value to a macro whose body interpolates it: every declared
+     * or tainted name among the call's ARGUMENT expressions is reported (an over-refusal in the
+     * accepted direction — the macro's own parameters are shadowed inside its body, so the call
+     * is the only place the value is visible). String literals are blanked first: `col="region"`
+     * names a column, not the parameter.
+     */
+    private fun reportCallArguments(
+        description: String,
+        watched: Set<String>,
+        shadowed: Set<String>,
+        tainted: Map<String, Set<String>>,
+        found: MutableSet<String>,
+    ) {
+        val arguments = withoutStringLiterals(description)
+        reportMatches(arguments, watched, shadowed, found)
+        tainted.forEach { (alias, sources) ->
+            if (alias !in shadowed && isReferencedIn(arguments, alias)) found += sources
+        }
     }
 
     private fun walkChildren(
@@ -240,8 +291,20 @@ internal object InterpolatedParameterScanner {
     }
 
     /** The loop variable of `<#list rows as x>` — prints as `#list rows as x`. */
-    private fun loopVariableOf(description: String): Set<String> =
-        LOOP_VARIABLE.find(description)?.let { setOf(it.groupValues[1]) } ?: emptySet()
+    private fun loopVariablesOf(description: String): Set<String> =
+        LOOP_VARIABLES
+            .find(description)
+            ?.groupValues
+            ?.drop(1)
+            ?.filter { it.isNotEmpty() }
+            ?.toSet()
+            ?: emptySet()
+
+    /** The listed expression of `#list <expr> as k[, v]` — what the loop variables carry. */
+    private fun listExpressionOf(description: String): String = description.removePrefix(LIST_KEYWORD).substringBefore(" as ")
+
+    /** [text] with every string literal blanked, so a quoted column name never reads as a parameter reference. */
+    private fun withoutStringLiterals(text: String): String = STRING_LITERAL.replace(text, "\"\"")
 
     /** FreeMarker's special variables that resolve a name against the data model (`.vars.x` is `x`). */
     private const val SPECIAL_VARIABLES = "vars|data_model|globals|main|namespace|locals"
@@ -274,5 +337,8 @@ internal object InterpolatedParameterScanner {
 
     private val TOKEN_SPLIT = Regex("""[\s,]+""")
 
-    private val LOOP_VARIABLE = Regex("""\bas\s+([A-Za-z_][A-Za-z0-9_]*)""")
+    /** `as k` or `as k, v` (a hash listing) — one or two loop variables. */
+    private val LOOP_VARIABLES = Regex("""\bas\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*,\s*([A-Za-z_][A-Za-z0-9_]*))?""")
+    private const val LIST_KEYWORD = "#list "
+    private val STRING_LITERAL = Regex(""""(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'""")
 }

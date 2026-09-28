@@ -6,6 +6,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.kotest.matchers.types.shouldNotBeInstanceOf
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertTimeoutPreemptively
 import java.math.BigDecimal
@@ -195,6 +196,35 @@ class ParameterCoercionTest {
         // BIGINTEGER's own int64 bound still answers first for values the cap admits —
         // 19 digits parse and are refused as out of range, exactly as before #278.
         rejected(LogicalType.BIGINTEGER, "\"${"9".repeat(100)}\"")
+    }
+
+    @Test
+    fun `a magnitude whose plain rendering would exceed the digit cap is refused in constant time - the value, not the parse`() {
+        // The 279 merge's security pass, finding 2: "1e999999999" is eleven characters, parses
+        // to scale -999,999,999 in constant time, and the first toPlainString() downstream (the
+        // wire encoder, the transform context) allocates a gigabyte of zeros. Both textual and
+        // JSON-number decimals hold |scale| and precision to the digit cap.
+        assertTimeoutPreemptively(Duration.ofSeconds(1)) {
+            ParameterCoercion
+                .coerce(LogicalType.BIGDECIMAL, parseJson("\"1e999999999\""))
+                .shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
+                .reason shouldStartWith "too_many_digits:"
+            // A JSON number: refused either as too_many_digits (a BigDecimal-parsing mapper) or,
+            // read as a double, as a non-finite value (#267) — never a NumberFormatException.
+            ParameterCoercion
+                .coerce(LogicalType.DECIMAL, parseJson("1e10000"))
+                .shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
+        }
+        // The boundary: a scale AT the cap stays legal; one past it does not.
+        ParameterCoercion
+            .coerce(
+                LogicalType.BIGDECIMAL,
+                parseJson("\"1e1024\""),
+            ).shouldNotBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
+        ParameterCoercion
+            .coerce(LogicalType.BIGDECIMAL, parseJson("\"1e1025\""))
+            .shouldBeInstanceOf<ParameterCoercion.Outcome.Rejected>()
+            .reason shouldStartWith "too_many_digits:"
     }
 
     @Test

@@ -89,6 +89,31 @@ class TemplateDryRendererImplTest {
     }
 
     @Test
+    fun `interpolatedParameters follows the two other binders - a list loop variable and a macro-call argument`() {
+        // The 279 merge's security pass, finding 3: `<#list region?split(",") as r>${r}` (the CSV
+        // to IN-list idiom) and `<@where v=region/>` carry the value past the assignment taint.
+        val where = "<#macro where col v>\${col} = '\${v}'</#macro>"
+        val bodies =
+            mapOf(
+                "test/loop.sql" to "<#list region?split(\",\") as r>'\${r}'</#list>",
+                "test/loop2.sql" to "<#list [region] as r>\${r}</#list>",
+                "test/call.sql" to "$where<@where col=\"region\" v=region/>",
+                "test/call2.sql" to "$where<@where \"region\" region/>",
+                // Clean: a literal list, and a call whose only mention of the name is a column literal.
+                "test/literal.sql" to "<#list [\"a\", \"b\"] as r>\${r}</#list>",
+                "test/column.sql" to "<#macro where col>\${col} = :region</#macro><@where col=\"region\"/>",
+            )
+        bodies.forEach { (id, body) -> registry.put(TemplateFixtures.version(id, body = body)) }
+
+        for (id in listOf("test/loop.sql", "test/loop2.sql", "test/call.sql", "test/call2.sql")) {
+            dryRenderer.interpolatedParameters(workspaceId, TemplateRef(id, 1), setOf("region")) shouldBe listOf("region")
+        }
+        for (id in listOf("test/literal.sql", "test/column.sql")) {
+            dryRenderer.interpolatedParameters(workspaceId, TemplateRef(id, 1), setOf("region")) shouldBe emptyList()
+        }
+    }
+
+    @Test
     fun `interpolatedParameters ignores a member of another value that merely shares the name`() {
         // `x.customer_id` cannot resolve to the flat parameter `customer_id` — the rule the fix above keeps.
         registry.put(TemplateFixtures.version("test/member.sql", body = "SELECT 1 WHERE a = '\${x.customer_id}'"))

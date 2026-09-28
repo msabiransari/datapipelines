@@ -9,8 +9,8 @@ package co.datapipelines.config
  * key is not a violation (application.yml always supplies the default). The bounds are spelled
  * as literals for the same reason the key-provider names are: `app` compiles against `web`
  * only, so it cannot import `pipeline-contract`'s `co.datapipelines.pipeline.RequestLimits`,
- * which owns the same numbers — `WebPropertiesSpecDriftTest` holds the binding class to the
- * doc, and this rule holds the operator's override to the same window.
+ * which owns the same numbers — `RequestBodyCapFilterTest` holds the filter and its registration,
+ * `ConfigValidatorCheckCountTest` the check count, and this rule the operator's override window.
  */
 internal object RequestLimitsRules {
     /** `pipeline-contract`'s `RequestLimits.MIN_REQUEST_BYTES`..`MAX_REQUEST_BYTES` (64 KiB..64 MiB). */

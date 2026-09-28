@@ -99,6 +99,9 @@ internal object FreemarkerAst {
      */
     const val ASSIGNMENT = "freemarker.core.Assignment"
 
+    /** A user-directive call, `<@m arg=expr/>` — its argument expressions carry values into the macro (the 279 pass, finding 3). */
+    const val UNIFIED_CALL = "freemarker.core.UnifiedCall"
+
     /** [element]'s own class name — the node-identity check every caller uses. */
     fun typeOf(element: TemplateElement): String = element.javaClass.name
 

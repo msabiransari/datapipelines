@@ -46,6 +46,8 @@ class FreemarkerAstDriftTest {
             FreemarkerAst.ITERATOR_BLOCK to "<#list rows as x></#list>",
             // #285 — the taint matches on the assignment node; a rename would silently disarm it.
             FreemarkerAst.ASSIGNMENT to "<#assign x = 1>",
+            // The 279 pass — the macro-call binder; a rename would silently disarm it.
+            FreemarkerAst.UNIFIED_CALL to "<@m/>",
         ).forEach { (expected, body) ->
             withClue("$body must still parse to $expected") { rootTypeOf(body) shouldBe expected }
         }
@@ -82,6 +84,9 @@ class FreemarkerAstDriftTest {
         val cases =
             mapOf(
                 "<#list rows as x></#list>" to "#list rows as x",
+                "<#list m as k, v></#list>" to "#list m as k, v",
+                "<@where col=\"region\" v=region/>" to "@where col=\"region\" v=region",
+                "<@where \"region\" region/>" to "@where \"region\", region",
                 "<#macro m customer_id x=1></#macro>" to "#macro m customer_id x=1",
                 "<#function f customer_id></#function>" to "#function f(customer_id)",
             )

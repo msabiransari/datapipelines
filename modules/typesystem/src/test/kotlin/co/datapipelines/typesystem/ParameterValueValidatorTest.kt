@@ -138,21 +138,28 @@ class ParameterValueValidatorTest {
         // precision() - scale() overflowed Int for scale() = -2147483647, so the values with the most
         // digits were the ones accepted; the arithmetic is Long now.
         val ten2 = ParameterDeclaration(LogicalType.BIGDECIMAL, precision = 10, scale = 2)
-        refused(ten2, "\"1e2147483647\"").reason shouldBe "precision"
-        refused(ten2, "\"123e2147483645\"").reason shouldBe "precision"
-        refused(ten2, "\"1e999999999\"").reason shouldBe "precision"
-        refused(ten2, "\"1e-2147483647\"").reason shouldBe "scale"
+        // Since the 279 merge's magnitude bound (finding 2) an exponent past the digit cap never
+        // reaches the precision arithmetic at all — it is refused as the value it is; the
+        // arithmetic (Long) is then exercised at the largest magnitude the bound admits.
+        for (huge in listOf("1e2147483647", "123e2147483645", "1e999999999", "1e-2147483647")) {
+            refused(ten2, "\"$huge\"").message shouldStartWith "too_many_digits:"
+        }
+        refused(ten2, "\"1e1024\"").reason shouldBe "precision"
+        refused(ten2, "\"1e-1024\"").reason shouldBe "scale"
     }
 
     @Test
     fun `a bound with a huge exponent renders in a refusal without materialising its digits`() {
         // renderCoerced used the plain wire spelling; for 1e2147483647 that is an OutOfMemoryError while
         // building the message (the 194a security pass, observation 1).
-        val declaration =
-            ParameterDeclaration(LogicalType.BIGDECIMAL, constraints = ParameterConstraints(min = TextNode("1e2147483647")))
+        // A bound past the digit cap is refused at the DECLARATION since the 279 merge's magnitude
+        // bound — it could never render anywhere; the largest legal one still renders compactly.
+        val pastTheCap = ParameterDeclaration(LogicalType.BIGDECIMAL, constraints = ParameterConstraints(min = TextNode("1e2147483647")))
+        validator.checkDeclaration(pastTheCap).single().message shouldContain "too_many_digits"
+        val declaration = ParameterDeclaration(LogicalType.BIGDECIMAL, constraints = ParameterConstraints(min = TextNode("1e1024")))
         val refusal = refused(declaration, "\"5\"")
         refusal.reason shouldBe "min"
-        refusal.message shouldContain "1E+2147483647"
+        refusal.message shouldContain "1E+1024"
     }
 
     @Test

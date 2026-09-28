@@ -63,7 +63,7 @@ object ParameterCoercion {
         when (type) {
             LogicalType.INTEGER -> integer(node)
 
-            LogicalType.DECIMAL -> decimal(node)
+            LogicalType.DECIMAL -> decimal(node, maxNumericDigits)
 
             LogicalType.BOOLEAN -> if (node.isBoolean) ok(node.booleanValue()) else wrongForm(type, node, "a JSON boolean")
 
@@ -94,8 +94,16 @@ object ParameterCoercion {
             else -> ok(node.intValue())
         }
 
-    private fun decimal(node: JsonNode): Outcome =
-        if (node.isNumber) ok(node.decimalValue()) else wrongForm(LogicalType.DECIMAL, node, "a JSON number")
+    private fun decimal(
+        node: JsonNode,
+        maxNumericDigits: Int,
+    ): Outcome {
+        if (!node.isNumber) return wrongForm(LogicalType.DECIMAL, node, "a JSON number")
+        val parsed =
+            runCatching { node.decimalValue() }.getOrNull()
+                ?: return Outcome.Rejected("DECIMAL value is not a finite number: '${node.asText().truncateForError()}'")
+        return boundedMagnitude(LogicalType.DECIMAL, parsed, maxNumericDigits)
+    }
 
     /**
      * The two textual BIG paths (#278): on JDK 21 the parse of an n-digit string is O(n²) —
@@ -128,9 +136,27 @@ object ParameterCoercion {
         if (!node.isTextual) return wrongForm(LogicalType.BIGDECIMAL, node, "a JSON string")
         val text = node.asText()
         if (text.length > maxNumericDigits) return tooManyDigits(LogicalType.BIGDECIMAL, text.length, maxNumericDigits)
-        val parsed = runCatching { BigDecimal(text) }.getOrNull()
-        return parsed?.let(::ok)
-            ?: Outcome.Rejected("BIGDECIMAL value is not a number: '${text.truncateForError()}'")
+        val parsed =
+            runCatching { BigDecimal(text) }.getOrNull()
+                ?: return Outcome.Rejected("BIGDECIMAL value is not a number: '${text.truncateForError()}'")
+        return boundedMagnitude(LogicalType.BIGDECIMAL, parsed, maxNumericDigits)
+    }
+
+    /**
+     * The digit cap bounds the PARSE; this bounds the VALUE (the 279 merge's security pass,
+     * finding 2): `"1e999999999"` is eleven characters and parses in constant time to scale
+     * −999,999,999, and the first `toPlainString()` downstream — the wire encoder, the transform
+     * context — then allocates a gigabyte of zeros. A magnitude whose plain rendering would need
+     * more than [maxNumericDigits] digits is the same `too_many_digits` refusal: `|scale|` and
+     * `precision` are both held to the cap, so every renderer inherits the bound.
+     */
+    private fun boundedMagnitude(
+        type: LogicalType,
+        value: BigDecimal,
+        maxNumericDigits: Int,
+    ): Outcome {
+        val rendered = maxOf(kotlin.math.abs(value.scale()), value.precision())
+        return if (rendered > maxNumericDigits) tooManyDigits(type, rendered, maxNumericDigits) else ok(value)
     }
 
     /** The `too_many_digits` refusal — the token leads so every surface's details carry it greppable. */

@@ -1,6 +1,6 @@
 # Templates Specification
 
-**Status:** v1.16 (frozen contract — additive-only changes after this point)
+**Status:** v1.17 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Configuration Reference](configuration.md), [Metadata DB spec](metadata-db.md)
 **Last updated:** 2026-09-28
@@ -290,7 +290,7 @@ Pipeline save enforces the form: a template that interpolates a declared paramet
 and the message names both the `${name}` written and the `:name` form to write (§7.2). The
 refusal follows indirection too: a value assigned from the parameter and interpolated through
 its alias (`<#assign x = region>${x}`) is the same refusal, naming the parameter (2026-09-28,
-#285).
+#285). The same scan follows the two other binders that carry a value into SQL text: a `<#list>` loop variable listed from the parameter (`<#list region?split(",") as r>'${r}'` — the CSV-to-IN-list idiom) and a user-macro call whose argument is the parameter (`<@where v=region/>`), each reported as the parameter itself (the 279 merge's security pass, 2026-09-28). A DERIVED value is refused too — `<#assign clause = region?has_content?then("AND region = :region", "")>${clause}` is refused although only the bound reaches SQL; write it as `<#if region?has_content>AND region = :region</#if>`.
 
 **What stays the author's responsibility.** `${}` interpolation is for **structure** — table
 names, dynamic `IN` lists, `ORDER BY` fragments — and remains exactly as trusting as it always
@@ -784,3 +784,4 @@ ORDER BY r.total DESC
 | 2026-08-09 | v1.3 | P3 build (Gate B) | `?interpret`/`?eval_json` added to §4.2's forbidden list (context-value-to-source siblings of `?eval`, no config switch). §3.2 `engine` and `schema_version` now rejected at save when unsupported — new codes `template.validation.engine_unsupported` / `template.validation.schema_version_unsupported` (§7, [Pipeline Contract §13.9](pipeline-contract.md#139-template)) close the silent-mis-render gap. §6.3: `imports` `alias`/`id`/`version` validated as strict identifiers before prologue synthesis (prologue-injection attempt → `dangerous_construct`, message never echoes the value; loader re-checks fail-closed). Appendix A worked example corrected `${min_total?c}` → `${min_total}` (`?c` drops the declared scale §4.4 promises). |
 | 2026-09-28 | v1.16 | 285 (#285) the assignment taint | The scan follows `<#assign>`/`<#local>`/`<#global>` indirection: a target whose value expression references a declared (or already-tainted) name is itself a reference to that parameter — `<#assign x = region>${x}` is now `template.validation.parameter_interpolated`, transitively through chained assignments, order-respecting, cleared by shadowing, with a literal value tainting nothing. Option (b) of the issue is already covered by the 194c special-variable reporting; option (c) is refused by the parameter-engine record §5.2. The assignment node's class and description shapes are pinned in `FreemarkerAstDriftTest`; the new scan cases are red-first in `TemplateDryRendererImplTest`. |
 | 2026-09-28 | v1.15 | the 194c security pass | §4.5's interpolation scan reports a declared name reached through a FreeMarker data-model special variable (`${.vars.x}`, `${.data_model.x}`, `.globals`, `.main`, `.namespace`, `.locals`) — the `.`-prefix exemption for `y.x` no longer exempts them; `template.validation.parameter_interpolated` fires for both spellings. Falsified in `TemplateDryRendererImplTest`. |
+| 2026-09-28 | v1.17 | the 279 merge's security pass | §4.5's scan follows the `<#list>` loop-variable and user-macro-call binders (a value listed or passed into a macro is reported as the parameter), and the doc says a derived value is refused with the `<#if>` rewrite. Falsified in `TemplateDryRendererImplTest`; `UnifiedCall` pinned in `FreemarkerAstDriftTest`. |

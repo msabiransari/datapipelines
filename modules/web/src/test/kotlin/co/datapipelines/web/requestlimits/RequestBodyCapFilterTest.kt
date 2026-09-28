@@ -7,6 +7,7 @@ import co.datapipelines.web.api.ApiErrorCatalog.userMessageFor
 import co.datapipelines.web.api.ApiExceptionHandler
 import co.datapipelines.web.config.RequestLimitsProperties
 import com.fasterxml.jackson.databind.json.JsonMapper
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -56,14 +57,53 @@ class RequestBodyCapFilterTest {
     }
 
     @Test
-    fun `a body at the cap passes the filter and reaches the handler`() {
+    fun `a body at the cap passes the filter and an EOF-reading handler gets every byte`() {
+        // The handler reads to EOF, like `@RequestBody String` and the MCP transport do — the
+        // 279 pass's observation 2: a chain that never reads made this case vacuous, and a body
+        // of EXACTLY the cap was refused on those routes by the read that only wanted its -1.
         val request = postRequest(ByteArray(cap.toInt()))
+        var readBytes = -1
+        val chain = FilterChain { wrapped, _ -> readBytes = wrapped.getInputStream().readAllBytes().size }
+
+        filter.doFilter(request, response, chain)
+
+        readBytes shouldBe cap.toInt()
+        response.contentAsString shouldNotContain PipelineErrorCodes.Request.BODY_TOO_LARGE
+    }
+
+    @Test
+    fun `a chunked body of exactly the cap reads to EOF and passes - the probe finds no byte`() {
+        val recording = RecordingStream(ByteArray(cap.toInt()))
+        val request = chunkedRequest(recording)
+        var readBytes = -1
+        val chain = FilterChain { wrapped, _ -> readBytes = wrapped.getInputStream().readAllBytes().size }
+
+        filter.doFilter(request, response, chain)
+
+        readBytes shouldBe cap.toInt()
+        response.contentAsString shouldNotContain PipelineErrorCodes.Request.BODY_TOO_LARGE
+        recording.maxPulled shouldBe cap
+    }
+
+    @Test
+    fun `the container stream is not opened until a handler asks for the body - a form post keeps its parameters`() {
+        // The 279 pass's finding 1: the first wrapper opened the stream in its constructor, which
+        // makes Tomcat skip form-body parsing — every form-encoded POST (local login included)
+        // reached its handler with no fields. A handler that never asks must never trigger the open.
+        val request = OpenCountingRequest()
         val chain = MockFilterChain()
 
         filter.doFilter(request, response, chain)
 
         chain.request.shouldNotBeNull()
-        response.contentAsString shouldNotContain PipelineErrorCodes.Request.BODY_TOO_LARGE
+        request.opened shouldBe 0
+    }
+
+    @Test
+    fun `the filter is registered on the two JSON surfaces only - never on every path`() {
+        val registration = RequestLimitsConfiguration().requestBodyCapFilterRegistration(filter)
+
+        registration.urlPatterns.toList() shouldContainExactlyInAnyOrder listOf("/api/v1/*", "/mcp", "/mcp/*")
     }
 
     @Test
@@ -80,8 +120,9 @@ class RequestBodyCapFilterTest {
 
         response.status shouldBe 413
         response.contentAsString shouldContain """"code":"${PipelineErrorCodes.Request.BODY_TOO_LARGE}""""
-        // The cap held: the counting wrapper never asked the container for more than cap bytes.
-        recording.maxPulled shouldBe cap
+        // The cap held: at the cap the wrapper pulls ONE probe byte to tell EOF from excess, and
+        // that byte is what refuses the body — never a second one.
+        recording.maxPulled shouldBe cap + 1
     }
 
     @Test
@@ -133,6 +174,20 @@ class RequestBodyCapFilterTest {
         }
 
     private fun errorWriter() = AuthErrorWriter(JsonMapper.builder().build())
+
+    /** A POST whose container stream counts how often it was opened — zero when no handler reads the body. */
+    private class OpenCountingRequest :
+        HttpServletRequestWrapper(
+            MockHttpServletRequest("POST", "/api/v1/pipelines").apply { setContent(ByteArray(8)) },
+        ) {
+        var opened = 0
+            private set
+
+        override fun getInputStream(): ServletInputStream {
+            opened++
+            return super.getInputStream()
+        }
+    }
 
     /** Counts how far the container's stream was ever pulled — the cap's "never read past" proof. */
     private class RecordingStream(

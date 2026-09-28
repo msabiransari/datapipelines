@@ -21,7 +21,6 @@ import org.springframework.web.filter.OncePerRequestFilter
 import org.springframework.web.util.ContentCachingRequestWrapper
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.nio.charset.Charset
 
 /**
  * The platform-wide request-body cap (#279, pipeline-contract §13.21, rest-api §4.2): a body
@@ -117,12 +116,30 @@ class RequestBodyCapFilter(
         request: HttpServletRequest,
         private val cap: Long,
     ) : HttpServletRequestWrapper(request) {
-        private val countingStream: CountingServletInputStream = CountingServletInputStream(request.getInputStream(), cap)
+        /**
+         * LAZY — opened on the first `getInputStream()`/`getReader()`, never in the constructor.
+         * Tomcat's `Request.getInputStream()` marks the request `usingInputStream`, and its
+         * `parseParameters()` then returns WITHOUT reading a form body — so an eager open here
+         * emptied every `application/x-www-form-urlencoded` POST's parameters (the 279 merge's
+         * security pass: local login, logout, every UI form; 143 tests red on the merge gate).
+         * A handler that reads parameters never opens the stream, and Tomcat's own
+         * `max-http-form-post-size` bounds that body.
+         */
+        private val countingStream: CountingServletInputStream by lazy { CountingServletInputStream(super.getInputStream(), cap) }
+
+        /** One reader per request (the servlet contract), over the counting stream, ISO-8859-1 when the request names no charset. */
+        private val countingReader: BufferedReader by lazy {
+            BufferedReader(InputStreamReader(countingStream, characterEncoding ?: DEFAULT_CHARSET))
+        }
 
         override fun getInputStream(): ServletInputStream = countingStream
 
-        override fun getReader(): BufferedReader =
-            BufferedReader(InputStreamReader(countingStream, characterEncoding ?: Charset.defaultCharset().name()))
+        override fun getReader(): BufferedReader = countingReader
+
+        private companion object {
+            /** RFC 9110 / the servlet spec's default for a body that names no charset. */
+            const val DEFAULT_CHARSET = "ISO-8859-1"
+        }
     }
 
     /** The counting delegate — the whole memory story is the one [cap]-sized high-water mark. */
@@ -133,7 +150,7 @@ class RequestBodyCapFilter(
         private var count = 0L
 
         override fun read(): Int {
-            if (count >= cap) throw RequestBodyTooLargeException(cap)
+            if (count >= cap) return atCap()
             val b = delegate.read()
             if (b >= 0) count++
             return b
@@ -144,12 +161,28 @@ class RequestBodyCapFilter(
             off: Int,
             len: Int,
         ): Int {
-            if (count >= cap) throw RequestBodyTooLargeException(cap)
+            if (len == 0) return 0
+            if (count >= cap) return atCap()
             // Clamp so the underlying stream is never pulled past the cap.
             val allowed = minOf(len.toLong(), cap - count).toInt()
             val n = delegate.read(b, off, allowed)
             if (n > 0) count += n
             return n
+        }
+
+        /**
+         * At exactly [cap] bytes consumed, a body of exactly the cap and a body past it look
+         * the same until the next byte is asked for: an EOF-reading consumer (`@RequestBody
+         * String`, the MCP transport's `readLine` loop) must get its `-1`, not a refusal (the
+         * 279 pass, observation 2 — the first version refused any body of exactly the cap on
+         * those routes). A declared-length body is finished here (Tomcat knows); a chunked one
+         * is answered by ONE probe byte — the single byte this wrapper may pull past the cap.
+         */
+        private fun atCap(): Int {
+            if (delegate.isFinished) return -1
+            val probe = delegate.read()
+            if (probe < 0) return -1
+            throw RequestBodyTooLargeException(cap)
         }
 
         override fun available(): Int = delegate.available()
@@ -190,6 +223,12 @@ class RequestLimitsConfiguration {
         FilterRegistrationBean(filter).apply {
             order = RequestBodyCapFilter.ORDER
             isAsyncSupported = true
+            // The two JSON surfaces the cap is documented on (§13.21, §3.31, rest-api §4.2,
+            // mcp-server §3) — never `/*`: the first version registered no pattern, so Spring
+            // mapped it to every path and the wrapper reached the UI's form posts. Every
+            // `@RequestBody` handler in `web` lives under `/api/v1`; a form body is Tomcat's
+            // `max-http-form-post-size` to bound.
+            urlPatterns = URL_PATTERNS
         }
 
     /**
@@ -212,6 +251,13 @@ class RequestLimitsConfiguration {
         }
 
     companion object {
+        /**
+         * The API prefix pattern and the MCP endpoint — the two documented surfaces. (A directory
+         * mapping also matches its own path; the bare MCP path is listed for readers. The patterns
+         * are not spelled in this comment: Kotlin block comments nest on the slash-star sequence.)
+         */
+        val URL_PATTERNS: List<String> = listOf("/api/v1/*", "/mcp", "/mcp/*")
+
         /** The stated constraints, from the one constants home (`pipeline-contract`'s [RequestLimits]). */
         fun streamReadConstraints(): StreamReadConstraints =
             StreamReadConstraints
