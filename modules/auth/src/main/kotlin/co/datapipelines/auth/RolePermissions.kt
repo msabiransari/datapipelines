@@ -27,6 +27,15 @@ import co.datapipelines.auth.Permission.MCP_KEY_CREATE
 import co.datapipelines.auth.Permission.MCP_KEY_OWN
 import co.datapipelines.auth.Permission.MCP_KEY_REVOKE_OWN
 import co.datapipelines.auth.Permission.PIPELINE_CREATE
+import co.datapipelines.auth.Permission.PARAMETER_SET_CREATE
+import co.datapipelines.auth.Permission.PARAMETER_SET_DELETE
+import co.datapipelines.auth.Permission.PARAMETER_SET_EVALUATE
+import co.datapipelines.auth.Permission.PARAMETER_SET_IMPORT
+import co.datapipelines.auth.Permission.PARAMETER_SET_READ
+import co.datapipelines.auth.Permission.PARAMETER_SET_RELEASE
+import co.datapipelines.auth.Permission.PARAMETER_SET_SWITCH_VERSION
+import co.datapipelines.auth.Permission.PARAMETER_SET_UPDATE
+import co.datapipelines.auth.Permission.PARAMETER_SET_VERSION_MANAGE
 import co.datapipelines.auth.Permission.PIPELINE_DELETE
 import co.datapipelines.auth.Permission.PIPELINE_EXECUTE
 import co.datapipelines.auth.Permission.PIPELINE_EXECUTE_NODE
@@ -101,6 +110,11 @@ object RolePermissions {
             PIPELINE_EXECUTE,
             PIPELINE_RUN_CHECKS,
             TEMPLATE_READ,
+            // #194 lane D: reads and evaluate are every role's (the record's §9.3; the evaluate
+            // fan-out's callers include every viewer — C24). The promoter's read is LENSED (the
+            // lens is a value on the read surface, never a row here).
+            PARAMETER_SET_READ,
+            PARAMETER_SET_EVALUATE,
             EXECUTION_READ,
             EXECUTION_RESULT_READ,
             EXECUTION_CANCEL,
@@ -142,6 +156,14 @@ object RolePermissions {
                 TEMPLATE_EVALUATE,
                 TEMPLATE_RELEASE,
                 TEMPLATE_SWITCH_VERSION,
+                // #194 lane D: authoring a parameter set is the author's, exactly as templates'.
+                PARAMETER_SET_CREATE,
+                PARAMETER_SET_UPDATE,
+                PARAMETER_SET_VERSION_MANAGE,
+                PARAMETER_SET_DELETE,
+                PARAMETER_SET_IMPORT,
+                PARAMETER_SET_RELEASE,
+                PARAMETER_SET_SWITCH_VERSION,
                 DATASOURCE_PREVIEW_ROWS,
                 DATASOURCE_SQL_PROBE,
                 LAKE_TABLE_MANAGE,
@@ -169,6 +191,9 @@ object RolePermissions {
         setOf(
             PIPELINE_READ,
             TEMPLATE_READ,
+            // #194 lane D: the promoter reads parameter sets through the LENS (§9.3) — released
+            // sets newer than the promotion target's; the lens travels on the read.
+            PARAMETER_SET_READ,
             DATASOURCE_READ,
             DATASOURCE_INTROSPECT,
             ENDPOINT_READ,

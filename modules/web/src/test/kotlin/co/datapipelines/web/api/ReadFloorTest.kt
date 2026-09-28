@@ -65,6 +65,8 @@ class ReadFloorTest {
             }
         }
         // …and the sharp ones by name, so the classifier has to get the DIRECTION right.
+        familyOf("/api/v1/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/api/v1/parameter-sets/{id}/versions/{version}") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/executions") shouldBeFamily Family.EXECUTIONS
         familyOf("/api/v1/executions/{id}/result") shouldBeFamily Family.EXECUTIONS
         familyOf("/partials/recent-executions") shouldBeFamily Family.EXECUTIONS
@@ -207,6 +209,13 @@ class ReadFloorTest {
             floor = 1,
             permissions = setOf(Permission.ENDPOINT_SERVE),
             matches = { path -> path.startsWith("/api/{") },
+        ),
+
+        /** #194 lane D: the parameter sets — an every-role read (the lens aside, one row shape). */
+        PARAMETER_SETS(
+            floor = 4,
+            permissions = setOf(Permission.PARAMETER_SET_READ),
+            matches = { path -> path.startsWith("/api/v1/parameter-sets") },
         ),
 
         /** Everything else a signed-in person reads: the every-role reads (the lens aside, one row shape). */

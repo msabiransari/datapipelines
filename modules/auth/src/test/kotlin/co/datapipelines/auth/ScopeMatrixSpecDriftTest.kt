@@ -98,9 +98,10 @@ class ScopeMatrixSpecDriftTest {
     private companion object {
         /**
          * The record's 64 + `template.evaluate` (7b) + keys v2's two (#233 A14) + the scheduler's six
-         * (#9: `schedule.read`, `.create`, `.update`, `.pause`, `.delete`, `.run`), re-derived.
+         * (#9: `schedule.read`, `.create`, `.update`, `.pause`, `.delete`, `.run`) + the parameter
+         * engine's nine (#194 lane D, the record's §9.3 table verbatim), re-derived.
          */
-        const val PERMISSION_COUNT = 73
+        const val PERMISSION_COUNT = 82
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

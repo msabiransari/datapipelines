@@ -44,6 +44,20 @@ enum class Permission(
     TEMPLATE_RELEASE("template.release"),
     TEMPLATE_SWITCH_VERSION("template.switch_version"),
 
+    // #194 lane D — the parameter engine (the record's §9.3; the `template.*` rows are the
+    // mould). `parameter_set.read` is an every-role read (the promoter through the lens) and
+    // `parameter_set.evaluate` a VIEWER row: the evaluate fan-out's callers include every
+    // viewer (C24) — it runs SQL on the datasources a viewer can already read through.
+    PARAMETER_SET_READ("parameter_set.read"),
+    PARAMETER_SET_CREATE("parameter_set.create"),
+    PARAMETER_SET_UPDATE("parameter_set.update"),
+    PARAMETER_SET_VERSION_MANAGE("parameter_set.version.manage"),
+    PARAMETER_SET_DELETE("parameter_set.delete"),
+    PARAMETER_SET_IMPORT("parameter_set.import"),
+    PARAMETER_SET_RELEASE("parameter_set.release"),
+    PARAMETER_SET_SWITCH_VERSION("parameter_set.switch_version"),
+    PARAMETER_SET_EVALUATE("parameter_set.evaluate"),
+
     // §2.2 — executions. The two `_all` rows have no surface of their own: they lift "own"
     // (D11) where a read or cancel path asks for them.
     EXECUTION_READ("execution.read"),

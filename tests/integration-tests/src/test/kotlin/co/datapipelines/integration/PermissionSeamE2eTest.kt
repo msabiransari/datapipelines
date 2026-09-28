@@ -531,6 +531,10 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
          * was witnessed until keys v2 moved the create routes onto `mcp_key.create`'s row and left
          * `api_key.create` a service-CHECK claim with "No route of its own" (auth.md §7.6) — a
          * permission with no surface proves nothing, so the slot moved with the routes.
+         *
+         * #194 lane D adds the NINE parameter-set pairs (the record's §9.3): read/evaluate are
+         * every-role rows held also by the author, so no role walk can separate
+         * `parameter_set.evaluate`'s route from `parameter_set.read`'s — only a grant can.
          */
         val WITNESSED =
             listOf(
@@ -548,6 +552,16 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
                 "workspace.members.manage",
                 "datasource.manage",
                 "profile.password",
+                // #194 lane D — the nine parameter-set rows.
+                "parameter_set.read",
+                "parameter_set.create",
+                "parameter_set.update",
+                "parameter_set.version.manage",
+                "parameter_set.delete",
+                "parameter_set.import",
+                "parameter_set.release",
+                "parameter_set.switch_version",
+                "parameter_set.evaluate",
             )
 
         /** `workspace id -> the one permission granted there`, read by the synthetic grant. */

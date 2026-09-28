@@ -122,6 +122,20 @@ class ParametersConfiguration {
     ): ParameterEvaluator = ParameterEvaluator(runner, pool, config, org, Clock.systemUTC())
 
     /**
+     * The ONE import/export path REST and the promotion receive share (the
+     * `PipelineImportService` precedent): the D9-style second caller must never re-implement
+     * an import.
+     */
+    @Bean
+    fun parameterSetTransferService(
+        sets: ParameterSetService,
+        repository: ParameterSetRepository,
+        templates: co.datapipelines.templates.TemplateRepository,
+        templateImport: co.datapipelines.web.templates.TemplateImportService,
+    ): co.datapipelines.web.parameters.ParameterSetTransferService =
+        co.datapipelines.web.parameters.ParameterSetTransferService(sets, repository, templates, templateImport)
+
+    /**
      * `parameters.selectors.abandoned` (record §11) — the pool's abandoned-statement count as a
      * gauge, the `transform.evaluations.abandoned` shape. The scrape ALSO calls
      * [SelectorPool.abandonedThreadsAlive] (the 194c security pass, observation 4): the prune
