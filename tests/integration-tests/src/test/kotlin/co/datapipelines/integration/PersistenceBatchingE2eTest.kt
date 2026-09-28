@@ -53,7 +53,9 @@ import java.util.concurrent.atomic.AtomicInteger
  *   once by the key that wrote them — `templates_render` then `pipelines_execute` of a draft (the
  *   render-freshness check reads the key's own `mcp.tool.called` row: 100 of 100 admitted) and a launch
  *   then `executions_cancel` (the same-credential rule reads the key's `mcp.execution.launched` row);
- *   the endpoint twin serves, then reads its execution back, 100 times.
+ *   the endpoint twin serves, then reads its execution back, 100 times. Those runs race a sub-millisecond
+ *   commit against a client round trip, so they cannot catch an ack-before-commit; the FORCED case holds
+ *   `audit_log`'s inserts (reads still pass) and proves the render returned only after its row committed.
  * - **D.5 cancel and terminal**: a real execution cancelled while `execution_events` is locked — the row
  *   reaches ABORTED within the writers' bound (the event writes gave up waiting; the terminal UPDATE is
  *   not blocked), no execution stays live, and once the lock lifts the terminal event is in the durable
@@ -240,6 +242,51 @@ class PersistenceBatchingE2eTest {
             }
         }
         readable.get() shouldBe READS
+    }
+
+    @Test
+    @Order(6)
+    fun `D2 - with audit_log inserts held, a render returns only once its row commits - its next execute is admitted`() {
+        // FORCED, not raced: unheld, the audit writer commits well inside one client round trip, so a
+        // row acknowledged BEFORE its commit would still be read back in time and the runs above could
+        // not tell the two apart (#266 falsification F24). SHARE ROW EXCLUSIVE blocks every INSERT into
+        // audit_log and admits every read — a render that returned before its row committed is refused
+        // by the execute's freshness check.
+        mcpFixture()
+        val (updated, updateError) =
+            callTool(
+                "templates_update",
+                mapOf(
+                    "id" to MCP_TEMPLATE,
+                    "display_name" to "266 probe",
+                    "description" to "Expects: nothing.",
+                    "body" to "SELECT id, label FROM probe WHERE id >= 0",
+                    "expected_hash" to templateHash,
+                ),
+            )
+        withClue("update: $updated") { updateError shouldBe false }
+        templateHash = updated["body_hash"].asText()
+        var renderMs = -1L
+        holdingLock("audit_log") { release ->
+            val releaser =
+                Thread {
+                    Thread.sleep(HELD_MS)
+                    release()
+                }.apply { start() }
+            val t0 = System.nanoTime()
+            val (_, renderError) = callTool("templates_render", mapOf("id" to MCP_TEMPLATE, "context" to emptyMap<String, Any>()))
+            renderMs = (System.nanoTime() - t0) / NANOS_PER_MS
+            renderError shouldBe false
+            val (run, runError) = callTool("pipelines_execute", mapOf("id" to mcpPipelineId, "parameters" to emptyMap<String, Any>()))
+            withClue("the execute after a held render (the render took $renderMs ms): $run") {
+                runError shouldBe false
+                run["status"].asText() shouldBe "SUCCESS"
+            }
+            releaser.join()
+        }
+        withClue("the render waited for its row while the table was held ($HELD_MS ms), measured $renderMs ms") {
+            (renderMs >= HELD_MS / 2) shouldBe true
+        }
     }
 
     // ------------------------------------------------------------------ D.5
@@ -811,6 +858,9 @@ class PersistenceBatchingE2eTest {
         private const val SIXTY_SECONDS = 60L
         private const val POLL_MS = 20L
         private const val NANOS_PER_MS = 1_000_000L
+
+        /** How long the forced D.2 case holds audit_log — under record-max-wait-ms (2 s), so the render's own batch commits. */
+        private const val HELD_MS = 1_000L
 
         /** Several emits' worth of 2 × record-max-wait-ms (2 s) — bounded, not the single-emit bound. */
         private const val BOUND_MS = 45_000L
