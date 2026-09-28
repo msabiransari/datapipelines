@@ -283,8 +283,13 @@ class ApiErrorCatalogSpecDriftTest {
          *
          * 304 + 1 = 305 at the 280 merge (2026-09-27): the two lanes moved the count in opposite
          * directions on the same base; re-derived from the merged document's own parse.
+         *
+         * 305 → 306 with #268 (lane 286, on origin/main dd7d807a): §13.3 gains
+         * `pipeline.execution.parameter_declaration_invalid` (409, an explicit catalog row — the
+         * `pipeline.execution.` family default is 500), landed in the SAME commit as its constant.
+         * 279's §13.21 row is on local main beside it; re-derive from the merged document's parse.
          */
-        const val SECTION_13_ROW_COUNT = 305
+        const val SECTION_13_ROW_COUNT = 306
 
         /**
          * §12's distinct validation codes.

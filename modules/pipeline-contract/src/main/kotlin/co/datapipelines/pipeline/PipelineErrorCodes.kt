@@ -509,6 +509,18 @@ object PipelineErrorCodes {
          */
         const val PARAMETER_CONSTRAINT_VIOLATION = "pipeline.execution.parameter_constraint_violation"
 
+        /**
+         * §13.3 (#268) — the STORED declaration of a parameter being judged is one save refuses
+         * today: a `constraints` problem (`constraint_invalid`, `constraint_not_applicable`,
+         * `pattern_invalid`) or a `cardinality` other than `SINGLE` (`cardinality_unsupported`).
+         * Only a body saved before #194 carries one — `Parameter` ignored unknown keys then, so
+         * the block rode in unchecked. Refused where the declaration is USED (a supplied value,
+         * or a default being applied); `details.reasons` lists the save-time codes, and the fix
+         * is to re-save the pipeline. HTTP 409: the request is well formed and the stored
+         * pipeline is what conflicts with today's rules.
+         */
+        const val PARAMETER_DECLARATION_INVALID = "pipeline.execution.parameter_declaration_invalid"
+
         /** §13.8 — pre-execution reachability check failed for a referenced datasource. */
         const val DATASOURCE_UNREACHABLE = "pipeline.execution.datasource_unreachable"
 

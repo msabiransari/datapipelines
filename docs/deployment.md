@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.28
+**Status:** v1.31
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-19
@@ -539,10 +539,53 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
    the upgrade; unpublishing one is the fix. An operator in a hurry on a build OLDER than V41
    can delete the rows by hand — the demo seeder republishes the demo endpoint at its current
    path on the next boot.
-4. Signal shutdown and let the instance drain (§8.3.1 — this is automatic, not a manual step).
-5. Start the new version (migrations apply on startup).
-6. Verify `/health` returns UP.
-7. Restore traffic.
+4. **Pre-deploy check for builds after 2026-09-26 (#194, #268):** two behaviours that stored
+   pipeline bodies can meet for the first time. (a) A `DECIMAL`/`BIGDECIMAL` parameter's declared
+   `scale` now binds its values, so a stored `default` with more places than the scale is refused
+   when it applies (`pipeline.execution.parameter_constraint_violation`). (b) A body saved before
+   #194 could carry a `constraints` block or a `cardinality` that `Parameter` then ignored; those
+   are read now, and one save refuses today is answered
+   `409 pipeline.execution.parameter_declaration_invalid` where it is used (a supplied value or an
+   applied default), never a 500. Run both against the metadata DB to know beforehand:
+
+   ```sql
+   -- pre-deploy #194: stored DECIMAL/BIGDECIMAL defaults with more places than their scale
+   SELECT p.name AS pipeline, v.version, v.status, e.key AS parameter,
+          e.value->>'default' AS default_value, e.value->>'scale' AS scale
+     FROM pipeline_versions v
+     JOIN pipelines p ON p.id = v.pipeline_id
+    CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof(v.body_json->'parameters') = 'object'
+                                       THEN v.body_json->'parameters' ELSE '{}'::jsonb END) e
+    WHERE e.value->>'type' IN ('DECIMAL', 'BIGDECIMAL')
+      AND e.value ? 'default' AND e.value ? 'scale'
+      AND length(split_part(trim(trailing '0' from (e.value->>'default')), '.', 2)) > (e.value->>'scale')::int
+    ORDER BY 1, 2, 4;
+   ```
+
+   ```sql
+   -- pre-deploy #268: stored parameters declaring constraints or a cardinality
+   SELECT p.name AS pipeline, v.version, v.status, e.key AS parameter,
+          e.value->'constraints' AS constraints, e.value->>'cardinality' AS cardinality, v.created_at
+     FROM pipeline_versions v
+     JOIN pipelines p ON p.id = v.pipeline_id
+    CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof(v.body_json->'parameters') = 'object'
+                                       THEN v.body_json->'parameters' ELSE '{}'::jsonb END) e
+    WHERE e.value ? 'constraints' OR e.value ? 'cardinality'
+    ORDER BY 1, 2, 4;
+   ```
+
+   Zero rows from each = nothing stored meets the new behaviour. Rows from the first = defaults to
+   correct (a new draft with the default at the declared scale). Rows from the second whose
+   version was written BEFORE the #194 build was deployed were never checked at save: open the
+   pipeline and re-save it — the save names what is wrong (a `cardinality` other than `SINGLE`
+   is refused outright; a pipeline parameter is `SINGLE`). Rows written after it passed the save
+   check and need nothing. Both scans read every stored version, drafts and discarded ones
+   included; neither covers a schedule's stored inputs. `PreDeployScanQueriesTest` runs the two
+   blocks above, verbatim, against the shipped schema.
+5. Signal shutdown and let the instance drain (§8.3.1 — this is automatic, not a manual step).
+6. Start the new version (migrations apply on startup).
+7. Verify `/health` returns UP.
+8. Restore traffic.
 
 For k8s: rolling update via `kubectl rollout`. Each terminated pod flips its readiness and cancels its in-flight executions on the way out (§8.3.1); the `preStop` and `terminationGracePeriodSeconds` settings in §8.3.2 keep that orderly.
 
@@ -1055,6 +1098,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.31 | 286 (#268, #194) pre-deploy scans | §8.3 gains step 4, the pre-deploy check for builds after 2026-09-26: 194a's over-scale-default scan (it lived in that lane's handback as an untested sketch — now made robust to a body with no `parameters` object) and #268's scan for stored parameters declaring `constraints` or a `cardinality`, each tagged and run verbatim by `PreDeployScanQueriesTest` against the shipped schema; the later steps renumber. The Status line read v1.28 behind the v1.30 row; it now reads v1.31. |
 | 2026-09-24 | v1.30 | 224 (#224) demo API | New Appendix B subsection "The demo API": seeding a demo family publishes every seeded pipeline under `/demo/…` and binds them to one public `api_caller` key minted from `DATAPIPELINES_DEMO_API_KEY` (blank = off, changed = rotation); the per-key request budget and the lake family's budget gate are the same act (rest-api.md §19.8). |
 
 | 2026-09-22 | v1.28 | key wording | Appendix B step 2 says what the product does since R3: the MCP key is created at sign-in and copied from the top bar; nothing is "minted" by hand and there is no create endpoint. `app.sh`'s demo message says the same. |

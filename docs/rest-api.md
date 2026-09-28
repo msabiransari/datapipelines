@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.44 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.45 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-27
@@ -2095,7 +2095,10 @@ at once** — one `400 endpoint.request.invalid` whose `details.errors[]` carrie
   Nothing is trimmed: `?amount=%2012.50%20` is refused exactly as the execute body refuses
   `" 12.50 "` (the v2.36 break, #194). A value that breaks a declared rule of its parameter —
   a `constraints` bound, length or pattern, or the declared precision/scale — is
-  `pipeline.execution.parameter_constraint_violation` (v2.37, pipeline-contract §6.2);
+  `pipeline.execution.parameter_constraint_violation` (v2.37, pipeline-contract §6.2); a value
+  judged against a STORED declaration today's save refuses (a body saved before #194 with a
+  `constraints` block or `cardinality` then ignored) is `409 pipeline.execution.parameter_declaration_invalid`
+  (v2.45, #268) — the pipeline must be re-saved;
 - a value over 4 KB is `endpoint.request.value_too_large`.
 
 Headers: `DP-Result-TTL-Seconds` (§7.4's clamp) and `DP-Result-Page-Rows` (R-EP4, clamped to
@@ -2366,6 +2369,7 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v2.45 | 286 (#268) a stored declaration save refuses | **Additive code.** Every surface that binds pipeline parameters (execute, `pipelines_execute`, release checks, schedules, published endpoints) answers `409 pipeline.execution.parameter_declaration_invalid` (pipeline-contract §13.3) when a supplied value or an applied default is judged against a stored declaration today's save refuses — `details.reasons` names the §12.7 codes. Before, such a declaration (only a body saved before #194 can hold one) reached the validator's `IllegalArgumentException`: a 500. |
 | 2026-09-28 | v2.44 | 286 (#286) legacy endpoint rows — the security pass's follow-ups | No route or field changes. **§19.5**: a legacy row's `path` and `url` are echoed cut at the grammar's 200 characters (they were echoed unbounded — only a database write can store a longer path, and the model keeps the stored one because unpublish is BY PATH); a promotion batch omits a legacy row and the sender now LOGS the omission with its count (before #274 the batch threw; after it the row was left out without a word). The repository's deployment-wide `findLegacy(null)` read, which had no caller, is gone. |
 | 2026-09-28 | v2.43 | 286 (#275) R3 on the four lists that still read own-only | No route, field or code changes. **§10.1's R3 paragraph stands and names the four surfaces it now covers**: the search palette's executions group, the pipeline and template explorers' Runs tabs, and MCP's executions resource listing read `findVisible` for a member with `execution.read` (they read own-only `findByUser` until #275 — narrower than the sentence, never wider), `findAll` with `execution.read_all`. The paragraph also says what the panes' route permission implies: the explorers' Runs tabs and the palette are `pipeline.read` / `template.read` routes, so a promoter reaches them without `execution.read` and sees her own runs only — R3's scheduled arm is `execution.read`'s (`ScheduledRunSurfacesE2eTest`, whose promoter case is falsified with the arm opened). |
 | 2026-09-27 | v2.42 | 274 (#274) legacy endpoint rows, retired never fatal | **§19.5's listing carries legacy rows.** A stored `published_endpoints` row whose path predates R-EP5 (fewer than three segments — the shape that made the row mapper throw inside the demo seeder's conflict check and refuse the boot) is now retired: the `GET /api/v1/endpoints` listing answers it flagged (`legacy: true`, `reason`, `enabled`) after the valid rows, in the MCP listing too; a single read (`?path=`) and the serve path answer it `404`; the existing `DELETE /api/v1/endpoints` removes it — the one verb the row supports, offered by the API console with its reason. No route, permission or status code changed; the wire shape of a valid row is byte-identical to v2.40. V40 (metadata-db §4.13) disables such rows in the database and records `retired_reason`; the repository's defensive mapping makes the boot itself immune regardless. |
