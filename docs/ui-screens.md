@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.78
+**Status:** v1.80
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-09-27 (254, #254/#255/#256)
+**Last updated:** 2026-09-27 (282, #282)
 
 ---
 
@@ -26,6 +26,7 @@ These are standard CRUD + list/detail screens. They don't need pipeline-editor-l
 6. **The server holds no UI state.** The app is stateless behind a load balancer with no sticky sessions ([Deployment](deployment.md)); every user preference that must survive a request lives on the `users` row, never in an `HttpSession`.
 7. **Scopes are not asserted here.** The per-screen scope column in §4 is a convenience view of the authoritative matrix in [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative).
 8. **Structure must survive a bad monitor — non-text contrast floors (WCAG 1.4.11).** Boundaries a user needs to identify a component are NOT text and have their own floors, enforced by the design-system audit (its `npm run build` runs it first; the vendored copy is guarded here by `VendoredNonTextContrastTest` in `modules/web`): `border-default`/`border-hover`/`border-focus` at **3:1** on the surface they are drawn on (inputs, panes, cards), `border-subtle` at **2:1** (separators — 3:1 makes every table heavy), `surface-selected` at **1.5:1** with a left accent bar of `border-focus` width `3px` (a tint alone cannot reach 3:1 without turning grey). A pane or card boundary is a `border-default` line, never a tint alone. Text keeps its 4.5:1 floors, unchanged.
+9. **Every table is the data table (282, §3.7).** One house component — `.dt-frame` › `.dt-viewport` › `table.ds-table`, one rule set (`data-table.css`) and one enhancer (`data-table.js`) — draws every table in the app: the header stays while the rows scroll, the scrollbar starts under the header (the cap), columns sort and resize, a wide table's first column can hold, and loading and empty are rows of the same table. No screen styles a table of its own; a new table is framed or `DataTableCssTokenTest` names it. A grid library was assessed and set aside (#282: AG Grid's theming injects styles at runtime, and the CSP is `style-src 'self'` with no nonce).
 
 ### 2.1 Route Convention
 
@@ -376,7 +377,7 @@ stylesheet or template starts naming a font host over the network. The marketing
 `app.css` and keeps the system fallback this round.
 
 1. **Page title**: `.ds-headline` on every screen's `h1` — one size, no inline `font-size` (`TypeScaleAuditTest` fails the build on a regression). Section headings are `.ds-title`; small uppercase section labels (eyebrows) are `.ds-caption`. **Amended 079 §E:** inside `.app-main` the headline is `--text-xl` and `.ds-title` is `--text-base`, to match the denser shell. The value moved; the rule that there is exactly ONE of it, expressed as a property of the class rather than of a screen, did not. Every page header is `.app-page-h` — title, a muted `.app-page-sub` subtitle of at most 70ch, actions right.
-2. **Every table is `.ds-table` with `font-variant-numeric: tabular-nums`** (app.css). Dates and timestamps are ALWAYS proportional — never inside a `.num`/mono cell.
+2. **Every table is the data table component (§3.7) — frame, viewport, sticky header, the cap — with `font-variant-numeric: tabular-nums`** (`data-table.css`, which folded app.css's old `.ds-table` block in 282). Dates and timestamps are ALWAYS proportional — never inside a `.num`/mono cell.
 3. **Mono is for identifiers only**: machine names, ids, template refs (`path @ vN`), SQL, keys/prefixes, `context_key → value`. Display names, usernames, badges and dates are prose. The per-table decision:
 
 | Screen | Mono columns | Prose columns |
@@ -427,6 +428,76 @@ Rules the table rides on, all testable:
 5. **Motion is `transform` on the drawer and `opacity` on the backdrop**, both silenced under `prefers-reduced-motion: reduce`.
 6. **Touch targets**: every control in the drawer and the topbar is at least `var(--field-height-lg)` tall below 768px; the nav links get the same minimum at that width only.
 
+### 3.7 The data table (282, normative)
+
+Owner, 2026-09-27: *"UI is the first thing people see."* Before 282 the app's tables were plain HTML: a card scrolled sideways (`.app-card-table`, `overflow-x: auto`), the PAGE scrolled the rows, every header scrolled away, and in the editor's result dock the viewport's scrollbar ran beside the header (the owner's report: *"a vertical scrollbar in the header"*). #282 is the house table that replaces them, ported from the owner-approved preview (the store's `notes/design/282-data-table-v2/`, *"Love this."*) — the preview is the look; this section is the contract.
+
+**Markup** — the server renders it; nothing here builds a cell from data:
+
+```html
+<div class="dt-frame [dt-scroll | dt-fill] [dt-flush] [dt-nowrap] [dt-freeze] [dt-fit] [dt-compact] [dt-zebra]"
+     [data-dt-paged]>
+  <div class="dt-viewport" tabindex="-1">
+    <table class="ds-table"> <thead>…</thead> <tbody>…</tbody> </table>
+  </div>
+</div>
+```
+
+The table stays a `.ds-table` (the vendored primitive's type, padding and hover) directly inside the viewport; a table swapped out-of-band keeps its bare `<table>` fragment root (§4.5's rule) — the frame is on the PAGE, around it (`api/keys.html`'s `keysTable`).
+
+**Files and load order.** `static/css/data-table.css` loads from the layout head right AFTER `app.css` (it folds app.css's table layers and must win over them) and BEFORE the page sheets (`template-tree.css`, `schedules.css`) whose table tweaks build on it — [Pipeline Editor §3.4](pipeline-editor.md#34-design-system-acmedesign-tokens) lists the order. `static/js/data-table.js` loads after `shell.js` (Enter on a row reuses shell.js's click handler). Both are vendored house code: no dependency, no build step, one IIFE. Every colour, radius, gap and type size is a token; the lengths with no token (the drag floor `--dt-col-min`, the dense columns' automatic ceiling `--dt-col-max`, the handle `--dt-handle`, the viewport heights `--dt-max-h`) are custom properties on the frame, and the script reads the sheet's numbers (resolving rem and em itself — `getComputedStyle` hands a custom property back unresolved) rather than carrying its own.
+
+**The header and the cap.** The header cells are `position: sticky; top: 0` inside the viewport, `border-collapse: separate` so their bottom line (an inset shadow) travels with them, on an opaque `--surface-inset`; body cells are opaque too (`--dt-surface`: `--surface-default`, `--surface-raised` inside a card) so rows pass UNDER the header and the frozen column. The frame's `::after` is the cap: `--dt-sbw` wide (the viewport's measured `offsetWidth − clientWidth`, 0 on overlay scrollbars — nothing is drawn) and `--dt-head-h` tall (the header's measured height), painted as the header, so the scrollbar visibly starts where the body starts. The script re-measures on a `ResizeObserver` (deferred one frame — a size change inside its callback loops it), on `document.fonts.ready`, and on every row change.
+
+**FIXED or PAGE-FLOW — decided per table (the list below; the next lane does not re-decide):**
+
+- **FIXED** (`dt-scroll`): the viewport has a height — `--dt-max-h`, `min(40rem, 60dvh)` by default, `dt-h-sm` 22rem (the ceiling `tplx-scroll` gave a growing list), or a page class setting the variable (`.sch-messages-scroll`, 24rem) — and the gutter is reserved (`scrollbar-gutter: stable`), so the header never jumps when rows arrive. **`dt-fill`** is FIXED by the parent: the frame is a flex item taking the rest of a column (the result dock).
+- **PAGE-FLOW** (the default): no height of its own. While the table fits its frame the script sets **`dt-fits`** and the viewport's overflow becomes `clip` — not a scroll container — so the header sticks to the page's own scroller: `<main>` (§3.4, *the shell is the viewport*), under the top bar. Measured on the lane instance, not assumed: Chromium stops a `top: 0` sticky cell at the scroller's CONTENT edge, i.e. `<main>`'s `--gap-lg` (24px) below the bar, with rows showing through the band above the header; so while it fits the script sets **`--dt-flow-top`** to MINUS the scroller's top padding, and the header lands on the bar's bottom edge (60 = 60 at 1440×600 on `/admin/users`). The same measurement puts a table in a dialog on the dialog's edge. A table WIDER than its frame (a narrow window, a drag) drops `dt-fits` and keeps a bounded box (`--dt-flow-max-h`, the window below the bar) that scrolls both ways with the header sticking inside it — that is also the no-script state, so a table can never widen the document (110 §B's rule, kept). The decision compares the table's width with the FRAME's inner width, never the viewport's, so a scrollbar appearing cannot flip it back and forth.
+
+| Template | Table | Kind | Modifiers |
+|---|---|---|---|
+| `partials/executions.html` (§4.8) | the executions list | FIXED | `dt-nowrap`, `data-dt-paged` (20 a page); empty = a state row |
+| `partials/recent-executions.html` + `dashboard.html` (§4.2) | recent executions | FIXED `dt-h-sm` | `dt-flush` (the card's body), `dt-nowrap`; loading = three skeleton rows under the same `head` fragment; empty = a state row |
+| `pipelines/editor.html` (§4.4) | the result dock | FIXED by its pane (`dt-fill`) | `dt-nowrap`, `dt-freeze`, `data-dt-paged` |
+| `partials/execution-result.html` (§4.9) | the execution's result page | FIXED | `dt-nowrap`, `dt-freeze`, `data-dt-paged` |
+| `partials/datasource-facts.html` (§4.5b) | learned facts (dialog and lake detail) | FIXED | prose wraps |
+| `schedules/run.html` (§4.20) | a run's Messages | FIXED (`.sch-messages-scroll`, 24rem) | — |
+| `schedules/detail.html` (§4.20) | next five occurrences; parameters | FIXED `dt-h-sm` | `dt-fit` |
+| `partials/pipeline-detail.html` (§4.3b) | declared parameters | FIXED `dt-h-sm` | `dt-fit` |
+| `admin/users.html` (§4.12) | users | PAGE-FLOW | — |
+| `api/keys.html` (§4.19) | keys | PAGE-FLOW | `dt-flush`; dates sort by `data-sort-value` |
+| `api/console.html` (§4.18) | published endpoints | PAGE-FLOW | `dt-flush` |
+| `partials/datasources.html` (§4.5) | datasources | PAGE-FLOW | `dt-flush`, `dt-freeze`, `data-dt-paged` (25 a page) |
+| `partials/datasource-grants.html` (§4.5a) | grants (dialog) | PAGE-FLOW | — |
+| `workspaces/index.html` (§4.13) | your workspaces; members | PAGE-FLOW | — |
+| `promotion/index.html` (§4.17) | the plan (promoter's form; reader's copy) | PAGE-FLOW | — |
+| `executions/detail.html` (§4.9) | the execution family | PAGE-FLOW | — |
+| `partials/execution-node-stats.html` (§4.9) | node stats | PAGE-FLOW | — |
+| `partials/execution-node-operations.html` (§4.9) | node operations | PAGE-FLOW | `dt-freeze` (nine columns) |
+| `templates/editor.html` (§4.7) | imports | PAGE-FLOW | — |
+
+Dense data is FIXED; a short list a person reads top to bottom is PAGE-FLOW. `templates/endpoints/**` is not in the sweep (lane 274's tree at the time); a table not yet framed keeps the pre-282 box (its own border, `display: block; overflow-x: auto`) from the fallback rule in `data-table.css`, and the markup audit names it.
+
+**Modifiers.** `dt-flush` — the card's own border closes the box (a separator line meets the card head); `dt-nowrap` — one line per row, an ellipsis where a column is narrower than its value; `dt-freeze` — the first column is sticky at the left and casts a soft shadow once the viewport has scrolled sideways (`is-scrolled-x`); `dt-fit` — the frame hugs its table ("never the full row", was `.tplx-fit-table`); `dt-compact` and `dt-zebra` — the preview's density and zebra switches, available, used by no screen yet.
+
+**Sort** (client-side, over the rendered rows). Every header cell with text becomes a `<button class="dt-sort">` (the label and the sprite's `chevron-right`, turned) unless it carries `data-sort="off"` (the Actions and Send columns). A click walks **none → ascending → descending → none**, sets `aria-sort` on that cell (`none` on the others) and MOVES the rendered `<tr>` nodes; it never rebuilds a row. The type is the header's `data-type` (`number`, `date`, `text`), else `number` for a `.num` column, else text; a cell sorts by its `data-sort-value` when the server gave one (a relative age's instant — the keys page), else a `<time datetime>` inside it, else the chosen option of a `<select>` in it (a member's role), else its text. **Nulls sort last in both directions** (an empty cell or a lone dash); equal keys keep their natural order. A paged list sorts the page it shows, and the button's title says so (`data-dt-paged` → "Sort this page by …"). State rows (a single cell spanning the row, `.dt-state-row`, `.dt-skeleton-row`) never move.
+
+**Resize.** Every header cell carries a resize handle at its right edge (`.dt-resizer`, `--dt-handle` wide; `data-resize="off"` opts out). A drag freezes the rendered widths onto a `<colgroup>` the script owns and switches the table to `table-layout: fixed` with its width the sum of its columns, so a drag changes ONE column's width and no other (the table grows or shrinks); `--dt-col-min` is the floor; a double-click gives the column back its width from before the drags. A `dt-nowrap` table is frozen at load (each column at most `--dt-col-max`, the slack shared so it still fills its viewport) and re-fitted when its frame changes width until a person has dragged; a wrapping table stays in the browser's own layout until the first drag. Widths are not remembered across page loads.
+
+**Keyboard rows.** A row that carries `data-href` (the executions tables, `app-row-clickable`) is focusable; **Enter** dispatches a click on it, so shell.js's one delegated handler navigates (§3.4's 188 note — the script never reads or writes `data-href`); **↑/↓** move between such rows.
+
+**States are rows of the same table**, so the header never disappears with the rows: the empty state is a `.dt-state-row` (one cell across the row holding `.dt-state` — the title in `<b>`, the follow-up beside it); the loading state is `.dt-skeleton-row`s of `.dt-skel` bars (a shimmer, off under `prefers-reduced-motion`), server-rendered — the dashboard's recent-executions placeholder. Both are Thymeleaf, never script-built. The columns' LABELS never change between states; their widths follow the rows (auto layout), so a skeleton's columns are not the loaded rows' widths.
+
+**When tables arrive.** At load, on `htmx:afterSwap` / `htmx:oobAfterSwap` for the swapped subtree, and — because three of the producers are not htmx (Alpine's dock rows, the schedules page's cloned `<template>`s, a htmx swap of a `tbody` alone) — through one document-level `MutationObserver` that upgrades a new table and re-runs the (idempotent) ensure steps when a table's rows change: a header a renderer rewrote gets its button back, a new row is focusable, an active sort is re-applied. A table is upgraded once (`data-dt-ready` and the instance map). **The history snapshot carries no CSSOM styles:** htmx caches `#app-main` as markup before a boosted swap, and a width serialised into a `style` attribute would come back on Back as an inline style the CSP refuses — `htmx:beforeHistorySave` strips them and the restored table is upgraded again.
+
+**CSP** (`script-src 'self'`, `style-src 'self'`, no nonce — `SecurityHeaders`): no template carries a `style` attribute (`InlineScriptAuditTest`, `InlineWidthAuditTest`), and the script writes no `style` attribute and parses no markup — widths and the measured variables go through the CSSOM (`el.style.width`, `style.setProperty`), which the policy permits. The preview's `<col style>` and skeleton widths were prototype shortcuts; the product sets widths through the CSSOM and the skeleton's bar lengths by position in CSS.
+
+**The legacy table classes** — `.ds-table`'s boxed block (app.css, 076 §D / 079 §E): folded into `data-table.css` (the frame draws the box; an unframed table keeps it as the fallback); `.app-card-table`: reduced to ONE rule, a card whose body is a flush data table (`padding: 0; overflow: clip` — `clip`, never a scroll container, or it would take a page-flow header's scroller away from `<main>`); its identifier-breaking rules (098 §A) moved to `data-table.css` for every wrapping frame, its header-wrap rule retired; `.u-scroll-x` and its `:has(> .ds-table)` frame rule: retired (their one user, the execution result, is a frame); `.tplx-fit-table` (template-tree.css): retired, now `dt-fit`; `.pe-result-table-container` (pipeline-editor.css): reduced to the dock's inset and flex placement — the frame draws the box and its viewport scrolls, 032's rule (the box belongs to what does not scroll) kept; `.tplx-scroll` stays for the one non-table list that wears it (the template detail pane). `.facts-table` and `.mini-table` are the MARKETING SITE's (`static/site/css/site.css`, `templates/site/**`), which loads neither `app.css` nor this layout — untouched.
+
+**Guards.** `DataTableCssTokenTest` (tokens only; the load order; the folded layers gone from their old sheets; every app template's `<table>` directly inside a `.dt-viewport` in a `.dt-frame`), `data-table.test.mjs` on `node --test` (the type, the cell value, the comparator with nulls last, the stable sort, the cycle, the width clamp and fill, the length resolution), `AppCssTokenAuditTest` (the card clips, the viewport scrolls), and `DataTableBrowserTest` in a real browser WITH scrollbars (Playwright hides them by default, which would prove the cap only at 0px): the executions list's header holds at `scrollTop = 200`, `--dt-sbw` equals the measured scrollbar and the cap is that wide and the header's height tall, a header click reorders the page and sets `aria-sort`, a drag moves one column; the dock's header holds and its frozen column sits at the viewport's left at `scrollLeft = 300`; a page-flow header sticks under the top bar; zero CSP violations; screenshots light and dark at 1440 / 1024 / 400.
+
+**Not in scope:** a grid library (the CSP, above), virtual scrolling (every list is server-paged), server-side sort (a paged list sorts its page, and says so), remembered column widths, sorting across pages.
+
 ---
 
 ## 4. Screen Catalog
@@ -467,7 +538,7 @@ Failure states are inline banners in the `?error=` idiom: `expired`, `domain_not
 | URL | `GET /dashboard` |
 | Auth required | Yes (`read`); the Recent executions panel and the run figures follow `execution.read` (D11, 177) — a promoter's dashboard draws neither, and the stats tiles count runs the caller may see (own plus the workspace's SCHEDULED runs (#250 — R3) unless workspace admin). The **Pipelines** tile counts the caller's VIEW (178): for a promoter, the released-and-newer set the lens admits ([Auth §11A.1](auth.md#11a1-the-404-rule)), the same number the rail badge and the explorer show |
 | Purpose | Landing page — overview of recent activity |
-| Design primitives | `.ds-card`, `.ds-badge`, `.ds-table` |
+| Design primitives | `.ds-card`, `.ds-badge`, the data table (§3.7) |
 | JS | None |
 | htmx | Yes — refresh sections independently (`hx-get="/partials/recent-executions"`, rendered only for `canReadExecutions`) |
 
@@ -483,7 +554,7 @@ Content:
 | URL | `GET /pipelines` |
 | Auth required | Yes (`read`) |
 | Purpose | Browse the pipeline folder tree, search across full paths, open a pipeline in the editor |
-| Design primitives | `.ds-table`, `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the tree/two-pane chrome is `template-tree.css` (`tplx-*`, `tpl-*`), shared with §4.6 |
+| Design primitives | the data table (§3.7), `.ds-input`, `.ds-badge`, `.ds-button`, `.ds-empty`; the tree/two-pane chrome is `template-tree.css` (`tplx-*`, `tpl-*`), shared with §4.6 |
 | JS | `static/js/template-explorer.js` — selection, focus and keyboard, shared with §4.6; it finds its pane by the `data-explorer-pane` marker, so both explorers use one file. Expansion itself is `<details>` + htmx and needs no JS |
 | htmx | Yes — **one level per request** (`hx-get="/partials/pipelines?prefix=…"` on a folder's `summary`, `hx-trigger="click once"`, targeting that folder's own `.tpl-level` placeholder with `outerHTML`); leaf selection (`hx-get="/partials/pipelines/detail?id=…"` into `#pipeline-detail`, `innerHTML`, `hx-sync=replace`); search and pagination (`hx-get="/partials/pipelines"` into the fragment-root `#pipeline-list-wrapper`, `outerHTML`) via the `#pipeline-filter-q` search input (`input changed delay:300ms`, `#pipeline-filter-spinner` indicator) and the shared §5 pager — full pattern in §5 |
 
@@ -803,7 +874,7 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows tha
   The size lands as ONE CSS custom property, `--pe-sidebar-w`, written on `<html>` and restored pre-paint (parser-blocking script, the §4.3a mechanism). Below 1024px the sidebar is a drawer (`.pe-body` collapses to `0 1fr`), the handle hides, and the media rule sits after the property-sized column in the cascade — a remembered 600px never reopens the collapse at phone widths (`PipelineEditorSidebarResizeBrowserTest`'s 390px arm asserts exactly that). The drawer's own width reads the same token, so a remembered width widens the drawer too.
 - **SQL section (§8.3 there):** the Details tab loads `GET /partials/pipelines/{id}/nodes/{nodeId}/sql` (a `pipeline.read` read partial, htmx.ajax on selection) and highlights it client-side with the zero-dependency `sql-highlight.js`; the copy confirmation is a live-region announcement plus a 1.5s button-label swap — deliberately NOT a toast (high-frequency, self-evident). CALCULATOR and PIPELINE nodes skip the fetch (client-built evaluation / child mapping).
 - **The data blobs cannot break out of their script blocks (185):** the editor's two `<script type="application/json">` blocks (`#pipeline-data`, `#pipeline-lifecycle`) are inserted with `th:utext`, so the controller writes both through `ScriptSafeJson.forScriptBlock` — a closing-tag sequence inside any free-text field the pipeline carries (display name, description, node labels, template names) is escaped and the JSON parses back unchanged client-side; `ScriptBlockUtextAuditTest` holds the document's closed `th:utext` allowlist and `PipelineEditorJsonRenderTest` reads the render back through a real HTML parser.
-- **Result grid:** the execution result table renders on the shared `.ds-table`; the bespoke `.pe-result-table` styles are gone. Paging stays client-side cursor paging (the §10.5 contract there).
+- **Result grid:** the execution result table is the data table (§3.7) — a frame FIXED by its pane (`dt-fill`): the header and the first column hold while a wide result scrolls both ways, the scrollbar starts under the header, the columns sort (this page) and resize; the bespoke `.pe-result-table` styles are gone. Paging stays client-side cursor paging (the §10.5 contract there).
 - **Template reference (§9.4 there):** a node's template is a read-only reference display — `acme/finance/monthly_revenue @ v3`, one line with the FULL reference on `title`, in the Details tab's key/value grid **and** in the server-rendered `partials/pipeline-node-sql` **and** in the `template-missing` empty state. **There is no template picker on this screen**; template selection happens through pipeline JSON authoring, import and MCP. **If a picker is ever added, it reuses §4.6's prefix fragment — it does not get its own client-side tree.**
 - **The TRANSFORM node (7d, #7; [transform-nodes design §9.3](superpowers/specs/2026-09-09-transform-nodes-design.md)):** its card wears its own accent (`TYPE_TOKEN.TRANSFORM = "transform"` → `app.css`'s `--type-transform`, a teal derived from the theme's info and success accents — no literal colour) and the sprite's `code` glyph (the rail's template glyph: a TRANSFORM is a pinned function), and carries three fact lines: **the language and the pin** — `jsonata · …/order_lines.jsonata @ v3`; the language is the pinned template's `type`, which is not on the node JSON, so the card reads `transform · …` until `graph.js` resolves the pin the way it resolves datasource dialects (one `GET /api/v1/templates/versions` per distinct pin, `template.read`, capped at 50; a failure or a lens-hidden version leaves the honest `transform`); **what it reads and where it writes** — `2 inputs → tempdb.order_lines`, `→ caller`, or `→ $line_count` for a value-mode node's Context key; **rejects and strict** when set — `rejects → tempdb.order_rejects · strict`. The output is fact line 2, not a port row (a TRANSFORM's write is not a `node_progress` operation today). Every value passes through `buildCardHtml`'s escaper (a template name planted with `<script>` renders as text — `graph-transform-card.test.mjs`). The **Details** pane lists Template, Language and Mode (both read off the resolved pin — the mode is the CONTRACT's, never the node's; `resolving…` until the lookup lands), Inputs as bound (`orders ← stg_orders · tz ← $org_timezone`), Output, Rejects and Strict, plus the node deadline; no Query Timeout row (a TRANSFORM runs no statement — `SettingsRules`' statement types). The definition pane shows the node as a function call — the template, its language and mode, the inputs map, the output and the rejects — escaped by construction; nothing is fetched (a TRANSFORM has no SQL to render). A pinned version marked `needs_review` (lane 7e's flag, read off the resolved pin) shows the marker on the card's kind line and in the Details header and rows. The legend names **Transform**. Read-only, as every node is. (`TransformNodeCardBrowserTest` — three TRANSFORM shapes saved through 7c's validator.)
 - **Failure display (057/T85, re-homed by 065, consolidated by 080):** `node_failed`'s `error` object — the failure record — renders in the dock's **Errors tab**: one entry per failed node, newest last, `node id · code` as its summary line, then the message, correlation id, details, the rendered SQL and the exception chain **root-cause-first**, one Copy button. The 065 per-node inspector section is gone with the overlay — the tab is the record's one home beside the modal's one-line summary. `pipeline_failed`'s execution-level record joins the same list (deduped on node + code + message). `PEErrorDetails.build` remains the one view-model (`sse-node-failure.test.mjs` pins it). Under `error-detail=structured` the SQL and Exception sections are simply absent — no apology. The recovery poll's banner names the error code.
@@ -818,7 +889,7 @@ Fully specified in [Pipeline Editor spec](pipeline-editor.md). Only the rows tha
 | URL | `GET /datasources` |
 | Auth required | Yes (`read` to browse; `author` to test a connection; workspace-bound create behind the `member-datasources-enabled` gate, global create/manage `admin` — workspaces D8) |
 | Purpose | Browse, test, register, EDIT and DELETE datasource connections in the active workspace |
-| Design primitives | `.ds-table`, `.ds-badge`, `.ds-button`, `.ds-modal` |
+| Design primitives | the data table (§3.7), `.ds-badge`, `.ds-button`, `.ds-modal` |
 | JS | `static/js/toast.js` (layout-global: arms every `.ds-toast` appended to `#toast` — auto-dismiss + close) |
 | htmx | Yes — test connection button (`hx-post="/partials/datasources/{name}/test"`, `hx-target="#toast"`, `hx-swap="beforeend"` — the result is a §5.1 Notifications toast, never a row swap), search + dialect filter + pager (`hx-get="/partials/datasources"` into `#datasource-list-wrapper`, `outerHTML` — the fragment root carries the id, so the swap target survives every refresh; the pager is the shared §5 fragment), register modal (`hx-post` on `/partials/datasources`, `#register-result` target — success is §5.1 Shape A: the success node closes the modal, the refreshed list and the toast ride along out-of-band, no `HX-Redirect` and no page reload). **A table partial travels as a whole `<table>` on any out-of-band path**: a `<tbody>` (or `<tr>`, `<td>`…) carrying `hx-swap-oob` nested in a `<div>` is silently DISCARDED by the browser's HTML fragment parser — table-only tags outside table context are dropped tokens, so the swap "succeeds" with empty content and no error anywhere (030 F-1; §4.10's keys table is the reference shape) |
 
@@ -853,7 +924,7 @@ The POST re-runs the guard regardless: a pipeline can start referencing the data
 | URL | `GET /partials/datasources/{name}/grants` (a dialog into `#ds-dialog`) |
 | Auth required | Yes — **super admin** (`datasource.grant`, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)) |
 | Purpose | Decide which workspaces can see a datasource at all (RBAC design §4, D-R7) |
-| Design primitives | `.u-backdrop`, `.ds-card`, `.ds-table`, `.ds-badge`, `.ds-empty`, `.ds-select` |
+| Design primitives | `.u-backdrop`, `.ds-card`, the data table (§3.7), `.ds-badge`, `.ds-empty`, `.ds-select` |
 | htmx | Yes — the same whole-backdrop-into-`#ds-dialog` contract §4.5's edit and delete dialogs use (094 §A/§B); each mutation re-renders THIS fragment, so the table and the select stay in step with the rows just written |
 
 **Visibility IS the grant.** Round 1 replaced `datasources.workspace_id` (NULL = "global") with
@@ -885,7 +956,7 @@ Every grant and revoke is audited (`datasource.granted` / `datasource.revoked`),
 | URL | `GET /partials/datasources/{name}/facts` (a dialog into `#ds-dialog`); the same table inline on every datasource's detail page (`GET /datasources/{name}`, [§4.5c](#45c-datasource-detail--a-read-only-tables-view-162-156)) |
 | Auth required | Yes — any member (`semantic.read`): the facts are a READ, and which rows a workspace sees is the store's own predicate, not the screen's |
 | Purpose | Show what agents LEARNED about a datasource that its schema could not say — units, time zones, sampling, grain, what coded values mean, joins, caveats — with trust badges ([learned-semantic-layer design](superpowers/specs/2026-09-11-learned-semantic-layer-design.md) §7.3) |
-| Design primitives | `.u-backdrop`, `.ds-card`, `.ds-table`, `.ds-badge`, `.ds-empty` |
+| Design primitives | `.u-backdrop`, `.ds-card`, the data table (§3.7), `.ds-badge`, `.ds-empty` |
 | htmx | Yes — the whole-backdrop-into-`#ds-dialog` contract of §4.5's dialogs (094 §A/§B, 114 §C.2) |
 
 **Read-only in round 1.** One row per fact, oldest first: the OBJECT it is about (`schema.table.column`), the kind badge (plus a `workspace` badge on a WORKSPACE-scope fact — one organisation's meaning, D-S1), the fact text (plus a `conflict` badge when another live fact of the same kind sits on the same refs — D-S5: both shown, neither wins), the TRUST badge — `observed`/`verified` success, `needs_review` warning, `stale` danger, `asserted` default — with the drift message under it when the read-time check demoted it (§6: "column X no longer exists"), the evidence summary (or "none — asserted"), and the provenance: when, through what (`mcp`/`session`/`api_key`), a `via another workspace` badge when the active workspace did not record it, and the source pipeline as a link ONLY when this workspace can read it (D-S9). Recording, verifying and retiring from the UI are round 2; the empty state says so and names the verbs that exist today (the `semantics_*` MCP tools).
@@ -1061,7 +1132,7 @@ Every user-supplied string — the panes, case and invariant names and messages,
 | URL | `GET /executions` |
 | Auth required | Yes — `execution.read` (D11, 177): a viewer or author sees their OWN runs plus every SCHEDULED run of the workspace (#250 — R3, the same `findVisible` read the REST listing does), a workspace admin (`execution.read_all`) every run of the workspace (endpoint-key runs included), a **promoter is refused by role** (`auth.role_required`) and the rail does not draw the Executions item for one ([§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative)) |
 | Purpose | Browse past executions, filter by pipeline/status/date |
-| Design primitives | `.ds-table`, `.ds-badge`, `.ds-input` |
+| Design primitives | the data table (§3.7), `.ds-badge`, `.ds-input` |
 | JS | None |
 | htmx | Yes — filters (pipeline, status, date range), pagination (`hx-get="/partials/executions"` into `#execution-table`, `innerHTML`, with `hx-include="#execution-filters"` re-sending the filter form by id; the pager offsets are server-rendered into `hx-vals` via `th:attr` literal substitution) |
 
@@ -1074,7 +1145,7 @@ Content: table of executions (pipeline **display name** — machine path on hove
 | URL | `GET /executions/{execution_id}` |
 | Auth required | Yes — `execution.read` + ownership of the execution (D11: own unless `execution.read_all`; another member's run is the 404, never 403; a promoter is refused by role). Cancelling a running execution is `execution.cancel` (`canExecute`; another member's run needs `execution.cancel_all`) |
 | Purpose | View execution metadata, node stats, result, replay events |
-| Design primitives | `.ds-card`, `.ds-table`, `.ds-badge`, `.ds-code-block` |
+| Design primitives | `.ds-card`, the data table (§3.7), `.ds-badge`, `.ds-code-block` |
 | JS | Light — result preview pagination if large |
 | htmx | Yes — result pagination (`hx-get="/partials/executions/{id}/result?offset=..."`), cancel (`hx-delete="/partials/executions/{id}"` — success is §5.1 Shape A: the cancelled-state badge swap plus an OOB toast; the 403/404/409 refusals are `ResponseStatusException`s answered with full error pages by `UiExceptionHandler` — a recorded gap for partial requests, not a toast) |
 
@@ -1167,7 +1238,7 @@ Content:
 | URL | `GET /admin/users` |
 | Auth required | Yes (`admin`) |
 | Purpose | View all users, activate/deactivate, grant/revoke admin |
-| Design primitives | `.ds-table`, `.ds-badge`, `.ds-button` |
+| Design primitives | the data table (§3.7), `.ds-badge`, `.ds-button` |
 | JS | None |
 | htmx | Yes — search/pagination (`hx-get="/partials/admin/users"`), activate/deactivate and admin grant/revoke (`hx-patch="/partials/admin/users/{id}/{action}"`, row-level swap), identity reset (#187, its own literal route `hx-patch="/partials/admin/users/{id}/identity-reset"` — `user.identity_reset`, [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)) |
 
@@ -1188,7 +1259,7 @@ Content: table of all users (email, display_name, `is_active` and `is_admin` as 
 | URL | `GET /workspaces` |
 | Auth required | Yes — **a workspace admin's or a super admin's page** (D13, `workspace.read` → workspace admin; [§4.3e](#43e-role-visibility--every-verb-and-the-role-boolean-that-renders-it-114-normative), [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)). A viewer, author or promoter is refused by role (`auth.role_required`) and the rail does not draw the Workspaces item for them; what every member keeps is the **switcher** in the chrome (§3.4), whose `POST /workspace/switch` is its own row (`workspace.switch`, every role) and re-issues the session token. A principal with NO active workspace still reaches the page — it renders the no-workspace state below, the one screen that explains their situation. Per-verb on the page: members and the display name need `canAdminWorkspace` **in the ACTIVE workspace**; create, deactivate, reactivate and delete need `isSuperAdmin`. The members section carries `id="workspace-members"` (143): it is where the rail's Admin item lands a workspace admin |
 | Purpose | Administer the workspaces you administer: their members and roles, the display name, and — for a super admin — create, deactivate, reactivate and delete |
-| Design primitives | `.ds-table`, `.ds-badge`, `.ds-button`, `.ds-input`, `.ds-card`, `.ds-empty`, `.app-note` |
+| Design primitives | the data table (§3.7), `.ds-badge`, `.ds-button`, `.ds-input`, `.ds-card`, `.ds-empty`, `.app-note` |
 | JS | One `onchange` submit on the rail switcher (`<noscript>` fallback button included). Nothing else — the flags-era "tick author when admin is ticked" listener went with the checkboxes (177) |
 | htmx | **One partial** (177, D22): the member row's role Save posts `POST /partials/workspaces/{name}/members/{userId}/role` and swaps the row (`hx-target="closest tr"`, `outerHTML`) with a success toast out-of-band; a refusal is a toast alone (`HX-Retarget: #toast`) and the row keeps the selection the server still holds. Every other verb is a plain CSRF-protected form post with `redirect:` outcomes (`?ok=`/`?error=` query state), rendered into the layout's `#toast` stack |
 
@@ -1376,7 +1447,7 @@ The signed-in index's page header carries the app's second **Report a problem** 
 | Rendered for (114) | The PLAN renders for every member — it is a read, and hiding it would leave an author unable to see what is waiting. **Promote** renders for `canPromote` **in the SOURCE workspace** (the ACTIVE one: `PromotionUiController` reads `principal.requireWorkspace()` and the interceptor judges `promotion.promote` against that same context; no target-side role is consulted). A member without it reads a line naming who to ask — the one place this round explains an absence rather than leaving one, because a promotion screen with no button and no words reads as broken. **Since 143 the reader's plan is a plain table** (`data-promotion-plan="read-only"`: Pipeline / Here / On target) — no `<form>`, no Send column, no selection boxes; the form with its controls renders for `canPromote` only |
 | Purpose | Push released content from this deployment to its one configured higher environment ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)) |
 | Endpoints called | The target's [REST API §18](rest-api.md#18-promotion-endpoints-receiver) pair, server-side. The browser never talks to the target |
-| Design primitives | `.ds-table` (the listing), `.ds-empty` (the three empty states — the "Could not read the target" one is reused by every list screen a promoter sees while the target is unreadable, 178), `.ds-badge` (the target label and `absent`) |
+| Design primitives | the data table (§3.7; the listing), `.ds-empty` (the three empty states — the "Could not read the target" one is reused by every list screen a promoter sees while the target is unreadable, 178), `.ds-badge` (the target label and `absent`) |
 | JS | None |
 | htmx | No — a plain form POST with a redirect flash. A promotion is a whole-environment action, not a fragment swap |
 
@@ -1425,7 +1496,7 @@ Each row shows the pipeline's version here and on the target (`absent` when the 
 | URL | `GET /api-console` |
 | Auth required | Yes — `read` (`endpoint.read`), the same permission `EndpointsController.list` declares |
 | Purpose | Everything a program uses to talk to this workspace, in one place: published endpoints, the API keys associated with each, the MCP connection |
-| Design primitives | `.ds-card`, `.ds-table`, `.app-chip`, `.app-code`, `.app-empty` |
+| Design primitives | `.ds-card`, the data table (§3.7), `.app-chip`, `.app-code`, `.app-empty` |
 | JS | None |
 | htmx | None — since 179 the page is a read-only inventory. The key verbs moved to `/api-keys` (§4.19) |
 
@@ -1488,7 +1559,7 @@ Two cards.
 | URL | `GET /api-keys` |
 | Auth required | Yes — any authenticated principal; the page lists keys the caller CREATED (`mcp_key.own`), and its verbs are `mcp_key.create` (create), `mcp_key.revoke_own` (a creator's delete — the service checks `created_by`) / `api_key.revoke` + `server_key.revoke` (any key of the workspace), `api_key.bind` (associations) |
 | Purpose | Create, delete and associate keys of every kind — the `mcp` key an agent presents at `/mcp`, the `endpoint` keys programs call published endpoints with, the promotion peer's `server` key |
-| Design primitives | `.ds-card`, `.ds-table`, `.app-chip`, `.app-picker`, `.app-modal` |
+| Design primitives | `.ds-card`, the data table (§3.7), `.app-chip`, `.app-picker`, `.app-modal` |
 | JS | The create modal, the kind-conditional role/associations fields, and the select-the-secret reveal |
 | htmx | `hx-post="/partials/api-keys"` (create, into `#keyCreated`); `hx-delete="/partials/api-keys/{id}"` (delete, into `#keys-table-body`); `hx-post="/partials/api-keys/{id}/bindings"` (save an association SET) — each with a §5.1 Shape A out-of-band piece |
 
@@ -1544,7 +1615,7 @@ association save swaps in all render `api/keys :: keysTable` / `:: keyRows` from
 | URL | `GET /schedules` — optional `?id=<schedule>` selects one (the tree opens down to its leaf) and `&run=<run>` opens that run; the address bar follows the reader's selection |
 | Auth required | Yes — `schedule.read`, every member (a promoter through the promoter lens: schedules of the pipelines the lens admits). Its verbs are the five `schedule.*` write rows ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)) — author, workspace admin, super admin — and render by `canAuthor` (§4.3e) |
 | Purpose | Browse the workspace's schedules as a folder explorer; read when one runs next and what its runs did; create, edit, pause, resume, unblock, Run now and delete them |
-| Design primitives | The explorer chrome is §4.3's (`template-tree.css` — `tplx-*`, `tpl-*`, the divider, the drawer below 1100px); `.ds-card`, `.ds-table`, `.ds-badge`, `.app-chip`, `.app-alert`, `.ds-field`, `.app-modal`; the page's own rules are `schedules.css` (tokens only, head-loaded — §3.0) |
+| Design primitives | The explorer chrome is §4.3's (`template-tree.css` — `tplx-*`, `tpl-*`, the divider, the drawer below 1100px); `.ds-card`, the data table (§3.7), `.ds-badge`, `.app-chip`, `.app-alert`, `.ds-field`, `.app-modal`; the page's own rules are `schedules.css` (tokens only, head-loaded — §3.0) |
 | JS | `static/js/schedules/` — `model.js` (pure: levels, search, presets, the merged trail, refusal → field, parameter coercion, idempotency; `schedules-model.test.mjs`), `api.js` (the ONE request path: §20 with the session and `DP-CSRF-Token`), `dom.js`, `explorer.js`, `detail.js`, `run.js`, `form.js`, `page.js`; plus the shared `template-explorer.js` (keyboard), `explorer-detail.js` (drawer) and `splitter.js` |
 | htmx | **None.** The scheduler design revision §6 (owner, 2026-09-22): the UI uses REST for every schedule operation, reads included, and no parallel partial route exists — the page is a server-rendered SHELL whose every read and write is a `fetch` to [REST §20](rest-api.md#20-schedules) |
 
@@ -1616,13 +1687,18 @@ Filter values are carried by **form fields plus `hx-include`** — never by stri
 
 <!-- The swapped fragment: table + pager, returned whole by /partials/pipelines -->
 <div id="pipeline-results">
-    <table class="ds-table">
-        <tr th:each="p : ${pipelines}">
-            <td><a th:href="@{'/pipelines/' + ${p.id} + '/editor'}" th:text="${p.displayName}">Name</a></td>
-            <td th:text="${p.description}">Desc</td>
-            <td><span class="ds-badge ds-badge--neutral" th:text="'v' + ${p.currentVersion}">v1</span></td>
-        </tr>
-    </table>
+    <!-- every table is the data table (§3.7): frame › viewport › table -->
+    <div class="dt-frame" data-dt-paged>
+      <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table">
+            <tr th:each="p : ${pipelines}">
+                <td><a th:href="@{'/pipelines/' + ${p.id} + '/editor'}" th:text="${p.displayName}">Name</a></td>
+                <td th:text="${p.description}">Desc</td>
+                <td><span class="ds-badge ds-badge--neutral" th:text="'v' + ${p.currentVersion}">v1</span></td>
+            </tr>
+        </table>
+      </div>
+    </div>
 
     <!-- Pager: the next offset is a server-rendered value, not a client-side expression -->
     <button th:if="${hasMore}" class="ds-button ds-button--secondary"
@@ -1650,7 +1726,7 @@ Two rules this example encodes, applicable to every list screen:
 
 Every list, panel and form on these screens implements the same three states. They are layout-shell concerns, specified once here rather than per screen.
 
-**Empty state.** When a collection legitimately has zero rows, the partial returns a `.ds-empty` block — `.ds-empty-title` naming what is missing, `.ds-empty-description` with the follow-up, and `.ds-empty-actions` for the action if the user has scope for it ("No pipelines yet — Create pipeline"). These are the only empty-state classes; `.ds-empty-state` is **not a class** — no stylesheet defines it (four templates once used it and every pixel came from the inline styles beside it). Distinguish the two empties: *nothing exists* gets the create action; *nothing matched the filter* gets "No pipelines match "…" — Clear filters". An empty table with only a header row is not an acceptable empty state.
+**Empty state.** When a collection legitimately has zero rows, the partial returns a `.ds-empty` block — `.ds-empty-title` naming what is missing, `.ds-empty-description` with the follow-up, and `.ds-empty-actions` for the action if the user has scope for it ("No pipelines yet — Create pipeline"). These are the only empty-state classes; `.ds-empty-state` is **not a class** — no stylesheet defines it (four templates once used it and every pixel came from the inline styles beside it). Distinguish the two empties: *nothing exists* gets the create action; *nothing matched the filter* gets "No pipelines match "…" — Clear filters". An empty table with only a header row is not an acceptable empty state. **In a data table (§3.7, 282) the empty state is a ROW of the same table** — `.dt-state-row` › `.dt-state`, the title in `<b>` and the follow-up beside it — so the header stays and the columns do not disappear with the rows (the executions list, recent executions; the keys and admin-users tables already carried theirs as a spanning row); a screen whose empty case has no table to keep (a dialog saying "Granted to nobody", a list screen before its first item) keeps `.ds-empty`.
 
 **Search.** A screen's server-side search covers every column that screen renders; where a column is derived, the search matches the rendered text (a dialect enum's wire value, an unbound workspace's `global` literal, a `readonly` restriction badge). A search that silently ignores a visible column reads as "no results" to the user.
 
@@ -1659,6 +1735,7 @@ Every list, panel and form on these screens implements the same three states. Th
 - **The originating control goes busy.** `shell.js` marks the requesting element with the shell's own `.app-busy` class for the flight — deliberately NOT htmx's `.htmx-request`, which htmx 2.0.10 applies to the `hx-indicator` TARGET instead whenever the element carries `hx-indicator` (the tree leaves do), leaving the control itself unmarked. A `<button>` in that state is non-interactive (`pointer-events: none` — `shell.js` adds `aria-disabled="true"` for the duration, never the `disabled` property, which would drop focus mid-flight; htmx already guards re-triggering) and draws an `::after` spinner ring in the `.ds-spinner` idiom, absolutely positioned so the control's box never changes (the no-layout-shift rule below stands). A folder `<summary>` is the deliberate exception: it gets the class but stays operable while its level loads (collapse/re-expand mid-fetch is pinned behaviour) and its busy signal is the chevron spinning in place. Mutating buttons (`Save`, `Generate key`, `Test connection`) still additionally set `hx-disabled-elt="this"` against double-submit, and elements carrying their own `hx-indicator` spinner keep it — the busy state is additive, never a replacement.
 - **A slow swap target gets a delayed skeleton.** A request still in flight 150ms after `htmx:beforeRequest` marks its target `aria-busy="true"` and gains ONE skeleton row (`.ds-skeleton .ds-skeleton-table-row .app-target-skeleton`); a faster swap never flashes either. Timers and skeletons pair per target — concurrent requests into different panes are normal — and the terminal event removes both. The detail panes (`#template-detail`, `#pipeline-detail`) are the primary beneficiaries; the mechanism is generic. **The target is resolved once, up front** (`swapTargetFor`): a boosted navigation's htmx target is `<body>` until the beforeSwap retarget, and a skeleton on body sits outside the 100dvh shell — the one place that can grow the document — so a boosted request's skeleton goes into `#app-main`. **The history snapshot carries no transient chrome**: htmx snapshots the page during the swap, before the terminal event, so `htmx:beforeHistorySave` strips every live skeleton and busy mark first, and `htmx:historyRestore` / `pageshow` purge any orphan a cache written earlier still holds. (2026-09-13: the owner's `/dashboard` carried a document scrollbar — a body-level skeleton row restored from the history cache after a slow boosted navigation away and a Back.)
 - **The click itself is acknowledged before any of the above** (103 §3.5): a boosted navigation dims and `aria-disabled`s the clicked link in the same frame as the press, and a status pill joins it after 150ms. That layer is specified in §3.5 — it is a property of the SHELL, not of a request, and it is cleared on a different union of events than the bar is.
+- **A data table's first-paint placeholder is skeleton ROWS of the same table** (§3.7, 282): the dashboard's recent-executions panel renders the partial's own header (`recent-executions :: head`) over three `.dt-skeleton-row`s, so the header is in place before the rows arrive. The delayed skeleton above is unchanged (shell.js's, for any slow swap).
 - Reduced motion keeps every state and drops every motion: the bar's slide, the control ring's spin (it goes dashed-static, the `.ds-spinner` precedent), the chevron's spin (a static accent chevron instead) and the skeleton's shimmer are all covered by their own `prefers-reduced-motion` blocks.
 
 **Error rendering.** A partial request that fails returns the **standard REST error envelope** ([REST §4.2](rest-api.md#42-error-envelope)) rendered into an HTML fragment — the same `code` / `message` / `user_message` / `correlation_id`, not a bespoke error format. No htmx extension is loaded: htmx never swaps 4xx/5xx responses on its own (`responseHandling` maps `[45]..` to `{swap: false}`), so a refusal that should surface as a toast keeps its real 4xx status, carries the `partials/toast-oob` fragment as its body, and sets the `HX-Retarget: #toast` + `HX-Reswap: beforeend` response headers; `toast.js`'s `bridgeErrors` listener flips `shouldSwap` on `htmx:beforeSwap` — only when the server asked for `#toast` by header, so an ordinary error behaves exactly as before (Shape C under **Notifications**).
@@ -1726,6 +1803,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v1.80 | 282 (#282) the data table — numbered after 280's v1.79 (in flight; renumber at merge if 280 has not landed, keep both) | **New §3.7 (normative) — the house data table**: `.dt-frame` › `.dt-viewport` › `table.ds-table`, one rule set (`data-table.css`, after app.css) and one enhancer (`data-table.js`, after shell.js), ported from the owner-approved preview: the header sticky in its viewport over opaque rows, the frame's `::after` CAP over the scrollbar track beside the header (measured `--dt-sbw` / `--dt-head-h`, 0 on overlay scrollbars), client sort over the rendered rows (`aria-sort`; nulls last both ways; "Sort this page by …" on a paged list), resize on a `<colgroup>` with `table-layout: fixed` (a drag changes one column), a frozen first column (`dt-freeze`), keyboard rows (Enter through shell.js's `data-href` handler), states as rows of the same table, re-init on htmx swaps and on non-htmx row producers (a MutationObserver), the history snapshot stripped of CSSOM styles; CSP-clean (no `style` attribute anywhere; CSSOM only). The 19 templates' 22 tables swept, each decided FIXED or PAGE-FLOW (the §3.7 table); PAGE-FLOW's header sticks to `<main>` under the top bar — measured: Chromium stops a sticky cell at the scroller's content edge, so the script sets `--dt-flow-top` to minus the scroller's padding. **§2 principle 9**, **§3.3 rule 2**, the primitives rows, §4.4's result grid, the §5 example, **§5.1** (empty and first-paint loading as rows of the table). Legacy classes: app.css's boxed `.ds-table` block folded, `.app-card-table` reduced to one clip rule, `.u-scroll-x` and `.tplx-fit-table` retired, `.pe-result-table-container` reduced to the dock's inset; `.facts-table` / `.mini-table` are the marketing site's, untouched. Guards: `DataTableCssTokenTest`, `data-table.test.mjs`, `DataTableBrowserTest`, `AppCssTokenAuditTest`'s card rule moved to the viewport. No route, permission or role changed. |
 | 2026-09-27 | v1.78 | 254 (#254, #255, #256) three small UI defects, the switcher and the rail honest | §3.4: the switcher's options are full-paint facts — every page-route mutation that changes the option list navigates in FULL; the three lifecycle verbs join the create form (#256): deactivate → the option absent without a reload, reactivate → present, delete → absent (`WorkspacesCreateBrowserTest` extends #170's no-reload assertion to each verb's before/after list; on the base the boosted swap left the rail every option rendered before the mutation). §4.7: the panel head yields before the rail scrolls (#255) — `.te-panel-head` wraps and its h2 carries `min-width: 0`, so at the splitter's 220px floor the `Key/Value` / `JSON` tabs drop below the `Render Context` heading instead of holding the rail open at `scrollWidth 228 > clientWidth 220`; the walk pins `scrollWidth == clientWidth` light and dark at 1100/1440/1920 and at the floor (`TemplateEditorContextRowBrowserTest`). |
 | 2026-09-27 | v1.77 | 250 (#250, #259) R3 on the UI + the Usage tab's schedules | **§4.8 / §4.2**: the executions screen and the dashboard's recent executions and run figures read `findVisible` — a viewer or author sees their OWN runs plus every SCHEDULED run of the workspace (#250, rest-api §10.1's R3), a scheduled run's row stating its origin (`SCHEDULE`) in the via column. **§4.3b**: the pipelines explorer's Usage tab gains a third heading — the live schedules whose target names the pipeline (#259), name + link to `/schedules?id=<id>` + enabled/paused/blocked, read through the lensed `ScheduleService.listByTarget`; a schedule is not refusal evidence, so the tab badge does not count it and the empty state now names all three absences. `ExecutionHistoryBrowserTest` holds a viewer's list to scheduled-visible / other's-own-absent; `ExplorerDetailBrowserTest` reads the third heading off the tab. |
 | 2026-09-26 | v1.76 | scheduler lane 3 (#9, slice 3) — numbered after origin/main's v1.75 (242b/230 may take it; renumber at merge, keep both) | **§4.20, the form**: a `DATE` parameter's field gains the **binding source** selector — Fixed value (default) / Today / Yesterday; a preset hides the fixed-value input by class and travels in `payload.parameter_bindings`, resolved per run on the schedule's frozen reference; the selection round-trips on edit; a literal binding shows its value and keeps its envelope while untouched. **§4.20, the run dialog**: beside the frozen parameters, **resolved parameters** (`prepared.resolved_parameters`) — what the run executed with. No new route, verb or role; the browser suites gain the bindings cases (`SchedulesBindingsBrowserTest`). |

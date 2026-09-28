@@ -1,9 +1,9 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.17 (revised — see Change Log)
+**Status:** v1.18 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
-**Last updated:** 2026-09-17
+**Last updated:** 2026-09-27
 
 ---
 
@@ -86,10 +86,12 @@ The active theme is resolved **per request**, not fixed at deployment: `${active
 <link rel="stylesheet" href="/vendor/design-system/base.css">
 <link rel="stylesheet" href="/vendor/design-system/motion.css">
 <link rel="stylesheet" href="/vendor/design-system/primitives.css">
-<link rel="stylesheet" href="/css/app.css">                <!-- app-specific, LAST -->
+<link rel="stylesheet" href="/css/app.css">                <!-- app-specific -->
+<link rel="stylesheet" href="/css/data-table.css">         <!-- 282: the data table, right after app.css -->
+<!-- …then the page sheets that build on both: template-tree.css, schedules.css -->
 ```
 
-`app.css` loads LAST so its rules win equal-specificity ties by document order: its `body` rule re-asserts `background-color: var(--surface-page); color: var(--text-primary)` (born as the guard against Bootstrap's reboot painting `<body>` white under every theme, 024 T40 — Bootstrap itself was removed in 076 §C, and the element defaults its reboot silently provided are now owned by base.css plus the "076 §C" section at the end of `app.css`). Every theme file, `dark.css` included, opens on `:root`: the swap loads exactly one file, so a theme takes effect by being loaded — no `data-theme` attribute is involved anywhere.
+`app.css` loads after the design system so its rules win equal-specificity ties by document order (since 282 the data table's sheet, `data-table.css`, follows it directly — it folded app.css's `.ds-table` block and must win over what is left — and the head-loaded page sheets follow both; [UI Screens §3.7](ui-screens.md#37-the-data-table-282-normative)): its `body` rule re-asserts `background-color: var(--surface-page); color: var(--text-primary)` (born as the guard against Bootstrap's reboot painting `<body>` white under every theme, 024 T40 — Bootstrap itself was removed in 076 §C, and the element defaults its reboot silently provided are now owned by base.css plus the "076 §C" section at the end of `app.css`). Every theme file, `dark.css` included, opens on `:root`: the swap loads exactly one file, so a theme takes effect by being loaded — no `data-theme` attribute is involved anywhere.
 
 Theme switching at runtime: swap the `href` of `#theme-link`. All tokens cascade instantly — no page reload.
 
@@ -1279,7 +1281,7 @@ Delivery is **uniform** — there is no inline-vs-claim-check split ([REST API �
 
 - The panel renders `data.rows` from the event directly — no fetch needed for the first page. When `has_more` is `false` (the common case) the first page IS the whole result and no cursor call is ever made.
 - The table renders the first page as delivered. Page size is the server's `datapipelines.result.page-size-rows`, not a client constant — the editor never assumes 100 or 1000 rows.
-- The grid is the shared `.ds-table` component ([UI Screens §5](ui-screens.md)) — the editor's bespoke `.pe-result-table` styles are gone; the container supplies scroll only.
+- The grid is the house data table ([UI Screens §3.7](ui-screens.md#37-the-data-table-282-normative), 282) — a `.dt-frame` FIXED by the pane (`dt-fill`) whose one viewport scrolls both ways: the header holds (the scrollbar starts under it — the cap), the first column holds (`dt-freeze`), one line per row (`dt-nowrap`), and the columns sort (this page — `data-dt-paged`) and resize. The editor's bespoke `.pe-result-table` styles are gone; `.pe-result-table-container` keeps only the dock's inset and flex placement.
 - BIGDECIMAL / BIGINTEGER values arrive as strings (Type System wire rules) and are rendered as-is — the editor never parses them into JS numbers.
 - Nothing is shown for a **pure-ETL pipeline**: with no caller node there is no `data_ready` event. The completion banner shows execution stats only.
 
@@ -1894,6 +1896,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-27 | v1.18 | 282 (#282) the data table | §3.4's load order: `data-table.css` loads right after `app.css` (it folds app.css's old `.ds-table` block) and before the page sheets; the result dock's grid (§10) is the house data table — [UI Screens §3.7](ui-screens.md#37-the-data-table-282-normative). |
 | 2026-09-18 | v1.17 | 159 addendum / #151 cards re-measure when they grow mid-run | §5.3: `measureCard` per height-changing write (state, stats, the port lines, the markers' elapsed line, the reset), deferred behind the html-label's re-render, no relayout in flight except on overlap; `settleCardHeights` re-runs a stale layout once at End's terminal state; the oscillation bound never reaches this path. |
 | 2026-09-17 | v1.16 | 159 / #148 the Start disc runs on a human press and cancels while running | §5.3b: **the press guard** — the cause of "Start does nothing" on the live editor was Cytoscape's mousedown `activate()` on the marker node re-rendering the disc (cytoscape-node-html-label re-parses on every `style` event, `setTimeout(0)`) under a held button, so no click was ever dispatched; `wireMarkerActivation` now stops `mousedown`/`pointerdown`/`touchstart` for `.pe-marker-run` targets in the capture phase. **Cancel from the marker**: while `isExecuting` the disc is `.pe-marker-cancel` (`Cancel execution`, the word Cancel, the square glyph, the danger fill, never `aria-disabled`) and its activation calls the toolbar's own `cancelExecution()`; Start again on any terminal state; a viewer who may not execute keeps the plain marker. **Focus survives the re-render** (`keepMarkerFocus`). §6.3: `execution_started` / `execution_aborted` rows name the disc's two faces. |
 | 2026-09-17 | v1.15 | 151 addendum / #144 boundary redesign | **New §5.3b the execution boundaries**: Start a disc and End a rounded square in a transparent 72px box (`node.boundary`, `BOUNDARY_W`; connectors anchored to the marker's half width); **Start is the run trigger** when `canExecute` (the toolbar's own flag, stamped as `data-can-execute`, read by `init()`) — `role="button"`, Enter/Space via `wireMarkerActivation`, the same `executePipeline()`, `aria-disabled` + pulse while Running…; End's fill and word are the outcome, with the run clock's elapsed (`durationText`); minimap silhouettes; `#cy-canvas` `role="group"`. §6.3: End on the terminal rows. §10.7: the closing sentence that said the arrows were untouched and no marker existed is replaced — the reducer now feeds the port, and the markers read the run status. |
