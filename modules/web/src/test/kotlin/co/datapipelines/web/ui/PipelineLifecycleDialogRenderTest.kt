@@ -316,6 +316,10 @@ class PipelineLifecycleDialogRenderTest {
         html shouldContain ">2026-10-01 03:00 UTC</span>"
         html shouldContain ">reports/backfill</span>"
         html shouldContain ">paused</span>"
+        // No next run, no label: the paused row carries no "next run" text at all — the badge
+        // is the explanation, and a dangling label would read as a rendering bug. (The note's
+        // prose also says "next run", so the count is of the label form specifically.)
+        Regex("next run <span>").findAll(html).count() shouldBe 1
         html shouldContain ">Discard v2</button>"
     }
 

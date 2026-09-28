@@ -46,7 +46,9 @@
           <li th:each="s : ${dlg.schedules}">
             <span class="u-mono" th:text="${s.name}">reports/nightly</span>
             <span class="ds-badge ds-badge-default" th:text="${s.state}">enabled</span>
-            <span class="u-muted u-text-xs">
+            <!-- No next run, no label: a paused schedule's row says so by its badge alone
+                 (a "next run" with nothing after it would be a dangling label). -->
+            <span class="u-muted u-text-xs" th:if="${s.nextRunLabel} != null">
               next run <span th:text="${s.nextRunLabel}">2026-10-01 03:00 UTC</span>
             </span>
           </li>
