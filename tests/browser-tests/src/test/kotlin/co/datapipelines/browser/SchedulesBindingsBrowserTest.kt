@@ -4,6 +4,7 @@ import co.datapipelines.browser.ScheduleFixtures.DATE_PARAMETER
 import co.datapipelines.browser.ScheduleFixtures.PARAMETER
 import co.datapipelines.browser.ScheduleFixtures.createBoundSchedule
 import co.datapipelines.browser.ScheduleFixtures.createSchedule
+import co.datapipelines.browser.ScheduleFixtures.idIn
 import co.datapipelines.browser.ScheduleFixtures.releasedDatePipeline
 import co.datapipelines.browser.ScheduleFixtures.releasedPipeline
 import co.datapipelines.browser.ScheduleFixtures.send
@@ -29,6 +30,38 @@ import java.time.ZoneId
  */
 class SchedulesBindingsBrowserTest : SchedulesBrowserSuite() {
     private fun source(name: String) = page.locator("[data-param-name='$name'] [data-param-source]")
+
+    /**
+     * Run now, then open THAT run's dialog once it has succeeded — every step synchronised on
+     * an event that belongs to this run, never on "the first row" (#283).
+     *
+     * From the shots test's second iteration on, the runs list already holds the previous
+     * iteration's run, succeeded. A wait on the first row's state then passed at once, and the
+     * click on the first row raced the Run-now response's re-render (detail.js puts the new run
+     * first): it could open the NEW run while it was still queued. A queued run is not prepared
+     * yet, so its §20.11 read carries no `resolved_parameters` and run.js never shows the slot —
+     * the 30 s timeouts on the box and the 90 s one on CI. Here the run id comes from the 202,
+     * the row waited on is that run's, and the dialog is released only after that run's own
+     * §20.11 read answered with resolved parameters.
+     */
+    private fun runAndOpen(scheduleId: String): String {
+        val requested =
+            page.waitForResponse({ it.url().endsWith("/api/v1/schedules/$scheduleId/run") && it.status() == 202 }) {
+                page.locator("[data-verb='schedule-run']").click()
+            }
+        val runId = idIn(requested.text())
+        val row = page.locator("#schedule-detail .sch-runrow[data-run-id='$runId']")
+        page
+            .locator("#schedule-detail .sch-runrow[data-run-id='$runId'][data-state='succeeded']")
+            .waitFor(Locator.WaitForOptions().setTimeout(60_000.0))
+        val read =
+            page.waitForResponse({ it.url().endsWith("/api/v1/schedules/$scheduleId/runs/$runId") && it.request().method() == "GET" }) {
+                row.locator("[data-sch-action='open-run']").click()
+            }
+        read.status() shouldBe 200
+        read.text() shouldContain Regex(""""resolved_parameters"\s*:\s*\{\s*"""")
+        return runId
+    }
 
     @Test
     fun `a DATE parameter offers the presets, Today hides the fixed field, and the choice round-trips`() {
@@ -161,19 +194,12 @@ class SchedulesBindingsBrowserTest : SchedulesBrowserSuite() {
             page.setViewportSize(1440, 900)
             openSchedules("?id=$id")
             detail().waitFor()
-            page.locator("[data-verb='schedule-run']").click()
-            page.waitForFunction(
-                "() => (document.querySelector('#schedule-detail .sch-runrow') || {}).getAttribute && " +
-                    "document.querySelector('#schedule-detail .sch-runrow').getAttribute('data-state') === 'succeeded'",
-                null,
-                Page.WaitForFunctionOptions().setTimeout(60_000.0),
-            )
-            page.locator("#schedule-detail .sch-runrow").first().waitFor()
-            page.locator("#schedule-detail .sch-runrow [data-sch-action='open-run']").first().click()
-            val dlg = page.locator("#sch-dialog .sch-run-dialog")
+            val runId = runAndOpen(id)
+            // run.js stamps the run id on the dialog's backdrop, the template's root.
+            val dlg = page.locator("#sch-dialog [data-sch-dialog][data-run-id='$runId'] .sch-run-dialog")
             dlg.waitFor()
             // The resolved block sits inside the frozen-parameters <details>; open it deterministically
-            // (a summary click races the dialog's async message fill).
+            // (the summary is a toggle, and the frame of the shot must not depend on click timing).
             page.evaluate("() => { const d = document.querySelector('#sch-dialog details.sch-frozen'); if (d) d.open = true; }")
             dlg.locator("[data-slot='resolved']:not([hidden])").waitFor()
             shot("bindings-run-1440-$mode")
