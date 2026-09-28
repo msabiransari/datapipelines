@@ -142,7 +142,9 @@
 }
 
 /* The Messages table is a FIXED data-table frame (282, data-table.css): its viewport scrolls
-   and its header sticks; this page only says how tall the box is. */
+   and its header sticks; this page only says how tall the box is. 288 #3: the height stays a
+   literal here — this IS the sanctioned override point (§3.7: "a page class setting the
+   variable"), the page's own decision, not a magic number in the component's rules. */
 .sch-messages-scroll {
   --dt-max-h: 24rem;
 }

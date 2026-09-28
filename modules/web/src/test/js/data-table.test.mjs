@@ -131,3 +131,38 @@ test("a paged list sorts the page it shows, and the title says so", () => {
   assert.equal(T.sortTitle("Started", true), "Sort this page by Started");
   assert.equal(T.sortTitle("Name", false), "Sort by Name");
 });
+
+test("a mutation batch's top-level roots: one subtree query per swap, not per node (288 #2)", () => {
+  // parent + child + grandchild in one batch: the parent carries the whole subtree.
+  const parent = { parentNode: null };
+  const child = { parentNode: parent };
+  const grandchild = { parentNode: child };
+  assert.deepEqual(T.topLevelRoots([parent, child, grandchild]), [parent]);
+
+  // siblings and disjoint trees all stay; an ancestor that arrives LATER in the same batch
+  // still claims its descendants.
+  const a = { parentNode: null };
+  const b = { parentNode: null };
+  const root = { parentNode: null };
+  const nested = { parentNode: root };
+  assert.deepEqual(T.topLevelRoots([a, b, nested, root]), [a, b, root]);
+
+  // the walk stops at the batch boundary: a parent OUTSIDE the batch cannot dedupe a node.
+  const outside = { parentNode: null };
+  const insideChild = { parentNode: outside };
+  assert.deepEqual(T.topLevelRoots([insideChild]), [insideChild]);
+
+  // an element whose ancestor chain leaves the batch (through body/document) is a root.
+  const body = { parentNode: null };
+  const el = { parentNode: body };
+  assert.deepEqual(T.topLevelRoots([el]), [el]);
+
+  assert.deepEqual(T.topLevelRoots([]), []);
+});
+
+test("a held sort says so (288 #1): the title names the active state, beside the aria-sort", () => {
+  assert.equal(T.activeSortTitle("Started", "ascending", true), "Sorting this page by Started — click for highest first");
+  assert.equal(T.activeSortTitle("Started", "descending", true), "Sorting this page by Started — click to clear");
+  assert.equal(T.activeSortTitle("Name", "ascending", false), "Sorting by Name — click for highest first");
+  assert.equal(T.activeSortTitle("Name", "descending", false), "Sorting by Name — click to clear");
+});

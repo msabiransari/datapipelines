@@ -146,6 +146,17 @@
     return (paged ? "Sort this page by " : "Sort by ") + label;
   }
 
+  /**
+   * The title while a sort is HELD (288 #1): the label states the active state, not just the
+   * affordance. On a paged list whose paging re-renders rows in place (the editor's dock,
+   * index-keyed), a held sort persists across pages by element identity — the title says so
+   * beside the `aria-sort` it already names, so the held state is never silent.
+   */
+  function activeSortTitle(label, dir, paged) {
+    var tail = dir === "ascending" ? " — click for highest first" : " — click to clear";
+    return (paged ? "Sorting this page by " : "Sorting by ") + label + tail;
+  }
+
   var api = {
     isNullText: isNullText,
     columnType: columnType,
@@ -160,6 +171,8 @@
     lengthPx: lengthPx,
     fits: fits,
     sortTitle: sortTitle,
+    activeSortTitle: activeSortTitle,
+    topLevelRoots: topLevelRoots,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api; // node --test
   if (typeof window === "undefined" || typeof document === "undefined") return;
@@ -210,6 +223,9 @@
     this.table = table;
     this.viewport = table.parentElement;
     this.frame = this.viewport.parentElement;
+    // 288 (#288): a viewport is a scroll area, so it is keyboard-scrollable — tabindex="0"
+    // (the markup renders -1, programmatically focusable only) with the sheet's focus ring.
+    this.viewport.setAttribute("tabindex", "0");
     this.sortCol = -1;
     this.sortDir = "none";
     this.widths = null; // whole-pixel column widths while locked (table-layout: fixed), else null
@@ -273,7 +289,10 @@
       }
       if (button) {
         var text = button.textContent.trim();
-        if (button.title !== sortTitle(text, paged)) button.title = sortTitle(text, paged);
+        var title = i === self.sortCol && self.sortDir !== "none"
+          ? activeSortTitle(text, self.sortDir, paged)
+          : sortTitle(text, paged);
+        if (button.title !== title) button.title = title;
         var state = i === self.sortCol ? self.sortDir : "none";
         if (th.getAttribute("aria-sort") !== state) th.setAttribute("aria-sort", state);
       }
@@ -331,9 +350,25 @@
     this.measure();
   };
 
-  /** Natural positions: an unsorted table's DOM order IS natural; rows new to a sorted one queue after. */
+  /** Natural positions: an unsorted table's DOM order IS natural; rows new to a sorted one queue after.
+   *
+   * 288 (#288): when EVERY data row is new to a sorted, PAGED table, the page was replaced
+   * (the htmx pagers swap the whole frame; the dock's cursor paging re-renders its rows) and
+   * the new page shows the SERVER's order: the client sort is cleared, not re-applied over
+   * rows the server ordered differently — the button's title already says the sort is per
+   * page ("Sort this page by …"), so the state the label claims is the state the rows are in.
+   * A row EDIT (some rows keep their natural index) and an APPEND (old rows keep theirs) keep
+   * the sort; a keyed re-render of the same rows reuses the same elements and keeps it too. */
   DataTable.prototype.index = function (rows) {
     var self = this;
+    if (this.sortDir !== "none" && rows.length > 0 && this.frame.hasAttribute("data-dt-paged") &&
+        rows.every(function (tr) { return !self.order.has(tr); })) {
+      this.sortDir = "none";
+      this.sortCol = -1;
+      this.order = new WeakMap();
+      this.nextIndex = 0;
+      this.ensureHeader(this.headCells());
+    }
     if (this.sortDir === "none") {
       this.nextIndex = 0;
       rows.forEach(function (tr) { self.order.set(tr, self.nextIndex++); });
@@ -569,19 +604,45 @@
 
   function onMutations(records) {
     var pending = [];
+    var added = [];
+    var removed = [];
     records.forEach(function (record) {
       Array.prototype.forEach.call(record.removedNodes, function (node) {
-        if (node.nodeType !== 1) return;
-        var gone = node.matches("table[data-dt-ready]") ? [node] : Array.prototype.slice.call(node.querySelectorAll("table[data-dt-ready]"));
-        gone.forEach(function (table) {
-          var inst = instances.get(table);
-          if (inst && !table.isConnected) inst.detach();
-        });
+        if (node.nodeType === 1) removed.push(node);
       });
-      Array.prototype.forEach.call(record.addedNodes, function (node) { if (node.nodeType === 1) upgrade(node); });
+      Array.prototype.forEach.call(record.addedNodes, function (node) {
+        if (node.nodeType === 1) added.push(node);
+      });
       refreshFor(record.target, pending);
     });
+    // 288 (#288): one subtree query per TOP-LEVEL root, not per node — a swap that adds a
+    // 500-node subtree used to query once per node (every child re-queried its own subtree,
+    // O(n²) over the batch). Top-level roots carry the whole subtree; the rest is redundant.
+    // A root INSIDE an upgraded table is one of its rows — refreshFor (the target walk) owns
+    // it, and querying its (row-sized) subtree found nothing anyway.
+    topLevelRoots(removed).forEach(function (node) {
+      if (node.closest && node.closest("table[data-dt-ready]") && node.tagName !== "TABLE") return;
+      var gone = node.matches("table[data-dt-ready]") ? [node] : Array.prototype.slice.call(node.querySelectorAll("table[data-dt-ready]"));
+      gone.forEach(function (table) {
+        var inst = instances.get(table);
+        if (inst && !table.isConnected) inst.detach();
+      });
+    });
+    topLevelRoots(added).forEach(function (node) {
+      if (node.closest && node.closest("table[data-dt-ready]")) return;
+      upgrade(node);
+    });
     pending.forEach(function (inst) { if (inst.table.isConnected) inst.refresh(); });
+  }
+
+  /** The batch's elements with no strict ancestor also in the batch — one query per subtree. */
+  function topLevelRoots(nodes) {
+    return nodes.filter(function (node) {
+      for (var p = node.parentNode; p; p = p.parentNode) {
+        if (nodes.indexOf(p) !== -1) return false;
+      }
+      return true;
+    });
   }
 
   /**

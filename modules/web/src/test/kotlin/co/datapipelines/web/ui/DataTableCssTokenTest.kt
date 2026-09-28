@@ -57,6 +57,31 @@ class DataTableCssTokenTest {
         found.shouldBeEmpty()
     }
 
+    /**
+     * 288 #3 — every animated property names a duration token (`--duration-*`, the vendored
+     * design system's motion scale). The skeleton's shimmer carried a literal `1.2s`; the
+     * house precedent (app.css's ds-spin) folded the vendored literal into `--duration-slower`.
+     * `none` (the reduced-motion kill) and a `0s` delay are not timings.
+     */
+    @Test
+    fun `every animation and transition names a duration token`() {
+        val timed = Regex("""(animation|transition):(?![^;]*(\bnone\b|\b0s\b))[^;]*;""")
+        val tokenised = Regex("""var\(--duration-""")
+        val found =
+            declarations
+                .filter { (_, line) -> timed.containsMatchIn(line) && !tokenised.containsMatchIn(line) }
+                .map { (n, line) -> "data-table.css:$n $line" }
+        withClue("a duration must be a design token") { found.shouldBeEmpty() }
+    }
+
+    /** 288 #4 — the keyboard-scrollable viewport's visible ring, inside its box. */
+    @Test
+    fun `the viewport has a visible focus ring`() {
+        css shouldContain ".dt-viewport:focus-visible"
+        val rule = css.substringAfter(".dt-viewport:focus-visible {", "").substringBefore("}")
+        rule shouldContain "outline: 2px solid var(--border-focus);"
+    }
+
     @Test
     fun `the sheet loads after app css and before the page sheets, the script after the shell`() {
         val layout = read("templates/layouts/default.html")
