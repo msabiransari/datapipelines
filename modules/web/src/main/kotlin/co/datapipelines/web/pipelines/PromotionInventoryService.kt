@@ -36,8 +36,8 @@ class PromotionInventoryService(
     private val datasources: DatasourceRegistry,
     private val deploymentName: String,
     private val authoringEnabled: Boolean,
-    /** #194 lane D — the parameter sets (the record's §8.3). */
-    private val parameterSets: co.datapipelines.parameters.ParameterSetRepository? = null,
+    /** #194 lane D — the parameter sets (the record's §8.3). Required: the inventory never silently omits them (#300). */
+    private val parameterSets: co.datapipelines.parameters.ParameterSetRepository,
 ) {
     /** The inventory of [workspaceName], or [WorkspaceNotFoundException] when this deployment has no such workspace. */
     fun inventoryOf(workspaceName: String): PromotionWire.Inventory {
@@ -102,10 +102,9 @@ class PromotionInventoryService(
     /** One entry per live parameter set's current RELEASED version (the promoter lens's input). */
     private fun parameterSetEntries(workspaceId: UUID): List<PromotionWire.Entry> =
         parameterSets
-            ?.findCurrentVersions(workspaceId)
-            ?.map { PromotionWire.Entry(it.name, it.version, it.bodyHash) }
-            ?.sortedBy { it.name }
-            ?: emptyList()
+            .findCurrentVersions(workspaceId)
+            .map { PromotionWire.Entry(it.name, it.version, it.bodyHash) }
+            .sortedBy { it.name }
 
     private companion object {
         /** `TemplateRepository.MAX_PAGE_LIMIT`; the loop above pages rather than assuming one page. */

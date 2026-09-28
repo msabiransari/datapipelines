@@ -73,6 +73,8 @@ class PromotionEndpointKeysTest {
             false,
             promotion,
             mockk(relaxed = true),
+            // #300: required — a strict double is right here: a batch carrying sets would hit it.
+            mockk<co.datapipelines.web.parameters.ParameterSetPromotion>(),
         )
 
     @Test

@@ -29,8 +29,8 @@ class PromotableViews(
     private val pipelines: PipelineRepository,
     private val templates: TemplateRepository,
     private val client: PromotionTargetClient,
-    /** #194 lane D — the set arm of §10.2; null keeps the pre-engine wiring compiling. */
-    private val parameterSets: co.datapipelines.parameters.ParameterSetRepository? = null,
+    /** #194 lane D — the set arm of §10.2. Required: the lens's set arm is never silently empty (#300). */
+    private val parameterSets: co.datapipelines.parameters.ParameterSetRepository,
 ) : PromoterLens {
     override fun viewFor(principal: AuthenticatedPrincipal): LensedView {
         if (!principal.isLensed) return LensedView.EVERYTHING
@@ -75,7 +75,7 @@ class PromotableViews(
             pipelines.findCurrentVersions(workspaceId),
             templates.findCurrentVersions(workspaceId),
             inventory,
-            parameterSets?.findCurrentVersions(workspaceId).orEmpty(),
+            parameterSets.findCurrentVersions(workspaceId),
         )
 
     private fun unavailable(reason: String): LensedView =

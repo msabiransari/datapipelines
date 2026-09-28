@@ -38,8 +38,8 @@ class AuthoringStartupCheck(
     private val environment: Environment,
     private val pipelines: PipelineRepository,
     private val templates: TemplateRepository,
-    /** C14 (#194 lane D): parameter-set drafts join the refusal, through the additive repository read. */
-    private val parameterSets: co.datapipelines.parameters.ParameterSetRepository? = null,
+    /** C14 (#194 lane D): parameter-set drafts join the refusal. Required (#300) — the check is reachable by construction; no null-skip. */
+    private val parameterSets: co.datapipelines.parameters.ParameterSetRepository,
     private val promotionServerKeyPresent: () -> Boolean = { false },
 ) {
     private val log = LoggerFactory.getLogger(AuthoringStartupCheck::class.java)
@@ -88,7 +88,7 @@ class AuthoringStartupCheck(
     private fun refuseDrafts() {
         val pipelineDrafts = pipelines.findAllDraftPipelineNames()
         val templateDrafts = templates.findAllDraftTemplateNames()
-        val parameterSetDrafts = parameterSets?.findAllDraftParameterSetNames().orEmpty()
+        val parameterSetDrafts = parameterSets.findAllDraftParameterSetNames()
         if (pipelineDrafts.isEmpty() && templateDrafts.isEmpty() && parameterSetDrafts.isEmpty()) return
         val message =
             buildString {

@@ -25,6 +25,9 @@ class AuthoringStartupCheckTest {
     private val pipelines = mockk<PipelineRepository>()
     private val templates = mockk<TemplateRepository>()
 
+    // #300: required — the set-draft check is reachable by construction; no null collaborator exists.
+    private val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>()
+
     private fun environment(authoring: String?): StandardEnvironment =
         StandardEnvironment().apply {
             propertySources.addFirst(
@@ -37,7 +40,7 @@ class AuthoringStartupCheckTest {
 
     @Test
     fun `authoring enabled with no promotion key is the quiet default`() {
-        val check = AuthoringStartupCheck(environment("true"), pipelines, templates)
+        val check = AuthoringStartupCheck(environment("true"), pipelines, templates, parameterSets)
 
         shouldNotThrow<Exception> { check.check() }
         verify(exactly = 0) { pipelines.findAllDraftPipelineNames() }
@@ -53,6 +56,7 @@ class AuthoringStartupCheckTest {
                 environment("true"),
                 pipelines,
                 templates,
+                parameterSets,
                 promotionServerKeyPresent = { true },
             )
 
@@ -67,10 +71,12 @@ class AuthoringStartupCheckTest {
                 environment("false"),
                 pipelines,
                 templates,
+                parameterSets,
                 promotionServerKeyPresent = { true },
             )
         every { pipelines.findAllDraftPipelineNames() } returns emptyList()
         every { templates.findAllDraftTemplateNames() } returns emptyList()
+        every { parameterSets.findAllDraftParameterSetNames() } returns emptyList()
 
         shouldNotThrow<Exception> { check.check() }
     }
@@ -79,8 +85,9 @@ class AuthoringStartupCheckTest {
     fun `authoring disabled with no drafts starts`() {
         every { pipelines.findAllDraftPipelineNames() } returns emptyList()
         every { templates.findAllDraftTemplateNames() } returns emptyList()
+        every { parameterSets.findAllDraftParameterSetNames() } returns emptyList()
 
-        shouldNotThrow<Exception> { AuthoringStartupCheck(environment("false"), pipelines, templates).check() }
+        shouldNotThrow<Exception> { AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets).check() }
     }
 
     @Test
@@ -89,10 +96,11 @@ class AuthoringStartupCheckTest {
         // not at the next promotion's 409.
         every { pipelines.findAllDraftPipelineNames() } returns listOf("monthly_revenue", "churn_rollup")
         every { templates.findAllDraftTemplateNames() } returns listOf("fetch_orders.sql")
+        every { parameterSets.findAllDraftParameterSetNames() } returns emptyList()
 
         val refused =
             shouldThrow<IllegalStateException> {
-                AuthoringStartupCheck(environment("false"), pipelines, templates).check()
+                AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets).check()
             }
 
         refused.message shouldContain "monthly_revenue"
@@ -105,7 +113,6 @@ class AuthoringStartupCheckTest {
 
     @Test
     fun `authoring disabled with a parameter-set draft refuses startup, naming it`() {
-        val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>()
         every { pipelines.findAllDraftPipelineNames() } returns emptyList()
         every { templates.findAllDraftTemplateNames() } returns emptyList()
         every { parameterSets.findAllDraftParameterSetNames() } returns listOf("acme/sales/region_filters")
@@ -121,8 +128,6 @@ class AuthoringStartupCheckTest {
 
     @Test
     fun `authoring enabled never asks the parameter-set repository for drafts`() {
-        val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>()
-
         shouldNotThrow<Exception> {
             AuthoringStartupCheck(environment("true"), pipelines, templates, parameterSets).check()
         }
@@ -133,7 +138,8 @@ class AuthoringStartupCheckTest {
     fun `a null parameter-set repository keeps the pre-C14 behaviour`() {
         every { pipelines.findAllDraftPipelineNames() } returns emptyList()
         every { templates.findAllDraftTemplateNames() } returns emptyList()
+        every { parameterSets.findAllDraftParameterSetNames() } returns emptyList()
 
-        shouldNotThrow<Exception> { AuthoringStartupCheck(environment("false"), pipelines, templates).check() }
+        shouldNotThrow<Exception> { AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets).check() }
     }
 }

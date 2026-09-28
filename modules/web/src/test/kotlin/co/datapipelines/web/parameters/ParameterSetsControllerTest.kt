@@ -25,6 +25,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.springframework.http.HttpStatus
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.context.SecurityContextHolder
@@ -210,14 +211,78 @@ class ParameterSetsControllerTest {
     }
 
     @Test
-    fun `an evaluate body over the stated bound is refused before the JSON is parsed`() {
+    fun `an evaluate body over the stated bound is the platform 413 before the JSON is parsed`() {
         authenticate()
         val oversized = """{"selections":{"x":"${"y".repeat(MAX_EVALUATE_REQUEST_BYTES)}"}}"""
 
         val error = shouldThrow<co.datapipelines.web.api.ApiException> { controller.evaluate(setId, oversized) }
 
-        error.details["reason"] shouldBe "request_too_large"
+        error.code shouldBe "request.body_too_large"
+        statusOf(error.code) shouldBe HttpStatus.PAYLOAD_TOO_LARGE
+        error.details["limit_bytes"] shouldBe MAX_EVALUATE_REQUEST_BYTES
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+    }
+
+    @Test
+    fun `the switch refuses a missing version as body_invalid - never a 404 that lies about the set`() {
+        authenticate()
+        every { repository.findRecord(any(), any()) } returns record
+
+        val error =
+            shouldThrow<co.datapipelines.web.api.ApiException> {
+                controller.switchCurrent(setId, ParameterSetJson.mapper.readTree("{}"))
+            }
+
+        error.code shouldBe "parameter.validation.body_invalid"
         statusOf(error.code) shouldBe HttpStatus.BAD_REQUEST
+        error.details["path"] shouldBe "version"
+        error.details["reason"] shouldBe "missing"
+        verify(exactly = 0) { repository.findRecord(any(), any()) }
+    }
+
+    @Test
+    fun `the switch refuses a non-integer version as body_invalid wrong_type`() {
+        authenticate()
+
+        val error =
+            shouldThrow<co.datapipelines.web.api.ApiException> {
+                controller.switchCurrent(setId, ParameterSetJson.mapper.readTree("""{"version":"2"}"""))
+            }
+
+        error.code shouldBe "parameter.validation.body_invalid"
+        error.details["path"] shouldBe "version"
+        error.details["reason"] shouldBe "wrong_type"
+        verify(exactly = 0) { repository.findRecord(any(), any()) }
+    }
+
+    @Test
+    fun `evaluate refuses a present non-integer version as body_invalid - an explicit version never falls back silently`() {
+        authenticate()
+
+        val error =
+            shouldThrow<co.datapipelines.web.api.ApiException> {
+                controller.evaluate(setId, """{"version":"2","selections":{}}""")
+            }
+
+        error.code shouldBe "parameter.validation.body_invalid"
+        error.details["path"] shouldBe "version"
+        error.details["reason"] shouldBe "wrong_type"
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+        verify(exactly = 0) { repository.findCurrent(any(), any()) }
+    }
+
+    @Test
+    fun `evaluate refuses a present non-object selections as body_invalid - it never becomes the empty map`() {
+        authenticate()
+
+        val error =
+            shouldThrow<co.datapipelines.web.api.ApiException> {
+                controller.evaluate(setId, """{"selections":["country=US"]}""")
+            }
+
+        error.code shouldBe "parameter.validation.body_invalid"
+        error.details["path"] shouldBe "selections"
+        error.details["reason"] shouldBe "wrong_type"
         verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
     }
 
@@ -253,6 +318,65 @@ class ParameterSetsControllerTest {
         statusOf("parameter.not_found") shouldBe HttpStatus.NOT_FOUND
         statusOf("parameter.validation.duplicate_name") shouldBe HttpStatus.CONFLICT
         statusOf("parameter.authoring.disabled") shouldBe HttpStatus.FORBIDDEN
+        statusOf("parameter.validation.body_invalid") shouldBe HttpStatus.BAD_REQUEST
+        statusOf("request.body_too_large") shouldBe HttpStatus.PAYLOAD_TOO_LARGE
+    }
+
+    @Test
+    fun `browse reports the level's truthful total and has_more - the sets, never the folders`() {
+        authenticate()
+        every { sets.listChildFolders(workspaceId, any(), "acme") } returns emptyList()
+        every { sets.listChildSets(workspaceId, any(), "acme", 0, 2) } returns listOf(loaded, loaded)
+        every { sets.countChildSets(workspaceId, any(), "acme") } returns 3
+
+        val firstPage = controller.browse("acme", offset = null, limit = 2).data
+
+        assertAll(
+            { firstPage["total"] shouldBe 3 },
+            { firstPage["has_more"] shouldBe true },
+        )
+
+        every { sets.listChildSets(workspaceId, any(), "acme", 2, 2) } returns listOf(loaded)
+
+        val lastPage = controller.browse("acme", offset = 2, limit = 2).data
+
+        assertAll(
+            { lastPage["total"] shouldBe 3 },
+            { lastPage["has_more"] shouldBe false },
+        )
+    }
+
+    @Test
+    fun `browse under a narrowing lens reports the lens-admitted total - the workspace's size is never leaked`() {
+        authenticate()
+        every { sets.listChildFolders(workspaceId, any(), "acme") } returns emptyList()
+        every { sets.listChildSets(workspaceId, any(), "acme", 0, 50) } returns listOf(loaded, loaded)
+        // The lens-truth of this count is the SERVICE's contract, integration-proven over real
+        // tables (ParameterSetServiceIntegrationTest); the controller reports what the lensed
+        // service counted - here 2, not the workspace's 3.
+        every { sets.countChildSets(workspaceId, any(), "acme") } returns 2
+
+        val page = narrowed("acme/sales/a").browse("acme", offset = null, limit = null).data
+
+        assertAll(
+            { page["total"] shouldBe 2 },
+            { page["has_more"] shouldBe false },
+        )
+    }
+
+    @Test
+    fun `the flat listing paginates against the whole level's total, not the page size`() {
+        authenticate()
+        every { sets.listChildSets(workspaceId, any(), null, 0, 2) } returns listOf(loaded, loaded)
+        every { sets.countChildSets(workspaceId, any(), null) } returns 3
+
+        val response = controller.list(offset = null, limit = 2)
+
+        assertAll(
+            { response.data.items.size shouldBe 2 },
+            { response.data.pagination.total shouldBe 3L },
+            { response.data.pagination.hasMore shouldBe true },
+        )
     }
 
     private companion object {

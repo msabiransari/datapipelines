@@ -290,6 +290,28 @@ class ParameterSetServiceIntegrationTest {
             h.service.listChildSets(WORKSPACE, lens, "acme/sales").map { it.record.name } shouldBe listOf("acme/sales/a")
             h.service.currentVersions(WORKSPACE).map { it.name to it.version } shouldBe listOf("acme/sales/a" to 1)
         }
+
+        @Test
+        fun `countChildSets is the listing's truthful total over the WHOLE level - lens-true, unpaged (#300)`() {
+            val a = h.create(constants(name = "acme/sales/a"))
+            h.service.release(WORKSPACE, a.record.id, a.detail.bodyHash, AUTHOR)
+            val b = h.create(constants(name = "acme/sales/b"))
+            h.service.release(WORKSPACE, b.record.id, b.detail.bodyHash, AUTHOR)
+            h.create(constants(name = "acme/sales/c")) // never released: a draft is never a promoter's
+
+            // Everything lens: the whole level, exactly what listChildSets pages through.
+            h.service.countChildSets(WORKSPACE, ReadLens.Everything, "acme/sales") shouldBe 3
+            // A narrowing lens counts what the lens ADMITS with a current version — never the
+            // workspace's total (a promoter must not learn how many sets exist outside the lens).
+            // The draft-only c is absent both by the lens and by the rule; admit it and it still
+            // cannot be counted, because the listing could not list it either.
+            val lens = ReadLens.Only(setOf("acme/sales/a", "acme/sales/b", "acme/sales/c"))
+            h.service.countChildSets(WORKSPACE, lens, "acme/sales") shouldBe 2
+            // The count matches what the listing would admit over the whole level - everything
+            // lens too; and the parent level "acme" holds no DIRECT sets, only the sales folder.
+            h.service.listChildSets(WORKSPACE, ReadLens.Everything, "acme/sales", 0, 200).size shouldBe 3
+            h.service.countChildSets(WORKSPACE, ReadLens.Everything, "acme") shouldBe 0
+        }
     }
 
     @Nested

@@ -139,9 +139,14 @@ class PromotionConfiguration {
         pipelines: PipelineRepository,
         templates: TemplateRepository,
         client: PromotionTargetClient,
-    ): PromotableViews = PromotableViews(pipelines, templates, client)
+        // #194 lane D — the set arm of §10.2. #300: REQUIRED, and wired — the bean passed a null
+        // default here since the engine landed, so the lens's set arm admitted nothing and the
+        // page's plan carried no sets.
+        parameterSets: co.datapipelines.parameters.ParameterSetRepository,
+    ): PromotableViews = PromotableViews(pipelines, templates, client, parameterSets)
 
     @Bean
+    @Suppress("LongParameterList")
     fun promotionService(
         environment: Environment,
         pipelines: PipelineRepository,
@@ -151,6 +156,9 @@ class PromotionConfiguration {
         views: PromotableViews,
         // 074 — the endpoints published over the promoted pipelines.
         endpointPromotion: EndpointPromotion,
+        // #194 lane D — the sender's set payloads. #300: REQUIRED, and wired — the bean left the
+        // default null here since the engine landed, so promote() silently sent NO parameter sets.
+        parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion,
     ): PromotionService =
         PromotionService(
             pipelines = pipelines,
@@ -160,6 +168,7 @@ class PromotionConfiguration {
             deploymentName = deploymentName(environment),
             views = views,
             endpointPromotion = endpointPromotion,
+            parameterSetPromotion = parameterSetPromotion,
         )
 
     /** The deployment LABEL, carried as data (never branched on) — see the class KDoc. */

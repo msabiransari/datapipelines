@@ -52,16 +52,20 @@ class PromotionService(
     private val client: PromotionTargetClient,
     private val promotionProperties: PromotionProperties,
     private val deploymentName: String,
-    /** 178 — §10.2 computed once for the page and the lens; the page reads THIS, never its own copy of the rule. */
-    private val views: PromotableViews = PromotableViews(pipelines, templates, client),
+    /**
+     * 178 — §10.2 computed once for the page and the lens; the page reads THIS, never its own
+     * copy of the rule. Required (no default): building one needs the set repository, and the
+     * lens's set arm is never silently empty (#300).
+     */
+    private val views: PromotableViews,
     /**
      * 074 — the endpoints published over the pipelines being promoted. Nullable so a deployment
      * wired before 074 (and every unit test that predates it) keeps building endpoint-free
      * batches rather than needing a stub.
      */
     private val endpointPromotion: EndpointPromotion? = null,
-    /** #194 lane D — the parameter-set half of promotion (§8.3). Nullable, the endpointPromotion precedent. */
-    private val parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion? = null,
+    /** #194 lane D — the parameter-set half of promotion (§8.3). Required: set roots are never silently dropped (#300). */
+    private val parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     private val log = LoggerFactory.getLogger(PromotionService::class.java)
@@ -164,24 +168,18 @@ class PromotionService(
         val closure = Closure(workspaceId, views.compute(workspaceId, inventory))
         names.distinct().forEach { name -> closure.addRoot(name, inventory) }
         // #194 lane D — the set roots AFTER the templates: their pins merge into the batch's
-        // template closure, the payloads ride the set slot (§8.3's order).
-        val promotion = parameterSetPromotion
+        // template closure, the payloads ride the set slot (§8.3's order). #300: the collaborator
+        // is required — set roots are never silently dropped from a batch.
+        val targets = inventory.parameterSetByName()
         val setEntries =
-            if (promotion != null) {
-                val targets = inventory.parameterSetByName()
-                val entries =
-                    parameterSetNames
-                        .distinct()
-                        .mapNotNull { name ->
-                            promotion.entryFor(workspaceId, name, targets[name])
-                        }
-                entries
-                    .flatMap { promotion.templatePins(it) }
-                    .forEach(closure::addTemplate)
-                entries
-            } else {
-                emptyList()
-            }
+            parameterSetNames
+                .distinct()
+                .mapNotNull { name ->
+                    parameterSetPromotion.entryFor(workspaceId, name, targets[name])
+                }
+        setEntries
+            .flatMap { parameterSetPromotion.templatePins(it) }
+            .forEach(closure::addTemplate)
         verifyDatasources(closure, inventory)
 
         val batch =
