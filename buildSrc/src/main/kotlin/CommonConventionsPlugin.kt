@@ -102,10 +102,10 @@ class CommonConventionsPlugin : Plugin<Project> {
             add("testImplementation", platform(lib("spring-boot-dependencies")))
 
             // SECURITY OVERRIDE (2026-08-07, GHSA-5gvw-p9qm-jgwh / GHSA-5jmj-h7xm-6q6v /
-            // GHSA-mhm7-754m-9p8w): jackson-bom 2.21.5 applied AFTER the Spring Boot BOM.
+            // GHSA-mhm7-754m-9p8w): jackson-bom 2.21.6 applied AFTER the Spring Boot BOM.
             // Both are non-enforced platforms, so Gradle's conflict resolution picks the
             // higher version and every Jackson artifact — including the transitively
-            // pulled jackson-databind the advisories name — moves to 2.21.5. Retirement
+            // pulled jackson-databind the advisories name — moves to 2.21.6. Retirement
             // condition is documented on the `jackson` entry in libs.versions.toml.
             add("implementation", platform(lib("jackson-bom")))
             add("testImplementation", platform(lib("jackson-bom")))
