@@ -147,6 +147,24 @@ class ParameterSetRepository(
         ) == true
 
     /**
+     * Every parameter-set name holding a DRAFT, across ALL workspaces — the authoring-disabled
+     * boot check's evidence (versioning §5.5; record C14, lane D). ADDITIVE to the frozen
+     * repository API (#194 lane B, `83e4d7c5`): a read only, mirroring
+     * `PipelineRepository.findAllDraftPipelineNames`.
+     */
+    fun findAllDraftParameterSetNames(): List<String> =
+        jdbc.query(
+            """
+            SELECT s.name
+              FROM parameter_set_versions v
+              JOIN parameter_sets s ON s.id = v.parameter_set_id
+             WHERE v.status = 'DRAFT'
+             ORDER BY s.name
+            """.trimIndent(),
+            emptyMap<String, Any>(),
+        ) { rs, _ -> rs.getString("name") }
+
+    /**
      * One tree level's direct sub-folders (the `TemplateRepository.listChildFolders` shape — the
      * workspace equality leads `uq_parameter_sets_workspace_name`, so this is a bounded range scan).
      * The root level ([prefix] null) is where a new root would appear — lane D's

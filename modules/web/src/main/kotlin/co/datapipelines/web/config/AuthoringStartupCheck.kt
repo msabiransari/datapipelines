@@ -38,6 +38,8 @@ class AuthoringStartupCheck(
     private val environment: Environment,
     private val pipelines: PipelineRepository,
     private val templates: TemplateRepository,
+    /** C14 (#194 lane D): parameter-set drafts join the refusal, through the additive repository read. */
+    private val parameterSets: co.datapipelines.parameters.ParameterSetRepository? = null,
     private val promotionServerKeyPresent: () -> Boolean = { false },
 ) {
     private val log = LoggerFactory.getLogger(AuthoringStartupCheck::class.java)
@@ -76,7 +78,11 @@ class AuthoringStartupCheck(
         if (!authoringEnabled) {
             val pipelineDrafts = pipelines.findAllDraftPipelineNames()
             val templateDrafts = templates.findAllDraftTemplateNames()
-            if (pipelineDrafts.isNotEmpty() || templateDrafts.isNotEmpty()) {
+            // C14 (#194 lane D): a parameter-set draft on a receiver breaks version alignment
+            // exactly as a pipeline's or a template's does — sets are versioned with the same
+            // lifecycle and promoted by name at pinned template versions.
+            val parameterSetDrafts = parameterSets?.findAllDraftParameterSetNames().orEmpty()
+            if (pipelineDrafts.isNotEmpty() || templateDrafts.isNotEmpty() || parameterSetDrafts.isNotEmpty()) {
                 val message =
                     buildString {
                         append(
@@ -89,6 +95,10 @@ class AuthoringStartupCheck(
                         if (pipelineDrafts.size > MAX_NAMED) append("\n  - … and ${pipelineDrafts.size - MAX_NAMED} more pipelines")
                         templateDrafts.take(MAX_NAMED).forEach { append("\n  - template: ").append(it) }
                         if (templateDrafts.size > MAX_NAMED) append("\n  - … and ${templateDrafts.size - MAX_NAMED} more templates")
+                        parameterSetDrafts.take(MAX_NAMED).forEach { append("\n  - parameter set: ").append(it) }
+                        if (parameterSetDrafts.size > MAX_NAMED) {
+                            append("\n  - … and ${parameterSetDrafts.size - MAX_NAMED} more parameter sets")
+                        }
                     }
                 log.error(message)
                 throw IllegalStateException(message)

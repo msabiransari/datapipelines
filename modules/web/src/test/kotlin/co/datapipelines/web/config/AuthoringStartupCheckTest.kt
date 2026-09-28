@@ -100,4 +100,40 @@ class AuthoringStartupCheckTest {
         refused.message shouldContain "fetch_orders.sql"
         (refused.message?.contains("datapipelines.deployment.authoring-enabled") ?: false) shouldBe true
     }
+
+    // ---- C14 (#194 lane D): parameter-set drafts join the refusal -----------------------
+
+    @Test
+    fun `authoring disabled with a parameter-set draft refuses startup, naming it`() {
+        val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>()
+        every { pipelines.findAllDraftPipelineNames() } returns emptyList()
+        every { templates.findAllDraftTemplateNames() } returns emptyList()
+        every { parameterSets.findAllDraftParameterSetNames() } returns listOf("acme/sales/region_filters")
+
+        val refused =
+            shouldThrow<IllegalStateException> {
+                AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets).check()
+            }
+
+        refused.message shouldContain "acme/sales/region_filters"
+        refused.message shouldContain "parameter set"
+    }
+
+    @Test
+    fun `authoring enabled never asks the parameter-set repository for drafts`() {
+        val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>()
+
+        shouldNotThrow<Exception> {
+            AuthoringStartupCheck(environment("true"), pipelines, templates, parameterSets).check()
+        }
+        verify(exactly = 0) { parameterSets.findAllDraftParameterSetNames() }
+    }
+
+    @Test
+    fun `a null parameter-set repository keeps the pre-C14 behaviour`() {
+        every { pipelines.findAllDraftPipelineNames() } returns emptyList()
+        every { templates.findAllDraftTemplateNames() } returns emptyList()
+
+        shouldNotThrow<Exception> { AuthoringStartupCheck(environment("false"), pipelines, templates).check() }
+    }
 }
