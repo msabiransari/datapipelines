@@ -15,7 +15,7 @@ object ScriptingTestSupport {
     /** A pinned clock so any body that reads `$now` is reproducible in tests. */
     val FIXED_NOW = java.time.Instant.parse("2026-09-23T12:00:00Z")
 
-    /** The default suite budget — generous against a 512m test JVM. */
+    /** The default suite budget — generous for these allocation-light suites at the conventions' test heap. */
     val DEFAULT_LIMITS =
         EvaluationLimits(
             wallClock = Duration.ofSeconds(10),

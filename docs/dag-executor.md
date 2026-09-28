@@ -615,7 +615,9 @@ node lands (7c). What is already true and binding:
   breach suite's record (`modules/scripting`'s `JsonataBreachTest` →
   `build/reports/jsonata-breach.md`), measured 2026-09-23 on jsonata 0.9.10 in a 512m JVM
   (deep recursion re-measured 2026-09-26, outcome unchanged) —
-  regenerate the report and paste it; the doc never hand-writes the numbers.
+  regenerate the report (`./gradlew :modules:scripting:breachSuite`, the suite's own task and
+  own 512m JVM since #289; every `build` runs it) and paste it; the doc never hand-writes the
+  numbers.
 
 | Breach case (record §4.5 corpus) | Measured outcome | The bound that held |
 |---|---|---|
@@ -1592,3 +1594,4 @@ document a customer can read before they need it.
 | 2026-08-27 | v1.6 | workspaces readonly slice | §8.2: new row `pipeline.node.datasource_readonly` (500) and the flip-window paragraph — the executor's per-node readonly backstop (workspaces design 2026-08-16 §6 layer 2a, D10) re-reads the LIVE registry entry past the datasources §6.3 cache, covers all three write shapes (DML/DDL source in the node runner pre-lease; `output.target: "datasource"` in the write-back shell both row sources share) and composed children (same runner, own execution). No classification change to any existing row. |
 | 2026-09-07 | v1.7 | 087 connector seams | §6.4.3: **write-back identifiers are quoted in the TARGET dialect's vocabulary**, routed through `DialectAdapter.quoteIdentifier` ([Datasources §4.2](datasources.md#42-dialect-adapter-interface)) — backticks for MySQL, brackets for MSSQL, the doubled `"` everywhere else. They were `"…"` unconditionally, which a MySQL server without `ANSI_QUOTES` reads as string literals: `INSERT INTO "orders" ("order") VALUES (?)` is a syntax error there, and the failure is invisible until a table or column is named like a reserved word — the case quoting exists for. §6.4.1's tempdb CTAS is unchanged: its target is the staging engine, whose vocabulary IS the doubled `"`. No wire, catalog or classification change. |
 | 2026-09-26 | v1.18 (no bump) | #194 lane A | §3: `Dag<T>` now lives in `modules/graph` (same package, `co.datapipelines.dag`), moved byte-identical so the parameter engine can use it without depending on the executor. No behaviour, API or import changed. |
+| 2026-09-28 | v1.19 (no bump) | lane 283 (#289) | §5.3's honest-bounds note: the breach suite runs in its own task, `:modules:scripting:breachSuite` (its own source set and 512m JVM, under `check`); the report's path and the table are unchanged. No behaviour changed. |

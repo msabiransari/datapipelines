@@ -7,7 +7,7 @@
 #
 # WHAT RUNS WHERE —
 #
-#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon):
+#   gate (ubuntu-latest, REQUIRES the runner's Docker daemon; 90-minute budget, #290):
 #     ./gradlew build ktlintCheck detekt   — the standard gate: assemble, unit tests,
 #         ktlint, detekt, module-dependency verification, Kover. Only the E2E
 #         integration suite is EXCLUDED (-x :tests:integration-tests:test); the rest
@@ -15,7 +15,29 @@
 #         Testcontainers — so this job needs Docker. The original Docker-free
 #         ("hermetic") design intent was dropped deliberately (025b/C1): excluding
 #         those 21 files across 7 modules would leave real unit coverage unrun, and
-#         Docker on ubuntu-latest is reliable.
+#         Docker on ubuntu-latest is reliable. `build` also runs the browser suite
+#         (tests/browser-tests' `test`) and scripting's `breachSuite` (#289, its own
+#         512m JVM) — both hang off `check`. The browser suite is this step's long pole:
+#         20.4 of its 29.5 min on run 36334831413, overlapping every other module's tests
+#         on the second worker; a job of its own would still compile the app first and
+#         then run the same 20 min, so it would not shorten the wall time (measured, #290).
+#     coverage XML (Kover)                  — the reports come from the build step's own
+#         execution data and NEVER re-run a test: an init script disables every Test task
+#         by TYPE for that one invocation (so `test`, `breachSuite` or the next test task
+#         cannot slip back in by name), and the integration module's report is excluded
+#         explicitly — the build step never compiled its tests, so --offline cannot
+#         resolve them. Until #290 this step re-ran tests on EVERY run: `modules/app`'s
+#         build-info stamps a fresh build.time per Gradle invocation, so everything
+#         downstream of the app — the whole browser suite — was out of date again, and a
+#         FAILED test task is never up to date either.
+#     Measured budget (#290): the four green gate jobs before the fix took 57.0, 48.8,
+#         56.3 and 50.7 min (runs 36283937250, 36288656563, 36296091394, 36334831413) —
+#         build step 33.7 / 28.3 / 32.8 / 29.5 min, the report step 22.7 / 19.0 / 22.6 /
+#         20.1 min of re-run tests. Run 36369728753 (one red browser test, build step
+#         36.2 min) was cancelled by the old 60-minute timeout 23.8 min into the report
+#         step, the red buried under "cancelled". The job now budgets 90 min like
+#         `integration`, and the build step has its own 70-minute ceiling so that even a
+#         hung build leaves the report, the failure summary and the artifact their time.
 #     ./scripts/docs-audit.sh               — doc-structure checks over docs/ AND the served
 #         manual: `:modules:mcp-server:docsExport` renders it into build/skill-docs first
 #         (offline — the build step above resolved its classpath; 242a). No network.
@@ -77,7 +99,8 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 90, the integration job's budget, over a measured 48–57 min before #290 (header).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
@@ -105,21 +128,90 @@ jobs:
       - name: every pinned test image still exists at its registry (cold — never the cache)
         run: ./scripts/verify-image-pins.sh
       - name: build, ktlint, detekt (full unit suite incl. Testcontainers — Docker required, see header)
+        id: build
         # --continue: one red module must not stop the others — every module's tests and
         # coverage verification run, so a failure is read from the full picture (the local
         # gate has always run with it; 2026-09-14: a dag flake stopped CI before four modules
         # had tested, and the report step below then ran their suites instead of reporting).
+        # Its own ceiling, 20 min under the job's: a hung build still leaves the steps below
+        # (the reports, the failure summary, the artifact) their time (#290).
+        timeout-minutes: 70
         run: ./gradlew build ktlintCheck detekt --continue -x :tests:integration-tests:test -x :tests:integration-tests:verifyTestsExecuted
       # koverVerify writes only verify.err; the line-level XML the artifact below needs comes from
-      # the report task, run AFTER the build so a failed verification still leaves the report
-      # (`--continue`-free: this step runs whether the build step passed or not).
-      - name: write the coverage XML reports
+      # the report task, run AFTER the build so a failed verification still leaves the report.
+      # It must NEVER run a test (#290): Kover 0.9.9's report tasks depend on every instrumented
+      # test task (its docs: "Running one of these tasks automatically triggers the launch of all
+      # test tasks"), and a task that failed — or sits downstream of the app, whose build-info
+      # stamps a new time per invocation — is not up to date, so this step used to re-run tests
+      # for 19–24 minutes. The init script disables every Test task by type for this invocation
+      # only (and detaches the zero-test guard each one is finalized by — the build step ran
+      # them), and Kover reads the binary reports the build step's test JVMs already wrote. The
+      # integration module is excluded by name: its tests were never compiled here, and
+      # --offline cannot resolve them. A failure here is its own, named red — never `|| true`.
+      - name: write the coverage XML reports (from the build step's data — no test re-runs)
         if: always()
-        run: ./gradlew koverXmlReport --offline --continue -q || true
+        run: |
+          cat > "$RUNNER_TEMP/no-test-tasks.init.gradle" <<'EOF'
+          // #290 — this invocation reads the build step's coverage data; it runs no test. The
+          // zero-test guards that finalize each test task judged the build step already; here
+          // they would only re-judge a task that never ran, so they are detached too. In
+          // afterEvaluate: the conventions attach the guards while the build scripts run.
+          allprojects {
+              afterEvaluate {
+                  tasks.withType(Test).configureEach {
+                      enabled = false
+                      setFinalizedBy([])
+                  }
+              }
+          }
+          EOF
+          ./gradlew koverXmlReport --init-script "$RUNNER_TEMP/no-test-tasks.init.gradle" \
+            -x :tests:integration-tests:koverXmlReport --offline --continue \
+            || { echo "::error title=coverage report::koverXmlReport failed on the build step's data (read this step's log; no test ran here)"; exit 1; }
+      # The failing tests by NAME on the run's summary page (#290): a red gate is read from the
+      # summary, not by searching a 15,000-line log for FAILED. The build's outcome rides in env;
+      # names and messages are escaped before they become annotations.
+      - name: name the failing tests
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          python3 - <<'PY'
+          import glob, os, xml.etree.ElementTree as ET
+          def esc(s):
+              return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          t = f = e = s = n = 0
+          failed = []
+          for p in sorted(glob.glob("modules/*/build/test-results/*/*.xml") + glob.glob("tests/*/build/test-results/*/*.xml")):
+              r = ET.parse(p).getroot()
+              if r.tag != "testsuite":
+                  continue
+              n += 1; t += int(r.get("tests", 0)); f += int(r.get("failures", 0))
+              e += int(r.get("errors", 0)); s += int(r.get("skipped", 0))
+              for tc in r.iter("testcase"):
+                  bad = tc.find("failure")
+                  if bad is None:
+                      bad = tc.find("error")
+                  if bad is not None:
+                      first = ((bad.get("message") or "").strip().splitlines() or [""])[0][:200]
+                      failed.append((tc.get("classname", ""), tc.get("name", ""), first))
+          lines = [f"### Tests: {t} in {n} result files — {f} failed, {e} errors, {s} skipped", ""]
+          for c, name, msg in failed:
+              lines.append(f"- **{c}** › {name} — {msg}")
+              print(f"::error title=test failed::{esc(c)} > {esc(name)}")
+          if not failed and os.environ.get("BUILD_OUTCOME") == "failure":
+              lines.append("The build step FAILED with no failing test case in the XML: a non-test task (lint, "
+                           "coverage floor, a guard) or a test JVM that died without reporting — read the "
+                           "build step's `FAILURE:` lines.")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("\n".join(lines) + "\n")
+          PY
       # The coverage and test-result XML, kept for a week, pass or fail: a coverage floor
       # that holds on the dev box and fails here (2026-09-14: pipeline-contract at 93.9065
       # against 94, the same 373 tests, 17 lines fewer covered) can only be diagnosed
-      # line by line, and the runner's numbers were unreachable without this.
+      # line by line, and the runner's numbers were unreachable without this. Every test
+      # task's results (`breachSuite` too), the browser suite's (#283's red was missing from
+      # this artifact) and the breach report dag-executor.md pastes (#290).
       - name: keep the coverage and test-result reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -128,7 +220,9 @@ jobs:
           path: |
             modules/*/build/reports/kover/report.xml
             modules/*/build/reports/kover/verify.err
-            modules/*/build/test-results/test/*.xml
+            modules/*/build/test-results/*/*.xml
+            modules/scripting/build/reports/jsonata-breach.md
+            tests/browser-tests/build/test-results/test/*.xml
           retention-days: 7
           if-no-files-found: warn
       - name: docs audit (the served manual exported first — 242a)

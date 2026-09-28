@@ -54,7 +54,8 @@ internal object ScheduleFixtures {
         return Response((result["status"] as Number).toInt(), result["body"] as String? ?: "", result["etag"] as String?)
     }
 
-    private fun idIn(body: String): String =
+    /** The first `"id"` in a §4.1 envelope — the object's own (the envelope has none; the object writes its id first). */
+    fun idIn(body: String): String =
         requireNotNull(Regex(""""id"\s*:\s*"([0-9a-f-]{36})"""").find(body)) { "no id in: ${body.take(300)}" }.groupValues[1]
 
     private fun hashIn(body: String): String =
