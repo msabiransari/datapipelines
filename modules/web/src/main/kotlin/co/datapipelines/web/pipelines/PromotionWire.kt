@@ -40,12 +40,21 @@ object PromotionWire {
         /** Every datasource name visible in the target workspace — §10.5's pre-validation input. */
         @field:JsonProperty("datasources") @get:JsonProperty("datasources") @param:JsonProperty("datasources")
         val datasources: List<String> = emptyList(),
+        /**
+         * #194 lane D — the target's parameter sets, by name. Defaulted so a sender that
+         * predates the engine reads an inventory this receiver still answers.
+         */
+        @field:JsonProperty("parameter_sets") @get:JsonProperty("parameter_sets") @param:JsonProperty("parameter_sets")
+        val parameterSets: List<Entry> = emptyList(),
     ) {
         /** Pipelines by name; a pipeline the target does not have counts as version 0 (§10.2). */
         fun pipelineByName(): Map<String, Entry> = pipelines.associateBy { it.name }
 
         /** Templates by id — a template's id IS its name (templates.md §3.1). */
         fun templateById(): Map<String, Entry> = templates.associateBy { it.name }
+
+        /** Parameter sets by name (194d). */
+        fun parameterSetByName(): Map<String, Entry> = parameterSets.associateBy { it.name }
     }
 
     /** One inventory row: the identity, the version the target serves, and its content hash. */
@@ -94,6 +103,14 @@ object PromotionWire {
          */
         @field:JsonProperty("endpoints") @get:JsonProperty("endpoints") @param:JsonProperty("endpoints")
         val endpoints: List<EndpointEntry> = emptyList(),
+        /**
+         * #194 lane D — full parameter-set export envelopes (§21.4), in push order AFTER the
+         * templates (a set's pins must resolve) and BEFORE the pipelines — the record's §8.3
+         * order. Defaulted empty so a sender that predates the engine still pushes a batch
+         * this receiver accepts.
+         */
+        @field:JsonProperty("parameter_sets") @get:JsonProperty("parameter_sets") @param:JsonProperty("parameter_sets")
+        val parameterSets: List<JsonNode> = emptyList(),
     )
 
     /**
@@ -133,5 +150,7 @@ object PromotionWire {
         val pipelines: Int,
         @field:JsonProperty("endpoints") @get:JsonProperty("endpoints") @param:JsonProperty("endpoints")
         val endpoints: Int = 0,
+        @field:JsonProperty("parameter_sets") @get:JsonProperty("parameter_sets") @param:JsonProperty("parameter_sets")
+        val parameterSets: Int = 0,
     )
 }
