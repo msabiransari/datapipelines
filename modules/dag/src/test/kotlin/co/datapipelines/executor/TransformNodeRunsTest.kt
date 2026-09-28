@@ -742,11 +742,14 @@ class TransformNodeRunsTest {
                     output = NodeOutput.Tempdb("out_big"),
                 )
 
-            val mem0 = staging.stats().memoryUsedBytes
+            // The table readings are RETAINED LIVE SIZE too (the CI red on a6eda076: the staging
+            // stats read the JVM's used heap, a collection between two readings made the input
+            // table -18.6 MB and the bound negative) — one probe for every number in the proof.
+            val mem0 = liveRetainedBytes()
             staging.stageRows("witness", schema, (1..batchSize).map { listOf(it) }.asSequence())
-            val witnessBytes = staging.stats().memoryUsedBytes - mem0
+            val witnessBytes = liveRetainedBytes() - mem0
             staging.stageRows("stg_big", schema, (1..200_000).asSequence().map { listOf(it) })
-            val memIn = staging.stats().memoryUsedBytes
+            val memIn = liveRetainedBytes()
 
             // The measurement is RETAINED LIVE SIZE, not whole-JVM used heap (issue #238):
             // every sample collects, then sums the heap pools' collection usage — the size the
@@ -785,7 +788,7 @@ class TransformNodeRunsTest {
             // materialised 200k-row input adds MORE than that in live structures (falsified
             // below: the peak grows past the bound).
             val inputTableBytes = memIn - (mem0 + witnessBytes)
-            val bound = baseline + 2 * inputTableBytes
+            val bound = memoryProofBound(baseline, witnessBytes, inputTableBytes)
             println(
                 "memory proof: baseline=${baseline}B over $MEMORY_PROOF_SAMPLES samples, " +
                     "peak retained during run=${peak.get()}B over ${samples.get()} samples, " +
@@ -832,6 +835,25 @@ private fun liveRetainedBytes(): Long {
         .getMemoryPoolMXBeans()
         .filter { it.type == MemoryType.HEAP }
         .sumOf { it.collectionUsage?.used ?: 0L }
+}
+
+/**
+ * The proof's bound — after the measurement's own validity: the 200k-row table must measure
+ * larger than the 10k-row witness; a smaller or negative reading is a probe failure (the CI
+ * red on a6eda076 read the input as -18.6 MB), never a verdict about the transform.
+ */
+private fun memoryProofBound(
+    baseline: Long,
+    witnessBytes: Long,
+    inputTableBytes: Long,
+): Long {
+    withClue(
+        "the input table (${inputTableBytes}B) measured larger than the witness (${witnessBytes}B) — " +
+            "else the probe, not the transform, is wrong",
+    ) {
+        (inputTableBytes > witnessBytes) shouldBe true
+    }
+    return baseline + 2 * inputTableBytes
 }
 
 /**
