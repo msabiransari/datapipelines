@@ -52,7 +52,18 @@ class AuditLogger(
         details: Map<String, Any?>,
     ) {
         val row = AuditRow(event, userId, keyId, sourceIp, userAgent, objectMapper.writeValueAsString(details))
-        if (writer == null || TransactionSynchronizationManager.isActualTransactionActive()) {
+        val inTransaction = TransactionSynchronizationManager.isActualTransactionActive()
+        // Which path a row takes, per event name — the #266 A.1 probe reads this; an operator can too.
+        log.debug(
+            "event=audit.write audit_event={} path={}",
+            event,
+            when {
+                inTransaction -> PATH_TRANSACTIONAL
+                writer == null -> PATH_DIRECT
+                else -> PATH_BATCHED
+            },
+        )
+        if (writer == null || inTransaction) {
             insertDirect(row)
             return
         }
@@ -79,6 +90,11 @@ class AuditLogger(
     }
 
     companion object {
+        /** The `path=` values of the DEBUG `event=audit.write` line. */
+        const val PATH_TRANSACTIONAL = "transactional"
+        const val PATH_BATCHED = "batched"
+        const val PATH_DIRECT = "direct"
+
         /**
          * D-R8's audit flag: the value `details.acting_via` carries when a SUPER ADMIN acted in
          * a workspace they hold no explicit membership in. Spelled once here because three
