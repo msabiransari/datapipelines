@@ -9,8 +9,10 @@ import java.util.UUID
  *
  * A separate class, beside [ScheduleRepository] rather than inside it, while the scheduler
  * follow-ups lane is in flight on that file; folding it in at that merge is a one-method move.
- * The query reads ONLY ids on the index and maps rows through [ScheduleRepository.findAny], so
- * the schedule row mapping stays in exactly one place. Not a transport surface: callers reach it
+ * The query reads ONLY ids on the index and maps rows through [ScheduleRepository.findLive], so
+ * the schedule row mapping stays in exactly one place. The re-read is SCOPED like the id read —
+ * the workspace and `deleted_at IS NULL` again (#275 item 4) — so a schedule soft-deleted between
+ * the two reads drops out instead of showing, just deleted, for one render. Not a transport surface: callers reach it
  * through [ScheduleService] (module-structure's one-scheduler-type rule); it is public only so a
  * test constructing the service can wire it.
  */
@@ -34,7 +36,7 @@ class ScheduleTargetReads(
                 "SELECT id FROM schedules WHERE workspace_id = :ws AND target_ref = :ref AND deleted_at IS NULL ORDER BY name",
                 mapOf("ws" to workspaceId, "ref" to targetRef),
             ) { rs, _ -> rs.getObject("id", UUID::class.java) }
-        val rows = ids.mapNotNull { schedules.findAny(it) }
+        val rows = ids.mapNotNull { schedules.findLive(workspaceId, it) }
         if (!viewer.narrowed) return rows
         return rows.groupBy { it.executorId }.flatMap { (executorId, group) ->
             val executor = executors.find(executorId) ?: return@flatMap emptyList()

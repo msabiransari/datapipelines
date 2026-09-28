@@ -57,7 +57,10 @@ class SearchControllerTest {
     @AfterEach
     fun clearContext() = SecurityContextHolder.clearContext()
 
-    private fun authenticate(workspaceAdmin: Boolean) {
+    private fun authenticate(workspaceAdmin: Boolean) =
+        authenticateAs(if (workspaceAdmin) WorkspaceRole.WORKSPACE_ADMIN else WorkspaceRole.VIEWER)
+
+    private fun authenticateAs(role: WorkspaceRole) {
         SecurityContextHolder.getContext().authentication =
             UsernamePasswordAuthenticationToken(
                 AuthenticatedPrincipal(
@@ -65,12 +68,7 @@ class SearchControllerTest {
                     "a@b.c",
                     "A",
                     AuthMethod.OIDC,
-                    workspace =
-                        WorkspaceContext(
-                            workspaceId,
-                            "acme",
-                            if (workspaceAdmin) WorkspaceRole.WORKSPACE_ADMIN else WorkspaceRole.VIEWER,
-                        ),
+                    workspace = WorkspaceContext(workspaceId, "acme", role),
                 ),
                 null,
                 emptyList(),
@@ -131,8 +129,27 @@ class SearchControllerTest {
     }
 
     @Test
-    fun `a viewer's executions come from their own runs, never the workspace's`() {
+    fun `a viewer's executions are her own runs plus the workspace's scheduled runs, never another member's own (R3)`() {
         authenticate(workspaceAdmin = false)
+        val hit = pipeline("nyc/mobility/revenue")
+        every { pipelines.list(workspaceId, any(), query = "revenue") } returns listOf(hit)
+        every { templates.list(workspaceId, q = "revenue", limit = 9) } returns emptyList()
+        every { pipelines.list(workspaceId, any()) } returns emptyList()
+        every { executions.findVisible(workspaceId, userId, hit.id, null, limit = 9) } returns emptyList()
+
+        ask("revenue")
+
+        // #275: the executions screen's read — `findVisible` names the principal (own runs) and
+        // adds only the SCHEDULED runs, R3; never the workspace alone. A strict mock: reading
+        // `findByUser` (the pre-#275 own-only read) or `findAll` fails rather than passes.
+        verify(exactly = 1) { executions.findVisible(workspaceId, userId, hit.id, null, limit = 9) }
+    }
+
+    @Test
+    fun `a promoter's executions are her own runs only - R3's scheduled arm is execution_read's, which the promoter lacks`() {
+        // The palette is a `pipeline.read` route, so the promoter reaches it; the scheduled runs
+        // R3 lifts are `execution.read`'s (the row refuses the promoter), exactly as `visibleTo`.
+        authenticateAs(WorkspaceRole.PROMOTER)
         val hit = pipeline("nyc/mobility/revenue")
         every { pipelines.list(workspaceId, any(), query = "revenue") } returns listOf(hit)
         every { templates.list(workspaceId, q = "revenue", limit = 9) } returns emptyList()
@@ -141,9 +158,7 @@ class SearchControllerTest {
 
         ask("revenue")
 
-        // The VIEWER fork: findByUser names the principal, never the workspace alone —
-        // "a second surface over the same rows must not be a wider one".
-        verify { executions.findByUser(workspaceId, userId, hit.id, null, limit = 9) }
+        verify(exactly = 1) { executions.findByUser(workspaceId, userId, hit.id, null, limit = 9) }
     }
 
     @Test

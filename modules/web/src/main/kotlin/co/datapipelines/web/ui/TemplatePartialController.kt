@@ -123,8 +123,9 @@ class TemplatePartialController(
      * The acting column's **Runs** tab — recent executions of the pipelines pinning this
      * template, loaded on the tab's first click.
      *
-     * Visibility is the execution-history screen's, unchanged: an admin sees the workspace's
-     * runs, everyone else sees their own.
+     * Visibility is the execution-history screen's ([TemplateBrowseModel.fillRuns], #275): an
+     * admin sees the workspace's runs, a member with `execution.read` her own plus the
+     * scheduled runs (R3), a promoter her own only.
      */
     @GetMapping("/partials/templates/runs")
     @RequiredScope(Permission.TEMPLATE_READ)
@@ -138,8 +139,7 @@ class TemplatePartialController(
             principal.requireWorkspace().id,
             lens.viewFor(principal),
             name,
-            principal.userId,
-            principal.holds(Permission.EXECUTION_READ_ALL),
+            principal,
         )
     }
 

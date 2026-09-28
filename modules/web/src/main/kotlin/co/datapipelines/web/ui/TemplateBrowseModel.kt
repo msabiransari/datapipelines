@@ -1,6 +1,7 @@
 package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.LensedView
+import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
@@ -281,16 +282,16 @@ class TemplateBrowseModel(
      * [USED_BY_FANOUT] — a template pinned by 300 pipelines must not turn one tab into 300
      * queries, and the tab's promise is "recent runs", not "every run".
      *
-     * Visibility is the execution-history screen's: an admin sees the workspace's runs,
-     * everyone else their own.
+     * Visibility is the execution-history screen's, through [listVisibleTo] (#275): an admin
+     * sees the workspace's runs, a member with `execution.read` her own plus the SCHEDULED runs
+     * (#9 R3), the promoter — who reaches this `template.read` pane — her own only.
      */
     fun fillRuns(
         model: Model,
         workspaceId: UUID,
         view: LensedView,
         id: String,
-        userId: UUID,
-        isAdmin: Boolean,
+        principal: AuthenticatedPrincipal,
     ): String {
         // 178: no runs for a template the lens hides, and none from pipelines it hides.
         if (!templates.existsId(workspaceId, view.templates, id)) return fillRunRows(model, emptyList())
@@ -303,11 +304,7 @@ class TemplateBrowseModel(
         val rows =
             pipelineIds
                 .flatMap { pipelineId ->
-                    if (isAdmin) {
-                        executions.findAll(workspaceId, pipelineId, limit = PipelineBrowseModel.RUNS_LIMIT)
-                    } else {
-                        executions.findByUser(workspaceId, userId, pipelineId, limit = PipelineBrowseModel.RUNS_LIMIT)
-                    }
+                    executions.listVisibleTo(principal, workspaceId, pipelineId, status = null, limit = PipelineBrowseModel.RUNS_LIMIT)
                 }.sortedByDescending(ExecutionRecord::startedAt)
                 .take(PipelineBrowseModel.RUNS_LIMIT)
         return fillRunRows(model, rows)

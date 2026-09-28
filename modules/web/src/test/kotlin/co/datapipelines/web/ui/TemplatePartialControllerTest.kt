@@ -126,14 +126,16 @@ class TemplatePartialControllerTest {
     }
 
     @Test
-    fun `the runs route passes the caller's identity, so a non-admin sees only their own runs`() {
-        // The execution-history screen's visibility rule, unchanged: a second surface over the
-        // same rows must not be a wider one. The principal here holds AUTHOR, not ADMIN.
-        every { browse.fillRuns(model, workspaceId, any(), "acme/rev", userId, false) } returns "partials/template-runs"
+    fun `the runs route passes the caller's principal, so the pane reads the caller's visibility and nobody else's`() {
+        // The execution-history screen's visibility rule (#275): the model decides from the
+        // principal's own permissions (`listVisibleTo`), so the route hands over the CALLER —
+        // a second surface over the same rows must not be a wider one.
+        every { browse.fillRuns(model, workspaceId, any(), "acme/rev", match { it.userId == userId }) } returns
+            "partials/template-runs"
 
         controller.runs(model, name = "acme/rev") shouldBe "partials/template-runs"
 
-        io.mockk.verify(exactly = 1) { browse.fillRuns(model, workspaceId, any(), "acme/rev", userId, false) }
+        io.mockk.verify(exactly = 1) { browse.fillRuns(model, workspaceId, any(), "acme/rev", match { it.userId == userId }) }
     }
 
     // ------------------------------------------------------------ create

@@ -2,7 +2,6 @@ package co.datapipelines.web.ui
 
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.AuthenticatedPrincipal
-import co.datapipelines.auth.Permission
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -28,11 +27,12 @@ import java.util.UUID
  * - **Templates** go through [TemplateRepository.list]'s `q`, the same ILIKE over path /
  *   display name / description the template explorer's flat search renders
  *   (`partials/template-search`).
- * - **Executions** reuse the execution-history screen's two decisions verbatim: an admin sees
- *   the workspace's runs and everyone else their own ([ExecutionRepository.findAll] /
- *   [ExecutionRepository.findByUser] — "a second surface over the same rows must not be a
- *   wider one", `PipelineBrowseModel.fillRuns`), and the pipeline fan-out is capped the way
- *   `TemplateBrowseModel.fillRuns` caps its pinning pipelines. A `q` names executions three
+ * - **Executions** read [listVisibleTo], the explorers' Runs tabs' read: an admin sees the
+ *   workspace's runs, a member with `execution.read` her own plus the workspace's SCHEDULED
+ *   runs (#9 R3, #275), and a role without it (the promoter) her own only — "a second surface
+ *   over the same rows must not be a wider one", `PipelineBrowseModel.fillRuns` — and the
+ *   pipeline fan-out is capped the way `TemplateBrowseModel.fillRuns` caps its pinning
+ *   pipelines. A `q` names executions three
  *   ways: a STATUS word (`failed`) filters by status directly; otherwise the matching
  *   PIPELINES (name, display name or id prefix) give their recent runs. That query shape did
  *   not exist on the executions list, which filters by one known pipeline id or one status —
@@ -136,18 +136,13 @@ class SearchBrowseModel(
         return RESULTS_VIEW
     }
 
-    /** The history screen's visibility fork, verbatim: the workspace's runs for an admin, the principal's own otherwise. */
+    /** The UI lists' one visibility read ([listVisibleTo], #275), one row over the cap so `…More` is a fact. */
     private fun recentExecutions(
         workspaceId: UUID,
         principal: AuthenticatedPrincipal,
         status: ExecutionStatus?,
         pipelineId: UUID?,
-    ): List<ExecutionRecord> =
-        if (principal.holds(Permission.EXECUTION_READ_ALL)) {
-            executions.findAll(workspaceId, pipelineId, status, limit = GROUP_LIMIT + 1)
-        } else {
-            executions.findByUser(workspaceId, principal.userId, pipelineId, status, limit = GROUP_LIMIT + 1)
-        }
+    ): List<ExecutionRecord> = executions.listVisibleTo(principal, workspaceId, pipelineId, status, limit = GROUP_LIMIT + 1)
 
     /** The id-prefix arm's match: a pasted pipeline UUID's prefix, case-insensitive. */
     private fun PipelineRecord.matchesIdPrefix(needle: String): Boolean = id.toString().startsWith(needle, ignoreCase = true)

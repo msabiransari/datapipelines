@@ -395,9 +395,13 @@ class ExecutionRepository(
      * #9 R3 — the runs a member WITHOUT `execution.read_all` may see: their OWN runs
      * ([findByUser]'s predicate) **plus every scheduled run of the workspace**
      * ([SCHEDULED_RUN_PREDICATE]) — a scheduled run is attributed to its schedule and visible to
-     * every member whose role reaches `execution.read`. The REST listing (`GET /api/v1/executions`)
-     * reads this; the surfaces not yet ruled on (the UI's lists, MCP's `executions_list`) keep
-     * [findByUser], so a scheduled run never takes a page slot a later visibility filter drops.
+     * every member whose role reaches `execution.read`. Every list a member without
+     * `execution.read_all` reads comes through here (#250, #275): the REST listing, the executions
+     * screen and the dashboard, the search palette and the explorers' Runs tabs, MCP's
+     * `executions_list` and its executions resource — decided in SQL, so a scheduled run never
+     * takes a page slot a later visibility filter drops. [findByUser] remains the read for a role
+     * WITHOUT `execution.read` that still reaches a runs pane (the promoter, through
+     * `pipeline.read`): R3's scheduled arm is that row's, never the pane's.
      */
     @Suppress("LongParameterList")
     fun findVisible(
