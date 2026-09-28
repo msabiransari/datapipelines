@@ -14,6 +14,7 @@ import co.datapipelines.templates.TemplateVersionSummary
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
@@ -178,9 +179,11 @@ class TemplatesPurgeDraftToolTest {
 
         assertAll(
             { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
-            // The hidden set is named by COUNT only - the refusal echoes no name the caller cannot see.
+            // The hidden set is FLAGGED only - the refusal echoes neither a name nor a count of what the caller cannot see.
             { thrown.details["referencing_parameter_sets"] shouldBe emptyList<String>() },
-            { (thrown.details["pins_hidden"] as Int) shouldBe 1 },
+            { thrown.details["pins_hidden"] shouldBe true },
+            { thrown.message shouldContain "parameter set version(s) outside your view" },
+            { thrown.message shouldNotContain "1 parameter set" },
             { thrown.message shouldNotContain "acme/sales/region_filters" },
         )
         verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }

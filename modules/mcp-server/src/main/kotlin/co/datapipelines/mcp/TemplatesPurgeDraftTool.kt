@@ -72,8 +72,8 @@ class TemplatesPurgeDraftTool(
      * #300 (the 194d security pass, observation 11): BOTH scans run under the WHOLE workspace —
      * the web guard's rule, unlensed ([TemplateUsage.referencedAnywhere] under a narrowing view
      * dropped hidden sets, so a lensed caller could purge a template a hidden set still pins).
-     * Only the ECHO narrows: the refusal names the pins the caller's view admits, and counts the
-     * hidden ones ("pins_hidden") — never a name the caller cannot see.
+     * Only the ECHO narrows: the refusal names the pins the caller's view admits and flags that others exist
+     * ("pins_hidden": true) — never a name, and never a count, of what the caller cannot see.
      */
     private fun refuseIfPinned(
         workspaceId: java.util.UUID,
@@ -83,19 +83,19 @@ class TemplatesPurgeDraftTool(
         val pinners = usage.pipelinesReferencedAnywhere(workspaceId, co.datapipelines.application.lens.LensedView.EVERYTHING, id)
         if (pinners.isNotEmpty()) {
             // The web service's `template.in_use` wire shape, verbatim: the refusal names the
-            // pipelines to go and change — the admitted ones; hidden ones are a count.
+            // pipelines to go and change — the admitted ones; hidden ones are a flag.
             val names = pinners.map { it.pipelineName }.distinct()
             val (admitted, hidden) = splitByAdmission(names, caller.pipelines)
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.IN_USE,
                 message =
-                    "Version of template '$id' is pinned by ${names.size} live pipeline version(s): " +
-                        messagePins(admitted, hidden) + "; discard or repoint them first.",
+                    "Version of template '$id' is pinned by " + pinnedBy("live pipeline version(s)", names.size, admitted, hidden) +
+                        "; discard or repoint them first.",
                 details =
                     buildMap {
                         put("template_id", id)
                         put("pinned_by", admitted)
-                        if (hidden > 0) put("pins_hidden", hidden)
+                        if (hidden > 0) put("pins_hidden", true)
                     },
             )
         }
@@ -106,33 +106,41 @@ class TemplatesPurgeDraftTool(
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.IN_USE,
                 message =
-                    "Version of template '$id' is pinned by ${setNames.size} parameter set version(s): " +
-                        messagePins(admitted, hidden) + "; discard or repoint them first.",
+                    "Version of template '$id' is pinned by " + pinnedBy("parameter set version(s)", setNames.size, admitted, hidden) +
+                        "; discard or repoint them first.",
                 details =
                     buildMap {
                         put("template_id", id)
                         put("referencing_parameter_sets", admitted)
-                        if (hidden > 0) put("pins_hidden", hidden)
+                        if (hidden > 0) put("pins_hidden", true)
                     },
             )
         }
     }
 
-    /** Split pinned names into what [lens] admits (echoed) and what it hides (counted only). */
+    /** Split pinned names into what [lens] admits (echoed) and how many it hides (flagged, never echoed). */
     private fun splitByAdmission(
         names: List<String>,
         lens: co.datapipelines.pipeline.ReadLens,
     ): Pair<List<String>, Int> = names.filter { lens.admits(it) } to names.count { !lens.admits(it) }
 
-    /** The web guard's sentence shape: the admitted names, then the hidden ones as a count. */
-    private fun messagePins(
+    /**
+     * The web guard's sentence, byte-for-byte, for a caller whose view admits every pin; when a
+     * pin is HIDDEN the sentence carries no cardinality at all — neither the total nor the hidden
+     * count (the 300 security pass: a count of hidden objects is an existence oracle) — only the
+     * admitted names and the fact that others exist outside the view.
+     */
+    private fun pinnedBy(
+        kind: String,
+        total: Int,
         admitted: List<String>,
         hidden: Int,
     ): String =
-        buildList {
-            addAll(admitted)
-            if (hidden > 0) add("$hidden you cannot see")
-        }.joinToString(", ")
+        when {
+            hidden == 0 -> "$total $kind: " + admitted.joinToString(", ")
+            admitted.isEmpty() -> "$kind outside your view"
+            else -> "$kind: " + admitted.joinToString(", ") + " and others outside your view"
+        }
 
     override fun call(
         args: McpArguments,
