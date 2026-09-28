@@ -109,8 +109,16 @@ class DataTableBrowserTest : BrowserSuite() {
 
         // 288 #1, the htmx half: the pager replaces the whole frame, so page 2 arrives with
         // the server's order and no held sort — the state a fresh table has by construction.
+        // The wait is on PAGE 2's first row, never on "a ready row": page 1's rows satisfy that
+        // before the swap lands, and under a loaded gate the assertion then read the OLD table's
+        // held sort (the 287 landing gate, twice — #283's shape).
+        val firstRowBefore = page.locator("$frame table[data-dt-ready] tbody tr[data-href]").first().getAttribute("data-href")
         page.locator("#execution-table button:has-text('Next')").click()
-        page.locator("$frame table[data-dt-ready] tbody tr[data-href]").first().waitFor()
+        page.waitForFunction(
+            "([sel, before]) => { const r = document.querySelector(sel + ' table[data-dt-ready] tbody tr[data-href]'); " +
+                "return r !== null && r.getAttribute('data-href') !== before; }",
+            listOf(frame, firstRowBefore),
+        )
         settle()
         withClue("the htmx page swap cleared the client sort") {
             page.locator("$frame thead th:nth-child(5)").getAttribute("aria-sort") shouldBe "none"

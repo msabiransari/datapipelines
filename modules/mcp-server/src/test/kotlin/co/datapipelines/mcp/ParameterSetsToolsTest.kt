@@ -2,6 +2,9 @@ package co.datapipelines.mcp
 
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.application.lens.PromoterLens
+import co.datapipelines.application.mcp.McpToolLearnings
+import co.datapipelines.parameters.ParameterErrorCodes
+import co.datapipelines.parameters.ParameterEvaluator
 import co.datapipelines.parameters.ParameterSetBody
 import co.datapipelines.parameters.ParameterSetFolder
 import co.datapipelines.parameters.ParameterSetJson
@@ -15,8 +18,13 @@ import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateVersion
+import co.datapipelines.typesystem.DatapipelinesException
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
+import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
@@ -24,9 +32,11 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * The parameter-set tools over mocked collaborators, the two rules the 194d merge's security pass
- * found missing: a promoter never sees a draft pointer (178 — `pipelines_get`'s shape), and the
- * 094 new-root check reads the WHOLE level, not its first root.
+ * The parameter-set tools over mocked collaborators (the `ExecutionToolsTest` shape): the two rules
+ * the 194d merge's security pass found missing — a promoter never sees a draft pointer (178,
+ * `pipelines_get`'s shape) and the 094 new-root check reads the WHOLE level — and the answer shapes
+ * and refusals of the list, update, purge and evaluate tools (the cascade E2E drives them through the
+ * server; this is the module's own coverage of their bodies — the 194d landing gate's koverVerify).
  */
 class ParameterSetsToolsTest {
     private val sets = mockk<ParameterSetService>()
@@ -99,5 +109,131 @@ class ParameterSetsToolsTest {
 
         answer["id"] shouldBe setId.toString()
         verify(exactly = 1) { repository.listChildFolders(workspaceId, null, any()) }
+    }
+
+    @Test
+    fun `parameter_sets_list answers the folders and the sets of one level with the returned count`() {
+        every { sets.listChildFolders(workspaceId, any(), null) } returns listOf(ParameterSetFolder("nyc", "nyc", 2))
+        every { sets.listChildSets(workspaceId, any(), null, 0, 50) } returns listOf(ParameterSetVersion(record, released, body))
+
+        val answer = ParameterSetsListTool(sets, McpFixtures.EVERYTHING_LENS).call(McpArguments(emptyMap()), ctx) as Map<*, *>
+
+        answer["prefix"] shouldBe ""
+        answer["returned"] shouldBe 2
+        (answer["folders"] as List<*>).map { (it as Map<*, *>)["segment"] } shouldContainExactly listOf("nyc")
+        val sets = answer["parameter_sets"] as List<*>
+        (sets.single() as Map<*, *>).let {
+            it["id"] shouldBe setId.toString()
+            it["name"] shouldBe record.name
+            it["version"] shouldBe 1
+            it["status"] shouldBe "RELEASED"
+            it["current_version"] shouldBe 1
+        }
+    }
+
+    @Test
+    fun `parameter_sets_update writes through the service under the expected hash and answers the new version`() {
+        val draft = released.copy(version = 2, status = PipelineVersionStatus.DRAFT, bodyHash = "hash-v2")
+        every { sets.write(workspaceId, setId, any(), "hash-v1", McpFixtures.USER, WriteSurface.MCP) } returns
+            ParameterSetVersion(record, draft, body)
+
+        val answer =
+            ParameterSetsUpdateTool(sets, ParametersConfig(), McpFixtures.EVERYTHING_LENS)
+                .call(
+                    McpArguments(
+                        mapOf(
+                            "id" to setId.toString(),
+                            "expected_hash" to "hash-v1",
+                            "name" to record.name,
+                            "display_name" to "Region filters",
+                            "description" to "The region cascade",
+                            "parameters" to emptyList<Any>(),
+                        ),
+                    ),
+                    ctx,
+                ) as Map<*, *>
+
+        answer["version"] shouldBe 2
+        answer["status"] shouldBe "DRAFT"
+        answer["body_hash"] shouldBe "hash-v2"
+    }
+
+    @Test
+    fun `parameter_sets_purge_draft purges under the expected hash - an unknown id is the catalogued not-found`() {
+        every { repository.findRecord(workspaceId, setId) } returns record
+        justRun { sets.purgeDraft(workspaceId, setId, "hash-v2") }
+        val tool = ParameterSetsPurgeDraftTool(sets, repository)
+
+        val answer = tool.call(McpArguments(mapOf("id" to setId.toString(), "expected_hash" to "hash-v2")), ctx) as Map<*, *>
+        answer["purged"] shouldBe true
+
+        val unknown = UUID.randomUUID()
+        every { repository.findRecord(workspaceId, unknown) } returns null
+        shouldThrow<DatapipelinesException> {
+            tool.call(McpArguments(mapOf("id" to unknown.toString(), "expected_hash" to "hash-v2")), ctx)
+        }.code shouldBe ParameterErrorCodes.NOT_FOUND
+    }
+
+    private val evaluator = mockk<ParameterEvaluator>()
+    private val learnings = mockk<McpToolLearnings>()
+
+    private fun evaluateTool(lens: PromoterLens = McpFixtures.EVERYTHING_LENS) =
+        ParameterSetsEvaluateTool(sets, repository, evaluator, learnings, templates, lens)
+
+    @Test
+    fun `parameter_sets_evaluate - an explicit version never falls back to the served one (C26)`() {
+        every { sets.findVersion(workspaceId, any(), setId, 3) } returns null
+
+        val refusal =
+            shouldThrow<DatapipelinesException> {
+                evaluateTool().call(McpArguments(mapOf("id" to setId.toString(), "version" to 3)), ctx)
+            }
+
+        refusal.code shouldBe ParameterErrorCodes.NOT_FOUND
+        refusal.details["version"] shouldBe 3
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+    }
+
+    @Test
+    fun `parameter_sets_evaluate - the served version is read through the lens, a hidden set is not-found`() {
+        every { repository.findCurrent(workspaceId, setId) } returns ParameterSetVersion(record, released, body)
+
+        val refusal =
+            shouldThrow<DatapipelinesException> {
+                evaluateTool(narrowed("acme/other/set")).call(McpArguments(mapOf("id" to setId.toString())), ctx)
+            }
+
+        refusal.code shouldBe ParameterErrorCodes.NOT_FOUND
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
+    }
+
+    @Test
+    fun `parameter_sets_evaluate - a DRAFT set whose DRAFT pin postdates this key's last render is template_unrendered`() {
+        val pinned: ParameterSetBody =
+            ParameterSetJson.mapper.treeToValue(
+                ParameterSetJson.mapper.readTree(
+                    """{"display_name":"Region filters","parameters":[{"name":"state","label":"State","type":"STRING",""" +
+                        """"kind":"SELECT","cardinality":"SINGLE","required":true,""" +
+                        """"source":{"template":{"id":"test/states.sql","version":1},"datasource":"crm"}}]}""",
+                ),
+                ParameterSetBody::class.java,
+            )
+        val draft = released.copy(version = 2, status = PipelineVersionStatus.DRAFT, bodyHash = "hash-v2")
+        every { sets.findVersion(workspaceId, any(), setId, 2) } returns ParameterSetVersion(record, draft, pinned)
+        val templateDraft =
+            mockk<TemplateVersion> {
+                every { status } returns PipelineVersionStatus.DRAFT
+                every { updatedAt } returns at
+            }
+        every { templates.lookupVersion(workspaceId, "test/states.sql", 1) } returns templateDraft
+        every { learnings.lastRenderAt(any(), any()) } returns null
+
+        val refusal =
+            shouldThrow<DatapipelinesException> {
+                evaluateTool().call(McpArguments(mapOf("id" to setId.toString(), "version" to 2)), ctx)
+            }
+
+        refusal.code shouldBe ParameterErrorCodes.EVALUATE_TEMPLATE_UNRENDERED
+        verify(exactly = 0) { evaluator.evaluateBlocking(any(), any(), any()) }
     }
 }
