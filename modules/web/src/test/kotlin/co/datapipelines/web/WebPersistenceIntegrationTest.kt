@@ -248,9 +248,10 @@ class WebPersistenceIntegrationTest {
 
     @Test
     fun `a batched replay-log append is one round trip - one RPUSH and one EXPIRE per execution, order kept, TTL still one hour`() {
-        // #266 B.2: N events of two executions in ONE pipelined MULTI/EXEC. Counted on the server
-        // itself (INFO commandstats): two RPUSH, two EXPIRE — not one pair per event, which is what
-        // append() costs. Red if appendAll loops append().
+        // #266 B.2: N events of two executions in ONE script call. Counted on the server itself
+        // (INFO commandstats, which counts the commands a script runs): two RPUSH, two PEXPIRE, one
+        // EVALSHA/EVAL — not one pair per event, which is what append() costs. Red if appendAll
+        // loops append().
         val first = UUID.randomUUID()
         val second = UUID.randomUUID()
         val entries =
@@ -269,15 +270,46 @@ class WebPersistenceIntegrationTest {
         // A Duration expiry reaches Redis as PEXPIRE — same one-hour TTL, asserted below.
         val delta =
             after
-                .filterKeys { it in setOf("rpush", "expire", "pexpire", "multi", "exec") }
+                .filterKeys { it in setOf("rpush", "expire", "pexpire", "multi", "exec", "eval", "evalsha") }
                 .mapValues { (command, calls) -> calls - before.getOrDefault(command, 0) }
                 .filterValues { it > 0 }
-        delta shouldBe mapOf("rpush" to 2, "pexpire" to 2, "multi" to 1, "exec" to 1)
+        delta.filterKeys { it != "eval" && it != "evalsha" } shouldBe mapOf("rpush" to 2, "pexpire" to 2)
+        // One script call: EVALSHA — or EVAL, the first time the script meets this server.
+        (delta.getOrDefault("evalsha", 0) + delta.getOrDefault("eval", 0) in 1..2) shouldBe true
         eventLog.replay(first).shouldNotBeNull().map { it.eventId } shouldBe (1..BATCH_EVENTS).toList()
         eventLog.replay(second).shouldNotBeNull().map { it.eventId } shouldBe (1..BATCH_EVENTS).toList()
         val ttl = redis.getExpire("dp:events:$first").shouldNotBeNull()
         (ttl in (ONE_HOUR_SECONDS - TTL_SLACK_SECONDS)..ONE_HOUR_SECONDS) shouldBe true
     }
+
+    @Test
+    fun `a batched replay-log append opens no connection - it rides the shared one`() {
+        // Measured (#266 C run 1): a pipelined MULTI/EXEC through Spring Data Redis takes a DEDICATED
+        // Lettuce connection — a new TCP connection and handshake per batch, ~7 ms, which made the
+        // batched replay log 15x slower than the per-event append it replaced. Counted on the server:
+        // twenty batches must not grow total_connections_received beyond the one this read opens.
+        val executionId = UUID.randomUUID()
+        val before = connectionsReceived()
+        repeat(BATCHES) { n -> eventLog.appendAll(listOf(eventLog.entry(executionId, LoggedSseEvent(n + 1, "node_started", emptyMap())))) }
+        val after = connectionsReceived()
+        io.kotest.assertions.withClue("connections the server received across $BATCHES batches: ${after - before}") {
+            (after - before <= 1) shouldBe true
+        }
+        eventLog.replay(executionId).shouldNotBeNull().size shouldBe BATCHES
+    }
+
+    private fun connectionsReceived(): Long =
+        redis.connectionFactory
+            .shouldNotBeNull()
+            .connection
+            .use { connection ->
+                connection
+                    .serverCommands()
+                    .info("stats")
+                    .shouldNotBeNull()
+                    .getProperty("total_connections_received")
+                    .toLong()
+            }
 
     @Test
     fun `the replay serves each event id once - a re-sent batch never duplicates what clients see`() {
@@ -472,6 +504,7 @@ class WebPersistenceIntegrationTest {
 
     private companion object {
         const val BATCH_EVENTS = 50
+        const val BATCHES = 20
         const val ONE_HOUR_SECONDS = 3_600L
         const val TTL_SLACK_SECONDS = 60L
 
