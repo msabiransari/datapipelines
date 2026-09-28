@@ -21,6 +21,9 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.SmartInitializingSingleton
 import java.util.UUID
 
+/** A driver's or a catalogued refusal's text in a boot log line, bounded — never a stack, never unbounded stored text. */
+private const val MAX_LOG_MESSAGE_CHARS = 300
+
 /**
  * The demo workspace's public API (#224): after the example content has landed, publishes one
  * endpoint per seeded demo pipeline, mints the ONE configured `api_caller` key, and binds it to
@@ -291,7 +294,7 @@ class DemoEndpointSeeder(
                     "event=demo.endpoint_failed path={} reason={} message=\"this target is skipped; the " +
                         "remaining demo endpoints are still published and the boot proceeds\"",
                     target.path,
-                    e.message ?: e.javaClass.simpleName,
+                    (e.message ?: e.javaClass.simpleName).take(MAX_LOG_MESSAGE_CHARS),
                 )
             }
         }
@@ -385,7 +388,7 @@ class DemoEndpointSeeder(
                     "event=demo.endpoint_retire_failed path={} reason={} message=\"the stale demo path stays; " +
                         "the boot proceeds\"",
                     endpoint.pathPattern,
-                    e.message ?: e.javaClass.simpleName,
+                    (e.message ?: e.javaClass.simpleName).take(MAX_LOG_MESSAGE_CHARS),
                 )
             }
         }

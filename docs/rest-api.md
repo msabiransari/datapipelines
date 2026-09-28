@@ -2153,7 +2153,7 @@ timestamps), because there is no parse. Once V41 has run its `enabled` is `false
 (`?path=`) resolves valid rows only and answers the legacy path `404`, like the serve path. The
 one verb the legacy row supports is **`DELETE`** — the same unpublish route, unchanged — which
 removes it; republishing at a current-grammar path is the replacement. The API console page lists
-the row flagged with the same reason and offers only that verb.
+the row flagged with the same reason and offers only that verb. The flag is the parse verdict taken on every read, not the `retired_reason` column (an audit marker); a legacy `path` is echoed as stored, and a row malformed in a way V41's two-segment predicate does not name is listed `legacy: true` with `enabled: true` and is never served either.
 
 Bindings are `POST` / `DELETE /api/v1/endpoints/bindings`, and since 179 (D17) they are a
 **workspace admin's verb** (`api_key.bind` — associating a credential with an endpoint tree is

@@ -533,7 +533,9 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
     WHERE array_length(string_to_array(trim(both '/' from path_pattern), '/'), 1) < 3;
    ```
 
-   Zero rows = safe (and always was). Rows listed = they come back disabled and flagged after
+   Zero rows = nothing for V41 to retire (the two-segment shape of the incident; a row malformed
+   another way is mapped legacy by the new code, never served, and needs no SQL — on a build OLDER
+   than #274 it broke the boot just the same). Rows listed = they come back disabled and flagged after
    the upgrade; unpublishing one is the fix. An operator in a hurry on a build OLDER than V41
    can delete the rows by hand — the demo seeder republishes the demo endpoint at its current
    path on the next boot.
