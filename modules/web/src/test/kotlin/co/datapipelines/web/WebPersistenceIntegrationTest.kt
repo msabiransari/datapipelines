@@ -26,6 +26,7 @@ import co.datapipelines.web.sse.LoggedSseEvent
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.WebEventEmitter
 import com.fasterxml.jackson.databind.json.JsonMapper
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -50,6 +51,7 @@ import java.sql.DriverManager
 import java.sql.ResultSet
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The web surface's persistence story against the real stores: a Postgres container running app's
@@ -201,6 +203,12 @@ class WebPersistenceIntegrationTest {
                     co.datapipelines.web.sse
                         .ReplayLogSink(eventLog),
                 )
+            // Non-vacuity: the direct path leaves the same rows, so the writers must be SEEN committing
+            // them — an emitter that ignored its recorder stayed green here before (#266 F18).
+            val rowsCommitted = AtomicInteger()
+            val replayCommitted = AtomicInteger()
+            rows.hooks = committedCounter(rowsCommitted)
+            replay.hooks = committedCounter(replayCommitted)
             val direct =
                 java.util.concurrent.Executors
                     .newSingleThreadExecutor()
@@ -239,10 +247,21 @@ class WebPersistenceIntegrationTest {
                         .asText() shouldBe correlationId.toString()
                 }
                 eventLog.replay(executionId).shouldNotBeNull().map { it.eventId } shouldBe listOf(1, 2, 3, 4, 5)
+                withClue("every event went through the writers, not around them") {
+                    rowsCommitted.get() shouldBe 5
+                    replayCommitted.get() shouldBe 5
+                }
             } finally {
                 rows.close()
                 replay.close()
                 direct.shutdownNow()
+            }
+        }
+
+    private fun committedCounter(count: AtomicInteger) =
+        object : co.datapipelines.persistence.BatchingHooks {
+            override fun onCommitted(lagNanos: Long) {
+                count.incrementAndGet()
             }
         }
 
