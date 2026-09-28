@@ -49,7 +49,10 @@ class PreDeployScanQueriesTest {
 
     @Test
     fun `the #194 scan lists exactly the stored decimal defaults with more places than their scale`() {
-        parametersFound(scan(OVER_SCALE_TAG)) shouldContainExactly listOf("amount")
+        // #298: a stored `scale` that is not an integer (`"2.0"`, `"x"`) is LISTED — a malformed
+        // declaration is exactly what the operator runs the scan to find — where the unguarded
+        // `::int` cast stopped the whole scan with an error.
+        parametersFound(scan(OVER_SCALE_TAG)) shouldContainExactly listOf("amount", "bad_scale", "odd_scale")
     }
 
     @Test
@@ -104,14 +107,18 @@ class PreDeployScanQueriesTest {
 
         /**
          * One of every case: `amount` over its scale (a hit), `fee` at its scale with a trailing
-         * zero and `rate` with no scale (misses), `whole` an integral default; `limit` with a
-         * constraints block and `regions` with a cardinality (hits), `plain` with neither.
+         * zero and `rate` with no scale (misses), `whole` an integral default; `odd_scale` and
+         * `bad_scale` with a scale that is not an integer (hits, #298 — listed, never a cast
+         * error); `limit` with a constraints block and `regions` with a cardinality (hits),
+         * `plain` with neither.
          */
         const val PARAMETERS =
             """{"amount": {"type": "DECIMAL", "scale": 2, "default": 12.345},
                 "fee": {"type": "DECIMAL", "scale": 2, "default": 1.50},
                 "rate": {"type": "DECIMAL", "default": 0.125},
                 "whole": {"type": "BIGDECIMAL", "scale": 0, "default": "100"},
+                "odd_scale": {"type": "DECIMAL", "scale": "2.0", "default": 1.5},
+                "bad_scale": {"type": "BIGDECIMAL", "scale": "x", "default": "1"},
                 "limit": {"type": "INTEGER", "constraints": {"min": 10, "max": 1}},
                 "regions": {"type": "STRING", "cardinality": "MULTI"},
                 "plain": {"type": "STRING"}}"""

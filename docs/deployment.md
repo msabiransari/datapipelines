@@ -1,6 +1,6 @@
 # Deployment & Packaging Specification
 
-**Status:** v1.32
+**Status:** v1.33
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-19
@@ -546,7 +546,9 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
    #194 could carry a `constraints` block or a `cardinality` that `Parameter` then ignored; those
    are read now, and one save refuses today is answered
    `409 pipeline.execution.parameter_declaration_invalid` where it is used (a supplied value or an
-   applied default), never a 500. Run both against the metadata DB to know beforehand:
+   applied default), never a 500. Run both against the metadata DB to know beforehand (read-only;
+   since #298 the first also LISTS a stored `scale` that is not an integer — `"2.0"`, `"x"` — rather
+   than stopping on the cast):
 
    ```sql
    -- pre-deploy #194: stored DECIMAL/BIGDECIMAL defaults with more places than their scale
@@ -558,7 +560,10 @@ Operators should run a quarterly restore drill: restore metadata DB from backup 
                                        THEN v.body_json->'parameters' ELSE '{}'::jsonb END) e
     WHERE e.value->>'type' IN ('DECIMAL', 'BIGDECIMAL')
       AND e.value ? 'default' AND e.value ? 'scale'
-      AND length(split_part(trim(trailing '0' from (e.value->>'default')), '.', 2)) > (e.value->>'scale')::int
+      AND CASE WHEN (e.value->>'scale') ~ '^-?[0-9]{1,9}$'
+               THEN length(split_part(trim(trailing '0' from (e.value->>'default')), '.', 2)) > (e.value->>'scale')::int
+               ELSE TRUE  -- a scale that is not an integer is itself a defect: listed, never a cast error
+          END
     ORDER BY 1, 2, 4;
    ```
 
@@ -1098,6 +1103,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.33 | 298 (#298) the #194 scan survives a malformed scale | §8.3 step 4's first scan guards its `::int` cast (`CASE WHEN scale ~ '^-?[0-9]{1,9}$'`): a stored `scale` that is not an integer (`"2.0"`, `"x"`, or past `int`) is LISTED — a malformed declaration is what the operator runs the scan to find — where the bare cast stopped the whole read-only scan with an error. `PreDeployScanQueriesTest` runs the block verbatim over a fixture that now carries both. |
 | 2026-09-28 | v1.32 | 286 (#277) the stop grace's arithmetic | §6's Deployment bullet and §8.3.2: the chart's `terminationGracePeriodSeconds` and compose's `stop_grace_period` are **50 s**, written as the sum of the shutdown sequence at its configured maximum — preStop 5 + the scheduler's admission gate ≤ 15 + the drain flush 20 + Tomcat 10. At 40 s (#251) the three scheduler phases alone reached 40 under Helm and left Tomcat nothing; §8.3.2's snippet and bullet still said 30. `ShutdownGraceArithmeticTest` pins both files and every value this document states. |
 | 2026-09-28 | v1.31 | 286 (#268, #194) pre-deploy scans | §8.3 gains step 4, the pre-deploy check for builds after 2026-09-26: 194a's over-scale-default scan (it lived in that lane's handback as an untested sketch — now made robust to a body with no `parameters` object) and #268's scan for stored parameters declaring `constraints` or a `cardinality`, each tagged and run verbatim by `PreDeployScanQueriesTest` against the shipped schema; the later steps renumber. The Status line read v1.28 behind the v1.30 row; it now reads v1.31. |
 | 2026-09-24 | v1.30 | 224 (#224) demo API | New Appendix B subsection "The demo API": seeding a demo family publishes every seeded pipeline under `/demo/…` and binds them to one public `api_caller` key minted from `DATAPIPELINES_DEMO_API_KEY` (blank = off, changed = rotation); the per-key request budget and the lake family's budget gate are the same act (rest-api.md §19.8). |

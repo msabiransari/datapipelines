@@ -12,6 +12,7 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -207,6 +208,22 @@ class EndpointPersistenceIntegrationTest {
         legacy.enabled shouldBe true
         legacy.reason shouldContain "at least 3"
         legacy.workspaceId shouldBe workspaceId
+    }
+
+    @Test
+    fun `a legacy reason never quotes stored-path text the echo cuts (#298)`() {
+        // 203 stored characters whose normalised form (the one `/api` prefix stripped) is 199:
+        // it passes the length rule and fails a later one whose sentence quotes the pattern —
+        // measured before #298, the reason carried the last three characters the 200-character
+        // echo cuts. The reason for a row whose echo is cut is the length sentence instead.
+        val stored = "/api/nyc/v1/" + "a".repeat(188) + "xy/"
+        stored.length shouldBe 203
+        insertRaw(stored, enabled = true)
+
+        val legacy = endpoints.findLegacy(workspaceId).single()
+        EndpointPath.echoBounded(legacy.pathPattern).length shouldBe EndpointPath.MAX_LENGTH
+        legacy.reason shouldNotContain "xy/"
+        legacy.reason shouldContain "203 characters"
     }
 
     @Test

@@ -60,8 +60,34 @@ object EndpointPath {
      * the API console must not echo a legacy row's path unbounded. The model keeps the stored
      * path: unpublish is BY PATH, so a row within the limit (every row the product wrote) is
      * echoed exactly and stays addressable; a longer one is unpublished by its full stored path.
+     *
+     * The cut falls on a CODE-POINT boundary (#298): a supplementary character straddling the
+     * limit is dropped whole rather than leaving a lone high surrogate for Jackson to escape and
+     * Thymeleaf to substitute.
      */
-    fun echoBounded(stored: String): String = stored.take(MAX_LENGTH)
+    fun echoBounded(stored: String): String {
+        if (stored.length <= MAX_LENGTH) return stored
+        val end = if (Character.isHighSurrogate(stored[MAX_LENGTH - 1])) MAX_LENGTH - 1 else MAX_LENGTH
+        return stored.substring(0, end)
+    }
+
+    /** True when [echoBounded] cut [stored] — the echo then names a path no row is stored at. */
+    fun isEchoCut(stored: String): Boolean = stored.length > MAX_LENGTH
+
+    /**
+     * The `reason` a LEGACY row carries (#298): the grammar's own [refusal] — unless the stored
+     * path is longer than [echoBounded] shows, and then the length sentence. The grammar's other
+     * sentences quote the NORMALISED pattern, and a stored `/api/…` path of 201–204 characters
+     * normalises under the limit, so its sentence quoted characters the echo had cut. With this
+     * rule a reason never quotes more of a stored path than its echo does.
+     */
+    fun legacyReason(
+        stored: String,
+        refusal: String,
+    ): String = if (isEchoCut(stored)) lengthRefusal(stored.length) else refusal
+
+    /** The length rule's sentence — one wording for the grammar and for [legacyReason]. */
+    private fun lengthRefusal(length: Int): String = "Path is $length characters; the limit is $MAX_LENGTH (§4.1)."
 
     /** R-EP5 — the shape floor: category, version, and at least one path segment. */
     const val MIN_SEGMENTS = 3
@@ -173,7 +199,7 @@ object EndpointPath {
         endpointShape: Boolean,
     ): Result<Parsed> {
         if (pattern.length > MAX_LENGTH) {
-            return reject("Path is ${pattern.length} characters; the limit is $MAX_LENGTH (§4.1).")
+            return reject(lengthRefusal(pattern.length))
         }
         if (!pattern.startsWith('/')) {
             return reject("Path must start with '/' (§4.1); '$pattern' does not.")

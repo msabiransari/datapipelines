@@ -36,24 +36,49 @@ import java.math.BigDecimal
 class ParameterValueValidator(
     private val limits: ParameterValueLimits = ParameterValueLimits(),
 ) {
-    /** Judges [value] against [declaration]; see the class KDoc for the order. */
+    /** Judges [value] against [declaration]; see the class KDoc for the order. Compiles it once. */
     fun validate(
         declaration: ParameterDeclaration,
         value: JsonNode?,
     ): ParameterValueOutcome {
-        if (value == null || value.isNull || value.isMissingNode) return ParameterValueOutcome.Unsupplied
-        val compiled = DeclarationCompiler.compile(declaration, limits)
+        if (isUnsupplied(value)) return ParameterValueOutcome.Unsupplied
+        return validate(compile(declaration), value)
+    }
+
+    /**
+     * [declaration] compiled ONCE (#298): its save-time [CheckedDeclaration.problems] and the typed
+     * rules the [CheckedDeclaration] overloads judge with. A caller that checks a declaration and
+     * then judges values against it — the binder asks "would save refuse this stored
+     * declaration?" before every judgement — compiles it here once instead of once per question
+     * (its `pattern` through the regex guard each time).
+     */
+    fun compile(declaration: ParameterDeclaration): CheckedDeclaration =
+        CheckedDeclaration(declaration, DeclarationCompiler.compile(declaration, limits))
+
+    /** [validate] over a declaration already compiled — nothing is compiled again. */
+    fun validate(
+        checked: CheckedDeclaration,
+        value: JsonNode?,
+    ): ParameterValueOutcome {
+        if (isUnsupplied(value)) return ParameterValueOutcome.Unsupplied
+        val compiled = checked.compiled
         require(compiled.problems.isEmpty()) {
             "declaration refused by checkDeclaration reached validate: ${compiled.problems.joinToString { it.message }}"
         }
-        return when (declaration.cardinality) {
-            ParameterCardinality.SINGLE -> single(declaration, compiled.rules, value)
-            ParameterCardinality.MULTI -> multi(declaration, compiled.rules, value)
+        val node = checkNotNull(value)
+        return when (checked.declaration.cardinality) {
+            ParameterCardinality.SINGLE -> single(checked.declaration, compiled.rules, node)
+            ParameterCardinality.MULTI -> multi(checked.declaration, compiled.rules, node)
         }
     }
 
     /** [validate] applied to the declaration's own `default` — the save-time check and the bind-time read. */
     fun resolveDefault(declaration: ParameterDeclaration): ParameterValueOutcome = validate(declaration, declaration.default)
+
+    /** [resolveDefault] over a declaration already compiled. */
+    fun resolveDefault(checked: CheckedDeclaration): ParameterValueOutcome = validate(checked, checked.declaration.default)
+
+    private fun isUnsupplied(value: JsonNode?): Boolean = value == null || value.isNull || value.isMissingNode
 
     /**
      * The refusal for a required parameter nothing resolved for, or null for an optional one. The
@@ -67,8 +92,7 @@ class ParameterValueValidator(
         }
 
     /** Everything wrong with [declaration]'s constraints — empty when [validate] may be given it. */
-    fun checkDeclaration(declaration: ParameterDeclaration): List<DeclarationProblem> =
-        DeclarationCompiler.compile(declaration, limits).problems
+    fun checkDeclaration(declaration: ParameterDeclaration): List<DeclarationProblem> = compile(declaration).problems
 
     private fun single(
         declaration: ParameterDeclaration,
@@ -223,4 +247,17 @@ class ParameterValueValidator(
             message: String,
         ) = ParameterValueRefusal(ParameterValueRule.CONSTRAINT_VIOLATION, message, reason)
     }
+}
+
+/**
+ * A [ParameterDeclaration] compiled once by [ParameterValueValidator.compile] (#298): what save
+ * would refuse about it ([problems]) and the typed rules a judgement reads. Built only by the
+ * validator, so the rules it carries are always the validator's own reading of [declaration].
+ */
+class CheckedDeclaration internal constructor(
+    val declaration: ParameterDeclaration,
+    internal val compiled: CompiledDeclaration,
+) {
+    /** Everything wrong with [declaration]'s constraints — empty when it may be judged against. */
+    val problems: List<DeclarationProblem> get() = compiled.problems
 }

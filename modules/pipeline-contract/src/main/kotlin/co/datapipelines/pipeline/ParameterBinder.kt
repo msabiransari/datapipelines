@@ -1,6 +1,7 @@
 package co.datapipelines.pipeline
 
 import co.datapipelines.calculators.CalculatorInput
+import co.datapipelines.typesystem.CheckedDeclaration
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCardinality
 import co.datapipelines.typesystem.ParameterCoercion
@@ -93,18 +94,7 @@ class ParameterBinder(
         val failures = mutableListOf<ValidationFailure>()
         val bound = LinkedHashMap<String, Any?>()
 
-        parameters.forEach { (name, parameter) ->
-            val refusedDeclaration = if (judges(parameter, inputs[name])) storedDeclarationRefusal(name, parameter) else null
-            if (refusedDeclaration != null) {
-                failures += refusedDeclaration
-                return@forEach
-            }
-            when (val supplied = VALIDATOR.validate(parameter.declaration, inputs[name])) {
-                is ParameterValueOutcome.Accepted -> bound[name] = supplied.value
-                is ParameterValueOutcome.Refused -> failures += refusal(name, parameter, supplied.refusal)
-                ParameterValueOutcome.Unsupplied -> bindUnsupplied(name, parameter, bound, failures)
-            }
-        }
+        parameters.forEach { (name, parameter) -> bindParameter(name, parameter, inputs[name], bound, failures) }
         // The calculator tier AFTER the parameter one: a supplied calculator key is optional in
         // both directions (unsupplied → nothing; an explicit JSON null reads as unsupplied,
         // exactly as it does for a declared parameter), and a name the pipeline also declares
@@ -173,6 +163,32 @@ class ParameterBinder(
                 .associateWith { sampleValue(LogicalType.STRING) }
 
     /**
+     * One declared parameter: its stored declaration checked, then its value (or its default)
+     * judged. A judged declaration is compiled ONCE (#298) — the stored-declaration check, the
+     * value's judgement and the default's all read the same [CheckedDeclaration].
+     */
+    private fun bindParameter(
+        name: String,
+        parameter: Parameter,
+        value: JsonNode?,
+        bound: MutableMap<String, Any?>,
+        failures: MutableList<ValidationFailure>,
+    ) {
+        val checked = if (judges(parameter, value)) VALIDATOR.compile(parameter.declaration) else null
+        val refusedDeclaration = checked?.let { storedDeclarationRefusal(name, parameter, it) }
+        if (refusedDeclaration != null) {
+            failures += refusedDeclaration
+            return
+        }
+        val supplied = if (checked != null) VALIDATOR.validate(checked, value) else VALIDATOR.validate(parameter.declaration, value)
+        when (supplied) {
+            is ParameterValueOutcome.Accepted -> bound[name] = supplied.value
+            is ParameterValueOutcome.Refused -> failures += refusal(name, parameter, supplied.refusal)
+            ParameterValueOutcome.Unsupplied -> bindUnsupplied(name, parameter, checked, bound, failures)
+        }
+    }
+
+    /**
      * Nothing was supplied (absent or JSON null): the declaration's `default`, judged like a
      * supplied value; else `parameter_required`; else — optional, no default — the key exists in
      * the Context with no value, so a template referencing it is defined-but-null rather than a
@@ -181,10 +197,14 @@ class ParameterBinder(
     private fun bindUnsupplied(
         name: String,
         parameter: Parameter,
+        checked: CheckedDeclaration?,
         bound: MutableMap<String, Any?>,
         failures: MutableList<ValidationFailure>,
     ) {
-        when (val default = VALIDATOR.resolveDefault(parameter.declaration)) {
+        // `checked` is null exactly when nothing is judged — no default either — and then the
+        // uncompiled form answers Unsupplied without compiling anything.
+        val default = if (checked != null) VALIDATOR.resolveDefault(checked) else VALIDATOR.resolveDefault(parameter.declaration)
+        when (default) {
             is ParameterValueOutcome.Accepted -> bound[name] = default.value
             is ParameterValueOutcome.Refused -> failures += refusal(name, parameter, default.refusal)
             ParameterValueOutcome.Unsupplied -> if (parameter.required) failures += requiredMissing(name) else bound[name] = null
@@ -202,16 +222,17 @@ class ParameterBinder(
 
     /**
      * `pipeline.execution.parameter_declaration_invalid` (§13.3, #268) when [parameter]'s stored
-     * declaration is one save refuses today — its constraints (the validator's own
-     * `checkDeclaration`) or a cardinality other than `SINGLE` — else null. The message names the
+     * declaration is one save refuses today — its constraints ([checked]'s problems, the
+     * validator's own compile of it, #298) or a cardinality other than `SINGLE` — else null. The message names the
      * first problem, bounded; `details.reasons` lists every save-time code, so the author knows
      * what the re-save must fix.
      */
     private fun storedDeclarationRefusal(
         name: String,
         parameter: Parameter,
+        checked: CheckedDeclaration,
     ): ValidationFailure? {
-        val problems = VALIDATOR.checkDeclaration(parameter.declaration)
+        val problems = checked.problems
         val cardinality = parameter.declaration.cardinality
         val unsupportedCardinality = cardinality != ParameterCardinality.SINGLE
         if (problems.isEmpty() && !unsupportedCardinality) return null
