@@ -91,7 +91,7 @@ class McpServerWiringTest {
             ),
             PipelinesCreateTool(service, pipelines),
             PipelinesUpdateTool(service),
-            *templateTools(usage, templates, drafts, templateValidator, engines),
+            *templateTools(usage, templates, drafts, templateValidator, engines).toTypedArray(),
             DatasourcesListTool(datasources, lens = McpFixtures.EVERYTHING_LENS),
             DatasourcesGetTool(datasources, lens = McpFixtures.EVERYTHING_LENS),
             DatasourcesTestTool(datasources),
