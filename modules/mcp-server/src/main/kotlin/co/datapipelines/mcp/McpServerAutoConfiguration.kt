@@ -228,9 +228,8 @@ class McpServerAutoConfiguration {
                 parameterSetRepository,
                 parameterEvaluator,
                 parametersProperties.toConfig(),
-                // 139's audit reader, built inline (the entryPointChecks discipline): the draft
-                // evaluate's template_unrendered twin reads the same table.
-                co.datapipelines.application.mcp.McpToolLearnings(jdbc),
+                co.datapipelines.application.mcp
+                    .McpToolLearnings(jdbc),
                 templates,
                 lens,
             )

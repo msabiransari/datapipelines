@@ -1,10 +1,10 @@
 package co.datapipelines.parameters
 
-import io.kotest.matchers.shouldBe
-import java.util.UUID
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /**
  * The parameters side of the templates reverse arrow (the record's §8.4, lane D) against the
@@ -107,5 +107,4 @@ class ParameterSetTemplatePinsIntegrationTest {
         scanner.anyVersionPins(workspaceId, pin.id).shouldBeEmpty()
         scanner.liveVersionPins(workspaceId, pin.id, pin.version).shouldBeEmpty()
     }
-
 }

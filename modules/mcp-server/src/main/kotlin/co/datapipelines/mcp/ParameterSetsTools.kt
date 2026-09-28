@@ -165,7 +165,12 @@ class ParameterSetsGetTool(
         workspaceId: UUID,
         loaded: ParameterSetVersion,
     ): List<Map<String, Any?>> {
-        val pins = loaded.body.parameters.mapNotNull { it.source?.template }.distinct()
+        val body = loaded.body
+        val pins =
+            body
+                .parameters
+                .mapNotNull { it.source?.template }
+                .distinct()
         val latest = templates.findCurrentVersions(workspaceId, pins.map { it.id }.toSet())
         return pins.mapNotNull { ref ->
             val newest = latest[ref.id] ?: return@mapNotNull null

@@ -167,8 +167,12 @@ class ParameterCascadeE2eTest {
     fun `fixture - tables, datasource, released templates, the set with a multi-segment name`() {
         seedAuthRows()
         DriverManager.getConnection(H2_JDBC_URL, "sa", "sa").use { connection ->
-            connection.createStatement().execute("CREATE TABLE IF NOT EXISTS dim_state (country_code VARCHAR(2), state_code VARCHAR(2), state_name VARCHAR(30))")
-            connection.createStatement().execute("CREATE TABLE IF NOT EXISTS dim_city (state_code VARCHAR(2), city_name VARCHAR(30))")
+            connection.createStatement().execute(
+                "CREATE TABLE IF NOT EXISTS dim_state (country_code VARCHAR(2), state_code VARCHAR(2), state_name VARCHAR(30))",
+            )
+            connection.createStatement().execute(
+                "CREATE TABLE IF NOT EXISTS dim_city (state_code VARCHAR(2), city_name VARCHAR(30))",
+            )
             connection.createStatement().execute("DELETE FROM dim_state")
             connection.createStatement().execute("DELETE FROM dim_city")
             connection.createStatement().execute(
@@ -285,9 +289,23 @@ class ParameterCascadeE2eTest {
         // The multi-segment name through the REST browse: `?prefix=acme` shows the `e2e`
         // folder one level down, `?prefix=acme/e2e` shows the set itself.
         val (_, rootBrowse) = rest("GET", "/api/v1/parameter-sets?prefix=acme")
-        rootBrowse.path("data").path("folders").find { it.path("segment").asText() == "e2e$RUN" }?.isMissingNode shouldBe false
+        val rootFolder =
+            rootBrowse
+                .path("data")
+                .path("folders")
+                .find { it.path("segment").asText() == "e2e$RUN" }
+        withClue("the multi-segment name's folder must browse at ?prefix=acme: $rootBrowse") {
+            rootFolder?.isMissingNode shouldBe false
+        }
         val (_, levelBrowse) = rest("GET", "/api/v1/parameter-sets?prefix=acme/e2e$RUN")
-        levelBrowse.path("data").path("parameter_sets").find { it.path("name").asText() == SET_NAME }?.isMissingNode shouldBe false
+        val levelSet =
+            levelBrowse
+                .path("data")
+                .path("parameter_sets")
+                .find { it.path("name").asText() == SET_NAME }
+        withClue("the set must browse at ?prefix=acme/e2e$RUN: $levelBrowse") {
+            levelSet?.isMissingNode shouldBe false
+        }
 
         // Release over REST with the draft's hash.
         val (releaseStatus, releaseBody) =
@@ -487,7 +505,8 @@ class ParameterCascadeE2eTest {
         /** The per-run JWT secret — registered as `datapipelines.jwt.secret`; REST is a session's surface. */
         private val JWT_SECRET = E2eSession.newSecret()
         private const val WORKSPACE_NAME = "cascade194"
-        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-194d@datapipelines.test", workspace = WORKSPACE_NAME)
+        private val ADMIN_SESSION
+            get() = E2eSession.jwt(JWT_SECRET, ADMIN_USER_ID, "e2e-194d@datapipelines.test", workspace = WORKSPACE_NAME)
 
         private val MCP_KEY = E2eAuth.generateKey("e2e-194d-cascade")
 

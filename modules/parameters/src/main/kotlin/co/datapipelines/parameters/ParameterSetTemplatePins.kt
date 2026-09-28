@@ -38,7 +38,9 @@ data class ParameterSetPin(
  * the JSONB predicate is the body shape's property — and the composition with the pipeline
  * scan is `application`'s (the record's §8.4), which sees only this class.
  */
-class ParameterSetTemplatePins(private val jdbc: NamedParameterJdbcTemplate) {
+class ParameterSetTemplatePins(
+    private val jdbc: NamedParameterJdbcTemplate,
+) {
     /** One row per pinning parameter of one live set's working version, at exactly `templateId@version`. */
     fun workingVersionPins(
         workspaceId: UUID,
@@ -98,8 +100,9 @@ class ParameterSetTemplatePins(private val jdbc: NamedParameterJdbcTemplate) {
             .query(
                 COUNT_WORKING_PINS_SQL,
                 mapOf("workspaceId" to workspaceId, "templateId" to templateId),
-            ) { rs, _ -> rs.getInt("pinned_version") to rs.getInt("sets") }
-            .toMap()
+            ) { rs, _ ->
+                rs.getInt("pinned_version") to rs.getInt("sets")
+            }.toMap()
 
     private companion object {
         /**

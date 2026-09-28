@@ -107,8 +107,7 @@ class TemplateUsage(
         workspaceId: UUID,
         view: LensedView,
         id: String,
-    ): List<co.datapipelines.pipeline.TemplatePin> =
-        pipelines.referencedAnywhere(workspaceId, view.templates, view.pipelines, id)
+    ): List<co.datapipelines.pipeline.TemplatePin> = pipelines.referencedAnywhere(workspaceId, view.templates, view.pipelines, id)
 
     /** The template screen's per-version in-use counts, sets included (040 D6, one level up). */
     fun inUseCounts(
@@ -151,6 +150,5 @@ class TemplateUsage(
     private fun visible(
         view: LensedView,
         status: PipelineVersionStatus,
-    ): Boolean =
-        (view.pipelines.isEverything && view.parameterSets.isEverything) || status == PipelineVersionStatus.RELEASED
+    ): Boolean = (view.pipelines.isEverything && view.parameterSets.isEverything) || status == PipelineVersionStatus.RELEASED
 }
