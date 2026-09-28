@@ -194,6 +194,54 @@ class ScheduleServiceIntegrationTest {
     }
 
     @Test
+    fun `a lensed walk over more than one window - a delete committing between windows drops no visible row (#277)`() {
+        // The walk reads the live list in windows of LENS_WINDOW; reachable once the per-workspace
+        // cap exceeds one window. FORCED: the first window is read, then its first row is
+        // soft-deleted before the second window is read — an OFFSET page would shift by one and
+        // skip the row at the window boundary; a keyset page continues after the last name read.
+        val wide = SchedulerHarness(properties = SchedulerProperties(minIntervalSeconds = 60, maxSchedulesPerWorkspace = WIDE_CAP))
+        val names = (0 until ScheduleService.LENS_WINDOW + 3).map { "p/s_%03d".format(it) }
+        val first = names.map { wide.create(wide.request(name = it, payload = FakeExecutor.payload(it.substringAfter('_')))) }.first()
+        var windowsRead = 0
+        val racing =
+            object : NamedParameterJdbcTemplate(SchedulerTestDb.dataSource) {
+                override fun <T> query(
+                    sql: String,
+                    paramMap: Map<String, *>,
+                    rowMapper: RowMapper<T>,
+                ): List<T> =
+                    super.query(sql, paramMap, rowMapper).also {
+                        if (sql.contains("ORDER BY name") && ++windowsRead == 1) {
+                            SchedulerTestDb.jdbc.update(
+                                "UPDATE schedules SET deleted_at = NOW(), deleted_by = :by WHERE id = :id",
+                                mapOf("id" to first.id, "by" to SchedulerTestDb.SYSTEM_ACTOR),
+                            )
+                        }
+                    }
+            }
+        val service =
+            ScheduleService(
+                ScheduleRepository(racing, SchedulerAutoConfiguration.JSON),
+                wide.runs,
+                wide.executors,
+                wide.ledger,
+                wide.transactions,
+                wide.clock,
+                wide.properties,
+                wide.queue,
+                SchedulerAutoConfiguration.JSON,
+                ScheduleTargetReads(SchedulerTestDb.jdbc),
+            ) { SchedulerTestDb.SYSTEM_ACTOR }
+
+        val listed = service.list(SchedulerTestDb.WORKSPACE, null, names.size, 0, NarrowedViewer).map { it.name }
+
+        withClue("windows read: $windowsRead; every row present when its window was read is listed exactly once") {
+            (windowsRead >= 2) shouldBe true
+            listed shouldContainExactly names
+        }
+    }
+
+    @Test
     fun `listByTarget re-reads each id SCOPED - a schedule soft-deleted between the two reads drops out (#275)`() {
         val doomed = h.create(h.request(name = "ops/nightly", payload = FakeExecutor.payload("nightly")))
         h.create(h.request(name = "ops/nightly_b", payload = FakeExecutor.payload("nightly")))
@@ -549,6 +597,7 @@ class ScheduleServiceIntegrationTest {
 
         /** The paging walk's envelope: the page the client keeps, plus the one extra row for has_more. */
         const val PAGE_SIZE = 2
+        const val WIDE_CAP = 1_000
         const val LIMIT_PLUS_ONE = PAGE_SIZE + 1
     }
 }

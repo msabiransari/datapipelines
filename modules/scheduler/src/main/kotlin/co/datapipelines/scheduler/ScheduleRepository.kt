@@ -103,28 +103,56 @@ class ScheduleRepository(
         limit: Int,
         offset: Int,
     ): List<Schedule> {
-        val params =
-            mutableMapOf<String, Any?>(
-                "ws" to workspaceId,
-                "limit" to limit,
-                "offset" to offset,
-            )
-        val prefixClause =
-            if (prefix.isNullOrEmpty()) {
-                ""
-            } else {
-                // A folder prefix matches its subtree; LIKE metacharacters cannot occur in a legal
-                // folder path (the grammar admits `_`, which is escaped below), and the caller
-                // validated the prefix against the grammar before it got here.
-                params["prefix"] = prefix.replace("_", "\\_") + "/%"
-                " AND name LIKE :prefix"
-            }
+        val params = mutableMapOf<String, Any?>("ws" to workspaceId, "limit" to limit, "offset" to offset)
         return jdbc.query(
-            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL$prefixClause " +
+            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)} " +
                 "ORDER BY name LIMIT :limit OFFSET :offset",
             params,
             rowMapper,
         )
+    }
+
+    /**
+     * [listLive] as a KEYSET page (#277): the live schedules named after [afterName] (null = from
+     * the start), by name. A live name is unique per workspace (`uq_schedules_workspace_name_live`),
+     * so the order is total and a walk that continues from the last name it read neither re-reads
+     * nor skips a row when another request creates or deletes one between two pages — the shift an
+     * OFFSET page takes.
+     */
+    fun listLiveAfter(
+        workspaceId: UUID,
+        prefix: String?,
+        afterName: String?,
+        limit: Int,
+    ): List<Schedule> {
+        val params = mutableMapOf<String, Any?>("ws" to workspaceId, "limit" to limit)
+        val afterClause =
+            if (afterName == null) {
+                ""
+            } else {
+                params["after"] = afterName
+                " AND name > :after"
+            }
+        return jdbc.query(
+            "SELECT * FROM schedules WHERE workspace_id = :ws AND deleted_at IS NULL${prefixClause(prefix, params)}$afterClause " +
+                "ORDER BY name LIMIT :limit",
+            params,
+            rowMapper,
+        )
+    }
+
+    /**
+     * A folder prefix matches its subtree; LIKE metacharacters cannot occur in a legal folder path
+     * (the grammar admits `_`, which is escaped here), and the caller validated the prefix against
+     * the grammar before it got here. Adds the bind to [params].
+     */
+    private fun prefixClause(
+        prefix: String?,
+        params: MutableMap<String, Any?>,
+    ): String {
+        if (prefix.isNullOrEmpty()) return ""
+        params["prefix"] = prefix.replace("_", "\\_") + "/%"
+        return " AND name LIKE :prefix"
     }
 
     /** Live schedules in [workspaceId] — the B18 cap's count (L4). */
