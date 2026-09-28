@@ -1,10 +1,10 @@
 # Scheduler Specification
 
-**Status:** v1.4 (slices 1–3 of #9 — the core, the Schedules page, and the bindings; notifications and the application credential are later slices)
+**Status:** v1.5 (slices 1–3 of #9 — the core, the Schedules page, and the bindings; notifications and the application credential are later slices)
 **Owner:** datapipelines.co core
 **Depends on:** [REST API §20](rest-api.md#20-schedules), [Auth](auth.md), [DAG Executor](dag-executor.md), [Metadata DB §4.22–§4.25](metadata-db.md#422-schedules), [Configuration §3.29](configuration.md#329-scheduler-9)
 **Design record:** [scheduler design revision](superpowers/specs/2026-09-22-scheduler-design-revision.md) (ratified 2026-09-25) — the why; this page is the what
-**Last updated:** 2026-09-26
+**Last updated:** 2026-09-28
 
 ---
 
@@ -188,7 +188,7 @@ Metrics ([Observability §4.1](observability.md#41-metric-naming)): `datapipelin
 
 ### 8.4 The page
 
-People manage schedules on the **Schedules** page (`/schedules`, in the rail's Operate group — [UI Screens §4.20](ui-screens.md#420-schedules), slice 2). It adds nothing to this spec: every read and every write it makes is a call to [REST §20](rest-api.md#20-schedules) with the person's session, so what the page can do is exactly what §20 and [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) allow — every member reads, authors and admins write, a hidden button is never the authority. What it shows is this spec made visible: the next five occurrences as §3's function computes them, a blocked schedule's reason (§5.2) beside **Unblock**, and a run's history with its trail and — for a reader who may read executions — the execution's own messages merged in time order (the design revision's R10). Its preview of a pattern is §20.3, the same function the dispatcher uses.
+People manage schedules on the **Schedules** page (`/schedules`, in the rail's Operate group — [UI Screens §4.20](ui-screens.md#420-schedules), slice 2). It adds nothing to this spec: every read and every write it makes is a call to [REST §20](rest-api.md#20-schedules) with the person's session, so what the page can do is exactly what §20 and [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative) allow — every member reads, authors and admins write, a hidden button is never the authority. What it shows is this spec made visible: the next five occurrences as §3's function computes them, a blocked schedule's reason (§5.2) beside **Unblock**, and a run's history with its trail and — for a reader who may read executions — the execution's own messages merged in time order (the design revision's R10). Its preview of a pattern is §20.3, the same function the dispatcher uses. Elsewhere in the UI the same truth is pre-read before the fact: the pipelines explorer's **discard dialog lists the schedules that run the pipeline** (the Usage tab's by-target read, [UI Screens §4.3d](ui-screens.md#43d-lifecycle-verbs--both-explorers-and-both-editors-102), #273) — a discard succeeds, and each listed schedule then blocks at its next run per §5.2 (`pointer_null`, `target_not_found`) until it is repointed or deleted.
 
 ---
 
@@ -206,6 +206,7 @@ People manage schedules on the **Schedules** page (`/schedules`, in the rail's O
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.5 | 301 (#273) | §8.4: the pipelines discard dialog pre-reads §5.2's consequence before the fact — it lists the schedules whose target names the pipeline (the Usage tab's by-target read, UI Screens §4.3d), because the discard succeeds and each of them then blocks (`pointer_null` / `target_not_found`) at its next run. No scheduler code, route or query changed. |
 | 2026-09-28 | v1.4 | 286 (#277) | §8.2: the stop grace is 50 s in both shipped files, with the arithmetic at the configured maximum (admission ≤ 15 + drain 20 + Tomcat 10, + Helm's 5 s preStop); at 40 s Tomcat had nothing left under Helm. §6: the promoter's list reads its windows by keyset (`ScheduleRepository.listLiveAfter`): a create or delete committing between two windows of one walk can no longer duplicate or drop a visible row. |
 | 2026-09-27 | v1.3 | #280 | §2.1: a SAVE whose pipeline has no current version to follow is refused `400 schedule.validation.target_not_released` (§13.19's new row — it was `payload_invalid` / `pointer_null`, one code shared with the shape refusals); the run side's `pointer_null` refusal and block are untouched. The form names the absence at pick time with the same words (UI Screens v1.79). |
 | 2026-09-26 | v1.2 | scheduler lane 3 (#9) | §2.1: the payload's optional additive `parameter_bindings` key and the snapshot's `resolved_parameters`. New **§2.2 Bindings**: the two keywords on the frozen reference time (the schedule's zone, its logical occurrence day — not the actual start), the calendar-day YESTERDAY, the exact allowlist, the one-source rule, binding fit and blocking, and what the run detail shows. §9 records bindings as delivered. |
