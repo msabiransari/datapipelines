@@ -31,11 +31,26 @@
       <h2 class="ds-title">Recent executions</h2>
       <a class="u-text-sm" th:href="@{/executions}">View all <svg class="ds-icon ds-icon-xs" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#arrow-right"></use></svg></a>
     </div>
+    <!-- 282 (#282): the LOADING state is rows of the same data table — the partial's own header
+         (`recent-executions :: head`) over three skeleton rows — so the columns do not move when
+         the rows arrive (the partial replaces this whole frame, outerHTML). -->
     <div class="ds-recent" hx-get="/partials/recent-executions" hx-trigger="load" hx-swap="outerHTML">
-      <div class="app-card-b">
-        <div class="ds-skeleton ds-skeleton-table-row"></div>
-        <div class="ds-skeleton ds-skeleton-table-row"></div>
-        <div class="ds-skeleton ds-skeleton-table-row"></div>
+      <div class="dt-frame dt-flush dt-scroll dt-h-sm dt-nowrap" aria-busy="true">
+        <div class="dt-viewport" tabindex="-1">
+          <table class="ds-table">
+            <thead th:replace="~{partials/recent-executions :: head}"></thead>
+            <tbody>
+              <tr class="dt-skeleton-row" aria-hidden="true" th:each="i : ${#numbers.sequence(1, 3)}">
+                <td><span class="dt-skel"></span></td>
+                <td><span class="dt-skel"></span></td>
+                <td><span class="dt-skel"></span></td>
+                <td><span class="dt-skel"></span></td>
+                <td class="num"><span class="dt-skel"></span></td>
+                <td><span class="dt-skel"></span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>

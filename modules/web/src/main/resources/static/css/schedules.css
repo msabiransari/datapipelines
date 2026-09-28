@@ -141,9 +141,10 @@
   font-weight: var(--weight-semibold);
 }
 
+/* The Messages table is a FIXED data-table frame (282, data-table.css): its viewport scrolls
+   and its header sticks; this page only says how tall the box is. */
 .sch-messages-scroll {
-  max-height: 24rem;
-  overflow: auto;
+  --dt-max-h: 24rem;
 }
 
 .sch-messages {

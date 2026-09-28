@@ -27,7 +27,10 @@
         <span class="app-card-note" th:text="${#lists.size(endpoints)} + ' live'">3 live</span>
       </div>
 
-      <table class="ds-table" th:if="${not #lists.isEmpty(endpoints)}">
+      <!-- 282 (#282): a PAGE-FLOW data-table frame, flush with the card (ui-screens §3.7). -->
+      <div class="dt-frame dt-flush" th:if="${not #lists.isEmpty(endpoints)}">
+        <div class="dt-viewport" tabindex="-1">
+      <table class="ds-table">
         <thead>
         <tr>
           <th>Path</th>
@@ -72,6 +75,8 @@
         </tr>
         </tbody>
       </table>
+        </div>
+      </div>
 
       <div class="app-card-b" th:if="${#lists.isEmpty(endpoints)}">
         <div class="app-empty">
@@ -88,6 +93,10 @@
            refusal, carried on the row — what the operator reads is the rule the row predates. -->
       <div class="app-card-b" th:if="${not #lists.isEmpty(legacyEndpoints)}">
         <h3 class="ds-title">Legacy paths</h3>
+        <!-- 282 (#282): a PAGE-FLOW data-table frame (ui-screens §3.7); a header-less list, so the
+             enhancer has no header to upgrade and only the frame, the rows and the cap apply. -->
+        <div class="dt-frame">
+          <div class="dt-viewport" tabindex="-1">
         <table class="ds-table">
           <tbody>
           <tr th:each="l : ${legacyEndpoints}">
@@ -113,6 +122,8 @@
           </tr>
           </tbody>
         </table>
+          </div>
+        </div>
         <p class="app-card-note app-flush">These stored paths predate the current three-segment grammar and never
           serve. Unpublishing one removes it; republishing at a current-grammar path is the replacement.</p>
       </div>

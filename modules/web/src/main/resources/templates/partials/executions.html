@@ -1,25 +1,32 @@
 <th:block xmlns:th="http://www.thymeleaf.org" th:fragment="table">
-  <th:block th:if="${#lists.isEmpty(executions)}">
-    <div class="ds-empty">
-      <div class="ds-empty-title">No executions found</div>
-      <div class="ds-empty-description" th:if="${offset == 0}">Run a pipeline to see results here.</div>
-      <div class="ds-empty-description" th:unless="${offset == 0}">No more results.</div>
-    </div>
-  </th:block>
-  <th:block th:unless="${#lists.isEmpty(executions)}">
+  <!-- 282 (#282): a FIXED data-table frame (ui-screens §3.7) — the header stays at the top of
+       its own viewport while the rows scroll, dense rows one line each, and the sort buttons say
+       they sort THIS page (`data-dt-paged`: the pager below is server-side, 20 a page). The
+       empty state is a row of the same table, so the header never disappears with the rows. -->
+  <div class="dt-frame dt-scroll dt-nowrap" data-dt-paged>
+    <div class="dt-viewport" tabindex="-1">
     <table class="ds-table">
       <thead>
         <tr>
           <th>Pipeline</th>
-          <th>Version</th>
+          <th data-type="number">Version</th>
           <th>Status</th>
-          <th>Started</th>
+          <th data-type="date">Started</th>
           <th class="num">Duration</th>
           <th class="num">Rows</th>
           <th>Via</th>
         </tr>
       </thead>
       <tbody>
+        <tr th:if="${#lists.isEmpty(executions)}" class="dt-state-row">
+          <td colspan="7" class="dt-state-cell">
+            <div class="dt-state">
+              <b>No executions found</b>
+              <span th:if="${offset == 0}">Run a pipeline to see results here.</span>
+              <span th:unless="${offset == 0}">No more results.</span>
+            </div>
+          </td>
+        </tr>
         <tr th:each="r : ${executions}" class="app-row-clickable" th:attr="data-href=@{/executions/{id}(id=${r.executionId})}">
           <td>
             <!-- T114: the display name is prose — it renders in the body face, not mono
@@ -66,7 +73,10 @@
         </tr>
       </tbody>
     </table>
+    </div>
+  </div>
 
+  <th:block th:unless="${#lists.isEmpty(executions)}">
     <div class="u-row u-between u-mt-md">
       <th:block th:if="${offset > 0}">
         <button class="ds-button ds-button-secondary"

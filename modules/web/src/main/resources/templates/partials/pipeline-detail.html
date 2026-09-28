@@ -195,8 +195,11 @@
                   th:text="${#maps.size(parameters)} + (${#maps.size(parameters)} == 1 ? ' declared' : ' declared')">2 declared</span>
           </div>
           <p class="ds-empty-description app-card-b" th:if="${#maps.isEmpty(parameters)}">This pipeline declares no parameters.</p>
-          <div class="tplx-scroll" th:unless="${#maps.isEmpty(parameters)}">
-            <table class="ds-table tplx-fit-table">
+          <!-- 282 (#282): a FIXED data-table frame at tplx-scroll's old 22rem ceiling, as wide as
+               its content (`dt-fit`, was .tplx-fit-table) — ui-screens §3.7. -->
+          <div class="dt-frame dt-scroll dt-h-sm dt-fit" th:unless="${#maps.isEmpty(parameters)}">
+            <div class="dt-viewport" tabindex="-1">
+            <table class="ds-table">
               <thead>
                 <tr><th>Name</th><th>Type</th><th>Default</th></tr>
               </thead>
@@ -211,6 +214,7 @@
                 </tr>
               </tbody>
             </table>
+            </div>
           </div>
         </section>
       </div>

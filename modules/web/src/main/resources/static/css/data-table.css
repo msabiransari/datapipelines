@@ -1,0 +1,429 @@
+/* The house data table (282, #282; ui-screens.md §2 rule 9 and §3.7) — ONE rule set draws every
+ * table in the app. Ported from the owner-approved preview (the store's
+ * notes/design/282-data-table-v2/, 2026-09-27: "Love this."), token-only, with the layers it
+ * replaces folded in: app.css's boxed `.ds-table` block (076 §D / 079 §E), the card-table and
+ * `.u-scroll-x` table rules, the "every table scrolls inside its own box" rule (110 §B),
+ * template-tree.css's `.tplx-fit-table` and the result dock's frame (pipeline-editor.css).
+ *
+ *   .dt-frame        the box: border, radius, background, the header CAP (::after)
+ *     .dt-viewport   the ONE scroll container, both axes
+ *       table.ds-table   one semantic table; thead sticky at the top, first column optionally
+ *                        sticky at the left (.dt-freeze)
+ *
+ * The header sticks with `position: sticky` on its cells inside the viewport. The viewport's
+ * vertical scrollbar would then run beside the header too — the owner's "a vertical scrollbar in
+ * the header" (#282) — so the frame's ::after caps the track for exactly the header's measured
+ * height, painted in the header's surface; its width is the MEASURED scrollbar width
+ * (data-table.js), so an overlay scrollbar gets a zero-width cap and nothing is drawn.
+ *
+ * Two kinds of frame, decided per table and listed in ui-screens §3.7:
+ *   FIXED     `.dt-scroll` — a bounded viewport (`--dt-max-h`) for dense data; `.dt-fill`
+ *             instead when a parent sizes it (the editor's result dock).
+ *   PAGE-FLOW the default — no height of its own. While the table fits its frame the script
+ *             sets `.dt-fits` and the viewport stops being a scroll container, so the header
+ *             sticks to the page's own scroller (<main>, §3.4) under the top bar. A table wider
+ *             than its frame keeps a bounded box and scrolls both ways inside it — that is
+ *             also the no-script state, so a table can never widen the document.
+ *
+ * Tokens only (CLAUDE.md rule 3; DataTableCssTokenTest): every colour, radius, gap and type size
+ * is a design-system variable. The few lengths with no token — the column floor and the dense
+ * columns' ceiling, the resize handle, the viewport heights — are named custom properties below,
+ * so the script reads the sheet's numbers rather than carrying its own. CSP: nothing here needs
+ * an inline style; the script writes widths and the two measured variables through the CSSOM. */
+
+/* ------------------------------------------------------------------ every .ds-table */
+
+/* Layered over the vendored primitives (primitives.css `.ds-table`, loaded first): the
+   separate border model (a sticky cell keeps its own borders and the frame's radius can close),
+   figures that align (076 §D — dates proportional but tabular, `.num` mono on top). */
+.ds-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.ds-table thead th {
+  background: var(--surface-inset);
+  /* The vendored rule hangs the header line on <thead>, which the separate model ignores. */
+  border-bottom: 1px solid var(--border-default);
+}
+
+.app-main .ds-table tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+/* Numerics right and tabular; dates stay proportional (§3.3.2) and never take this class. */
+.app-main .ds-table td.num,
+.app-main .ds-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-main .ds-table td.num {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* `.ds-table td` (0,1,1) outranks a bare utility (0,1,0): a full-bleed skeleton cell and the
+   admin-users empty row (097 §C) say their padding at table scope, never with !important. */
+.ds-table td.u-p0 { padding: 0; }
+.ds-table td.u-p-md { padding: var(--gap-md); }
+
+/* A table NOT yet in a frame (274's legacy-paths list, and anything a later round adds before
+   it is swept) keeps the pre-282 box: its own border and radius, and it scrolls inside itself
+   rather than widening the document (110 §B). Every table this round touched is framed. */
+.ds-table:not(.dt-viewport > .ds-table) {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-default);
+}
+
+.app-main .ds-table:not(.dt-viewport > .ds-table) {
+  display: block;
+  overflow-x: auto;
+}
+
+.ds-table:not(.dt-viewport > .ds-table) thead th:first-child { border-top-left-radius: calc(var(--radius-md) - 1px); }
+.ds-table:not(.dt-viewport > .ds-table) thead th:last-child { border-top-right-radius: calc(var(--radius-md) - 1px); }
+.ds-table:not(.dt-viewport > .ds-table) tbody tr:last-child td:first-child { border-bottom-left-radius: calc(var(--radius-md) - 1px); }
+.ds-table:not(.dt-viewport > .ds-table) tbody tr:last-child td:last-child { border-bottom-right-radius: calc(var(--radius-md) - 1px); }
+
+/* ------------------------------------------------------------------ the frame */
+
+.dt-frame {
+  --dt-sbw: 0px;                 /* measured: the viewport's scrollbar width */
+  --dt-head-h: 0px;              /* measured: the header row's height */
+  --dt-surface: var(--surface-default);
+  --dt-row-pad-y: var(--space-2-5);
+  --dt-head-pad-y: var(--space-2);
+  --dt-col-min: 4rem;            /* a drag never makes a column narrower */
+  --dt-col-max: 25rem;           /* a dense column's automatic ceiling (drag past it freely) */
+  --dt-handle: var(--space-2);   /* the resize handle's hit width */
+  --dt-max-h: min(40rem, 60dvh); /* a FIXED viewport's height */
+  --dt-flow-max-h: calc(100dvh - var(--header-height) - 2 * var(--gap-lg));
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--dt-surface);
+  /* `clip`, not `hidden`: the corners are clipped but the frame is NOT a scroll container, so a
+     page-flow header still sticks to <main> through it. */
+  overflow: clip;
+}
+
+/* Inside a card the table is the card's body: the card's own border closes the box, a
+   separator line meets the card head, and the rows sit on the card's surface. */
+.ds-card .dt-frame {
+  --dt-surface: var(--surface-raised);
+}
+
+.dt-frame.dt-flush {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+}
+
+/* The cap: the scrollbar track beside the header, painted as the header. */
+.dt-frame::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  width: var(--dt-sbw);
+  height: var(--dt-head-h);
+  background: var(--surface-inset);
+  box-shadow: inset 0 -1px 0 var(--border-default);
+  pointer-events: none;
+}
+
+.dt-viewport {
+  overflow: auto;
+  max-height: var(--dt-flow-max-h);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent;
+  overscroll-behavior: contain;
+}
+
+/* FIXED: a bounded viewport, the gutter reserved so the header never jumps when rows arrive. */
+.dt-scroll > .dt-viewport {
+  max-height: var(--dt-max-h);
+  scrollbar-gutter: stable;
+}
+
+.dt-scroll.dt-h-sm {
+  --dt-max-h: 22rem; /* the ceiling tplx-scroll gave a growing list (owner, 2026-09-08) */
+}
+
+/* FIXED by its parent: the frame is a flex item that takes the rest of a column. */
+.dt-fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.dt-fill > .dt-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  scrollbar-gutter: stable;
+}
+
+/* PAGE-FLOW and the table fits: no scroll container here, so the header sticks to the page's.
+   `--dt-flow-top` is minus that scroller's top padding (data-table.js measures it): a sticky
+   `top: 0` cell stops at the scroller's CONTENT edge, 24px under <main>'s top, and the rows
+   would show through the band above the header. */
+.dt-frame.dt-fits:not(.dt-scroll):not(.dt-fill) > .dt-viewport {
+  overflow: clip;
+  max-height: none;
+}
+
+.dt-frame.dt-fits:not(.dt-scroll):not(.dt-fill) > .dt-viewport > .ds-table thead th {
+  top: var(--dt-flow-top, 0px);
+}
+
+/* "A table exactly as wide as its content, never the full row" (was template-tree.css's
+   .tplx-fit-table): the frame hugs the table. */
+.dt-frame.dt-fit {
+  width: fit-content;
+}
+
+.dt-fit > .dt-viewport > .ds-table {
+  width: auto;
+}
+
+/* ------------------------------------------------------------------ the table in a viewport */
+
+.dt-viewport > .ds-table {
+  display: table;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.dt-viewport > .ds-table.dt-fixed {
+  table-layout: fixed;
+}
+
+.dt-viewport > .ds-table th,
+.dt-viewport > .ds-table td {
+  border-radius: 0;
+  box-sizing: border-box;
+}
+
+.dt-viewport > .ds-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: var(--dt-head-pad-y) var(--space-3);
+  background: var(--surface-inset);
+  border-bottom: 0;
+  /* The header's bottom line is a shadow, so it travels with the sticky cell. */
+  box-shadow: inset 0 -1px 0 var(--border-default);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.dt-viewport > .ds-table td {
+  padding: var(--dt-row-pad-y) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  /* Opaque: rows pass UNDER the sticky header and the frozen column. */
+  background: var(--dt-surface);
+}
+
+.dt-viewport > .ds-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Identifiers must be allowed to BREAK in a table that wraps (098 §A, was the card-table
+   rule): a folder path or a JDBC URL has no spaces and would set the table's minimum width. */
+.dt-frame:not(.dt-nowrap) td .ds-mono,
+.dt-frame:not(.dt-nowrap) td .app-path,
+.dt-frame:not(.dt-nowrap) td.u-mono,
+.dt-frame:not(.dt-nowrap) td.ds-mono {
+  overflow-wrap: anywhere;
+}
+
+/* Dense data: one line per row, an ellipsis where a column is narrower than its value. */
+.dt-nowrap > .dt-viewport > .ds-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Density and zebra (the preview's two switches), both opt-in per frame. */
+.dt-frame.dt-compact {
+  --dt-row-pad-y: var(--space-1-5);
+  --dt-head-pad-y: var(--space-1-5);
+}
+
+.dt-zebra > .dt-viewport > .ds-table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surface-inset) 55%, var(--dt-surface));
+}
+
+/* Hover wins over zebra (same specificity, declared after it). */
+.dt-frame > .dt-viewport > .ds-table tbody tr:hover td {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ the frozen first column */
+
+/* `:first-of-type`, not `:first-child`: a row Alpine renders (the result dock) starts with its
+   `<template x-for>`, so the first CELL is not the row's first child. */
+.dt-freeze > .dt-viewport > .ds-table th:first-of-type,
+.dt-freeze > .dt-viewport > .ds-table td:first-of-type {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.dt-freeze > .dt-viewport > .ds-table thead th:first-of-type {
+  z-index: 4;
+}
+
+.dt-freeze.is-scrolled-x > .dt-viewport > .ds-table td:first-of-type {
+  box-shadow: inset -1px 0 0 var(--border-subtle), var(--space-1-5) 0 var(--space-2-5) calc(-1 * var(--space-2)) color-mix(in srgb, var(--text-primary) 35%, transparent);
+}
+
+.dt-freeze.is-scrolled-x > .dt-viewport > .ds-table thead th:first-of-type {
+  box-shadow: inset 0 -1px 0 var(--border-default), inset -1px 0 0 var(--border-subtle), var(--space-1-5) 0 var(--space-2-5) calc(-1 * var(--space-2)) color-mix(in srgb, var(--text-primary) 35%, transparent);
+}
+
+/* ------------------------------------------------------------------ keyboard rows */
+
+.dt-viewport > .ds-table tbody tr[data-href] {
+  cursor: pointer;
+}
+
+.dt-viewport > .ds-table tbody tr:focus-visible {
+  outline: 0;
+}
+
+.dt-viewport > .ds-table tbody tr:focus-visible td {
+  background: var(--surface-active);
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 0 var(--border-focus), inset 0 -1px 0 var(--border-focus);
+}
+
+/* ------------------------------------------------------------------ sort */
+
+.dt-sort {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.dt-sort:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The sprite's chevron-right, turned: up = ascending, down = descending. */
+.dt-sort-ic {
+  flex: none;
+  opacity: 0;
+  transform: rotate(-90deg);
+  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+
+th:hover > .dt-sort > .dt-sort-ic { opacity: 0.5; }
+th[aria-sort="ascending"] > .dt-sort > .dt-sort-ic { opacity: 1; }
+th[aria-sort="descending"] > .dt-sort > .dt-sort-ic { opacity: 1; transform: rotate(90deg); }
+th[aria-sort="ascending"] > .dt-sort,
+th[aria-sort="descending"] > .dt-sort { color: var(--text-primary); }
+th.num > .dt-sort { flex-direction: row-reverse; }
+
+/* ------------------------------------------------------------------ resize */
+
+.dt-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: var(--dt-handle);
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.dt-resizer::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: var(--space-1);
+  width: 1px;
+  background: var(--border-subtle);
+}
+
+.dt-resizer:hover::after,
+.dt-resizer.is-active::after {
+  width: 2px;
+  background: var(--border-focus);
+}
+
+:root.dt-resizing,
+:root.dt-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------------ states: rows of the same table */
+
+.dt-viewport > .ds-table td.dt-state-cell {
+  padding: 0;
+}
+
+.dt-state {
+  display: grid;
+  place-items: center;
+  gap: var(--space-2);
+  padding: var(--space-10) var(--space-4);
+  color: var(--text-muted);
+  text-align: center;
+  white-space: normal;
+}
+
+.dt-state b {
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.dt-skeleton-row .dt-skel {
+  display: block;
+  height: 0.85em;
+  width: 70%;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-inset) 25%, var(--surface-active) 50%, var(--surface-inset) 75%);
+  background-size: 200% 100%;
+  animation: dt-shimmer 1.2s linear infinite;
+}
+
+/* The preview's varied bar lengths, by position — classes, never an inline width. */
+.dt-skeleton-row td:nth-child(3n + 2) .dt-skel { width: 45%; }
+.dt-skeleton-row td:nth-child(3n) .dt-skel { width: 58%; }
+.dt-skeleton-row td.num .dt-skel { margin-left: auto; }
+
+@keyframes dt-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dt-skeleton-row .dt-skel { animation: none; }
+  .dt-sort-ic { transition: none; }
+}

@@ -5,7 +5,11 @@
     </div>
   </th:block>
   <th:block th:unless="${#lists.isEmpty(rows)}">
-    <div class="u-scroll-x">
+    <!-- 282 (#282): a FIXED data-table frame (ui-screens §3.7): header and first column hold
+         while a wide result scrolls both ways; one line per row; the sort sorts THIS page (the
+         pager below is the cursor's). -->
+    <div class="dt-frame dt-scroll dt-nowrap dt-freeze" data-dt-paged>
+      <div class="dt-viewport" tabindex="-1">
       <table class="ds-table">
         <thead>
           <tr>
@@ -18,6 +22,7 @@
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
 
     <div class="u-row u-between u-mt-md u-text-sm u-secondary">

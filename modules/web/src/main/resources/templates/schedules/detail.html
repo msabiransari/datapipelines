@@ -99,11 +99,16 @@
               <h3>Next five occurrences</h3>
               <span class="app-card-note" data-slot="occurrences-note"></span>
             </div>
-            <div class="tplx-scroll">
-              <table class="ds-table tplx-fit-table sch-occurrences">
+            <!-- 282 (#282): FIXED data-table frames at tplx-scroll's 22rem, content-wide (`dt-fit`,
+                 was .tplx-fit-table) — ui-screens §3.7. The rows are cloned from the templates
+                 below; the enhancer sees them arrive. -->
+            <div class="dt-frame dt-scroll dt-h-sm dt-fit">
+              <div class="dt-viewport" tabindex="-1">
+              <table class="ds-table sch-occurrences">
                 <thead><tr><th>Local time</th><th>Offset</th><th>UTC</th></tr></thead>
                 <tbody data-slot="occurrences"></tbody>
               </table>
+              </div>
             </div>
           </section>
 
@@ -113,11 +118,13 @@
               <span class="app-card-note" data-slot="parameters-note"></span>
             </div>
             <p class="ds-empty-description app-card-b" data-slot="parameters-empty" hidden>No parameter values — the pipeline's defaults apply.</p>
-            <div class="tplx-scroll" data-slot="parameters-wrap" hidden>
-              <table class="ds-table tplx-fit-table">
+            <div class="dt-frame dt-scroll dt-h-sm dt-fit" data-slot="parameters-wrap" hidden>
+              <div class="dt-viewport" tabindex="-1">
+              <table class="ds-table">
                 <thead><tr><th>Name</th><th>Value</th></tr></thead>
                 <tbody data-slot="parameters"></tbody>
               </table>
+              </div>
             </div>
           </section>
         </div>

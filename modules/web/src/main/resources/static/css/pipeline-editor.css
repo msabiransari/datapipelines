@@ -1994,31 +1994,22 @@ html.dp-splitting-y * {
 }
 
 .pe-result-table-container {
-  /* The FRAME belongs to the scroll viewport, not to the table (owner, 2026-09-11: "results
-     table does not have border on the right"). 032 had the table carry border, radius and
-     background; a result wider than the dock then scrolled its own right edge — and its
-     rounded corners — out of view, and the visible box read as a table with three sides.
-     Same shape as `.app-card-table` (app.css): the viewport draws the box, the table runs
-     edge to edge inside it and scrolls. */
-  overflow-x: auto;
+  /* The FRAME belongs to the box that does NOT scroll (owner, 2026-09-11: "results table does
+     not have border on the right"). 032 had the table carry border, radius and background; a
+     result wider than the dock then scrolled its own right edge — and its rounded corners —
+     out of view. Since 282 this element IS the data table's frame (`.dt-frame.dt-fill`,
+     data-table.css): the frame draws the box and its one viewport scrolls both ways inside it,
+     so the right edge and the corners stay put — 032's rule, kept. Only the dock's inset is
+     this sheet's. */
   margin: var(--gap-sm, 8px);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--surface-default);
-}
-
-.pe-result-table-container > .ds-table {
-  border: 0;
-  border-radius: 0;
-  background: none;
 }
 
 /* Locked header, scrolling body (owner, 2026-09-11). `position: sticky` pins to the
-   nearest SCROLLING ancestor, so the table container has to be the pane's vertical
-   scroller — not the dock body above it. The results pane is a column: the ttl line and
-   the actions row keep their height, the table container takes the rest and scrolls both
-   ways, and the header row rides on top of it with an opaque ground so rows never show
-   through the labels. */
+   nearest SCROLLING ancestor, so the table's viewport has to be the pane's vertical scroller
+   — not the dock body above it. The results pane is a column: the ttl line and the actions
+   row keep their height, the table frame takes the rest (`.dt-fill`) and its viewport
+   scrolls both ways; the sticky header, its opaque ground and the scrollbar cap are the data
+   table's (282, data-table.css). */
 #pe-pane-results {
   display: flex;
   flex-direction: column;
@@ -2034,14 +2025,6 @@ html.dp-splitting-y * {
 .pe-result-body > .pe-result-table-container {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
-}
-
-.pe-result-table-container thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--surface-inset); /* app.css's header ground — restated because sticky needs it opaque */
 }
 
 .pe-result-actions {

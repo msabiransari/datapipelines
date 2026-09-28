@@ -136,17 +136,23 @@ class AppCssTokenAuditTest {
     }
 
     @Test
-    fun `a table wider than its card scrolls inside it rather than being clipped`() {
+    fun `a table wider than its card scrolls inside its own viewport rather than being clipped`() {
         // `overflow: hidden` on the table card sliced the endpoints table's last column off
         // at the card's edge and made it look deliberate. Scrolling keeps the content
         // reachable and still keeps the DOCUMENT from widening, which is what
         // AppShellBrowserTest's overflow assertion actually asks for.
-        // Scoped to the .app-card-table RULE, not to the file: `overflow: hidden` is right in
-        // several other places here (the rail clips its labels when collapsed, the avatar
-        // clips its image), and a file-wide ban would be a guard that fails on correct code.
+        // 282 (#282): the scrolling moved from the CARD to the data table's own viewport
+        // (data-table.css `.dt-viewport`), and the card must now NOT be a scroll container at
+        // all — `clip` rounds its corners without taking the page-flow header's sticky
+        // scroller away from <main>. So: the card clips (never hides, never scrolls), the
+        // viewport scrolls. Scoped to the two RULES, not the files: `overflow: hidden` is right
+        // in several other places here (the rail clips its labels, the avatar its image).
         val rule = appCss.substringAfter(".app-card-table {").substringBefore("}")
-        rule shouldContain "overflow-x: auto;"
+        rule shouldContain "overflow: clip;"
         rule shouldNotContain "overflow: hidden;"
+        rule shouldNotContain "overflow-x: auto;"
+        val viewport = read("css/data-table.css").substringAfter(".dt-viewport {").substringBefore("}")
+        viewport shouldContain "overflow: auto;"
     }
 
     @Test

@@ -37,13 +37,15 @@
       <p class="ds-empty-title">No workspaces yet</p>
       <p class="ds-empty-description">You are not a member of any workspace yet.</p>
     </div>
-    <!-- .ds-table supplies its own box (app.css) — the old wrapper div double-framed it. -->
-    <table class="ds-table" th:unless="${#lists.isEmpty(own)}">
+    <!-- 282 (#282): PAGE-FLOW data-table frames (ui-screens §3.7) — the frame draws the box. -->
+    <div class="dt-frame" th:unless="${#lists.isEmpty(own)}">
+      <div class="dt-viewport" tabindex="-1">
+    <table class="ds-table">
       <thead>
         <tr>
           <th>Workspace</th>
           <th>Your role</th>
-          <th class="num">Actions</th>
+          <th class="num" data-sort="off">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -96,6 +98,8 @@
         </tr>
       </tbody>
     </table>
+      </div>
+    </div>
   </section>
 
   <!-- The member sections follow the ACTIVE workspace, because that is the one the server
@@ -131,13 +135,14 @@
       <button type="submit" data-verb="workspace-display-name" class="ds-button ds-button-secondary ds-button-sm">Rename</button>
     </form>
 
-    <!-- .ds-table supplies its own box (app.css) — the old wrapper div double-framed it. -->
-    <table class="ds-table u-mb-md">
+    <div class="dt-frame u-mb-md">
+      <div class="dt-viewport" tabindex="-1">
+    <table class="ds-table">
       <thead>
         <tr>
           <th>Member</th>
           <th>Role</th>
-          <th class="num">Actions</th>
+          <th class="num" data-sort="off">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -167,6 +172,8 @@
         </tr>
       </tbody>
     </table>
+      </div>
+    </div>
 
     <!-- Add a member — or invite one (113): an email with no account yet becomes an
          invitation carrying the same ONE role, materialised at first sign-in. -->

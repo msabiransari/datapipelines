@@ -70,11 +70,15 @@
 
         <h3 class="sch-messages-h">Messages</h3>
         <p class="u-text-sm u-muted u-m0 u-mb-xs" data-slot="messages-note"></p>
-        <div class="tplx-scroll sch-messages-scroll">
+        <!-- 282 (#282): a FIXED data-table frame (ui-screens §3.7); schedules.css's
+             .sch-messages-scroll sets its height (--dt-max-h). -->
+        <div class="dt-frame dt-scroll sch-messages-scroll">
+          <div class="dt-viewport" tabindex="-1">
           <table class="ds-table sch-messages">
-            <thead><tr><th>Time</th><th>Source</th><th>What</th><th>Detail</th></tr></thead>
+            <thead><tr><th data-type="date">Time</th><th>Source</th><th>What</th><th>Detail</th></tr></thead>
             <tbody data-slot="messages"></tbody>
           </table>
+          </div>
         </div>
       </div>
     </div>

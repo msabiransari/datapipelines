@@ -105,10 +105,13 @@
            control the server would refuse, and the note naming who can send it. -->
       <form th:if="${canPromote == true and !#lists.isEmpty(plan.promotable)}"
             th:action="@{/promotion/promote}" method="post">
+        <!-- 282 (#282): PAGE-FLOW data-table frames (ui-screens §3.7). -->
+        <div class="dt-frame">
+          <div class="dt-viewport" tabindex="-1">
         <table class="ds-table">
           <thead>
             <tr>
-              <th class="app-col-check">Send</th>
+              <th class="app-col-check" data-sort="off" data-resize="off">Send</th>
               <th>Pipeline</th>
               <th class="num">Here</th>
               <th class="num">On target</th>
@@ -138,6 +141,8 @@
             </tr>
           </tbody>
         </table>
+          </div>
+        </div>
         <div class="u-row-md u-mt-lg">
           <button type="submit" data-verb="promote" class="ds-button ds-button-primary"
                   th:disabled="${plan.targetAuthoringEnabled}">Promote</button>
@@ -151,6 +156,8 @@
       <!-- The reader's plan (143): the same rows, read-only — 114 §B's "the PLAN stays readable
            for everyone" kept, without the submission controls it used to carry. -->
       <th:block th:if="${canPromote != true and !#lists.isEmpty(plan.promotable)}">
+        <div class="dt-frame">
+          <div class="dt-viewport" tabindex="-1">
         <table class="ds-table" data-promotion-plan="read-only">
           <thead>
             <tr>
@@ -173,6 +180,8 @@
             </tr>
           </tbody>
         </table>
+          </div>
+        </div>
         <div class="u-row-md u-mt-lg">
           <div class="app-note" data-role-note="promote">
             <svg class="ds-icon ds-icon-sm" aria-hidden="true" focusable="false"><use href="/vendor/icons/lucide-sprite.svg#info"></use></svg>

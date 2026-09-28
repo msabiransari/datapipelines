@@ -152,7 +152,9 @@
           <div class="te-panel-head">
             <h2>Imports</h2>
           </div>
-          <!-- .ds-table supplies its own box (app.css) — the old .ds-card wrapper double-framed it. -->
+          <!-- 282 (#282): a PAGE-FLOW data-table frame (ui-screens §3.7). -->
+          <div class="dt-frame">
+            <div class="dt-viewport" tabindex="-1">
           <table class="ds-table">
             <thead>
               <tr>
@@ -167,6 +169,8 @@
               </tr>
             </tbody>
           </table>
+            </div>
+          </div>
         </div>
       </th:block>
     </div>

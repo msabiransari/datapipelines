@@ -344,48 +344,9 @@ body {
    this file. `.app-logout-form` survives there as the avatar menu's last row; it
    is still the `hx-boost="false"` full navigation `ShellRenderTest` pins. */
 
-/* ---------------------------------------------------------------------------
-   Data tables — boxed, header fill, closed rounded corners. Layered over the
-   vendored .ds-table primitives (this file loads last, §3.4; row hover, the
-   last-row border removal and the `.num` alignment already live there).
-   Border model switches to `separate` so the outer border + radius can close;
-   corners are clipped via the corner cells (the thead fill and row-hover fill
-   would otherwise paint over the rounded border).
-   --------------------------------------------------------------------------- */
-.ds-table {
-  border-collapse: separate;
-  border-spacing: 0;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--surface-default);
-  /* 076 §D: every table aligns figures — dates and counts share a column's rhythm.
-     `.num` cells keep their mono face on top of this; dates render proportional
-     but tabular, so a column of timestamps still scans. */
-  font-variant-numeric: tabular-nums;
-}
-
-.ds-table thead th {
-  background: var(--surface-inset);
-  /* Vendored rule hangs the header separator on <thead>, which the separate
-     border model ignores — restate it on the cells. */
-  border-bottom: 1px solid var(--border-default);
-}
-
-.ds-table thead th:first-child {
-  border-top-left-radius: calc(var(--radius-md) - 1px);
-}
-
-.ds-table thead th:last-child {
-  border-top-right-radius: calc(var(--radius-md) - 1px);
-}
-
-.ds-table tbody tr:last-child td:first-child {
-  border-bottom-left-radius: calc(var(--radius-md) - 1px);
-}
-
-.ds-table tbody tr:last-child td:last-child {
-  border-bottom-right-radius: calc(var(--radius-md) - 1px);
-}
+/* 282 (#282): the boxed `.ds-table` block that lived here (076 §D / 079 §E — separate
+   borders, the header fill, the radius on the corner cells, tabular figures) is folded into
+   css/data-table.css, which loads right after this file and draws every table. */
 
 /* ---------------------------------------------------------------------------
    076 §B — boosted-navigation progress bar (layouts/default.html #app-progress,
@@ -1555,19 +1516,16 @@ button.app-busy::after {
   border-color: var(--border-subtle);
 }
 
-/* A card whose body is a full-bleed table: the header keeps the padding, the
-   table runs to the card's edges and its own cell padding does the rest.
-
-   `overflow-x: auto`, NOT `hidden`. The first screenshot pass of /api-console
-   showed the endpoints table's last column sliced off at the card's edge: the
-   table is wider than its grid column (a mono path plus a nowrap chip), and
-   `hidden` made that look like a design choice instead of a defect. Scrolling
-   inside the card keeps the content reachable AND keeps the document from
-   widening, which is what the overflow assertion is really asking for. */
+/* A card whose body is a flush data table (282: the ONE rule left of the card-table block).
+   The table's own frame (data-table.css, `.dt-flush`) scrolls inside the card, so the card
+   neither scrolls nor widens: `overflow: clip` only rounds its corners — `clip`, never
+   `hidden`/`auto`, because a scroll container here would take the page-flow header's sticky
+   scroller away from <main>. Before 282 the CARD scrolled sideways (`overflow-x: auto`, the
+   /api-console lesson) and the page scrolled the rows, so no header ever stayed. */
 .app-card-table {
   padding: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  min-width: 0;
+  overflow: clip;
 }
 
 .app-card-h {
@@ -1654,24 +1612,6 @@ button.app-busy::after {
   }
 }
 
-/* Tables inside a card have already got the card's border and radius; the
-   076 boxed-table treatment would draw a second one inside the first. */
-.app-card-table {
-  /* The card clips; the table below scrolls inside it. Together these keep a long mono
-     path from widening the page — the failure the overflow assertion exists for. */
-  min-width: 0;
-}
-
-.app-card-table .ds-table {
-  border: 0;
-  border-radius: 0;
-  background: none;
-}
-
-.app-main .ds-table tbody tr:hover td {
-  background: var(--surface-hover);
-}
-
 /* The machine path under a display name: mono, muted, one size down — the
    §3.3 "mono is for identifiers only" rule, given a place to live. */
 .app-path {
@@ -1682,50 +1622,13 @@ button.app-busy::after {
   overflow-wrap: anywhere;
 }
 
-/* Identifiers in a table cell must be allowed to BREAK. A folder path or a
-   published route has no spaces, so without this a single cell sets the table's
-   minimum width and the whole table stops fitting its card — which is what
-   sliced the endpoints table's last column off its first screenshot. Breaking
-   an identifier mid-string is ugly; hiding a column is worse. */
-.app-card-table td .ds-mono,
-.app-card-table td .app-path {
-  overflow-wrap: anywhere;
-}
-
-/* 098 §A — the same rule where the identifier IS the cell rather than a span inside it.
-   /datasources renders the JDBC URL and the username as `<td class="u-mono">`, so the two
-   selectors above (which address a CHILD of the cell) never reached them: one
-   `jdbc:postgresql://postgres:5432/datapipelines` set the table's minimum width, the table
-   stopped fitting its column, and the overflow escaped to <html> — measured 1618px on a
-   1440px viewport with eight rows. Breaking a URL mid-string is ugly; a page that scrolls
-   sideways and hides the Actions column is worse (the 091/093 ruling). */
-.app-card-table td.u-mono,
-.app-card-table td.ds-mono {
-  overflow-wrap: anywhere;
-}
-
-/* A header may wrap inside a table that has to fit a card column; the vendored
-   `white-space: nowrap` is right for a full-width table and wrong here. */
-.app-card-table .ds-table th {
-  white-space: normal;
-}
+/* 282: the card-table's identifier-breaking rules (098 §A — a folder path, a JDBC URL) now
+   live in data-table.css for every wrapping frame; its header-wrap rule is retired (a data
+   table's header is one line and the viewport scrolls). */
 
 .app-name {
   font-weight: var(--weight-medium);
   color: var(--text-primary);
-}
-
-/* Numerics right and tabular; dates stay proportional (§3.3.2) and never take
-   this class. */
-.app-main .ds-table td.num,
-.app-main .ds-table th.num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.app-main .ds-table td.num {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
 }
 
 /* The status chip. The DOT is not decoration: colour alone cannot carry state
@@ -2153,22 +2056,7 @@ button.app-busy::after {
 .u-inline-block { display: inline-block; }
 .u-hidden { display: none; }
 .u-full { width: 100%; }
-.u-scroll-x { overflow-x: auto; }
 
-/* A scroll viewport whose direct child is a framed table: the frame moves onto the viewport,
-   so a table wider than the box keeps a visible right edge and its corners (the editor's
-   result dock had the same defect — pipeline-editor.css `.pe-result-table-container`). */
-.u-scroll-x:has(> .ds-table) {
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--surface-default);
-}
-
-.u-scroll-x > .ds-table {
-  border: 0;
-  border-radius: 0;
-  background: none;
-}
 .u-flex { display: flex; }
 
 /* Gap overrides for the row/col utilities above. Declared AFTER them so the
@@ -2366,14 +2254,8 @@ button.app-busy::after {
 .u-divider-top { border-top: 1px solid var(--border-default); }
 .u-divider-bottom { border-bottom: 1px solid var(--border-subtle); }
 
-/* `.ds-table td` (0,1,1) outranks a bare utility (0,1,0), so `.u-p0` alone could
-   not clear the cell padding a full-bleed skeleton row needs. Declared at table
-   scope rather than with `!important`. */
-.ds-table td.u-p0 { padding: 0; }
-
-/* Same reason, the other direction: the admin-users empty row is a roomier cell than a data
-   row, which it used to say with an inline padding (097 §C). */
-.ds-table td.u-p-md { padding: var(--gap-md); }
+/* 282: `.ds-table td.u-p0` / `td.u-p-md` (the table-scope padding utilities, 097 §C) moved to
+   data-table.css with the rest of the table rules. */
 
 /* 097 §C — the inline refusal a modal renders in place of a toast (the 022 review F9 rule:
    form-level feedback belongs in the form). It was three Kotlin string builders carrying
@@ -3226,19 +3108,11 @@ button.app-busy::after {
   display: none;
 }
 
-/* §B — every table scrolls INSIDE its own box instead of widening the document —
-   the .app-card-table treatment (overflow-x: auto), one rule for all of them, at
-   every width (a wide table is a document-widener at 768 exactly as at 390; the
-   walk proved it on /admin/users). `display: block` turns each table into its own
-   scroll container, which is what lets wrapper-less tables (admin, workspaces,
-   promotion, the execution fragments) get it without new markup — and what keeps
-   the oob-swapped keys table (api/console.html) safe: its fragment root must stay
-   a bare <table> (ui-screens.md §4.5 — a wrapped table partial is silently
-   discarded by the fragment parser). */
-.app-main .ds-table {
-  display: block;
-  overflow-x: auto;
-}
+/* §B — every table scrolls INSIDE its own box instead of widening the document. Since 282 the
+   box is the data table's viewport (data-table.css); an UNFRAMED table keeps this rule's old
+   `display: block; overflow-x: auto` there as the fallback. The oob-swapped keys table
+   (api/keys.html) stays a bare <table> fragment root — its frame is on the page, outside the
+   fragment (ui-screens.md §4.5: a wrapped table partial is silently discarded). */
 
 /* §B — the shell's own shared rule. `.app-shell` lays its content column out as
    a bare `1fr`, whose automatic minimum is the item's min-content — so ANY page

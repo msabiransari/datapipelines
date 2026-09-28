@@ -41,6 +41,10 @@
         th:href="@{/vendor/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2}">
 
   <link th:href="@{/css/app.css}" rel="stylesheet">
+  <!-- 282 (#282) — the house data table: one rule set for every table, loaded right after
+       app.css (it folds app.css's old table layers and must win over them) and before the page
+       sheets below, whose table tweaks (the schedules messages height) build on it. -->
+  <link th:href="@{/css/data-table.css}" rel="stylesheet">
 
   <!--/* 090 §A/§B — THE EXPLORER SHEET LOADS FROM THE HEAD, not from the page.
 
@@ -566,5 +570,7 @@
   <script th:src="@{/vendor/htmx/htmx.min.js}"></script>
   <script th:src="@{/js/shell.js}"></script>
   <script th:src="@{/js/toast.js}"></script>
+  <!-- 282 (#282) — the data table's enhancer: sort, resize, the header cap, keyboard rows. -->
+  <script th:src="@{/js/data-table.js}"></script>
 </body>
 </html>

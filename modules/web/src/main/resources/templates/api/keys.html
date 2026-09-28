@@ -32,6 +32,12 @@
          see "" forever and the secret would never appear. -->
     <div id="keyCreated" class="app-card-b u-hidden"></div>
 
+    <!-- 282 (#282): a PAGE-FLOW data-table frame, flush with the card (ui-screens §3.7). The
+         frame sits OUTSIDE the `keysTable` fragment on purpose: the oob swap's root must stay a
+         bare <table> (§4.5 — a wrapped table partial is silently discarded), so the swapped
+         table lands inside this viewport and the enhancer upgrades it again. -->
+    <div class="dt-frame dt-flush">
+      <div class="dt-viewport" tabindex="-1">
     <table class="ds-table" id="keys-table" th:fragment="keysTable(keys)" th:attr="hx-swap-oob=${oob}">
       <thead>
       <tr>
@@ -41,10 +47,10 @@
         <th>Acts as</th>
         <th>Created by</th>
         <th>Associated endpoints</th>
-        <th>Created</th>
-        <th>Expires</th>
-        <th>Last used</th>
-        <th class="num">Actions</th>
+        <th data-type="date">Created</th>
+        <th data-type="date">Expires</th>
+        <th data-type="date">Last used</th>
+        <th class="num" data-sort="off">Actions</th>
       </tr>
       </thead>
       <tbody id="keys-table-body">
@@ -78,12 +84,14 @@
             <span class="app-card-note" th:if="${#lists.isEmpty(k.boundPaths) and k.kind == 'endpoint'}">none — authorises nothing</span>
             <span class="app-card-note" th:if="${k.kind == 'server'}">promotion routes</span>
           </td>
-          <td><span th:title="${k.createdAbsolute}" th:text="${k.createdRelative}">3 days ago</span></td>
-          <td>
+          <!-- 282: a relative age sorts by its absolute instant (the title it shows); "never"
+               carries no instant and sorts last either way. -->
+          <td th:attr="data-sort-value=${k.createdAbsolute}"><span th:title="${k.createdAbsolute}" th:text="${k.createdRelative}">3 days ago</span></td>
+          <td th:attr="data-sort-value=${k.expiresAbsolute != null ? k.expiresAbsolute : ''}">
             <span th:if="${k.expiresAbsolute != null}" th:title="${k.expiresAbsolute}" th:text="${k.expiresRelative}">in 84 days</span>
             <span th:if="${k.expiresAbsolute == null}" th:text="${k.expiresRelative}">never</span>
           </td>
-          <td>
+          <td th:attr="data-sort-value=${k.lastUsedAbsolute != null ? k.lastUsedAbsolute : ''}">
             <span th:if="${k.lastUsedAbsolute != null}" th:title="${k.lastUsedAbsolute}" th:text="${k.lastUsedRelative}">2 hours ago</span>
             <span th:if="${k.lastUsedAbsolute == null}" th:text="${k.lastUsedRelative}">never</span>
           </td>
@@ -117,6 +125,8 @@
       </th:block>
       </tbody>
     </table>
+      </div>
+    </div>
   </div>
 
   </div>

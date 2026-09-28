@@ -4,25 +4,32 @@
     restructuring as dashboard-stats — the old parameterized fragment signature could not
     render outside an include and 500'd the endpoint.
   -->
-  <th:block th:if="${#lists.isEmpty(executions)}">
-    <div class="ds-empty">
-      <div class="ds-empty-title">No executions yet</div>
-      <div class="ds-empty-description">Run a pipeline to see results here.</div>
-    </div>
-  </th:block>
-  <th:block th:unless="${#lists.isEmpty(executions)}">
+  <!-- 282 (#282): a FIXED data-table frame, flush with the dashboard card it fills
+       (ui-screens §3.7). The header row is also the `head` fragment: the dashboard's loading
+       state (dashboard.html) is skeleton ROWS under this same header, so the columns never
+       change between loading, empty and rows. The empty state is a row too. -->
+  <div class="dt-frame dt-flush dt-scroll dt-h-sm dt-nowrap">
+    <div class="dt-viewport" tabindex="-1">
     <table class="ds-table">
-      <thead>
+      <thead th:fragment="head">
         <tr>
           <th>Pipeline</th>
-          <th>Version</th>
+          <th data-type="number">Version</th>
           <th>Status</th>
-          <th>Started</th>
+          <th data-type="date">Started</th>
           <th class="num">Duration</th>
           <th>Via</th>
         </tr>
       </thead>
       <tbody>
+        <tr th:if="${#lists.isEmpty(executions)}" class="dt-state-row">
+          <td colspan="6" class="dt-state-cell">
+            <div class="dt-state">
+              <b>No executions yet</b>
+              <span>Run a pipeline to see results here.</span>
+            </div>
+          </td>
+        </tr>
         <tr th:each="r : ${executions}" class="app-row-clickable" th:attr="data-href=@{/executions/{id}(id=${r.executionId})}">
           <td>
             <!-- 079 §E: the display name is prose, the machine path sits UNDER it in mono
@@ -56,5 +63,6 @@
         </tr>
       </tbody>
     </table>
-  </th:block>
+    </div>
+  </div>
 </th:block>
