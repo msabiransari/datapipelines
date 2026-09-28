@@ -11,10 +11,11 @@ import co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.scheduler.TargetViewer
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.typesystem.DatapipelinesException
-import co.datapipelines.scheduler.TargetViewer
 import co.datapipelines.web.anonymousActors
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -273,30 +274,33 @@ class PipelineLifecycleDialogModelTest {
         name: String,
         enabled: Boolean,
         nextDueAt: Instant?,
-    ) = co.datapipelines.scheduler.Schedule(
-        id = UUID.randomUUID(),
-        workspaceId = WS,
-        name = name,
-        revision = 1,
-        executorId = "pipeline",
-        payloadSchemaVersion = 1,
-        payload = com.fasterxml.jackson.databind.ObjectMapper().readTree("""{"pipeline":"test/probe","version":"current"}"""),
-        parameters = com.fasterxml.jackson.databind.ObjectMapper().readTree("{}"),
-        targetRef = "pipeline:test/probe",
-        cron = "0 3 1 1 *",
-        timezone = "UTC",
-        missedRunPolicy = co.datapipelines.scheduler.MissedRunPolicy.SKIP,
-        enabled = enabled,
-        blockedReason = null,
-        blockedAt = null,
-        blockedRunId = null,
-        nextDueAt = nextDueAt,
-        createdBy = USER,
-        updatedBy = USER,
-        createdAt = T0,
-        updatedAt = T0,
-        deletedAt = null,
-    )
+    ): co.datapipelines.scheduler.Schedule {
+        val json = ObjectMapper()
+        return co.datapipelines.scheduler.Schedule(
+            id = UUID.randomUUID(),
+            workspaceId = WS,
+            name = name,
+            revision = 1,
+            executorId = "pipeline",
+            payloadSchemaVersion = 1,
+            payload = json.readTree("""{"pipeline":"test/probe","version":"current"}"""),
+            parameters = json.readTree("{}"),
+            targetRef = "pipeline:test/probe",
+            cron = "0 3 1 1 *",
+            timezone = "UTC",
+            missedRunPolicy = co.datapipelines.scheduler.MissedRunPolicy.SKIP,
+            enabled = enabled,
+            blockedReason = null,
+            blockedAt = null,
+            blockedRunId = null,
+            nextDueAt = nextDueAt,
+            createdBy = USER,
+            updatedBy = USER,
+            createdAt = T0,
+            updatedAt = T0,
+            deletedAt = null,
+        )
+    }
 
     @Test
     fun `restore - a non-discarded target is not_discarded`() {

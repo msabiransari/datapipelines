@@ -327,6 +327,43 @@ class PipelineLifecycleDialogRenderTest {
         html shouldContain ">Discard v2</button>"
     }
 
+    /**
+     * #273's roles cell — the template contract for a PROMOTER's booleans (the render-level
+     * half of the guard; the reachable browser walk is DiscardDialogSchedulesBrowserTest's).
+     * The schedules evidence is a READ inside the dialog: it renders for whoever the dialog
+     * renders for, the lens riding the read itself (the model test and the browser suite pin
+     * that). What is pinned here: the evidence is present for a promoter's booleans, and the
+     * one verb — the confirm — is not, because a promoter discards nothing. (This arm lives in
+     * the dialog's render test rather than RoleVisibilityRenderTest because that class sits at
+     * detekt's LargeClass ceiling; the role question it answers is the same one.)
+     */
+    @Test
+    fun `discard - a promoter's booleans render the schedules evidence and no confirm`() {
+        val html =
+            render("partials/pipeline-lifecycle-discard") {
+                setVariable(
+                    "dlg",
+                    discardDialog().copy(
+                        schedules =
+                            listOf(
+                                PipelineLifecycleDialogModel.ScheduleEvidence(
+                                    UUID.randomUUID(),
+                                    "reports/nightly",
+                                    "enabled",
+                                    "2026-10-01 03:00 UTC",
+                                ),
+                            ),
+                    ),
+                )
+                setVariable("from", "explorer")
+                withRoles(canRead = true, canExecute = false, canAuthor = false, canPromote = true, roleLabel = "promoter")
+            }
+
+        html shouldContain "data-discard-schedules"
+        html shouldContain ">reports/nightly</span>"
+        html shouldNotContain "data-verb=\"pipeline-discard-confirm\""
+    }
+
     @Test
     fun `restore - states the pointer outcome both ways`() {
         val moves =

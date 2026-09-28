@@ -20,7 +20,6 @@ import java.nio.file.Paths
  * all, so the dialog (evidence included) never opens for one.
  */
 class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
-
     @Test
     fun `the discard dialog lists the two schedules that run the pipeline - name, state, next run`() {
         startTrace()
@@ -248,11 +247,9 @@ class DiscardDialogSchedulesBrowserTest : BrowserSuite() {
         try {
             on.waitForSelector("summary.tpl-summary")
         } catch (e: Exception) {
-            throw AssertionError(
-                "no pipelines tree at ${on.url()} — main reads: " +
-                    on.locator("#app-main").first().innerText().take(500),
-                e,
-            )
+            val mainRegion = on.locator("#app-main").first()
+            val main = mainRegion.innerText().take(500)
+            throw AssertionError("no pipelines tree at ${on.url()} — main reads: $main", e)
         }
         if (on.locator("details.tpl-folder[open]").count() == 0) {
             on.waitForResponse({ it.url().contains("prefix=test") }) {
