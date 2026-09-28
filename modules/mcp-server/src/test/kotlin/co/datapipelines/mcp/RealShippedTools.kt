@@ -67,7 +67,6 @@ fun realShippedTools(): List<McpTool> {
         parameterSetRepository = mockk<co.datapipelines.parameters.ParameterSetRepository>(),
         parameterEvaluator = mockk<co.datapipelines.parameters.ParameterEvaluator>(),
         parametersProperties = co.datapipelines.parameters.ParametersProperties(),
-        mcpToolLearnings = mockk<co.datapipelines.application.mcp.McpToolLearnings>(),
         lens = McpFixtures.EVERYTHING_LENS,
         templateService = McpFixtures.templateService(mockk<TemplateRepository>()),
         templateEvaluateService = mockk<co.datapipelines.application.templates.TemplateEvaluateService>(),

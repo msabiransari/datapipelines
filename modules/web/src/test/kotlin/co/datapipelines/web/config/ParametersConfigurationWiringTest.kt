@@ -148,5 +148,15 @@ class ParametersConfigurationWiringTest {
 
         @Bean
         fun templateImportService(): co.datapipelines.web.templates.TemplateImportService = io.mockk.mockk(relaxed = true)
+
+        // The lensed status read the validator and the service take — the production bean is
+        // PipelineLifecycleConfiguration's; the slice provides the same shape here.
+        @Bean
+        fun templateVersionStatuses(): co.datapipelines.pipeline.TemplateVersionStatuses =
+            co.datapipelines.pipeline.TemplateVersionStatuses { _, _, _ -> null }
+
+        @Bean
+        fun templateReleaser(): co.datapipelines.pipeline.TemplateReleaser =
+            co.datapipelines.pipeline.TemplateReleaser { _, _, _, _ -> error("not reached in a wiring test") }
     }
 }

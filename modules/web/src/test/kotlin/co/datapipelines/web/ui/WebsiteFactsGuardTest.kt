@@ -226,7 +226,6 @@ class WebsiteFactsGuardTest {
                 parameterSetRepository = mockk<co.datapipelines.parameters.ParameterSetRepository>(),
                 parameterEvaluator = mockk<co.datapipelines.parameters.ParameterEvaluator>(),
                 parametersProperties = co.datapipelines.parameters.ParametersProperties(),
-                mcpToolLearnings = mockk<co.datapipelines.application.mcp.McpToolLearnings>(),
                 lens = co.datapipelines.web.EVERYTHING_LENS,
                 templateService = mockk<co.datapipelines.templates.TemplateService>(),
                 templateEvaluateService = mockk<co.datapipelines.application.templates.TemplateEvaluateService>(),
