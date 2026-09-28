@@ -14,11 +14,14 @@
  */
 (function () {
   "use strict";
+  // 287 (#287): show/hide through the `u-backdrop-hidden` class, never an inline `display` —
+  // a class leaves no `style` attribute for htmx's history snapshot to serialise into an
+  // inline style the CSP refuses on Back.
   function showKeyModal() {
-    document.getElementById('key-modal').style.display = 'flex';
+    document.getElementById('key-modal').classList.remove('u-backdrop-hidden');
   }
   function hideKeyModal() {
-    document.getElementById('key-modal').style.display = 'none';
+    document.getElementById('key-modal').classList.add('u-backdrop-hidden');
   }
   // The kind decides whether associations exist at all (auth §7.7): bindings on a server
   // key are REFUSED by the server, not dropped, so the form must not carry any. Disabled

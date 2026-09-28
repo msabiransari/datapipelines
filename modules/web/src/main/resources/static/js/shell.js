@@ -103,6 +103,14 @@
  *    busy mark before the snapshot; htmx:historyRestore and pageshow purge any
  *    orphan a cache written before this fix still carries.
  *
+ *    287 (#287): the snapshot is MARKUP, so a style a script wrote through the
+ *    CSSOM serialises into it as a `style` attribute and comes back on Back as
+ *    an inline style the CSP refuses. Scripts that write such styles register a
+ *    cleanup on window.__dpHistoryStyleCleanups (an array of fns taking the
+ *    history element); the SAME beforeHistorySave listener runs them after the
+ *    skeleton strip — one listener, one seam, each script stripping only its
+ *    own write set.
+ *
  * 103 §A/§B added the FEEDBACK AND ATMOSPHERE layer — measured against
  * algoschool.app (notes T195), which has zero hx-boost and still reads as the
  * more native app because a click there is acknowledged immediately and the new
@@ -1050,9 +1058,18 @@
       busy.end(doc, evt.detail.elt, swapTargetFor(evt.detail, doc));
     });
     /* Header note 9: the history snapshot carries no transient chrome, and a
-       restored page carries no orphan of one. */
-    doc.body.addEventListener("htmx:beforeHistorySave", function () {
+       restored page carries no orphan of one. 287 (#287): it carries no style
+       attribute a script wrote either — the registered cleanups (data-table's
+       widths and measured variables, the version menu's placement) strip their
+       own write set from the outgoing copy before htmx serialises it. */
+    doc.body.addEventListener("htmx:beforeHistorySave", function (evt) {
       busy.snapshotClean();
+      var cleanups = window.__dpHistoryStyleCleanups;
+      if (!cleanups) return;
+      var root = evt && evt.detail && evt.detail.historyElt;
+      for (var i = 0; i < cleanups.length; i++) {
+        if (typeof cleanups[i] === "function") cleanups[i](root);
+      }
     });
     doc.body.addEventListener("htmx:historyRestore", function () {
       busy.purgeOrphans(doc);

@@ -22,13 +22,16 @@
     document.getElementById('ds-dialog').innerHTML = '';
   }
 
+  // 287 (#287): the modal shows and hides through its `u-backdrop-hidden` CLASS, never an
+  // inline `display` — a class survives htmx's history snapshot (markup re-parsed on Back)
+  // with no `style` attribute for `style-src 'self'` to refuse.
   function showRegisterModal() {
     document.getElementById('register-result').removeAttribute('data-error');
     document.getElementById('register-result').innerHTML = '';
-    document.getElementById('register-modal').style.display = 'flex';
+    document.getElementById('register-modal').classList.remove('u-backdrop-hidden');
   }
   function hideRegisterModal() {
-    document.getElementById('register-modal').style.display = 'none';
+    document.getElementById('register-modal').classList.add('u-backdrop-hidden');
   }
   // 076 §D: arm immediately when this fragment arrives in a boosted swap
   // (DOMContentLoaded has long fired); wait for the parse only on a cold load.
@@ -60,7 +63,7 @@
     // Close the modal only on SUCCESS content — never over an error (F9).
     var observer = new MutationObserver(function() {
       var modal = document.getElementById('register-modal');
-      if (modal.style.display === 'flex' &&
+      if (!modal.classList.contains('u-backdrop-hidden') &&
           result.children.length > 0 &&
           result.getAttribute('data-error') !== 'true') {
         hideRegisterModal();

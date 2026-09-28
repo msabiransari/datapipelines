@@ -585,13 +585,19 @@
   }
 
   /**
-   * htmx snapshots `#app-main` into its history cache as MARKUP before a boosted swap, and a
+   * htmx snapshots the page into its history cache as MARKUP before a boosted swap, and a
    * back navigation re-parses it: a CSSOM width serialised into a `style` attribute would come
    * back as an inline style the policy refuses. The outgoing copy drops them; the restored table
-   * is re-upgraded (the instance map, not the attribute, decides) and re-measures.
+   * is re-upgraded (the instance map, not the attribute, decides) and re-measured.
+   *
+   * 287 (#287): the strip runs from shell.js's one `htmx:beforeHistorySave` listener through
+   * the window.__dpHistoryStyleCleanups registry — this write set is registered there instead
+   * of this file listening on its own, so the snapshot has ONE seam and every script strips
+   * only its own write set. The cleanup takes the history element (shell.js resolves
+   * `evt.detail.historyElt`, which is `document.body` — no `hx-history-elt` in the
+   * layout), so the walk covers every table on the page.
    */
-  function beforeHistorySave(evt) {
-    var root = evt.detail && evt.detail.historyElt;
+  function beforeHistorySave(root) {
     tablesIn(root).forEach(function (table) {
       var frame = table.parentElement.parentElement;
       [frame, table].concat(Array.prototype.slice.call(table.querySelectorAll(":scope > colgroup > col"))).forEach(function (el) {
@@ -606,7 +612,8 @@
   }
   document.body.addEventListener("htmx:afterSwap", function (evt) { upgrade(evt.detail && evt.detail.target); });
   document.body.addEventListener("htmx:oobAfterSwap", function (evt) { upgrade(evt.detail && evt.detail.target); });
-  document.body.addEventListener("htmx:beforeHistorySave", beforeHistorySave);
+  window.__dpHistoryStyleCleanups = window.__dpHistoryStyleCleanups || [];
+  window.__dpHistoryStyleCleanups.push(beforeHistorySave);
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(function () {
       tablesIn(document.documentElement).forEach(function (table) {

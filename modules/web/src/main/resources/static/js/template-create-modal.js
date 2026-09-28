@@ -14,13 +14,16 @@
  */
 (function () {
   "use strict";
+  // 287 (#287): show/hide through the `u-backdrop-hidden` class, never an inline `display` —
+  // a class leaves no `style` attribute for htmx's history snapshot to serialise into an
+  // inline style the CSP refuses on Back.
   function showCreateTemplateModal() {
     document.getElementById('template-create-result').removeAttribute('data-error');
     document.getElementById('template-create-result').innerHTML = '';
-    document.getElementById('create-template-modal').style.display = 'flex';
+    document.getElementById('create-template-modal').classList.remove('u-backdrop-hidden');
   }
   function hideCreateTemplateModal() {
-    document.getElementById('create-template-modal').style.display = 'none';
+    document.getElementById('create-template-modal').classList.add('u-backdrop-hidden');
   }
   /* §9.3: dialect is required for `sql` and ABSENT for `html`. `disabled` (not just hidden)
      is what keeps the field out of the submitted form data — a hidden-but-enabled select
@@ -83,7 +86,7 @@
     /* Close the modal only on SUCCESS content — never over an error. */
     var observer = new MutationObserver(function() {
       var modal = document.getElementById('create-template-modal');
-      if (modal.style.display === 'flex' &&
+      if (!modal.classList.contains('u-backdrop-hidden') &&
           result.children.length > 0 &&
           result.getAttribute('data-error') !== 'true') {
         hideCreateTemplateModal();
