@@ -103,18 +103,31 @@ class McpServerWiringTest {
             // 120 — the two docs tools, appended after the semantics tools.
             DocsTools.all { DocSetTestSupport.minimalDocSet() } +
             // 140 — the release-check run, appended after the docs tools.
-            listOf(PipelineRunChecksTool(service, mockk()))
+            listOf(PipelineRunChecksTool(service, mockk())) +
+            parameterSetTools()
     }
 
+    /** #194 lane D — the six parameter-set tools, appended last (the 117/107 append rule). */
+    private fun parameterSetTools(): List<McpTool> =
+        listOf(
+            ParameterSetsListTool(mockk(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsGetTool(mockk(), mockk(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsCreateTool(mockk(), mockk(), co.datapipelines.parameters.ParametersConfig(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsUpdateTool(mockk(), co.datapipelines.parameters.ParametersConfig(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsEvaluateTool(mockk(), mockk(), mockk(), mockk(), mockk(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsPurgeDraftTool(mockk(), mockk()),
+        )
+
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 41 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
      * documented capability that does not exist. (28 → 27 with 094 removing
      * `datasources_create`; 30 → 34 with 107's probe/cancel/purge four; 34 → 35 with 117's `templates_update`; 35 → 38 with 118's
-     * `semantics_*` three; 38 → 40 with 120's `docs_*` two; 40 → 41 with 140's `pipelines_run_checks`.)
+     * `semantics_*` three; 38 → 40 with 120's `docs_*` two; 40 → 41 with 140's `pipelines_run_checks`;
+     * 41 → 48 with #194 lane D's six `parameter_sets_*` tools.)
      */
     @Test
-    fun `the tool surface is exactly the 41 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the catalog the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
@@ -124,7 +137,7 @@ class McpServerWiringTest {
     }
 
     @Test
-    fun `the server builds with all 41 tools and all three prompts registered`() {
+    fun `the server builds with all 48 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(

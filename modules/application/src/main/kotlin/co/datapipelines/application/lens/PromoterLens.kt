@@ -43,6 +43,7 @@ data class LensedView(
         val EVERYTHING = LensedView(ReadLens.Everything, ReadLens.Everything)
     }
 }
+
 /**
  * The port every read surface resolves its [LensedView] through — REST and UI from the
  * security context's principal, an MCP tool from `McpToolContext.principal` (the SDK's

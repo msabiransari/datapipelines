@@ -181,9 +181,10 @@ class ParameterSetsControllerTest {
     fun `an explicit version resolves through the lensed read and an absent one is the catalogued 404`() {
         authenticate()
         every { sets.findVersion(workspaceId, any(), setId, 3) } returns null
-        val error = shouldThrow<co.datapipelines.web.api.ApiException> {
-            controller.evaluate(setId, """{"version":3,"selections":{}}""")
-        }
+        val error =
+            shouldThrow<co.datapipelines.web.api.ApiException> {
+                controller.evaluate(setId, """{"version":3,"selections":{}}""")
+            }
         error.code shouldBe "parameter.not_found"
     }
 

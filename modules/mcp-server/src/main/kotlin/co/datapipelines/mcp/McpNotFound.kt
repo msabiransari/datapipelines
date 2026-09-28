@@ -73,6 +73,14 @@ object McpNotFound {
             message = "Execution $id does not exist.",
             details = mapOf("execution_id" to id.toString()),
         )
+
+    /** Unknown parameter set id (§13.20 `parameter.not_found`, #194 lane D) — another workspace's answers the same. */
+    fun parameterSet(id: UUID): DatapipelinesException =
+        DatapipelinesException(
+            code = PipelineErrorCodes.Parameters.NOT_FOUND,
+            message = "Parameter set $id does not exist.",
+            details = mapOf("id" to id.toString()),
+        )
 }
 
 /**

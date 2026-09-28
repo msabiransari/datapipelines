@@ -72,8 +72,13 @@ class McpServerAutoConfiguration {
             TemplateRenderFreshness(templates, learnings)
     }
 
-    /** The 42 tools of §6.1, in `tools/list` order. */
-    @Suppress("LongParameterList")
+    /**
+     * The 48 tools of §6.1, in `tools/list` order. The BODY is now grouped into per-family
+     * helpers; what remains is the DI FACTORY's arity — the parameters ARE the wiring, and a
+     * holder type would exist only to be counted (the DomainConfiguration `TooManyFunctions`
+     * precedent). 139 and 140 each grew it; 194d's six parameter-set tools passed the ceiling.
+     */
+    @Suppress("LongParameterList", "LongMethod")
     @Bean
     @ConditionalOnMissingBean
     fun mcpTools(
@@ -130,6 +135,17 @@ class McpServerAutoConfiguration {
         // contract and persists the same pipeline_check_runs rows. A plain parameter, the
         // 068/074 pattern.
         checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
+        // #194 lane D — the parameter engine's service, evaluator and repository (declared by
+        // `web`'s ParametersConfiguration), so the tools cross the SAME save-time validation,
+        // the ONE selector pool and the SAME evaluate runtime REST does. Plain parameters, the
+        // 068/074 pattern.
+        parameterSets: co.datapipelines.parameters.ParameterSetService,
+        parameterSetRepository: co.datapipelines.parameters.ParameterSetRepository,
+        parameterEvaluator: co.datapipelines.parameters.ParameterEvaluator,
+        parametersProperties: co.datapipelines.parameters.ParametersProperties,
+        // 139 — the render-freshness learnings, for the draft evaluate's template_unrendered twin
+        // (the same audit table the pipeline execute gate reads).
+        mcpToolLearnings: co.datapipelines.application.mcp.McpToolLearnings,
         // 178 — the promoter lens (declared by `web`'s PromotionConfiguration as the `application`
         // port) and the template read façade (declared by `templates`), so the read tools
         // narrow exactly as REST and the UI do. Plain parameters, the 068/074 pattern.
@@ -149,49 +165,88 @@ class McpServerAutoConfiguration {
         // construction time.
         docSet: ObjectProvider<co.datapipelines.mcp.docs.DocSet>,
     ): List<McpTool> {
-        // The authoring capability (versioning §5.5), read from the same property web's
-        // guard bean reads — built locally so this module needs no bean from `web`; the
-        // flag is immutable configuration, so two instances cannot disagree. The PIPELINE
-        // write tools no longer need it: PipelineService checks it (056), which is the point
-        // of a service layer. The template tools still do, until slice B.
+        val runtime =
+            inlineRuntime(pipelines, templates, templateEngines, datasources, introspector, jdbc)
+        // The authoring capability (versioning §5.5), read from the same property web's guard
+        // bean reads — immutable config, so two instances cannot disagree. The template tools
+        // still take it, until slice B.
         val authoring = AuthoringGuard.from(environment)
-        // 037's two data-visibility services, built from collaborators already in this method:
-        // stateless, so inline construction adds no wiring (the 037 fence touched no `app` bean).
-        val sqlRunner = co.datapipelines.datasources.SqlRunner(datasources)
-        val nodeResolver = co.datapipelines.templates.NodeSqlResolver(pipelines, templates, templateEngines)
-        // 040's used-by service, same inline-construction discipline (the templates module's
-        // configuration declares the bean `web` consumes; this module builds its own).
-        val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
-        val (tableLearning, renderFreshness) = entryPointChecks(jdbc, templates, introspector, datasources)
-        return listOf(
-            PipelinesListTool(pipelineService, lens),
-            PipelinesGetTool(pipelineService, usage, lens),
-            PipelineExecuteTool(
-                pipelines = pipelineService,
-                executor = executor,
-                executions = executions,
-                resultStore = resultStore,
-                resultUrls = resultUrls,
-                launcher = launcher.getIfAvailable(),
-                resultConfig = executorConfig.result,
-                executionRunner = executionRunner.getIfAvailable(),
-                launchAudit = auditSink,
-                renderFreshness = renderFreshness,
-            ),
-            PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner, renderFreshness),
-            PipelinesCreateTool(pipelineService, pipelines, tableLearning),
-            PipelinesUpdateTool(pipelineService, tableLearning),
-            TemplatesListTool(templateService, lens),
-            TemplatesGetTool(templateService, lens),
-            TemplatesUsedByTool(usage, lens),
-            TemplatesCreateTool(templates, authoring, templateValidator, templateDrafts),
-            TemplatesUpdateTool(templates, templateDrafts, templateValidator),
-            TemplatesRenderTool(templates, templateEngines),
-            // 7b — the transform evaluator (record §9.1): the SAME service the REST evaluate
-            // route calls, a plain parameter by the 068/074 pattern.
-            TemplatesEvaluateTool(templateEvaluateService),
-            // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
-            TemplatesPurgeDraftTool(templates, usage, authoring),
+        return pipelineReadTools(pipelineService, runtime.usage, lens) +
+            pipelineExecuteTools(
+                pipelineService,
+                executor,
+                executions,
+                resultStore,
+                resultUrls,
+                executorConfig,
+                executionRunner,
+                launcher,
+                auditSink,
+                runtime.renderFreshness,
+                runtime.nodeResolver,
+                datasources,
+                runtime.sqlRunner,
+                runtime.tableLearning,
+                pipelines,
+            ) +
+            templateTools(
+                templateService,
+                runtime.usage,
+                templates,
+                authoring,
+                templateValidator,
+                templateDrafts,
+                templateEngines,
+                templateEvaluateService,
+                lens,
+            ) +
+            datasourceAndExecutionTools(
+                datasources,
+                introspector,
+                runtime.sqlRunner,
+                environment,
+                factEnrichment,
+                lens,
+                executions,
+                resultStore,
+                resultUrls,
+                executorConfig,
+                cancellationService,
+                mcpCallAudit,
+            ) +
+            EndpointsTools.all(endpointPublishService, pipelines) +
+            LakeTableTools.all(datasources, lakeTableRegistryService) +
+            SemanticsTools.all(datasources, semanticsService, introspector, lens) +
+            DocsTools.all { docSet.getObject() } +
+            listOf(PipelineRunChecksTool(pipelineService, checkRunner)) +
+            parameterSetTools(
+                parameterSets,
+                parameterSetRepository,
+                parameterEvaluator,
+                parametersProperties.toConfig(),
+                mcpToolLearnings,
+                templates,
+                lens,
+            )
+    }
+
+    /** The datasource, execution and calculator tools, extracted at 194d when the list passed detekt's length. */
+    @Suppress("LongParameterList")
+    private fun datasourceAndExecutionTools(
+        datasources: DatasourceRegistry,
+        introspector: SchemaIntrospector,
+        sqlRunner: co.datapipelines.datasources.SqlRunner,
+        environment: org.springframework.core.env.Environment,
+        factEnrichment: FactEnrichment,
+        lens: PromoterLens,
+        executions: ExecutionRepository,
+        resultStore: ResultStore,
+        resultUrls: ResultUrlFactory,
+        executorConfig: ExecutorConfig,
+        cancellationService: ExecutionCancellationService,
+        mcpCallAudit: McpCallAudit,
+    ): List<McpTool> =
+        listOf(
             DatasourcesListTool(datasources, factEnrichment, lens),
             DatasourcesGetTool(datasources, factEnrichment, lens),
             DatasourcesTestTool(datasources),
@@ -215,17 +270,136 @@ class McpServerAutoConfiguration {
             // exactly why these two need no workspace, no repository and no registry.
             CalculatorsListTool(),
             CalculatorsGetTool(),
-        ) + EndpointsTools.all(endpointPublishService, pipelines) + LakeTableTools.all(datasources, lakeTableRegistryService) +
-            SemanticsTools.all(datasources, semanticsService, introspector, lens) +
-            // 120 — the skill docs as tools (R3); the by-area served set since 242a. No
-            // collaborators beyond the DocSet itself — the content is a property of the
-            // build and the boot configuration, like the calculator catalog.
-            DocsTools.all { docSet.getObject() } +
-            // 140 — the release-check run, appended after the docs tools (the 117/107 append
-            // rule). Takes the service for the working-version resolution and the shared
-            // runner for everything else.
-            listOf(PipelineRunChecksTool(pipelineService, checkRunner))
+        )
+
+    /** The pipeline execute/create/update block, extracted at 194d when the list passed detekt's length. */
+    @Suppress("LongParameterList")
+    private fun pipelineExecuteTools(
+        pipelineService: PipelineService,
+        executor: PipelineExecutor,
+        executions: ExecutionRepository,
+        resultStore: ResultStore,
+        resultUrls: ResultUrlFactory,
+        executorConfig: ExecutorConfig,
+        executionRunner: ObjectProvider<McpExecutionRunner>,
+        launcher: ObjectProvider<ExecutionLauncher>,
+        auditSink: co.datapipelines.auth.AuditEventSink,
+        renderFreshness: TemplateRenderFreshness,
+        nodeResolver: co.datapipelines.templates.NodeSqlResolver,
+        datasources: DatasourceRegistry,
+        sqlRunner: co.datapipelines.datasources.SqlRunner,
+        tableLearning: TableLearningCheck,
+        pipelines: PipelineRepository,
+    ): List<McpTool> =
+        listOf(
+            PipelineExecuteTool(
+                pipelines = pipelineService,
+                executor = executor,
+                executions = executions,
+                resultStore = resultStore,
+                resultUrls = resultUrls,
+                launcher = launcher.getIfAvailable(),
+                resultConfig = executorConfig.result,
+                executionRunner = executionRunner.getIfAvailable(),
+                launchAudit = auditSink,
+                renderFreshness = renderFreshness,
+            ),
+            PipelinesExecuteNodeTool(nodeResolver, datasources, sqlRunner, renderFreshness),
+            PipelinesCreateTool(pipelineService, pipelines, tableLearning),
+            PipelinesUpdateTool(pipelineService, tableLearning),
+        )
+
+    /**
+     * 037's inline-construction block, extracted at 194d when the list passed detekt's length:
+     * stateless over the same collaborators, so building it here adds no wiring (the 037 fence
+     * touched no `app` bean).
+     */
+    private class InlineRuntime(
+        val sqlRunner: co.datapipelines.datasources.SqlRunner,
+        val nodeResolver: co.datapipelines.templates.NodeSqlResolver,
+        /** 040's used-by service — the templates module's configuration declares the bean `web` consumes. */
+        val usage: co.datapipelines.templates.TemplateUsageService,
+        val tableLearning: TableLearningCheck,
+        val renderFreshness: TemplateRenderFreshness,
+    )
+
+    private fun inlineRuntime(
+        pipelines: PipelineRepository,
+        templates: TemplateRepository,
+        templateEngines: WorkspaceTemplateEngines,
+        datasources: DatasourceRegistry,
+        introspector: SchemaIntrospector,
+        jdbc: org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate,
+    ): InlineRuntime {
+        val checks = entryPointChecks(jdbc, templates, introspector, datasources)
+        return InlineRuntime(
+            sqlRunner = co.datapipelines.datasources.SqlRunner(datasources),
+            nodeResolver = co.datapipelines.templates.NodeSqlResolver(pipelines, templates, templateEngines),
+            usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines),
+            tableLearning = checks.first,
+            renderFreshness = checks.second,
+        )
     }
+
+    /** The template tools block, extracted at 194d when the list passed detekt's length. */
+    @Suppress("LongParameterList")
+    private fun templateTools(
+        templateService: TemplateService,
+        usage: co.datapipelines.templates.TemplateUsageService,
+        templates: TemplateRepository,
+        authoring: AuthoringGuard,
+        templateValidator: TemplateValidator,
+        templateDrafts: co.datapipelines.templates.TemplateDraftService,
+        templateEngines: WorkspaceTemplateEngines,
+        templateEvaluateService: co.datapipelines.application.templates.TemplateEvaluateService,
+        lens: PromoterLens,
+    ): List<McpTool> =
+        listOf(
+            TemplatesListTool(templateService, lens),
+            TemplatesGetTool(templateService, lens),
+            TemplatesUsedByTool(usage, lens),
+            TemplatesCreateTool(templates, authoring, templateValidator, templateDrafts),
+            TemplatesUpdateTool(templates, templateDrafts, templateValidator),
+            TemplatesRenderTool(templates, templateEngines),
+            // 7b — the transform evaluator (record §9.1): the SAME service the REST evaluate
+            // route calls, a plain parameter by the 068/074 pattern.
+            TemplatesEvaluateTool(templateEvaluateService),
+            // 107 — the bounded purge: sole-DRAFT, author-owned, unpinned only.
+            TemplatesPurgeDraftTool(templates, usage, authoring),
+        )
+
+    /** The two pipeline read tools, extracted at 194d when the list passed detekt's length. */
+    private fun pipelineReadTools(
+        pipelineService: PipelineService,
+        usage: co.datapipelines.templates.TemplateUsageService,
+        lens: PromoterLens,
+    ): List<McpTool> =
+        listOf(
+            PipelinesListTool(pipelineService, lens),
+            PipelinesGetTool(pipelineService, usage, lens),
+        )
+
+    /**
+     * #194 lane D — the parameter engine's six tools, appended last (the 117/107 append rule):
+     * the tools are thin over the wired service, and their order in the returned list is §6.1's.
+     */
+    private fun parameterSetTools(
+        sets: co.datapipelines.parameters.ParameterSetService,
+        repository: co.datapipelines.parameters.ParameterSetRepository,
+        evaluator: co.datapipelines.parameters.ParameterEvaluator,
+        config: co.datapipelines.parameters.ParametersConfig,
+        learnings: co.datapipelines.application.mcp.McpToolLearnings,
+        templates: TemplateRepository,
+        lens: PromoterLens,
+    ): List<McpTool> =
+        listOf(
+            ParameterSetsListTool(sets, lens),
+            ParameterSetsGetTool(sets, repository, lens),
+            ParameterSetsCreateTool(sets, repository, config, lens),
+            ParameterSetsUpdateTool(sets, config, lens),
+            ParameterSetsEvaluateTool(sets, repository, evaluator, learnings, templates, lens),
+            ParameterSetsPurgeDraftTool(sets, repository),
+        )
 
     /**
      * 242a — the rendered manual, assembled ONCE at boot (the agent-docs-by-area record §3.3):

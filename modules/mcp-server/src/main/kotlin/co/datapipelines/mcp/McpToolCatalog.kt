@@ -129,6 +129,16 @@ object McpToolCatalog {
             // definition: the rows are the server's own observed values, and WHO commissioned
             // them is exactly what the write event records.
             Entry("pipelines_run_checks", mutating = true, permission = Permission.PIPELINE_RUN_CHECKS),
+            // #194 lane D — the parameter engine (the record's §9.1). list/get/evaluate are
+            // reads; create/update write definitions; purge_draft is the bounded 107-style
+            // self-service verb and writes. No release/switch tool exists — none exists for
+            // pipelines or templates either (§9.1).
+            Entry("parameter_sets_list", mutating = false, permission = Permission.PARAMETER_SET_READ),
+            Entry("parameter_sets_get", mutating = false, permission = Permission.PARAMETER_SET_READ),
+            Entry("parameter_sets_create", mutating = true, permission = Permission.PARAMETER_SET_CREATE),
+            Entry("parameter_sets_update", mutating = true, permission = Permission.PARAMETER_SET_UPDATE),
+            Entry("parameter_sets_evaluate", mutating = false, permission = Permission.PARAMETER_SET_EVALUATE),
+            Entry("parameter_sets_purge_draft", mutating = true, permission = Permission.PARAMETER_SET_VERSION_MANAGE),
         )
 
     /** §6.1's names, in `tools/list` order — [ENTRIES] projected, so the two cannot drift. */

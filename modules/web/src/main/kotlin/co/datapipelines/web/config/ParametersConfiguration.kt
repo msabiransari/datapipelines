@@ -133,7 +133,8 @@ class ParametersConfiguration {
         templates: co.datapipelines.templates.TemplateRepository,
         templateImport: co.datapipelines.web.templates.TemplateImportService,
     ): co.datapipelines.web.parameters.ParameterSetTransferService =
-        co.datapipelines.web.parameters.ParameterSetTransferService(sets, repository, templates, templateImport)
+        co.datapipelines.web.parameters
+            .ParameterSetTransferService(sets, repository, templates, templateImport)
 
     /**
      * `parameters.selectors.abandoned` (record §11) — the pool's abandoned-statement count as a
@@ -142,6 +143,12 @@ class ParametersConfiguration {
      * runs with every scrape, so an abandoned worker's dead `Thread` object is released by the
      * next metrics read instead of accumulating for the process's life.
      */
+    private companion object {
+        const val GAUGE_DESCRIPTION =
+            "Selector statements abandoned at their evaluate's deadline (cancel + discard; " +
+                "the worker keeps its slot until the driver returns)"
+    }
+
     @Bean
     fun parametersSelectorsAbandonedGauge(
         pool: SelectorPool,
@@ -151,7 +158,5 @@ class ParametersConfiguration {
             .builder("parameters.selectors.abandoned") {
                 pool.abandonedThreadsAlive() // prune the dead worker threads with the scrape
                 pool.abandoned.sum().toDouble()
-            }.description(
-                "Selector statements abandoned at their evaluate's deadline (cancel + discard; the worker keeps its slot until the driver returns)",
-            ).register(meters)
+            }.description(GAUGE_DESCRIPTION).register(meters)
 }

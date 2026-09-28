@@ -76,34 +76,43 @@ class AuthoringStartupCheck(
         }
 
         if (!authoringEnabled) {
-            val pipelineDrafts = pipelines.findAllDraftPipelineNames()
-            val templateDrafts = templates.findAllDraftTemplateNames()
-            // C14 (#194 lane D): a parameter-set draft on a receiver breaks version alignment
-            // exactly as a pipeline's or a template's does — sets are versioned with the same
-            // lifecycle and promoted by name at pinned template versions.
-            val parameterSetDrafts = parameterSets?.findAllDraftParameterSetNames().orEmpty()
-            if (pipelineDrafts.isNotEmpty() || templateDrafts.isNotEmpty() || parameterSetDrafts.isNotEmpty()) {
-                val message =
-                    buildString {
-                        append(
-                            "Authoring is disabled (datapipelines.deployment.authoring-enabled=false) but this " +
-                                "server holds existing drafts — someone authored on a promotion receiver, and version " +
-                                "alignment may already be broken (versioning §9.3). Release or discard them on an " +
-                                "authoring server, or re-import this workspace. Drafts found:",
-                        )
-                        pipelineDrafts.take(MAX_NAMED).forEach { append("\n  - pipeline: ").append(it) }
-                        if (pipelineDrafts.size > MAX_NAMED) append("\n  - … and ${pipelineDrafts.size - MAX_NAMED} more pipelines")
-                        templateDrafts.take(MAX_NAMED).forEach { append("\n  - template: ").append(it) }
-                        if (templateDrafts.size > MAX_NAMED) append("\n  - … and ${templateDrafts.size - MAX_NAMED} more templates")
-                        parameterSetDrafts.take(MAX_NAMED).forEach { append("\n  - parameter set: ").append(it) }
-                        if (parameterSetDrafts.size > MAX_NAMED) {
-                            append("\n  - … and ${parameterSetDrafts.size - MAX_NAMED} more parameter sets")
-                        }
-                    }
-                log.error(message)
-                throw IllegalStateException(message)
-            }
+            refuseDrafts()
         }
+    }
+
+    /**
+     * The C8/C14 refusal: a receiver holding drafts means someone authored there, and version
+     * alignment may already be broken (versioning §9.3). Parameter-set drafts break it exactly
+     * as a pipeline's or a template's do — sets are versioned with the same lifecycle (C14).
+     */
+    private fun refuseDrafts() {
+        val pipelineDrafts = pipelines.findAllDraftPipelineNames()
+        val templateDrafts = templates.findAllDraftTemplateNames()
+        val parameterSetDrafts = parameterSets?.findAllDraftParameterSetNames().orEmpty()
+        if (pipelineDrafts.isEmpty() && templateDrafts.isEmpty() && parameterSetDrafts.isEmpty()) return
+        val message =
+            buildString {
+                append(
+                    "Authoring is disabled (datapipelines.deployment.authoring-enabled=false) but this " +
+                        "server holds existing drafts — someone authored on a promotion receiver, and version " +
+                        "alignment may already be broken (versioning §9.3). Release or discard them on an " +
+                        "authoring server, or re-import this workspace. Drafts found:",
+                )
+                named("pipeline", pipelineDrafts)
+                named("template", templateDrafts)
+                named("parameter set", parameterSetDrafts)
+            }
+        log.error(message)
+        throw IllegalStateException(message)
+    }
+
+    /** Names up to [MAX_NAMED] holders, then counts the rest. */
+    private fun StringBuilder.named(
+        kind: String,
+        names: List<String>,
+    ) {
+        names.take(MAX_NAMED).forEach { append("\n  - $kind: ").append(it) }
+        if (names.size > MAX_NAMED) append("\n  - … and ${names.size - MAX_NAMED} more ${kind}s")
     }
 
     companion object {

@@ -178,8 +178,8 @@ class MatrixRowReachabilityTest {
         const val MINIMUM_PERMISSIONS = 40
         const val MINIMUM_CHECKED = 8
 
-        /** 42 since 7b's `templates_evaluate` (auth.md's change log keeps the history). */
-        const val TOOL_COUNT = 42
+        /** 48 since #194 lane D's six parameter_sets_* tools (auth.md's change log keeps the history). */
+        const val TOOL_COUNT = 48
         const val MCP_LABEL = "MCP:"
         val TOOL = Regex("[a-z][a-z_]+")
 

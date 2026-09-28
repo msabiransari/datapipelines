@@ -3,9 +3,9 @@ package co.datapipelines.web.parameters
 import co.datapipelines.parameters.ParameterErrorCodes
 import co.datapipelines.parameters.ParameterSetBody
 import co.datapipelines.parameters.ParameterSetExport
+import co.datapipelines.parameters.ParameterSetImported
 import co.datapipelines.parameters.ParameterSetJson
 import co.datapipelines.parameters.ParameterSetRepository
-import co.datapipelines.parameters.ParameterSetImported
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
@@ -52,18 +52,19 @@ class ParameterSetTransferService(
         workspaceId: UUID,
         id: UUID,
     ): Map<String, Any?> {
-        val record = repository.findRecord(workspaceId, id) ?: throw ApiErrors.parameterNotFound(id.toString())
-        val current =
-            record.currentVersion
-                ?: throw notReleased(record.name)
-        val detail =
-            repository.findVersionDetail(workspaceId, id, current) ?: throw ApiErrors.parameterNotFound(id.toString())
-        if (detail.status != PipelineVersionStatus.RELEASED) throw notReleased(record.name)
-        val version = repository.findVersion(workspaceId, id, current) ?: throw ApiErrors.parameterNotFound(id.toString())
-        val pins = version.body.parameters.mapNotNull { it.source?.template }.distinct()
+        val exported = releasedFor(workspaceId, id)
+        val record = exported.record
+        val detail = exported.detail
+        val version = exported.version
+        val pins =
+            version
+                .body
+                .parameters
+                .mapNotNull { it.source?.template }
+                .distinct()
         val bundled = pinnedClosure(workspaceId, pins)
-        val payload = ParameterSetResponses.full(record, version.body, detail) as ObjectNode
-        payload.put("version", current)
+        val payload = fullPayload(record, version.body, detail)
+        payload.put("version", exported.detail.version)
         payload.put("body_hash", detail.bodyHash)
         detail.releasedAt?.let { payload.put("released_at", it.toString()) }
         return mapOf(
@@ -72,7 +73,7 @@ class ParameterSetTransferService(
             "manifest" to
                 mapOf(
                     "parameter_set_id" to record.id.toString(),
-                    "parameter_set_version" to current,
+                    "parameter_set_version" to detail.version,
                     "parameter_set_body_hash" to detail.bodyHash,
                     "template_pins" to pins.map { mapOf("id" to it.id, "version" to it.version) },
                     "exported_at" to Instant.now().toString(),
@@ -90,18 +91,11 @@ class ParameterSetTransferService(
         workspaceId: UUID,
         actor: UUID,
     ): ParameterSetImported {
-        val tree = MAPPER.readTree(body) as? ObjectNode ?: throw ApiErrors.malformedParameterSetBody()
-        val payload =
-            tree.get("parameter_set")?.takeIf(JsonNode::isObject) as? ObjectNode
-                ?: throw ApiErrors.malformedParameterSetBody()
+        val payload = importPayload(body)
         // Templates before sets (record §8.3): a pin the bundle brings must be stored before the
         // set's validation resolves it. Already-present versions are the template import's
         // idempotent no-op.
-        tree.get("templates")?.takeIf(JsonNode::isArray)?.let { bundled ->
-            val envelope = MAPPER.createObjectNode()
-            envelope.set<JsonNode>("templates", bundled)
-            templateImport.import(MAPPER.writeValueAsString(envelope), workspaceId, actor)
-        }
+        importBundledTemplates(payload, workspaceId, actor)
         val export = exportPayload(payload) ?: throw ApiErrors.malformedParameterSetBody()
         return try {
             sets.import(workspaceId, export, actor)
@@ -112,18 +106,124 @@ class ParameterSetTransferService(
         }
     }
 
+    /** The envelope's `parameter_set` object — every miss is the same malformed-envelope refusal. */
+    private fun importPayload(body: String): ObjectNode {
+        val tree = MAPPER.readTree(body) as? ObjectNode ?: throw ApiErrors.malformedParameterSetBody()
+        return tree.get("parameter_set")?.takeIf(JsonNode::isObject) as? ObjectNode
+            ?: throw ApiErrors.malformedParameterSetBody()
+    }
+
+    /** The bundle's optional `templates` array, imported FIRST (the promotion order — §8.3). */
+    private fun importBundledTemplates(
+        payload: ObjectNode,
+        workspaceId: UUID,
+        actor: UUID,
+    ) {
+        val bundled = MAPPER.readTree(payload.toString()).get("templates") ?: return
+        if (!bundled.isArray) return
+        val envelope = MAPPER.createObjectNode()
+        envelope.set<JsonNode>("templates", bundled)
+        templateImport.import(MAPPER.writeValueAsString(envelope), workspaceId, actor)
+    }
+
+    private data class Exported(
+        val record: co.datapipelines.parameters.ParameterSetRecord,
+        val detail: co.datapipelines.parameters.ParameterSetVersionDetail,
+        val version: co.datapipelines.parameters.ParameterSetVersion,
+    )
+
+    /** The RELEASED current version an export needs; every miss is the catalogued 404 or the release refusal. */
+    private fun releasedFor(
+        workspaceId: UUID,
+        id: UUID,
+    ): Exported {
+        val record = repository.findRecord(workspaceId, id) ?: throw ApiErrors.parameterNotFound(id.toString())
+        val current = record.currentVersion ?: throw notReleased(record.name)
+        return releasedVersion(workspaceId, record, current)
+    }
+
+    private fun releasedVersion(
+        workspaceId: UUID,
+        record: co.datapipelines.parameters.ParameterSetRecord,
+        current: Int,
+    ): Exported {
+        val detail = detailOr404(workspaceId, record.id, current)
+        releaseOr404(record.name, detail)
+        return Exported(record, detail, versionOr404(workspaceId, record.id, current))
+    }
+
+    private fun detailOr404(
+        workspaceId: UUID,
+        id: UUID,
+        current: Int,
+    ): co.datapipelines.parameters.ParameterSetVersionDetail =
+        repository.findVersionDetail(workspaceId, id, current)
+            ?: throw ApiErrors.parameterNotFound(id.toString())
+
+    private fun releaseOr404(
+        name: String,
+        detail: co.datapipelines.parameters.ParameterSetVersionDetail,
+    ) {
+        if (detail.status != PipelineVersionStatus.RELEASED) throw notReleased(name)
+    }
+
+    private fun versionOr404(
+        workspaceId: UUID,
+        id: UUID,
+        current: Int,
+    ): co.datapipelines.parameters.ParameterSetVersion =
+        repository.findVersion(workspaceId, id, current)
+            ?: throw ApiErrors.parameterNotFound(id.toString())
+
+    private fun fullPayload(
+        record: co.datapipelines.parameters.ParameterSetRecord,
+        body: co.datapipelines.parameters.ParameterSetBody,
+        detail: co.datapipelines.parameters.ParameterSetVersionDetail,
+    ): ObjectNode = ParameterSetResponses.full(record, body, detail) as ObjectNode
+
     /** The `ParameterSetExport` the service imports, judged strictly (an unknown shape is refused, never guessed). */
     private fun exportPayload(payload: ObjectNode): ParameterSetExport? {
-        val id =
-            payload.get("id")?.takeIf(JsonNode::isTextual)?.asText()
-                ?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return null
-        val name = payload.get("name")?.takeIf(JsonNode::isTextual)?.asText() ?: return null
-        val version = payload.get("version")?.takeIf(JsonNode::isInt)?.asInt()
-        val bodyHash = payload.get("body_hash")?.takeIf(JsonNode::isTextual)?.asText()
-        val releasedAt = payload.get("released_at")?.takeIf(JsonNode::isTextual)?.asText()?.let(Instant::parse)
-        val body = runCatching { MAPPER.treeToValue(payload, ParameterSetBody::class.java) }.getOrNull() ?: return null
-        return ParameterSetExport(id = id, name = name, version = version, bodyHash = bodyHash, releasedAt = releasedAt, body = body)
+        val exported =
+            Export(
+                id = textual(payload, "id")?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+                name = textual(payload, "name"),
+                bodyHash = textual(payload, "body_hash"),
+                releasedAt = textual(payload, "released_at")?.let(Instant::parse),
+                body = runCatching { MAPPER.treeToValue(payload, ParameterSetBody::class.java) }.getOrNull(),
+                version = payload.get("version")?.takeIf(JsonNode::isInt)?.asInt(),
+            )
+        return exported.asParameterExport()
     }
+
+    /** The payload's fields as read; [asParameterExport] decides which are load-bearing. */
+    private data class Export(
+        val id: UUID?,
+        val name: String?,
+        val bodyHash: String?,
+        val releasedAt: Instant?,
+        val body: ParameterSetBody?,
+        val version: Int?,
+    ) {
+        fun asParameterExport(): ParameterSetExport? {
+            val complete =
+                listOf(id, name, bodyHash, body).all { it != null }
+            if (!complete) return null
+            return ParameterSetExport(
+                id = checkNotNull(id),
+                name = checkNotNull(name),
+                version = version,
+                bodyHash = checkNotNull(bodyHash),
+                releasedAt = releasedAt,
+                body = checkNotNull(body),
+            )
+        }
+    }
+
+    /** The object's textual field, or null when absent or not a string. */
+    private fun textual(
+        payload: ObjectNode,
+        field: String,
+    ): String? = payload.get(field)?.takeIf(JsonNode::isTextual)?.asText()
 
     /** Direct pins plus the transitive `imports` closure, deduplicated — the pipeline bundle's walk. */
     private fun pinnedClosure(
@@ -135,20 +235,30 @@ class ParameterSetTransferService(
         val found = mutableListOf<co.datapipelines.templates.Template>()
         while (queue.isNotEmpty()) {
             val ref = queue.removeFirst()
-            if (!seen.add(ref.key)) continue
-            val version = templates.lookupVersion(workspaceId, ref.id, ref.version) ?: continue
-            templates.findVersion(workspaceId, ref.id, ref.version)?.let(found::add)
-            version.imports.forEach { queue.addLast(TemplateRef(it.id, it.version)) }
+            if (seen.add(ref.key)) {
+                visit(workspaceId, ref, queue, found)
+            }
         }
         return found
+    }
+
+    private fun visit(
+        workspaceId: UUID,
+        ref: TemplateRef,
+        queue: ArrayDeque<TemplateRef>,
+        found: MutableList<co.datapipelines.templates.Template>,
+    ) {
+        val version = templates.lookupVersion(workspaceId, ref.id, ref.version) ?: return
+        templates.findVersion(workspaceId, ref.id, ref.version)?.let(found::add)
+        version.imports.forEach { queue.addLast(TemplateRef(it.id, it.version)) }
     }
 
     private fun notReleased(name: String): ApiException =
         ApiException(
             ParameterErrorCodes.NOT_FOUND,
-            "Parameter set '${name.take(64)}' has no released version to export. Release it first — " +
+            "Parameter set '${name.take(MAX_ECHOED_NAME_CHARS)}' has no released version to export. Release it first — " +
                 "an export is what a promotion import consumes, and a draft never crosses environments.",
-            mapOf("parameter_set" to name.take(64)),
+            mapOf("parameter_set" to name.take(MAX_ECHOED_NAME_CHARS)),
         )
 
     private fun idTaken(
@@ -165,5 +275,8 @@ class ParameterSetTransferService(
 
     private companion object {
         val MAPPER = ParameterSetJson.mapper
+
+        /** Reflected client input is bounded before it reaches a refusal's text. */
+        const val MAX_ECHOED_NAME_CHARS = 64
     }
 }

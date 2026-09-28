@@ -26,7 +26,6 @@ import co.datapipelines.auth.Permission.LAKE_TABLE_MANAGE
 import co.datapipelines.auth.Permission.MCP_KEY_CREATE
 import co.datapipelines.auth.Permission.MCP_KEY_OWN
 import co.datapipelines.auth.Permission.MCP_KEY_REVOKE_OWN
-import co.datapipelines.auth.Permission.PIPELINE_CREATE
 import co.datapipelines.auth.Permission.PARAMETER_SET_CREATE
 import co.datapipelines.auth.Permission.PARAMETER_SET_DELETE
 import co.datapipelines.auth.Permission.PARAMETER_SET_EVALUATE
@@ -36,6 +35,7 @@ import co.datapipelines.auth.Permission.PARAMETER_SET_RELEASE
 import co.datapipelines.auth.Permission.PARAMETER_SET_SWITCH_VERSION
 import co.datapipelines.auth.Permission.PARAMETER_SET_UPDATE
 import co.datapipelines.auth.Permission.PARAMETER_SET_VERSION_MANAGE
+import co.datapipelines.auth.Permission.PIPELINE_CREATE
 import co.datapipelines.auth.Permission.PIPELINE_DELETE
 import co.datapipelines.auth.Permission.PIPELINE_EXECUTE
 import co.datapipelines.auth.Permission.PIPELINE_EXECUTE_NODE

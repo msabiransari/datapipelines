@@ -36,23 +36,21 @@ class ParametersConfigurationWiringTest {
 
     @Test
     fun `the whole graph builds - service, validator, runner, evaluator and the one pool`() {
-        context.run { it ->
-            it.getBean(ParameterSetService::class.java) shouldNotBe null
-            it.getBean(ParameterSetValidator::class.java) shouldNotBe null
-            it.getBean(SelectorRunner::class.java) shouldNotBe null
-            it.getBean(ParameterEvaluator::class.java) shouldNotBe null
-            it.getBean(SelectorPool::class.java) shouldNotBe null
-            // One pool: the runner's, the evaluator's and the gauge's are the same bean.
-            val pool = it.getBean(SelectorPool::class.java)
-            it.getBean(ParameterEvaluator::class.java) shouldBe it.getBean(ParameterEvaluator::class.java)
-            pool.size shouldBe it.getBean(ParametersConfig::class.java).maxConcurrentSelectorQueries
+        context.run { context ->
+            context.getBean(ParameterSetService::class.java) shouldNotBe null
+            context.getBean(ParameterSetValidator::class.java) shouldNotBe null
+            context.getBean(SelectorRunner::class.java) shouldNotBe null
+            context.getBean(ParameterEvaluator::class.java) shouldNotBe null
+            context.getBean(SelectorPool::class.java) shouldNotBe null
+            val pool = context.getBean(SelectorPool::class.java)
+            pool.size shouldBe context.getBean(ParametersConfig::class.java).maxConcurrentSelectorQueries
         }
     }
 
     @Test
     fun `the bound properties reach the domain config, bounds enforced at construction`() {
-        context.run { it ->
-            val config = it.getBean(ParametersConfig::class.java)
+        context.run { context ->
+            val config = context.getBean(ParametersConfig::class.java)
             config.maxParametersPerSet shouldBe 64
             config.maxConcurrentSelectorQueries shouldBe 4
             config.maxWaitingSelectorQueries shouldBe 64
@@ -147,5 +145,8 @@ class ParametersConfigurationWiringTest {
 
         @Bean
         fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
+
+        @Bean
+        fun templateImportService(): co.datapipelines.web.templates.TemplateImportService = io.mockk.mockk(relaxed = true)
     }
 }

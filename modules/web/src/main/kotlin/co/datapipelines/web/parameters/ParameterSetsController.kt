@@ -3,11 +3,12 @@ package co.datapipelines.web.parameters
 import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.auth.Permission
 import co.datapipelines.auth.RequiredScope
+import co.datapipelines.parameters.EvaluateResponseJson
 import co.datapipelines.parameters.ParameterErrorCodes
 import co.datapipelines.parameters.ParameterEvaluator
+import co.datapipelines.parameters.ParameterSetImported
 import co.datapipelines.parameters.ParameterSetReader
 import co.datapipelines.parameters.ParameterSetRepository
-import co.datapipelines.parameters.ParameterSetImported
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.web.api.ApiErrors
@@ -332,16 +333,7 @@ class ParameterSetsController(
         @PathVariable id: UUID,
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
-        // The stated bound, BEFORE the JSON parse: a viewer-reachable POST must not spend the
-        // server's parser on an oversized body (the #279 gap is this route's to bound).
-        if (body.toByteArray(Charsets.UTF_8).size > MAX_EVALUATE_REQUEST_BYTES) {
-            throw co.datapipelines.web.api.ApiException(
-                ParameterErrorCodes.EVALUATE_UNKNOWN_PARAMETER,
-                "The evaluate request body exceeds $MAX_EVALUATE_REQUEST_BYTES bytes; the largest legal " +
-                    "selections document for any set is far smaller.",
-                mapOf("reason" to "request_too_large", "max_request_bytes" to MAX_EVALUATE_REQUEST_BYTES),
-            )
-        }
+        refuseOversizedBody(body)
         val tree = TREE.readTree(body)
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
@@ -355,10 +347,25 @@ class ParameterSetsController(
             } ?: repository.findCurrent(workspaceId, id)?.takeIf { view.admits(it.record.name) }
         val set = loaded ?: throw ApiErrors.parameterNotFound(id.toString())
         val selections =
-            tree.get("selections")?.takeIf(JsonNode::isObject)
-                ?.properties()?.associate { it.key to it.value as JsonNode }
+            tree
+                .get("selections")
+                ?.takeIf(JsonNode::isObject)
+                ?.properties()
+                ?.associate { it.key to it.value as JsonNode }
                 ?: emptyMap()
-        return ApiResponse.of(co.datapipelines.parameters.EvaluateResponseJson.write(evaluator.evaluateBlocking(workspaceId, set, selections)))
+        val response = evaluator.evaluateBlocking(workspaceId, set, selections)
+        return ApiResponse.of(EvaluateResponseJson.write(response))
+    }
+
+    /** The stated bound, BEFORE the JSON parse: an oversized body never reaches the parser (#279). */
+    private fun refuseOversizedBody(body: String) {
+        if (body.toByteArray(Charsets.UTF_8).size <= MAX_EVALUATE_REQUEST_BYTES) return
+        throw co.datapipelines.web.api.ApiException(
+            ParameterErrorCodes.EVALUATE_UNKNOWN_PARAMETER,
+            "The evaluate request body exceeds $MAX_EVALUATE_REQUEST_BYTES bytes; the largest legal " +
+                "selections document for any set is far smaller.",
+            mapOf("reason" to "request_too_large", "max_request_bytes" to MAX_EVALUATE_REQUEST_BYTES),
+        )
     }
 
     // ---- helpers ----------------------------------------------------------------------------------

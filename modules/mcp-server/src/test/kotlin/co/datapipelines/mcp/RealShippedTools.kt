@@ -61,6 +61,13 @@ fun realShippedTools(): List<McpTool> {
         semanticsService = mockk<co.datapipelines.application.semantics.SemanticsService>(),
         factEnrichment = co.datapipelines.application.semantics.FactEnrichment.NONE,
         checkRunner = mockk<co.datapipelines.application.checks.PipelineCheckRunner>(),
+        // #194 lane D — the parameter-set tools' collaborators; the tools under these tests
+        // never reach them (a bare mock is the pattern this fixture already uses).
+        parameterSets = mockk<co.datapipelines.parameters.ParameterSetService>(),
+        parameterSetRepository = mockk<co.datapipelines.parameters.ParameterSetRepository>(),
+        parameterEvaluator = mockk<co.datapipelines.parameters.ParameterEvaluator>(),
+        parametersProperties = co.datapipelines.parameters.ParametersProperties(),
+        mcpToolLearnings = mockk<co.datapipelines.application.mcp.McpToolLearnings>(),
         lens = McpFixtures.EVERYTHING_LENS,
         templateService = McpFixtures.templateService(mockk<TemplateRepository>()),
         templateEvaluateService = mockk<co.datapipelines.application.templates.TemplateEvaluateService>(),

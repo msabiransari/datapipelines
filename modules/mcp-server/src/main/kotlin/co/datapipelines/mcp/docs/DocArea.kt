@@ -22,6 +22,7 @@ enum class DocArea(
     DATASOURCES("datasources"),
     LAKE("lake"),
     ENDPOINTS("endpoints"),
+    PARAMETERS("parameters"),
     ;
 
     companion object {
@@ -67,6 +68,10 @@ enum class DocArea(
                 "lake" -> LAKE
 
                 "endpoints" -> ENDPOINTS
+
+                // #194 lane D — the parameter engine's six tools are their own area: a consumer
+                // (a dashboard renderer, an agent building a form) meets them as one offering.
+                "parameter" -> PARAMETERS
 
                 "sql" -> DATASOURCES
 
