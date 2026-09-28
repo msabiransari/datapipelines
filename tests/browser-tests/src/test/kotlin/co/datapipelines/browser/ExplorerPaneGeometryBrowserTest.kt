@@ -167,7 +167,16 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
         """.trimIndent()
 
     /**
-     * Arms a one-shot capture of the FIRST animation frame after the next boosted swap.
+     * Arms a one-shot capture of the first animation frame, after the next boosted swap, in
+     * which the explorer's panes MEASURE (#294): a `requestAnimationFrame` loop from
+     * `htmx:afterSwap` that stops on the first frame whose probe finds both panes with a tree
+     * of non-zero width. One fixed frame after the swap was a bet the swap's own frame had
+     * painted the explorer; on a 2-vCPU runner it had not. The loop still catches the defect
+     * this test pins — a tree painted in the wrong geometry MEASURES, wrongly, on that frame.
+     * The armed document is stamped with the `token` argument: a click that replaced the whole document
+     * (a full navigation, not the boosted swap) leaves a document without the stamp, which
+     * the caller reports as exactly that instead of as "no geometry".
+     *
      * The probe is spliced into the evaluated source here, in Kotlin, rather than handed
      * to an in-page `eval`: the app's CSP has no `'unsafe-eval'` (188), so an `eval` that
      * runs INSIDE the page is refused — only the expression Playwright compiles through
@@ -175,10 +184,24 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
      */
     private val armFirstFrame =
         """
-        () => { window.__ff = null;
-          document.body.addEventListener('htmx:afterSwap', () => {
-            requestAnimationFrame(() => { window.__ff = ($geometryProbe)(); });
-          }, {once: true}); }
+        (token) => { window.__ff = null; window.__ffArmed = token;
+          const probe = $geometryProbe;
+          const frame = () => {
+            const g = probe();
+            if (g && g.treeWidth > 0) { window.__ff = g; } else { requestAnimationFrame(frame); }
+          };
+          document.body.addEventListener('htmx:afterSwap', () => requestAnimationFrame(frame), {once: true}); }
+        """.trimIndent()
+
+    /**
+     * True once htmx has BOOSTED the link the `sel` argument selects (htmx 2 keeps it on the element's
+     * internal data): a click before that is an ordinary full navigation, and the first-frame probe
+     * lives in the document that navigation throws away.
+     */
+    private val linkBoosted =
+        """
+        (sel) => { const a = document.querySelector(sel);
+          const d = a && a['htmx-internal-data']; return !!(d && d.boosted); }
         """.trimIndent()
 
     @Suppress("UNCHECKED_CAST")
@@ -343,14 +366,19 @@ class ExplorerPaneGeometryBrowserTest : BrowserSuite() {
                         collapsed,
                     )
                     page.waitForLoadState(LoadState.NETWORKIDLE)
-                    page.evaluate(armFirstFrame)
-                    page.click("a[data-nav-section='$section']")
+                    val link = "a[data-nav-section='$section']"
+                    page.waitForFunction(linkBoosted, link)
+                    val label = "boosted first frame $section at ${width}px rail-collapsed=$collapsed"
+                    page.evaluate(armFirstFrame, label)
+                    page.click(link)
                     page.waitForSelector(".tplx-tree")
-                    page.waitForFunction("() => window.__ff !== null")
-                    assertPanes(
-                        "boosted first frame $section at ${width}px rail-collapsed=$collapsed",
-                        page.evaluate("() => window.__ff"),
-                    )
+                    // Resolves on the measured frame — or at once in a document the probe was never
+                    // armed in, which the check below names (a full navigation, not the boosted swap).
+                    page.waitForFunction("(t) => window.__ffArmed !== t || window.__ff !== null", label)
+                    check(page.evaluate("() => window.__ffArmed") == label) {
+                        "$label: the click replaced the whole document — a full navigation, not the boosted swap this test measures"
+                    }
+                    assertPanes(label, page.evaluate("() => window.__ff"))
                 }
             }
         }
