@@ -2,7 +2,6 @@ package co.datapipelines.web.parameters
 
 import co.datapipelines.parameters.ParameterErrorCodes
 import co.datapipelines.parameters.ParameterSetImported
-import co.datapipelines.parameters.ParameterSetJson
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.web.api.ApiErrors
@@ -96,6 +95,10 @@ class ParameterSetPromotion(
      * with the id KEPT (P24), and an id taken by another workspace's set is refused `id_taken`
      * (C29 — never re-issued).
      *
+     * The body binds through [parameterSetBodyOf] — the lifecycle keys stripped by name, the
+     * strict mapper still refusing every other undeclared key (#299; the same bind the REST
+     * import makes).
+     *
      * Not an authoring write: the promotion receiver accepts it.
      */
     fun apply(
@@ -114,7 +117,7 @@ class ParameterSetPromotion(
                 ?.asText()
                 ?.let(Instant::parse)
         val body =
-            runCatching { MAPPER.treeToValue(entry, co.datapipelines.parameters.ParameterSetBody::class.java) }.getOrNull()
+            parameterSetBodyOf(entry as? ObjectNode ?: throw ApiErrors.malformedParameterSetBody())
                 ?: throw ApiErrors.malformedParameterSetBody()
         return sets.import(
             workspaceId,
@@ -128,9 +131,5 @@ class ParameterSetPromotion(
             ),
             actor,
         )
-    }
-
-    private companion object {
-        val MAPPER = ParameterSetJson.mapper
     }
 }

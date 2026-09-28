@@ -83,20 +83,23 @@ class ParameterSetTransferService(
 
     /**
      * Imports [body] — the export envelope — into [workspaceId] on behalf of [actor].
-     * Templates first (when the bundle carries them), then the set; the id is kept; the
-     * same-version-same-hash re-import is the service's idempotent no-op.
+     * The envelope's shape is judged BEFORE anything lands (a malformed set never leaves its
+     * templates behind); then the bundle's templates (when it carries them), then the set; the
+     * id is kept; the same-version-same-hash re-import is the service's idempotent no-op.
      */
     fun import(
         body: String,
         workspaceId: UUID,
         actor: UUID,
     ): ParameterSetImported {
-        val payload = importPayload(body)
+        val envelope = envelopeOf(body)
+        val payload = parameterSetOf(envelope)
+        val export = exportPayload(payload) ?: throw ApiErrors.malformedParameterSetBody()
         // Templates before sets (record §8.3): a pin the bundle brings must be stored before the
         // set's validation resolves it. Already-present versions are the template import's
-        // idempotent no-op.
-        importBundledTemplates(payload, workspaceId, actor)
-        val export = exportPayload(payload) ?: throw ApiErrors.malformedParameterSetBody()
+        // idempotent no-op. The set's OWN refusal after this point (a pin the bundle did not
+        // bring, a hash mismatch, a taken id) leaves the templates — §18 C35.
+        importBundledTemplates(envelope, workspaceId, actor)
         return try {
             sets.import(workspaceId, export, actor)
         } catch (e: DuplicateKeyException) {
@@ -107,23 +110,26 @@ class ParameterSetTransferService(
     }
 
     /** The envelope's `parameter_set` object — every miss is the same malformed-envelope refusal. */
-    private fun importPayload(body: String): ObjectNode {
-        val tree = MAPPER.readTree(body) as? ObjectNode ?: throw ApiErrors.malformedParameterSetBody()
-        return tree.get("parameter_set")?.takeIf(JsonNode::isObject) as? ObjectNode
+    private fun parameterSetOf(envelope: ObjectNode): ObjectNode =
+        envelope.get("parameter_set")?.takeIf(JsonNode::isObject) as? ObjectNode
             ?: throw ApiErrors.malformedParameterSetBody()
-    }
 
-    /** The bundle's optional `templates` array, imported FIRST (the promotion order — §8.3). */
+    private fun envelopeOf(body: String): ObjectNode = MAPPER.readTree(body) as? ObjectNode ?: throw ApiErrors.malformedParameterSetBody()
+
+    /**
+     * The bundle's optional `templates` array — at the ENVELOPE's root (§21.4), beside
+     * `parameter_set`, never inside it — imported FIRST (the promotion order — §8.3).
+     */
     private fun importBundledTemplates(
-        payload: ObjectNode,
+        envelope: ObjectNode,
         workspaceId: UUID,
         actor: UUID,
     ) {
-        val bundled = MAPPER.readTree(payload.toString()).get("templates") ?: return
+        val bundled = envelope.get("templates") ?: return
         if (!bundled.isArray) return
-        val envelope = MAPPER.createObjectNode()
-        envelope.set<JsonNode>("templates", bundled)
-        templateImport.import(MAPPER.writeValueAsString(envelope), workspaceId, actor)
+        val templatesEnvelope = MAPPER.createObjectNode()
+        templatesEnvelope.set<JsonNode>("templates", bundled)
+        templateImport.import(MAPPER.writeValueAsString(templatesEnvelope), workspaceId, actor)
     }
 
     private data class Exported(
@@ -189,7 +195,7 @@ class ParameterSetTransferService(
                 name = textual(payload, "name"),
                 bodyHash = textual(payload, "body_hash"),
                 releasedAt = textual(payload, "released_at")?.let(Instant::parse),
-                body = runCatching { MAPPER.treeToValue(payload, ParameterSetBody::class.java) }.getOrNull(),
+                body = parameterSetBodyOf(payload),
                 version = payload.get("version")?.takeIf(JsonNode::isInt)?.asInt(),
             )
         return exported.asParameterExport()
@@ -279,4 +285,38 @@ class ParameterSetTransferService(
         /** Reflected client input is bounded before it reaches a refusal's text. */
         const val MAX_ECHOED_NAME_CHARS = 64
     }
+}
+
+/**
+ * The lifecycle keys an export's `parameter_set` node carries BESIDE the body — the
+ * `ParameterSetResponses.full` projection (`id`, `name`, `version`, `created_at`, `updated_at`,
+ * `current_version`, `status`, `body_hash`) plus the transfer's `released_at`. Removed BY NAME
+ * before the strict bind (the reader's stripped-tree convention, #299); every OTHER undeclared
+ * key survives the strip and still refuses through the mapper's `FAIL_ON_UNKNOWN_PROPERTIES`.
+ */
+private val LIFECYCLE_KEYS: Set<String> =
+    setOf(
+        "id",
+        "name",
+        "version",
+        "created_at",
+        "updated_at",
+        "current_version",
+        "status",
+        "body_hash",
+        "released_at",
+    )
+
+/**
+ * The `parameter_set` node of a §21.4 envelope (a REST import payload or a promotion batch
+ * entry) as a strict [ParameterSetBody] — the ONE bind both transfer surfaces share (#299).
+ * The node carries the lifecycle keys beside the body, so they are stripped by name first and
+ * the strict mapper still refuses everything else: a typo like `parameterz` never binds, and
+ * `create`'s `ParameterSetReader` strictness is unchanged. Null when the bind fails; the caller
+ * refuses `parameter.validation.body_invalid`.
+ */
+internal fun parameterSetBodyOf(payload: ObjectNode): ParameterSetBody? {
+    val stripped = payload.deepCopy()
+    LIFECYCLE_KEYS.forEach(stripped::remove)
+    return runCatching { ParameterSetJson.mapper.treeToValue(stripped, ParameterSetBody::class.java) }.getOrNull()
 }
