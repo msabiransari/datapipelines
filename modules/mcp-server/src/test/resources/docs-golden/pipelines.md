@@ -20,7 +20,9 @@ an agent made here.
     the exact SELECT with representative parameters and read `plan.scan` and `wall_ms` — a
     sequential scan on a large table is the timeout you would meet in step 5, found while it
     is still cheap. Then write the calculation down before the first template: each quantity's
-    population, window, unit, grain and sampling weight (`pipelines-numbers`).
+    population, window, unit, grain and sampling weight, and why the inputs are comparable —
+    a sampled count is weighted to its population BEFORE it enters a total, a share or a
+    ranking (`pipelines-numbers`).
 2. **Write the template.** `templates_create` with a dialect matching the source and a
    description naming every parameter. Before creating a lookup or reference template,
    `templates_list {"q": "<table>"}` and **PIN what exists** — a narrowed variant is a `WHERE`
@@ -48,10 +50,12 @@ an agent made here.
    (first update opens it, later ones overwrite it). `pipelines_execute` with no version runs
    the working version — your draft when one exists — so testing needs no version argument. A
    draft whose pinned template was **updated after its last render** is refused
-   (`pipeline.execution.template_unrendered`) — render, then run. Then verify the QUESTION:
-   two check shapes are `checks[]` entries, and independent output reconciliation lives in the
-   description's Verification recipe — `pipelines-verification` is the whole discipline. Then
-   stop: leave the draft for a human to release.
+   (`pipeline.execution.template_unrendered`) — render, then run. Then verify the QUESTION,
+   derived again from the question and the source facts, weights included — never by
+   re-running your own formula: two check shapes are `checks[]` entries, and independent
+   output reconciliation lives in the description's Verification recipe —
+   `pipelines-verification` is the whole discipline. Then stop: leave the draft for a human
+   to release.
 6. **Read the result.** Inline first page, `total_rows`, `has_more`, `ttl_seconds`; page the
    remainder with `executions_get_result` within the TTL. A client can truncate a large tool
    result — page the rows and reason over what the server returned, **never over a partial view**. The `executions` guide owns runs and failures.
@@ -109,7 +113,8 @@ The mistakes that fill `pipelines-do-dont`: writing SQL against a column or unit
 instead of probed; printing a code where a lookup table could answer with names; staging raw
 rows into tempdb to aggregate there instead of at the source; two caller nodes; letting the
 next execute be a new template's first render; splitting a scan blindly to dodge a timeout;
-ranking rounded values; declaring the window three different ways.
+adding a sampled count to a census count; ranking rounded values; verifying by re-running your
+own formula; declaring the window three different ways.
 
 ## References — open when
 

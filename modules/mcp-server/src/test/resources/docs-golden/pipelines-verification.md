@@ -24,7 +24,8 @@
   question and the source facts — the population, the weights, the denominators, the window —
   never by re-running the pipeline's own formula or reading its staged tables. Re-running
   your formula checks arithmetic; only a second derivation can challenge the interpretation,
-  and the interpretation is where the answer goes wrong (`pipelines-numbers`). Then cover
+  and the interpretation is where the answer goes wrong (`pipelines-numbers` — its worked
+  case shows a recomputation agreeing with a wrong ranking). Then cover
   what the question asked for: every requested dimension (each period, each mode, each
   subgroup — a combined total that agrees says nothing about how it splits), and the
   vulnerable rows — the rank cutoff and the rows on both sides of it, the sparsest groups,
