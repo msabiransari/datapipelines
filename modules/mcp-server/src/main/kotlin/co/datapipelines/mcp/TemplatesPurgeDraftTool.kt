@@ -64,6 +64,38 @@ class TemplatesPurgeDraftTool(
                 """.trimIndent(),
         )
 
+    /** The D4 guard, both aggregates: every pipeline version ever, then every set version ever. */
+    private fun refuseIfPinned(
+        workspaceId: java.util.UUID,
+        id: String,
+        view: co.datapipelines.application.lens.LensedView,
+    ) {
+        val pinners = usage.pipelinesReferencedAnywhere(workspaceId, view, id)
+        if (pinners.isNotEmpty()) {
+            // The web service's `template.in_use` wire shape, verbatim: the refusal names the
+            // pipelines to go and change.
+            val names = pinners.map { it.pipelineName }.distinct()
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.IN_USE,
+                message =
+                    "Version of template '$id' is pinned by ${names.size} live pipeline version(s): " +
+                        names.joinToString(", ") + "; discard or repoint them first.",
+                details = mapOf("template_id" to id, "pinned_by" to names),
+            )
+        }
+        val setPinners = usage.referencedAnywhere(workspaceId, view, id)
+        if (setPinners.isNotEmpty()) {
+            val setNames = setPinners.map { it.setName }.distinct()
+            throw DatapipelinesException(
+                code = PipelineErrorCodes.Template.IN_USE,
+                message =
+                    "Version of template '$id' is pinned by ${setNames.size} parameter set version(s): " +
+                        setNames.joinToString(", ") + "; discard or repoint them first.",
+                details = mapOf("template_id" to id, "referencing_parameter_sets" to setNames),
+            )
+        }
+    }
+
     override fun call(
         args: McpArguments,
         ctx: McpToolContext,
@@ -102,31 +134,7 @@ class TemplatesPurgeDraftTool(
         }
         // #194 lane D — the guard covers parameter-set pins too (the record's §8.4); the lens
         // narrows both scans exactly as the read tools narrow.
-        val view = lens.viewFor(ctx.principal)
-        val pinners = usage.pipelinesReferencedAnywhere(workspaceId, view, id)
-        if (pinners.isNotEmpty()) {
-            // The web service's `template.in_use` wire shape, verbatim: the refusal names the
-            // pipelines to go and change.
-            val names = pinners.map { it.pipelineName }.distinct()
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Template.IN_USE,
-                message =
-                    "Version of template '$id' is pinned by ${names.size} live pipeline version(s): " +
-                        names.joinToString(", ") + "; discard or repoint them first.",
-                details = mapOf("template_id" to id, "pinned_by" to names),
-            )
-        }
-        val setPinners = usage.referencedAnywhere(workspaceId, view, id)
-        if (setPinners.isNotEmpty()) {
-            val setNames = setPinners.map { it.setName }.distinct()
-            throw DatapipelinesException(
-                code = PipelineErrorCodes.Template.IN_USE,
-                message =
-                    "Version of template '$id' is pinned by ${setNames.size} parameter set version(s): " +
-                        setNames.joinToString(", ") + "; discard or repoint them first.",
-                details = mapOf("template_id" to id, "referencing_parameter_sets" to setNames),
-            )
-        }
+        refuseIfPinned(workspaceId, id, lens.viewFor(ctx.principal))
 
         val draft = templates.findDraftDetail(workspaceId, id) ?: throw McpNotFound.template(id)
         if (!templates.purgeDraft(workspaceId, id, draft.bodyHash, authoring.developmentPosture)) {

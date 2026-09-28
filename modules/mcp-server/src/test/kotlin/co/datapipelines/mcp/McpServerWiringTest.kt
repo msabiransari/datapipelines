@@ -43,6 +43,26 @@ class McpServerWiringTest {
     private val resultUrls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
     private val authoringGuard = co.datapipelines.pipeline.AuthoringGuard(true)
 
+    /** The template tools, extracted at 194d when the fixture passed detekt's length. */
+    private fun templateTools(
+        usage: co.datapipelines.application.templates.TemplateUsage,
+        templates: TemplateRepository,
+        drafts: co.datapipelines.templates.TemplateDraftService,
+        templateValidator: TemplateValidator,
+        engines: WorkspaceTemplateEngines,
+    ): List<McpTool> =
+        listOf(
+            TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS),
+            TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS),
+            TemplatesUsedByTool(usage, McpFixtures.EVERYTHING_LENS),
+            McpFixtures.createTool(templates, authoringGuard, templateValidator),
+            TemplatesUpdateTool(templates, drafts, templateValidator),
+            TemplatesRenderTool(templates, engines),
+            // 7b — the transform evaluator, appended the way the shipped bean does.
+            TemplatesEvaluateTool(mockk<co.datapipelines.application.templates.TemplateEvaluateService>()),
+            TemplatesPurgeDraftTool(templates, usage, authoringGuard, McpFixtures.EVERYTHING_LENS),
+        )
+
     private fun tools(): List<McpTool> {
         val validator = mockk<PipelineValidator>()
         val templateValidator = mockk<TemplateValidator>()
@@ -71,15 +91,7 @@ class McpServerWiringTest {
             ),
             PipelinesCreateTool(service, pipelines),
             PipelinesUpdateTool(service),
-            TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS),
-            TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS),
-            TemplatesUsedByTool(usage, McpFixtures.EVERYTHING_LENS),
-            McpFixtures.createTool(templates, authoringGuard, templateValidator),
-            TemplatesUpdateTool(templates, drafts, templateValidator),
-            TemplatesRenderTool(templates, engines),
-            // 7b — the transform evaluator, appended the way the shipped bean does.
-            TemplatesEvaluateTool(mockk<co.datapipelines.application.templates.TemplateEvaluateService>()),
-            TemplatesPurgeDraftTool(templates, usage, authoringGuard, McpFixtures.EVERYTHING_LENS),
+            *templateTools(usage, templates, drafts, templateValidator, engines),
             DatasourcesListTool(datasources, lens = McpFixtures.EVERYTHING_LENS),
             DatasourcesGetTool(datasources, lens = McpFixtures.EVERYTHING_LENS),
             DatasourcesTestTool(datasources),

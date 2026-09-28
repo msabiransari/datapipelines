@@ -160,12 +160,70 @@ class ParameterCascadeE2eTest {
         withClue("template release must succeed: $releaseEnvelope") { releaseEnvelope.path("error").isMissingNode shouldBe true }
     }
 
-    // ---- the walk ---------------------------------------------------------------------------
+    /** The cascade set's four parameters (the record's §3.2 shapes, the E2E's own fixture). */
+    private val cascadeParameters: List<Map<String, Any?>> =
+        listOf(
+            mapOf(
+                "name" to "country",
+                "label" to "Country",
+                "type" to "STRING",
+                "kind" to "SELECT",
+                "cardinality" to "MULTI",
+                "required" to true,
+                "source" to
+                    mapOf(
+                        "constants" to
+                            listOf(
+                                mapOf("value" to "US", "display_value" to "United States", "is_default" to true),
+                                mapOf("value" to "CA", "display_value" to "Canada"),
+                            ),
+                    ),
+                "presentation" to mapOf("control" to "checkboxes"),
+            ),
+            mapOf(
+                "name" to "state",
+                "label" to "State",
+                "type" to "STRING",
+                "kind" to "SELECT",
+                "cardinality" to "SINGLE",
+                "required" to true,
+                "source" to
+                    mapOf(
+                        "template" to mapOf("id" to STATES_TEMPLATE, "version" to 1),
+                        "datasource" to DATASOURCE,
+                    ),
+                "depends_on" to listOf("country"),
+            ),
+            mapOf(
+                "name" to "city",
+                "label" to "City",
+                "type" to "STRING",
+                "kind" to "SELECT",
+                "cardinality" to "SINGLE",
+                "required" to false,
+                "source" to
+                    mapOf(
+                        "template" to mapOf("id" to CITIES_TEMPLATE, "version" to 1),
+                        "datasource" to DATASOURCE,
+                    ),
+                "depends_on" to listOf("state"),
+                "disabled_expression" to
+                    mapOf("op" to "eq", "left" to mapOf("ref" to "state"), "right" to mapOf("literal" to "NY")),
+            ),
+            mapOf(
+                "name" to "min_order_amount",
+                "label" to "Minimum order amount",
+                "type" to "DECIMAL",
+                "precision" to 12,
+                "scale" to 2,
+                "kind" to "INPUT",
+                "required" to false,
+                "default_value" to 0,
+                "constraints" to mapOf("min" to 0),
+            ),
+        )
 
-    @Test
-    @Order(1)
-    fun `fixture - tables, datasource, released templates, the set with a multi-segment name`() {
-        seedAuthRows()
+    private fun seedTables() {
         DriverManager.getConnection(H2_JDBC_URL, "sa", "sa").use { connection ->
             connection.createStatement().execute(
                 "CREATE TABLE IF NOT EXISTS dim_state (country_code VARCHAR(2), state_code VARCHAR(2), state_name VARCHAR(30))",
@@ -180,6 +238,15 @@ class ParameterCascadeE2eTest {
             )
             connection.createStatement().execute("INSERT INTO dim_city VALUES ('NY','New York City'),('CA','Los Angeles')")
         }
+    }
+
+    // ---- the walk ---------------------------------------------------------------------------
+
+    @Test
+    @Order(1)
+    fun `fixture - tables, datasource, released templates, the set with a multi-segment name`() {
+        seedAuthRows()
+        seedTables()
 
         given()
             .port(port)
@@ -206,7 +273,11 @@ class ParameterCascadeE2eTest {
             "SELECT city_name AS \"value\", city_name AS \"display_value\", FALSE AS \"is_default\" " +
                 "FROM dim_city WHERE state_code = :state ORDER BY city_name",
         )
+        createMainSet()
+    }
 
+    /** The cascade set: MULTI country (constants), template-backed state and city, a scale-2 INPUT. */
+    private fun createMainSet() {
         // The set is created over MCP (the agent surface) with the MULTI-SEGMENT name in the
         // BODY — never in a path segment (P24).
         val (created, createError) =
@@ -219,66 +290,7 @@ class ParameterCascadeE2eTest {
                     "description" to "country to state to city cascade plus an amount input",
                     "confirm_new_root" to true,
                     "parameters" to
-                        listOf(
-                            mapOf(
-                                "name" to "country",
-                                "label" to "Country",
-                                "type" to "STRING",
-                                "kind" to "SELECT",
-                                "cardinality" to "MULTI",
-                                "required" to true,
-                                "source" to
-                                    mapOf(
-                                        "constants" to
-                                            listOf(
-                                                mapOf("value" to "US", "display_value" to "United States", "is_default" to true),
-                                                mapOf("value" to "CA", "display_value" to "Canada"),
-                                            ),
-                                    ),
-                                "presentation" to mapOf("control" to "checkboxes"),
-                            ),
-                            mapOf(
-                                "name" to "state",
-                                "label" to "State",
-                                "type" to "STRING",
-                                "kind" to "SELECT",
-                                "cardinality" to "SINGLE",
-                                "required" to true,
-                                "source" to
-                                    mapOf(
-                                        "template" to mapOf("id" to STATES_TEMPLATE, "version" to 1),
-                                        "datasource" to DATASOURCE,
-                                    ),
-                                "depends_on" to listOf("country"),
-                            ),
-                            mapOf(
-                                "name" to "city",
-                                "label" to "City",
-                                "type" to "STRING",
-                                "kind" to "SELECT",
-                                "cardinality" to "SINGLE",
-                                "required" to false,
-                                "source" to
-                                    mapOf(
-                                        "template" to mapOf("id" to CITIES_TEMPLATE, "version" to 1),
-                                        "datasource" to DATASOURCE,
-                                    ),
-                                "depends_on" to listOf("state"),
-                                "disabled_expression" to
-                                    mapOf("op" to "eq", "left" to mapOf("ref" to "state"), "right" to mapOf("literal" to "NY")),
-                            ),
-                            mapOf(
-                                "name" to "min_order_amount",
-                                "label" to "Minimum order amount",
-                                "type" to "DECIMAL",
-                                "precision" to 12,
-                                "scale" to 2,
-                                "kind" to "INPUT",
-                                "required" to false,
-                                "default_value" to 0,
-                                "constraints" to mapOf("min" to 0),
-                            ),
-                        ),
+                        cascadeParameters,
                 ),
             )
         withClue("parameter_sets_create must succeed: $createError") { createError shouldBe null }
@@ -404,48 +416,7 @@ class ParameterCascadeE2eTest {
     @Test
     @Order(7)
     fun `a DRAFT evaluate over MCP whose pinned DRAFT template was not rendered refuses template_unrendered`() {
-        val (tpl, tplError) =
-            callTool(
-                10,
-                "templates_create",
-                mapOf(
-                    "id" to DRAFT_TEMPLATE,
-                    "dialect" to "H2",
-                    "display_name" to "Cascade draft template",
-                    "description" to "A draft selector for the unrendered gate.",
-                    "body" to "SELECT 'ALL' AS \"value\", 'All' AS \"display_value\", TRUE AS \"is_default\" ORDER BY 1",
-                ),
-            )
-        withClue("template create must succeed: $tplError") { tplError shouldBe null }
-
-        val (draft, createError) =
-            callTool(
-                11,
-                "parameter_sets_create",
-                mapOf(
-                    "name" to DRAFT_SET_NAME,
-                    "display_name" to "Draft cascade",
-                    "parameters" to
-                        listOf(
-                            mapOf(
-                                "name" to "region",
-                                "label" to "Region",
-                                "type" to "STRING",
-                                "kind" to "SELECT",
-                                "cardinality" to "SINGLE",
-                                "required" to true,
-                                "source" to
-                                    mapOf(
-                                        "template" to mapOf("id" to DRAFT_TEMPLATE, "version" to 1),
-                                        "datasource" to DATASOURCE,
-                                    ),
-                            ),
-                        ),
-                ),
-            )
-        withClue("draft set create must succeed: $createError") { createError shouldBe null }
-        withClue("draft create must return the created set: $draft") { draft.has("id") } shouldBe true
-        draftSetId = draft["id"].asText()
+        seedDraftContent()
 
         // The DRAFT set evaluates over MCP before this key rendered the draft pin: refused.
         val (refused, refusedError) =
@@ -474,6 +445,53 @@ class ParameterCascadeE2eTest {
             )
         withClue("the rendered draft evaluates: $passError") { passError shouldBe null }
         passed["valid"].asBoolean() shouldBe true
+    }
+
+    /** The draft pin and the draft set pinning it — the template_unrendered gate's subject. */
+    private fun seedDraftContent() {
+        val (tpl, tplError) =
+            callTool(
+                10,
+                "templates_create",
+                mapOf(
+                    "id" to DRAFT_TEMPLATE,
+                    "dialect" to "H2",
+                    "display_name" to "Cascade draft template",
+                    "description" to "A draft selector for the unrendered gate.",
+                    "body" to "SELECT 'ALL' AS \"value\", 'All' AS \"display_value\", TRUE AS \"is_default\" ORDER BY 1",
+                ),
+            )
+        withClue("template create must succeed: $tplError") { tplError shouldBe null }
+
+        val (draft, createError) =
+            callTool(
+                11,
+                "parameter_sets_create",
+                mapOf(
+                    "name" to DRAFT_SET_NAME,
+                    "display_name" to "Draft cascade",
+                    "confirm_new_root" to true,
+                    "parameters" to
+                        listOf(
+                            mapOf(
+                                "name" to "region",
+                                "label" to "Region",
+                                "type" to "STRING",
+                                "kind" to "SELECT",
+                                "cardinality" to "SINGLE",
+                                "required" to true,
+                                "source" to
+                                    mapOf(
+                                        "template" to mapOf("id" to DRAFT_TEMPLATE, "version" to 1),
+                                        "datasource" to DATASOURCE,
+                                    ),
+                            ),
+                        ),
+                ),
+            )
+        withClue("draft set create must succeed: $createError") { createError shouldBe null }
+        withClue("draft create must return the created set: $draft") { draft.has("id") } shouldBe true
+        draftSetId = draft["id"].asText()
     }
 
     companion object {
