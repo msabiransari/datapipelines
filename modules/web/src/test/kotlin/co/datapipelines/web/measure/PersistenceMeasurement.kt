@@ -80,44 +80,70 @@ import java.util.concurrent.atomic.AtomicLong
  * `1..M` and the committed count equals the emitted count, or the arm prints `COUNT MISMATCH`. A
  * number over zero executions is never printed as a number.
  *
+ * Two modes, same rig, same arms: `direct` — the pre-#266 path this build still carries (the
+ * emitter's default recorder, the audit logger without a writer; on the base commit this class ran
+ * the same path as the only one) — and `batched`, the production wiring: both event writers and the
+ * audit writer, with their meters read per arm through `WebMetrics.bindPersistence`.
+ *
  * Gated on `DP_MEASURE=1` (scripts/measure/README.md); a measurement reports, it never asserts a
- * threshold. `DP_MEASURE_N` (comma list, default `1,8,32,100`), `DP_MEASURE_M` (default 40) and
- * `DP_MEASURE_AUDIT_RATE` (default 500) narrow or widen the arms.
+ * threshold. `DP_MEASURE_N` (comma list, default `1,8,32,100`), `DP_MEASURE_M` (default 40),
+ * `DP_MEASURE_AUDIT_RATE` (default 500), `DP_MEASURE_MODES` (default `direct,batched`) and
+ * `DP_MEASURE_LINGER_MS` (default 0) narrow or widen the arms.
  */
 @EnabledIfEnvironmentVariable(named = "DP_MEASURE", matches = "1")
 class PersistenceMeasurement {
     private val ns = System.getenv("DP_MEASURE_N")?.split(",")?.map { it.trim().toInt() } ?: listOf(1, 8, 32, 100)
     private val eventsPerExecution = System.getenv("DP_MEASURE_M")?.toInt() ?: DEFAULT_EVENTS
     private val auditRatePerSecond = System.getenv("DP_MEASURE_AUDIT_RATE")?.toInt() ?: DEFAULT_AUDIT_RATE
+    private val modes = System.getenv("DP_MEASURE_MODES")?.split(",")?.map { it.trim() } ?: listOf(MODE_DIRECT, MODE_BATCHED)
+    private val lingerMs = System.getenv("DP_MEASURE_LINGER_MS")?.toLong() ?: 0L
 
     @Test
     fun `N concurrent executions through the real emitter beside an open-loop audit load`() {
-        val rig = Rig()
-        try {
-            rig.seed()
-            println("### #266 persistence — N executions × M=$eventsPerExecution events, audit A=$auditRatePerSecond rows/s")
-            println()
-            println("build: ${rig.buildLabel}")
-            println("dp-event-persist queue: ${rig.persistQueueDescription()}")
-            println(
-                "window: ${ARM_SECONDS}s measured after ${WARMUP_SECONDS}s warmup per arm; Hikari max=${POOL_SIZE}; " +
-                    "executor stand-in threads=$EXECUTOR_THREADS; servlet stand-in threads=$SERVLET_THREADS; " +
-                    "cpus=${Runtime.getRuntime().availableProcessors()}",
-            )
-            println()
-            println(
-                "| N | executions | events | events/s committed | emit p50 ms | emit p95 ms | emit p99 ms | emit max ms | " +
-                    "audit rows | audit rows/s | audit p50 ms | audit p95 ms | audit p99 ms | persist queue mean | persist queue max | " +
-                    "hikari active max | hikari waiting max | RSS start MB | RSS peak MB | recount |",
-            )
-            println("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
-            // One unreported warm-up arm so the first reported row is not paying for JIT and pool growth.
-            runArm(rig, WARMUP_N, report = false)
-            ns.forEach { n -> println(runArm(rig, n, report = true)) }
-            println()
-            rig.extraReport().forEach(::println)
-        } finally {
-            rig.close()
+        println("### #266 persistence — N executions × M=$eventsPerExecution events, audit A=$auditRatePerSecond rows/s")
+        println()
+        println(
+            "window: ${ARM_SECONDS}s measured after ${WARMUP_SECONDS}s warmup per arm; Hikari max=${POOL_SIZE}; " +
+                "executor stand-in threads=$EXECUTOR_THREADS; servlet stand-in threads=$SERVLET_THREADS; " +
+                "cpus=${Runtime.getRuntime().availableProcessors()}; linger-ms=$lingerMs (batched arms)",
+        )
+        modes.forEach { mode ->
+            val rig = Rig(mode, lingerMs)
+            try {
+                rig.seed()
+                println()
+                println("#### mode: $mode — ${rig.buildLabel}")
+                println("dp-event-persist queue: ${rig.persistQueueDescription()}")
+                println()
+                println(
+                    "| N | executions | events | events/s committed | emit p50 ms | emit p95 ms | emit p99 ms | emit max ms | " +
+                        "audit rows | audit rows/s | audit p50 ms | audit p95 ms | audit p99 ms | " +
+                        "persist queue mean | persist queue max | " +
+                        "hikari active max | hikari waiting max | RSS start MB | RSS peak MB | recount |",
+                )
+                println("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+                // One unreported warm-up arm so the first reported row is not paying for JIT and pool growth.
+                runArm(rig, WARMUP_N, report = false)
+                val writerRows = mutableListOf<String>()
+                ns.forEach { n ->
+                    rig.resetWriterMeters()
+                    println(runArm(rig, n, report = true))
+                    writerRows += rig.writerReport(n)
+                }
+                if (rig.batched) {
+                    println()
+                    println("writers (this mode): the meters WebMetrics.bindPersistence registers, read per arm")
+                    println()
+                    println(
+                        "| N | store | batches | batch size mean | batch size max | batch ms mean | lag mean ms | lag max ms | " +
+                            "queue depth max | fallbacks | failures |",
+                    )
+                    println("|---|---|---|---|---|---|---|---|---|---|---|")
+                    writerRows.forEach(::println)
+                }
+            } finally {
+                rig.close()
+            }
         }
     }
 
@@ -128,6 +154,7 @@ class PersistenceMeasurement {
     ): String {
         val window = Window()
         val sampler = Sampler(rig)
+        rig.writerDepthMax = 0
         val rssStart = rssMb()
         val auditTicker = startAuditLoad(rig, window)
         sampler.start(window.measuring)
@@ -310,8 +337,19 @@ class PersistenceMeasurement {
      * [emitter] and [audit] are the only two lines that differ between the baseline build and the
      * batched one — everything around them is identical by construction.
      */
-    private class Rig : AutoCloseable {
-        val buildLabel = "baseline (e4cd69e2): emit awaits one hop onto a 4-thread pool; audit is one INSERT on the caller's thread"
+    private class Rig(
+        mode: String,
+        lingerMs: Long,
+    ) : AutoCloseable {
+        val batched = mode == MODE_BATCHED
+        val buildLabel =
+            if (batched) {
+                "batched (#266): event row + replay entry through two BatchingWriters, audit through the audit writer; " +
+                    "emit and log still await"
+            } else {
+                "direct: emit awaits one write per store on the 4-thread pool; audit is one INSERT on the caller's thread " +
+                    "(the pre-#266 path)"
+            }
         private val dataSource =
             HikariDataSource(
                 HikariConfig().apply {
@@ -342,8 +380,104 @@ class PersistenceMeasurement {
                 ExecutionCancellationService(InMemoryCancellationRegistry(), RedisCancellationFlags(redis), ExecutorConfig()),
                 ExecutorJson.mapper,
             )
-        val audit = AuditLogger(jdbc, ExecutorJson.mapper)
+        private val config =
+            co.datapipelines.auth
+                .PersistenceProperties(lingerMs = lingerMs)
+                .toConfig()
+        private val writers =
+            if (batched) {
+                listOf(
+                    co.datapipelines.persistence.BatchingWriter(
+                        "execution_events",
+                        config,
+                        co.datapipelines.web.sse
+                            .ExecutionEventRowSink(events),
+                    ),
+                    co.datapipelines.persistence.BatchingWriter(
+                        "replay_log",
+                        config,
+                        co.datapipelines.web.sse
+                            .ReplayLogSink(eventLog),
+                    ),
+                    co.datapipelines.persistence.BatchingWriter("audit", config, co.datapipelines.auth.AuditRowSink(jdbc)),
+                )
+            } else {
+                emptyList()
+            }
+        private var registry =
+            io.micrometer.core.instrument.simple
+                .SimpleMeterRegistry()
+
+        @Suppress("UNCHECKED_CAST")
+        private val recorder =
+            if (batched) {
+                co.datapipelines.web.sse.BatchedEventRecorder(
+                    writers[0] as co.datapipelines.persistence.BatchingWriter<co.datapipelines.executor.ExecutionEventRecord>,
+                    writers[1] as co.datapipelines.persistence.BatchingWriter<co.datapipelines.web.sse.ReplayLogEntry>,
+                    eventLog,
+                    persistPool,
+                )
+            } else {
+                null
+            }
+
+        @Suppress("UNCHECKED_CAST")
+        val audit =
+            AuditLogger(
+                jdbc,
+                ExecutorJson.mapper,
+                writers.getOrNull(2) as co.datapipelines.persistence.BatchingWriter<co.datapipelines.auth.AuditRow>?,
+            )
         lateinit var userId: UUID
+
+        /** A fresh registry per arm, so each arm's writer meters are its own. */
+        fun resetWriterMeters() {
+            registry =
+                io.micrometer.core.instrument.simple
+                    .SimpleMeterRegistry()
+            val metrics =
+                co.datapipelines.web.metrics
+                    .WebMetrics(registry)
+            writers.forEach(metrics::bindPersistence)
+        }
+
+        fun writerQueueDepth(): Int = writers.sumOf { it.queueDepth() }
+
+        fun writerReport(n: Int): List<String> =
+            writers.map { writer ->
+                val tag = writer.name
+                val size = registry.find("datapipelines.persistence.batch.size").tag("store", tag).summary()
+                val duration = registry.find("datapipelines.persistence.batch.duration").tag("store", tag).timer()
+                val lag = registry.find("datapipelines.persistence.lag").tag("store", tag).timer()
+                val fallbacks =
+                    registry
+                        .find("datapipelines.persistence.fallbacks")
+                        .tag("store", tag)
+                        .counters()
+                        .sumOf { it.count() }
+                val failures =
+                    registry
+                        .find("datapipelines.persistence.failures")
+                        .tag("store", tag)
+                        .counters()
+                        .sumOf { it.count() }
+                listOf(
+                    n,
+                    tag,
+                    size?.count() ?: 0,
+                    "%.1f".format(size?.mean() ?: 0.0),
+                    "%.0f".format(size?.max() ?: 0.0),
+                    "%.2f".format(duration?.mean(TimeUnit.MILLISECONDS) ?: 0.0),
+                    "%.2f".format(lag?.mean(TimeUnit.MILLISECONDS) ?: 0.0),
+                    "%.2f".format(lag?.max(TimeUnit.MILLISECONDS) ?: 0.0),
+                    writerDepthMax,
+                    "%.0f".format(fallbacks),
+                    "%.0f".format(failures),
+                ).joinToString(" | ", prefix = "| ", postfix = " |")
+            }
+
+        /** The largest summed writer queue depth the sampler saw in the last arm. */
+        var writerDepthMax = 0
         lateinit var pipelineId: UUID
 
         fun emitter(): WebEventEmitter =
@@ -355,6 +489,7 @@ class PersistenceMeasurement {
                 eventRepository = events,
                 executionRepository = executions,
                 persistenceDispatcher = persistDispatcher,
+                eventRecorder = recorder,
             )
 
         fun persistQueueDescription(): String {
@@ -362,13 +497,15 @@ class PersistenceMeasurement {
             return "${tpe.queue.javaClass.simpleName}, remainingCapacity=${tpe.queue.remainingCapacity()} (Int.MAX_VALUE=${Int.MAX_VALUE})"
         }
 
-        fun persistQueueDepth(): Int = (persistPool as ThreadPoolExecutor).queue.size
+        /**
+         * Baseline: the persistence pool's backlog. Batched: that plus every writer's admitted items — the queue
+         * the batching introduces.
+         */
+        fun persistQueueDepth(): Int = (persistPool as ThreadPoolExecutor).queue.size + writerQueueDepth()
 
         fun hikariActive(): Int = dataSource.hikariPoolMXBean?.activeConnections ?: 0
 
         fun hikariWaiting(): Int = dataSource.hikariPoolMXBean?.threadsAwaitingConnection ?: 0
-
-        fun extraReport(): List<String> = emptyList()
 
         fun seed() {
             jdbc.jdbcTemplate.execute("TRUNCATE users CASCADE")
@@ -423,6 +560,7 @@ class PersistenceMeasurement {
         }
 
         override fun close() {
+            writers.forEach { it.close() }
             servlet.shutdown()
             executorPool.shutdownNow()
             persistPool.shutdownNow()
@@ -476,6 +614,7 @@ class PersistenceMeasurement {
                         queueSum += depth
                         samples++
                         queueMax = maxOf(queueMax, depth)
+                        rig.writerDepthMax = maxOf(rig.writerDepthMax, rig.writerQueueDepth())
                         activeMax = maxOf(activeMax, rig.hikariActive())
                         waitingMax = maxOf(waitingMax, rig.hikariWaiting())
                         rssPeakMb = maxOf(rssPeakMb, rssMb())
@@ -498,6 +637,8 @@ class PersistenceMeasurement {
     private companion object {
         const val DEFAULT_EVENTS = 40
         const val DEFAULT_AUDIT_RATE = 500
+        const val MODE_DIRECT = "direct"
+        const val MODE_BATCHED = "batched"
         const val MICROS_PER_SECOND = 1_000_000L
         const val MILLIS_PER_SECOND = 1_000L
         const val ARM_SECONDS = 6L
