@@ -105,6 +105,8 @@ class SseEventLog(
             args += values.size.toString()
             args += values
         }
+        // RedisTemplate.execute takes the script's arguments only as varargs; the array is built once per batch.
+        @Suppress("SpreadOperator")
         redis.execute(APPEND_SCRIPT, keys, *args.toTypedArray())
     }
 

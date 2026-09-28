@@ -295,6 +295,8 @@ class ArchitectureGuardTest {
                 "dag",
                 "auth",
                 "typesystem",
+                // #266 — the batching writer primitive: it knows no store, so it must not know a surface either.
+                "persistence",
             )
 
         /**
