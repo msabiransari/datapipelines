@@ -842,13 +842,44 @@ class TemplateRepositoryIntegrationTest {
      */
     @Test
     fun `the first-draft race, FORCED - the loser collides on the version PK and answers version_conflict with the winner's state`() {
+        forcedFirstDraftRace()
+    }
+
+    @Test
+    fun `the race loser's winner read is its OWN workspace's - a same-named template's draft elsewhere changes nothing (#276)`() {
+        // Template names are per workspace. The loser's read of the winner looked the draft up
+        // by NAME alone, so a same-named template with a draft in another workspace made it two
+        // rows, singleOrNull answered null, and the conflict carried no hash to rebase on — or,
+        // had the winner's row gone first, the OTHER workspace's draft state.
+        val other = UUID.randomUUID()
+        jdbc.update(
+            "INSERT INTO workspaces (id, name, display_name) VALUES (:id, 'other', 'Other')",
+            mapOf("id" to other),
+        )
+        repository.createReleased(other, draft(), actor)
+        val otherReleased = checkNotNull(repository.findLatest(other, "test/fetch_orders.sql"))
+        checkNotNull(
+            repository.createDraft(
+                other,
+                "test/fetch_orders.sql",
+                draft(body = "SELECT 7"),
+                otherReleased.bodyHash,
+                actor,
+                WriteSurface.SESSION,
+            ),
+        )
+
+        forcedFirstDraftRace()
+    }
+
+    private fun forcedFirstDraftRace() {
         repository.createReleased(workspaceId, draft(), actor)
         val released = checkNotNull(repository.findLatest(workspaceId, "test/fetch_orders.sql"))
         val templateId =
             checkNotNull(
                 jdbc.queryForObject(
-                    "SELECT id FROM templates WHERE name = 'test/fetch_orders.sql'",
-                    emptyMap<String, Any>(),
+                    "SELECT id FROM templates WHERE name = 'test/fetch_orders.sql' AND workspace_id = :ws",
+                    mapOf("ws" to workspaceId),
                     UUID::class.java,
                 ),
             )

@@ -578,6 +578,7 @@ class TemplateRepository(
      * `ParameterSetRepository` map the same pair.
      */
     private fun <T> mappingDraftRace(
+        workspaceId: UUID,
         templateId: String,
         block: () -> T,
     ): T =
@@ -586,7 +587,10 @@ class TemplateRepository(
         } catch (e: org.springframework.dao.DuplicateKeyException) {
             val violated = e.mostSpecificCause.message.orEmpty()
             if (DRAFT_INDEX !in violated && DRAFT_PK !in violated) throw e
-            val winner = findDraftDetailUnchecked(templateId)
+            // The winner is read in the CALLER's workspace (#276): a template name is unique per
+            // workspace only, and a by-name read saw another workspace's same-named draft too —
+            // two rows, no winner, a conflict with no hash to rebase on.
+            val winner = findDraftDetail(workspaceId, templateId)
             throw co.datapipelines.typesystem.DatapipelinesException(
                 code = PipelineErrorCodes.Template.VERSION_CONFLICT,
                 message = "Template was modified by someone else after you loaded it.",
@@ -723,21 +727,6 @@ class TemplateRepository(
             ),
         )
 
-    /** The race-loser's read of the winner — workspace unchecked because the INSERT already established the caller's scope. */
-    private fun findDraftDetailUnchecked(templateId: String): TemplateVersionDetail? =
-        jdbc
-            .query(
-                """
-                SELECT t.name AS template_id, v.version, v.status, v.body_hash, v.created_at, v.created_by,
-                       v.released_at, v.released_by, v.discarded_at, v.discarded_by, v.updated_by, v.updated_at,
-                       v.created_via, v.updated_via
-                  FROM template_versions v JOIN templates t ON t.id = v.template_id
-                 WHERE t.name = :name AND v.status = 'DRAFT'
-                """.trimIndent(),
-                mapOf("name" to templateId),
-                DETAIL_MAPPER,
-            ).singleOrNull()
-
     // ---------------------------------------------------------------------------------------------
     // Lifecycle writes (versioning §5/§6)
     // ---------------------------------------------------------------------------------------------
@@ -768,7 +757,7 @@ class TemplateRepository(
         actor: UUID,
         via: WriteSurface,
     ): TemplateVersionDetail? =
-        mappingDraftRace(id) {
+        mappingDraftRace(workspaceId, id) {
             jdbc
                 .query(
                     CREATE_DRAFT_SQL,
