@@ -1,6 +1,6 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.15 — #276: the draft race maps the version primary key as well as the one-draft index (§3.3)
+**Status:** v1.16 — #276: the draft race maps the version primary key as well as the one-draft index (§3.3)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
 **Last updated:** 2026-09-28
@@ -217,7 +217,12 @@ construction; the serve path checks the same eligibility rule the pointer uses
 
 ### 3.5 The lifecycle table
 
-**The tree.** Pipelines and templates are two folder trees; every leaf has an ordered
+**The tree.** Pipelines and templates are two folder trees — joined by #194 lane D's third,
+**parameter sets** (the record's §8.1: the templates' table shape, the pipelines' hash and
+index semantics, addressed by id). Every lifecycle row below reads with `parameter.*` codes
+for the set family; a set releases only when every pinned template version is RELEASED (or
+the 142 cascade with consent), and release re-runs the record's §4 source validation against
+the pins as they are now. Every leaf has an ordered
 version list. Dependencies are **edges**: exact-version pins (a pipeline node's template
 pin, a PIPELINE node's child pin) and pointer edges (endpoint→current, schedule→current).
 Three graph rules cover every refusal:
@@ -692,7 +697,9 @@ datapipelines:
 ```
 
 - **`deployment.authoring-enabled`, default `true`** — named for the CAPABILITY, not the
-  environment: someone runs this on ONE box, authors there and runs there, and that server
+  environment (the boot refusal covers PIPELINE, TEMPLATE and — since #194 lane D, C14 —
+  **parameter-set** drafts: `AuthoringStartupCheck` refuses startup on an authoring-disabled
+  deployment holding any of the three): someone runs this on ONE box, authors there and runs there, and that server
   is "production" in every ordinary sense, so a key that gated authoring on an environment
   NAME would lock them out of the only server they have. A promotion receiver turns it
   off; everyone else is on by default.
@@ -1337,6 +1344,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.16 | 194d (#194) parameter sets — renumbered at merge after 286's v1.15 | **§3.5: the tree gains its third family — parameter sets** (the record's §8.1: the templates' table shape, the pipelines' hash and index semantics, addressed by id, the `parameter.*` codes reading every lifecycle row). Release carries the pinned-template precondition plus the record's §4 source re-validation; the C14 boot rule adds parameter-set drafts to the authoring-disabled refusal. §5.5's refusal names all three draft families. |
 | 2026-09-28 | v1.15 | 286 (#276) | §3.3 names the constraint the race loser actually hits: both first writers allocate the same `max + 1`, so the loser collides on the version PRIMARY KEY before the one-draft index. `TemplateRepository.mappingDraftRace` mapped only the index and answered a first-draft race with a raw `DuplicateKeyException` (measured by a forced race — the winner's row held uncommitted until Postgres reported the contender blocked); it now maps both, as `PipelineRepository` and `ParameterSetRepository` do. No lifecycle rule changed. |
 | 2026-09-25 | v1.14 | scheduler lane 1 (#9) | §3.4: the schedule dependent is #9's (was "092"), follows the pointer wherever it points, drafts included (R5); a NULL pointer makes a schedule record a `not_started` / `pointer_null` run and **block** — "records a refused run" was the draft's wording (scheduler design revision A16). |
 | 2026-09-21 | v1.13 | 178 (#178) | §10.2's rule is now also the **promoter lens** ([Auth §11A.1](auth.md#11a1-the-404-rule)): computed once per request (`PromotableView`) for pipelines AND templates — the template arm stated for the first time — and read by the promotion page and by every promoter read alike; the push path's root guard decides "not newer" from the same object (a same-hash root at a higher number is refused `promotion.not_newer` with "same content", where the page already hid it). The 2026-09-20 verb ownership corrected in the lifecycle-verbs block: release and switch are the author's (D8), promote the promoter's. |

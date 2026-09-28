@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.56 (frozen contract — additive-only changes after this point)
+**Status:** v1.57 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-28
@@ -167,7 +167,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and the key sees exactly the datasources granted to its workspace (D-R7). What follows is ranked for a client that truncates it (#241): where the manual lives, then the draft rule, the name grammar, "humans register datasources" and the three recoveries — all inside 1,843 characters, 10 % under the 2,048-character cap Claude Code applies by default. The full text is §15's Delivery 1 block and ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 42 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 48 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -225,6 +225,12 @@ Tools are named `{domain}_{action}`:
 - `docs_list`
 - `docs_get`
 - `pipelines_run_checks`
+- `parameter_sets_list`
+- `parameter_sets_get`
+- `parameter_sets_create`
+- `parameter_sets_update`
+- `parameter_sets_evaluate`
+- `parameter_sets_purge_draft`
 
 A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)) — this is why `tools.listChanged` is `false` in v1 (§5.1).
 
@@ -934,7 +940,7 @@ Which pipelines pin a given template version — the reverse arrow of a node's `
 }
 ```
 
-Returns: `{"template": {"id", "version"}, "scan": "working_version", "pipeline_count", "references": [{"pipeline", "pipeline_id", "node_id", "pipeline_version", "pipeline_version_status"}]}` — one row per pinning NODE, so a pipeline with two nodes on the same version appears twice and `pipeline_count` stays the honest distinct count. The scan reads each pipeline's **working version** (draft-if-exists, versioning §7), so a draft that just adopted the pin is already counted — the "who do I notify" answer an author needs before editing a template ([Templates §5.4](templates.md#54-used-by-the-reverse-arrow-v19-040)). `version` is required and never clamped (the [D2 rule](templates.md#54-used-by-the-reverse-arrow-v19-040): the question is per version). The delete-safety question — who pins ANY version, in ANY pipeline version ever — is a different scan and surfaces as the `template.in_use` delete refusal on the REST surface, not here.
+Returns: `{"template": {"id", "version"}, "scan": "working_version", "pipeline_count", "references": [{"pipeline", "pipeline_id", "node_id", "pipeline_version", "pipeline_version_status"}], "parameter_set_references": [{"parameter_set", "parameter_set_id", "parameter", "set_version", "set_version_status"}]}` — one row per pinning NODE (pipelines) and per pinning PARAMETER (sets), so a pipeline with two nodes on the same version appears twice and `pipeline_count` stays the honest distinct count. Since #194 lane D the answer covers PARAMETER SETS too (the record's §8.4): a set whose selector pins this template version is a real reference, listed with the set name, the parameter and the set version carrying the pin. The scan reads each pipeline's **working version** (draft-if-exists, versioning §7), so a draft that just adopted the pin is already counted — the "who do I notify" answer an author needs before editing a template ([Templates §5.4](templates.md#54-used-by-the-reverse-arrow-v19-040)). `version` is required and never clamped (the [D2 rule](templates.md#54-used-by-the-reverse-arrow-v19-040): the question is per version). The delete-safety question — who pins ANY version, in ANY pipeline version ever, and since lane D in any parameter-set version ever — is a different scan and surfaces as the `template.in_use` delete refusal on the REST surface, not here.
 
 An unknown template id is the catalogued `template.not_found`; a known id with no such version is the same code with a `version` detail. **Permission:** `template.read` (040 D7) — reference structure a workspace reader may already see by reading the pipelines themselves; no customer row data.
 
@@ -1286,7 +1292,7 @@ Hard-delete a template that has NEVER been released — the one lifecycle verb a
 ```json
 {
   "name": "templates_purge_draft",
-  "description": "Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, may reference any version of it (the refusal names the pinning pipelines; templates_used_by answers the working-version scan if you need to inspect them). The sole-draft purge takes the entity row with it. A template holding any RELEASED or discarded version, another user's draft, or a pinned draft is refused — humans release and humans discard releases; an agent's own draft that should not exist is what this verb removes. Mutating.",
+  "description": "Hard-delete a template that has NEVER been released: the only version is a DRAFT, created by this key's user, and pinned by nothing — no pipeline version anywhere, draft or released, and no parameter-set version either, may reference any version of it (the refusal names the pinning pipelines and, since #194 lane D, the pinning parameter sets; templates_used_by answers the working-version scan if you need to inspect them). The sole-draft purge takes the entity row with it. A template holding any RELEASED or discarded version, another user's draft, or a pinned draft is refused — humans release and humans discard releases; an agent's own draft that should not exist is what this verb removes. Mutating.",
   "inputSchema": {
     "type": "object",
     "required": ["id"],
@@ -1758,6 +1764,145 @@ Evaluate a transform template over a caller-supplied input object (7b, transform
 **Returns:** `{ output, rejects, invariants: [ { name, passed, message } ] }`. `output` is the function's return after the type gate (the rows array, `{ rows, rejects }` when the contract declares rejects, or the one value/object in value mode); `rejects` is the rejected half with its reasons; each invariant verdict is `{ name, passed, message }`.
 
 **Errors:** an unknown id or version is `template.not_found`; an `sql`/`html` id is `template.contract_invalid` with `details.rule: "type_not_transform"`; an input that violates the contract is the record §5.1's input-check code; an evaluation failure is the engine's own typed refusal (evaluation failure, timeout, resource limit, pool exhausted) or the type gate's (shape, value, precision, size) — §13.18 names them (7c). The `mcp.tool.called` audit row carries `tool`, `template`, `version` and `outcome` — never the input object or the output (§9.5).
+
+#### 6.2.44 `parameter_sets_list`
+
+List the key's pinned workspace's parameter sets, or browse ONE level of the name tree (`prefix` — the pipelines listing's shape; names are folder paths, P24). Every row carries the set's `id` (what the other five tools take), `name`, `display_name`, `version`, `status` and `current_version`. A promoter's key sees only RELEASED sets newer than the promotion target's (the lens); every other set is absent for it.
+
+```json
+{
+  "name": "parameter_sets_list",
+  "inputSchema": {
+                  "type": "object",
+                  "properties": {
+                    "prefix": {"type": "string", "description": "Browse ONE level of the name tree at this prefix. Empty string browses the roots."},
+                    "limit": {"type": "integer", "default": 50, "maximum": 200}
+                  }
+                }
+}
+```
+
+**Permission:** `parameter_set.read` — every role (the promoter lensed). **Returns:** `{prefix, folders: [{path, segment, parameter_set_count}], parameter_sets: [{id, name, display_name, version, status, current_version}], returned}`.
+
+#### 6.2.45 `parameter_sets_get`
+
+Read one set by id: the WORKING version's full §3 document (every parameter's type, kind, cardinality, source, depends_on, constraints, presentation), the lifecycle state (`version`, `status`, `body_hash`, `current_version`, the `draft` pointer). Another workspace's set — or a lens-hidden one — answers `parameter.not_found`, never a permission error (§11A.1).
+
+```json
+{
+  "name": "parameter_sets_get",
+  "inputSchema": {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": {
+                    "id": {"type": "string", "format": "uuid", "description": "The set's id (parameter_sets_list returns it)."}
+                  },
+                  "additionalProperties": false
+                }
+}
+```
+
+**Permission:** `parameter_set.read`. **Returns:** `{id, name, display_name, description, version, status, body_hash, current_version, draft?, document}`. **Errors:** an unknown id is `parameter.not_found`.
+
+#### 6.2.46 `parameter_sets_create`
+
+Create a parameter set; version 1 lands DRAFT (a human releases it; no tool releases anything). The document is validated IN FULL at save (the record's §4) — including the metadata execution of every source template against its datasource — so a set whose selector cannot be proven is refused, not stored. A new top-level folder needs `confirm_new_root: true` (the 094 rule; the refusal names the existing roots, `test/` exempt). Before creating a `MULTI` SELECT with no `presentation.control`, ASK the person how it renders (dropdown, checkboxes, list) and set the control — §13a.2's ask-first rule (the manual's `parameters` area carries it).
+
+```json
+{
+  "name": "parameter_sets_create",
+  "inputSchema": {
+                  "type": "object",
+                  "required": ["name", "display_name", "parameters"],
+                  "properties": {
+                    "name": {"type": "string", "description": "Folder-path name (2-10 segments, lower-case): acme/sales/region_filters."},
+                    "display_name": {"type": "string", "description": "Human label, 1-120 characters."},
+                    "description": {"type": "string", "description": "Optional; 2000 characters max."},
+                    "parameters": {
+                      "type": "array",
+                      "description": "The ordered parameter definitions (the record's §3.2): name, label, type, kind (INPUT|SELECT), cardinality (SINGLE|MULTI), required, default_value, source (constants | template+datasource), depends_on, hidden_expression, disabled_expression, constraints (INPUT only), presentation.",
+                      "items": {"type": "object"}
+                    },
+                    "confirm_new_root": {"type": "boolean", "description": "Set true ONLY after a person has agreed to a new top-level folder; the refusal names the roots that exist. 'test/' never needs it."}
+                  },
+                  "additionalProperties": false
+                }
+}
+```
+
+**Permission:** `parameter_set.create`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`. **Errors:** the §13.20 validation family (the full failure list), `parameter.validation.new_root_requires_confirmation`, `parameter.authoring.disabled` on a receiver.
+
+#### 6.2.47 `parameter_sets_update`
+
+Edit a set by id: the first change after a release opens a DRAFT (copy-on-write), later updates overwrite it in place. `expected_hash` is the `body_hash` read from `parameter_sets_get` — a mismatch is a 409 conflict; re-read and rebase. The document is validated in full; the expensive source re-proving (steps 5–6) runs only when the body actually changed. A set is never renamed.
+
+```json
+{
+  "name": "parameter_sets_update",
+  "inputSchema": {
+                  "type": "object",
+                  "required": ["id", "expected_hash", "name", "display_name", "parameters"],
+                  "properties": {
+                    "id": {"type": "string", "format": "uuid"},
+                    "expected_hash": {"type": "string", "description": "The body_hash of the version this edit is based on. A mismatch is a 409 conflict; re-read and rebase."},
+                    "name": {"type": "string", "description": "Must equal the stored name — a set is never renamed."},
+                    "display_name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "parameters": {"type": "array", "items": {"type": "object"}}
+                  },
+                  "additionalProperties": false
+                }
+}
+```
+
+**Permission:** `parameter_set.update`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}` — the draft's hash is the next call's `expected_hash`.
+
+#### 6.2.48 `parameter_sets_evaluate`
+
+Evaluate a set by id (§6.2's tool face of the record's §5): submit EVERY parameter's current value (`selections`, wire-encoded, `MULTI` as an array; the first render sends `{}`) and receive the whole set re-rendered — `parameters[]` with each definition, its `dependents` and its `state` (`value`, `origin`, `computed_default`, `reset`, `hidden`, `disabled`, `options`, `errors`), plus `values`, the consumer payload. There is no client dependency logic: a stale child walks the server's selection priority (`reset: true`, never an error). The version resolves to the SERVED one unless `version` is passed; a DRAFT may be evaluated by its number — and then the 139 gate's twin applies: a draft whose pinned DRAFT template changed after this key's last `templates_render` of it is refused `parameter.evaluate.template_unrendered` (the fact is read from the same audit table the pipeline execute gate reads — the key's last render of that template id). An unknown `selections` key refuses the whole request (`unknown_parameter`).
+
+```json
+{
+  "name": "parameter_sets_evaluate",
+  "inputSchema": {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": {
+                    "id": {"type": "string", "format": "uuid"},
+                    "version": {"type": "integer", "description": "A specific version to evaluate. Absent: the SERVED version (current_version). A DRAFT may be evaluated by its own number."},
+                    "selections": {
+                      "type": "object",
+                      "description": "Every parameter's current value keyed by parameter name — the first render sends {}. null and [] mean 'nothing chosen' and walk the selection priority. Unknown keys refuse the whole request.",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": false
+                }
+}
+```
+
+**Permission:** `parameter_set.evaluate` — a VIEWER row (the fan-out's callers include every viewer, C24). Not a writer: nothing is stored. **Returns:** the §5.3 response verbatim (`id`, `name`, `version`, `valid`, `org`, `values`, `parameters[]`). **Errors:** whole-request — `parameter.evaluate.unknown_parameter`, `.timeout` (504), `.response_too_large` (413), `.template_unrendered`; per-parameter — in `state.errors[]` of a 200 (`valid: false`).
+
+#### 6.2.49 `parameter_sets_purge_draft`
+
+Hard-delete a set's DRAFT by id (versioning §5.4): the draft row is deleted, never restorable; if it is the set's ONLY version the set goes with it. `expected_hash` guards the purge. A RELEASED version is never touched here.
+
+```json
+{
+  "name": "parameter_sets_purge_draft",
+  "inputSchema": {
+                  "type": "object",
+                  "required": ["id", "expected_hash"],
+                  "properties": {
+                    "id": {"type": "string", "format": "uuid"},
+                    "expected_hash": {"type": "string", "description": "The draft's body_hash. A mismatch is a 409 conflict; re-read first."}
+                  },
+                  "additionalProperties": false
+                }
+}
+```
+
+**Permission:** `parameter_set.version.manage`. **Mutating** — the `mcp.tool.write` audit row is the trace of who purged it. **Returns:** `{id, purged: true}`. **Errors:** `parameter.not_found`, `parameter.version.not_draft` (no draft), `parameter.version.conflict` (stale hash).
 
 ### 6.3 Tool result schema
 
@@ -2254,6 +2399,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.57 | 194d (#194) the parameter engine's tools — renumbered at merge after 279's v1.55 and 286's v1.56 | **§6.1: 42 → 48 tools — the six `parameter_sets_*`** (the record's §9.1; addressed by id per P24, no release/switch tool — none exists for pipelines or templates either): `parameter_sets_list`/`get` (reads; the promoter lens), `_create`/`_update` (writes; full save-time validation; the 094 new-root confirmation; the §13a.2 ask-before-a-MULTI-without-a-hint rule in the description), `_evaluate` (the §5 runtime; a VIEWER row per C24; the 139 gate's twin — a DRAFT evaluate whose pinned DRAFT template postdates the key's last `templates_render` of it refuses `parameter.evaluate.template_unrendered`, read from the same audit table), `_purge_draft` (versioning §5.4, hash-guarded, the write audit). New §6.2.44–6.2.49. The manual gains the `parameters` area; the matrix places the six on the nine `parameter_set.*` rows. |
 | 2026-09-28 | v1.56 | 286 (#275) — numbered after 279's v1.55 at merge (landed before 194d) | **§7.3's role filtering**: the executions resource listing reads what `executions_list` reads — `findVisible` (own runs plus every `triggered_via = SCHEDULE` run of the workspace) under `execution.read`, `findAll` under `execution.read_all`; until #275 it read own-only `findByUser` for every key, admins included, so a scheduled run was on the tool's list and missing from the resources. No tool or URI changed. |
 | 2026-09-28 | v1.55 | 279 (#279) the request-body cap | **§3 names the transport's cap**: the platform's filter (pipeline-contract §13.21, [Configuration §3.31](configuration.md#331-web-request-limits)) sits ahead of the transport servlet, refusing a body over `datapipelines.web.max-request-bytes` with the same `413 request.body_too_large` envelope REST answers; the transport's JSON mapper carries the stated Jackson `StreamReadConstraints`. No tool, no schema, no permission change. |
 | 2026-09-27 | v1.54 | 274 (#274) legacy endpoint rows, retired never fatal | **§6.2.24 `endpoints_list` answers legacy rows flagged** — after the valid rows, a stored path saved before the current grammar carries `"legacy": true`, its `"reason"` (the grammar's own refusal, bounded), `"enabled"` and `path`/`pipeline`/`url`; no `path_variables` (there is no parse). **§6.2.25 `endpoints_get`** answers a legacy path not-found (the single read is valid-shape only). **§6.2.26 `endpoints_delete` is the fix** — the descriptions state it; removing the row is the one verb a legacy row supports. No tool added or removed: **42 stays 42**, permissions unchanged (`endpoint.read`, `endpoint.unpublish` — the same rows for legacy rows as for valid ones). The manual's `endpoints` guide carries the one sentence. |

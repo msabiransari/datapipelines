@@ -55,6 +55,8 @@ class PromotionReceiveService(
     private val endpointPromotion: EndpointPromotion,
     /** 140 — the receiver's release-check gate (§10.5): the one runner, shared with every surface. */
     private val checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
+    /** #194 lane D — the parameter-set half of promotion (§8.3). Nullable, the endpointPromotion precedent. */
+    private val parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion? = null,
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
@@ -107,6 +109,14 @@ class PromotionReceiveService(
             if (batch.templates.isNotEmpty()) {
                 templateImportService.import(templatesPayload(batch), workspace.id, actor)
             }
+            // #194 lane D — sets BEFORE pipelines, AFTER templates (§8.3's order): a set's
+            // pins must resolve, and the pipelines' editors read the released sets beside
+            // the released templates. A pin the batch did not bring is the import's own
+            // `parameter.import.missing_template`.
+            batch.parameterSets.forEach { entry ->
+                parameterSetPromotion?.apply(entry, workspace.id, actor)
+                    ?: error("a batch carrying parameter sets reached a receiver wired before #194")
+            }
             batch.pipelines.forEach { pipeline ->
                 pipelineImportService.import(pipeline.toString(), workspace.id, actor)
             }
@@ -128,15 +138,17 @@ class PromotionReceiveService(
                     "key_fingerprint" to batch.keyFingerprint,
                     "workspace" to batch.workspace,
                     "templates" to batch.templates.size,
+                    "parameter_sets" to batch.parameterSets.size,
                     "pipelines" to batch.pipelines.size,
                     "endpoints" to batch.endpoints.size,
                 ),
         )
         log.info(
-            "event=$AUDIT_ACCEPTED source_env={} workspace={} templates={} pipelines={} actor={}",
+            "event=$AUDIT_ACCEPTED source_env={} workspace={} templates={} sets={} pipelines={} actor={}",
             batch.sourceEnv,
             batch.workspace,
             batch.templates.size,
+            batch.parameterSets.size,
             batch.pipelines.size,
             actor,
         )
@@ -146,6 +158,7 @@ class PromotionReceiveService(
             templates = batch.templates.size,
             pipelines = batch.pipelines.size,
             endpoints = batch.endpoints.size,
+            parameterSets = batch.parameterSets.size,
         )
     }
 

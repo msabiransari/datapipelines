@@ -60,6 +60,8 @@ class PromotionService(
      * batches rather than needing a stub.
      */
     private val endpointPromotion: EndpointPromotion? = null,
+    /** #194 lane D — the parameter-set half of promotion (§8.3). Nullable, the endpointPromotion precedent. */
+    private val parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion? = null,
     private val deserializer: PipelineDeserializer = PipelineDeserializer(),
 ) {
     private val log = LoggerFactory.getLogger(PromotionService::class.java)
@@ -81,6 +83,8 @@ class PromotionService(
         val workspace: String,
         /** §10.2's set, exactly. Empty means "nothing to promote", which is the common state. */
         val promotable: List<Candidate>,
+        /** #194 lane D — the same set for parameter sets (§8.3), the page's rows through the model. */
+        val promotableParameterSets: List<Candidate>,
         /** How many live pipelines were examined — so an empty listing reads as "in sync", not "broken". */
         val examined: Int,
     )
@@ -120,6 +124,8 @@ class PromotionService(
             targetAuthoringEnabled = inventory.authoringEnabled,
             workspace = workspaceName,
             promotable = view.pipelines.map { Candidate(it.name, it.displayName, it.localVersion, it.targetVersion) },
+            promotableParameterSets =
+                view.parameterSets.map { Candidate(it.name, it.displayName, it.localVersion, it.targetVersion) },
             examined = view.examinedPipelines,
         )
     }
@@ -135,8 +141,21 @@ class PromotionService(
         workspaceId: UUID,
         workspaceName: String,
         names: List<String>,
+    ): PromotionWire.Applied = promote(workspaceId, workspaceName, names, emptyList())
+
+    fun promote(
+        workspaceId: UUID,
+        workspaceName: String,
+        names: List<String>,
+        /**
+         * #194 lane D — the parameter-set roots, pushed after the templates and before the
+         * pipelines (§8.3). A DELIBERATE overload, not a defaulted parameter: the promotion
+         * E2E invokes `promote` reflectively by the three-argument signature, and a Kotlin
+         * default would silently remove it.
+         */
+        parameterSetNames: List<String>,
     ): PromotionWire.Applied {
-        require(names.isNotEmpty()) { "promote() needs at least one pipeline name" }
+        require(names.isNotEmpty() || parameterSetNames.isNotEmpty()) { "promote() needs at least one root" }
         // FRESH, never the lens's cached copy: §10.3's guards run against the target as it is
         // now, and the same view the page computes is rebuilt over that fresh answer.
         val inventory = client.inventory(workspaceName)
@@ -144,6 +163,25 @@ class PromotionService(
 
         val closure = Closure(workspaceId, views.compute(workspaceId, inventory))
         names.distinct().forEach { name -> closure.addRoot(name, inventory) }
+        // #194 lane D — the set roots AFTER the templates: their pins merge into the batch's
+        // template closure, the payloads ride the set slot (§8.3's order).
+        val promotion = parameterSetPromotion
+        val setEntries =
+            if (promotion != null) {
+                val targets = inventory.parameterSetByName()
+                val entries =
+                    parameterSetNames
+                        .distinct()
+                        .mapNotNull { name ->
+                            promotion.entryFor(workspaceId, name, targets[name])
+                        }
+                entries
+                    .flatMap { promotion.templatePins(it) }
+                    .forEach(closure::addTemplate)
+                entries
+            } else {
+                emptyList()
+            }
         verifyDatasources(closure, inventory)
 
         val batch =
@@ -152,15 +190,17 @@ class PromotionService(
                 keyFingerprint = PromotionServerKeys.fingerprint(promotionProperties.target.serverKey),
                 workspace = workspaceName,
                 templates = closure.templatePayloads(inventory),
+                parameterSets = setEntries,
                 pipelines = closure.pipelinePayloads(inventory),
                 endpoints = endpointPromotion?.entriesFor(workspaceId, closure.pipelineNames()).orEmpty(),
             )
         log.info(
-            "event=pipeline.promotion.pushing target={} workspace={} roots={} templates={} pipelines={} endpoints={}",
+            "event=pipeline.promotion.pushing target={} workspace={} roots={} templates={} sets={} pipelines={} endpoints={}",
             client.targetBaseUrl,
             workspaceName,
-            names.size,
+            names.size + batch.parameterSets.size,
             batch.templates.size,
+            batch.parameterSets.size,
             batch.pipelines.size,
             batch.endpoints.size,
         )
@@ -313,7 +353,7 @@ class PromotionService(
         }
 
         /** A template version and the transitive `imports_json` closure beneath it. */
-        private fun addTemplate(ref: TemplateRef) {
+        fun addTemplate(ref: TemplateRef) {
             if (ref.id.isBlank()) return
             if (!visitedTemplates.add(ref.key)) return
             val version = templates.lookupVersion(workspaceId, ref.id, ref.version) ?: return

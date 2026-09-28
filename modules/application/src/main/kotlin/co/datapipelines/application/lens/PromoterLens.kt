@@ -19,9 +19,15 @@ data class LensedView(
     val pipelines: ReadLens,
     val templates: ReadLens,
     val unavailable: Unavailable? = null,
+    /**
+     * #194 lane D — the parameter-set lens (`parameter_set.read`'s promoter cell). Appended
+     * LAST and defaulted so every positional construction keeps compiling: an unnamed view is
+     * everything, never a silent narrowing.
+     */
+    val parameterSets: ReadLens = ReadLens.Everything,
 ) {
     /** True when this view narrows anything — the surfaces that pay for a view ask this first. */
-    val isLensed: Boolean get() = !pipelines.isEverything || !templates.isEverything
+    val isLensed: Boolean get() = !pipelines.isEverything || !templates.isEverything || !parameterSets.isEverything
 
     /**
      * Why a lensed view is empty: the target's base URL (never its key) and the transport or

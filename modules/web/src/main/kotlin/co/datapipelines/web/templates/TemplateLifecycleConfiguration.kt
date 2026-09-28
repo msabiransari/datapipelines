@@ -7,6 +7,7 @@ import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateValidator
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 
 /**
  * The version-lifecycle services of the template surface (versioning.md §5/§6).
@@ -28,10 +29,32 @@ class TemplateLifecycleConfiguration {
     ): TemplateDraftService = TemplateDraftService(templates, authoring, citations)
 
     @Bean
+    fun parameterSetTemplatePins(jdbc: NamedParameterJdbcTemplate): co.datapipelines.parameters.ParameterSetTemplatePins =
+        co.datapipelines.parameters.ParameterSetTemplatePins(jdbc)
+
+    /**
+     * #194 lane D — the COMBINED reverse arrow as one bean: the template screen's model, the
+     * web delete guards and the MCP tool bean all consume it (the record's §8.4).
+     */
+    @Bean
+    fun templateUsage(
+        pipelines: PipelineRepository,
+        templates: TemplateRepository,
+        parameterSets: co.datapipelines.parameters.ParameterSetTemplatePins,
+    ): co.datapipelines.application.templates.TemplateUsage =
+        co.datapipelines.application.templates.TemplateUsage(
+            co.datapipelines.templates.TemplateUsageService(templates, pipelines),
+            parameterSets,
+        )
+
+    @Bean
     fun templateReleaseService(
         templates: TemplateRepository,
         validator: TemplateValidator,
         authoring: AuthoringGuard,
         pipelines: PipelineRepository,
-    ): TemplateReleaseService = TemplateReleaseService(templates, validator, authoring, pipelines)
+        // #194 lane D — the delete guards cover parameter-set pins (the record's §8.4).
+        parameterSets: co.datapipelines.parameters.ParameterSetTemplatePins,
+    ): TemplateReleaseService =
+        TemplateReleaseService(templates, validator, authoring, pipelines, parameterSets)
 }

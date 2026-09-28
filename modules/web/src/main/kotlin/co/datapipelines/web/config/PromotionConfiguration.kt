@@ -45,6 +45,8 @@ class PromotionConfiguration {
         pipelines: PipelineRepository,
         templates: TemplateRepository,
         datasources: DatasourceRegistry,
+        // #194 lane D — the set arm of the inventory (§8.3).
+        repository: co.datapipelines.parameters.ParameterSetRepository,
     ): PromotionInventoryService =
         PromotionInventoryService(
             workspaces,
@@ -53,6 +55,7 @@ class PromotionConfiguration {
             datasources,
             deploymentName(environment),
             authoringEnabled(environment),
+            parameterSets = repository,
         )
 
     /**
@@ -81,6 +84,8 @@ class PromotionConfiguration {
         endpointPromotion: EndpointPromotion,
         // 140 — the receiver's release-check gate rides the one shared runner.
         checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
+        // #194 lane D — the parameter-set half of promotion (§8.3).
+        parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion,
     ): PromotionReceiveService =
         PromotionReceiveService(
             inventory,
@@ -91,7 +96,18 @@ class PromotionConfiguration {
             authoringEnabled(environment),
             endpointPromotion,
             checkRunner,
+            parameterSetPromotion,
         )
+
+    /** #194 lane D — the sender's set payloads and the receiver's set imports, ONE collaborator. */
+    @Bean
+    fun parameterSetPromotion(
+        repository: co.datapipelines.parameters.ParameterSetRepository,
+        sets: co.datapipelines.parameters.ParameterSetService,
+        templates: TemplateRepository,
+    ): co.datapipelines.web.parameters.ParameterSetPromotion =
+        co.datapipelines.web.parameters
+            .ParameterSetPromotion(repository, sets, templates)
 
     /** 074 — the endpoint half of a promotion batch, sender and receiver rules in one place. */
     @Bean

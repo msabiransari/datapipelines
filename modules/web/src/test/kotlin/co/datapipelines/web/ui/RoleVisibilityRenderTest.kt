@@ -796,6 +796,7 @@ class RoleVisibilityRenderTest {
                             targetVersion = 1,
                         ),
                     ),
+                promotableParameterSets = emptyList(),
                 examined = 4,
             )
     }

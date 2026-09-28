@@ -153,5 +153,6 @@ object ToolsReferenceGenerator {
             DocArea.DATASOURCES to "Discovery, introspection, learned semantics and the SQL probe.",
             DocArea.LAKE to "The dp-lake registry writes: register, import, unregister.",
             DocArea.ENDPOINTS to "Publish and read the HTTP interfaces of released pipelines.",
+            DocArea.PARAMETERS to "The parameter sets: list, read, write, evaluate and purge drafts.",
         )
 }

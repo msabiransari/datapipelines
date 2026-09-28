@@ -21,6 +21,10 @@ dependencies {
     // repository and the test runner; scripting for the engine seam the runner drives.
     implementation(project(":modules:templates"))
     implementation(project(":modules:scripting"))
+    // #194 lane D: the templates reverse arrow's parameter-set half — TemplateUsage composes
+    // the templates scan with ParameterSetTemplatePins (the record's §8.4; the edge was
+    // allowed ahead, now that something here compiles against it it is declared).
+    implementation(project(":modules:parameters"))
 
     // ExecutionLauncher binds parameters and reserves idempotency keys before the surface
     // starts anything; the reservation store and ExecuteRequest are dag types, the principal

@@ -35,6 +35,8 @@ class PromotableView private constructor(
     val pipelines: List<Candidate>,
     /** The same set for templates. */
     val templates: List<Candidate>,
+    /** #194 lane D — the same set for parameter sets (the record's §8.3). */
+    val parameterSets: List<Candidate>,
     /** How many live pipelines held a current version — so an empty listing reads as "in sync", not "broken". */
     val examinedPipelines: Int,
     val examinedTemplates: Int,
@@ -51,9 +53,13 @@ class PromotableView private constructor(
 
     val pipelineLens: ReadLens = ReadLens.Only(pipelines.mapTo(LinkedHashSet()) { it.name })
     val templateLens: ReadLens = ReadLens.Only(templates.mapTo(LinkedHashSet()) { it.name })
+    val parameterSetLens: ReadLens = ReadLens.Only(parameterSets.mapTo(LinkedHashSet()) { it.name })
 
     /** The listing row for [name], or null when [name] is not promotable — the promote path's root guard reads this. */
     fun pipeline(name: String): Candidate? = pipelines.firstOrNull { it.name == name }
+
+    /** The set arm of the same guard. */
+    fun parameterSet(name: String): Candidate? = parameterSets.firstOrNull { it.name == name }
 
     companion object {
         /** The rule over the two local current-version lists and the target's inventory. */
@@ -61,9 +67,11 @@ class PromotableView private constructor(
             localPipelines: List<CurrentPipelineVersion>,
             localTemplates: List<CurrentTemplateVersion>,
             inventory: PromotionWire.Inventory,
+            localParameterSets: List<co.datapipelines.parameters.CurrentParameterSetVersion> = emptyList(),
         ): PromotableView {
             val pipelinesOnTarget = inventory.pipelineByName()
             val templatesOnTarget = inventory.templateById()
+            val setsOnTarget = inventory.parameterSetByName()
             return PromotableView(
                 pipelines =
                     localPipelines
@@ -74,6 +82,11 @@ class PromotableView private constructor(
                     localTemplates
                         .mapNotNull { local ->
                             candidate(local.id, local.displayName, local.version, local.bodyHash, templatesOnTarget[local.id])
+                        }.sortedBy { it.name },
+                parameterSets =
+                    localParameterSets
+                        .mapNotNull { local ->
+                            candidate(local.name, local.displayName, local.version, local.bodyHash, setsOnTarget[local.name])
                         }.sortedBy { it.name },
                 examinedPipelines = localPipelines.size,
                 examinedTemplates = localTemplates.size,

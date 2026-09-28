@@ -237,6 +237,16 @@ object ApiErrorCatalog {
             // the version refused. Wired explicitly for that reason (025 A2).
             PipelineErrorCodes.Versioning.CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
             PipelineErrorCodes.Template.VERSION_CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
+            // §13.20 (#194 lane D) — the parameter-set codes whose status differs from their
+            // family default (or owns a row where no family status exists: `parameter.not_found`
+            // has no status family at all, so unmapped it would answer 500). Wired explicitly so
+            // each code owns a row, the 025 A2 convention:
+            PipelineErrorCodes.Parameters.NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Parameters.EVALUATE_UNKNOWN_PARAMETER to HttpStatus.BAD_REQUEST,
+            PipelineErrorCodes.Parameters.EVALUATE_RESPONSE_TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
+            PipelineErrorCodes.Parameters.EVALUATE_TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
+            PipelineErrorCodes.Parameters.DUPLICATE_NAME to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Parameters.VERSION_CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
             // §13.9 (7b, the transform types) — 400s, wired explicitly so each code owns a row
             // rather than being absorbed by a default (the 025 A2 convention).
             PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN to HttpStatus.BAD_REQUEST,

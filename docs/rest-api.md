@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.46 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.47 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-27
@@ -1954,10 +1954,13 @@ What this deployment already holds in `{name}` — the sender's whole delta inpu
     "templates": [
       { "name": "finance/revenue.sql", "current_version": 2, "body_hash": "sha256-..." }
     ],
-    "datasources": ["sales_db", "warehouse"]
+    "datasources": ["sales_db", "warehouse"],
+    "parameter_sets": [ { "name": "acme/sales/region_filters", "current_version": 4, "body_hash": "sha256-..." } ]
   }
 }
 ```
+
+`parameter_sets` (#194 lane D, the record's §8.3) is the same `(name, current_version, body_hash)` triple for the workspace's parameter sets; a sender that predates the engine reads an inventory whose absence it ignores.
 
 **The sender caches this answer (178).** The promoter lens evaluates §10.2 on every read a promoter makes, so the sender reads this endpoint through a per-workspace cache (`datapipelines.deployment.promotion.inventory-cache-ttl-seconds`, default 60 s — [Configuration §3.19](configuration.md#319-deployment)); an unreachable answer is remembered for the same window, a successful push invalidates the entry, and the push path itself always reads fresh (§10.3).
 
@@ -1984,9 +1987,12 @@ Apply one batch. **All of it, or none of it** ([§10.4](versioning.md#104-push-o
   "key_fingerprint": "sha256:1a2b3c4d5e6f",
   "workspace": "acme",
   "templates": [ { "id": "finance/revenue.sql", "version": 2, "body_hash": "...", "body": "...", "...": "..." } ],
-  "pipelines": [ { "id": "…uuid…", "version": 4, "body_hash": "...", "name": "acme/finance/daily_revenue", "nodes": [] } ]
+  "pipelines": [ { "id": "…uuid…", "version": 4, "body_hash": "...", "name": "acme/finance/daily_revenue", "nodes": [] } ],
+  "parameter_sets": [ { "id": "3f2a…", "name": "acme/sales/region_filters", "version": 4, "body_hash": "…", "released_at": "…", "parameters": [] } ]
 }
 ```
+
+`parameter_sets` (#194 lane D) are the §21.4 export envelopes, applied in the same one transaction AFTER the templates (a set's pins must resolve) and BEFORE the pipelines — the record's §8.3 order. A pin the batch does not bring is `400 parameter.import.missing_template`; the id is KEPT (P24) and an id held by another workspace's set refuses `409 parameter.version.conflict` / `id_taken` (C29).
 
 `templates` and `pipelines` arrive **in push order** — template versions in the transitive `imports_json` closure first, then child pipelines, then their parents (children before parents) — and are applied in the order given. The receiver does not re-derive the closure: the sender owns that rule (§10.4), and a second implementation of it here would be a second thing to keep correct. Entries already present at the same version and hash are omitted by the sender and are an idempotent no-op if sent anyway.
 
@@ -1998,7 +2004,7 @@ Each entry is the ordinary portable body plus the [§9.2](versioning.md#92-impor
 {
   "schema_version": 1,
   "correlation_id": "...",
-  "data": { "workspace": "acme", "source_env": "dev", "templates": 1, "pipelines": 2 }
+  "data": { "workspace": "acme", "source_env": "dev", "templates": 1, "pipelines": 2, "parameter_sets": 1 }
 }
 ```
 
@@ -2367,8 +2373,80 @@ Keywords are an exact allowlist — `TODAY` and `YESTERDAY`, uppercase — and a
 
 ---
 
+## 21. Parameter Sets
+
+The parameter engine's REST surface (the [parameter-engine design record](superpowers/specs/2026-09-21-parameter-engine-design.md) §9.2 — the **pipelines** routes are the mould, addressed by **id** per P24; a multi-segment NAME never travels in a path segment, it appears only in bodies and `?prefix=`). Authorization is the nine `parameter_set.*` rows of [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative); every route is session-or-key like §5 (the MCP key refused as everywhere off `/mcp`). Envelopes per §4; every refusal is a `parameter.*` code of [Pipeline Contract §13.20](pipeline-contract.md#1320-parameter-sets). No UI page exists (the record's §13) — this section and the MCP tools are the whole surface. **Audit:** no new event kinds — the routes ride the request-interceptor logging and, for MCP, the dispatcher's `mcp.tool.called`; one evaluate writes exactly that call row (the datasource reads it causes are the selector statements themselves).
+
+### 21.1 The entity and its document
+
+A **parameter set** is a versioned definition: the §3 document (`name`, `display_name`, `description`, `parameters[]`) stored with the folder-path grammar and the **templates' version lifecycle** (draft / release / discard / restore / purge / switch / import — [Versioning §3.5](versioning.md#35-the-lifecycle-table)). The name is immutable; the id is a UUID the server assigns at creation and an import KEEPS (P24), so it is stable across environments.
+
+Reads follow the working-version rule ([Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)): a GET answers the DRAFT when one exists, else the current RELEASED version, and says which — `version` and `status` name the returned row, `current_version` the latest release, and a `draft` pointer carries the draft's `body_hash` whenever one exists. Every mutation takes `If-Match: <body_hash>` ([Versioning §4.2](versioning.md#42-the-precondition-protocol)); a stale hash is `409 parameter.version.conflict`.
+
+### 21.2 Routes
+
+| Route | Permission | What |
+|---|---|---|
+| `POST /api/v1/parameter-sets` | `parameter_set.create` | Create: validate the §3 document in full (the record's §4, including the metadata execution of every source template — a set whose datasource is down is not saved), land version 1 **DRAFT** with a server-assigned id. `201`. |
+| `GET /api/v1/parameter-sets` | `parameter_set.read` | The flat listing (offset/limit), or, with `?prefix=`, ONE level of the set tree: `folders` with their subtree counts and the level's sets (the pipelines §5.7 shape; `parameter_set_count` per folder). `?prefix=` (empty) is the ROOT and is a different request from an absent `prefix`. |
+| `GET /api/v1/parameter-sets/{id}` | `parameter_set.read` | The working version's full JSON (the document + `id`, `version`, `status`, `body_hash`, `current_version`, `draft`). |
+| `GET /api/v1/parameter-sets/{id}/versions` | `parameter_set.read` | Version metadata, newest first; no bodies. |
+| `GET /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.read` | One version. A version other than RELEASED is 404 under a narrowing lens (the promoter's). |
+| `PUT /api/v1/parameter-sets/{id}` | `parameter_set.update` | The draft write (copy-on-write, then in-place; `If-Match` required). The hash precondition is checked BEFORE the body is parsed. An identical body is a no-op and reports the current state. |
+| `POST /api/v1/parameter-sets/{id}/release?release_pinned_templates=` | `parameter_set.release` | Release (lock) the draft. Every pinned template version must be RELEASED (`409 parameter.release.template_not_released`, `details.pins_not_released`) — or, with `release_pinned_templates=true`, is released WITH the set in one transaction, templates first (142). Release re-runs the §4 source validation against the pins as they are now. |
+| `POST /api/v1/parameter-sets/{id}/draft/discard` | `parameter_set.version.manage` | Purge the DRAFT (versioning §5.4); the sole draft takes the set with it. Session-only. |
+| `POST /api/v1/parameter-sets/{id}/versions/{version}/discard` | `parameter_set.version.manage` | Discard a RELEASED version (reversible); the pointer falls back per D60. |
+| `POST /api/v1/parameter-sets/{id}/versions/{version}/restore` | `parameter_set.version.manage` | Restore a DISCARDED version; the pointer moves only above-current-or-NULL. |
+| `DELETE /api/v1/parameter-sets/{id}/versions/{version}` | `parameter_set.version.manage` | Purge a DRAFT version. A release is discarded, never purged (`409 parameter.version.last_release`). |
+| `POST /api/v1/parameter-sets/{id}/current` | `parameter_set.switch_version` | The manual switch (the promotion receiver's rollout/rollback lever): body `{"version": n}`. Session-only. |
+| `DELETE /api/v1/parameter-sets/{id}` | `parameter_set.delete` | The entity purge — only when the set's only version is a DRAFT. |
+| `GET /api/v1/parameter-sets/{id}/export` | `parameter_set.read` | The export bundle (§21.4). Released-only: a never-released set is `404 parameter.not_found` naming the set. |
+| `POST /api/v1/parameter-sets/import` | `parameter_set.import` | Import the bundle (§21.4): templates first, then the set; the exported id is KEPT. |
+| `POST /api/v1/parameter-sets/{id}/evaluate` | `parameter_set.evaluate` | **Evaluate** (§21.3) — the whole set re-rendered against the submitted selections. |
+
+Every read and write is workspace-scoped: a set of another workspace — or one the promoter lens hides — answers the same `404 parameter.not_found` an absent id gets; nothing confirms existence across workspaces.
+
+### 21.3 Evaluate
+
+```
+POST /api/v1/parameter-sets/{id}/evaluate
+{ "version": 4,
+  "selections": { "country": "USA", "state": "NY", "city": null, "min_order_amount": 250.00 } }
+```
+
+- `version` optional: the SERVED version (`current_version`) when absent; an explicit version — a DRAFT by its number, the working-version read rule — is read exactly, never rounded or fallen back. `selections` carries EVERY parameter's current value, wire-encoded for its type, a `MULTI` as an array; the first render sends `{}`. Absent, `null` and `[]` are one signal — nothing chosen — and walk the selection priority (P26); there is no cleared state. An unknown key refuses the whole request (`400 parameter.evaluate.unknown_parameter`).
+- **Request bound (stated):** the body is refused over **1,048,576 UTF-8 bytes** before its JSON is parsed (`400 parameter.evaluate.unknown_parameter`, `details.reason = "request_too_large"`). The largest legal selections document for any set is bounded by the engine's own caps (`max-parameters-per-set`=64 × `max-input-length`=4,096 ≈ 256 KiB), so the cap refuses nothing legal. Per-value validation is the shared validator (P28): `parameter.evaluate.invalid_value_type` / `constraint_violation` (a `DECIMAL(12,2)` submitted `12.345` is refused, `details.reason = "scale"` — never rounded).
+- The response is the runtime's JSON **verbatim** inside the §4 envelope — `id`, `name`, `version`, `valid`, `org` (the deployment's currency for `currency` formats), `values` (the consumer payload: one canonical value per parameter, hidden and disabled included) and `parameters[]` (the full definition, `dependents`, and `state`: `value`, `origin` (`client`/`default`/`first`/`source`/`none`), `computed_default`, `reset`, `hidden`, `disabled`, `options`, `errors`). Per-parameter errors ride `state.errors[]` in a **200** (`valid: false`); the whole-request refusals are `parameter.evaluate.timeout` (**504**, the executor-deadline mapping), `parameter.evaluate.response_too_large` (**413**) and `parameter.evaluate.unknown_parameter` (**400**). A selector's datasource failure marks ITS parameter and the form stays whole.
+- Cost: one selector statement per template-backed parameter plus one datasource metadata read per evaluate (measured, the record's C25). There is no options cache in round one.
+
+### 21.4 Export and import
+
+```json
+{ "parameter_set": { "id": "3f2a…", "name": "acme/sales/region_filters", "version": 4,
+                     "body_hash": "sha256-…", "released_at": "…", "display_name": "…", "parameters": [] },
+  "templates": [ { "id": "acme/sales/states_of_country.sql", "version": 3, "body": "…", "…": "…" } ],
+  "manifest": { "parameter_set_id": "3f2a…", "parameter_set_version": 4, "parameter_set_body_hash": "sha256-…",
+                "template_pins": [ { "id": "acme/sales/states_of_country.sql", "version": 3 } ], "exported_at": "…" } }
+```
+
+Export bundles the CURRENT release — the set body with its lifecycle fields, the pinned template versions with their transitive `imports` closure, and the manifest. Import reads the same envelope: the `templates` array, when present, is imported first (**templates before sets** — the promotion order), then the set; a pin this deployment still lacks is `400 parameter.import.missing_template`. The id is kept (P24), so an import is environment-stable; an id already held by ANOTHER workspace's set refuses `409 parameter.version.conflict` with `details.reason = "id_taken"` (C29 — the id is refused, never re-issued; re-issuing would break the identity P24 grants). A same-version, same-hash re-import is an idempotent no-op.
+
+| Error | HTTP | When |
+|---|---|---|
+| `parameter.not_found` | 404 | No such set (or version) in the workspace, hidden by the lens, or another workspace's |
+| `parameter.validation.*` | 400 | The document failed the record's §4 (the full failure list rides `details.failures`); `duplicate_name` is **409** |
+| `parameter.authoring.disabled` | 403 | A promotion receiver refuses every authoring write (reads, evaluate and import unaffected) |
+| `parameter.version.conflict` | 409 | A stale `If-Match`, a taken version number, or a kept id held by another workspace (`id_taken`, C29) |
+| `parameter.version.not_draft` / `.not_released` / `.not_discarded` / `.last_release` / `.not_eligible` | 409 | The lifecycle precondition of the verb |
+| `parameter.release.template_not_released` | 409 | Release with a pinned template version still DRAFT (`details.pins_not_released`) |
+| `parameter.import.missing_template` | 400 | An import whose pinned template is absent here (templates are promoted first) |
+| `parameter.evaluate.unknown_parameter` | 400 | A `selections` key names no parameter of the set; also the oversized-body refusal |
+| `parameter.evaluate.timeout` | 504 | The evaluate's deadline (`evaluate-timeout-seconds`) passed |
+| `parameter.evaluate.response_too_large` | 413 | The response would exceed `max-evaluate-response-bytes` — options are never truncated |
+
 ## Appendix A: Change Log
 
+| 2026-09-28 | v2.47 | 194d (#194) — renumbered at merge after 286's v2.46; parameter engine lane D — the surfaces | Additive. **New §21 Parameter Sets** — the pipelines-shaped routes addressed by id (P24): create, the `?prefix=` browse and flat list, the working-version read, versions, the `If-Match` draft write, release (the 142 cascade consent, §4 steps 4–6 re-run), draft/version purge, discard/restore, the switch, the entity purge, export/import (templates first; the id KEPT, C29 refuses a taken id), and **`POST /parameter-sets/{id}/evaluate`** (§21.3): the whole set re-rendered per submission, the selection priority P26, the request bounded at 1 MiB before parsing, `parameter.evaluate.timeout` 504 / `response_too_large` 413 / `unknown_parameter` 400 as whole-request refusals, per-parameter errors in a 200's `state.errors[]`. **§18 promotion gains parameter sets** (§21.4's bundle is the batch entry): templates → sets → pipelines, the promoter lens over set rows. The `parameter.*` §13.20 family is live from routes (§13's statuses mapped in the catalog: `duplicate_name` 409, `not_found` 404, `version.confirm_mismatch` 400). |
 | 2026-09-28 | v2.46 | 286 (#268) a stored declaration save refuses | **Additive code.** Every API surface that binds pipeline parameters (execute, `pipelines_execute`, release checks, schedules) answers `409 pipeline.execution.parameter_declaration_invalid` (pipeline-contract §13.3) when a supplied value or an applied default is judged against a stored declaration today's save refuses — `details.reasons` names the §12.7 codes. A published endpoint keeps its caller-facing envelope: the same refusal is reported inside `400 endpoint.request.invalid`, `details.errors` carrying the binder's re-save sentence (the 286 merge's security pass, observation 1). Before, such a declaration (only a body saved before #194 can hold one) reached the validator's `IllegalArgumentException`: a 500. |
 | 2026-09-28 | v2.45 | 286 (#286) legacy endpoint rows — the security pass's follow-ups | No route or field changes. **§19.5**: a legacy row's `path` and `url` are echoed cut at the grammar's 200 characters (they were echoed unbounded — only a database write can store a longer path, and the model keeps the stored one because unpublish is BY PATH); a promotion batch omits a legacy row and the sender now LOGS the omission with its count (before #274 the batch threw; after it the row was left out without a word). The repository's deployment-wide `findLegacy(null)` read, which had no caller, is gone. |
 | 2026-09-28 | v2.44 | 286 (#275) — renumbered at merge after 279's v2.43 R3 on the four lists that still read own-only | No route, field or code changes. **§10.1's R3 paragraph stands and names the four surfaces it now covers**: the search palette's executions group, the pipeline and template explorers' Runs tabs, and MCP's executions resource listing read `findVisible` for a member with `execution.read` (they read own-only `findByUser` until #275 — narrower than the sentence, never wider), `findAll` with `execution.read_all`. The paragraph also says what the panes' route permission implies: the explorers' Runs tabs and the palette are `pipeline.read` / `template.read` routes, so a promoter reaches them without `execution.read` and sees her own runs only — R3's scheduled arm is `execution.read`'s (`ScheduledRunSurfacesE2eTest`, whose promoter case is falsified with the arm opened). |

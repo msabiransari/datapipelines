@@ -1,7 +1,7 @@
 package co.datapipelines.mcp
 
 import co.datapipelines.application.lens.PromoterLens
-import co.datapipelines.templates.TemplateUsageService
+import co.datapipelines.application.templates.TemplateUsage
 import io.modelcontextprotocol.spec.McpSchema
 
 /**
@@ -18,7 +18,7 @@ import io.modelcontextprotocol.spec.McpSchema
  * this tool.
  */
 class TemplatesUsedByTool(
-    private val usage: TemplateUsageService,
+    private val usage: TemplateUsage,
     /** 178 — both lenses: a hidden template is not-found, hidden pinning pipelines drop out of the answer. */
     private val lens: PromoterLens,
 ) : McpTool {
@@ -26,9 +26,11 @@ class TemplatesUsedByTool(
         McpTools.tool(
             name = "templates_used_by",
             description =
-                "Which pipelines pin a given template version in their working version (the draft when unreleased " +
-                    "edits exist, else the latest released). Returns one reference per node — pipeline name and id, " +
-                    "node id, and the pipeline version carrying the pin — plus the distinct pipeline count. Use it " +
+                "Which pipelines AND parameter sets pin a given template version in their working version (the " +
+                    "draft when unreleased edits exist, else the latest released). Returns one reference per node — " +
+                    "pipeline name and id, node id, and the pipeline version carrying the pin — plus the distinct " +
+                    "pipeline count, and one row per pinning parameter set (#194: set name and id, the parameter, " +
+                    "the set version carrying the pin). Use it " +
                     "before editing or retiring a template version to see who you would affect. It does not answer " +
                     "'is it safe to delete' (that scan includes historical pipeline versions and lives in the " +
                     "delete refusal), and it never changes anything." +
@@ -59,19 +61,31 @@ class TemplatesUsedByTool(
         // not silently answer for a neighbouring version.
         val version = args.version() ?: throw McpArguments.invalidParams("Missing required argument 'version'.")
         val view = lens.viewFor(ctx.principal)
-        val used = usage.usedBy(workspaceId, view.templates, view.pipelines, id, version)
+        val used = usage.usedBy(workspaceId, view, id, version)
         return mapOf(
             "template" to mapOf("id" to used.templateId, "version" to used.version),
             "scan" to "working_version",
             "pipeline_count" to used.pipelineCount,
             "references" to
-                used.references.map {
+                used.pipelineReferences.map {
                     mapOf(
                         "pipeline" to it.pipelineName,
                         "pipeline_id" to it.pipelineId.toString(),
                         "node_id" to it.nodeId,
                         "pipeline_version" to it.pipelineVersion,
                         "pipeline_version_status" to it.versionStatus.name,
+                    )
+                },
+            // #194 lane D — parameter sets pin templates too; a set-only pin is a real
+            // reference and shows here (the record's §8.4).
+            "parameter_set_references" to
+                used.parameterSetReferences.map {
+                    mapOf(
+                        "parameter_set" to it.setName,
+                        "parameter_set_id" to it.setId.toString(),
+                        "parameter" to it.parameter,
+                        "set_version" to it.setVersion,
+                        "set_version_status" to it.versionStatus.name,
                     )
                 },
         )

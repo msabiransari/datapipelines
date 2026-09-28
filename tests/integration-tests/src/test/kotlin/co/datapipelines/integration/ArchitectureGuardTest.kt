@@ -362,6 +362,13 @@ class ArchitectureGuardTest {
                 "PipelineTransferController → PipelineRepository",
                 "PipelineTransferController → TemplateRepository",
                 "PipelinesController → PipelineCheckRunRepository",
+                // #194 lane D — the set controller's and tools' draft pointer, findRecord,
+                // served-version and pin reads (the PipelinesController pattern; each read is
+                // workspace-scoped in its SQL). The guard keys by FILE, so the six tools in
+                // ParameterSetsTools.kt are one entry each for the two repositories they read.
+                "ParameterSetsController → ParameterSetRepository",
+                "ParameterSetsTools → ParameterSetRepository",
+                "ParameterSetsTools → TemplateRepository",
                 "TemplateAuthoringTools → TemplateRepository",
                 "TemplateEditorController → TemplateRepository",
                 // Annotated `@org.springframework.stereotype.Controller` — found once the controller match read qualified names.

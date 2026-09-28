@@ -29,6 +29,8 @@ class PromotableViews(
     private val pipelines: PipelineRepository,
     private val templates: TemplateRepository,
     private val client: PromotionTargetClient,
+    /** #194 lane D — the set arm of §10.2; null keeps the pre-engine wiring compiling. */
+    private val parameterSets: co.datapipelines.parameters.ParameterSetRepository? = null,
 ) : PromoterLens {
     override fun viewFor(principal: AuthenticatedPrincipal): LensedView {
         if (!principal.isLensed) return LensedView.EVERYTHING
@@ -36,8 +38,17 @@ class PromotableViews(
         // fail-closed answer rather than a 403 from a read that never named a workspace.
         val workspace = principal.workspace ?: return unavailable("no_workspace")
         return when (val computed = compute(workspace.id, workspace.name)) {
-            is Computed.Ready -> LensedView(computed.view.pipelineLens, computed.view.templateLens)
-            is Computed.Unavailable -> unavailable(computed.reason)
+            is Computed.Ready -> {
+                LensedView(
+                    computed.view.pipelineLens,
+                    computed.view.templateLens,
+                    parameterSets = computed.view.parameterSetLens,
+                )
+            }
+
+            is Computed.Unavailable -> {
+                unavailable(computed.reason)
+            }
         }
     }
 
@@ -59,10 +70,16 @@ class PromotableViews(
     fun compute(
         workspaceId: UUID,
         inventory: PromotionWire.Inventory,
-    ): PromotableView = PromotableView.of(pipelines.findCurrentVersions(workspaceId), templates.findCurrentVersions(workspaceId), inventory)
+    ): PromotableView =
+        PromotableView.of(
+            pipelines.findCurrentVersions(workspaceId),
+            templates.findCurrentVersions(workspaceId),
+            inventory,
+            parameterSets?.findCurrentVersions(workspaceId).orEmpty(),
+        )
 
     private fun unavailable(reason: String): LensedView =
-        LensedView(ReadLens.NOTHING, ReadLens.NOTHING, LensedView.Unavailable(client.targetBaseUrl, reason))
+        LensedView(ReadLens.NOTHING, ReadLens.NOTHING, LensedView.Unavailable(client.targetBaseUrl, reason), ReadLens.NOTHING)
 
     /** [compute]'s two outcomes: the view against the inventory it was computed from, or why there is none. */
     sealed interface Computed {

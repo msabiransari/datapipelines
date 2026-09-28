@@ -43,26 +43,15 @@ class McpServerWiringTest {
     private val resultUrls = ResultUrlFactory { "https://dp.test/api/v1/executions/$it/result" }
     private val authoringGuard = co.datapipelines.pipeline.AuthoringGuard(true)
 
-    private fun tools(): List<McpTool> {
-        val validator = mockk<PipelineValidator>()
-        val templateValidator = mockk<TemplateValidator>()
-        val engines = mockk<WorkspaceTemplateEngines>()
-        val introspector = mockk<SchemaIntrospector>()
-        val usage = co.datapipelines.templates.TemplateUsageService(templates, pipelines)
-        val service = McpFixtures.pipelineService(pipelines, validator, authoringGuard)
-        val drafts = co.datapipelines.templates.TemplateDraftService(templates, authoringGuard, mockk(relaxed = true))
-        val semantics = mockk<co.datapipelines.application.semantics.SemanticsService>()
-        return listOf(
-            PipelinesListTool(service, McpFixtures.EVERYTHING_LENS),
-            PipelinesGetTool(service, usage, McpFixtures.EVERYTHING_LENS),
-            PipelineExecuteTool(service, executor, executions, resultStore, resultUrls),
-            PipelinesExecuteNodeTool(
-                co.datapipelines.templates.NodeSqlResolver(pipelines, templates, engines),
-                datasources,
-                co.datapipelines.datasources.SqlRunner(datasources),
-            ),
-            PipelinesCreateTool(service, pipelines),
-            PipelinesUpdateTool(service),
+    /** The template tools, extracted at 194d when the fixture passed detekt's length. */
+    private fun templateTools(
+        usage: co.datapipelines.application.templates.TemplateUsage,
+        templates: TemplateRepository,
+        drafts: co.datapipelines.templates.TemplateDraftService,
+        templateValidator: TemplateValidator,
+        engines: WorkspaceTemplateEngines,
+    ): List<McpTool> =
+        listOf(
             TemplatesListTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS),
             TemplatesGetTool(McpFixtures.templateService(templates), McpFixtures.EVERYTHING_LENS),
             TemplatesUsedByTool(usage, McpFixtures.EVERYTHING_LENS),
@@ -71,7 +60,38 @@ class McpServerWiringTest {
             TemplatesRenderTool(templates, engines),
             // 7b — the transform evaluator, appended the way the shipped bean does.
             TemplatesEvaluateTool(mockk<co.datapipelines.application.templates.TemplateEvaluateService>()),
-            TemplatesPurgeDraftTool(templates, usage, authoringGuard),
+            TemplatesPurgeDraftTool(templates, usage, authoringGuard, McpFixtures.EVERYTHING_LENS),
+        )
+
+    private fun tools(): List<McpTool> {
+        val validator = mockk<PipelineValidator>()
+        val templateValidator = mockk<TemplateValidator>()
+        val engines = mockk<WorkspaceTemplateEngines>()
+        val introspector = mockk<SchemaIntrospector>()
+        val usage =
+            co.datapipelines.application.templates.TemplateUsage(
+                co.datapipelines.templates.TemplateUsageService(templates, pipelines),
+                io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(),
+            )
+        val service = McpFixtures.pipelineService(pipelines, validator, authoringGuard)
+        val drafts = co.datapipelines.templates.TemplateDraftService(templates, authoringGuard, mockk(relaxed = true))
+        val semantics = mockk<co.datapipelines.application.semantics.SemanticsService>()
+        return listOf(
+            PipelinesListTool(service, McpFixtures.EVERYTHING_LENS),
+            PipelinesGetTool(
+                service,
+                co.datapipelines.templates.TemplateUsageService(templates, pipelines),
+                McpFixtures.EVERYTHING_LENS,
+            ),
+            PipelineExecuteTool(service, executor, executions, resultStore, resultUrls),
+            PipelinesExecuteNodeTool(
+                co.datapipelines.templates.NodeSqlResolver(pipelines, templates, engines),
+                datasources,
+                co.datapipelines.datasources.SqlRunner(datasources),
+            ),
+            PipelinesCreateTool(service, pipelines),
+            PipelinesUpdateTool(service),
+            *templateTools(usage, templates, drafts, templateValidator, engines).toTypedArray(),
             DatasourcesListTool(datasources, lens = McpFixtures.EVERYTHING_LENS),
             DatasourcesGetTool(datasources, lens = McpFixtures.EVERYTHING_LENS),
             DatasourcesTestTool(datasources),
@@ -103,18 +123,31 @@ class McpServerWiringTest {
             // 120 — the two docs tools, appended after the semantics tools.
             DocsTools.all { DocSetTestSupport.minimalDocSet() } +
             // 140 — the release-check run, appended after the docs tools.
-            listOf(PipelineRunChecksTool(service, mockk()))
+            listOf(PipelineRunChecksTool(service, mockk())) +
+            parameterSetTools()
     }
 
+    /** #194 lane D — the six parameter-set tools, appended last (the 117/107 append rule). */
+    private fun parameterSetTools(): List<McpTool> =
+        listOf(
+            ParameterSetsListTool(mockk(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsGetTool(mockk(), mockk(), mockk(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsCreateTool(mockk(), mockk(), co.datapipelines.parameters.ParametersConfig(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsUpdateTool(mockk(), co.datapipelines.parameters.ParametersConfig(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsEvaluateTool(mockk(), mockk(), mockk(), mockk(), mockk(), McpFixtures.EVERYTHING_LENS),
+            ParameterSetsPurgeDraftTool(mockk(), mockk()),
+        )
+
     /**
-     * The §6.1 surface and the auth §7.6 matrix are the same 41 names, in both directions. A tool
+     * The §6.1 surface and the auth §7.6 matrix are the same names, in both directions. A tool
      * without a matrix row is refused at dispatch (fail-closed); a matrix row without a tool is a
      * documented capability that does not exist. (28 → 27 with 094 removing
      * `datasources_create`; 30 → 34 with 107's probe/cancel/purge four; 34 → 35 with 117's `templates_update`; 35 → 38 with 118's
-     * `semantics_*` three; 38 → 40 with 120's `docs_*` two; 40 → 41 with 140's `pipelines_run_checks`.)
+     * `semantics_*` three; 38 → 40 with 120's `docs_*` two; 40 → 41 with 140's `pipelines_run_checks`;
+     * 41 → 48 with #194 lane D's six `parameter_sets_*` tools.)
      */
     @Test
-    fun `the tool surface is exactly the 41 tools the scope matrix knows`() {
+    fun `the tool surface is exactly the catalog the scope matrix knows`() {
         val dispatcher = McpToolDispatcher(tools(), auditLogger)
 
         assertAll(
@@ -124,7 +157,7 @@ class McpServerWiringTest {
     }
 
     @Test
-    fun `the server builds with all 41 tools and all three prompts registered`() {
+    fun `the server builds with all 48 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(

@@ -31,6 +31,12 @@ open class TemplateReleaseService(
     private val validator: TemplateValidator,
     private val authoring: AuthoringGuard,
     private val pipelines: PipelineRepository,
+    /**
+     * #194 lane D (the record's §8.4): template-backed selectors make a SET an inbound edge —
+     * the guards below scan it beside the pipelines, and the refusal's details name the sets
+     * (`referencing_parameter_sets` beside `pinned_by`).
+     */
+    private val parameterSets: co.datapipelines.parameters.ParameterSetTemplatePins,
 ) {
     /** What a release produced: the released version detail and the stored template at it. */
     data class Released(
@@ -225,9 +231,13 @@ open class TemplateReleaseService(
         if (versions.size != 1 || versions[0].status != PipelineVersionStatus.DRAFT) {
             throw lastReleaseEntity(id, versions.size)
         }
-        // Graph rule 3: no inbound edges — any pin of ANY version, from any live pipeline version.
+        // Graph rule 3: no inbound edges — any pin of ANY version, from any live pipeline
+        // version, and since 194d from any live PARAMETER SET version (the record's §8.4).
         val pinners = pipelines.findAnyVersionTemplatePins(workspaceId, id)
-        if (pinners.isNotEmpty()) throw inUse(id, pinners.map { it.pipelineName })
+        val setPinners = parameterSets.anyVersionPins(workspaceId, id)
+        if (pinners.isNotEmpty() || setPinners.isNotEmpty()) {
+            throw inUse(id, pinners.map { it.pipelineName }, setPinners)
+        }
         templates.deleteTemplateRow(workspaceId, id)
     }
 
@@ -265,7 +275,10 @@ open class TemplateReleaseService(
         version: Int,
     ) {
         val pinners = pipelines.findLiveVersionsPinningTemplateVersion(workspaceId, id, version)
-        if (pinners.isNotEmpty()) throw inUse(id, pinners.map { it.pipelineName })
+        val setPinners = parameterSets.liveVersionPins(workspaceId, id, version)
+        if (pinners.isNotEmpty() || setPinners.isNotEmpty()) {
+            throw inUse(id, pinners.map { it.pipelineName }, setPinners)
+        }
     }
 
     private fun pinnedOrConcurrent(
@@ -274,7 +287,10 @@ open class TemplateReleaseService(
         version: Int,
     ): DatapipelinesException {
         val pinners = pipelines.findLiveVersionsPinningTemplateVersion(workspaceId, id, version)
-        if (pinners.isNotEmpty()) return inUse(id, pinners.map { it.pipelineName })
+        val setPinners = parameterSets.liveVersionPins(workspaceId, id, version)
+        if (pinners.isNotEmpty() || setPinners.isNotEmpty()) {
+            return inUse(id, pinners.map { it.pipelineName }, setPinners)
+        }
         val current = findVersionOr404(workspaceId, id, version)
         return if (current.status == PipelineVersionStatus.RELEASED) {
             DatapipelinesException(
@@ -290,14 +306,35 @@ open class TemplateReleaseService(
     private fun inUse(
         id: String,
         pinnedBy: List<String>,
-    ): DatapipelinesException =
-        DatapipelinesException(
+        setPinners: List<co.datapipelines.parameters.ParameterSetPin> = emptyList(),
+    ): DatapipelinesException {
+        val setNames = setPinners.map { it.setName }.distinct()
+        return DatapipelinesException(
             code = PipelineErrorCodes.Template.IN_USE,
             message =
-                "Version of template '$id' is pinned by ${pinnedBy.size} live pipeline version(s): " +
-                    pinnedBy.distinct().joinToString(", ") + "; discard or repoint them first.",
-            details = mapOf("template_id" to id, "pinned_by" to pinnedBy.distinct()),
+                buildString {
+                    append("Version of template '$id' is pinned by")
+                    if (pinnedBy.isNotEmpty()) {
+                        append(" ${pinnedBy.size} live pipeline version(s): ")
+                        append(pinnedBy.distinct().joinToString(", "))
+                    }
+                    if (setPinners.isNotEmpty()) {
+                        if (pinnedBy.isNotEmpty()) append(" and")
+                        append(" ${setNames.size} parameter set version(s): ")
+                        append(setNames.joinToString(", "))
+                    }
+                    append("; discard or repoint them first.")
+                },
+            details =
+                buildMap {
+                    put("template_id", id)
+                    put("pinned_by", pinnedBy.distinct())
+                    if (setPinners.isNotEmpty()) {
+                        put("referencing_parameter_sets", setPinners.map { it.setName }.distinct())
+                    }
+                },
         )
+    }
 
     private fun lastRelease(
         id: String,

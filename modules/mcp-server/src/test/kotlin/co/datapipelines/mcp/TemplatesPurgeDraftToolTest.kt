@@ -27,8 +27,14 @@ import java.time.Instant
 class TemplatesPurgeDraftToolTest {
     private val templates = mockk<TemplateRepository>()
     private val pipelines = mockk<PipelineRepository>()
-    private val usage = TemplateUsageService(templates, pipelines)
-    private val tool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true))
+    private val usage =
+        co.datapipelines.application.templates.TemplateUsage(
+            TemplateUsageService(templates, pipelines),
+            io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins> {
+                every { anyVersionPins(any(), any()) } returns emptyList()
+            },
+        )
+    private val tool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), McpFixtures.EVERYTHING_LENS)
     private val ctx = McpFixtures.ctx()
 
     private val id = "test/scratch.sql"

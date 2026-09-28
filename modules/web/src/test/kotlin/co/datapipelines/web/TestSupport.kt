@@ -278,7 +278,8 @@ fun pipelineBrowseModelOver(
  */
 fun templateBrowseModelOver(
     templates: co.datapipelines.templates.TemplateRepository,
-    usage: co.datapipelines.templates.TemplateUsageService = io.mockk.mockk(),
+    usage: co.datapipelines.application.templates.TemplateUsage =
+        io.mockk.mockk<co.datapipelines.application.templates.TemplateUsage>(relaxed = true),
     executions: co.datapipelines.executor.ExecutionRepository = io.mockk.mockk(),
     actors: co.datapipelines.web.ui.ActorNames = anonymousActors(),
 ): co.datapipelines.web.ui.TemplateBrowseModel =

@@ -1,5 +1,6 @@
 package co.datapipelines.web.api
 
+import co.datapipelines.parameters.ParameterErrorCodes
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.annotation.JsonInclude
@@ -168,6 +169,33 @@ object ApiErrors {
             "Request body is not valid JSON: ${cause.message?.take(MAX_CAUSE_CHARS)}",
             mapOf(REASON to MALFORMED_JSON),
             cause,
+        )
+
+    /**
+     * A parameter set (or version) that does not exist in this workspace — or is hidden by the
+     * promoter lens, or belongs to another workspace: all answer the §13.20 `parameter.not_found`
+     * 404, never a 403 that would confirm existence (the §11A.1 rule, record §9.3).
+     */
+    fun parameterNotFound(
+        id: String,
+        version: Int? = null,
+    ): ApiException =
+        ApiException(
+            ParameterErrorCodes.NOT_FOUND,
+            if (version == null) {
+                "Parameter set '$id' not found."
+            } else {
+                "Parameter set '$id' has no version $version."
+            },
+            if (version == null) mapOf("id" to id) else mapOf("id" to id, "version" to version),
+        )
+
+    /** An unparseable parameter-set import envelope — the `parameter.validation.body_invalid` shape refusal. */
+    fun malformedParameterSetBody(): ApiException =
+        ApiException(
+            ParameterErrorCodes.BODY_INVALID,
+            "The import payload's root is not the export envelope ({parameter_set, templates, manifest}).",
+            mapOf("path" to "", "reason" to "wrong_type"),
         )
 
     /** `?format=` was not one of json/arrow/csv (rest-api §7.5/§7.6). */

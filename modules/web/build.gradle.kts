@@ -16,6 +16,9 @@ dependencies {
     implementation(project(":modules:auth"))
     implementation(project(":modules:application"))
     implementation(project(":modules:mcp-server"))
+    // #194 lane D: the parameter-set REST surface and the engine's wiring (record §2.4 — the
+    // edge was allowed ahead; now that `web` compiles against the engine it is declared).
+    implementation(project(":modules:parameters"))
     // #9: the schedules REST surface, the pipeline executor adapter and the scheduler's ports'
     // implementations (web/config is the composition root — scheduler design revision §6.2, A3).
     implementation(project(":modules:scheduler"))

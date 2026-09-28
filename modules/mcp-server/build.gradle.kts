@@ -12,6 +12,9 @@ dependencies {
     implementation(project(":modules:datasources"))
     implementation(project(":modules:dag"))
     implementation(project(":modules:auth"))
+    // #194 lane D: the six parameter-set tools compile against the engine's public API (record §2.4 —
+    // the edge was allowed ahead; now that the tools exist it is declared).
+    implementation(project(":modules:parameters"))
     implementation(project(":modules:application"))
 
     // GATE G1 CLOSED 2026-08-07 — official Java MCP SDK. mcp-core carries the

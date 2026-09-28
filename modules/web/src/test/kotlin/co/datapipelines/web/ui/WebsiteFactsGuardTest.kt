@@ -221,6 +221,11 @@ class WebsiteFactsGuardTest {
                 semanticsService = mockk<co.datapipelines.application.semantics.SemanticsService>(),
                 factEnrichment = co.datapipelines.application.semantics.FactEnrichment.NONE,
                 checkRunner = mockk<co.datapipelines.application.checks.PipelineCheckRunner>(),
+                // #194 lane D — the parameter-set tools' collaborators; never queried here.
+                parameterSets = mockk<co.datapipelines.parameters.ParameterSetService>(),
+                parameterSetRepository = mockk<co.datapipelines.parameters.ParameterSetRepository>(),
+                parameterEvaluator = mockk<co.datapipelines.parameters.ParameterEvaluator>(),
+                parametersProperties = co.datapipelines.parameters.ParametersProperties(),
                 lens = co.datapipelines.web.EVERYTHING_LENS,
                 templateService = mockk<co.datapipelines.templates.TemplateService>(),
                 templateEvaluateService = mockk<co.datapipelines.application.templates.TemplateEvaluateService>(),

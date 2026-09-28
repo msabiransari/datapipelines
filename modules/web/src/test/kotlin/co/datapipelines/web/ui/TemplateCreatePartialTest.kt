@@ -45,6 +45,16 @@ import java.util.UUID
  * controller are what actually hold.
  */
 class TemplateCreatePartialTest {
+    /** 194d — the COMPOSED reverse arrow the model takes (the record's §8.4). */
+    private fun composedUsage(
+        templates: co.datapipelines.templates.TemplateRepository,
+        pipelines: PipelineRepository,
+    ): co.datapipelines.application.templates.TemplateUsage =
+        co.datapipelines.application.templates.TemplateUsage(
+            TemplateUsageService(templates, pipelines),
+            io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins>(relaxed = true),
+        )
+
     private val repository = mockk<TemplateRepository>()
     private val pipelines = mockk<PipelineRepository>()
     private val validator = mockk<TemplateValidator>()
@@ -52,7 +62,7 @@ class TemplateCreatePartialTest {
     private val controller =
         TemplatePartialController(
             repository,
-            co.datapipelines.web.templateBrowseModelOver(repository, TemplateUsageService(repository, pipelines)),
+            co.datapipelines.web.templateBrowseModelOver(repository, composedUsage(repository, pipelines)),
             validator,
             authoring,
             co.datapipelines.web.EVERYTHING_LENS,

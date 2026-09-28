@@ -116,6 +116,18 @@ class McpServerAutoConfigurationTest {
         // application; pipelines_run_checks takes it.
         @Bean fun checkRunner(): co.datapipelines.application.checks.PipelineCheckRunner = mockk()
 
+        // #194 lane D — the parameter-set tools' collaborators (declared by `web`'s
+        // ParametersConfiguration in the assembled application). Mocked like every other one.
+        @Bean fun parameterSetService(): co.datapipelines.parameters.ParameterSetService = mockk()
+
+        @Bean fun parameterSetRepository(): co.datapipelines.parameters.ParameterSetRepository = mockk()
+
+        @Bean fun parameterEvaluator(): co.datapipelines.parameters.ParameterEvaluator = mockk()
+
+        @Bean fun parametersProperties() = co.datapipelines.parameters.ParametersProperties()
+
+        @Bean fun mcpToolLearnings(): co.datapipelines.application.mcp.McpToolLearnings = mockk()
+
         @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()
 
         @Bean fun executions(): ExecutionRepository = mockk()

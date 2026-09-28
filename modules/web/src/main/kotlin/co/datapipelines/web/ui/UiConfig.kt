@@ -49,7 +49,9 @@ class UiConfig {
     @Bean
     fun templateBrowseModel(
         templates: co.datapipelines.templates.TemplateService,
-        usage: co.datapipelines.templates.TemplateUsageService,
+        // 194d — the COMPOSED reverse arrow: the screen's in-use counts cover parameter sets
+        // too (the record's §8.4).
+        usage: co.datapipelines.application.templates.TemplateUsage,
         executions: co.datapipelines.executor.ExecutionRepository,
         actorNames: ActorNames,
     ): TemplateBrowseModel = TemplateBrowseModel(templates, usage, executions, actorNames)
