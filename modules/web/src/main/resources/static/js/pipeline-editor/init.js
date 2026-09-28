@@ -1149,7 +1149,6 @@
           : undefined;
       },
 
-      /* --- graph controls (the old expressions guarded with `graph &&`) --- */
       /* --- graph controls (the old expressions guarded with `graph &&`) ---
          The zoom steps are named (301 #305): ZOOM_IN_STEP/ZOOM_OUT_STEP — a ×1.25 in and
          its exact reciprocal out, so in-then-out lands the view where it started and a
