@@ -118,12 +118,44 @@ class SelectorPool(
         // normally, by failure, or long after its caller abandoned it (the bulkhead).
         val result = CompletableDeferred<SelectorRun>()
         val worker = slotOwningThread(task, result)
-        return try {
-            SelectorAdmission.Completed(result.await())
-        } catch (e: CancellationException) {
-            if (!result.isCompleted) abandon(label, task, worker)
-            throw e
-        }
+        return SelectorAdmission.Completed(awaitWithHandover(label, task, result, worker))
+    }
+
+    /** The caller's await: the outcome once the worker's permits are back; abandonment on the deadline; a task's own failure rethrown. */
+    private suspend fun awaitWithHandover(
+        label: SelectorLabel,
+        task: SelectorTask,
+        result: CompletableDeferred<SelectorRun>,
+        worker: Thread,
+    ): SelectorRun {
+        val outcome =
+            try {
+                result.await()
+            } catch (e: CancellationException) {
+                if (!result.isCompleted) abandon(label, task, worker)
+                throw e
+            } catch (
+                @Suppress("TooGenericExceptionCaught") failure: Throwable,
+            ) {
+                // The task's own failure: the worker is ending; let its permits land before the caller acts on it.
+                handover(worker)
+                throw failure
+            }
+        handover(worker)
+        return outcome
+    }
+
+    /**
+     * The permit handover: the worker completes the result INSIDE its try and releases both permits in
+     * its finally, so a caller resumed by the completion could re-submit before the slot was back and
+     * be answered `Saturated` by its own just-finished task (CI's 2-vCPU runner did exactly that on
+     * `a task that completes normally returns both permits`). `Completed` means the slot is back: the
+     * caller joins the finishing thread — a handover of microseconds, never a wait for work (the
+     * thread has already completed the result). An ABANDONED worker is never joined: the deadline
+     * path above rethrows without waiting, which is the bulkhead's whole point.
+     */
+    private fun handover(worker: Thread) {
+        worker.join()
     }
 
     /** Submissions admitted and not yet ended — running (abandoned included) plus waiting; at most [queue]. */

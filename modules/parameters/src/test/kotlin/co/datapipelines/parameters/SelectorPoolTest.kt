@@ -172,6 +172,9 @@ class SelectorPoolTest {
 
     @Test
     fun `a task that completes normally returns both permits`() {
+        // Three back-to-back runs on a 1/0 pool: `Completed` must mean the slot is already back
+        // (the pool joins its finishing worker before answering) — CI's 2-vCPU runner answered the
+        // second run `Saturated` when the caller was resumed before the worker's finally ran.
         val pool = SelectorPool(size = 1, waiting = 0)
         val quick = StubJdbc(quick = true)
 
