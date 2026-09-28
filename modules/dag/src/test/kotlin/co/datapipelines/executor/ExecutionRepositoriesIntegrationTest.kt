@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
@@ -431,6 +432,116 @@ class ExecutionRepositoriesIntegrationTest {
         }
     }
 
+    // ------------------------------------------------------- batched appends (#266)
+
+    @Test
+    fun `appendAll writes a 500-row batch as ONE JDBC batch statement`() {
+        // #266 B.2: the group commit's whole point — N rows, one round trip. Counted at the JDBC
+        // boundary: one executeBatch, no per-row execute. Red if appendAll loops append().
+        val execution = running().also(executions::create)
+        val counting = CountingDataSource(dataSource())
+        val batched = ExecutionEventRepository(NamedParameterJdbcTemplate(counting))
+
+        batched.appendAll(rows(execution.executionId, 1..BATCH))
+
+        counting.executeBatches shouldBe 1
+        counting.singleExecutes shouldBe 0
+        events.findByExecution(execution.executionId).map { it.eventId } shouldBe (1..BATCH).toList()
+    }
+
+    @Test
+    fun `appendAll is one transaction - a refused row commits none of its batch`() {
+        // Row 500 points at an execution with no RUNNING row (the FK refuses it), and the 499 before
+        // it roll back with it. Red without appendAll's explicit transaction: in autocommit mode
+        // PgJDBC commits a batch in ~256-statement chunks, and 255 rows were left behind (measured).
+        // All-or-nothing is what makes the writer's retry-as-singles exact, and one commit per batch
+        // is what the group commit is for.
+        val execution = running().also(executions::create)
+        val orphan = UUID.randomUUID()
+        val batch = rows(execution.executionId, 1 until BATCH) + rows(orphan, 1..1)
+
+        shouldThrow<DataIntegrityViolationException> { events.appendAll(batch) }
+
+        events.findByExecution(execution.executionId).shouldBeEmpty()
+    }
+
+    @Test
+    fun `appendAll dedups a re-sent identical row - the retry of an indeterminate commit is harmless`() {
+        val execution = running().also(executions::create)
+        val batch = rows(execution.executionId, 1..3, at = Instant.now())
+        events.appendAll(batch)
+
+        events.appendAll(batch)
+        events.appendAll(batch.subList(1, 2))
+
+        events.findByExecution(execution.executionId).map { it.eventId } shouldContainExactly listOf(1, 2, 3)
+    }
+
+    @Test
+    fun `appendAll still refuses a DIFFERENT row with a taken sequence number - the pin above holds for batches`() {
+        // Dedup is decided by identical CONTENT: a re-sent row is a no-op, a second event claiming
+        // the same (execution_id, event_id) is the emitter losing count and is refused exactly as
+        // append() refuses it — and, the batch being one transaction, the rows around it roll back
+        // with it (the writer's singles retry then commits them and isolates this one as poison).
+        val execution = running().also(executions::create)
+        events.appendAll(rows(execution.executionId, 1..1, type = "execution_started"))
+        val clash = rows(execution.executionId, 1..1, type = "node_started")
+
+        shouldThrow<DuplicateKeyException> {
+            events.appendAll(
+                rows(execution.executionId, 2..2) + clash + rows(execution.executionId, 3..3),
+            )
+        }
+
+        val stored = events.findByExecution(execution.executionId)
+        stored.map { it.eventId } shouldContainExactly listOf(1)
+        stored.single().eventType shouldBe "execution_started"
+        // …and one at a time, exactly as the writer retries it: the others land, the clash alone is refused.
+        events.appendAll(rows(execution.executionId, 2..2))
+        shouldThrow<DuplicateKeyException> { events.appendAll(clash) }
+        events.appendAll(rows(execution.executionId, 3..3))
+        events.findByExecution(execution.executionId).map { it.eventId } shouldContainExactly listOf(1, 2, 3)
+    }
+
+    private fun rows(
+        executionId: UUID,
+        ids: IntRange,
+        type: String = "node_started",
+        at: Instant = Instant.parse("2026-09-28T12:00:00.123456Z"),
+    ): List<ExecutionEventRecord> = ids.map { ExecutionEventRecord(executionId, it, type, at, """{"n":$it}""") }
+
+    /**
+     * A DataSource that counts what reaches the driver: executeBatch calls vs per-statement
+     * executes. A java.lang.reflect.Proxy on the Connection and its PreparedStatements — no
+     * library, and nothing about the statements is changed.
+     */
+    private class CountingDataSource(
+        private val target: javax.sql.DataSource,
+    ) : org.springframework.jdbc.datasource.DelegatingDataSource(target) {
+        var executeBatches = 0
+        var singleExecutes = 0
+
+        override fun getConnection(): java.sql.Connection = wrap(target.connection)
+
+        private fun wrap(connection: java.sql.Connection): java.sql.Connection =
+            java.lang.reflect.Proxy.newProxyInstance(javaClass.classLoader, arrayOf(java.sql.Connection::class.java)) { _, method, args ->
+                val result = method.invoke(connection, *(args ?: emptyArray()))
+                if (result is java.sql.PreparedStatement) statement(result) else result
+            } as java.sql.Connection
+
+        private fun statement(ps: java.sql.PreparedStatement): java.sql.PreparedStatement =
+            java.lang.reflect.Proxy.newProxyInstance(
+                javaClass.classLoader,
+                arrayOf(java.sql.PreparedStatement::class.java),
+            ) { _, method, args ->
+                when (method.name) {
+                    "executeBatch", "executeLargeBatch" -> executeBatches++
+                    "execute", "executeUpdate", "executeLargeUpdate" -> singleExecutes++
+                }
+                method.invoke(ps, *(args ?: emptyArray()))
+            } as java.sql.PreparedStatement
+    }
+
     @Test
     fun `retention is decided per completed execution, never per event`() {
         // F3: deleting on the EVENT's own timestamp opened a front-gap — a long-running execution
@@ -510,6 +621,7 @@ class ExecutionRepositoriesIntegrationTest {
         // pipeline belongs to, so every workspace-scoped read resolves through it.
         val WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
         const val SPACING_MS = 5L
+        const val BATCH = 500
         const val NODE_STATS_JSON = """[{"node_id":"a","status":"SUCCESS"}]"""
 
         /** What the row is INSERTED with: the request's parameter object, as the caller sent it. */
