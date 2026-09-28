@@ -114,14 +114,7 @@ class ApiConsoleController(
         model.addAttribute("defaultTimeoutSeconds", endpointsProperties.timeoutDefaultSeconds)
         model.addAttribute(
             "legacyEndpoints",
-            legacyEndpoints.map { legacy ->
-                LegacyEndpointRow(
-                    path = legacy.pathPattern,
-                    url = PUBLISHED_PREFIX + legacy.pathPattern,
-                    reason = legacy.reason,
-                    enabled = legacy.enabled,
-                )
-            },
+            legacyEndpoints.map(LegacyEndpointRow::of),
         )
 
         model.addAttribute("mcpUrl", mcpUrl())
@@ -203,7 +196,23 @@ class ApiConsoleController(
         val url: String,
         val reason: String,
         val enabled: Boolean,
-    )
+    ) {
+        companion object {
+            /**
+             * The row a stored legacy endpoint renders as — its path echoed bounded (#286,
+             * [EndpointPath.echoBounded]), like the REST listing and `endpoints_list`.
+             */
+            fun of(legacy: co.datapipelines.application.endpoints.EndpointRow.Legacy): LegacyEndpointRow {
+                val echoed = EndpointPath.echoBounded(legacy.pathPattern)
+                return LegacyEndpointRow(
+                    path = echoed,
+                    url = PUBLISHED_PREFIX + echoed,
+                    reason = legacy.reason,
+                    enabled = legacy.enabled,
+                )
+            }
+        }
+    }
 
     private companion object {
         /** `PublishedEndpointController.ROOT`, restated as the display prefix. */

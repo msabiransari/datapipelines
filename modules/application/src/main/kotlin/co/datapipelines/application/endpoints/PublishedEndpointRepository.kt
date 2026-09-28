@@ -79,19 +79,14 @@ class PublishedEndpointRepository(
         queryRows("$SELECT_COLUMNS WHERE path_pattern = :path", mapOf("path" to pathPattern)).singleOrNull()
 
     /**
-     * The legacy rows of one workspace, or every legacy row on the deployment when [workspaceId]
-     * is null. A legacy row is listed, flagged with its reason, and unpublishable — never
-     * served, never a conflict partner.
+     * The legacy rows of one workspace. A legacy row is listed, flagged with its reason, and
+     * unpublishable — never served, never a conflict partner. Workspace-scoped only (#286): the
+     * deployment-wide `null` branch had no caller, and an unscoped read with none is one caller
+     * away from listing every workspace's rows.
      */
-    fun findLegacy(workspaceId: UUID?): List<EndpointRow.Legacy> {
-        val rows =
-            if (workspaceId == null) {
-                queryRows(SELECT_COLUMNS, emptyMap())
-            } else {
-                queryRows("$SELECT_COLUMNS WHERE workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId))
-            }
-        return rows.filterIsInstance<EndpointRow.Legacy>()
-    }
+    fun findLegacy(workspaceId: UUID): List<EndpointRow.Legacy> =
+        queryRows("$SELECT_COLUMNS WHERE workspace_id = :workspaceId", mapOf("workspaceId" to workspaceId))
+            .filterIsInstance<EndpointRow.Legacy>()
 
     /** Whether any endpoint publishes [pipelineId] — what a pipeline delete has to know. */
     fun findByPipeline(pipelineId: UUID): List<PublishedEndpoint> =
@@ -239,7 +234,15 @@ class PublishedEndpointRepository(
         const val REASON_MAX_LENGTH = 300
     }
 
-    /** Every row of one query, mapped defensively (#274). */
+    /**
+     * Every row of one query, mapped defensively (#274).
+     *
+     * The once-per-JVM WARN fires on the FIRST query that meets a legacy row, so its number is
+     * that query's count — a floor, not the deployment's (#286): after V41 the registry warm-up
+     * reads enabled rows only, so the first sighting is usually a workspace's listing or one
+     * path's lookup. The line says `at_least` for exactly that reason; it carries a count,
+     * never a path.
+     */
     private fun queryRows(
         sql: String,
         params: Map<String, Any?>,
@@ -248,9 +251,9 @@ class PublishedEndpointRepository(
         val legacy = rows.count { it is EndpointRow.Legacy }
         if (legacy > 0 && legacyWarned.compareAndSet(false, true)) {
             log.warn(
-                "event=endpoint.legacy_rows count={} message=\"rows whose stored path no longer meets today's " +
-                    "grammar (R-EP5) are retired: never served, never a conflict partner, listed flagged; " +
-                    "unpublishing one is the fix (issue #274)\"",
+                "event=endpoint.legacy_rows at_least={} message=\"at least this many rows (the first query that met one) " +
+                    "hold a stored path that no longer meets today's grammar (R-EP5); they are retired: never served, " +
+                    "never a conflict partner, listed flagged; unpublishing one is the fix (issue #274)\"",
                 legacy,
             )
         }

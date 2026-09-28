@@ -1,5 +1,6 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.endpoints.EndpointPath
 import co.datapipelines.application.endpoints.EndpointPublishService
 import co.datapipelines.application.endpoints.EndpointRow
 import co.datapipelines.application.endpoints.PublishedEndpoint
@@ -60,6 +61,22 @@ class EndpointsListLegacyToolsTest {
             )
     }
 
+    @Test
+    fun `a stored path longer than the grammar allows is echoed cut at EndpointPath MAX_LENGTH - path and url alike (#286)`() {
+        // `path_pattern` is TEXT with no CHECK, so only a database write stores one this long;
+        // the echo is bounded, the stored row (unpublish is BY PATH) is not touched.
+        val long = "/nyc/" + "x".repeat(LONG_TAIL)
+        every { publishing.list(any()) } returns emptyList()
+        every { publishing.listLegacy(any()) } returns listOf(legacyRow(path = long))
+        every { pipelines.findById(any(), any()) } returns null
+
+        @Suppress("UNCHECKED_CAST")
+        val row = (tool.call(McpArguments(emptyMap()), ctx).asMap()["endpoints"] as List<Map<String, Any?>>).single()
+
+        row["path"] shouldBe long.take(EndpointPath.MAX_LENGTH)
+        row["url"] shouldBe "/api" + long.take(EndpointPath.MAX_LENGTH)
+    }
+
     private fun validEndpoint(): PublishedEndpoint =
         PublishedEndpoint.of(
             id = UUID.nameUUIDFromBytes("/nyc/v1/revenue/{borough}".toByteArray()),
@@ -74,11 +91,11 @@ class EndpointsListLegacyToolsTest {
             updatedAt = Instant.EPOCH,
         )
 
-    private fun legacyRow(): EndpointRow.Legacy =
+    private fun legacyRow(path: String = "/nyc/revenue-by-borough"): EndpointRow.Legacy =
         EndpointRow.Legacy(
-            id = UUID.nameUUIDFromBytes("/nyc/revenue-by-borough".toByteArray()),
+            id = UUID.nameUUIDFromBytes(path.toByteArray()),
             workspaceId = WORKSPACE,
-            pathPattern = "/nyc/revenue-by-borough",
+            pathPattern = path,
             pipelineId = UUID.randomUUID(),
             reason = REASON,
             enabled = false,
@@ -86,6 +103,7 @@ class EndpointsListLegacyToolsTest {
 
     private companion object {
         val WORKSPACE: UUID = UUID.fromString("00000000-0000-0000-0000-000000000274")
+        const val LONG_TAIL = 1_000
         const val REASON = "Path has 2 segment(s); an endpoint is at least 3 — /<category>/<version>/<path…> (R-EP5)."
 
         private fun Any?.asMap(): Map<String, Any?> =
