@@ -87,11 +87,13 @@ wrote.
 
 ## A worked case — weighting changes the winners
 
-Invented numbers. The question: which of three sites had the most visits in one month? Two
-feeds count visits — a gate counter that records every visit (a census) and a mobile feed
-that keeps a stated 1 in 4 of its visits (a sample: weight 4).
+Invented numbers. The question: which of three sites had the most visits in one month? Visits
+arrive through two channels that never overlap — walk-ins, every one counted at the gate (a
+census), and bookings, logged by a feed that keeps a stated 1 in 4 of them (a sample: weight
+4). Both count visits, neither counts a visit the other does, and each enters at its stated
+weight: that is the comparability the description states.
 
-| Site | Counter visits (census) | Mobile rows observed | Counter + rows | Counter + 4 × rows |
+| Site | Walk-ins (census) | Booking rows observed | Walk-ins + rows | Walk-ins + 4 × rows |
 |---|---|---|---|---|
 | Alder | 900 | 50 | 950 | 1,100 |
 | Birch | 700 | 150 | 850 | 1,300 |
@@ -103,8 +105,8 @@ only weighting the sampled summand moves it. The output keeps the three quantiti
 Birch's 1,300 is 700 counted plus 600 estimated from 150 observed rows, and the reply shows
 that support beside the estimate. Birch's lead over Cedar is 100 estimated visits — 25
 observed rows' worth — a gap in a sampled estimate, not statistical stability; the reply says
-so. And a check that re-runs "counter + rows" reproduces 950 / 850 / 900 and agrees with the
-wrong answer; only a check derived from the question — visits per site, each feed at its
+so. And a check that re-runs "walk-ins + rows" reproduces 950 / 850 / 900 and agrees with the
+wrong answer; only a check derived from the question — visits per site, each channel at its
 stated weight — can disagree with it (`pipelines-verification`).
 
 ## Preserve meaning across aggregation steps

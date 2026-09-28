@@ -70,10 +70,10 @@ class AnalyticalGuidanceRulesTest {
             rows shouldHaveAtLeastSize 3
         }
         for (row in rows) {
-            withClue("${row.site}: 'Counter + rows' is not counter + observed rows") {
+            withClue("${row.site}: the unweighted total is not the census count + the observed sample rows") {
                 row.unweighted shouldBe row.census + row.sampled
             }
-            withClue("${row.site}: the weighted total is not counter + $weight × observed rows") {
+            withClue("${row.site}: the weighted total is not the census count + $weight × the observed sample rows") {
                 row.weighted shouldBe row.census + weight * row.sampled
             }
         }
