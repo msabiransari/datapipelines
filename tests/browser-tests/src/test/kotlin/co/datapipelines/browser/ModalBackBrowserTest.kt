@@ -88,11 +88,24 @@ class ModalBackBrowserTest : BrowserSuite() {
         }
         page.locator("#pipeline-tab-versions .tplx-vrow").first().waitFor()
 
-        // The ⋯ usually sits below the fold: scroll it into view OURSELVES and let the
-        // scroll handlers settle, so Playwright's own pre-click auto-scroll cannot race
-        // the menu's scroll-out-of-sight close.
+        // The ⋯ usually sits below the fold: scroll it into view OURSELVES, then wait for the
+        // scroll to have SETTLED — the summary's rect inside the viewport and unchanged across
+        // two animation frames (301 #301; was a fixed 300 ms sleep) — so Playwright's own
+        // pre-click auto-scroll cannot race the menu's scroll-out-of-sight close.
         page.locator("#pipeline-tab-versions details.tplx-vmenu > summary").first().evaluate("el => el.scrollIntoView({ block: 'center' })")
-        page.waitForTimeout(300.0)
+        page.waitForFunction(
+            """(sel) => {
+              const el = document.querySelector(sel);
+              if (!el) return false;
+              const rect = el.getBoundingClientRect();
+              if (rect.top < 0 || rect.bottom > innerHeight) return false;
+              return new Promise(done => requestAnimationFrame(() => requestAnimationFrame(() => {
+                const after = el.getBoundingClientRect();
+                done(after.top === rect.top && after.bottom === rect.bottom);
+              })));
+            }""",
+            "#pipeline-tab-versions details.tplx-vmenu > summary",
+        )
         page.locator("#pipeline-tab-versions details.tplx-vmenu > summary").first().click()
         page.waitForFunction(
             """() => {

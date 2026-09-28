@@ -147,6 +147,16 @@
   }
 
   /**
+   * 288 #1 / 301 (#301): the rows of THIS batch are all new to [order] — a page replacement,
+   * by DOM identity. The seam `index()`'s sort-clear rule reads; node-tested so the rule's
+   * three shapes stay decided in one place: a replaced page clears the client sort, a row
+   * edit / append / keyed same-page re-render (elements the order already knows) keeps it.
+   */
+  function allRowsNew(rows, order) {
+    return rows.length > 0 && rows.every(function (tr) { return !order.has(tr); });
+  }
+
+  /**
    * The title while a sort is HELD (288 #1): the label states the active state, not just the
    * affordance. On a paged list whose paging re-renders rows in place (the editor's dock,
    * index-keyed), a held sort persists across pages by element identity — the title says so
@@ -172,6 +182,7 @@
     fits: fits,
     sortTitle: sortTitle,
     activeSortTitle: activeSortTitle,
+    allRowsNew: allRowsNew,
     topLevelRoots: topLevelRoots,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api; // node --test
@@ -225,7 +236,10 @@
     this.frame = this.viewport.parentElement;
     // 288 (#288): a viewport is a scroll area, so it is keyboard-scrollable — tabindex="0"
     // (the markup renders -1, programmatically focusable only) with the sheet's focus ring.
-    this.viewport.setAttribute("tabindex", "0");
+    // 301 (#301): only a viewport that actually SCROLLS answers the arrows, so the tab stop
+    // lands on it and on nothing else — a page-flow frame that fits (the sheet's
+    // `overflow: clip`) is not a scroll container and gets its inert -1 back. Re-checked in
+    // measure(), where every state change lands.
     this.sortCol = -1;
     this.sortDir = "none";
     this.widths = null; // whole-pixel column widths while locked (table-layout: fixed), else null
@@ -352,17 +366,20 @@
 
   /** Natural positions: an unsorted table's DOM order IS natural; rows new to a sorted one queue after.
    *
-   * 288 (#288): when EVERY data row is new to a sorted, PAGED table, the page was replaced
-   * (the htmx pagers swap the whole frame; the dock's cursor paging re-renders its rows) and
-   * the new page shows the SERVER's order: the client sort is cleared, not re-applied over
-   * rows the server ordered differently — the button's title already says the sort is per
-   * page ("Sort this page by …"), so the state the label claims is the state the rows are in.
-   * A row EDIT (some rows keep their natural index) and an APPEND (old rows keep theirs) keep
-   * the sort; a keyed re-render of the same rows reuses the same elements and keeps it too. */
+   *  288 (#288): when EVERY data row is new to a sorted, PAGED table, the page was replaced
+   *  (the htmx pagers swap the whole frame; the dock's cursor paging re-renders its rows) and
+   *  the new page shows the SERVER's order: the client sort is cleared, not re-applied over
+   *  rows the server ordered differently — the button's title already says the sort is per
+   *  page ("Sort this page by …"), so the state the label claims is the state the rows are in.
+   *  A row EDIT (some rows keep their natural index) and an APPEND (old rows keep theirs) keep
+   *  the sort; a keyed re-render of the same rows reuses the same elements and keeps it too.
+   *
+   *  301 (#301): the every-row-new decision is [allRowsNew], node-tested — the guard for a
+   *  future swap that keeps the table element has a red state of its own now.
+   */
   DataTable.prototype.index = function (rows) {
     var self = this;
-    if (this.sortDir !== "none" && rows.length > 0 && this.frame.hasAttribute("data-dt-paged") &&
-        rows.every(function (tr) { return !self.order.has(tr); })) {
+    if (this.sortDir !== "none" && this.frame.hasAttribute("data-dt-paged") && allRowsNew(rows, this.order)) {
       this.sortDir = "none";
       this.sortCol = -1;
       this.order = new WeakMap();
@@ -485,6 +502,30 @@
   }
 
   /**
+   * Whether THIS viewport can actually scroll: a scroll container (the sheet's `auto` states —
+   * FIXED `dt-scroll`, `dt-fill`, the page-flow frame that stopped fitting) whose content
+   * overflows it. `clip` (a fitting page-flow frame) is not a scroll container, so its
+   * content width never makes it a tab stop.
+   */
+  DataTable.prototype.viewportScrolls = function () {
+    var style = getComputedStyle(this.viewport);
+    function container(o) {
+      return o === "auto" || o === "scroll" || o === "overlay" || o === "hidden";
+    }
+    if (!container(style.overflowX) && !container(style.overflowY)) return false;
+    return this.viewport.scrollHeight > this.viewport.clientHeight ||
+      this.viewport.scrollWidth > this.viewport.clientWidth;
+  };
+
+  /** The tab stop follows the scrolling (301 #301): focusable only while the arrows answer. */
+  DataTable.prototype.syncViewportFocus = function () {
+    var desired = this.viewportScrolls() ? "0" : "-1";
+    if (this.viewport.getAttribute("tabindex") !== desired) {
+      this.viewport.setAttribute("tabindex", desired);
+    }
+  };
+
+  /**
    * The cap's two numbers and, on a page-flow frame, whether the table fits it — and, while it
    * does, `--dt-flow-top`: MINUS its scroller's top padding. Chromium sticks a `top: 0` cell at
    * the scroller's CONTENT edge (measured: <main>'s 24px `--gap-lg` below the top bar, rows
@@ -492,6 +533,7 @@
    * visible edge — under the top bar on a page, at a dialog's edge in a dialog.
    */
   DataTable.prototype.measure = function () {
+    this.syncViewportFocus();
     var frame = this.frame;
     var viewport = this.viewport;
     if (this.isFlow()) {
@@ -635,11 +677,16 @@
     pending.forEach(function (inst) { if (inst.table.isConnected) inst.refresh(); });
   }
 
-  /** The batch's elements with no strict ancestor also in the batch — one query per subtree. */
+  /** The batch's elements with no strict ancestor also in the batch — one query per subtree.
+   *
+   *  301 (#301): the membership read is a Set, not `indexOf` over the batch — the dock's
+   *  1,000-row page render put ~12 ancestors × 1,000 nodes through an O(n²·depth) scan;
+   *  `inBatch.has` makes it O(n · depth). Measured before/after in the lane's evidence. */
   function topLevelRoots(nodes) {
+    var inBatch = new Set(nodes);
     return nodes.filter(function (node) {
       for (var p = node.parentNode; p; p = p.parentNode) {
-        if (nodes.indexOf(p) !== -1) return false;
+        if (inBatch.has(p)) return false;
       }
       return true;
     });
@@ -648,8 +695,10 @@
   /**
    * htmx snapshots the page into its history cache as MARKUP before a boosted swap, and a
    * back navigation re-parses it: a CSSOM width serialised into a `style` attribute would come
-   * back as an inline style the policy refuses. The outgoing copy drops them; the restored table
-   * is re-upgraded (the instance map, not the attribute, decides) and re-measured.
+   * back as an inline style the policy refuses. This cleanup runs on the LIVE page, an instant
+   * before it is snapshotted and replaced (htmx clones the history element only AFTER the
+   * event — 301 #301), so a restored table's widths are the re-measured ones: the restored
+   * table is re-upgraded (the instance map, not the attribute, decides).
    *
    * 287 (#287): the strip runs from shell.js's one `htmx:beforeHistorySave` listener through
    * the window.__dpHistoryStyleCleanups registry — this write set is registered there instead

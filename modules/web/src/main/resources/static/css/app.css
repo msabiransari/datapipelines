@@ -2103,10 +2103,11 @@ button.app-busy::after {
   background: color-mix(in srgb, var(--text-primary) 55%, transparent);
 }
 
-/* The hand-rolled modals start CLOSED and are opened by their screen's script
-   setting an inline `display: flex`, which beats any class — so the closed state
-   is safe to hold here. Declared after `.u-backdrop` because it overrides that
-   rule's own `display: flex`, and without `!important` so the inline set wins. */
+/* The hand-rolled modals start CLOSED: their scripts show and hide them by
+   toggling the `u-backdrop-hidden` CLASS (287 #287) — never an inline `display`,
+   which is exactly what #287 forbids: an inline style the history snapshot would
+   serialise and the CSP refuse on Back. Declared after `.u-backdrop` because it
+   overrides that rule's own `display: flex` by cascade order. */
 .u-backdrop-hidden { display: none; }
 
 .u-modal-tall { min-height: 60vh; }
