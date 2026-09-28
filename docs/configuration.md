@@ -519,7 +519,7 @@ The parameter engine's limits ([the design record](superpowers/specs/2026-09-21-
 
 No options cache in round one (`selector-cache-ttl-seconds` is deliberately absent — the record's §11: authority-aware keys and invalidation are its price, and it lands when a measured query count says it must).
 
-### 3.31 Web — request limits (#279)
+### 3.31 Web request limits
 
 The platform-wide request-body cap (pipeline-contract §13.21, [REST API §4.2](rest-api.md#42-error-envelope)): a JSON request body over the cap is refused with `413 request.body_too_large` at a servlet filter on BOTH surfaces — `/api/v1` and `/mcp` — before authentication and before any parser reads the body, so no handler, tool or permission is involved. The filter refuses without buffering: a declared `Content-Length` over the cap is refused unread; a chunked body is counted through a wrapping stream that never pulls a byte past the cap. Jackson's `StreamReadConstraints` — nesting depth **100**, string length **4,000,000** characters, number length **1000** digits — are stated explicitly on the request mappers of both surfaces rather than inherited from the pinned Jackson 2.21.5's defaults (depth 1000, string 20,000,000, number 1000), so a within-cap body that is adversarial for the parser is refused by the parser as a 400.
 

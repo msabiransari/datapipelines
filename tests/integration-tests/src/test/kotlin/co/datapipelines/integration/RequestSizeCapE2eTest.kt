@@ -130,7 +130,7 @@ class RequestSizeCapE2eTest {
          */
         const val CAP = 65_536L
 
-        const val TEMPLATE_ID = "cap279-within"
+        const val TEMPLATE_ID = "test/cap279_within.sql"
 
         /**
          * `CAP + 1` ASCII bytes total — byte-precise over the cap (ASCII: byte = char).
