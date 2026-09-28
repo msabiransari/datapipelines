@@ -475,8 +475,8 @@ Both live in `tests/browser-tests`, download a chromium binary on first use and 
 browser. Only the **screenshot driver** is outside `build`/`check`. The **browser suite** is the
 module's `test` task, so `build` runs it like any module's tests — every `scripts/gate.sh` build
 stage and CI's gate job, whose long pole it is (§9.5); `browserTest` runs it alone. (This
-section said until #283 that the suite, too, was outside `build`; every gate log says otherwise,
-and the comments in the root build and the module's build file still carry the old claim — #292.)
+section said until #283 that the suite, too, was outside `build`; every gate log says otherwise.
+The comments in the root build and the module's build file carried the same claim until #297.)
 
 ```bash
 ./gradlew browserTest      # the Playwright golden-path suite (module-structure §5.12)
@@ -776,8 +776,9 @@ one-fork order with
 integration job's figure) and its build step 70 of them. Before #290 the four green jobs took
 48–57 min, and 19–23 of those were the coverage-report step RE-RUNNING tests: Kover 0.9.9's report
 tasks depend on every instrumented test task, a task that failed is never up to date, and neither
-is anything downstream of `modules/app`, whose build-info stamps a new `build.time` on every Gradle
-invocation (#292) — so each run's report step replayed the whole browser suite, and a
+was anything downstream of `modules/app`, whose build-info stamped a new `build.time` on every
+Gradle invocation until #292 made the time opt-in — so each run's report step replayed the whole
+browser suite, and a
 red run's report step ran into the 60-minute cancel and read "cancelled". The step now runs
 `koverXmlReport` with an init script that disables every `Test` task **by type** (a new test task
 needs nothing added there) and `-x :tests:integration-tests:koverXmlReport` (the build step never

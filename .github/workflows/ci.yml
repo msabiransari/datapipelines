@@ -27,9 +27,9 @@
 #         cannot slip back in by name), and the integration module's report is excluded
 #         explicitly — the build step never compiled its tests, so --offline cannot
 #         resolve them. Until #290 this step re-ran tests on EVERY run: `modules/app`'s
-#         build-info stamps a fresh build.time per Gradle invocation, so everything
-#         downstream of the app — the whole browser suite — was out of date again, and a
-#         FAILED test task is never up to date either.
+#         build-info stamped a fresh build.time per Gradle invocation (until #292 made the
+#         time opt-in), so everything downstream of the app — the whole browser suite — was
+#         out of date again, and a FAILED test task is never up to date either.
 #     Measured budget (#290): the four green gate jobs before the fix took 57.0, 48.8,
 #         56.3 and 50.7 min (runs 36283937250, 36288656563, 36296091394, 36334831413) —
 #         build step 33.7 / 28.3 / 32.8 / 29.5 min, the report step 22.7 / 19.0 / 22.6 /
@@ -141,8 +141,8 @@ jobs:
       # the report task, run AFTER the build so a failed verification still leaves the report.
       # It must NEVER run a test (#290): Kover 0.9.9's report tasks depend on every instrumented
       # test task (its docs: "Running one of these tasks automatically triggers the launch of all
-      # test tasks"), and a task that failed — or sits downstream of the app, whose build-info
-      # stamps a new time per invocation — is not up to date, so this step used to re-run tests
+      # test tasks"), and a task that failed — or, until #292, sat downstream of the app, whose
+      # build-info stamped a new time per invocation — is not up to date, so this step used to re-run tests
       # for 19–24 minutes. The init script disables every Test task by type for this invocation
       # only (and detaches the zero-test guard each one is finalized by — the build step ran
       # them), and Kover reads the binary reports the build step's test JVMs already wrote. The
