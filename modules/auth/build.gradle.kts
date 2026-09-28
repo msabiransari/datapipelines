@@ -1,8 +1,11 @@
-// module-structure.md §5.7 — allowed internal deps: typesystem (shared exception base only).
+// module-structure.md §5.7 — allowed internal deps: typesystem (shared exception base only), persistence (#266).
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     implementation(project(":modules:typesystem"))
+    // #266 — the audit log's batching writer (module-structure §5.19); AuditLogger's constructor
+    // takes one, so the type is part of this module's API.
+    api(project(":modules:persistence"))
 
     implementation(libs.argon2.jvm)
     implementation(libs.jjwt.api)

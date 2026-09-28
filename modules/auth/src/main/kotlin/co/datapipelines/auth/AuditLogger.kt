@@ -1,8 +1,10 @@
 package co.datapipelines.auth
 
+import co.datapipelines.persistence.BatchingWriter
+import co.datapipelines.persistence.Outcome
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.UUID
 
 /**
@@ -17,10 +19,27 @@ import java.util.UUID
  * Implements [AuditEventSink] (052) so cross-module emitters — the MCP dispatcher's
  * `mcp.tool.*` events — depend on the sink contract, not on this JDBC writer; the
  * default argument values live on the interface now and are inherited here unchanged.
+ *
+ * ## Durable before [log] returns — batched, or joined to the caller's transaction (#266)
+ * Audit rows are AUTHORIZATION INPUTS: an MCP key's read of its own execution is decided by its
+ * `mcp.execution.launched` / `mcp.tool.called` rows, an endpoint key's by its serve row. So [log]
+ * returns only once the row is committed — never from memory. HOW it is committed depends on the
+ * caller, decided per call:
+ * - **Inside the caller's transaction** (`TransactionSynchronizationManager.isActualTransactionActive`)
+ *   the row is INSERTed on the caller's connection, exactly as before #266: it commits with the
+ *   business write it describes and vanishes if that write rolls back (a key issuance that failed
+ *   leaves no `api_key.created` row). A batched write there would commit an audit row for an action
+ *   that never happened — and would hold a second pool connection while the caller holds its first.
+ * - **Otherwise** the row goes through [writer] — a group commit shared by concurrent callers,
+ *   partitioned by key (then user) so one credential's events commit in order. The writer falls back
+ *   to this same INSERT on the caller's thread after `record-max-wait-ms`, and after shutdown.
+ * - **No writer** (`datapipelines.persistence.enabled: false`, or a test slice): every row is the
+ *   direct INSERT.
  */
 class AuditLogger(
     private val jdbc: NamedParameterJdbcTemplate,
     private val objectMapper: ObjectMapper,
+    private val writer: BatchingWriter<AuditRow>? = null,
 ) : AuditEventSink {
     private val log = org.slf4j.LoggerFactory.getLogger(AuditLogger::class.java)
 
@@ -32,26 +51,28 @@ class AuditLogger(
         userAgent: String?,
         details: Map<String, Any?>,
     ) {
+        val row = AuditRow(event, userId, keyId, sourceIp, userAgent, objectMapper.writeValueAsString(details))
+        if (writer == null || TransactionSynchronizationManager.isActualTransactionActive()) {
+            insertDirect(row)
+            return
+        }
+        val outcome = writer.record(row)
+        if (outcome is Outcome.Failed) {
+            // The writer has logged the cause with the row's ids; this is the line the audit trail
+            // has always carried for a lost row.
+            log.warn("audit_log write failed event={} user_id={} key_id={} kind={}", event, userId, keyId, outcome.kind)
+        }
+    }
+
+    private fun insertDirect(row: AuditRow) {
         try {
-            jdbc.update(
-                """
-                INSERT INTO audit_log (event, user_id, key_id, source_ip, user_agent, details_json)
-                VALUES (:event, :user_id, :key_id, CAST(:source_ip AS INET), :user_agent, CAST(:details AS JSONB))
-                """.trimIndent(),
-                MapSqlParameterSource()
-                    .addValue("event", event)
-                    .addValue("user_id", userId)
-                    .addValue("key_id", keyId)
-                    .addValue("source_ip", sourceIp)
-                    .addValue("user_agent", userAgent)
-                    .addValue("details", objectMapper.writeValueAsString(details)),
-            )
+            jdbc.update(AuditRowSink.INSERT, AuditRowSink.params(row))
         } catch (e: org.springframework.dao.DataAccessException) {
             log.warn(
                 "audit_log write failed event={} user_id={} key_id={}",
-                event,
-                userId,
-                keyId,
+                row.event,
+                row.userId,
+                row.keyId,
                 e,
             )
         }

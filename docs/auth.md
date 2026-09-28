@@ -1,9 +1,9 @@
 # Auth & Security Specification
 
-**Status:** v3.20 (revised — see Change Log)
+**Status:** v3.21 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System](type-system.md)
-**Last updated:** 2026-09-27
+**Last updated:** 2026-09-28
 
 ---
 
@@ -1415,6 +1415,28 @@ Workspace resolution failures (§5.6) use the `workspace.*` codes — catalogued
 
 The same `audit_log` table also carries the **promotion events** — `auth.promotion.rejected` when the peer-credential gate refuses a request, `auth.promotion.accepted` when a batch is applied ([Versioning §10](versioning.md#10-promotion-ui-driven-separate-use-case)) — the **datasource decryption events** ([Datasources §7.4](datasources.md#74-decryption-points-and-audit-log)), the **MCP tool events** — `mcp.tool.called` for every tool call, `mcp.tool.write` for every mutating one — emitted by the MCP dispatcher through the same sink ([MCP §14](mcp-server.md#14-audit)), and the **mail events** — `mail.sent` / `mail.failed` for every notice §5A.8 sends, kind and recipients in `details` and never a body (all registered in [Enums §15](enums.md#15-authauditevent--auth-audit-log-events)).
 
+### 10.1A Delivery: durable before `log` returns (#266)
+
+Audit rows are **authorization inputs**, not only a trail: an MCP key's read of its own execution is decided by its `mcp.execution.launched` / `mcp.tool.called` rows (`McpCallAudit.calledByKey`), an endpoint key's by its serve row (`EndpointServeAudit.servedByKey`), and `McpToolLearnings` decides the MCP entry-point checks from a key's own `mcp.tool.called` rows. So `AuditEventSink.log` returns **only once the row is committed** — never from memory — and a caller that proceeds can always read what it just did. How the row is committed is decided per call, by `AuditLogger`:
+
+| The caller… | The row is written | Why |
+|---|---|---|
+| holds a transaction (`TransactionSynchronizationManager.isActualTransactionActive()` — e.g. `ApiKeyService.issue`, `revokeOwn`, member removal) | on the caller's own connection, inside its transaction — the pre-#266 INSERT | it commits with the business write it describes and **vanishes if that write rolls back**; a separately committed row would record an action that never happened, and would hold a second pool connection while the caller holds one |
+| holds none (the common case — every filter, every MCP call, every serve) | by the audit **batching writer** ([Module Structure §5.19](module-structure.md#519-persistence)): concurrent callers share one JDBC batch in ONE transaction; each caller still waits for its own row's commit | one commit for N rows under load; nothing waits at idle |
+| — `datapipelines.persistence.enabled: false` | the direct INSERT, always | the pre-#266 path |
+
+**Order.** The writer is partitioned by key id (then user id): one credential's events commit in the order they were logged, and because each caller waits for its commit, an event that happens *because of* an earlier one (a `revoked` after its `created`) is always committed after it.
+
+**Bounded.** A row waits at most `record-max-wait-ms` ([Configuration §3.32](configuration.md#332-persistence-batching-266)) for its batch; then the caller takes it back from the queue and runs the INSERT itself, on its own thread. A row already inside a commit is waited on — exactly as long as the caller's own INSERT would have waited on the same database. The sink never returns before the row is durable or definitively not.
+
+**Failures.** A row the database refuses (a user id with no user row, a malformed address) fails alone — the rest of its batch commits — and is WARNed (`audit_log write failed …`) and counted (`datapipelines.persistence.failures{store=audit,kind=poison}`); the request is never failed by it. That was the contract before #266 and still is. A malformed credential still costs no audit write at all (`ApiKeyFilter`, pinned by `ApiKeyRejectionAuditTest`).
+
+**`timestamp`.** Still the column default `NOW()` — the database's clock, which `McpToolLearnings` compares with `pipeline_versions.updated_at` and must keep free of cross-clock skew. For a batched row it is the batch transaction's start: later than the call by at most the queue wait, and equal across the rows of one batch (callers that were concurrent — `id` orders them).
+
+**No natural key.** `audit_log` has none to deduplicate by, so the batch is all-or-nothing (a failed batch leaves nothing behind before its rows are retried one at a time). A batch whose COMMIT succeeded but whose acknowledgment was lost to a dropped connection is retried as singles and its rows land twice — the at-least-once edge of any retried write; the writer counts every retried batch (`datapipelines.persistence.batches.retried{store=audit}`).
+
+**Retention** (`datapipelines.audit.retention-days`) is documented but still not implemented — nothing binds the key or deletes rows (#266 finding, tracked separately).
+
 ### 10.2 Log shape
 
 ```json
@@ -1725,6 +1747,7 @@ All auth tables accessed via `JdbcTemplate` + `RowMapper`. No JPA. See [Metadata
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v3.21 | 266 (#266) persistence batching | New **§10.1A Delivery**: `AuditEventSink.log` still returns only once the row is committed (audit rows are authorization inputs — the #266 ruling); outside a transaction through the audit batching writer (group commit, partitioned by key then user, bounded by `record-max-wait-ms` with the caller's own INSERT as the fallback), inside a caller's transaction on the caller's connection (commits and rolls back with it), always direct when `datapipelines.persistence.enabled` is false; poison isolation; `timestamp` stays `NOW()` (the batch transaction's start); the at-least-once edge of a retried batch; retention still unimplemented. No event, route, permission or role changed. |
 | 2026-09-28 | v3.20 | 195 (#195) the editor's CSP exemption retired — renumbered at merge after 298's v3.19 | The security-header posture, no route, permission or key changed: `SecurityHeaders` lost `CSP_POLICY_EDITOR` and `isEditorRoute` — ONE policy now covers every policed route (§8.1's writer list is one matcher), and no response carries `'unsafe-eval'` anymore. The route-scoped exception 188 shipped on `GET /pipelines/{id}/editor` (owner ruling 2026-09-21: route-scoped over global) is retired because the editor's page runs Alpine's CSP build (`@alpinejs/csp` 3.14.1, vendored at the same path; the vendor manifest records the npm tarball's sha256) and every template expression is a pure property path. `style-src` carries Cytoscape's one sheet hash on every route — a hash admits exactly that sheet, so routes that never load Cytoscape are not weakened. `SecurityHeadersTest`'s former exemption case now pins the directive's ABSENCE on the editor route (falsified by re-adding it); `AuthHttpBoundaryTest` reads the one policy on every walked path. Deployment §6.2's CSP row carries the same story. |
 | 2026-09-28 | v3.19 | 298 (#293) the result row's own prose | §7.6's `execution.result.read` row says what it enforces — own runs unless `execution.read_all`, and every scheduled run (R3), the scheduled arm asking this row — instead of the stale "same own-or-all filter" (the `execution.read` row was corrected in f54a35bf). `executions_get_result`'s scheduled branch now asks `execution.result.read`, its own catalogue row, not `execution.read`; no role holds one without the other, so no role's access changed. No route, tool, cell or constant changed. |
 | 2026-09-28 | v3.18 | 194d (#194) the parameter engine's surfaces — renumbered at merge after 286's v3.17 | **§7.6: 82 permissions — the nine `parameter_set.*` rows** (the record's §9.3 table verbatim, the `template.*` rows the mould): `parameter_set.read` (every role; the promoter through the LENS — released sets newer than the promotion target's) and `parameter_set.evaluate` (every role but the promoter — a VIEWER row, C24: the evaluate fan-out's callers include every viewer; it reads the datasources the set's selectors name, which a viewer can already read through) plus the seven author rows (`.create`, `.update`, `.version.manage`, `.delete`, `.import`, `.release`, `.switch_version`). The two transport key roles hold none of them — an `endpoint` or `server` key never reaches `/api/v1/parameter-sets` (`ScopeInterceptor.reachableBy`; proven by `PermissionSeamE2eTest`'s nine new witness pairs). REST routes in the Surfaces cells; the MCP placements (`parameter_sets_list|get|create|update|evaluate|purge_draft`) land with the tools in the same round. `ReadFloorTest` gains the `parameter_sets` family (a GET declares the LOWEST admitting row — `parameter_set.read`). |

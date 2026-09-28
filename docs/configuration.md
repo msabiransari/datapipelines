@@ -1,8 +1,8 @@
 # Configuration Reference
 
-**Status:** v1.36 (single source of truth for every config key)
+**Status:** v1.37 (single source of truth for every config key)
 **Owner:** datapipelines.co core
-**Last updated:** 2026-09-26
+**Last updated:** 2026-09-28
 
 ---
 
@@ -531,6 +531,24 @@ The bound below is enforced at boot (§7, `checkRequestLimits`) and again when t
 
 Tomcat's swallow budget is the cap's counterpart on the connection: `server.tomcat.max-swallow-size` (default `2MB`, [§3.13](#313-server)) bounds how much of a REFUSED body the container drains before closing it, so an abandoned over-cap upload costs the connection, never the server.
 
+### 3.32 Persistence batching (#266)
+
+The batching writers in front of three stores ([DAG Executor §10](dag-executor.md#10-sse-event-integration), [Auth §10](auth.md)): the audit log (`audit_log`), the durable execution-event record (`execution_events`) and the one-hour Redis replay log. **Every write is still awaited** — a caller returns only once its row is committed or known not to be; batching changes how a row becomes durable (N concurrent callers share one commit), never whether the caller waits. The execution row itself (`pipeline_executions`: the RUNNING insert and the terminal UPDATE) is never batched. Each store gets its OWN writer with these bounds, so the memory bound is three times the queue bounds. Every bound is enforced when the keys bind (`PersistenceProperties` → `BatchingConfig`), naming the key.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.persistence.enabled` | `true` | `false` restores the pre-#266 path: every audit row, event row and replay-log entry written by its own caller, one statement each |
+| `datapipelines.persistence.batch-max-events` | `200` | Items per committed batch at most. ≥ 1 |
+| `datapipelines.persistence.batch-max-bytes` | `1048576` | Bytes per batch at most (1 MiB); one item larger than this is its own batch. ≥ 1 |
+| `datapipelines.persistence.linger-ms` | `0` | How long a BUSY writer (≥ 2 items queued behind its previous commit) waits for a fuller batch. Never applies at idle: a lone item — including a sequential caller's next one — is written at once. ≥ 0 |
+| `datapipelines.persistence.queue-max-events` | `10000` | Items admitted and not yet finished (queued or inside a commit), per writer. Full → an awaited caller waits up to `record-max-wait-ms`, then writes its own row. ≥ 1 |
+| `datapipelines.persistence.queue-max-bytes` | `33554432` | The same bound in bytes (32 MiB) per writer. ≥ 1 |
+| `datapipelines.persistence.record-max-wait-ms` | `2000` | How long a caller waits for room and then for its batch before it takes its item back and writes it itself (the direct path). The execution-event emitter waits at most this long again for that direct write — or for an item already inside a commit — and then records the outcome as `indeterminate` and moves on (a hung store never hangs an execution). ≥ 1 |
+| `datapipelines.persistence.writers` | `4` | Writer threads per store (= partitions; one execution's, or one key's, items always share one), and the size of the `dp-event-persist` pool that runs the execution row's writes and the direct fallbacks. ≥ 1 |
+| `datapipelines.persistence.shutdown-drain-ms` | `10000` | How long the shutdown drain flushes — all writers in parallel, after the web server's graceful drain — before it reports what it could not write. 0..25000 (inside Spring's 30 s shutdown phase) |
+
+What these keys never change: an audit row written inside the caller's transaction joins that transaction (it commits and rolls back with it; [Auth §10](auth.md)); per-key and per-execution order; the retry dedup (the event record's `ON CONFLICT (execution_id, event_id)`, the replay's first-copy-per-event-id); the loss window, which exists only for the non-awaited `submit` path — no production caller yet ([Observability §7](observability.md)).
+
 ---
 
 ## 4. Precedence
@@ -816,6 +834,17 @@ datapipelines:
   web:                             # §3.31 — request limits (#279)
     max-request-bytes: ${DATAPIPELINES_WEB_MAX_REQUEST_BYTES:2097152}
 
+  persistence:                     # §3.32 — the batching writers (#266)
+    enabled: ${DATAPIPELINES_PERSISTENCE_ENABLED:true}
+    batch-max-events: ${DATAPIPELINES_PERSISTENCE_BATCH_MAX_EVENTS:200}
+    batch-max-bytes: ${DATAPIPELINES_PERSISTENCE_BATCH_MAX_BYTES:1048576}
+    linger-ms: ${DATAPIPELINES_PERSISTENCE_LINGER_MS:0}
+    queue-max-events: ${DATAPIPELINES_PERSISTENCE_QUEUE_MAX_EVENTS:10000}
+    queue-max-bytes: ${DATAPIPELINES_PERSISTENCE_QUEUE_MAX_BYTES:33554432}
+    record-max-wait-ms: ${DATAPIPELINES_PERSISTENCE_RECORD_MAX_WAIT_MS:2000}
+    writers: ${DATAPIPELINES_PERSISTENCE_WRITERS:4}
+    shutdown-drain-ms: ${DATAPIPELINES_PERSISTENCE_SHUTDOWN_DRAIN_MS:10000}
+
 # The scheduler's library reads its own prefix; every value comes from datapipelines.scheduler.*
 # above (§3.29). Framework wiring, not an operator surface.
 db-scheduler:
@@ -928,6 +957,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.37 | 266 (#266) persistence batching — the dashboard implementation spec reserved "§3.32" for its keys; this lane takes it and the spec renumbers | New **§3.32 Persistence batching**: the nine `datapipelines.persistence.*` keys of the batching writers in front of the audit log, the execution-event record and the replay log (enabled, batch and queue bounds, linger, record-max-wait, writers, shutdown drain), enforced at binding (`PersistenceProperties`); `writers` also sizes the `dp-event-persist` pool, whose thread count was a code constant (4). §5's template gains the `persistence:` block appended after the whole `datapipelines:` tree. No existing key changed. |
 | 2026-09-28 | v1.36 | 298 (#291) request constraints on every body | §3.31's prose: the stated Jackson `StreamReadConstraints` hold on every route that parses its own text body as well (a request copy of its domain mapper, pipeline-contract §13.21), not only on the two surfaces' shared mappers. The v1.35 row, which had landed above this table's header, moved under it. No key changed. |
 | 2026-09-28 | v1.35 | 279 (#279) the request-body cap | New **§3.31 Web — request limits**: `datapipelines.web.max-request-bytes` (default 2 MiB, 65536..67108864), the platform-wide request-body cap refused `413 request.body_too_large` on `/api/v1` and `/mcp` before any handler or parser (pipeline-contract §13.21); §3.13 gains the `server.tomcat.max-swallow-size` row (default 2MB) that bounds draining a refused body; §5's template gains the `web:` block appended after the whole `datapipelines:` tree; §7 lists the rule (check 31). The stated Jackson `StreamReadConstraints` (nesting 100, string 4M chars, number 1000 digits) are recorded in §3.31's prose — they are constants of the request mappers, not operator keys. |
 | 2026-09-26 | v1.34 | 194b (#194) parameter engine lane B — numbered after origin/main's v1.33 (260) | New **§3.30 Parameter engine**: the fifteen `datapipelines.parameters.*` keys of the design record's §11 with their bounds (enforced at boot by `ConfigValidator` and at binding by `ParametersProperties`); §5's template gains the `parameters:` block as the last child of `datapipelines:`; §7 lists the rule. No options cache (the record's §11). |

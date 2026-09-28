@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import co.datapipelines.persistence.BatchingWriter
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -27,7 +28,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * behavior is proven at the wire by `AuthHttpBoundaryTest`.
  */
 @Configuration
-@EnableConfigurationProperties(WorkspacesProperties::class, PromotionProperties::class)
+@EnableConfigurationProperties(WorkspacesProperties::class, PromotionProperties::class, PersistenceProperties::class)
 @Suppress("TooManyFunctions") // the wiring class: one function per bean, which is the point
 class AuthConfiguration {
     /**
@@ -58,11 +59,25 @@ class AuthConfiguration {
     @Bean
     fun authCache(authProperties: AuthProperties): AuthCache = AuthCache(authProperties)
 
+    /**
+     * #266 — the audit log's batching writer (auth.md §10): an ordered group commit shared by
+     * concurrent callers, partitioned by key. Closed at context shutdown after a bounded drain;
+     * `web`'s `PersistenceDrainLifecycle` stops it earlier, after the web server's graceful drain.
+     */
+    @Bean(destroyMethod = "close")
+    fun auditWriter(
+        jdbc: NamedParameterJdbcTemplate,
+        persistence: PersistenceProperties,
+    ): BatchingWriter<AuditRow> = BatchingWriter(AUDIT_STORE, persistence.toConfig(), AuditRowSink(jdbc))
+
+    /** Batched outside a transaction, direct inside one; every write direct when `datapipelines.persistence.enabled` is false. */
     @Bean
     fun auditLogger(
         jdbc: NamedParameterJdbcTemplate,
         objectMapper: ObjectMapper,
-    ): AuditLogger = AuditLogger(jdbc, objectMapper)
+        persistence: PersistenceProperties,
+        auditWriter: BatchingWriter<AuditRow>,
+    ): AuditLogger = AuditLogger(jdbc, objectMapper, auditWriter.takeIf { persistence.enabled })
 
     @Bean
     fun jwtService(
@@ -307,4 +322,9 @@ class AuthConfiguration {
                     clientAddressResolver,
                 ),
         )
+
+    companion object {
+        /** The audit writer's `store` tag and thread-name stem (observability §4). */
+        const val AUDIT_STORE = "audit"
+    }
 }

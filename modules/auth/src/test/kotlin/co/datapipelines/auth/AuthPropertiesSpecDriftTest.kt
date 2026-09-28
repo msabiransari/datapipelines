@@ -49,6 +49,22 @@ class AuthPropertiesSpecDriftTest {
         documented.getValue("datapipelines.mail.starttls") shouldBe props.starttls.toString()
     }
 
+    @Test
+    fun `persistence property defaults match configuration-md section 3-32`() {
+        // #266: the batching writers' bounds. Every key, because a default that drifts here is a
+        // queue bound or a wait that operators read one value for and run with another.
+        val props = PersistenceProperties()
+        documented.getValue("datapipelines.persistence.enabled") shouldBe props.enabled.toString()
+        documented.getValue("datapipelines.persistence.batch-max-events") shouldBe props.batchMaxEvents.toString()
+        documented.getValue("datapipelines.persistence.batch-max-bytes") shouldBe props.batchMaxBytes.toString()
+        documented.getValue("datapipelines.persistence.linger-ms") shouldBe props.lingerMs.toString()
+        documented.getValue("datapipelines.persistence.queue-max-events") shouldBe props.queueMaxEvents.toString()
+        documented.getValue("datapipelines.persistence.queue-max-bytes") shouldBe props.queueMaxBytes.toString()
+        documented.getValue("datapipelines.persistence.record-max-wait-ms") shouldBe props.recordMaxWaitMs.toString()
+        documented.getValue("datapipelines.persistence.writers") shouldBe props.writers.toString()
+        documented.getValue("datapipelines.persistence.shutdown-drain-ms") shouldBe props.shutdownDrainMs.toString()
+    }
+
     private companion object {
         /**
          * A full `| \`datapipelines.*\` | \`default\` | description |` row of the §3 tables:

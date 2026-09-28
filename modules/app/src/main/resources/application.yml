@@ -543,6 +543,21 @@ datapipelines:
   web:
     max-request-bytes: ${DATAPIPELINES_WEB_MAX_REQUEST_BYTES:2097152}
 
+  # #266 — the batching writers in front of the audit log, the execution-event record and the
+  # replay log (configuration.md §3.32). Every write is still AWAITED: batching changes how a row
+  # becomes durable, never whether the caller waits for it. `enabled: false` restores one write per
+  # row. Appended after the whole tree (the reparenting lesson): nothing below moved.
+  persistence:
+    enabled: ${DATAPIPELINES_PERSISTENCE_ENABLED:true}
+    batch-max-events: ${DATAPIPELINES_PERSISTENCE_BATCH_MAX_EVENTS:200}
+    batch-max-bytes: ${DATAPIPELINES_PERSISTENCE_BATCH_MAX_BYTES:1048576}
+    linger-ms: ${DATAPIPELINES_PERSISTENCE_LINGER_MS:0}
+    queue-max-events: ${DATAPIPELINES_PERSISTENCE_QUEUE_MAX_EVENTS:10000}
+    queue-max-bytes: ${DATAPIPELINES_PERSISTENCE_QUEUE_MAX_BYTES:33554432}
+    record-max-wait-ms: ${DATAPIPELINES_PERSISTENCE_RECORD_MAX_WAIT_MS:2000}
+    writers: ${DATAPIPELINES_PERSISTENCE_WRITERS:4}
+    shutdown-drain-ms: ${DATAPIPELINES_PERSISTENCE_SHUTDOWN_DRAIN_MS:10000}
+
 # db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
 # (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a
 # 30-minute shutdown wait — A19) never apply. The starter's start gate is replaced by the scheduler
