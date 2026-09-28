@@ -471,12 +471,26 @@ Integration tests use **Testcontainers** to spin up real Postgres, Redis, and so
 
 ### 9.0 The browser suite and the screenshot driver
 
-Both live in `tests/browser-tests` and both are **deliberately outside `build`/`check`**: they
-download a chromium binary on first use and launch a real browser.
+Both live in `tests/browser-tests`, download a chromium binary on first use and launch a real
+browser. Only the **screenshot driver** is outside `build`/`check`. The **browser suite** is the
+module's `test` task, so `build` runs it like any module's tests — every `scripts/gate.sh` build
+stage and CI's gate job, whose long pole it is (§9.5); `browserTest` runs it alone. (This
+section said until #283 that the suite, too, was outside `build`; every gate log says otherwise,
+and the comments in the root build and the module's build file still carry the old claim — #292.)
 
 ```bash
 ./gradlew browserTest      # the Playwright golden-path suite (module-structure §5.12)
 ```
+
+**A browser test waits on ITS event, never on a position (#283).** After an action, synchronise
+on something that belongs to that action: the response it caused (`page.waitForResponse`, and keep
+the id it returns), the row carrying that id (`[data-run-id='…']`), the read for that id — never on
+"the first row", a fixed sleep or a longer timeout. `SchedulesBindingsBrowserTest`'s shots test
+waited on the first run row's state: from its second (dark) iteration on the list already held
+the first iteration's run, succeeded, so the wait passed at once, and the click on the first row
+could open the NEW run while it was still queued — not prepared, so its §20.11 read had no
+`resolved_parameters` and the slot it waited for never appeared (30 s on the box, 90 s on CI).
+A loop in a test re-synchronises in every iteration; no iteration inherits the previous one's state.
 
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
@@ -695,6 +709,19 @@ the *shell's* last command. `scripts/test-recount.sh` reads the JUnit XML both t
 rather than retyped so two lanes' numbers are comparable; a modules-only glob under-reported the
 total for four consecutive rounds before it existed.
 
+**The breach suite is a task of its own (#289).** `JsonataBreachTest` lives in
+`modules/scripting/src/test/breach` and runs ALONE in `:modules:scripting:breachSuite`, a 512m test
+JVM of its own, never inside the module's `test` (which runs at the conventions' `dp.test.heap`).
+It hangs off `check`, so the gate's two `build` stages and CI's build step run it with no stage
+of their own; a filtered `:modules:scripting:test` no longer touches it, and
+`./gradlew :modules:scripting:breachSuite` regenerates `build/reports/jsonata-breach.md` (the
+table dag-executor.md pastes). Its results land in `build/test-results/breachSuite/` — the
+recount's `test-results/**` glob counts them; `verifyBreachSuiteExecuted` is its zero-test
+guard. A red there reads one of two ways, both named in the XML and the report: a prediction
+that no longer holds (reconcile the doc), or a `SKIPPED` row — the case could not start with the
+headroom the calibration needs, an environment verdict to re-run, not a bound. The worker itself
+no longer dies of a heap event: everything after a bomb runs inside the suite's OOM guard.
+
 **`verifyTestsExecuted` and filtered runs.** The zero-test guard fails whenever a module produced
 fewer result files than it has `*Test.kt` sources — which is *always* true of a `--tests` filtered
 run. That `BUILD FAILED` is the guard doing its job, not a red suite: read the XML (or run the
@@ -741,6 +768,22 @@ their build files set; any `-Pjunit.jupiter.testclass.order.default=…` you pas
 §9.3 shuffle included), so the box and CI see the same suite sequence; reproduce CI's exact
 one-fork order with
 `./gradlew :tests:integration-tests:test :tests:browser-tests:test -Pdp.test.forks.e2e=1 -Pjunit.jupiter.testclass.order.default='org.junit.jupiter.api.ClassOrderer$ClassName'`.
+
+**CI's gate job: the budget and the report step (#290).** The job budgets 90 minutes (the
+integration job's figure) and its build step 70 of them. Before #290 the four green jobs took
+48–57 min, and 19–23 of those were the coverage-report step RE-RUNNING tests: Kover 0.9.9's report
+tasks depend on every instrumented test task, a task that failed is never up to date, and neither
+is anything downstream of `modules/app`, whose build-info stamps a new `build.time` on every Gradle
+invocation (#292) — so each run's report step replayed the whole browser suite, and a
+red run's report step ran into the 60-minute cancel and read "cancelled". The step now runs
+`koverXmlReport` with an init script that disables every `Test` task **by type** (a new test task
+needs nothing added there) and `-x :tests:integration-tests:koverXmlReport` (the build step never
+compiled that module's tests, and `--offline` cannot resolve them); it fails as itself, never behind
+`|| true`. A following step names every failing test on the run's summary page, and the
+`gate-reports` artifact now carries every test task's XML (the browser suite's included) and the
+breach report. The browser suite stays in the gate job: it is the build step's long pole (20.4 of
+29.5 min on run 36334831413) but overlaps every other module's tests on the second worker, so a job
+of its own — which compiles the app first — would finish no sooner.
 
 **Measured on 2026-09-12** (2 × 24-core Xeon, 96 threads, 64 GB, NVMe, native Docker, Ubuntu
 26.04) — the numbers to size against:
