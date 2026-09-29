@@ -74,4 +74,16 @@ class JsonataEvaluationGuardTest {
         val escaped = guard().escaped(IllegalStateException("boom"))
         escaped.shouldBeInstanceOf<ScriptEvaluationException>().message shouldBe "evaluation failed unexpectedly: boom"
     }
+
+    @Test
+    fun `a stack overflow the library wrapped is the catalogued depth refusal, not an unexpected failure (#314)`() {
+        // The evaluate boundary catches a bare StackOverflowError directly; this pins
+        // the belt behind it — an overflow the library WRAPPED in a RuntimeException
+        // (as it wraps comparator failures) still arrives as the typed refusal, never
+        // as "evaluation failed unexpectedly".
+        val escaped = guard().escaped(RuntimeException("comparator wrap", StackOverflowError("deep")))
+        val refusal = escaped.shouldBeInstanceOf<ScriptResourceLimitException>()
+        refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
+        refusal.code shouldBe "pipeline.transform.resource_limit"
+    }
 }

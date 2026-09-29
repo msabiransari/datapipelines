@@ -38,6 +38,16 @@ import java.time.Instant
  *    interruptible. The evaluation pool's abandonment is the bound that actually
  *    stops an overrunning builtin's caller — and the SANDBOX bound against a hostile
  *    body (owner ruling 2026-09-28, record §4.5); the hooks are a runaway guard.
+ *  - **A body past the compile-time nesting ceiling never reaches the library (#314).**
+ *    The library's parser AND evaluator recurse per level; 500 nested brackets overflowed
+ *    a 256 KB stack inside the parse alone (measured 2026-09-29 — and 297's conformance
+ *    run saw the same shape once on a default stack under load, the JIT deciding frame
+ *    sizes). [compile] refuses past [JsonataNestingScan.CEILING] with the engine's
+ *    catalogued DEPTH refusal — the same kind the evaluate-time counter throws, because
+ *    the expression is grammatical and only its depth is over the line — and BOTH
+ *    boundaries (compile and evaluate) turn a residual `StackOverflowError` into that
+ *    same refusal, so an Error never escapes the seam even for a body that defeats the
+ *    pre-scan's under-counting.
  *  - **The hooks cannot be unbound by the body (#272).** They are frame variables the
  *    library looks up by name, so a body that binds `$__evaluate_entry` switches them
  *    off. [compile] refuses every bind of a `__` name, read from the parsed AST
@@ -87,11 +97,29 @@ class JsonataEngine(
         )
 
     override fun compile(body: String): CompiledScript {
+        // The nesting ceiling (#314) fires BEFORE the library parses: the library's
+        // parser recurses per level, so a deeper body can overflow the compiling
+        // thread's stack — an Error, not a refusal. The scan is a linear pass with
+        // O(1) stack (JsonataNestingScan).
+        if (JsonataNestingScan.exceeds(body)) {
+            throw ScriptResourceLimitException(
+                ScriptResourceLimitException.Kind.DEPTH,
+                JsonataNestingScan.refusal(),
+            )
+        }
         val expr =
             try {
                 Jsonata.jsonata(body)
             } catch (err: JException) {
                 throw syntaxException(body, err)
+            } catch (
+                @Suppress("SwallowedException", "TooGenericExceptionCaught") err: StackOverflowError,
+            ) {
+                // A body that defeats the pre-scan (a miscounted construct) still
+                // cannot surface an Error (#314) — the boundary guard. The Error
+                // itself is deliberately not chained: the catalogued refusal is the
+                // message, and walking an overflow's frames buys nothing.
+                throw stackOverflowRefusal("at compile")
             }
         // The parser can finish with non-fatal errors collected on the AST; the
         // library would only refuse them at evaluate (S0500). Refuse here instead:
@@ -148,10 +176,19 @@ class JsonataEngine(
                 compiled.expr.evaluate(JsonataValues.toEngineInput(input), frame),
             )
         } catch (
+            @Suppress("SwallowedException", "TooGenericExceptionCaught") err: StackOverflowError,
+        ) {
+            // The library's evaluator recurses too — a non-tail recursion past what
+            // the thread's stack carries, with a maxDepth too high to refuse first,
+            // arrives as an Error (#314). It is the same catalogued refusal, never
+            // an Error escaping the seam; the Error is not chained (see compile).
+            throw stackOverflowRefusal("at evaluate")
+        } catch (
             @Suppress("TooGenericExceptionCaught") err: RuntimeException,
         ) {
-            // Every failure — the engine's own refusal, a library script error, or a library
-            // or engine defect surfacing mid-evaluation — is classified by what escaped.
+            // Every failure — the engine's own refusal, a library script error, or a
+            // library or engine defect surfacing mid-evaluation — is classified by
+            // what escaped.
             throw guard.escaped(err)
         }
     }
@@ -255,6 +292,14 @@ class JsonataEngine(
         val at = lineColumn(body, err.location.coerceAtLeast(0))
         return ScriptSyntaxException(at.first, at.second, err.message ?: err.error)
     }
+
+    /** The one catalogued refusal a stack overflow becomes, at either boundary (#314). */
+    private fun stackOverflowRefusal(at: String): ScriptResourceLimitException =
+        ScriptResourceLimitException(
+            ScriptResourceLimitException.Kind.DEPTH,
+            "the library's recursion overflowed the evaluation stack $at — refused as the " +
+                "catalogued depth limit instead of surfacing an Error",
+        )
 
     /** 1-based line/column for a 0-based character offset (the library's position). */
     private fun lineColumn(

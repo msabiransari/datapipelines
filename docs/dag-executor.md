@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.21 (revised — see Change Log)
+**Status:** v1.22 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-09-29
@@ -641,6 +641,16 @@ node lands (7c). What is already true and binding:
   skip no longer leaks a unit per item, so a set-level transform over hundreds of rows
   evaluates at the default depth of 100. A tail-recursive lambda is trampolined — its
   depth never grows, and the wall clock is the bound that catches it.
+- **Static nesting is refused at COMPILE past the ceiling (#314)**: the library's
+  parser recurses per level, and 500 nested brackets overflowed a 256 KB stack inside
+  the parse alone (measured 2026-09-29 — and once on a default stack under load, the
+  conformance suite's 1-in-13 red). `compile` therefore refuses past a fixed ceiling
+  of 64 bracket levels BEFORE the library parses (`pipeline.transform.resource_limit`,
+  kind DEPTH — the expression is grammatical, only its depth is over the line), and
+  both boundaries turn any residual stack overflow into that same refusal, so an
+  Error never escapes the seam. The ceiling sits under the evaluate-time default
+  (100): compile bounds STATIC nesting (stack safety), evaluate bounds RUNTIME depth
+  (steps and non-tail lambda recursion, which no static scan can see).
 - **A heap bound is not enforceable in-process; input and output caps bound a well-formed
   evaluation; a malicious body can still exhaust the heap.** `EngineCapabilities` states this
   (`boundsHeap = false`, `interruptible = false`) so the callers document what a limit means
@@ -1600,6 +1610,8 @@ document a customer can read before they need it.
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
+|---|---|---|---|
+| 2026-09-29 | v1.22 | lane 307 (#314) | §5.3's depth bullet gains the compile-time nesting ceiling: the library's parser recurses per level and 500 nested brackets overflowed a 256 KB stack inside the parse (measured; the conformance suite's 1-in-13 red), so `compile` refuses past a fixed ceiling of 64 bracket levels before the library parses (`pipeline.transform.resource_limit`, kind DEPTH — no new code), and both boundaries turn any residual stack overflow into the same refusal. The evaluate-time bound and every measured outcome are unchanged; the ceiling is a stack-safety constant, not a config key. |
 |---|---|---|---|
 | 2026-09-26 | v1.19 | 260 the depth-accounting fix (#260) | §5.3's script-engine bullet and the honest-bounds table re-measured: the library `Timebox` returned early on `isParallelCall` frames (second and later object pairs/arguments), leaking one depth unit per item on set-level shapes and skipping the clock check in those frames — the engine now counts every evaluate entry/exit itself. Deep-recursion row outcome UNCHANGED (the loop is tail-recursive; the library trampolines it; TIME catches it — the trampoline, not `isParallelCall`, is the mechanism); a non-tail-recursive lambda nests for real and depth refuses it at `max-depth` nested calls. No table outcome flipped; the doc never hand-writes the numbers. |
 | 2026-09-25 | v1.18 | scheduler lane 1 (#9) | §5.3 gains the scheduler's row: `ExecutionSlots.acquire` returns a `SlotLease` taken before the scheduler claims a run's start (acquire-before-claim, R4), carried in `ExecuteRequest.slotLease` and adopted by `withSlot`; `max-concurrent-runs` is the system identity's per-user bound. Executions a schedule fires carry `triggeredVia = SCHEDULE` ([Enums §18](enums.md#18-executiontrigger--how-execution-was-initiated)); they run the ordinary path — same emitter, same `execution_events`, no SSE consumer — and a scheduled launch fails closed: the execution runs only once its `RUNNING` row is written (the recording emitter's `failClosedOnRecord`). Status caught up (it read v1.14 after v1.17's row). |

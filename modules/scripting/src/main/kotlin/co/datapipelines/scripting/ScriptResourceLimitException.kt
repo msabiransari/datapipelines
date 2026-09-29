@@ -9,7 +9,11 @@ package co.datapipelines.scripting
  * lambda recursion alike (#260; the library's `Timebox` skipped `isParallelCall`
  * frames, so a set-level shape leaked a depth unit per item until the engine counted
  * for itself). A tail-recursive lambda loop is trampolined by the library — depth
- * stays flat and the wall clock bounds that shape instead.
+ * stays flat and the wall clock bounds that shape instead. The same kind is ALSO the
+ * compile-time nesting ceiling's refusal (#314): a body past the ceiling is refused
+ * before the library's recursive parser can overflow the stack, and any residual
+ * stack overflow at the compile/evaluate boundary becomes this refusal rather than
+ * an Error escaping the seam.
  * [Kind.HEAP] and [Kind.STATEMENTS] name limits no in-process
  * engine can enforce (`EngineCapabilities`); the kinds exist so the round-two isolate
  * engine reuses this exception unchanged.

@@ -64,10 +64,19 @@ internal class JsonataEvaluationGuard(
     fun escaped(err: Throwable): ScriptingException {
         val chain = generateSequence(err) { it.cause }.take(MAX_CAUSE_DEPTH).toList()
         val scriptError = chain.firstNotNullOfOrNull { it as? JException }
-        // Order: the engine's own refusal where the chain still holds it; else a refusal
-        // still pending, which escaped under a library REPLACEMENT (that carries no cause);
+        // Order: the engine's own refusal where the chain still holds it; else a stack
+        // overflow the library WRAPPED (#314) — the same catalogued refusal the direct
+        // boundary catch gives, wherever the library buried it; else a refusal still
+        // pending, which escaped under a library REPLACEMENT (that carries no cause);
         // else the library's script error, wherever it was wrapped.
         return chain.firstNotNullOfOrNull { it as? ScriptingException }
+            ?: chain.filterIsInstance<StackOverflowError>().firstOrNull()?.let {
+                ScriptResourceLimitException(
+                    ScriptResourceLimitException.Kind.DEPTH,
+                    "the library's recursion overflowed the evaluation stack mid-evaluation — " +
+                        "refused as the catalogued depth limit instead of surfacing an Error",
+                )
+            }
             ?: pending
             ?: scriptError?.let { ScriptEvaluationException(it.message ?: it.error, it) }
             ?: ScriptEvaluationException("evaluation failed unexpectedly: ${err.message ?: err.javaClass.name}", err)
