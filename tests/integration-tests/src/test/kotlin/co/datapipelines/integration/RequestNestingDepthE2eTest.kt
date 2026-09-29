@@ -82,6 +82,13 @@ class RequestNestingDepthE2eTest {
             StringRoute("POST", "/api/v1/pipelines/${UUID.randomUUID()}/execute", EXECUTE_MALFORMED),
             StringRoute("POST", "/api/v1/schedules", SCHEDULE_MALFORMED),
             StringRoute("PUT", "/api/v1/schedules/${UUID.randomUUID()}", SCHEDULE_MALFORMED),
+            // #10 L1b: the two artifact families parse create, update and switch-current bodies themselves.
+            StringRoute("POST", "/api/v1/visualizations", VISUALIZATION_MALFORMED),
+            StringRoute("PUT", "/api/v1/visualizations/${UUID.randomUUID()}", VISUALIZATION_MALFORMED),
+            StringRoute("POST", "/api/v1/visualizations/${UUID.randomUUID()}/current", VISUALIZATION_MALFORMED),
+            StringRoute("POST", "/api/v1/dashboards", DASHBOARD_MALFORMED),
+            StringRoute("PUT", "/api/v1/dashboards/${UUID.randomUUID()}", DASHBOARD_MALFORMED),
+            StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/current", DASHBOARD_MALFORMED),
         )
 
     @Test
@@ -156,6 +163,8 @@ class RequestNestingDepthE2eTest {
                 "PipelineTransferController.kt" to 1,
                 "PipelineExecuteController.kt" to 1,
                 "SchedulesController.kt" to 2,
+                "VisualizationsController.kt" to 3,
+                "DashboardsController.kt" to 3,
             )
         withClue("files declaring an @RequestBody String parameter, and how many each declares") {
             found.entries.map { it.key to it.value } shouldContainExactlyInAnyOrder
@@ -271,6 +280,8 @@ class RequestNestingDepthE2eTest {
         const val PIPELINE_MALFORMED = "pipeline.validation.schema_version_unsupported"
         const val EXECUTE_MALFORMED = "pipeline.execution.invalid_parameter_type"
         const val SCHEDULE_MALFORMED = "schedule.validation.request_invalid"
+        const val VISUALIZATION_MALFORMED = "visualization.validation.body_invalid"
+        const val DASHBOARD_MALFORMED = "dashboard.validation.body_invalid"
 
         /** `{` request, `params`, `arguments`: the nesting a tools/call spends before its arguments' values. */
         const val MCP_ENVELOPE_DEPTH = 3

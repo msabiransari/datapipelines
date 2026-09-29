@@ -236,10 +236,11 @@ internal object SharedE2e {
  * `flyway_schema_history` (dropping it would make every later context re-migrate or
  * fail), truncates with CASCADE, and re-seeds the V4 `default` workspace.
  *
- * ALWAYS call from the suite's first-test seed hook BEHIND its `seeded` flag — the flag,
- * not this object, provides the once-per-suite guarantee (several suites in one JVM each
- * need their own reset). A static `@BeforeAll` is too early: it runs before the context —
- * and with it Flyway — so the tables would not exist yet.
+ * ALWAYS call [beforeSeeding] from the suite's first-test seed hook BEHIND its `seeded` flag — the
+ * flag, not this object, provides the once-per-suite guarantee (several suites in one JVM each
+ * need their own reset). A static `@BeforeAll` is too early for it: it runs before the context —
+ * and with it Flyway — so the tables would not exist yet; [beforeContext] is the one exception,
+ * for suites whose context seeds a bootstrap actor at boot.
  */
 internal object E2eClean {
     /** The V4-seeded `default` workspace (metadata-db §4.11) — a pinned literal, not a guess. */
@@ -247,7 +248,20 @@ internal object E2eClean {
         "INSERT INTO workspaces (id, name, display_name) VALUES " +
             "('defa0000-0000-0000-0000-000000000001', 'default', 'Default') ON CONFLICT DO NOTHING"
 
-    fun beforeSeeding() {
+    fun beforeSeeding() = clear(requireMigrated = true)
+
+    /**
+     * The one legitimate `@BeforeAll` use: a suite whose CONTEXT seeds a bootstrap actor at boot
+     * (`LocalAdminSeeder`) must clear the database BEFORE the context boots — the seeder refuses to
+     * seed when another bootstrap actor is already there (`auth.local.bootstrap_mismatch`, auth §5A.2),
+     * and a suite's first-test hook is too late for a decision the boot already took. On a fresh JVM
+     * no context has run and there is nothing to clear: an unmigrated database IS the precondition,
+     * so it returns instead of refusing. (The 3a249c36 gate: `LocalAdminSeedE2eTest` then
+     * `WorkspaceInvitationLocalE2eTest` in one fork seeded nothing for the second.)
+     */
+    fun beforeContext() = clear(requireMigrated = false)
+
+    private fun clear(requireMigrated: Boolean) {
         val pg = SharedE2e.postgres
         DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
             connection.createStatement().use { statement ->
@@ -258,6 +272,7 @@ internal object E2eClean {
                         ).use { rows ->
                             generateSequence { if (rows.next()) rows.getString(1) else null }.toList()
                         }
+                if (tables.isEmpty() && !requireMigrated) return
                 check(tables.isNotEmpty()) { "No public tables found — has a context (and Flyway) run yet?" }
                 // The application's jobs tick when the context boots — the moment a suite's first
                 // test reaches here — and the key-retention purge (233c) locks several tables per

@@ -9,6 +9,7 @@ import io.kotest.matchers.string.shouldNotContain
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import io.restassured.response.Response
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.springframework.boot.test.context.SpringBootTest
@@ -291,6 +292,18 @@ class LocalAdminSeedE2eTest {
             .get(path)
 
     companion object {
+        /**
+         * The seeder refuses to seed when ANOTHER bootstrap actor was seeded into this database earlier
+         * (`auth.local.bootstrap_mismatch` — a changed variable never re-seeds, auth §5A.2), and the module's
+         * suites share one Postgres per JVM: whichever local-seed suite boots second in a JVM found the first's
+         * actor and seeded nothing (the 3a249c36 gate, reproduced with `LocalAdminSeedE2eTest` then this class
+         * in one fork). The precondition is cleared here, before the context boots — Spring loads it at
+         * instance preparation, after `@BeforeAll`; on a fresh JVM there is nothing to clear and the helper returns.
+         */
+        @JvmStatic
+        @BeforeAll
+        fun clearTheSharedDatabase() = E2eClean.beforeContext()
+
         private const val SECRET_BYTES = 32
         private const val ADMIN_EMAIL = "seed-admin@datapipelines.test"
         private const val CREATED_EMAIL = "created-user@datapipelines.test"
