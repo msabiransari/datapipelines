@@ -12,6 +12,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.web.config.SseProperties
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.just
@@ -443,33 +444,30 @@ class WebEventEmitterTest {
             try {
                 val recorder = BatchedEventRecorder(rows, replay, eventLog, direct)
                 val executions = listOf(UUID.randomUUID(), UUID.randomUUID())
+                // FORCED, not raced (#266b): an awaiting emitter has one row outstanding at a time, so
+                // two executions share a batch only if both rows queue while the writer is busy with
+                // something else. Left to timing that was a coin toss — red under load on the 266b
+                // pregate. A sentinel row holds the one writer until both first rows are queued behind it.
+                rowsSink.holdNextWrite()
+                rows.submit(co.datapipelines.executor.ExecutionEventRecord(SENTINEL, 1, "hold", NOW, "{}")) shouldBe true
+                rowsSink.awaitHeld()
                 kotlinx.coroutines.coroutineScope {
                     executions.forEach { id ->
                         launch(Dispatchers.Default) {
-                            val emitter =
-                                WebEventEmitter(
-                                    context =
-                                        ExecutionContext(
-                                            pipelineId,
-                                            3,
-                                            userId,
-                                            correlationId,
-                                            ExecutionTrigger.REST,
-                                            "{}",
-                                            workspaceId,
-                                        ),
-                                    stream = null,
-                                    streams = registry,
-                                    eventLog = eventLog,
-                                    eventRepository = eventRepository,
-                                    executionRepository = executionRepository,
-                                    persistenceDispatcher = Dispatchers.Default,
-                                    eventRecorder = recorder,
-                                )
+                            val emitter = batchedEmitter(recorder)
                             emitter.emit(ExecutionStarted(id, pipelineId, 3, emptyMap(), startedAt = NOW))
                             repeat(INTERLEAVED) { n -> emitter.emit(NodeStarted(id, "n$n", NOW)) }
                             emitter.emit(PipelineCompleted(id, pipelineId, 3, NOW, NOW.plusMillis(900), 900, emptyList()))
                         }
+                    }
+                    launch(Dispatchers.Default) {
+                        // The sentinel in its commit plus both executions' first rows.
+                        val deadline =
+                            System.nanoTime() +
+                                java.util.concurrent.TimeUnit.SECONDS
+                                    .toNanos(10)
+                        while (rows.queueDepth() < 3 && System.nanoTime() < deadline) Thread.sleep(1)
+                        rowsSink.release()
                     }
                 }
                 val expected = (1..INTERLEAVED + 2).toList()
@@ -478,7 +476,9 @@ class WebEventEmitterTest {
                     replaySink.items().filter { it.executionId == id }.map { it.eventId } shouldBe expected
                 }
                 // Non-vacuity: the two executions really did share the one writer's batches.
-                rowsSink.batches().any { batch -> batch.map { it.executionId }.toSet().size == 2 } shouldBe true
+                withClue("batches by execution: ${rowsSink.batches().map { b -> b.map { it.executionId } }}") {
+                    rowsSink.batches().any { batch -> batch.map { it.executionId }.containsAll(executions) } shouldBe true
+                }
                 verify(exactly = 0) { eventRepository.append(any<UUID>(), any(), any(), any(), any()) }
             } finally {
                 rows.close()
@@ -486,6 +486,19 @@ class WebEventEmitterTest {
                 direct.shutdownNow()
             }
         }
+
+    /** A REST execution's emitter recording through [recorder] — the batched path. */
+    private fun batchedEmitter(recorder: ExecutionEventRecorder): WebEventEmitter =
+        WebEventEmitter(
+            context = ExecutionContext(pipelineId, 3, userId, correlationId, ExecutionTrigger.REST, "{}", workspaceId),
+            stream = null,
+            streams = registry,
+            eventLog = eventLog,
+            eventRepository = eventRepository,
+            executionRepository = executionRepository,
+            persistenceDispatcher = Dispatchers.Default,
+            eventRecorder = recorder,
+        )
 
     /** An in-memory store for the batched recorder: every batch, in commit order. */
     private class RecordingSink<T>(
@@ -497,7 +510,32 @@ class WebEventEmitterTest {
 
         fun items(): List<T> = batches().flatten()
 
+        /** The gate the NEXT write waits on, and the one a write is waiting on now (a release reaches either). */
+        @Volatile private var armed: java.util.concurrent.CountDownLatch? = null
+
+        @Volatile private var holding: java.util.concurrent.CountDownLatch? = null
+        private val held = java.util.concurrent.CountDownLatch(1)
+
+        fun holdNextWrite() {
+            armed = java.util.concurrent.CountDownLatch(1)
+        }
+
+        fun awaitHeld() {
+            held.await(TEN_SECONDS, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+        }
+
+        fun release() {
+            armed?.countDown()
+            holding?.countDown()
+        }
+
         override fun write(items: List<T>) {
+            armed?.let { gate ->
+                armed = null
+                holding = gate
+                held.countDown()
+                gate.await(TEN_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            }
             // A short commit, so emits from the other execution queue up behind it and share the next batch.
             Thread.sleep(1)
             batches += items
@@ -531,5 +569,9 @@ class WebEventEmitterTest {
     private companion object {
         val NOW: Instant = Instant.parse("2026-08-05T14:30:00Z")
         const val INTERLEAVED = 60
+        const val TEN_SECONDS = 10L
+
+        /** The row that holds the one writer while both executions' first rows queue behind it. */
+        val SENTINEL: UUID = UUID.fromString("5e471e11-0000-0000-0000-000000000266")
     }
 }

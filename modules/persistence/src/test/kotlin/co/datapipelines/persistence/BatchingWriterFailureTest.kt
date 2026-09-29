@@ -86,6 +86,9 @@ class BatchingWriterFailureTest {
         awaitQueueDepth(w, 4)
         sink.release()
         (queued + first).forEach { it.join(TimeUnit.SECONDS.toMillis(10)) }
+        // The singles retry completes each caller's item BEFORE it logs the batch's line, so the
+        // callers can be back before the writer thread has logged it: wait for the line, bounded.
+        awaitLine("event=persistence.batch_retried")
         assertNoRowContent()
         val line = line("event=persistence.batch_retried")
         line shouldContain "cause=StoreRefusal"
@@ -116,7 +119,7 @@ class BatchingWriterFailureTest {
         shouldThrow<IllegalStateException> { w.record("bug") }.message shouldBe "not a store failure: bug"
         w.record("refused").shouldBeInstanceOf<Outcome.Failed>()
         withClue("counted and logged like any failure before it is rethrown") {
-            logs.list.count { it.formattedMessage.contains("cause=IllegalStateException") } shouldBe 2
+            logged().count { it.formattedMessage.contains("cause=IllegalStateException") } shouldBe 2
         }
     }
 
@@ -135,14 +138,22 @@ class BatchingWriterFailureTest {
     private fun writer(sink: BatchSink<String>): BatchingWriter<String> =
         BatchingWriter("test", BatchingConfig(writers = 1, lingerMillis = 0), sink).also { closeables += it }
 
+    /** What the appender holds now — read under its own lock, since writer threads append to it. */
+    private fun logged(): List<ILoggingEvent> = synchronized(logs) { logs.list.toList() }
+
+    private fun awaitLine(prefix: String) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (logged().none { it.formattedMessage.startsWith(prefix) } && System.nanoTime() < deadline) Thread.sleep(2)
+    }
+
     private fun line(prefix: String): String {
-        val matching = logs.list.filter { it.formattedMessage.startsWith(prefix) }
-        withClue("the writer's lines: ${logs.list.map { it.formattedMessage }}") { matching.size shouldBe 1 }
+        val matching = logged().filter { it.formattedMessage.startsWith(prefix) }
+        withClue("the writer's lines: ${logged().map { it.formattedMessage }}") { matching.size shouldBe 1 }
         return matching.single().formattedMessage
     }
 
     private fun assertNoRowContent() {
-        val rendered = logs.list.map { it.formattedMessage + " " + it.throwableProxy.render() }
+        val rendered = logged().map { it.formattedMessage + " " + it.throwableProxy.render() }
         withClue("every line the writer logged, rendered whole: $rendered") {
             rendered.none { it.contains(ROW_CONTENT) } shouldBe true
         }
