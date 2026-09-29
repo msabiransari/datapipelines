@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import co.datapipelines.persistence.BatchingWriter
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -27,7 +28,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * behavior is proven at the wire by `AuthHttpBoundaryTest`.
  */
 @Configuration
-@EnableConfigurationProperties(WorkspacesProperties::class, PromotionProperties::class)
+@EnableConfigurationProperties(WorkspacesProperties::class, PromotionProperties::class, PersistenceProperties::class)
 @Suppress("TooManyFunctions") // the wiring class: one function per bean, which is the point
 class AuthConfiguration {
     /**
@@ -58,11 +59,36 @@ class AuthConfiguration {
     @Bean
     fun authCache(authProperties: AuthProperties): AuthCache = AuthCache(authProperties)
 
+    /**
+     * #266 — the audit log's batching writer (auth.md §10): an ordered group commit shared by
+     * concurrent callers, partitioned by key. Closed at context shutdown after a bounded drain;
+     * `web`'s `PersistenceDrainLifecycle` stops it earlier, after the web server's graceful drain.
+     *
+     * Built whether or not [auditLogger] uses it (#266b: `datapipelines.persistence.audit.enabled`
+     * ships false) — idle, as under `enabled: false`: its `writers` threads park, its meters stay
+     * bound and read zero (an absent meter would look like a missing one), and the drain stops it
+     * with nothing to do. No conditional bean, so the drain and the metrics wiring stay one shape.
+     */
+    @Bean(destroyMethod = "close")
+    fun auditWriter(
+        jdbc: NamedParameterJdbcTemplate,
+        persistence: PersistenceProperties,
+    ): BatchingWriter<AuditRow> = BatchingWriter(AUDIT_STORE, persistence.toConfig(), AuditRowSink(jdbc))
+
+    /**
+     * The writer is handed over only when BOTH `datapipelines.persistence.enabled` and
+     * `datapipelines.persistence.audit.enabled` are true (#266b; configuration §3.32). By default the
+     * second is false and every audit row is the direct INSERT — on the caller's transaction when it
+     * holds one, on its own otherwise (auth.md §10.1A). Switched on: batched outside a transaction,
+     * still direct inside one.
+     */
     @Bean
     fun auditLogger(
         jdbc: NamedParameterJdbcTemplate,
         objectMapper: ObjectMapper,
-    ): AuditLogger = AuditLogger(jdbc, objectMapper)
+        persistence: PersistenceProperties,
+        auditWriter: BatchingWriter<AuditRow>,
+    ): AuditLogger = AuditLogger(jdbc, objectMapper, auditWriter.takeIf { persistence.enabled && persistence.audit.enabled })
 
     @Bean
     fun jwtService(
@@ -307,4 +333,9 @@ class AuthConfiguration {
                     clientAddressResolver,
                 ),
         )
+
+    companion object {
+        /** The audit writer's `store` tag and thread-name stem (observability §4). */
+        const val AUDIT_STORE = "audit"
+    }
 }

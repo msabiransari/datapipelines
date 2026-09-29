@@ -167,6 +167,11 @@ class ExecutionStreamLauncher(
      * ("not wired in this runtime"), exactly as [subPipelineRunner] fails a PIPELINE node.
      */
     private val transformSupport: co.datapipelines.executor.TransformSupport? = null,
+    /**
+     * #266 — the emitter's event recorder: the batched one in the application (PersistenceConfiguration),
+     * null in module-slice wiring and unit tests, where the emitter's direct default applies.
+     */
+    private val eventRecorder: co.datapipelines.web.sse.ExecutionEventRecorder? = null,
 ) {
     private val log = LoggerFactory.getLogger(ExecutionStreamLauncher::class.java)
 
@@ -234,6 +239,7 @@ class ExecutionStreamLauncher(
                 eventRepository = eventRepository,
                 executionRepository = executionRepository,
                 persistenceDispatcher = persistenceDispatcher,
+                eventRecorder = eventRecorder,
             ) { onExecutionStarted(it, request, sse) }
         val executor = executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId)
 

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessException
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.data.redis.core.script.RedisScript
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -14,6 +15,16 @@ data class LoggedSseEvent(
     val eventId: Int,
     val eventName: String,
     val payload: Map<String, Any?>,
+)
+
+/**
+ * One replay-log entry, serialized once by [SseEventLog.entry] — so the batching writer can weigh it
+ * against its byte bounds and a payload that cannot be serialized fails before it is queued.
+ */
+data class ReplayLogEntry(
+    val executionId: UUID,
+    val eventId: Int,
+    val json: String,
 )
 
 /**
@@ -62,9 +73,55 @@ class SseEventLog(
         }
     }
 
+    /** Serializes [event] for [appendAll]; throws when the payload cannot be serialized (the caller's WARN). */
+    fun entry(
+        executionId: UUID,
+        event: LoggedSseEvent,
+    ): ReplayLogEntry = ReplayLogEntry(executionId, event.eventId, mapper.writeValueAsString(event))
+
     /**
-     * The stored stream in original order, or null when the log has expired or never existed —
+     * Appends a batch — entries of any number of executions — in ONE round trip: one Lua script
+     * ([APPEND_SCRIPT], `EVALSHA` after its first load) that, per execution, pushes its entries in
+     * order — variadic `RPUSH`es of at most [APPEND_CHUNK] values each, Lua's unpack limit — and runs
+     * one `PEXPIRE` (#266 B.2; [append] costs two round trips per
+     * event and re-sets the TTL on every one). A script runs atomically on the server, and — unlike a
+     * pipelined `MULTI`/`EXEC`, which Spring Data Redis runs on a DEDICATED Lettuce connection, a new
+     * TCP connection and handshake per batch (measured: 20 batches, 20 connections, ~7 ms each) — it
+     * rides the application's shared connection.
+     *
+     * **Throws** on failure, unlike [append]: its caller is the batching writer, which counts the
+     * failure, retries the batch one entry at a time, and hands the outcome back to the emitter —
+     * whose WARN is the same "replay will be incomplete" this class has always logged. A batch whose
+     * reply was lost may be re-sent and land twice, which [replay] absorbs by keeping the first entry
+     * per event id.
+     */
+    fun appendAll(entries: List<ReplayLogEntry>) {
+        if (entries.isEmpty()) return
+        val byExecution = entries.groupBy({ it.executionId }, { it.json })
+        val keys = byExecution.keys.map(::key)
+        // ARGV: the TTL, then per key (in KEYS order) its entry count followed by its entries.
+        val args = ArrayList<String>(1 + byExecution.size + entries.size)
+        args += RETENTION.toMillis().toString()
+        byExecution.values.forEach { values ->
+            args += values.size.toString()
+            args += values
+        }
+        // RedisTemplate.execute takes the script's arguments only as varargs; the array is built once per batch.
+        @Suppress("SpreadOperator")
+        redis.execute(APPEND_SCRIPT, keys, *args.toTypedArray())
+    }
+
+    /**
+     * The stored stream in event-id order, or null when the log has expired or never existed —
      * which §10.3 answers with `410`, and which the caller must distinguish from an empty list.
+     *
+     * Each event id is served ONCE, the first stored copy (#266): the batched append is
+     * at-least-once, and a client resuming by `Last-Event-ID` must never see an event twice.
+     *
+     * Sorted by id after that (#266b), so the order is this code's and not the list's: an emitter's
+     * direct fallback that outlived its bound keeps running on the persistence pool while the next
+     * event's entry is batched, and the list then holds whichever reached Redis first. The durable
+     * record orders by `event_id` in SQL; the replay says the same thing the same way.
      */
     fun replay(executionId: UUID): List<LoggedSseEvent>? {
         val stored =
@@ -75,16 +132,52 @@ class SseEventLog(
                 return null
             }
         if (stored.isNullOrEmpty()) return null
-        return stored.mapNotNull { raw ->
-            runCatching { mapper.readValue<LoggedSseEvent>(raw) }
-                .onFailure { log.warn("Unreadable event in the log for execution {}; skipped.", executionId, it) }
-                .getOrNull()
-        }
+        return stored
+            .mapNotNull { raw ->
+                runCatching { mapper.readValue<LoggedSseEvent>(raw) }
+                    .onFailure { log.warn("Unreadable event in the log for execution {}; skipped.", executionId, it) }
+                    .getOrNull()
+            }.distinctBy { it.eventId }
+            .sortedBy { it.eventId }
     }
 
     private fun key(executionId: UUID) = "$KEY_PREFIX$executionId"
 
     private companion object {
+        /**
+         * The most values [APPEND_SCRIPT] unpacks into one `RPUSH` (#266b). Lua refuses to unpack more
+         * than about 7,990 values ("too many results to unpack"), so one execution's entries are
+         * pushed in chunks of this size — all inside the one script, so the append stays atomic and
+         * one round trip whatever the batch holds. `batch-max-events` is bounded at 7,000 as well
+         * (`PersistenceProperties`); the chunk is what makes the script safe on its own.
+         */
+        const val APPEND_CHUNK = 1_000
+
+        /**
+         * [appendAll]'s one round trip: per key, its entries in order in `RPUSH`es of at most
+         * [APPEND_CHUNK] values, then one `PEXPIRE`. The chunk size is a compile-time constant of
+         * this class — no key, value or count from a caller is ever part of the script text.
+         */
+        val APPEND_SCRIPT: RedisScript<Long> =
+            RedisScript.of(
+                """
+                local ttl = ARGV[1]
+                local i = 2
+                for k = 1, #KEYS do
+                  local last = i + tonumber(ARGV[i])
+                  i = i + 1
+                  while i <= last do
+                    local j = math.min(i + $APPEND_CHUNK - 1, last)
+                    redis.call('RPUSH', KEYS[k], unpack(ARGV, i, j))
+                    i = j + 1
+                  end
+                  redis.call('PEXPIRE', KEYS[k], ttl)
+                end
+                return #KEYS
+                """.trimIndent(),
+                Long::class.java,
+            )
+
         /** module-structure §5.9 — `web`'s own keyspace, distinct from `dag`'s `dp:result` / `dp:cancel`. */
         const val KEY_PREFIX = "dp:events:"
 

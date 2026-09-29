@@ -1,6 +1,7 @@
 package co.datapipelines.web.config
 
 import co.datapipelines.auth.AuthProperties
+import co.datapipelines.auth.PersistenceProperties
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.executor.CancellationFlags
 import co.datapipelines.executor.CancellationRegistry
@@ -251,16 +252,19 @@ class EngineConfiguration {
         )
 
     /**
-     * Where the event emitter's blocking JDBC/Redis writes run.
+     * Where the event emitter's blocking JDBC/Redis writes run — since #266 the execution row's own
+     * writes (the RUNNING insert, the terminal UPDATE) and the batching writers' DIRECT fallbacks;
+     * the batches themselves run on each writer's own threads.
      *
      * A pool `web` owns, not the executor's: dag-executor §15.2 sizes `ExecutorDispatcher` for SQL
      * work against source databases, and putting the surface's bookkeeping on it would make
      * execution throughput a function of metadata-DB latency. Not `Dispatchers.IO` either — the
-     * same argument the executor makes against sharing a JVM-wide pool applies here.
+     * same argument the executor makes against sharing a JVM-wide pool applies here. Sized by
+     * `datapipelines.persistence.writers` (§3.32; the constant it replaces was 4, the default).
      */
     @Bean(destroyMethod = "shutdown")
-    fun eventPersistenceExecutor(): java.util.concurrent.ExecutorService =
-        Executors.newFixedThreadPool(EVENT_PERSISTENCE_THREADS) { runnable ->
+    fun eventPersistenceExecutor(persistence: PersistenceProperties): java.util.concurrent.ExecutorService =
+        Executors.newFixedThreadPool(persistence.writers) { runnable ->
             Thread(runnable, "dp-event-persist").apply { isDaemon = true }
         }
 
@@ -274,12 +278,6 @@ class EngineConfiguration {
 
     private companion object {
         const val RESULT_PATH_PREFIX = "/api/v1/executions/"
-
-        /**
-         * Small on purpose: these writes are short, and `emit` awaits each one, so the pool bounds
-         * how many executions can be mid-bookkeeping rather than how fast any one of them is.
-         */
-        const val EVENT_PERSISTENCE_THREADS = 4
 
         /**
          * The deliberately-workspace-less binding of the shared executor bean's engine (see

@@ -138,11 +138,17 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     // the executor's dependency set. Stdlib only; an entry here is a reason to stop and ask why a
     // graph needs it.
     ":modules:graph" to emptySet(),
+    // #266 — layer 0 beside typesystem: the generic batching writer (an ordered, bounded group
+    // commit in front of a store). Stdlib, coroutines and slf4j only; the stores' sinks live with
+    // the modules that own the stores (`auth`, `web`). An entry here would teach the primitive
+    // about a store, which is the thing it exists not to know.
+    ":modules:persistence" to emptySet(),
     ":modules:pipeline-contract" to setOf(":modules:typesystem", ":modules:calculators"),
     ":modules:templates" to setOf(":modules:typesystem", ":modules:pipeline-contract", ":modules:scripting"),
     ":modules:datasources" to setOf(":modules:typesystem"),
     ":modules:staging" to setOf(":modules:typesystem"),
-    ":modules:auth" to setOf(":modules:typesystem"),
+    // #266 — the audit log's batching writer (module-structure §5.19).
+    ":modules:auth" to setOf(":modules:typesystem", ":modules:persistence"),
     // #9 scheduler — the durable occurrence engine (scheduler design revision §6.2). Pipeline-agnostic
     // by construction: `pipeline-contract` is allowed for the published name grammar alone (A2), and
     // the module's own SchedulerBoundaryTest refuses every other pipeline import. No `dag`, `auth`
@@ -217,6 +223,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:scheduler",
         // #194 (record §2.4) — the parameter-set REST routes and the engine's wiring (lane D); allowed ahead, undeclared.
         ":modules:parameters",
+        // #266 — the execution-event record's and the replay log's batching writers, and their metrics.
+        ":modules:persistence",
     ),
     ":modules:app" to setOf(":modules:web"),
     ":tests:integration-tests" to setOf(":modules:app"),

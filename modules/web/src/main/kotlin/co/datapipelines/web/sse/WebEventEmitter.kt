@@ -14,6 +14,9 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 import java.util.UUID
@@ -71,10 +74,17 @@ data class ExecutionContext(
  * ## Dispatching
  * Steps 3 and 4 are blocking JDBC and Redis calls, and `emit` is invoked **on the executor's own
  * bounded dispatcher** (dag-executor §15.2 — a pool sized for SQL work, not for the surface's
- * bookkeeping). They therefore run under [persistenceDispatcher], a dispatcher `web` owns. Each
- * `emit` awaits its own persistence before returning, which is what preserves event order: the
- * executor calls `emit` sequentially, so an awaited hand-off cannot reorder. Fire-and-forget would
- * be faster and would let `data_ready` land in the table before `pipeline_completed`.
+ * bookkeeping). The execution row's writes run under [persistenceDispatcher], a pool `web` owns;
+ * the event's row and replay-log entry go through [eventRecorder] — since #266 the batching
+ * writers, which share one commit across concurrent executions and run their direct fallback on
+ * that same pool. Each `emit` still AWAITS its own persistence before returning, which is what
+ * preserves event order: the executor calls `emit` sequentially, the writers are FIFO per
+ * execution, so an awaited hand-off cannot reorder. Fire-and-forget would be faster and would let
+ * `data_ready` land in the table before `pipeline_completed` (the #266 ruling keeps it awaited).
+ *
+ * Persistence that has STARTED runs to its end even if the execution is cancelled meanwhile, and
+ * the cancellation is then rethrown — the shape the single blocking hop always had. It is bounded:
+ * the recorder waits at most twice `record-max-wait-ms` per store (dag-executor §10).
  *
  * ## Failure policy
  * A persistence failure is logged and **swallowed** — deliberately, and only here. dag-executor
@@ -87,8 +97,8 @@ class WebEventEmitter(
     private val context: ExecutionContext,
     private val stream: ExecutionStream?,
     private val streams: ExecutionStreamRegistry,
-    private val eventLog: SseEventLog,
-    private val eventRepository: ExecutionEventRepository,
+    eventLog: SseEventLog,
+    eventRepository: ExecutionEventRepository,
     private val executionRepository: ExecutionRepository,
     private val persistenceDispatcher: CoroutineDispatcher,
     /**
@@ -100,6 +110,14 @@ class WebEventEmitter(
      * failure is logged and the run goes on, exactly as §10's never-throw policy says.
      */
     private val failClosedOnRecord: Boolean = false,
+    /**
+     * #266 — where the event's durable row and replay-log entry go. Defaults to the direct path —
+     * one write per event per store on [persistenceDispatcher], the shape before #266 and the one
+     * `datapipelines.persistence.enabled: false` restores; the application passes the batched
+     * recorder. Not function-typed, and placed before the two hooks, so [onExecutionStarted] stays
+     * the last parameter (see its note).
+     */
+    eventRecorder: ExecutionEventRecorder? = null,
     /**
      * #9 — invoked with the execution id once its RUNNING row is durably written (after
      * [onExecutionStarted], which runs BEFORE persistence). The scheduler's adapter waits on it to
@@ -120,6 +138,8 @@ class WebEventEmitter(
     private val onExecutionStarted: (UUID) -> Unit = {},
 ) : EventEmitter {
     private val log = LoggerFactory.getLogger(WebEventEmitter::class.java)
+    private val eventRecorder: ExecutionEventRecorder =
+        eventRecorder ?: DirectEventRecorder(eventRepository, eventLog, persistenceDispatcher)
     private val projection = SseEventProjection(context.correlationId)
     private val executionId = AtomicReference<UUID?>(null)
     private val nextEventId =
@@ -163,21 +183,27 @@ class WebEventEmitter(
             if (event.isTerminalOnTheWire()) target.markTerminal(name)
         }
 
-        withContext(persistenceDispatcher) {
-            persist(event, eventId, name, payload)
-        }
+        // The refusal point the single `withContext(persistenceDispatcher)` hop always had: an emit on
+        // an already-cancelled job persists nothing (PipelineExecutor.emitTerminal's NonCancellable is
+        // what keeps the terminal emit out of this case).
+        currentCoroutineContext().ensureActive()
+        // Once started, the writes finish — as the blocking hop's did — and a cancellation that
+        // landed meanwhile is rethrown afterwards, as the hop's completion rethrew it.
+        withContext(NonCancellable) { persist(event, eventId, name, payload) }
+        currentCoroutineContext().ensureActive()
     }
 
-    private fun persist(
+    private suspend fun persist(
         event: ExecutionEvent,
         eventId: Int,
         name: String,
         payload: Map<String, Any?>,
     ) {
         // The execution row must exist before any event row: execution_events.execution_id is a
-        // foreign key onto pipeline_executions (metadata-db §4.7).
+        // foreign key onto pipeline_executions (metadata-db §4.7). A direct, awaited single insert —
+        // never batched — because the scheduler's start barrier waits on it (#9 A14).
         if (event is ExecutionStarted) {
-            val recorded = createExecutionRow(event)
+            val recorded = withContext(persistenceDispatcher) { createExecutionRow(event) }
             if (!recorded && failClosedOnRecord) throw ExecutionRecordUnwritableException(event.executionId)
             if (recorded) {
                 runCatching { onRecorded(event.executionId) }
@@ -185,23 +211,10 @@ class WebEventEmitter(
             }
         }
 
-        runCatching {
-            eventRepository.append(
-                executionId = event.executionId,
-                eventId = eventId,
-                type = event.type,
-                timestamp = event.timestamp,
-                // SseJson: the payload carries resolved parameters, so a DATE/TIME pipeline puts
-                // java.time values here. ExecutorJson cannot serialize them and the runCatching
-                // below swallows the failure — which is why this silently dropped execution_started
-                // from the durable record instead of failing loudly. T36, third path.
-                payloadJson = SseJson.mapper.writeValueAsString(payload),
-            )
-        }.onFailure { log.warn("Durable event {} for execution {} not written.", name, event.executionId, it) }
+        eventRecorder.record(RecordedEvent(event.executionId, eventId, event.type, name, event.timestamp, payload))
 
-        eventLog.append(event.executionId, LoggedSseEvent(eventId, name, payload))
-
-        completeExecutionRow(event)
+        // The terminal UPDATE after the terminal event's own row, as always — direct, never batched.
+        if (event.completesTheRow()) withContext(persistenceDispatcher) { completeExecutionRow(event) }
     }
 
     /** Inserts the RUNNING row; false when the insert failed (logged either way). */
@@ -315,6 +328,8 @@ class WebEventEmitter(
                     .toMillis()
             }
         }.getOrNull() ?: 0
+
+    private fun ExecutionEvent.completesTheRow(): Boolean = this is PipelineCompleted || this is PipelineFailed || this is ExecutionAborted
 
     private fun ExecutionEvent.isTerminalOnTheWire(): Boolean =
         this is PipelineCompleted || this is PipelineFailed || this is ExecutionAborted || this is DataReady

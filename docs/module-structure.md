@@ -45,6 +45,7 @@ datapipelines/
 ├── modules/
 │   ├── typesystem/                      # [Type System spec]
 │   ├── graph/                           # the generic Dag<T> primitive, layer 0 (§5.17)
+│   ├── persistence/                     # the generic batching writer — ordered group commit, layer 0 (§5.19)
 │   ├── calculators/                     # [Calculators catalog] — pure kinds, layer 0 (§5.14)
 │   ├── scripting/                       # Transform script engine seam, layer 0 (§5.15)
 │   ├── pipeline-contract/               # [Pipeline Contract spec]
@@ -71,6 +72,7 @@ datapipelines/
 |---|---|---|---|
 | `typesystem` | [type-system.md](type-system.md) | The 11 canonical types, per-dialect mappers, H2 mapping, schema envelope. Foundation. | — (no persistence) |
 | `graph` | [dag-executor.md §3](dag-executor.md#3-dag-data-structure) (this spec, §5.17) | The generic DAG primitive — `Dag<T>`, `DagBuilder<T>` (topological order, cycle detection, reverse index). Stdlib only, no internal dependencies: moved out of `dag` (#194) so a module below the executor can build a graph without inheriting the executor's dependency set. Package `co.datapipelines.dag`, kept on purpose. | — (no persistence) |
+| `persistence` | [DAG Executor §10](dag-executor.md#10-sse-event-integration), [Auth §10](auth.md) (this spec, §5.19) | The generic batching writer (#266) — `BatchingWriter<T>`: an ordered, bounded, partitioned group commit in front of ONE store, with a bounded wait that falls back to the caller's own write, a singles retry that isolates a poison row, and a bounded shutdown drain. Knows no store: each supplies a `BatchSink`. Stdlib, coroutines and slf4j only. | — (writes whatever its sinks write; owns no table) |
 | `scripting` | (this spec, §5.15) | The transform engine seam: `ScriptEngine` (JSONata in round one), the evaluation pool, the type gate, canonical JSON. Pure library — evaluates untrusted script bodies with no I/O surface. | — (no persistence) |
 | `pipeline-contract` | [pipeline-contract.md](pipeline-contract.md) | Pipeline JSON model, validation, ExecutionContext type. | `PipelineRepository` → `pipelines`, `pipeline_versions` |
 | `templates` | [templates.md](templates.md) | Freemarker integration, library macros, template registry, versioning. | `TemplateRepository` → `templates`, `template_versions` |
@@ -104,14 +106,14 @@ This diagram is a **rendering of the normative table in §4.2** — it carries n
 
 ```
 layer 0 — no internal deps
-┌──────────────┐ ┌─────────┐
-│  typesystem  │ │  graph  │
-└──────────────┘ └─────────┘
+┌──────────────┐ ┌─────────┐ ┌───────────────┐
+│  typesystem  │ │  graph  │ │  persistence  │
+└──────────────┘ └─────────┘ └───────────────┘
 
-layer 1 — typesystem only
+layer 1 — typesystem (auth also persistence)
 ┌──────────────┐ ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌────────┐
 │ calculators  │ │  scripting  │ │ datasources  │ │  staging  │ │  auth  │  ← typesystem
-└──────────────┘ └─────────────┘ └──────────────┘ └───────────┘ └────────┘
+└──────────────┘ └─────────────┘ └──────────────┘ └───────────┘ └────────┘  auth ← typesystem, persistence
 
 layer 2
 ┌───────────────────┐
@@ -145,7 +147,7 @@ layer 7
 ┌──────────────┐
 │     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
 │              │    datasources, staging, dag, auth, application, mcp-server, scheduler,
-│              │    parameters
+│              │    parameters, persistence
 │              │    (declared explicitly, not transitively)
 └──────────────┘
 
@@ -170,19 +172,20 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 |---|---|
 | `typesystem` | *(none)* |
 | `graph` | *(none)* |
+| `persistence` | *(none)* |
 | `calculators` | `typesystem` |
 | `scripting` | `typesystem` |
 | `pipeline-contract` | `typesystem`, `calculators` |
 | `templates` | `typesystem`, `pipeline-contract`, `scripting` |
 | `datasources` | `typesystem` |
 | `staging` | `typesystem` |
-| `auth` | `typesystem` |
+| `auth` | `typesystem`, `persistence` |
 | `scheduler` | `typesystem`, `pipeline-contract` |
 | `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph` |
 | `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
 | `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters` |
 | `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app` |
@@ -193,6 +196,7 @@ Notes on the shape (explanatory, not additional rules):
 - `calculators`' row is the shortest one in the table on purpose (072, calculators design §0.4/C12). A calculator kind is a **pure function of its inputs**; a row that admitted `datasources` or `dag` would make that a hope rather than a fact, and the executor's freedom to evaluate a kind anywhere, in any order, rests on it. Adding an entry to that row is the edit a reviewer must refuse.
 - `scheduler` lists `pipeline-contract` for exactly ONE thing, the published `PipelineNameGrammar` (a schedule is named like a pipeline — scheduler design revision §6, A2); its `SchedulerBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge. It lists no `dag`, `auth` or `application`: the executor adapter, the capacity lease and the system principal live on `web`'s side of its port.
 - `parameters` (#194) declares all five of its edges — `typesystem` (the shared value validator, `LogicalType`), `graph` (`Dag<T>`), `pipeline-contract` (`TemplateRef`, the name grammars, the `TemplateDryRenderer` / `DatasourceRegistry` / `TemplateVersionStatuses` / `TemplateReleaser` ports it validates and releases through, `ReadLens`, `AuthoringGuard`), and since lane C `templates` (the selector runtime renders a pinned template through `WorkspaceTemplateEngines`) and `datasources` (it runs through the registry's pools, `ReadOnlyStatementLease` and `ResultRowReader`). Since lane D the `parameters` edges of `application`, `mcp-server` and `web` are DECLARED (the record's §2.4): the surfaces compile against the engine, the reverse-arrow composition in `application`, the six tools in `mcp-server`, the routes and the wiring in `web`.
+- `persistence` (#266) is the second empty row beside `graph`, for the same reason: it is a primitive every store-owning module can sit on. `auth` lists it for the audit log's writer and `web` for the execution-event record's and the replay log's; `dag` does NOT — its repository offers the batch statement (`ExecutionEventRepository.appendAll`) and knows nothing of the queue in front of it, which is `web`'s wiring.
 - `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
@@ -413,7 +417,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 
 ### 5.7 `auth`
 
-**Dependencies (internal):** `typesystem` (shared exception base only).
+**Dependencies (internal):** `typesystem` (shared exception base only), `persistence` (#266 — the audit log's batching writer, §5.19).
 
 **Dependencies (external):**
 - `de.mkammerer:argon2-jvm`
@@ -427,7 +431,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 - `JwtService`, `ApiKeyService`, `UserService`, `WorkspaceService`
 - `OidcSuccessHandler`, `JwtAuthenticationFilter`, `ApiKeyFilter`, `SecurityConfig`
 - `@RequiredScope` annotation + `ScopeInterceptor`
-- `AuditLogger` — writes `audit_log`
+- `AuditLogger` — writes `audit_log`, through its batching writer outside a transaction and directly inside one ([Auth §10](auth.md)); `PersistenceProperties` — `datapipelines.persistence.*` ([Configuration §3.32](configuration.md)), read by every writer the application builds
 - `UserRepository` — `users`; `ApiKeyRepository` — `api_keys` (§8.1)
 
 The per-request `is_active` / revocation re-check (D13) reads through the same 60s cache as the key-hash lookup; the cache is owned by this module and is **in-process per instance, not Redis** — it is a read-through cache of Postgres truth, not shared state ([Auth §11.4](auth.md#114-api-key-validation-cache)).
@@ -698,6 +702,20 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Why it is its own module.** The owner's intent (the record's P1): an engine for parameters "independent of anything", a decoupled offering. A single-aggregate module — the definition, its validation and its lifecycle — whose only cross-aggregate facts arrive through `pipeline-contract`'s ports; the templates reverse arrow and promotion are `application`'s (the record's §8.4/§8.5).
 
 **Tests:** the model's strict binding and round trip; the reflection pin between the two code objects; the expression AST (every operator, both cardinalities, the null/empty rules, every cap one past); the validator (every §13.20 validation code reached by a fixture, the probe proven CALLED by a recording fake); the repository and every lifecycle verb against the module's own Postgres container (`ParametersTestDb`, the shipped migrations through plain JDBC) — workspace scoping both ways, the one-draft index, and both races FORCED with a second connection; `ParametersConfigKeysSpecDriftTest`. Lane C: `SelectorBindsTest` (the pinned spring-jdbc's list expansion, the empty list, the slices, the placeholder count); `SelectorRunnerIntegrationTest` and `ParameterEvaluatorIntegrationTest` — the REAL runner over the same container as the CUSTOMER database (`CustomerDb`, a real-pool `CustomerRegistry` with revocable grants and counted reads) — save end to end, the gate, canonical types, a revoked grant, the row invariants, a statement abandoned at the deadline, the query count per evaluate; `SelectorPoolTest` over a stub driver that ignores `cancel()`; `ParameterEvaluatorTest`, `SelectorRowsTest` and `EvaluatorConcurrencyTest` over a scripted, recording selector runtime (every P26 branch, the owner's three scenarios, the caps one off, concurrency on latches).
+
+### 5.19 `persistence`
+
+**Dependencies (internal):** none. **Dependencies (external):** `kotlinx-coroutines-core` (the bounded suspending record the event emitter awaits from the executor's coroutines) and `slf4j-api` (the WARNs a failed batch, a saturated queue and an incomplete drain owe the operator), both BOM-managed; tests only, `logback-classic` (the BOM's — the suite records the writer's WARN lines, #266b). No Spring, no Micrometer, no JDBC — `java.sql.SQLException` is read for its SQLState alone (`FailureShape`).
+
+**Public API:**
+- `BatchingWriter<T>` — `record` (blocking: returns once the item is durable or definitively not), `recordSuspending` (bounded: at most twice `record-max-wait-ms`, then `Indeterminate`), `submit` (non-awaited, refuses when full — no production caller yet, D27's dashboard event), `queueDepth`/`queuedBytes`, `stop` (bounded drain → `DrainReport`)
+- `BatchSink<T>` — the store's side: `write(items)` (one unit, throws on failure), `writeOne` (the direct path), `partitionKey`, `sizeOf`, `describe` (ids for log lines, never payloads), `classify` (the failure-kind tag), `propagates` (a failure that belongs to the CALLER — rethrown on its thread by `record`/`recordSuspending`; default none, #266b)
+- `FailureShape` — a failure as a log line may carry it: `cause` (the simple class name) and `sqlState` (the first SQLState in the chain) — never the message (#266b)
+- `BatchingConfig` (the `datapipelines.persistence.*` values), `Outcome`, `FallbackReason`, `FailureKinds`, `BatchingHooks` (what the web layer binds to Micrometer), `DrainReport`
+
+**Why it is its own module.** #266: the audit log (`auth`) and the execution-event record and replay log (`web`) need the SAME group commit, and the only module below both is one that knows neither. A copy in each would be two implementations of the ordering and durability guarantees, and those are exactly the guarantees that must not drift. It holds no store and no Spring type; each module that owns a store supplies its `BatchSink` and its wiring.
+
+**Tests:** `BatchingWriterTest` — one suite over a recording sink, because the primitive is generic: per-key order under 8 writers × 1,000 items, the idle fast path (a sequential producer never lingers), group commit, the batch bounds, linger under load, saturation by count and by bytes (`record` falls back, `submit` refuses and counts), the singles retry with the poison row skipped, a hung sink (the bounded wait claims the item back; an in-flight item is never written twice), the bounded suspending record (indeterminate, never unbounded; an abandoned direct write that had not started never runs), the drain (nothing unflushed; a hung sink gives up at `shutdown-drain-ms` and reports what it lost). `BatchingWriterFailureTest` (#266b): a failure is logged by class and SQLState and never by its message (a recording appender over a sink whose message carries a marker), and a failure the sink claims is rethrown on the caller's thread, blocking and suspending, from a batch and from the direct write.
 
 ## 6. Version Catalog
 
@@ -1229,6 +1247,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | #266 persistence batching, with its correction round 266b | 266 | New **§5.19 `persistence`** — layer 0 beside `typesystem` and `graph`, no internal dependency: `BatchingWriter<T>` and its `BatchSink` seam, the one group commit the audit log (`auth`) and the execution-event record and replay log (`web`) share. §3/§3.1 rows, §4.1 layer, §4.2's allowed map gains `auth → persistence` and `web → persistence` (`dag` needs none: `appendAll` is a plain repository method); §5.7 names the edge. 266b: `BatchSink.propagates` (a failure that belongs to the caller) and `FailureShape` (a failure's class and SQLState for a log line, never its message) join the public API; `logback-classic` as a test-only dependency. (Round 1 changed §3–§5 without this row.) |
 | 2026-09-28 | #194 lane D — the surfaces | 194d | `web`, `mcp-server` and `application` DECLARE their `parameters` edges (§4.2/§5.18): the REST routes and the wiring in `web` (ParametersConfiguration builds the runner, the evaluator and the ONE pool from one config, plus the `parameters.selectors.abandoned` gauge), the six `parameter_sets_*` tools in `mcp-server` (a `parameters` DocArea with its guide), and the reverse-arrow composition `TemplateUsage` + `ParameterSetTemplatePins` in `application`. `AuthoringStartupCheck` covers parameter-set drafts (versioning §5.5, C14). |
 | 2026-09-27 | #194 lane C — the selector runtime | 194c | §4.2's note: `parameters` DECLARES `templates` and `datasources` (the selector runtime renders and runs through them; the table's row is unchanged — it always allowed both). §5.18 gains the runtime's public API — `SelectorRunner` (the production `SelectorProbe`, now REQUIRED; `selector_probe_unavailable` retired) with its evaluate-time face, `SelectorPool`, `ParameterEvaluator` with the §5.3 model and writer — and `kotlinx-coroutines-core` (BOM-managed). `datasources` (§5.4's module, datasources.md §5.3) gains `ConnectionPool.discard` and `ReadOnlyStatementLease`. |
 | 2026-09-25 | #9 scheduler lane 1 | scheduler-1 | New module `scheduler` (§5.16): the pipeline-agnostic scheduler core over db-scheduler 16.12.0 (the catalog's one new version, two library aliases). §3, §3.1, §4.1 and §4.2 gain the row (`scheduler` → `typesystem`, `pipeline-contract` for the name grammar alone); `web` gains `scheduler`. The root build's allowed-dependency map and `COVERAGE_FLOORS` carry the module; its `gradle.lockfile` and the db-scheduler verification entries ship in the same commit. The scheduler's beans come from the module's own `@AutoConfiguration` (§8.2 — the second module to use it, after `mcp-server`), so no db-scheduler type leaves the module. |

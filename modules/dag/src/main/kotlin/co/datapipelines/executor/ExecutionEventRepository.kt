@@ -1,8 +1,12 @@
 package co.datapipelines.executor
 
 import co.datapipelines.events.SseEventType
+import org.springframework.dao.DuplicateKeyException
+import org.springframework.jdbc.core.ConnectionCallback
 import org.springframework.jdbc.core.RowMapper
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.datasource.SingleConnectionDataSource
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Instant
@@ -57,6 +61,85 @@ class ExecutionEventRepository(
             ),
         )
     }
+
+    /**
+     * Appends [records] as ONE JDBC batch in ONE transaction — one statement text, one commit — for
+     * the batching writer's group commit (#266, dag-executor §10).
+     *
+     * **One transaction, explicitly.** In autocommit mode PgJDBC does NOT run a large batch as one
+     * transaction: it syncs every ~256 statements, and each chunk commits on its own (measured:
+     * a 500-row batch refused at row 500 left 255 rows behind — `ExecutionRepositoriesIntegrationTest`
+     * pins it). So the batch runs on one connection with autocommit off and commits once: all of it
+     * lands or none of it does, and the store pays one commit for N rows. Called inside a caller's
+     * transaction (none does today) it joins that transaction and leaves the commit to it.
+     *
+     * **Retry dedup.** Each row is `INSERT … ON CONFLICT (execution_id, event_id) DO NOTHING`, so a
+     * row the store already holds — a batch re-sent after an indeterminate commit — is a no-op.
+     * What a no-op may NOT do is hide the case [append] refuses: a DIFFERENT event claiming a taken
+     * sequence number (the emitter lost count). So every row the conflict clause skipped is compared,
+     * by content, with the row that holds its key — type, timestamp and payload (as JSONB, so key
+     * order and whitespace do not count) — and a mismatch rolls the batch back and throws the same
+     * `DuplicateKeyException` [append] would. The writer then retries the batch one row at a time,
+     * which commits the others and isolates the clash as its poison row.
+     *
+     * A row the store refuses outright (a foreign key, a payload JSONB cannot hold) rolls the batch
+     * back the same way.
+     */
+    fun appendAll(records: List<ExecutionEventRecord>) {
+        if (records.isEmpty()) return
+        jdbc.jdbcTemplate.execute(
+            ConnectionCallback { connection ->
+                val owned = connection.autoCommit
+                if (owned) connection.autoCommit = false
+                try {
+                    val onConnection = NamedParameterJdbcTemplate(SingleConnectionDataSource(connection, true))
+                    val counts = onConnection.batchUpdate(APPEND_OR_SKIP, records.map(::params).toTypedArray())
+                    records.forEachIndexed { i, record ->
+                        // PgJDBC reports each row's count: 0 means the conflict clause skipped it.
+                        if (counts.getOrNull(i) == 0 && !storedAs(onConnection, record)) {
+                            throw DuplicateKeyException(
+                                "execution_events already holds a different event ${record.eventId} for execution " +
+                                    "${record.executionId}; a repeated sequence number means the emitter lost count",
+                            )
+                        }
+                    }
+                    if (owned) connection.commit()
+                } catch (
+                    // Any failure leaves nothing behind — the batch's atomicity is the contract.
+                    @Suppress("TooGenericExceptionCaught") e: Exception,
+                ) {
+                    if (owned) connection.rollback()
+                    throw e
+                } finally {
+                    if (owned) connection.autoCommit = true
+                }
+            },
+        )
+    }
+
+    /** True when the row holding [record]'s key IS [record] — the same event re-sent. */
+    private fun storedAs(
+        onConnection: NamedParameterJdbcTemplate,
+        record: ExecutionEventRecord,
+    ): Boolean =
+        onConnection.queryForObject(
+            """
+            SELECT COUNT(*) FROM execution_events
+             WHERE execution_id = :executionId AND event_id = :eventId
+               AND event_type = :eventType AND timestamp = :timestamp
+               AND payload_json = CAST(:payloadJson AS jsonb)
+            """.trimIndent(),
+            params(record),
+            Int::class.java,
+        ) == 1
+
+    private fun params(record: ExecutionEventRecord): MapSqlParameterSource =
+        MapSqlParameterSource()
+            .addValue("executionId", record.executionId)
+            .addValue("eventId", record.eventId)
+            .addValue("eventType", record.eventType)
+            .addValue("timestamp", Timestamp.from(record.timestamp))
+            .addValue("payloadJson", record.payloadJson)
 
     /** Appends [event] with the next sequence number, as [SseEventType]'s wire name. */
     fun append(
@@ -143,6 +226,14 @@ class ExecutionEventRepository(
         )
 
     private companion object {
+        /** [append]'s statement text plus the retry-dedup clause — the only difference, on purpose. */
+        val APPEND_OR_SKIP =
+            """
+            INSERT INTO execution_events (execution_id, event_id, event_type, timestamp, payload_json)
+            VALUES (:executionId, :eventId, :eventType, :timestamp, CAST(:payloadJson AS jsonb))
+            ON CONFLICT (execution_id, event_id) DO NOTHING
+            """.trimIndent()
+
         val MAPPER =
             RowMapper { rs: ResultSet, _: Int ->
                 ExecutionEventRecord(
