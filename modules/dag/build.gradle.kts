@@ -1,6 +1,6 @@
-// module-structure.md §5.6 — allowed internal deps: typesystem, pipeline-contract,
-// templates, datasources, staging. Deliberately NOT auth: the executor is handed
-// an already-authenticated principal by its caller (§4.2 note).
+// module-structure.md §5.6 — declared internal deps: typesystem, pipeline-contract, templates, datasources, staging, scripting, graph, persistence
+// (#321 added persistence for FailureShape; scripting and graph joined earlier — this comment had lagged).
+// Deliberately NOT auth: the executor is handed an already-authenticated principal by its caller (§4.2 note).
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {

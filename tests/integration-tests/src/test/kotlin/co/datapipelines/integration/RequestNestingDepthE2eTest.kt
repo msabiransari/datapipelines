@@ -89,6 +89,11 @@ class RequestNestingDepthE2eTest {
             StringRoute("POST", "/api/v1/dashboards", DASHBOARD_MALFORMED),
             StringRoute("PUT", "/api/v1/dashboards/${UUID.randomUUID()}", DASHBOARD_MALFORMED),
             StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/current", DASHBOARD_MALFORMED),
+            // #323 (lane 321): the parameter-set routes read their body the #291 way too — swept, no longer allowlisted.
+            StringRoute("POST", "/api/v1/parameter-sets", PARAMETER_MALFORMED),
+            StringRoute("PUT", "/api/v1/parameter-sets/${UUID.randomUUID()}", PARAMETER_MALFORMED),
+            StringRoute("POST", "/api/v1/parameter-sets/${UUID.randomUUID()}/evaluate", PARAMETER_MALFORMED),
+            StringRoute("POST", "/api/v1/parameter-sets/import", PARAMETER_MALFORMED),
         )
 
     @Test
@@ -165,6 +170,7 @@ class RequestNestingDepthE2eTest {
                 "SchedulesController.kt" to 2,
                 "VisualizationsController.kt" to 3,
                 "DashboardsController.kt" to 3,
+                "ParameterSetsController.kt" to 4,
             )
         withClue("files declaring an @RequestBody String parameter, and how many each declares") {
             found.entries.map { it.key to it.value } shouldContainExactlyInAnyOrder
@@ -282,17 +288,18 @@ class RequestNestingDepthE2eTest {
         const val SCHEDULE_MALFORMED = "schedule.validation.request_invalid"
         const val VISUALIZATION_MALFORMED = "visualization.validation.body_invalid"
         const val DASHBOARD_MALFORMED = "dashboard.validation.body_invalid"
+        const val PARAMETER_MALFORMED = "parameter.validation.body_invalid"
 
         /** `{` request, `params`, `arguments`: the nesting a tools/call spends before its arguments' values. */
         const val MCP_ENVELOPE_DEPTH = 3
 
         /**
-         * String-body handlers NOT in the sweep, each with its reason (#291, 2026-09-28): the
-         * parameter-set routes sit under `web/parameters`, lane 194e's fence while #291 landed;
-         * they parse with the parameters module's strict mapper — bounded by the body cap and
-         * Jackson's default depth, not yet the stated constraints. Tracked in #300 (with the other parameter-set surface items).
+         * String-body handlers NOT in the sweep, each with its reason. Empty since 321 (#323): the parameter-set
+         * routes — allowlisted while they parsed with the parameters module's bare mapper (#291's shape landed
+         * around them) — read their body through `RequestBodies.readTree(RequestLimits.requestMapper(…))` now
+         * and are swept above. A new entry needs a reason and an issue.
          */
-        private val ALLOWLISTED = mapOf("ParameterSetsController.kt" to 4)
+        private val ALLOWLISTED: Map<String, Int> = emptyMap()
 
         const val WS_NAME = "depth291"
 
