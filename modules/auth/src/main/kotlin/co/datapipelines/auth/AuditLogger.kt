@@ -21,11 +21,16 @@ import java.util.UUID
  * `mcp.tool.*` events — depend on the sink contract, not on this JDBC writer; the
  * default argument values live on the interface now and are inherited here unchanged.
  *
- * ## Durable before [log] returns — batched, or joined to the caller's transaction (#266)
+ * ## Durable before [log] returns — direct, joined to the caller's transaction, or batched (#266)
  * Audit rows are AUTHORIZATION INPUTS: an MCP key's read of its own execution is decided by its
  * `mcp.execution.launched` / `mcp.tool.called` rows, an endpoint key's by its serve row. So [log]
- * returns only once the row is committed — never from memory. HOW it is committed depends on the
- * caller, decided per call:
+ * returns only once the row is committed — never from memory.
+ *
+ * **By default there is no [writer]** (#266b): `datapipelines.persistence.audit.enabled` ships
+ * false, because measured, audit rows never formed batches and the writer only added to their tail
+ * (configuration §3.32). Every row is then the pre-#266 INSERT — on the caller's connection inside
+ * its transaction, on a pool connection otherwise. With the switch on, HOW a row is committed is
+ * decided per call:
  * - **Inside the caller's transaction** (`TransactionSynchronizationManager.isActualTransactionActive`)
  *   the row is INSERTed on the caller's connection, exactly as before #266: it commits with the
  *   business write it describes and vanishes if that write rolls back (a key issuance that failed
@@ -34,8 +39,8 @@ import java.util.UUID
  * - **Otherwise** the row goes through [writer] — a group commit shared by concurrent callers,
  *   partitioned by key (then user) so one credential's events commit in order. The writer falls back
  *   to this same INSERT on the caller's thread after `record-max-wait-ms`, and after shutdown.
- * - **No writer** (`datapipelines.persistence.enabled: false`, or a test slice): every row is the
- *   direct INSERT.
+ * - **No writer** (the default — `audit.enabled: false` — or `datapipelines.persistence.enabled:
+ *   false`, or a test slice): every row is the direct INSERT.
  *
  * ## Which failures reach the caller — the same on every path (#266b)
  * A STORE failure is the row's, never the request's: a `DataAccessException` (the INSERT refused, the

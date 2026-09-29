@@ -32,8 +32,14 @@ class PersistencePropertiesTest {
         generateSequence<Throwable>(refusal) { it.cause }.last().message.orEmpty() shouldContain "shutdown-drain-ms must be <= 25000"
     }
 
+    @Test
+    fun `audit-enabled binds from its key and ships false - the audit writer is off unless switched on`() {
+        bind().audit.enabled shouldBe false
+        bind("audit.enabled" to "true").audit.enabled shouldBe true
+        bind("audit.enabled" to "true").enabled shouldBe true
+    }
+
     private fun bind(vararg keys: Pair<String, String>): PersistenceProperties =
         Binder(MapConfigurationPropertySource(keys.associate { (k, v) -> "datapipelines.persistence.$k" to v }))
-            .bind("datapipelines.persistence", PersistenceProperties::class.java)
-            .get()
+            .bindOrCreate("datapipelines.persistence", PersistenceProperties::class.java)
 }

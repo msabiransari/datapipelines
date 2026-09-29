@@ -55,6 +55,7 @@ class AuthPropertiesSpecDriftTest {
         // queue bound or a wait that operators read one value for and run with another.
         val props = PersistenceProperties()
         documented.getValue("datapipelines.persistence.enabled") shouldBe props.enabled.toString()
+        documented.getValue("datapipelines.persistence.audit.enabled") shouldBe props.audit.enabled.toString()
         documented.getValue("datapipelines.persistence.batch-max-events") shouldBe props.batchMaxEvents.toString()
         documented.getValue("datapipelines.persistence.batch-max-bytes") shouldBe props.batchMaxBytes.toString()
         documented.getValue("datapipelines.persistence.linger-ms") shouldBe props.lingerMs.toString()

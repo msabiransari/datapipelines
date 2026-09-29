@@ -15,9 +15,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 @ConfigurationProperties(prefix = "datapipelines.persistence")
 data class PersistenceProperties(
     /**
-     * `enabled` — false restores the pre-#266 path everywhere: every audit row and every event row
-     * and replay-log entry written by its own caller, one statement each. The writers are still
-     * built (idle); nothing is queued.
+     * `enabled` — false restores the pre-#266 path everywhere: every event row and replay-log entry
+     * (and every audit row, whatever [audit] says) written by its own caller, one statement each. The
+     * writers are still built (idle); nothing is queued.
      */
     val enabled: Boolean = true,
     val batchMaxEvents: Int = BatchingConfig.DEFAULT_BATCH_MAX_EVENTS,
@@ -29,7 +29,23 @@ data class PersistenceProperties(
     /** Writer threads per store — and the size of `web`'s `dp-event-persist` pool (the execution row's writes and the direct fallbacks). */
     val writers: Int = BatchingConfig.DEFAULT_WRITERS,
     val shutdownDrainMs: Long = BatchingConfig.DEFAULT_SHUTDOWN_DRAIN_MILLIS,
+    /** `audit.*` — the audit log's own switch (#266b); see [Audit]. */
+    val audit: Audit = Audit(),
 ) {
+    /**
+     * `audit.enabled` — whether audit rows go through the audit writer at all (and only while
+     * [enabled] is also true). **Off by default**, by measurement (#266 C, the orchestrator's ruling
+     * of 2026-09-29): at every measured audit rate the writer never formed a batch (mean size 1.0 at
+     * 500 rows/s, 1.0–1.1 at 5,000) and it made the tail worse (p99 +4 ms at 100 concurrent
+     * executions), while event batching earned ×2.2–3.5. Off, every audit row is the pre-#266
+     * INSERT on its caller's thread (or on the caller's transaction); on, the batched path of auth.md
+     * §10.1A. The writer bean is built either way — idle when off, as under `enabled: false` — so its
+     * meters read zero rather than vanish and the drain has nothing to do.
+     */
+    data class Audit(
+        val enabled: Boolean = false,
+    )
+
     /** The primitive's config; its `init` refuses an impossible bound, so a bad key fails the boot. */
     fun toConfig(): BatchingConfig =
         BatchingConfig(

@@ -79,7 +79,9 @@ class AuditLoggerBatchingIntegrationTest {
                     }
                 },
             )
-        logger = AuditLogger(jdbc, ObjectMapper(), writer)
+        // Through the production wiring with the audit writer switched ON explicitly (#266b: it ships
+        // off) — every batched case below is a proof of the batched path, never of the default.
+        logger = AuthConfiguration().auditLogger(jdbc, ObjectMapper(), BATCHED_AUDIT, writer)
         userId =
             UUID.randomUUID().also { id ->
                 jdbc.update(
@@ -115,6 +117,35 @@ class AuditLoggerBatchingIntegrationTest {
         callers.shutdown()
         misses.get() shouldBe 0
         committed.get() shouldBe CALLERS * PER_CALLER
+    }
+
+    @Test
+    fun `with the default configuration an audit row takes the direct path - the writer never sees it`() {
+        // #266b, the ruling: `datapipelines.persistence.audit.enabled` ships false, so the application's
+        // wiring hands AuditLogger no writer and every row is the pre-266 INSERT. Red with the default
+        // flipped (the row is batched: the writer's commit hook fires, the DEBUG line says batched).
+        val lines = ListAppender<ILoggingEvent>().apply { start() }
+        val auditLog = LoggerFactory.getLogger(AuditLogger::class.java) as Logger
+        val previous = auditLog.level
+        auditLog.level = ch.qos.logback.classic.Level.DEBUG
+        auditLog.addAppender(lines)
+        val markers = mutableListOf<String>()
+        try {
+            listOf(PersistenceProperties(), PersistenceProperties(enabled = false, audit = PersistenceProperties.Audit(enabled = true)))
+                .forEach { config ->
+                    val marker = UUID.randomUUID().toString().also { markers += it }
+                    AuthConfiguration()
+                        .auditLogger(jdbc, ObjectMapper(), config, writer)
+                        .log("audit.default.path", userId = userId, details = mapOf("marker" to marker))
+                }
+        } finally {
+            auditLog.detachAppender(lines)
+            auditLog.level = previous
+        }
+        markers.forEach { rowsWith(it) shouldBe 1 }
+        withClue("the audit writer committed nothing") { committed.get() shouldBe 0 }
+        lines.list.map { it.formattedMessage }.filter { it.contains("audit_event=audit.default.path") } shouldBe
+            List(2) { "event=audit.write audit_event=audit.default.path path=direct" }
     }
 
     @Test
@@ -329,5 +360,8 @@ class AuditLoggerBatchingIntegrationTest {
         const val BATCH = 500
         const val SIXTY_SECONDS = 60L
         const val ROW_CONTENT = "row-content-266b-must-not-be-logged"
+
+        /** The audit writer switched on — the batched path's configuration, never the default. */
+        val BATCHED_AUDIT = PersistenceProperties(audit = PersistenceProperties.Audit(enabled = true))
     }
 }

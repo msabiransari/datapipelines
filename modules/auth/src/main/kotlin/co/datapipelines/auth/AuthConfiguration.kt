@@ -63,6 +63,11 @@ class AuthConfiguration {
      * #266 — the audit log's batching writer (auth.md §10): an ordered group commit shared by
      * concurrent callers, partitioned by key. Closed at context shutdown after a bounded drain;
      * `web`'s `PersistenceDrainLifecycle` stops it earlier, after the web server's graceful drain.
+     *
+     * Built whether or not [auditLogger] uses it (#266b: `datapipelines.persistence.audit.enabled`
+     * ships false) — idle, as under `enabled: false`: its `writers` threads park, its meters stay
+     * bound and read zero (an absent meter would look like a missing one), and the drain stops it
+     * with nothing to do. No conditional bean, so the drain and the metrics wiring stay one shape.
      */
     @Bean(destroyMethod = "close")
     fun auditWriter(
@@ -70,14 +75,20 @@ class AuthConfiguration {
         persistence: PersistenceProperties,
     ): BatchingWriter<AuditRow> = BatchingWriter(AUDIT_STORE, persistence.toConfig(), AuditRowSink(jdbc))
 
-    /** Batched outside a transaction, direct inside one; every write direct when `datapipelines.persistence.enabled` is false. */
+    /**
+     * The writer is handed over only when BOTH `datapipelines.persistence.enabled` and
+     * `datapipelines.persistence.audit.enabled` are true (#266b; configuration §3.32). By default the
+     * second is false and every audit row is the direct INSERT — on the caller's transaction when it
+     * holds one, on its own otherwise (auth.md §10.1A). Switched on: batched outside a transaction,
+     * still direct inside one.
+     */
     @Bean
     fun auditLogger(
         jdbc: NamedParameterJdbcTemplate,
         objectMapper: ObjectMapper,
         persistence: PersistenceProperties,
         auditWriter: BatchingWriter<AuditRow>,
-    ): AuditLogger = AuditLogger(jdbc, objectMapper, auditWriter.takeIf { persistence.enabled })
+    ): AuditLogger = AuditLogger(jdbc, objectMapper, auditWriter.takeIf { persistence.enabled && persistence.audit.enabled })
 
     @Bean
     fun jwtService(

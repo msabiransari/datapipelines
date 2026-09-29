@@ -557,6 +557,9 @@ datapipelines:
     record-max-wait-ms: ${DATAPIPELINES_PERSISTENCE_RECORD_MAX_WAIT_MS:2000}
     writers: ${DATAPIPELINES_PERSISTENCE_WRITERS:4}
     shutdown-drain-ms: ${DATAPIPELINES_PERSISTENCE_SHUTDOWN_DRAIN_MS:10000}
+    audit:
+      # #266b: the audit log's own switch, OFF by measurement (configuration.md §3.32).
+      enabled: ${DATAPIPELINES_PERSISTENCE_AUDIT_ENABLED:false}
 
 # db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
 # (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a
