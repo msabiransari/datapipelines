@@ -98,8 +98,11 @@ object RolePermissionsResolver : PermissionResolver {
  *
  * [PermissionResolverInstallation] — the bean that takes the context's ONE [PermissionResolver] —
  * installs it when the context starts and puts [RolePermissionsResolver] back when the context
- * closes, so a test context that installed a synthetic resolver cannot leave it behind in a JVM
- * other contexts share. With no context at all (a unit test), it is [RolePermissionsResolver].
+ * closes — but only while its own resolver is still the installed one: in a JVM other contexts
+ * share (the integration module holds more contexts than Spring's cache keeps, so the cache closes
+ * an old one while a newer one is live), an evicted context's close must not clobber the resolver
+ * the live context installed after it (CI's single fork lost the seam witness's synthetic grant
+ * that way). With no context at all (a unit test), it is [RolePermissionsResolver].
  * [install] is `internal`: nothing outside this module can reach it except through that bean.
  */
 object PermissionResolution {
@@ -112,6 +115,11 @@ object PermissionResolution {
     internal fun install(resolver: PermissionResolver) {
         installed = resolver
     }
+
+    /** Restores [RolePermissionsResolver] only if [resolver] is the one installed — a closing context never uninstalls another's. */
+    internal fun uninstall(resolver: PermissionResolver) {
+        if (installed === resolver) installed = RolePermissionsResolver
+    }
 }
 
 /**
@@ -120,13 +128,13 @@ object PermissionResolution {
  * restores the production resolver on close (Spring calls [close] when the context shuts down).
  */
 class PermissionResolverInstallation(
-    resolver: PermissionResolver,
+    private val resolver: PermissionResolver,
 ) : AutoCloseable {
     init {
         PermissionResolution.install(resolver)
     }
 
     override fun close() {
-        PermissionResolution.install(RolePermissionsResolver)
+        PermissionResolution.uninstall(resolver)
     }
 }

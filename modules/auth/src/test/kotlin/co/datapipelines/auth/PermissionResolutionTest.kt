@@ -127,6 +127,30 @@ class PermissionResolutionTest {
         PermissionResolution.resolver shouldBeSameInstanceAs RolePermissionsResolver
     }
 
+    /**
+     * Two contexts in one JVM (the integration module: 68 distinct contexts against Spring's cache of 32,
+     * so the cache CLOSES an old context while a newer one is live). Closing the OLDER installation must
+     * not clobber the resolver a live context installed after it — CI's single alphabetical fork lost
+     * `PermissionSeamE2eTest`'s synthetic grant that way on 55114b78 (run 36615188901): an eviction's
+     * close hook put the production resolver back under the witness's feet.
+     */
+    @Test
+    fun `closing an older installation leaves a newer context's resolver in place - only the current one restores production`() {
+        val older = Grant(Permission.TEMPLATE_RELEASE, mutableListOf())
+        val newer = Grant(Permission.PIPELINE_DELETE, mutableListOf())
+        val first = PermissionResolverInstallation(older)
+        val second = PermissionResolverInstallation(newer)
+        PermissionResolution.resolver shouldBeSameInstanceAs newer
+
+        first.close()
+        withClue("an evicted context's close must not uninstall the live context's resolver") {
+            PermissionResolution.resolver shouldBeSameInstanceAs newer
+        }
+
+        second.close()
+        PermissionResolution.resolver shouldBeSameInstanceAs RolePermissionsResolver
+    }
+
     private data class Asked(
         val workspaceId: UUID?,
         val permission: Permission,
