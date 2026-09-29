@@ -201,7 +201,7 @@ class ExecutionEventRowSink(
     }
 }
 
-/** The replay log's side of its writer: [SseEventLog.appendAll] — one pipelined `MULTI`/`EXEC` per batch. */
+/** The replay log's side of its writer: [SseEventLog.appendAll] — one Lua script (`EVALSHA`, KEYS/ARGV) per batch. */
 class ReplayLogSink(
     private val eventLog: SseEventLog,
 ) : BatchSink<ReplayLogEntry> {

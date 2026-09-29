@@ -38,7 +38,7 @@ class PersistenceConfiguration {
     ): BatchingWriter<ExecutionEventRecord> =
         BatchingWriter(EXECUTION_EVENTS_STORE, persistence.toConfig(), ExecutionEventRowSink(repository))
 
-    /** #266 — the replay log's batching writer: one pipelined `MULTI`/`EXEC` per commit through [SseEventLog.appendAll]. */
+    /** #266 — the replay log's batching writer: one Lua script (`EVALSHA`) per commit through [SseEventLog.appendAll]. */
     @Bean(destroyMethod = "close")
     fun replayLogWriter(
         eventLog: SseEventLog,
