@@ -299,6 +299,13 @@ class ArchitectureGuardTest {
                 "persistence",
                 // #10 — visualizations and dashboards: the surfaces (L1b) compile against it, never the reverse.
                 "visualization",
+                // The five domain modules the list had missed (0 web/MCP imports each, measured at the L1a merge review):
+                // a guard that names SOME of the modules below the surfaces guards only those.
+                "calculators",
+                "graph",
+                "parameters",
+                "scheduler",
+                "scripting",
             )
 
         /**

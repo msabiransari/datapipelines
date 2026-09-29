@@ -1,5 +1,6 @@
 package co.datapipelines.visualization
 
+import co.datapipelines.parameters.ParametersKey
 import com.fasterxml.jackson.databind.JsonNode
 
 /**
@@ -41,6 +42,13 @@ class DashboardReader(
 
         /** `details.reason` for a binding or placement naming both or neither of its alternatives. */
         const val REASON_AMBIGUOUS = "ambiguous"
+
+        /**
+         * A source binds a parameter set's parameters, and no set declares more than the parameters module's ceiling
+         * (`max-parameters-per-set`'s maximum) — a wider map is refused before its members are walked, so the scope
+         * pass over a dashboard stays inputs + bindings.
+         */
+        val MAX_SOURCE_PARAMETERS: Int = checkNotNull(ParametersKey.MAX_PARAMETERS_PER_SET.max).toInt()
 
         /** The keys of each level — the binding's own properties, pinned equal by `DashboardReaderTest`. */
         val DOCUMENT_KEYS: Set<String> =
@@ -132,8 +140,19 @@ private class DashboardScan(
         scan.unknownKeys(node, DashboardReader.SOURCE_KEYS, path)
         scan.requiredText(node, "name", "$path.name")
         scan.present(node, "pipeline")?.let { scan.ref(it, "$path.pipeline") } ?: scan.missing("$path.pipeline")
-        scan.objectAt(node, "parameters", "$path.parameters", required = false)?.properties()?.forEach { (name, binding) ->
-            objectOf(binding, "$path.parameters.$name") { parameterBinding(it, "$path.parameters.$name") }
+        scan.objectAt(node, "parameters", "$path.parameters", required = false)?.let { parameters ->
+            if (parameters.size() > DashboardReader.MAX_SOURCE_PARAMETERS) {
+                scan.tooMany(
+                    "$path.parameters",
+                    parameters.size(),
+                    ParametersKey.MAX_PARAMETERS_PER_SET.path,
+                    DashboardReader.MAX_SOURCE_PARAMETERS,
+                )
+            } else {
+                parameters.properties().forEach { (name, binding) ->
+                    objectOf(binding, "$path.parameters.$name") { parameterBinding(it, "$path.parameters.$name") }
+                }
+            }
         }
     }
 
@@ -155,10 +174,16 @@ private class DashboardScan(
         scan.requiredText(node, "name", "$path.name")
         objectType(node, path, DashboardObjectType.VISUALIZATION)
         scan.present(node, "visualization")?.let { scan.ref(it, "$path.visualization") } ?: scan.missing("$path.visualization")
-        scan.objectAt(node, "inputs", "$path.inputs", required = false)?.properties()?.forEach { (input, mapping) ->
-            objectOf(mapping, "$path.inputs.$input") {
-                scan.unknownKeys(it, DashboardReader.INPUT_MAPPING_KEYS, "$path.inputs.$input")
-                scan.requiredText(it, "source", "$path.inputs.$input.source")
+        scan.objectAt(node, "inputs", "$path.inputs", required = false)?.let { inputs ->
+            if (inputs.size() > config.maxInputsPerVisualization) {
+                scan.tooMany("$path.inputs", inputs.size(), VisualizationKey.MAX_INPUTS_PER_VISUALIZATION, config.maxInputsPerVisualization)
+            } else {
+                inputs.properties().forEach { (input, mapping) ->
+                    objectOf(mapping, "$path.inputs.$input") {
+                        scan.unknownKeys(it, DashboardReader.INPUT_MAPPING_KEYS, "$path.inputs.$input")
+                        scan.requiredText(it, "source", "$path.inputs.$input.source")
+                    }
+                }
             }
         }
         scan.optionalInt(node, "timeout_seconds", "$path.timeout_seconds")

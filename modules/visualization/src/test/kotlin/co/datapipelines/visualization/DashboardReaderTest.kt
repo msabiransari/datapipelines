@@ -1,5 +1,6 @@
 package co.datapipelines.visualization
 
+import co.datapipelines.parameters.ParametersKey
 import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.visualization.DocumentFixtures.obj
 import com.fasterxml.jackson.databind.JsonNode
@@ -217,6 +218,24 @@ class DashboardReaderTest {
         withClue("placement") { propertiesOf(ParameterPlacement::class.java) shouldBe DashboardReader.PLACEMENT_KEYS }
         withClue("grid item") { propertiesOf(GridItem::class.java) shouldBe DashboardReader.GRID_ITEM_KEYS }
         withClue("timeouts") { propertiesOf(DashboardTimeouts::class.java) shouldBe DashboardReader.TIMEOUT_KEYS }
+    }
+
+    @Test
+    fun `a source's parameter map and an occurrence's input map are bounded BEFORE their members are walked`() {
+        val wideSource = DocumentFixtures.dashboard()
+        val parameters = wideSource.obj("sources[0].parameters")
+        val ceiling = checkNotNull(ParametersKey.MAX_PARAMETERS_PER_SET.max).toInt() // no set declares more; the reader's bound
+        repeat(ceiling + 1 - parameters.size()) { i -> parameters.putObject("extra_$i").put("value", i) }
+        refused(wideSource).map { it.path to it.details["config_key"] } shouldBe
+            listOf("sources[0].parameters" to ParametersKey.MAX_PARAMETERS_PER_SET.path)
+        val wideOccurrence = DocumentFixtures.dashboard()
+        wideOccurrence.obj("visualizations[0].inputs").putObject("extra").put("source", "revenue_source")
+        DashboardReader(VisualizationConfig(maxInputsPerVisualization = 1))
+            .read(wideOccurrence)
+            .shouldBeInstanceOf<ReadOutcome.Refused>()
+            .result.failures
+            .map { it.path to it.details["config_key"] } shouldBe
+            listOf("visualizations[0].inputs" to VisualizationKey.MAX_INPUTS_PER_VISUALIZATION.path)
     }
 
     private fun read(tree: JsonNode): DashboardDocument =

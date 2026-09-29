@@ -71,17 +71,19 @@ internal class ScopeConsumers(
     private val masks: List<BitSet>
 
     init {
-        val sources = body.sources.associateBy { it.name }
+        // One bitset per SOURCE, built once: an occurrence then costs one OR per input mapping, never a walk of the
+        // mapped source's bindings per mapping (inputs × bindings — the third quadratic path, closed at merge review).
+        val bySource =
+            body.sources.associate { source ->
+                source.name to
+                    BitSet().also { mask ->
+                        source.parameters.values.forEach { binding -> binding.parameter?.let { index[it] }?.let(mask::set) }
+                    }
+            }
         val byOccurrence =
             body.visualizations.associate { occurrence ->
                 occurrence.name to
-                    BitSet().also { mask ->
-                        occurrence.inputs.values.forEach { mapping ->
-                            sources[mapping.source]?.parameters?.values?.forEach { binding ->
-                                binding.parameter?.let { index[it] }?.let(mask::set)
-                            }
-                        }
-                    }
+                    BitSet().also { mask -> occurrence.inputs.values.forEach { mapping -> bySource[mapping.source]?.let(mask::or) } }
             }
         masks =
             graph.bottomUp { group -> BitSet().also { mask -> group.members.forEach { member -> byOccurrence[member]?.let(mask::or) } } }

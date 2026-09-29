@@ -5,7 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode
 /**
  * The checks every level of a document pre-scan shares (the `ParameterSetReader` Scan, lifted so both readers
  * spell a refusal identically). Every problem is REPORTED with its path and the walk continues — the readers
- * are exhaustive — and nothing here echoes a value: a refusal names a key, a path, an expected JSON type.
+ * are exhaustive. A refusal names a key, a path, an expected JSON type; the one thing echoed from the body is an
+ * enum candidate ([literal]), clipped and sanitised through `safeEcho` — the `ParameterSetReader` mould.
  *
  * [bodyInvalid] is the family's `*.validation.body_invalid`; `details.reason` is one of the `REASON_*`
  * constants below.
@@ -199,11 +200,19 @@ internal class JsonScan(
         count: Int,
         key: VisualizationKey,
         max: Int,
+    ) = tooMany(path, count, key.path, max)
+
+    /** [configKey] is the key whose value is [max]: one of this module's, or a ceiling another module's key sets. */
+    fun tooMany(
+        path: String,
+        count: Int,
+        configKey: String,
+        max: Int,
     ) = failures.add(
         bodyInvalid,
         path,
-        "$count entries here; at most $max (${key.path}).",
-        mapOf("reason" to REASON_TOO_MANY, "count" to count, "max" to max, "config_key" to key.path),
+        "$count entries here; at most $max ($configKey).",
+        mapOf("reason" to REASON_TOO_MANY, "count" to count, "max" to max, "config_key" to configKey),
     )
 
     fun wrongType(
