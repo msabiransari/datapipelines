@@ -350,6 +350,7 @@ class ApiExceptionHandler {
             // stand in for their families; `details.reason: malformed_json` and the message carry
             // what the code cannot.
             uri.startsWith("$API_PREFIX/endpoints") -> PipelineErrorCodes.Endpoint.PATH_INVALID
+            uri.startsWith("$API_PREFIX/parameter-sets") -> PipelineErrorCodes.Parameters.BODY_INVALID
 
             else -> PipelineErrorCodes.Validation.SCHEMA_VERSION_UNSUPPORTED
         }

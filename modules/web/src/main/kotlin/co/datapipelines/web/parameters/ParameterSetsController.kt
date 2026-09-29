@@ -12,11 +12,13 @@ import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParametersConfig
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
+import co.datapipelines.web.api.RequestBodies
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.api.writeSurface
 import co.datapipelines.web.pipelines.IfMatchHeader
@@ -80,7 +82,7 @@ class ParameterSetsController(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
         val principal = currentPrincipal()
-        val document = ParameterSetReader(config).readOrThrow(TREE.readTree(body))
+        val document = ParameterSetReader(config).readOrThrow(readBody(body))
         val saved = sets.create(principal.requireWorkspace().id, document, principal.userId, principal.writeSurface())
         return ApiResponse.of(ParameterSetResponses.full(saved.record, saved.body, saved.detail))
     }
@@ -142,7 +144,7 @@ class ParameterSetsController(
         // The precondition is checked BEFORE the body is parsed (the pipelines PUT's rule).
         val expectedHash = IfMatchHeader.required(ifMatch)
         val principal = currentPrincipal()
-        val document = ParameterSetReader(config).readOrThrow(TREE.readTree(body))
+        val document = ParameterSetReader(config).readOrThrow(readBody(body))
         val written =
             sets.write(
                 workspaceId = principal.requireWorkspace().id,
@@ -364,7 +366,7 @@ class ParameterSetsController(
         @RequestBody body: String,
     ): ApiResponse<JsonNode> {
         refuseOversizedBody(body)
-        val tree = TREE.readTree(body)
+        val tree = readBody(body)
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val view = lens.viewFor(principal).parameterSets
@@ -428,8 +430,16 @@ class ParameterSetsController(
             "body_hash" to detail.bodyHash,
         )
 
+    /**
+     * A `String` body parsed the #291 way (#323): through [REQUEST_MAPPER], an unreadable body —
+     * not JSON, or past the request bounds — is the family's catalogued 400, never the 500 backstop.
+     * The reader's own bounds still run on what this returns.
+     */
+    private fun readBody(body: String): JsonNode = RequestBodies.readTree(REQUEST_MAPPER, body, ApiErrors::malformedParameterSetBody)
+
     private companion object {
-        private val TREE = co.datapipelines.parameters.ParameterSetJson.mapper
+        /** The module's mapper under the request limits (`RequestLimits.requestMapper`, #291) — built once. */
+        private val REQUEST_MAPPER = RequestLimits.requestMapper(co.datapipelines.parameters.ParameterSetJson.mapper)
 
         /**
          * The stated evaluate-request bound (rest-api §21): 1 MiB of UTF-8 — comfortably above

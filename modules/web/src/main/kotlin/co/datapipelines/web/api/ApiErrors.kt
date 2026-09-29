@@ -172,6 +172,20 @@ object ApiErrors {
         )
 
     /**
+     * An unreadable parameter-set request body (#323) — not JSON, or past the request mapper's
+     * bounds. The family's own `parameter.validation.body_invalid` (§13.20: a body the route cannot
+     * use) with `details.reason = "malformed_json"`; the no-argument overload is the import
+     * ENVELOPE's shape refusal, a readable body of the wrong shape.
+     */
+    fun malformedParameterSetBody(cause: Throwable): ApiException =
+        ApiException(
+            ParameterErrorCodes.BODY_INVALID,
+            "Request body is not valid JSON: ${cause.message?.take(MAX_CAUSE_CHARS)}",
+            mapOf(REASON to MALFORMED_JSON),
+            cause,
+        )
+
+    /**
      * A parameter set (or version) that does not exist in this workspace — or is hidden by the
      * promoter lens, or belongs to another workspace: all answer the §13.20 `parameter.not_found`
      * 404, never a 403 that would confirm existence (the §11A.1 rule, record §9.3).
@@ -190,7 +204,11 @@ object ApiErrors {
             if (version == null) mapOf("id" to id) else mapOf("id" to id, "version" to version),
         )
 
-    /** An unparseable parameter-set import envelope — the `parameter.validation.body_invalid` shape refusal. */
+    /**
+     * A parameter-set import envelope of the wrong SHAPE (a readable body whose root, or whose
+     * `parameter_set`, is not the export envelope's) — the `parameter.validation.body_invalid`
+     * `wrong_type` refusal. A body that cannot be READ is the one-argument overload's.
+     */
     fun malformedParameterSetBody(): ApiException =
         ApiException(
             ParameterErrorCodes.BODY_INVALID,

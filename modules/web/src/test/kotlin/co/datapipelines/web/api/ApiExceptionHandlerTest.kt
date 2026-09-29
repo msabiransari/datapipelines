@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPat
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RestController
@@ -92,6 +93,18 @@ class ApiExceptionHandlerTest {
         fun createPipeline(
             @RequestBody body: JsonNode,
         ): Any = jacksonObjectMapper().treeToValue(body.get("nodes").get(0), ProbeNode::class.java)
+
+        /**
+         * #323 — the parameter-set switch's shape (`POST /api/v1/parameter-sets/{id}/current`): its
+         * body is bound by the message converter, so an unreadable one is the converter's
+         * `HttpMessageNotReadableException` and [ApiExceptionHandler]'s `malformedBodyCodeFor`
+         * picks the code from this URI.
+         */
+        @PostMapping("/api/v1/parameter-sets/{id}/current")
+        fun switchParameterSet(
+            @PathVariable id: String,
+            @RequestBody body: JsonNode,
+        ): JsonNode = body
 
         @GetMapping("/probe/query-failed")
         fun queryFailed(): Nothing =
@@ -263,6 +276,24 @@ class ApiExceptionHandlerTest {
                     .content("""{"nodes":[{"id":"n1","source":{"name":"sample-trips"}}]}"""),
             ).andExpect(status().isBadRequest)
             .andExpect(jsonPath("$.error.code").value(PipelineErrorCodes.Validation.SCHEMA_VERSION_UNSUPPORTED))
+            .andExpect(jsonPath("$.error.details.reason").value(ApiErrors.MALFORMED_JSON))
+    }
+
+    /**
+     * #323 — the parameter-set routes had no `malformedBodyCodeFor` row, so an unreadable body on a
+     * converter-bound route of the family (the switch) answered the PIPELINE family's
+     * `schema_version_unsupported` — a pipeline verdict on a request that names no pipeline (098 §C's
+     * shape). `parameter.validation.body_invalid` is the family's own 400 for a body it cannot use.
+     */
+    @Test
+    fun `a malformed parameter-sets body is 400 with the parameter family's code, not a pipeline one`() {
+        bodyMvc
+            .perform(
+                post("/api/v1/parameter-sets/0b6f1c1e-0000-4000-8000-000000000001/current")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{"),
+            ).andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error.code").value(PipelineErrorCodes.Parameters.BODY_INVALID))
             .andExpect(jsonPath("$.error.details.reason").value(ApiErrors.MALFORMED_JSON))
     }
 

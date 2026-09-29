@@ -8,9 +8,11 @@ import co.datapipelines.parameters.ParameterSetJson
 import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.RequestLimits
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.api.RequestBodies
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
@@ -122,7 +124,13 @@ class ParameterSetTransferService(
         envelope.get("parameter_set")?.takeIf(JsonNode::isObject) as? ObjectNode
             ?: throw ApiErrors.malformedParameterSetBody()
 
-    private fun envelopeOf(body: String): ObjectNode = MAPPER.readTree(body) as? ObjectNode ?: throw ApiErrors.malformedParameterSetBody()
+    /**
+     * The envelope, read through [REQUEST_MAPPER] (#323, the #291 shape): an unreadable body is the
+     * family's `malformed_json` 400, a readable one of the wrong shape the envelope refusal.
+     */
+    private fun envelopeOf(body: String): ObjectNode =
+        RequestBodies.readTree(REQUEST_MAPPER, body, ApiErrors::malformedParameterSetBody) as? ObjectNode
+            ?: throw ApiErrors.malformedParameterSetBody()
 
     /**
      * The bundle's optional `templates` array — at the ENVELOPE's root (§21.4), beside
@@ -289,6 +297,9 @@ class ParameterSetTransferService(
 
     private companion object {
         val MAPPER = ParameterSetJson.mapper
+
+        /** [MAPPER]'s request copy — what the import body is read with (#291, #323). */
+        val REQUEST_MAPPER = RequestLimits.requestMapper(MAPPER)
 
         /** Reflected client input is bounded before it reaches a refusal's text. */
         const val MAX_ECHOED_NAME_CHARS = 64

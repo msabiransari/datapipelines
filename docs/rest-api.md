@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.54 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.55 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-27
@@ -134,7 +134,7 @@ Every 4xx and 5xx response uses this shape:
 
 One envelope answers **before any handler**: a request body over the platform cap ([Configuration §3.31](configuration.md#331-web-request-limits)) is refused at a servlet filter with `413 request.body_too_large` (`details.limit_bytes`) on `/api/v1` and `/mcp` alike — the pre-handler 413 (the parameter engine's evaluate response budget answers 413 too — pipeline-contract §13.20), carried before authentication and before any parser reads the body (pipeline-contract §13.21).
 
-A body **within** the cap that cannot be read — not JSON, or nested past §13.21's stated depth of 100 — is the route family's malformed-body `400` with `details.reason: malformed_json` on EVERY route, including the ones that take their body as text and parse it themselves (#291): the templates routes (create, update, the lifecycle verbs, render, evaluate, import), pipelines create, update and import, and execute. Until #291 a malformed body on templates create/update/import and pipelines create/update/import reached the `500` backstop, and those routes parsed under Jackson's inherited depth of 1000.
+A body **within** the cap that cannot be read — not JSON, or nested past §13.21's stated depth of 100 — is the route family's malformed-body `400` with `details.reason: malformed_json` on EVERY route, including the ones that take their body as text and parse it themselves (#291): the templates routes (create, update, the lifecycle verbs, render, evaluate, import), pipelines create, update and import, execute, and the parameter-set routes (create, update, evaluate, import — #323; the family's code is `parameter.validation.body_invalid`). Until #291 a malformed body on templates create/update/import and pipelines create/update/import reached the `500` backstop, and those routes parsed under Jackson's inherited depth of 1000; the parameter-set routes did the same until #323.
 
 ### 4.3 Pagination envelope
 
@@ -2452,7 +2452,7 @@ Export bundles the CURRENT release — the set body with its lifecycle fields, t
 | Error | HTTP | When |
 |---|---|---|
 | `parameter.not_found` | 404 | No such set (or version) in the workspace, hidden by the lens, or another workspace's |
-| `parameter.validation.*` | 400 | The document failed the record's §4 (the full failure list rides `details.failures`); `duplicate_name` is **409**. A request body whose shape is wrong — the switch's missing `version`, or a present `version`/`selections` of the wrong JSON type — is `parameter.validation.body_invalid` with `details.path` naming the key and `details.reason` `missing` / `wrong_type` |
+| `parameter.validation.*` | 400 | The document failed the record's §4 (the full failure list rides `details.failures`); `duplicate_name` is **409**. A request body whose shape is wrong — the switch's missing `version`, or a present `version`/`selections` of the wrong JSON type — is `parameter.validation.body_invalid` with `details.path` naming the key and `details.reason` `missing` / `wrong_type`; a body that cannot be read at all — not JSON, or nested past §13.21's depth of 100 — is the same code with `details.reason: malformed_json` on every route (§4.2, #323) |
 | `parameter.authoring.disabled` | 403 | A promotion receiver refuses every authoring write (reads, evaluate and import unaffected) |
 | `parameter.version.conflict` | 409 | A stale `If-Match`, a taken version number, or a kept id held by another workspace (`id_taken`, C29) |
 | `parameter.version.not_draft` / `.not_released` / `.not_discarded` / `.last_release` / `.not_eligible` | 409 | The lifecycle precondition of the verb |
@@ -2465,6 +2465,7 @@ Export bundles the CURRENT release — the set body with its lifecycle fields, t
 
 ## Appendix A: Change Log
 
+| 2026-09-29 | v2.55 | 321 (#323) the parameter-set routes read their body the #291 way — renumber at merge if L1b takes v2.55 | **§4.2 and §21.4's error table:** a parameter-set request body that cannot be read — not JSON, or nested past §13.21's depth of 100 — is `400 parameter.validation.body_invalid` with `details.reason: malformed_json` on create, update, evaluate and import (the four routes that parse their own text, now through the request mapper) and on the switch (bound by the message converter; the malformed-body handler had no row for the family and answered the pipeline family's `schema_version_unsupported`). The four text routes answered the `500` backstop before (reproduced on the wire: `{` as the body). Well-formed bodies are unchanged; no route, permission or §13 code added. |
 | 2026-09-29 | v2.54 | 312 (#312) the flat listing lists — renumbered from v2.53 at merge, which 302 takes | **§21.2, one row:** `GET /api/v1/parameter-sets` without a prefix now lists EVERY set the caller's lens admits at its listed version, paged against a lens-true `total` — a flat repository read (the pipelines §5.7 mould). It had reused the ROOT tree level's read, and the name grammar's `folder_required` kept that level empty: every workspace answered `[]` / `total 0`. The tree routes (`?prefix=`) are unchanged; no permission, code or route added. |
 | 2026-09-29 | v2.53 | 302 (#302) the template-backed promotion receive | **§18.2: a template-backed parameter set is received whole.** The batch sets' validation (the full §4 — the selector probe included, a customer-datasource connection) moved BEFORE the one transaction, on the receiver's own datasources, with the batch's template payloads overlaying the receiver's registry; the transaction lands pre-validated entries. A refusal at validation is the entry's own catalogued code (`parameter.import.missing_template`, `parameter.validation.*`) and lands nothing; a refusal at landing (C29's `id_taken`, a hash mismatch) rolls the batch back whole, templates included. The §18.2 error table names the set-family codes. No route, permission or §13 code added. |
 | 2026-09-28 | v2.52 | the 300 merge's security pass (#300) | **§21.3, one clause:** an explicit JSON `null` `version` on evaluate is absent (the served version), while the switch's `null` is `missing` — the two routes' deliberate divergence stated. Docs only. |
