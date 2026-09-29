@@ -28,6 +28,11 @@ class AuthoringStartupCheckTest {
     // #300: required — the set-draft check is reachable by construction; no null collaborator exists.
     private val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>()
 
+    // #10 L1b: required like the set repository; no drafts unless a case says so.
+    private val visualizations =
+        mockk<co.datapipelines.visualization.VisualizationRepository> { every { findAllDraftNames() } returns emptyList() }
+    private val dashboards = mockk<co.datapipelines.visualization.DashboardRepository> { every { findAllDraftNames() } returns emptyList() }
+
     private fun environment(authoring: String?): StandardEnvironment =
         StandardEnvironment().apply {
             propertySources.addFirst(
@@ -40,7 +45,7 @@ class AuthoringStartupCheckTest {
 
     @Test
     fun `authoring enabled with no promotion key is the quiet default`() {
-        val check = AuthoringStartupCheck(environment("true"), pipelines, templates, parameterSets)
+        val check = AuthoringStartupCheck(environment("true"), pipelines, templates, parameterSets, visualizations, dashboards)
 
         shouldNotThrow<Exception> { check.check() }
         verify(exactly = 0) { pipelines.findAllDraftPipelineNames() }
@@ -57,6 +62,8 @@ class AuthoringStartupCheckTest {
                 pipelines,
                 templates,
                 parameterSets,
+                visualizations,
+                dashboards,
                 promotionServerKeyPresent = { true },
             )
 
@@ -72,6 +79,8 @@ class AuthoringStartupCheckTest {
                 pipelines,
                 templates,
                 parameterSets,
+                visualizations,
+                dashboards,
                 promotionServerKeyPresent = { true },
             )
         every { pipelines.findAllDraftPipelineNames() } returns emptyList()
@@ -87,7 +96,9 @@ class AuthoringStartupCheckTest {
         every { templates.findAllDraftTemplateNames() } returns emptyList()
         every { parameterSets.findAllDraftParameterSetNames() } returns emptyList()
 
-        shouldNotThrow<Exception> { AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets).check() }
+        shouldNotThrow<Exception> {
+            AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets, visualizations, dashboards).check()
+        }
     }
 
     @Test
@@ -100,7 +111,7 @@ class AuthoringStartupCheckTest {
 
         val refused =
             shouldThrow<IllegalStateException> {
-                AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets).check()
+                AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets, visualizations, dashboards).check()
             }
 
         refused.message shouldContain "monthly_revenue"
@@ -119,7 +130,7 @@ class AuthoringStartupCheckTest {
 
         val refused =
             shouldThrow<IllegalStateException> {
-                AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets).check()
+                AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets, visualizations, dashboards).check()
             }
 
         refused.message shouldContain "acme/sales/region_filters"
@@ -129,9 +140,37 @@ class AuthoringStartupCheckTest {
     @Test
     fun `authoring enabled never asks the parameter-set repository for drafts`() {
         shouldNotThrow<Exception> {
-            AuthoringStartupCheck(environment("true"), pipelines, templates, parameterSets).check()
+            AuthoringStartupCheck(environment("true"), pipelines, templates, parameterSets, visualizations, dashboards).check()
         }
         verify(exactly = 0) { parameterSets.findAllDraftParameterSetNames() }
+    }
+
+    // ---- #10 L1b: visualization and dashboard drafts join the refusal ----------------------
+
+    @Test
+    fun `authoring disabled with a visualization or a dashboard draft refuses startup, naming both`() {
+        every { pipelines.findAllDraftPipelineNames() } returns emptyList()
+        every { templates.findAllDraftTemplateNames() } returns emptyList()
+        every { parameterSets.findAllDraftParameterSetNames() } returns emptyList()
+        every { visualizations.findAllDraftNames() } returns listOf("finance/visualizations/monthly_revenue")
+        every { dashboards.findAllDraftNames() } returns listOf("finance/dashboards/revenue_overview")
+
+        val refused =
+            shouldThrow<IllegalStateException> {
+                AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets, visualizations, dashboards).check()
+            }
+
+        refused.message shouldContain "visualization: finance/visualizations/monthly_revenue"
+        refused.message shouldContain "dashboard: finance/dashboards/revenue_overview"
+    }
+
+    @Test
+    fun `authoring enabled never asks the visualization or dashboard repository for drafts`() {
+        shouldNotThrow<Exception> {
+            AuthoringStartupCheck(environment("true"), pipelines, templates, parameterSets, visualizations, dashboards).check()
+        }
+        verify(exactly = 0) { visualizations.findAllDraftNames() }
+        verify(exactly = 0) { dashboards.findAllDraftNames() }
     }
 
     @Test
@@ -140,6 +179,8 @@ class AuthoringStartupCheckTest {
         every { templates.findAllDraftTemplateNames() } returns emptyList()
         every { parameterSets.findAllDraftParameterSetNames() } returns emptyList()
 
-        shouldNotThrow<Exception> { AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets).check() }
+        shouldNotThrow<Exception> {
+            AuthoringStartupCheck(environment("false"), pipelines, templates, parameterSets, visualizations, dashboards).check()
+        }
     }
 }

@@ -35,7 +35,8 @@ data class VisualizationReleased(
  */
 @Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount") // one façade over the verb table; each throw is its own refusal
 class VisualizationService(
-    val repository: VisualizationRepository,
+    /** Module-internal (O3): the surfaces read through the lensed reads below, never through this. */
+    internal val repository: VisualizationRepository,
     private val validator: VisualizationValidator,
     private val dashboards: DashboardRepository,
     authoring: AuthoringGuard,

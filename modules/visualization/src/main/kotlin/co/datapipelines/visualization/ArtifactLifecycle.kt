@@ -51,12 +51,18 @@ data class ArtifactImported(
  *
  * The metadata work that must be atomic runs inside [transactions] (a `TransactionTemplate` over the metadata
  * transaction manager in production; [DIRECT] in a directly constructed test).
+ *
+ * **Module-internal doors (L1b, the L1a security pass's O3).** [repository], [transactions] and [flipDraft] are
+ * `internal`: the family services own them, and a surface outside this module reaches the artifacts ONLY through
+ * the services' lensed reads and their verbs. A public repository here would be an unlensed read no
+ * `ArchitectureGuardTest` rule sees (it matches repository class names, not a property chain), and a public
+ * [flipDraft] a release with no gate, no evidence and no cascade.
  */
 @Suppress("TooManyFunctions", "ThrowsCount") // one method per verb and read; each throw is a distinct catalogued refusal
 class ArtifactLifecycle<B : Any>(
-    val repository: ArtifactRepository<B>,
+    internal val repository: ArtifactRepository<B>,
     private val authoring: AuthoringGuard,
-    val transactions: TransactionOperations = DIRECT,
+    internal val transactions: TransactionOperations = DIRECT,
     private val newId: () -> UUID = UUID::randomUUID,
 ) {
     private val kind = repository.kind
@@ -105,7 +111,7 @@ class ArtifactLifecycle<B : Any>(
     }
 
     /** The DRAFT at [expectedHash] flips to RELEASED — the family's release body, run inside ITS transaction. */
-    fun flipDraft(
+    internal fun flipDraft(
         workspaceId: UUID,
         id: UUID,
         expectedHash: String,

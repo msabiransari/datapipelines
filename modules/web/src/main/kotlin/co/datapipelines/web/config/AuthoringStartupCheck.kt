@@ -40,6 +40,9 @@ class AuthoringStartupCheck(
     private val templates: TemplateRepository,
     /** C14 (#194 lane D): parameter-set drafts join the refusal. Required (#300) — the check is reachable by construction; no null-skip. */
     private val parameterSets: co.datapipelines.parameters.ParameterSetRepository,
+    /** #10 L1b: visualization and dashboard drafts join the refusal — the same lifecycle, the same alignment risk. Required. */
+    private val visualizations: co.datapipelines.visualization.VisualizationRepository,
+    private val dashboards: co.datapipelines.visualization.DashboardRepository,
     private val promotionServerKeyPresent: () -> Boolean = { false },
 ) {
     private val log = LoggerFactory.getLogger(AuthoringStartupCheck::class.java)
@@ -83,13 +86,17 @@ class AuthoringStartupCheck(
     /**
      * The C8/C14 refusal: a receiver holding drafts means someone authored there, and version
      * alignment may already be broken (versioning §9.3). Parameter-set drafts break it exactly
-     * as a pipeline's or a template's do — sets are versioned with the same lifecycle (C14).
+     * as a pipeline's or a template's do — sets are versioned with the same lifecycle (C14). Visualizations and
+     * dashboards (#10 L1b) break it the same way, and are named the same way.
      */
     private fun refuseDrafts() {
         val pipelineDrafts = pipelines.findAllDraftPipelineNames()
         val templateDrafts = templates.findAllDraftTemplateNames()
         val parameterSetDrafts = parameterSets.findAllDraftParameterSetNames()
-        if (pipelineDrafts.isEmpty() && templateDrafts.isEmpty() && parameterSetDrafts.isEmpty()) return
+        val visualizationDrafts = visualizations.findAllDraftNames()
+        val dashboardDrafts = dashboards.findAllDraftNames()
+        val all = listOf(pipelineDrafts, templateDrafts, parameterSetDrafts, visualizationDrafts, dashboardDrafts)
+        if (all.all { it.isEmpty() }) return
         val message =
             buildString {
                 append(
@@ -101,6 +108,8 @@ class AuthoringStartupCheck(
                 named("pipeline", pipelineDrafts)
                 named("template", templateDrafts)
                 named("parameter set", parameterSetDrafts)
+                named("visualization", visualizationDrafts)
+                named("dashboard", dashboardDrafts)
             }
         log.error(message)
         throw IllegalStateException(message)

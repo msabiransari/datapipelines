@@ -161,7 +161,11 @@ class DomainConfiguration {
         promotionProperties: PromotionProperties,
         // C14 (#194 lane D): parameter-set drafts join the drafts refusal.
         parameterSets: co.datapipelines.parameters.ParameterSetRepository,
-    ): AuthoringStartupCheck = AuthoringStartupCheck(environment, pipelines, templates, parameterSets) { promotionProperties.receives }
+        // #10 L1b: so do visualization and dashboard drafts (VisualizationConfiguration's repositories).
+        visualizations: co.datapipelines.visualization.VisualizationRepository,
+        dashboards: co.datapipelines.visualization.DashboardRepository,
+    ): AuthoringStartupCheck =
+        AuthoringStartupCheck(environment, pipelines, templates, parameterSets, visualizations, dashboards) { promotionProperties.receives }
 
     /**
      * The system service account (auth.md §4.5, R7), provisioned at boot. Unconditional: it

@@ -32,7 +32,8 @@ data class DashboardReleased(
  */
 @Suppress("TooManyFunctions", "LongParameterList") // one façade over the aggregate's verb table; its ports are the constructor
 class DashboardService(
-    val repository: DashboardRepository,
+    /** Module-internal (O3): the surfaces read through the lensed reads below, never through this. */
+    internal val repository: DashboardRepository,
     private val validator: DashboardValidator,
     private val visualizations: VisualizationService,
     private val sets: ParameterSetFacts,
