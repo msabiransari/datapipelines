@@ -13,7 +13,10 @@ The bounds: one case ≤ `datapipelines.transform.evaluate-timeout-seconds`, the
 `datapipelines.transform.suite-timeout-seconds`; the depth bound (`max-depth`, default 100) counts
 every evaluate entry and exit — nested expressions and non-tail lambda recursion alike, and
 set-level work over hundreds of rows evaluates at the default (#260) — while a tail-recursive
-lambda is trampolined by the library, so the wall clock is the bound that catches that shape.
+lambda is trampolined by the library, so the wall clock is the bound that catches that shape. A
+body whose STATIC bracket nesting exceeds 64 levels is refused at save/compile time before the
+library parses it (`pipeline.transform.resource_limit`) — the library's parser recurses per
+level and a deeper body can overflow the compiling thread's stack.
 
 ## The node
 

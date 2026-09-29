@@ -225,7 +225,11 @@ loop. Invoked explicitly before a release: `./gradlew browserTest`.
    fixture approach). NOT driven against an already-running stack — the suite
    must be re-runnable to one command with zero manual setup.
 4. **Separate invocation, never in the default graph:** root alias task
-   `browserTest` → `:tests:browser-tests:test`; NOT wired into `build`/`check`.
+   `browserTest` → `:tests:browser-tests:test`; never in the default graph
+   (as proposed — reversed since #292/#297: `build`/`check` RUN
+   `:tests:browser-tests:test` like every module's `test`, and `browserTest`
+   is the name for invoking the suite ALONE; module-structure.md §3/§5.12 is
+   the corrected record).
    Documented in DEVELOPMENT.md §9 beside `integrationTest`. First run without
    browser binaries FAILS with the `playwright install chromium` instructions —
    a deliberate invocation that silently skips is not a verdict (JarSmoke

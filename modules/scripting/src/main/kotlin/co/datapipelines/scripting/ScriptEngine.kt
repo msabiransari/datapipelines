@@ -37,8 +37,11 @@ interface ScriptEngine {
 
     /**
      * Parses the body. A syntax error is [ScriptSyntaxException] with 1-based
-     * [ScriptSyntaxException.line] and [ScriptSyntaxException.column]; nothing else
-     * fails here — semantic errors surface at [evaluate].
+     * [ScriptSyntaxException.line] and [ScriptSyntaxException.column]; a body nesting
+     * past the engine's compile-time ceiling is [ScriptResourceLimitException] of kind
+     * DEPTH (#314 — the library's parser recurses per level, so a deeper body could
+     * overflow the compiling thread's stack). Nothing else fails here — semantic
+     * errors surface at [evaluate].
      */
     fun compile(body: String): CompiledScript
 

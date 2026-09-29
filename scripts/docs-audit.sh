@@ -13,6 +13,14 @@
 #      STRUCTURED LOG event names defined in observability.md §3.4A — a log line's
 #      `event=` is neither an error code nor an audit row, and observability.md is
 #      its authority the same way it is for metric names in check B.
+#      Permissions (#307): every BACKTICKED dotted name whose first segment is one
+#      of the auth.md §7.6 catalog's OWN families (derived from the parsed catalog,
+#      never a hand list) must be defined there — 307 added the 12 families the
+#      code alternation cannot see (api_key, execution, parameter_set, user, ...).
+#      The name is accepted when ANY catalog defines it (permission, §12/§13 code,
+#      or event) and refused when none does — a misspelt `parameter_set.raed` is
+#      in neither. Filenames (.md/.js/.css) and fenced code (JSON paths) are not
+#      citations.
 #   D. Forbidden legacy spellings (renamed/removed in the 2026-08 campaign, and the
 #      pre-075/pre-081 deployment names) outside Change Log sections. Check D alone
 #      also scans the non-`docs/` files a deployer actually copies from — README.md,
@@ -76,15 +84,31 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo 'Records `schedule.nonexistent_event` here.'
     echo 'Logs `scheduler.nonexistent_event` here.'
     echo 'Raises `parameter.evaluate.nonexistent_code` here.'
+    echo 'Cites `user.raed` here.'
+    echo 'Reads `docs.css` here.'
+    echo '```'
+    echo 'a fenced JSON path cites `user.name`'
+    echo '```'
     echo 'Legacy `terminal_node_id` mention.'
   } >> "$tmp/docs/staging.md"
   # D over the NON-docs scan set, which checks A-C never reach: a header that still
   # sends a deployer to a file 081 deleted must fail exactly like a stale spec line.
   echo '# see deploy/env/posture/development.env' >> "$tmp/deploy/compose.yml"
-  if (cd "$tmp" && bash scripts/docs-audit.sh >/dev/null 2>&1); then
-    echo "SELF-TEST FAILED: doctored docs passed the audit" >&2; exit 1
+  # The doctoring must fail EXACTLY as planted (#307's non-vacuity: the probe count,
+  # the one permission probe CAUGHT, and the two negatives — the docs.css filename
+  # and the fenced JSON path — never named). 12 = A:1 B:1 C:8 (7 codes/events + the
+  # permission probe) D:2.
+  out=$( (cd "$tmp" && bash scripts/docs-audit.sh 2>&1) || true)
+  if echo "$out" | grep -q "permission not in auth.md" && \
+     echo "$out" | grep -q "user\.raed" && \
+     ! echo "$out" | grep -E "docs\.css|user\.name" | grep -q "^  " && \
+     [ "$(printf '%s\n' "$out" | grep -c '^  [A-D] ')" -eq 12 ]; then
+    echo "self-test OK: doctored docs fail with all 12 planted defects — the permission probe caught, the filename and fence negatives clean"
+    exit 0
   else
-    echo "self-test OK: doctored docs correctly fail the audit"; exit 0
+    echo "SELF-TEST FAILED: doctored docs did not fail exactly as planted (expected 12 failures, the user.raed permission caught, no docs.css/user.name line)" >&2
+    printf '%s\n' "$out" | tail -25 >&2
+    exit 1
   fi
 fi
 
@@ -271,6 +295,27 @@ if cat_at >= 0:
         elif seen_row and cat_s:
             break
 events |= permissions
+# PERMISSION CITATIONS (#307). The extraction above DEFINES the names; this makes
+# the audit SEE them. Check C's CODE_RE scan matches only its own 16 namespace
+# words, and the catalog's families outnumber them: 12 of the 18 (`api_key`,
+# `calculator`, `docs`, `execution`, `lake_table`, `mcp_key`, `parameter_set`,
+# `profile`, `promotion`, `semantic`, `server_key`, `user`) were invisible — a
+# misspelt `parameter_set.raed` or `execution.cancle` in any doc passed. The
+# families are DERIVED from the parsed catalog (`{p.split('.')[0]}`), never a hand
+# list, so a family §7.6 gains joins this scan without a script edit; the words
+# CODE_RE already scans are subtracted, so no name is checked twice. The pattern
+# demands BACKTICKS (a prose citation, not prose-with-a-period): JSON paths and
+# filenames in code fences body_lines() already skips, and the .md/.js/.css
+# filename suffixes skip below. A name is accepted when any catalog defines it —
+# permission, code or event (`code_ok`) — and refused when none does.
+perm_scan_re = None
+if permissions:
+    code_words = set(re.search(r"\(\?:([^)]+)\)", CODE_RE).group(1).split("|"))
+    perm_families = sorted({p.split(".")[0] for p in permissions} - code_words)
+    if perm_families:
+        perm_scan_re = re.compile(
+            r"`((?:" + "|".join(perm_families) + r")\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`"
+        )
 # lines stating a removal/rename may cite old spellings
 NEGATION = re.compile(r"removed|renamed|deleted|replaced|superseded|folded|"
                       r"does not exist|no longer|instead of|there is no|no `|"
@@ -300,6 +345,17 @@ for p, t in texts.items():
                 continue
             if not code_ok(c):
                 failures.append(f"C {p}:{i}: error code not in pipeline-contract catalog: {c}")
+        if perm_scan_re is not None:
+            for c in set(perm_scan_re.findall(line)):
+                if c.endswith(".js") or c.endswith(".md") or c.endswith(".css"):
+                    continue
+                if (c + "(") in line:
+                    continue
+                if not code_ok(c):
+                    failures.append(
+                        f"C {p}:{i}: permission not in auth.md \u00a77.6 catalog "
+                        f"(nor any code/event catalog): {c}"
+                    )
 
 # ---- D. forbidden legacy spellings -----------------------------------------
 FORBIDDEN = [

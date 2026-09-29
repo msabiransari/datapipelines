@@ -62,7 +62,7 @@ datapipelines/
 │   └── app/                             # Spring Boot entry point, assembles everything
 ├── tests/
 │   ├── integration-tests/           # cross-module integration tests
-│   └── browser-tests/               # Playwright browser suite (separate invocation: `./gradlew browserTest`)
+│   └── browser-tests/               # Playwright browser suite — runs in `build`/`check` like every module's `test` (`./gradlew browserTest` runs it alone)
 └── docs/                                # these specs
 ```
 
@@ -87,7 +87,7 @@ datapipelines/
 | `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. | — (delegates); Redis keys for the post-completion SSE event log and per-user rate-limit counters |
 | `app` | (this spec) | Spring Boot `main()`, assembles all modules, configuration, runnable JAR, **Flyway dependency + migration scripts**. | Owns schema *creation* (Flyway), not data access |
 | `tests/integration-tests` | (this spec) | Cross-module integration tests (Testcontainers for real databases). | — |
-| `tests/browser-tests` | (this spec §5.12) | Mechanical browser E2E of the UI golden paths (Playwright for Java, chromium-only). Separately invoked via `./gradlew browserTest` — NOT part of `build`/`check`. | — |
+| `tests/browser-tests` | (this spec §5.12) | Mechanical browser E2E of the UI golden paths (Playwright for Java, chromium-only). Runs in `build`/`check` like every module's `test`; `./gradlew browserTest` invokes it ALONE. Only `siteShots` (a demo deployment needed) is outside `build`/`check`. | — |
 
 #### Persistence ownership rule (normative)
 
@@ -545,10 +545,11 @@ Codifies the ad-hoc `.playwright-mcp` dev loop as a re-runnable gate.
 - **Self-contained boot:** `@SpringBootTest(RANDOM_PORT)` + Testcontainers Postgres +
   Redis + local auth with a seeded admin — one command, zero manual setup, no
   dependency on an operator's running stack.
-- **Separate invocation:** the root `browserTest` lifecycle task →
-  `:tests:browser-tests:test`. Deliberately NOT wired into `build`/`check`/`gate.sh` —
-  the browser binary download (~150 MB, first run only) and the chromium launch make
-  it too heavy for every-build; it is invoked deliberately before a release.
+- **Runs in `build`/`check` (#308):** `build` and `check` run `:tests:browser-tests:test` like
+  every module's `test` (CI's build step lists it; every gate log shows it). The root
+  `browserTest` lifecycle task is the name for running that suite ALONE. The only browser
+  surface outside `build`/`check` is `siteShots` — it needs a running demo deployment
+  (070 §C), not a browser binary.
 - **Fails loud, never skips:** a deliberate invocation without browser binaries FAILS
   with the install instructions — a silent skip is not a verdict. (The banner-skip
   precedent of `editorJsTest` is for INVOLUNTARY toolchain absence; it does not apply.)
@@ -1248,6 +1249,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | #308 the browser suite's invocation truth | 307 | The `tests/browser-tests` tree comment (§3), the §3.1 matrix row and §5.12's design rule said the suite was "NOT part of/wired into `build`/`check`" — false since #292/#297: `build`/`check` run `:tests:browser-tests:test` like every module's `test`; `./gradlew browserTest` is the name for running the suite ALONE, and only `siteShots` (a running demo deployment needed) is outside. TEST-GAP-2026-09.md's decision 4 carries the correction beside its original proposal. |
 | 2026-09-29 | #266 persistence batching, with its correction round 266b | 266 | New **§5.19 `persistence`** — layer 0 beside `typesystem` and `graph`, no internal dependency: `BatchingWriter<T>` and its `BatchSink` seam, the one group commit the audit log (`auth`) and the execution-event record and replay log (`web`) share. §3/§3.1 rows, §4.1 layer, §4.2's allowed map gains `auth → persistence` and `web → persistence` (`dag` needs none: `appendAll` is a plain repository method); §5.7 names the edge. 266b: `BatchSink.propagates` (a failure that belongs to the caller) and `FailureShape` (a failure's class and SQLState for a log line, never its message) join the public API; `logback-classic` as a test-only dependency. (Round 1 changed §3–§5 without this row.) |
 | 2026-09-28 | #194 lane D — the surfaces | 194d | `web`, `mcp-server` and `application` DECLARE their `parameters` edges (§4.2/§5.18): the REST routes and the wiring in `web` (ParametersConfiguration builds the runner, the evaluator and the ONE pool from one config, plus the `parameters.selectors.abandoned` gauge), the six `parameter_sets_*` tools in `mcp-server` (a `parameters` DocArea with its guide), and the reverse-arrow composition `TemplateUsage` + `ParameterSetTemplatePins` in `application`. `AuthoringStartupCheck` covers parameter-set drafts (versioning §5.5, C14). |
 | 2026-09-27 | #194 lane C — the selector runtime | 194c | §4.2's note: `parameters` DECLARES `templates` and `datasources` (the selector runtime renders and runs through them; the table's row is unchanged — it always allowed both). §5.18 gains the runtime's public API — `SelectorRunner` (the production `SelectorProbe`, now REQUIRED; `selector_probe_unavailable` retired) with its evaluate-time face, `SelectorPool`, `ParameterEvaluator` with the §5.3 model and writer — and `kotlinx-coroutines-core` (BOM-managed). `datasources` (§5.4's module, datasources.md §5.3) gains `ConnectionPool.discard` and `ReadOnlyStatementLease`. |
