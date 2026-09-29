@@ -4,7 +4,7 @@
 # numbers are the same numbers.
 #
 #   ./scripts/test-recount.sh
-#   → files=298 tests=3155 failures=0 errors=0 skipped=1
+#   → files=298 tests=3155 failures=0 errors=0 skipped=1 unreadable=0
 #
 # ---------------------------------------------------------------------------
 # WHY THIS SCRIPT EXISTS
@@ -31,6 +31,13 @@
 # Reads only build output; writes nothing; needs python3 and no network.
 # Exit code is 0 whatever the counts say — it REPORTS, it does not judge.
 # Read the numbers.
+#
+# A result file that does not parse (a test JVM killed mid-write, a disk-full,
+# a daemon OOM) is counted and NAMED, never a crash (#309): the counts line
+# ends with `unreadable=N`, each unreadable path follows on its own line with
+# the parse error — the same shape CI's summary step prints. A named file is a
+# tooling event the reader must see; dropping it silently would under-report
+# the very total this script exists to keep honest.
 
 set -u
 cd "$(dirname "$0")/.." || exit 2
@@ -38,11 +45,18 @@ cd "$(dirname "$0")/.." || exit 2
 python3 - <<'PY'
 import glob, xml.etree.ElementTree as ET
 t=f=e=s=n=0
+unreadable=[]
 for p in glob.glob("modules/*/build/test-results/**/*.xml", recursive=True) + \
          glob.glob("tests/*/build/test-results/**/*.xml", recursive=True):
-    r = ET.parse(p).getroot()
+    try:
+        r = ET.parse(p).getroot()
+    except (ET.ParseError, OSError) as err:
+        unreadable.append((p, str(err)))
+        continue
     if r.tag != "testsuite": continue
     n+=1; t+=int(r.get("tests",0)); f+=int(r.get("failures",0))
     e+=int(r.get("errors",0)); s+=int(r.get("skipped",0))
-print(f"files={n} tests={t} failures={f} errors={e} skipped={s}")
+print(f"files={n} tests={t} failures={f} errors={e} skipped={s} unreadable={len(unreadable)}")
+for p, why in unreadable:
+    print(f"unreadable result file: `{p}` — {why}")
 PY
