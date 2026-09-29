@@ -2,10 +2,12 @@ package co.datapipelines.auth
 
 import co.datapipelines.persistence.BatchSink
 import co.datapipelines.persistence.FailureKinds
+import org.springframework.dao.DataAccessException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.transaction.TransactionException
 import org.springframework.transaction.support.TransactionTemplate
 import java.util.UUID
 
@@ -61,6 +63,21 @@ class AuditRowSink(
     /** A row the database refuses (a user id with no user row, a malformed address) is `poison`; anything else is an outage. */
     override fun classify(failure: Throwable): String =
         if (failure is DataIntegrityViolationException) FailureKinds.POISON else FailureKinds.WRITE_FAILED
+
+    /**
+     * The pre-#266 contract of `AuditLogger`'s INSERT, kept on the batched path (#266b): a STORE
+     * failure is the row's outcome — WARNed, counted, swallowed; the request proceeds — and anything
+     * else reaches the caller and fails the request, as it always did.
+     *
+     * A store failure is a [DataAccessException] (the INSERT's) or a [TransactionException] (the
+     * batch's own transaction: a database that cannot be reached surfaces as
+     * `CannotCreateTransactionException` when the batch begins and a failed COMMIT as
+     * `TransactionSystemException` — neither a `DataAccessException`, and neither may fail a request
+     * that the unbatched INSERT would have let through). Everything else propagates: an
+     * `IllegalStateException` or any other runtime exception from the driver or the template, and
+     * an `Error`.
+     */
+    override fun propagates(failure: Throwable): Boolean = failure !is DataAccessException && failure !is TransactionException
 
     companion object {
         /** The statement [AuditLogger] has always run — the batch sends it N times, the direct path once. */

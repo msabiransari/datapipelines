@@ -36,6 +36,16 @@ import java.util.UUID
  *   to this same INSERT on the caller's thread after `record-max-wait-ms`, and after shutdown.
  * - **No writer** (`datapipelines.persistence.enabled: false`, or a test slice): every row is the
  *   direct INSERT.
+ *
+ * ## Which failures reach the caller — the same on every path (#266b)
+ * A STORE failure is the row's, never the request's: a `DataAccessException` (the INSERT refused, the
+ * database unreachable) and, on the batched path, a `TransactionException` (the batch's own
+ * transaction could not begin or commit) are WARNed with the row's ids and the failure's class and
+ * SQLState, counted, and swallowed — [log] returns and the request proceeds without the row.
+ * Anything else propagates out of [log] and fails the request, exactly as the pre-#266 INSERT's
+ * `catch (DataAccessException)` let it: a runtime exception from the driver or the template, a
+ * serialization failure of `details`, an `Error`. On the batched path the writer rethrows it on this
+ * thread ([AuditRowSink.propagates]).
  */
 class AuditLogger(
     private val jdbc: NamedParameterJdbcTemplate,

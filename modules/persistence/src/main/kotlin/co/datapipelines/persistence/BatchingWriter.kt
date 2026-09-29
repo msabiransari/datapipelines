@@ -73,13 +73,16 @@ class BatchingWriter<T : Any>(
     /**
      * Writes [item] durably and returns once it is — or once it definitively is not. Blocks the
      * calling thread; the direct path (a full queue, a slow commit, a stopped writer) writes on it.
-     * Never throws for a store failure: that is [Outcome.Failed].
+     * Never throws for a store failure: that is [Outcome.Failed]. Throws only a failure the sink
+     * claims for the caller ([BatchSink.propagates]), after counting and logging it.
      */
     fun record(item: T): Outcome =
-        when (val admission = admitBlocking(item)) {
-            is Admission.Refused -> direct(item, admission.reason)
-            is Admission.Queued -> awaitOrReclaim(admission)
-        }
+        claimed(
+            when (val admission = admitBlocking(item)) {
+                is Admission.Refused -> direct(item, admission.reason)
+                is Admission.Queued -> awaitOrReclaim(admission)
+            },
+        )
 
     /**
      * [record] for a caller that must not block a thread and must not wait without bound — the
@@ -88,15 +91,29 @@ class BatchingWriter<T : Any>(
      * direct write (run on [directExecutor], never on the caller's dispatcher) or for an item
      * already inside a commit; after that it returns [Outcome.Indeterminate] and the write, if it
      * is still running, may land later. A direct write abandoned before it started never runs.
+     * Like [record], throws only a failure the sink claims for the caller.
      */
     suspend fun recordSuspending(
         item: T,
         directExecutor: Executor,
     ): Outcome =
-        when (val admission = admitSuspending(item)) {
-            is Admission.Refused -> directBounded(item, admission.reason, directExecutor)
-            is Admission.Queued -> awaitOrReclaimSuspending(admission, directExecutor)
-        }
+        claimed(
+            when (val admission = admitSuspending(item)) {
+                is Admission.Refused -> directBounded(item, admission.reason, directExecutor)
+                is Admission.Queued -> awaitOrReclaimSuspending(admission, directExecutor)
+            },
+        )
+
+    /**
+     * The one place a failure leaves the writer as an exception (#266b): a failure the sink claims
+     * for the caller ([BatchSink.propagates]) is rethrown on the caller's thread — from a batch or
+     * from the caller's own direct write alike; every other outcome is returned.
+     */
+    private fun claimed(outcome: Outcome): Outcome {
+        val cause = (outcome as? Outcome.Failed)?.cause
+        if (cause != null && sink.propagates(cause)) throw cause
+        return outcome
+    }
 
     private fun admitBlocking(item: T): Admission<T> {
         if (!accepting.get()) return Admission.Refused(FallbackReason.STOPPED)

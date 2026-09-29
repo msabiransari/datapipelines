@@ -23,6 +23,11 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import javax.sql.DataSource
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Proxy
+import java.sql.Connection
+import java.sql.SQLException
 import java.util.Collections
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -218,6 +223,89 @@ class AuditLoggerBatchingIntegrationTest {
             rendered.count { it.startsWith("event=persistence.direct_write_failed writer=audit") && it.contains("sql_state=22P05") } shouldBe 1
         }
     }
+
+    @Test
+    fun `a failure that is not the store's reaches the caller on every path - batched, fallback and direct`() {
+        // #266b (the pass's observation 6): the unbatched INSERT caught DataAccessException only, so
+        // anything else — here a runtime exception out of the driver — failed the request. The batched
+        // path swallowed every Exception into an outcome; the sink now claims the non-store ones and
+        // the writer rethrows them on the caller's thread. Red while the writer ignored the claim.
+        val broken = NamedParameterJdbcTemplate(statementsThrow { IllegalStateException("driver bug") })
+        val brokenWriter = BatchingWriter("audit", BatchingConfig(writers = 1), AuditRowSink(broken))
+        try {
+            val batched = AuditLogger(broken, ObjectMapper(), brokenWriter)
+            shouldThrow<IllegalStateException> { batched.log("audit.nonstore.batched", userId = userId) }.message shouldBe "driver bug"
+            brokenWriter.close()
+            shouldThrow<IllegalStateException> { batched.log("audit.nonstore.fallback", userId = userId) }.message shouldBe "driver bug"
+            shouldThrow<IllegalStateException> {
+                AuditLogger(broken, ObjectMapper()).log("audit.nonstore.direct", userId = userId)
+            }.message shouldBe "driver bug"
+        } finally {
+            brokenWriter.close()
+        }
+    }
+
+    @Test
+    fun `a store that cannot be reached is a failed row, never a failed request - batched, fallback and direct`() {
+        // The other half of the classification, and why it is not "DataAccessException only": the
+        // batch runs in its own transaction, and a database that cannot be reached surfaces there as
+        // CannotCreateTransactionException — a TransactionException, not a DataAccessException. The
+        // unbatched INSERT met the same outage as CannotGetJdbcConnectionException and swallowed it;
+        // the batched path must too (red with TransactionException dropped from the sink's store set).
+        val unreachable = NamedParameterJdbcTemplate(connectionsRefused())
+        val deadWriter = BatchingWriter("audit", BatchingConfig(writers = 1), AuditRowSink(unreachable))
+        try {
+            val batched = AuditLogger(unreachable, ObjectMapper(), deadWriter)
+            batched.log("audit.outage.batched", userId = userId)
+            deadWriter.close()
+            batched.log("audit.outage.fallback", userId = userId)
+            AuditLogger(unreachable, ObjectMapper()).log("audit.outage.direct", userId = userId)
+        } finally {
+            deadWriter.close()
+        }
+        AuditRowSink(unreachable).run {
+            propagates(org.springframework.transaction.CannotCreateTransactionException("begin")) shouldBe false
+            propagates(org.springframework.transaction.TransactionSystemException("commit")) shouldBe false
+            propagates(org.springframework.jdbc.CannotGetJdbcConnectionException("connect")) shouldBe false
+            propagates(IllegalStateException("bug")) shouldBe true
+            propagates(AssertionError("error")) shouldBe true
+        }
+    }
+
+    /** The shared database, except that every statement the connection prepares throws [failure]. */
+    private fun statementsThrow(failure: () -> RuntimeException): DataSource =
+        object : DataSource by dataSource {
+            override fun getConnection(): Connection = throwingStatements(dataSource.connection, failure)
+
+            override fun getConnection(
+                username: String?,
+                password: String?,
+            ): Connection = throwingStatements(dataSource.connection, failure) // credentials: the shared pool's own
+        }
+
+    private fun throwingStatements(
+        real: Connection,
+        failure: () -> RuntimeException,
+    ): Connection =
+        Proxy.newProxyInstance(Connection::class.java.classLoader, arrayOf(Connection::class.java)) { _, method, args ->
+            if (method.name == "prepareStatement") throw failure()
+            try {
+                method.invoke(real, *(args ?: emptyArray()))
+            } catch (e: InvocationTargetException) {
+                throw e.targetException
+            }
+        } as Connection
+
+    /** A database nobody can reach: every connection attempt is refused (SQLState 08001). */
+    private fun connectionsRefused(): DataSource =
+        object : DataSource by dataSource {
+            override fun getConnection(): Connection = throw SQLException("connection refused", "08001")
+
+            override fun getConnection(
+                username: String?,
+                password: String?,
+            ): Connection = throw SQLException("connection refused", "08001")
+        }
 
     private fun row(
         event: String,

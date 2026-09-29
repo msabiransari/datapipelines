@@ -90,6 +90,17 @@ interface BatchSink<T> {
 
     /** The failure-kind tag for a write that threw — `poison` for a row the store refuses, anything else for an outage. */
     fun classify(failure: Throwable): String = FailureKinds.WRITE_FAILED
+
+    /**
+     * Whether [failure] belongs to the CALLER rather than to the item's outcome (#266b). True →
+     * [BatchingWriter.record] and [BatchingWriter.recordSuspending] rethrow it on the caller's
+     * thread — after the writer has counted and logged it like any failure — whether it came from a
+     * batch (the instance the writer thread caught, so its stack is the writer's) or from the
+     * caller's own direct write. Default false: every failure is an [Outcome.Failed], never thrown.
+     * The audit log uses it to keep the contract its INSERT had before batching: a store failure is
+     * logged and swallowed, anything else fails the request.
+     */
+    fun propagates(failure: Throwable): Boolean = false
 }
 
 /** What happened to one recorded item. */

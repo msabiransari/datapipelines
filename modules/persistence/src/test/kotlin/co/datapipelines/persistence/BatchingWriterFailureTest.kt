@@ -4,10 +4,12 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.spi.IThrowableProxy
 import ch.qos.logback.core.read.ListAppender
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Timeout
 import org.slf4j.LoggerFactory
 import java.sql.SQLException
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 /**
@@ -26,6 +29,10 @@ import java.util.concurrent.TimeUnit
  * The sink here throws exactly that: an exception whose message and whose cause's message both
  * carry [ROW_CONTENT], with a SQLState on the cause. Every line the writer logs is rendered whole —
  * the message AND any attached throwable, recursively — and must not contain it.
+ *
+ * And whose failure it is: a store failure is the item's [Outcome.Failed]; a failure the sink
+ * claims for the caller ([BatchSink.propagates] — the audit log's non-store failures) is rethrown on
+ * the caller's thread, from a batch or from the caller's own direct write, blocking or suspending.
  */
 @Timeout(30)
 class BatchingWriterFailureTest {
@@ -98,7 +105,34 @@ class BatchingWriterFailureTest {
         FailureShape.cause(object : RuntimeException("anonymous") {}) shouldContain "BatchingWriterFailureTest"
     }
 
-    private fun writer(sink: LeakySink): BatchingWriter<String> =
+    @Test
+    fun `a failure the sink claims for the caller is rethrown on the caller's thread - from a batch and from the direct write`() {
+        // Red while the writer ignores BatchSink.propagates: every failure became an outcome, so the
+        // audit log's batched path swallowed what its INSERT used to throw into the request.
+        val w = writer(ClaimingSink())
+        shouldThrow<IllegalStateException> { w.record("bug") }.message shouldBe "not a store failure: bug"
+        w.record("refused").shouldBeInstanceOf<Outcome.Failed>()
+        w.close() // stopped: the caller's own direct write
+        shouldThrow<IllegalStateException> { w.record("bug") }.message shouldBe "not a store failure: bug"
+        w.record("refused").shouldBeInstanceOf<Outcome.Failed>()
+        withClue("counted and logged like any failure before it is rethrown") {
+            logs.list.count { it.formattedMessage.contains("cause=IllegalStateException") } shouldBe 2
+        }
+    }
+
+    @Test
+    fun `the suspending record rethrows a claimed failure too - from a batch and from the bounded direct write`() =
+        runBlocking<Unit> {
+            val direct = Executors.newSingleThreadExecutor().also { pool -> closeables += AutoCloseable { pool.shutdownNow() } }
+            val w = writer(ClaimingSink())
+            shouldThrow<IllegalStateException> { w.recordSuspending("bug", direct) }
+            w.recordSuspending("refused", direct).shouldBeInstanceOf<Outcome.Failed>()
+            w.close()
+            shouldThrow<IllegalStateException> { w.recordSuspending("bug", direct) }
+            w.recordSuspending("refused", direct).shouldBeInstanceOf<Outcome.Failed>()
+        }
+
+    private fun writer(sink: BatchSink<String>): BatchingWriter<String> =
         BatchingWriter("test", BatchingConfig(writers = 1, lingerMillis = 0), sink).also { closeables += it }
 
     private fun line(prefix: String): String {
@@ -178,6 +212,26 @@ class BatchingWriterFailureTest {
                 "ERROR: null value in column violates not-null constraint for $item ($ROW_CONTENT)",
                 SQLException("Detail: Failing row contains ($ROW_CONTENT).", SQL_STATE),
             )
+    }
+
+    /** A store that throws a store failure for `refused` and something else for `bug` — and claims only the latter. */
+    private class ClaimingSink : BatchSink<String> {
+        override fun write(items: List<String>) = items.forEach(::writeOne)
+
+        override fun writeOne(item: String) {
+            when (item) {
+                "bug" -> throw IllegalStateException("not a store failure: $item")
+                "refused" -> throw StoreRefusal("refused", SQLException("refused", SQL_STATE))
+            }
+        }
+
+        override fun partitionKey(item: String): Any = "one"
+
+        override fun sizeOf(item: String): Int = item.length
+
+        override fun describe(item: String): String = item
+
+        override fun propagates(failure: Throwable): Boolean = failure !is StoreRefusal
     }
 
     private class StoreRefusal(
