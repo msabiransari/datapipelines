@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.22 (revised — see Change Log)
+**Status:** v1.23 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-09-29
@@ -646,7 +646,10 @@ node lands (7c). What is already true and binding:
   the parse alone (measured 2026-09-29 — and once on a default stack under load, the
   conformance suite's 1-in-13 red). `compile` therefore refuses past a fixed ceiling
   of 64 bracket levels BEFORE the library parses (`pipeline.transform.resource_limit`,
-  kind DEPTH — the expression is grammatical, only its depth is over the line), and
+  kind DEPTH — the expression is grammatical, only its depth is over the line; on the save
+  and validate paths the templates validator turns that refusal into the failure list's
+  `template.validation.syntax_error`, or `invariant_invalid` for an invariant, with
+  `details.kind`), and
   both boundaries turn any residual stack overflow into that same refusal, so an
   Error never escapes the seam. The ceiling sits under the evaluate-time default
   (100): compile bounds STATIC nesting (stack safety), evaluate bounds RUNTIME depth
@@ -1611,6 +1614,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.23 | the 307 merge's security pass (#314) | §5.3's depth bullet: on the save and validate paths the compile-time ceiling's refusal is the templates validator's failure list (`template.validation.syntax_error`, `invariant_invalid` for an invariant, `details.kind: DEPTH`) — the merged branch let `ScriptResourceLimitException` escape `validate` as the catalogued 500 on every save path; the skill's transforms-evaluation sentence says the same. |
 | 2026-09-29 | v1.22 | lane 307 (#314) | §5.3's depth bullet gains the compile-time nesting ceiling: the library's parser recurses per level and 500 nested brackets overflowed a 256 KB stack inside the parse (measured; the conformance suite's 1-in-13 red), so `compile` refuses past a fixed ceiling of 64 bracket levels before the library parses (`pipeline.transform.resource_limit`, kind DEPTH — no new code), and both boundaries turn any residual stack overflow into the same refusal. The evaluate-time bound and every measured outcome are unchanged; the ceiling is a stack-safety constant, not a config key. |
 |---|---|---|---|
 | 2026-09-26 | v1.19 | 260 the depth-accounting fix (#260) | §5.3's script-engine bullet and the honest-bounds table re-measured: the library `Timebox` returned early on `isParallelCall` frames (second and later object pairs/arguments), leaking one depth unit per item on set-level shapes and skipping the clock check in those frames — the engine now counts every evaluate entry/exit itself. Deep-recursion row outcome UNCHANGED (the loop is tail-recursive; the library trampolines it; TIME catches it — the trampoline, not `isParallelCall`, is the mechanism); a non-tail-recursive lambda nests for real and depth refuses it at `max-depth` nested calls. No table outcome flipped; the doc never hand-writes the numbers. |

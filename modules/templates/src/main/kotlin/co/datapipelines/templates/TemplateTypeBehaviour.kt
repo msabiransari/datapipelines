@@ -4,6 +4,7 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.scripting.ScriptEngine
 import co.datapipelines.scripting.ScriptLanguage
+import co.datapipelines.scripting.ScriptResourceLimitException
 import co.datapipelines.scripting.ScriptSyntaxException
 import co.datapipelines.typesystem.Dialect
 import freemarker.core.TemplateElement
@@ -115,6 +116,17 @@ sealed interface TemplateTypeBehaviour {
                         code = PipelineErrorCodes.Template.SYNTAX_ERROR,
                         message = err.message ?: "the body does not parse",
                         details = mapOf("line" to err.line, "column" to err.column),
+                    ),
+                )
+            } catch (err: ScriptResourceLimitException) {
+                // #314's compile-time nesting ceiling refuses the BODY before the library parses it: on the save and
+                // validate paths that is a validation failure like a syntax error (the 400 failure list every caller
+                // renders), never the transform family's catalogued 500 — the 307 merge's security pass.
+                listOf(
+                    TemplateValidationFailure(
+                        code = PipelineErrorCodes.Template.SYNTAX_ERROR,
+                        message = err.message ?: "the body exceeds a resource limit",
+                        details = mapOf("kind" to err.kind.name),
                     ),
                 )
             }

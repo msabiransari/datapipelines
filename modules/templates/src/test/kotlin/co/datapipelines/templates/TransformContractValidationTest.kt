@@ -2,10 +2,12 @@ package co.datapipelines.templates
 
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.TemplateType
+import co.datapipelines.scripting.ScriptResourceLimitException
 import co.datapipelines.typesystem.LogicalType
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
 
 /**
@@ -25,12 +27,13 @@ class TransformContractValidationTest {
         contract: TransformContract = rowContract(),
         invariants: List<TransformInvariant>? = emptyList(),
         tests: List<TransformTestCase>? = listOf(emptyCase()),
+        body: String = "rows",
     ) = TemplateFixtures.draft(
         id = "test/xform.jsonata",
         type = TemplateType.JSONATA,
         engine = Template.NONE_ENGINE,
         dialect = null,
-        body = "rows",
+        body = body,
         contract = contract,
         invariants = invariants,
         tests = tests,
@@ -211,6 +214,30 @@ class TransformContractValidationTest {
         ) shouldBe "rejects_without_table"
     }
 
+    /**
+     * #314's compile-time nesting ceiling refuses the BODY before the library parses it. On the save and validate
+     * paths that refusal is a validation failure like a syntax error — the 400 failure list every caller renders —
+     * never the transform family's catalogued 500 (the 307 merge's security pass).
+     */
+    @Test
+    fun `a body past the nesting ceiling is syntax_error with kind DEPTH - a validation failure, never a 500`() {
+        val deep = "(".repeat(OVER_THE_CEILING) + "rows" + ")".repeat(OVER_THE_CEILING)
+        val failure = failuresOf(draftOf(body = deep)).single { it.code == PipelineErrorCodes.Template.SYNTAX_ERROR }
+        failure.message shouldContain "refused before parsing"
+        failure.details["kind"] shouldBe ScriptResourceLimitException.Kind.DEPTH.name
+    }
+
+    @Test
+    fun `an invariant past the nesting ceiling is invariant_invalid, naming it and the kind - never a 500`() {
+        val deep = "(".repeat(OVER_THE_CEILING) + "true" + ")".repeat(OVER_THE_CEILING)
+        val failure =
+            failuresOf(draftOf(invariants = listOf(TransformInvariant("deep", deep, "too deep"))))
+                .single { it.code == PipelineErrorCodes.Template.INVARIANT_INVALID }
+        failure.details["invariant"] shouldBe "deep"
+        failure.details["kind"] shouldBe ScriptResourceLimitException.Kind.DEPTH.name
+        failure.message shouldContain "refused before parsing"
+    }
+
     @Test
     fun `invariant_invalid refuses a non-compiling invariant, naming it`() {
         val failures =
@@ -286,5 +313,10 @@ class TransformContractValidationTest {
         val rejected = (outcome as TemplateDeserializationOutcome.Rejected).result
         rejected.failures.single().code shouldBe PipelineErrorCodes.Template.CONTRACT_INVALID
         rejected.failures.single().details["rule"] shouldBe "unknown_field"
+    }
+
+    private companion object {
+        /** One past `JsonataNestingScan.CEILING` (64, internal to `scripting`); a raised ceiling turns both cases red. */
+        const val OVER_THE_CEILING = 65
     }
 }

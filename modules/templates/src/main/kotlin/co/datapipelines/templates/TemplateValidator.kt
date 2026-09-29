@@ -5,6 +5,7 @@ import co.datapipelines.pipeline.TemplateType
 import co.datapipelines.scripting.JsonataEngine
 import co.datapipelines.scripting.ScriptEngine
 import co.datapipelines.scripting.ScriptLanguage
+import co.datapipelines.scripting.ScriptResourceLimitException
 import co.datapipelines.scripting.ScriptSyntaxException
 import co.datapipelines.typesystem.Dialect
 import co.datapipelines.typesystem.LogicalType
@@ -602,6 +603,14 @@ class TemplateValidator(
                                 "line" to err.line,
                                 "column" to err.column,
                             ),
+                    )
+            } catch (err: ScriptResourceLimitException) {
+                // The compile-time nesting ceiling (#314), a validation failure here as it is for the body.
+                failures +=
+                    TemplateValidationFailure(
+                        code = PipelineErrorCodes.Template.INVARIANT_INVALID,
+                        message = "Invariant '${invariant.name}' does not compile: ${err.message ?: "resource limit"}",
+                        details = mapOf("invariant" to invariant.name, "kind" to err.kind.name),
                     )
             }
         }
