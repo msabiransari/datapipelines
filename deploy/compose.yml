@@ -46,10 +46,13 @@ services:
     # shutdown lets in-flight requests end. Docker's default stop grace is 10 s — a kill
     # mid-drain leaves executions RUNNING, which the sweep marks ABORTED/instance_lost,
     # which the scheduler records as UNKNOWN — and an unknown run BLOCKS its schedule.
-    # The arithmetic (#277): the gate at its maximum 15 s + the drain's 20 s + 10 s for
-    # Tomcat = 45 s; compose has no preStop, so 50 s (Helm's value, which needs its 5 s
-    # preStop too) leaves 15 s for Tomcat. ShutdownGraceArithmeticTest pins both files.
-    stop_grace_period: 50s
+    # The arithmetic (#277, #266, #316): the gate at its maximum 15 s + the drain's 20 s +
+    # 10 s for Tomcat + the persistence drain's 10 s (shutdown-drain-ms, #266) = 55 s;
+    # compose has no preStop, so 60 s (Helm's value, which needs its 5 s preStop too)
+    # leaves 5 s of headroom. The scheduled jobs' scheduler (#316) stops AFTER all of
+    # these and is not in the sum: a kill during its wait costs nothing the drains own.
+    # ShutdownGraceArithmeticTest pins both files.
+    stop_grace_period: 60s
     ports:
       # APP_HOST_PORT is the LANE knob, not app config (hence no DATAPIPELINES_
       # prefix — compose-env-audit.sh scopes that namespace to keys the app binds).

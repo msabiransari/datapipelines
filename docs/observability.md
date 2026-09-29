@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.23 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.24 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-29
@@ -214,6 +214,16 @@ Every `@Scheduled` job — the stale-execution sweep (every 15 s), the pool reap
 |---|---|---|---|
 | INFO | `shutdown.scheduled_jobs_stopped` | Shutdown, after the execution drain and every writer's drain (§3.4G): the jobs' scheduler has stopped and its thread has ended. No tick STARTS once the application begins to close; a tick already running finished before this line, while the metadata pool was still open | `thread` |
 | WARN | `shutdown.scheduled_jobs_incomplete` | The same point, but a tick was still running — it outlived `spring.lifecycle.timeout-per-shutdown-phase` (30 s by default) and a further `await_ms`. It is cut when the metadata pool closes, and the next tick, on this instance or another, redoes it: every job is idempotent | `thread`, `await_ms` |
+
+#### 3.4I The executor's retention events (#316 review)
+
+The executor's two scheduled jobs on the `dp-scheduled` thread (§3.4H) — the stale-execution sweep (`StaleExecutionSweeper`, every 15 s) and the hourly retention sweep over `execution_events` (`ExecutionEventRetention`) — log these. The two failure lines still carry the store's `message` today; #321 replaces it with `cause` + `sql_state` (the §3.4G rule). Catalogued at the 316 merge: §3.4H cited two of these names before any table defined them, and the docs audit (whose `execution` event family joined in the same commit — `execution` is also a permission family) refused the citation.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `execution.events_purged` | A retention tick deleted at least one `execution_events` row for executions completed before the cutoff (nothing is logged for an empty tick) | `count`, `cutoff` |
+| WARN | `execution.sweep_failed` | The stale sweep's UPDATE threw; the tick is skipped and the next one retries | `cutoff`, `heartbeat_cutoff`, `message` (the store's — #321 replaces it with `cause`, `sql_state`) |
+| WARN | `execution.event_retention_failed` | The retention tick's DELETE threw; the next tick retries | `cutoff`, `message` (the store's — #321 replaces it with `cause`, `sql_state`) |
 
 ### 3.5 Log destination
 
@@ -496,6 +506,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.24 | the 316 merge's review (#316) | New **§3.4I**: `execution.events_purged` catalogued — §3.4H cited it and the docs audit's citation check (#307, on main since 4b91c387; not on the lane's base) refused the uncatalogued name; #321 adds the two failure rows. |
 | 2026-09-29 | v1.23 | 316 (#316) the scheduled jobs' own thread — renumbered at merge: 306 took v1.21 and its pass v1.22 | New **§3.4H**: every `@Scheduled` job runs on `dp-scheduled`, the jobs' own scheduler, so their lines (named there) carry that `thread` — until #316 they carried `dp-sse-log`, the SSE log streamer's; two shutdown lines, `shutdown.scheduled_jobs_stopped` (INFO, after both drains) and `shutdown.scheduled_jobs_incomplete` (WARN, a tick outlived the shutdown wait). |
 | 2026-09-29 | v1.22 | the 306 merge's security pass (#311) | §4.1: `lifecycle_write_failed` also counts a terminal UPDATE that matched no row (#325); the emitter's lifecycle failure lines log class + SQLState at WARN (§3.4G), never the driver's message. |
 | 2026-09-29 | v1.21 | 306/#311 (the execution row's order and bounds) — numbered after 310's v1.20 | §4.1 gains `datapipelines.executions.lifecycle_write_failed` (counter, no tags): the terminal UPDATE of `pipeline_executions` failed or outlived its bound (`datapipelines.executor.lifecycle-write-timeout-seconds`), the row is left RUNNING for the stale sweep, and the counter is the difference between that and a dead instance. The RUNNING insert's failure is deliberately uncounted here (fail-closed for scheduled runs, WARN for interactive). |

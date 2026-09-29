@@ -1,5 +1,6 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.persistence.BatchingConfig
 import co.datapipelines.scheduler.SchedulerProperties
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
@@ -14,7 +15,12 @@ import java.io.File
  * On SIGTERM, in order: Helm's `preStop` sleep (compose has none); the scheduler's admission gate,
  * which waits up to `shutdown-wait-seconds` — at most [SchedulerProperties.MAX_SHUTDOWN_WAIT_SECONDS];
  * the execution drain's bounded flush ([ExecutionDrainLifecycle.DEFAULT_FLUSH_TIMEOUT_MILLIS]); then
- * Tomcat's graceful phase, given [TOMCAT_GRACEFUL_SECONDS]. A runtime that kills before the drain
+ * Tomcat's graceful phase, given [TOMCAT_GRACEFUL_SECONDS]; then the persistence drain (#266) —
+ * every batching writer flushes for at most `shutdown-drain-ms`, shipped as
+ * [BatchingConfig.DEFAULT_SHUTDOWN_DRAIN_MILLIS] (the 316 merge's review found it missing here
+ * and in deployment §8.3.2). The scheduled jobs' scheduler stops AFTER all of these (#316) and is
+ * not in the sum: a tick in flight is awaited up to the phase timeout, but nothing the drains own
+ * is lost if the runtime kills during that wait. A runtime that kills before the drain
  * finishes leaves executions RUNNING, the sweep records them lost, and a lost scheduled run BLOCKS
  * its schedule — so the grace is derived from the code's own bounds here, never restated.
  *
@@ -24,20 +30,23 @@ import java.io.File
 class ShutdownGraceArithmeticTest {
     private val schedulerPhases =
         (SchedulerProperties.MAX_SHUTDOWN_WAIT_SECONDS + ExecutionDrainLifecycle.DEFAULT_FLUSH_TIMEOUT_MILLIS / MILLIS).toInt()
+    private val persistenceDrain = (BatchingConfig.DEFAULT_SHUTDOWN_DRAIN_MILLIS / MILLIS).toInt()
 
     @Test
-    fun `Helm's grace covers preStop, the admission gate at its maximum, the drain and Tomcat's phase`() {
+    fun `Helm's grace covers preStop, the admission gate at its maximum, the drain, Tomcat's phase and the persistence drain`() {
         val preStop = helmPreStopSeconds()
-        val required = preStop + schedulerPhases + TOMCAT_GRACEFUL_SECONDS
-        withClue("values.yaml terminationGracePeriodSeconds against $preStop + $schedulerPhases + $TOMCAT_GRACEFUL_SECONDS") {
+        val required = preStop + schedulerPhases + TOMCAT_GRACEFUL_SECONDS + persistenceDrain
+        withClue(
+            "values.yaml terminationGracePeriodSeconds against $preStop + $schedulerPhases + $TOMCAT_GRACEFUL_SECONDS + $persistenceDrain",
+        ) {
             helmGraceSeconds() shouldBeGreaterThanOrEqual required
         }
     }
 
     @Test
-    fun `compose's stop grace covers the admission gate at its maximum, the drain and Tomcat's phase`() {
-        withClue("deploy/compose.yml stop_grace_period against $schedulerPhases + $TOMCAT_GRACEFUL_SECONDS") {
-            composeGraceSeconds() shouldBeGreaterThanOrEqual schedulerPhases + TOMCAT_GRACEFUL_SECONDS
+    fun `compose's stop grace covers the admission gate at its maximum, the drain, Tomcat's phase and the persistence drain`() {
+        withClue("deploy/compose.yml stop_grace_period against $schedulerPhases + $TOMCAT_GRACEFUL_SECONDS + $persistenceDrain") {
+            composeGraceSeconds() shouldBeGreaterThanOrEqual schedulerPhases + TOMCAT_GRACEFUL_SECONDS + persistenceDrain
         }
     }
 

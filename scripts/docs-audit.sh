@@ -276,10 +276,14 @@ events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
 # typo elsewhere fails: the name has to be DEFINED before it is cited. A name may carry more than
 # one dot (178: `pipeline.promotion.lens_unavailable` sits beside the client's existing
 # `pipeline.promotion.pushing` / `.target_refused` family) — the family is the second segment.
+# `execution` joined at the 316 merge (§3.4I): the executor's scheduled jobs log
+# `execution.events_purged` / `execution.sweep_failed` / `execution.event_retention_failed`, and
+# `execution` is ALSO a permission family (§7.6 `execution.read`, …), so the #307 citation scan
+# below refused the first doc that cited one of them until a §3.4 table could define it.
 obs_txt = texts.get("docs/observability.md", "")
 sec34 = re.search(r"^#### 3\.4A\b.*?(?=^### )", obs_txt, re.M | re.S)
 if sec34:
-    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake|scheduler)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
+    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake|scheduler|execution)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
 # PERMISSIONS (#215). The auth.md §7.6 catalog's FIRST column defines every
 # `<functionality>.<permission>` name (`pipeline.read`, `workspace.members.manage`). They share
 # the error codes' domain words but are neither codes nor events, and the catalog is their one

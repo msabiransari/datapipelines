@@ -56,8 +56,11 @@ podDisruptionBudget:
 # §8.3.1/§8.3.2 (#251, #277): the grace is the SUM of the shutdown sequence at its
 # configured maximum — the §8.3.2 `preStop: sleep 5` (baked into the Deployment
 # template) + the scheduler's admission gate (shutdown-wait-seconds, at most 15 s)
-# + the drain's bounded flush (20 s) + 10 s for Tomcat's graceful phase = 50 s.
-# At 40 s the scheduler phases alone reached 40 and left Tomcat nothing.
-# deploy/compose.yml's stop_grace_period matches; ShutdownGraceArithmeticTest
-# derives the sum from the code's own bounds and fails a smaller value.
-terminationGracePeriodSeconds: 50
+# + the drain's bounded flush (20 s) + 10 s for Tomcat's graceful phase + the
+# persistence drain (shutdown-drain-ms, 10 s — #266; the 316 review found it missing
+# from this sum) = 60 s. At 40 s the scheduler phases alone reached 40 and left
+# Tomcat nothing. The scheduled jobs' scheduler (#316) stops after every drain and is
+# not in the sum. deploy/compose.yml's stop_grace_period matches;
+# ShutdownGraceArithmeticTest derives the sum from the code's own bounds and fails a
+# smaller value.
+terminationGracePeriodSeconds: 60
