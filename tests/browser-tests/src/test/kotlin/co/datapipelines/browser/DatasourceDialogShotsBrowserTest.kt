@@ -1,6 +1,9 @@
 package co.datapipelines.browser
 
+import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.PlaywrightException
+import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -70,11 +73,16 @@ class DatasourceDialogShotsBrowserTest : BrowserSuite() {
 
         // 2. expanded — every catalogued key, prefilled, each saying which layer it came from.
         page.locator("#register-modal details summary").first().click()
+        // The section's own ready state (#303): the <details> OPEN and the fields laid out. Both
+        // reads below would pass on a closed section (a hidden input still has its value), so
+        // without this the first thing to notice a closed one was the scroll's 30 s timeout.
+        page.waitForFunction("() => document.querySelector('#register-modal details').open")
+        page.locator("#ds-pool-fields").waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE))
         page.locator("#register-modal input[name='pool.maximumPoolSize']").inputValue() shouldBe "10"
         page.locator("#ds-pool-fields").innerText() shouldContain "this server"
         // The modal scrolls; a shot taken from the top would photograph the credential fields
         // and one edge of the section this image is OF.
-        page.locator("#ds-pool-fields").scrollIntoViewIfNeeded()
+        scrollIntoView("#ds-pool-fields")
         shot("pool-expanded", mode)
 
         // 3. an out-of-range value, refused inline with the modal still open.
@@ -95,8 +103,11 @@ class DatasourceDialogShotsBrowserTest : BrowserSuite() {
             .waitForResponse("**/partials/datasources") {
                 page.click("#register-modal button[type=submit]")
             }.status() shouldBe 400
+        // The refusal is rendered by datasources.js's htmx:responseError handler AFTER the response
+        // this waited for; its own marker is `data-error` on the result (#303).
+        page.locator("#register-result[data-error='true']").waitFor(Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE))
         page.locator("#register-result").innerText() shouldContain "maxLifetime"
-        page.locator("#register-result").scrollIntoViewIfNeeded()
+        scrollIntoView("#register-result")
         shot("pool-validation-error", mode)
         page.click("#register-modal .app-modal-close")
 
@@ -126,6 +137,19 @@ class DatasourceDialogShotsBrowserTest : BrowserSuite() {
     }
 
     private fun shotDir(): Path = Paths.get("build", "reports", "094-screenshots").also { it.toFile().mkdirs() }
+
+    /**
+     * Scrolls [selector] into view for a shot. A timeout names the element and the dialog's state:
+     * the gate red that filed #303 carried only Playwright's call log ("element is not visible"),
+     * which names neither.
+     */
+    private fun scrollIntoView(selector: String) {
+        try {
+            page.locator(selector).scrollIntoViewIfNeeded()
+        } catch (e: PlaywrightException) {
+            throw AssertionError("$selector never became visible to scroll into view; dialog state: ${page.evaluate(DIALOG_STATE)}", e)
+        }
+    }
 
     private fun register(name: String): String {
         page.navigate("$baseUrl/datasources")
@@ -188,4 +212,22 @@ class DatasourceDialogShotsBrowserTest : BrowserSuite() {
             }""",
             listOf(datasource, pipeline),
         ) as Int
+
+    private companion object {
+        /** What decides whether the register modal's sections can be visible at all. */
+        val DIALOG_STATE =
+            """
+            () => {
+              const modal = document.getElementById('register-modal');
+              const details = document.querySelector('#register-modal details');
+              const result = document.getElementById('register-result');
+              return {
+                modalHidden: modal ? modal.classList.contains('u-backdrop-hidden') : null,
+                poolOpen: details ? details.open : null,
+                resultError: result ? result.getAttribute('data-error') : null,
+                resultText: result ? result.innerText.slice(0, 80) : null,
+              };
+            }
+            """.trimIndent()
+    }
 }

@@ -149,9 +149,11 @@ for i in $(seq 1 "$CYCLES"); do
     fi
   done
 
-  # -prune .claude: lane worktrees live at .claude/worktrees/<lane> INSIDE the repo, and their
-  # build/test-results would otherwise be counted as this tree's.
-  tests=$(find . -path ./.claude -prune -o -path '*/build/test-results/test/TEST-*.xml' -print 2>/dev/null | wc -l | tr -d ' ')
+  # The two trees test-recount.sh reads, and EVERY test task's directory — `breachSuite` writes
+  # test-results/breachSuite/, which the old `test-results/test/` pattern left out (#297). Walking
+  # modules/ and tests/ only also keeps out lane worktrees, which live at .claude/worktrees/<lane>
+  # INSIDE the repo and whose build/test-results would otherwise be counted as this tree's.
+  tests=$(find modules tests -path '*/build/test-results/*/TEST-*.xml' -print 2>/dev/null | wc -l | tr -d ' ')
   echo "  cycle $i  clean=$c build=$b incremental=$n  results=${tests} file(s)  → $status"
 done
 

@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.17 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.18 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-28
 
 ---
 
@@ -341,7 +341,7 @@ Build info at the application-port root. No auth required. Key names are the con
 | Key | Value | Presence |
 |---|---|---|
 | `version` | Build version string | Always |
-| `build_time` | Build timestamp (ISO 8601 instant) | Always |
+| `build_time` | Build timestamp (ISO 8601 instant), supplied at build time (`-Pdatapipelines.buildTime=<instant>`; `app.sh`'s image build passes the moment it builds) | **Absent when not supplied** — same rule as `commit`. A plain Gradle build no longer stamps `Instant.now()`: that made the app's jar new on every invocation and re-ran everything downstream of it (#292). |
 | `commit` | Commit hash, supplied at build time (`-Pdatapipelines.commit=<sha>`) | **Absent when not supplied** — never `"unknown"`. Clients must not assume the field exists; an operator correlating a deploy to a revision needs it true or absent, never plausibly wrong. |
 
 Bare values only — no hostnames, no paths, same discipline as `/health` (§6.4).
@@ -447,6 +447,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-28 | v1.18 | 297 (#292) build time opt-in | §6.3's `build_time` becomes **absent when not supplied**, like `commit`: the build stamps a time only with `-Pdatapipelines.buildTime=<instant>` (`app.sh`'s image build passes it), because the plugin's default `Instant.now()` made the app's jar new on every Gradle invocation and re-ran its tests and the whole browser suite each time. |
 | 2026-09-28 | v1.17 | 298 (#293) the log-served streams' cut | §4.1's `datapipelines.sse.stream.duration` row: the timer covers the live stream; the log-served streams (replay, idempotent-retry follow) record no duration and tag their cut's log line `close_reason=expired` or `close_reason=revoked` from the same verdict that refused (#271's one-judgement rule) — before, every log-served cut read as a revocation. |
 | 2026-09-28 | v1.16 | 286 (#286) | New **§3.4F the legacy endpoint events**: `endpoint.legacy_rows` (#274's once-per-JVM WARN, its field now `at_least` — the first query's count is a floor) and `endpoint.promotion_legacy_omitted` (#286 — a promotion batch left legacy rows out; before #274 the batch threw, after it the omission was silent). Both carry a count, never a path. |
 | 2026-09-26 | v1.15 | 262 (#263) | §4.1 `datapipelines.sse.stream.duration`'s `close_reason` closed set gains **`expired`**: the same policy cut as `revoked` — the subscriber's re-judgement refuses a write, the final comment is the same static string, the execution keeps running — where the refusal was the subscriber's validated token passing its `exp` (#263), so an expired token is never counted as a standing revocation or a `client_disconnect`. |

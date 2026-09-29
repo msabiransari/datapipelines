@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
-import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldNotBeBlank
@@ -117,16 +116,21 @@ class ApplicationSmokeTest {
     }
 
     @Test
-    fun `info reports version and build time at the root path`() {
+    fun `info reports the version at the root path, and no build time unless the build supplied one`() {
         val response = rest.getForEntity("/info", String::class.java)
 
         response.statusCode.value() shouldBe 200
         val json: JsonNode = mapper.readTree(response.body)
 
         json["version"].asText().shouldNotBeBlank()
-        json["build_time"].shouldNotBeNull()
-        // `commit` is absent unless the build was given -Pdatapipelines.commit,
-        // so it is deliberately not asserted here.
+        // `build_time` and `commit` are each present only when the build was given
+        // -Pdatapipelines.buildTime / -Pdatapipelines.commit (observability §6.3), and neither
+        // the gate nor CI supplies them. A `build_time` in a plain build means the plugin's
+        // per-invocation Instant.now() is back — the stamp that kept the app's jar new on every
+        // Gradle run and re-ran everything downstream of it (#292).
+        withClue("/info carried build_time in a build that supplied no -Pdatapipelines.buildTime: ${response.body}") {
+            json.has("build_time") shouldBe false
+        }
     }
 
     /**

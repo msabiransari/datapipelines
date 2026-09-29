@@ -5,6 +5,7 @@ import co.datapipelines.integration.E2eSession.asSession
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import de.mkammerer.argon2.Argon2Factory
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -551,25 +552,39 @@ class PipelineShapesE2eTest {
 
         val reader = BufferedReader(InputStreamReader(response.body()))
         val events = mutableListOf<Pair<String, JsonNode>>()
-        var executionId = ""
+        val (executionId, cancel) = reader.use { r -> readEventsAndCancel(r, events) }
 
-        reader.use { r -> executionId = readEventsAndCancel(r, events) }
-
-        val eventNames = events.map { it.first }
         executionId shouldNotBe ""
+        // The DELETE's answer is judged only after the stream has ended, so a red names WHICH
+        // refusal it was (a 404 is `result.execution_not_found` or `pipeline.execution.not_running`)
+        // beside every event the execution emitted (#295).
+        val answer = cancel ?: throw AssertionError("No DELETE was sent — the stream never reached node_started: ${describe(events)}")
+        val refused = "DELETE /api/v1/executions/$executionId answered ${answer.status} ${answer.code}: ${answer.body}"
+        withClue("$refused | events: ${describe(events)}") {
+            answer.status shouldBe 204
+        }
         if (!events.any { it.first == "execution_aborted" }) {
-            throw AssertionError("Expected execution_aborted event, got: $eventNames")
+            throw AssertionError("Expected execution_aborted event, got: ${describe(events)}")
         }
         return executionId
     }
 
+    /**
+     * Reads the stream to its end, sending the DELETE on the first `node_started` — never on
+     * `execution_started`. The stream SENDS `execution_started` before the emitter persists the
+     * execution's RUNNING row (`WebEventEmitter.emit`: the send, then `persist`), so a DELETE fired
+     * on that event can reach the controller's lookup first and be refused
+     * `404 result.execution_not_found` (CI run 36381499550: the whole test took 78 ms). The executor
+     * emits `node_started` only after `execution_started`'s emit — the row insert included — has
+     * returned, so on that event the row is RUNNING and visible.
+     */
     private fun readEventsAndCancel(
         reader: BufferedReader,
         events: MutableList<Pair<String, JsonNode>>,
-    ): String {
+    ): Pair<String, CancelAnswer?> {
         var executionId = ""
         var currentEvent: String? = null
-        var cancelSent = false
+        var cancel: CancelAnswer? = null
         for (line in reader.lines()) {
             when {
                 line.startsWith("event:") -> {
@@ -579,26 +594,46 @@ class PipelineShapesE2eTest {
                 line.startsWith("data:") -> {
                     val payload = mapper.readTree(line.removePrefix("data:").trim())
                     events += (currentEvent ?: "unknown") to payload
-                    if (currentEvent == "execution_started" && !cancelSent) {
-                        cancelSent = true
-                        executionId = payload["execution_id"].asText()
-                        cancelExecution(executionId)
-                    }
+                    if (currentEvent == "execution_started") executionId = payload["execution_id"].asText()
+                    if (currentEvent == "node_started" && cancel == null) cancel = cancelExecution(executionId)
                 }
             }
         }
-        return executionId
+        return executionId to cancel
     }
 
-    private fun cancelExecution(executionId: String) {
-        given()
-            .port(port)
-            .asSession(ADMIN_SESSION)
-            .`when`()
-            .delete("/api/v1/executions/$executionId")
-            .then()
-            .statusCode(204)
+    /** The DELETE's answer, kept rather than asserted mid-stream (see [readEventsAndCancel]). */
+    private data class CancelAnswer(
+        val status: Int,
+        val body: String,
+        val code: String,
+    )
+
+    private fun cancelExecution(executionId: String): CancelAnswer {
+        val response =
+            given()
+                .port(port)
+                .asSession(ADMIN_SESSION)
+                .`when`()
+                .delete("/api/v1/executions/$executionId")
+        val body = response.body.asString()
+        val code =
+            runCatching {
+                mapper
+                    .readTree(body)
+                    .path("error")
+                    .path("code")
+                    .asText("")
+            }.getOrDefault("")
+        return CancelAnswer(response.statusCode, body, code.ifEmpty { "(no error code)" })
     }
+
+    /** Each event's name, with a failure event's error code: what a red must show beside its cause. */
+    private fun describe(events: List<Pair<String, JsonNode>>): String =
+        events.joinToString(prefix = "[", postfix = "]") { (name, payload) ->
+            val code = payload.path("error").path("code").asText("")
+            if (code.isEmpty()) name else "$name($code)"
+        }
 
     // ---------------------------------------------------------------- companion
 

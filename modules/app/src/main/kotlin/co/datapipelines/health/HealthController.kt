@@ -63,6 +63,8 @@ class HealthController(
      * reported as `"unknown"` — an operator correlating a deployment to a revision
      * needs the field to be either true or absent, never plausibly wrong. It is
      * populated by building with `-Pdatapipelines.commit=<sha>` (see build.gradle.kts).
+     * `build_time` follows the same rule since #292: present only when the build was given
+     * `-Pdatapipelines.buildTime=<instant>` (app.sh's image build passes it).
      */
     @GetMapping("/info")
     fun info(): InfoResponse =

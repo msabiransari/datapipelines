@@ -27,9 +27,9 @@
 #         cannot slip back in by name), and the integration module's report is excluded
 #         explicitly — the build step never compiled its tests, so --offline cannot
 #         resolve them. Until #290 this step re-ran tests on EVERY run: `modules/app`'s
-#         build-info stamps a fresh build.time per Gradle invocation, so everything
-#         downstream of the app — the whole browser suite — was out of date again, and a
-#         FAILED test task is never up to date either.
+#         build-info stamped a fresh build.time per Gradle invocation (until #292 made the
+#         time opt-in), so everything downstream of the app — the whole browser suite — was
+#         out of date again, and a FAILED test task is never up to date either.
 #     Measured budget (#290): the four green gate jobs before the fix took 57.0, 48.8,
 #         56.3 and 50.7 min (runs 36283937250, 36288656563, 36296091394, 36334831413) —
 #         build step 33.7 / 28.3 / 32.8 / 29.5 min, the report step 22.7 / 19.0 / 22.6 /
@@ -141,8 +141,8 @@ jobs:
       # the report task, run AFTER the build so a failed verification still leaves the report.
       # It must NEVER run a test (#290): Kover 0.9.9's report tasks depend on every instrumented
       # test task (its docs: "Running one of these tasks automatically triggers the launch of all
-      # test tasks"), and a task that failed — or sits downstream of the app, whose build-info
-      # stamps a new time per invocation — is not up to date, so this step used to re-run tests
+      # test tasks"), and a task that failed — or, until #292, sat downstream of the app, whose
+      # build-info stamped a new time per invocation — is not up to date, so this step used to re-run tests
       # for 19–24 minutes. The init script disables every Test task by type for this invocation
       # only (and detaches the zero-test guard each one is finalized by — the build step ran
       # them), and Kover reads the binary reports the build step's test JVMs already wrote. The
@@ -170,20 +170,32 @@ jobs:
             || { echo "::error title=coverage report::koverXmlReport failed on the build step's data (read this step's log; no test ran here)"; exit 1; }
       # The failing tests by NAME on the run's summary page (#290): a red gate is read from the
       # summary, not by searching a 15,000-line log for FAILED. The build's outcome rides in env;
-      # names and messages are escaped before they become annotations.
+      # names and messages are escaped for EACH channel they reach (#297): workflow-command
+      # escaping for the annotation, html.escape for the Markdown summary — GitHub's sanitiser
+      # drops a `<WORD>` it reads as a tag, so `expected:<REFUSED> but was:<UNBOUNDED>` would
+      # render as `expected: but was:`. A result file that does not parse (a test JVM killed
+      # mid-write — the 70-minute ceiling's own case) is named and skipped, never fatal: the
+      # summary is most needed in exactly that run.
       - name: name the failing tests
         if: always()
         env:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
         run: |
           python3 - <<'PY'
-          import glob, os, xml.etree.ElementTree as ET
+          import glob, html, os, xml.etree.ElementTree as ET
           def esc(s):
               return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          def md(s):
+              return html.escape(s, quote=False)
           t = f = e = s = n = 0
           failed = []
+          unreadable = []
           for p in sorted(glob.glob("modules/*/build/test-results/*/*.xml") + glob.glob("tests/*/build/test-results/*/*.xml")):
-              r = ET.parse(p).getroot()
+              try:
+                  r = ET.parse(p).getroot()
+              except (ET.ParseError, OSError) as err:
+                  unreadable.append((p, str(err)))
+                  continue
               if r.tag != "testsuite":
                   continue
               n += 1; t += int(r.get("tests", 0)); f += int(r.get("failures", 0))
@@ -195,9 +207,13 @@ jobs:
                   if bad is not None:
                       first = ((bad.get("message") or "").strip().splitlines() or [""])[0][:200]
                       failed.append((tc.get("classname", ""), tc.get("name", ""), first))
-          lines = [f"### Tests: {t} in {n} result files — {f} failed, {e} errors, {s} skipped", ""]
+          more = f" ({len(unreadable)} more unreadable)" if unreadable else ""
+          lines = [f"### Tests: {t} in {n} result files{more} — {f} failed, {e} errors, {s} skipped", ""]
+          for p, why in unreadable:
+              lines.append(f"- unreadable result file: `{p}` — {md(why)}")
+              print(f"::warning title=unreadable result file::{esc(p)}")
           for c, name, msg in failed:
-              lines.append(f"- **{c}** › {name} — {msg}")
+              lines.append(f"- **{md(c)}** › {md(name)} — {md(msg)}")
               print(f"::error title=test failed::{esc(c)} > {esc(name)}")
           if not failed and os.environ.get("BUILD_OUTCOME") == "failure":
               lines.append("The build step FAILED with no failing test case in the XML: a non-test task (lint, "

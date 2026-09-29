@@ -378,7 +378,10 @@ EOM
 
 # ---------------------------------------------------------------- build
 build() {
-  local gradle_args=(:modules:app:bootJar)
+  # The image's /info reports when THIS jar was built: the build stamps a time only when told
+  # to (#292 — the default Instant.now() kept every Gradle invocation re-running the app's
+  # downstream tests), so the release build is where it is supplied.
+  local gradle_args=(-Pdatapipelines.buildTime="$(date -u +%Y-%m-%dT%H:%M:%SZ)" :modules:app:bootJar)
   # -Pmysql adds MySQL Connector/J (GPL + FOSS exception; datasources.md §10.2),
   # which the default build deliberately omits. Either demo family's MySQL
   # datasources (weather / Comtrade) fail registration without it with

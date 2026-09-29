@@ -75,6 +75,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo 'Raises `schedule.nonexistent_code` here.'
     echo 'Records `schedule.nonexistent_event` here.'
     echo 'Logs `scheduler.nonexistent_event` here.'
+    echo 'Raises `parameter.evaluate.nonexistent_code` here.'
     echo 'Legacy `terminal_node_id` mention.'
   } >> "$tmp/docs/staging.md"
   # D over the NON-docs scan set, which checks A-C never reach: a header that still
@@ -213,8 +214,12 @@ for p, t in texts.items():
 # code passed the audit (only the drift tests would have caught it). `scheduler` joins beside
 # it for the scheduler.* STRUCTURED LOG events (observability §3.4E); the §3.4 extraction is
 # their definition set. `scheduler.md` — a FILENAME the docs cite — is skipped below like a .js.
+# `parameter` joins in #284 for the parameter-set codes (pipeline-contract §13.20, the family
+# #194 added): until then a misspelt or retired `parameter.*` code in any doc passed. The
+# retired `parameter.validation.selector_probe_unavailable` needs no new exemption — every
+# mention in the scan set sits in a Change Log row, which body_lines() already skips.
 CODE_RE = (r"(?<![.\w-])(?:pipeline|template|datasource|auth|workspace|result|rate_limit|"
-           r"idempotency|type_mapping|mcp|endpoint|mail|lake|schedule|scheduler)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
+           r"idempotency|type_mapping|mcp|endpoint|mail|lake|schedule|scheduler|parameter)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
 catalog = set(re.findall(CODE_RE, texts["docs/pipeline-contract.md"]))
 # datasource.validation.* is delegated: pipeline-contract §13.8 names Datasources §9
 # as the defining list, so codes defined there join the catalog.

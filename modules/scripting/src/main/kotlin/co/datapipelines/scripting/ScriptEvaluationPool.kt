@@ -52,6 +52,9 @@ fun interface ScriptClock {
  *    same way): a runaway degrades transform capacity, never the rest of the JVM. The
  *    first reading of §4.3 released the slot at abandonment, which let every abandoned
  *    runaway add one more live thread with no ceiling.
+ *  - **An answer means the slot is back.** A caller answered with a value or with the work's
+ *    own failure has joined the finishing thread first, so its next submission can never be
+ *    refused by its own just-finished evaluation (#295); an abandoned thread is never joined.
  *  - **A caller waits for a slot at most its own wall clock**, then gets
  *    [ScriptPoolExhaustedException] — a saturated pool (runaways holding every slot) is a
  *    fast, typed refusal, never a caller hung behind someone else's evaluation.
@@ -69,12 +72,23 @@ fun interface ScriptClock {
  * an abandoned evaluation's thread is never handed new work, and its slot comes back only
  * when that thread ends.
  */
-class ScriptEvaluationPool(
+class ScriptEvaluationPool internal constructor(
     val size: Int,
     val queue: Int,
     val abandonGrace: Duration,
     private val clock: ScriptClock,
+    /**
+     * Runs on the evaluation's own thread once the work has ended and BEFORE its permits are
+     * returned. A **fault-injection seam for tests**, not a configuration point: holding the
+     * finishing thread here widens the window the caller's handover ([handover]) must close, which
+     * is the only way to lose that race on every run rather than on a 2-vCPU runner only (#295).
+     * The public constructor passes nothing.
+     */
+    private val beforePermitsReturn: () -> Unit,
 ) {
+    constructor(size: Int, queue: Int, abandonGrace: Duration, clock: ScriptClock) :
+        this(size, queue, abandonGrace, clock, {})
+
     init {
         require(size > 0) { "size must be positive, was $size" }
         require(queue >= size) { "queue ($queue) must admit at least the $size running evaluations" }
@@ -152,6 +166,7 @@ class ScriptEvaluationPool(
                 {
                     try {
                         task.run()
+                        beforePermitsReturn()
                     } finally {
                         running.release()
                         admission.release()
@@ -199,7 +214,9 @@ class ScriptEvaluationPool(
         val deadline =
             clock.currentTimeMillis() + limits.wallClock.toMillis() + abandonGrace.toMillis()
         try {
-            return task.get(deadline - clock.currentTimeMillis(), TimeUnit.MILLISECONDS)
+            val value = task.get(deadline - clock.currentTimeMillis(), TimeUnit.MILLISECONDS)
+            handover(thread)
+            return value
         } catch (
             @Suppress("SwallowedException") err: TimeoutException,
         ) {
@@ -222,8 +239,25 @@ class ScriptEvaluationPool(
         ) {
             // `err` is only the wrapper; the WORK's throwable is `err.cause` and it is
             // rethrown or re-wrapped as the caller's exception below — nothing is lost.
+            // The work's own failure: its thread is ending — let the permits land first.
+            handover(thread)
             throw completionError(err.cause)
         }
+    }
+
+    /**
+     * The permit handover (#295 — the shape `SelectorPool` took in 303d8b51): the evaluation thread
+     * completes the task INSIDE its try and returns both permits in its finally, so a caller
+     * resumed by the completion could re-submit before the slot was back and be refused
+     * [ScriptPoolExhaustedException] by its own just-finished evaluation. An answered run — a value
+     * or the work's own failure — means the slot is back: the caller joins the finishing thread, a
+     * handover of microseconds, never a wait for work (the task has already completed). An
+     * ABANDONED thread is never joined: the timeout path throws without waiting, which is the
+     * bulkhead's whole point. A caller interrupted during the join gets what an interrupt while
+     * waiting always gets ([awaitInterrupted], via [run]).
+     */
+    private fun handover(thread: Thread) {
+        thread.join()
     }
 
     /** Unwraps the work's failure: scripting exceptions and Errors as-is, the rest wrapped. */

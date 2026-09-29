@@ -480,8 +480,8 @@ Both live in `tests/browser-tests`, download a chromium binary on first use and 
 browser. Only the **screenshot driver** is outside `build`/`check`. The **browser suite** is the
 module's `test` task, so `build` runs it like any module's tests — every `scripts/gate.sh` build
 stage and CI's gate job, whose long pole it is (§9.5); `browserTest` runs it alone. (This
-section said until #283 that the suite, too, was outside `build`; every gate log says otherwise,
-and the comments in the root build and the module's build file still carry the old claim — #292.)
+section said until #283 that the suite, too, was outside `build`; every gate log says otherwise.
+The comments in the root build and the module's build file carried the same claim until #297.)
 
 ```bash
 ./gradlew browserTest      # the Playwright golden-path suite (module-structure §5.12)
@@ -736,8 +736,11 @@ recount) for the verdict. Filtered runs are for iterating; the gate is unfiltere
 minutes, exactly what a targeted test run cannot see and the full gate keeps finding two or
 three runs late: (1) `ktlintCheck detekt` plus the four root audits (`composeEnvAudit`,
 `composeArgvSecretsAudit`, `verifyModuleDependencies`, `verifyVerificationMetadataDocs` — they hang
-off every module's `check`, so the gate's `build` reaches them before any test); (2) the **unfiltered** `test` task
-of every module the diff touched (so `verifyTestsExecuted` stays meaningful); (3) the
+off every module's `check`, so the gate's `build` reaches them before any test); (2) `check` of
+every module the diff touched — its **unfiltered** `test` (so `verifyTestsExecuted` stays
+meaningful), every other test task it carries (scripting's `breachSuite`, web's `editorJsTest`) and
+its coverage floor (`koverVerify`), each floor printed as a number beside it (2026-09-28's landing
+failed two gates on floors no pregate had run, #297); (3) the
 cross-cutting guard classes, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
@@ -778,8 +781,9 @@ one-fork order with
 integration job's figure) and its build step 70 of them. Before #290 the four green jobs took
 48–57 min, and 19–23 of those were the coverage-report step RE-RUNNING tests: Kover 0.9.9's report
 tasks depend on every instrumented test task, a task that failed is never up to date, and neither
-is anything downstream of `modules/app`, whose build-info stamps a new `build.time` on every Gradle
-invocation (#292) — so each run's report step replayed the whole browser suite, and a
+was anything downstream of `modules/app`, whose build-info stamped a new `build.time` on every
+Gradle invocation until #292 made the time opt-in — so each run's report step replayed the whole
+browser suite, and a
 red run's report step ran into the 60-minute cancel and read "cancelled". The step now runs
 `koverXmlReport` with an init script that disables every `Test` task **by type** (a new test task
 needs nothing added there) and `-x :tests:integration-tests:koverXmlReport` (the build step never
