@@ -297,6 +297,8 @@ class ArchitectureGuardTest {
                 "typesystem",
                 // #266 — the batching writer primitive: it knows no store, so it must not know a surface either.
                 "persistence",
+                // #10 — visualizations and dashboards: the surfaces (L1b) compile against it, never the reverse.
+                "visualization",
             )
 
         /**

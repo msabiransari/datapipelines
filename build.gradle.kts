@@ -180,6 +180,17 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:templates",
         ":modules:datasources",
     ),
+    // #10 dashboards (implementation spec §1, record D29) — the two documents (visualizations and
+    // dashboards), their readers/validators, repositories, lifecycle and transfer. Layer 5, above
+    // `parameters` (the set pin). `templates` is allowed for the pin checks and NOT declared: every
+    // template fact arrives through pipeline-contract's ports. No `dag`/`datasources`/`graph`: the
+    // runtime (L2) lives in `application`, and the pipeline facts a dashboard needs arrive through a port.
+    ":modules:visualization" to setOf(
+        ":modules:typesystem",
+        ":modules:pipeline-contract",
+        ":modules:templates",
+        ":modules:parameters",
+    ),
     // The cross-aggregate use-case layer (056/R6): below `web` and `mcp-server`, above the
     // domain modules. `templates` and `datasources` are allowed here for slices B/C's moves
     // (the import services, promotion) and are not declared in the module's build file until
@@ -194,6 +205,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:auth",
         // #194 (record §2.4) — promotion and the templates reverse arrow (lane D); allowed ahead, undeclared.
         ":modules:parameters",
+        // #10 — DashboardRuntime and the promotion of the two artifacts (L2, L1c); allowed ahead, undeclared.
+        ":modules:visualization",
     ),
     ":modules:mcp-server" to setOf(
         ":modules:typesystem",
@@ -206,6 +219,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:application",
         // #194 (record §2.4) — the six parameter-set tools (lane D); allowed ahead, undeclared.
         ":modules:parameters",
+        // #10 — the thirteen visualization/dashboard tools (L1b); allowed ahead, undeclared.
+        ":modules:visualization",
     ),
     ":modules:web" to setOf(
         ":modules:typesystem",
@@ -225,6 +240,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:parameters",
         // #266 — the execution-event record's and the replay log's batching writers, and their metrics.
         ":modules:persistence",
+        // #10 — the visualization/dashboard REST routes, the runtime routes and the wiring (L1b/L2); allowed ahead, undeclared.
+        ":modules:visualization",
     ),
     ":modules:app" to setOf(":modules:web"),
     ":tests:integration-tests" to setOf(":modules:app"),

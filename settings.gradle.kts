@@ -34,6 +34,7 @@ include(
     ":modules:staging",
     ":modules:dag",
     ":modules:parameters",
+    ":modules:visualization",
     ":modules:auth",
     ":modules:scheduler",
     ":modules:application",

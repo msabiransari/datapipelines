@@ -54,6 +54,7 @@ datapipelines/
 │   ├── staging/                         # [Staging spec]
 │   ├── dag/                             # [DAG Executor spec]
 │   ├── parameters/                      # the parameter engine — parameter sets, #194 (§5.18)
+│   ├── visualization/                   # visualizations and dashboards — the two documents and their lifecycle, #10 (§5.20)
 │   ├── auth/                            # [Auth spec]
 │   ├── scheduler/                       # [Scheduler reference] — durable occurrences, #9 (§5.16)
 │   ├── application/                     # cross-aggregate use cases (§5.13)
@@ -82,6 +83,7 @@ datapipelines/
 | `auth` | [auth.md](auth.md) | Users, workspaces + membership (resolution, provisioning, CRUD/member rules — 019's recorded placement: the workspace is an identity concept, membership-checked on every authenticated request exactly like `users`), API keys, JWT sessions, scopes, audit log. | `UserRepository` → `users`; `WorkspaceRepository` → `workspaces`, `workspace_members` (metadata-db §4.11/§4.12); `ApiKeyRepository` → `api_keys`; `AuditLogger` → `audit_log` |
 | `scheduler` | [scheduler.md](scheduler.md) | The pipeline-agnostic scheduler (#9): schedules, their occurrence function, the one dispatcher over db-scheduler, runs and their append-only trail, the generic executor port, capacity admission and reconciliation. Knows no pipeline semantics — the executor adapter lives in `web` (§5.16). | `ScheduleRepository` → `schedules`; `ScheduleRunRepository` → `schedule_runs`, `schedule_run_events`; db-scheduler owns `scheduled_tasks` (created by `app`'s V38) |
 | `parameters` | [parameter-engine design record](superpowers/specs/2026-09-21-parameter-engine-design.md) (this spec, §5.18) | The parameter engine (#194): the parameter-set definition model and its strict binding, the save-time validator (the record's §4), the expression AST, the set's dependency graph (over `graph`'s `Dag<T>`), the versioned lifecycle, the `parameter.*` codes and `datapipelines.parameters.*`. A single-aggregate module: the selector runtime arrives in lane C, the surfaces and the templates reverse arrow in lane D (`application`). | `ParameterSetRepository` → `parameter_sets`, `parameter_set_versions` (created by `app`'s V39) |
+| `visualization` | [dashboards.md](dashboards.md), the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (this spec, §5.20) | Visualizations and dashboards (#10): the two documents and their strict binding, the save-time validators, the name grammars, the versioned lifecycle (draft/release with the two cascades, discard, restore, purge, switch, import), the transfer service (export/import envelopes), the `visualization.*`/`dashboard.*` codes and `datapipelines.visualization.*`. A two-aggregate module whose cross-aggregate facts — a pinned pipeline release, a pinned set's parameters, a transform's contract, the release evidence — arrive through ports it declares. | `VisualizationRepository` → `visualizations`, `visualization_versions`; `DashboardRepository` → `dashboards`, `dashboard_versions` (created by `app`'s V42, with the two test-evidence tables L4 writes) |
 | `application` | (this spec, §5.13) | **Cross-aggregate use cases** — the ones that need more than one domain module and so belong to none of them. Sits below `web` and `mcp-server` so both surfaces share one implementation (ARCH-AUDIT-2026-08 S4, ruling R6). | — (delegates to the owning modules' repositories) |
 | `mcp-server` | [mcp-server.md](mcp-server.md) | MCP transport (Streamable HTTP), tool/resource/prompt definitions. Thin adapter over the same services the REST layer uses. | — (delegates to the owning modules' repositories) |
 | `web` | [rest-api.md](rest-api.md) | Spring Boot REST controllers, SSE endpoints, Thymeleaf UI, error handling, CORS. | — (delegates); Redis keys for the post-completion SSE event log and per-user rate-limit counters |
@@ -132,31 +134,36 @@ layer 4
 └──────────────┘ └──────────────┘  parameters ← typesystem, graph, pipeline-contract, templates, datasources
 
 layer 5
-┌──────────────┐
-│ application  │  ← typesystem, scripting, pipeline-contract, templates,
-│ (use cases)  │    datasources, dag, auth, parameters
-└──────────────┘
+┌─────────────────┐
+│  visualization  │  ← typesystem, pipeline-contract, templates, parameters
+└─────────────────┘
 
 layer 6
 ┌──────────────┐
-│  mcp-server  │  ← typesystem, calculators, pipeline-contract, templates,
-│              │    datasources, dag, auth, application, parameters
+│ application  │  ← typesystem, scripting, pipeline-contract, templates,
+│ (use cases)  │    datasources, dag, auth, parameters, visualization
 └──────────────┘
 
 layer 7
 ┌──────────────┐
-│     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
-│              │    datasources, staging, dag, auth, application, mcp-server, scheduler,
-│              │    parameters, persistence
-│              │    (declared explicitly, not transitively)
+│  mcp-server  │  ← typesystem, calculators, pipeline-contract, templates,
+│              │    datasources, dag, auth, application, parameters, visualization
 └──────────────┘
 
 layer 8
 ┌──────────────┐
+│     web      │  ← typesystem, calculators, scripting, pipeline-contract, templates,
+│              │    datasources, staging, dag, auth, application, mcp-server, scheduler,
+│              │    parameters, persistence, visualization
+│              │    (declared explicitly, not transitively)
+└──────────────┘
+
+layer 9
+┌──────────────┐
 │     app      │  ← web only
 └──────────────┘
 
-layer 9 — the test suites
+layer 10 — the test suites
 ┌─────────────────────────┐ ┌─────────────────────┐
 │ tests/integration-tests │ │ tests/browser-tests │  ← app
 └─────────────────────────┘ └─────────────────────┘
@@ -183,9 +190,10 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `scheduler` | `typesystem`, `pipeline-contract` |
 | `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph` |
 | `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
-| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters` |
-| `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters` |
-| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence` |
+| `visualization` | `typesystem`, `pipeline-contract`, `templates`, `parameters` |
+| `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization` |
+| `mcp-server` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `application`, `parameters`, `visualization` |
+| `web` | `typesystem`, `calculators`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `staging`, `dag`, `auth`, `application`, `mcp-server`, `scheduler`, `parameters`, `persistence`, `visualization` |
 | `app` | `web` |
 | `tests/integration-tests` | `app` |
 | `tests/browser-tests` | `app` |
@@ -197,6 +205,7 @@ Notes on the shape (explanatory, not additional rules):
 - `scheduler` lists `pipeline-contract` for exactly ONE thing, the published `PipelineNameGrammar` (a schedule is named like a pipeline — scheduler design revision §6, A2); its `SchedulerBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge. It lists no `dag`, `auth` or `application`: the executor adapter, the capacity lease and the system principal live on `web`'s side of its port.
 - `parameters` (#194) declares all five of its edges — `typesystem` (the shared value validator, `LogicalType`), `graph` (`Dag<T>`), `pipeline-contract` (`TemplateRef`, the name grammars, the `TemplateDryRenderer` / `DatasourceRegistry` / `TemplateVersionStatuses` / `TemplateReleaser` ports it validates and releases through, `ReadLens`, `AuthoringGuard`), and since lane C `templates` (the selector runtime renders a pinned template through `WorkspaceTemplateEngines`) and `datasources` (it runs through the registry's pools, `ReadOnlyStatementLease` and `ResultRowReader`). Since lane D the `parameters` edges of `application`, `mcp-server` and `web` are DECLARED (the record's §2.4): the surfaces compile against the engine, the reverse-arrow composition in `application`, the six tools in `mcp-server`, the routes and the wiring in `web`.
 - `persistence` (#266) is the second empty row beside `graph`, for the same reason: it is a primitive every store-owning module can sit on. `auth` lists it for the audit log's writer and `web` for the execution-event record's and the replay log's; `dag` does NOT — its repository offers the batch statement (`ExecutionEventRepository.appendAll`) and knows nothing of the queue in front of it, which is `web`'s wiring.
+- `visualization` (#10) sits above `parameters` and below `application`: it declares `typesystem`, `pipeline-contract` (the name grammar, `ReadLens`, `AuthoringGuard`, the template ports it validates and releases through) and `parameters` (the production `ParameterSetFacts` reads a pinned set release through `ParameterSetRepository`). `templates` is allowed and NOT declared — every template fact reaches it through `pipeline-contract`'s ports. The pipeline facts a dashboard needs (released? read-only? the caller output columns) arrive through its `PipelineReleaseFacts` port, which `application` implements over `ReadOnlyPipelineRule` (L1b), so no `dag` edge exists. `application`, `mcp-server` and `web` list it ahead of the lanes that declare it (L1b, L1c, L2).
 - `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
 - `application` is where a use case goes when it needs MORE THAN ONE aggregate. The rule, in one sentence: **cross-aggregate use cases live in `application`; single-aggregate ones live with the aggregate that owns them.** `PipelineService` is therefore in `pipeline-contract`, and `ExecutionLauncher` — which needs the pipeline aggregate AND `dag`'s reservation store — is in `application`. Nothing in `application` may import a `web` or `mcp` type; `ArchitectureGuardTest` fails the build on one.
@@ -717,6 +726,23 @@ build's `allowedInternalDependencies` map carries the same closed set).
 **Why it is its own module.** #266: the audit log (`auth`) and the execution-event record and replay log (`web`) need the SAME group commit, and the only module below both is one that knows neither. A copy in each would be two implementations of the ordering and durability guarantees, and those are exactly the guarantees that must not drift. It holds no store and no Spring type; each module that owns a store supplies its `BatchSink` and its wiring.
 
 **Tests:** `BatchingWriterTest` — one suite over a recording sink, because the primitive is generic: per-key order under 8 writers × 1,000 items, the idle fast path (a sequential producer never lingers), group commit, the batch bounds, linger under load, saturation by count and by bytes (`record` falls back, `submit` refuses and counts), the singles retry with the poison row skipped, a hung sink (the bounded wait claims the item back; an in-flight item is never written twice), the bounded suspending record (indeterminate, never unbounded; an abandoned direct write that had not started never runs), the drain (nothing unflushed; a hung sink gives up at `shutdown-drain-ms` and reports what it lost). `BatchingWriterFailureTest` (#266b): a failure is logged by class and SQLState and never by its message (a recording appender over a sink whose message carries a marker), and a failure the sink claims is rethrown on the caller's thread, blocking and suspending, from a batch and from the direct write.
+
+### 5.20 `visualization`
+
+**Dependencies (internal):** `typesystem`, `pipeline-contract`, `parameters` — declared; `templates` allowed and not declared (§4.2 note). **Dependencies (external):** `spring-boot-starter-jdbc` (the two repositories, §8.1), Jackson (BOM-managed). No Redis (§3.1 rule 3), no coroutines (nothing here waits on anything).
+
+**Public API (#10 L1a — the documents, the codes, the ports and the repositories' API; L1b–L5 build on them):**
+- `VisualizationBody` / `DashboardBody` and their parts — the two documents ([dashboards.md §2](dashboards.md), the implementation spec §3), bound by `VisualizationReader` / `DashboardReader` (an explicit key table per level; unknown keys, wrong JSON types and missing keys refused as `*.validation.body_invalid` naming the path; the collection bounds checked before their members are walked) and `ArtifactJson`'s strict mapper.
+- `VisualizationErrorCodes` / `DashboardErrorCodes` — the `visualization.*` / `dashboard.*` families ([Pipeline Contract §13.22/§13.23](pipeline-contract.md)); `PipelineErrorCodes.Visualization` / `.Dashboard` mirror them, pinned equal by reflection.
+- `VisualizationValidator` / `DashboardValidator` — the save-time rules (the spec's §3.1/§3.2), exhaustive, one code per rule. The ports they judge through, declared here and implemented by the surfaces: `TemplateContractFacts` (a pinned template version's type and transform contract — `TemplateContractFacts.over(TemplateDryRenderer)` is the production adapter), `RendererConfigValidator` (this module's `table`/`kpi` schemas and the Plotly shape check; L4 adds the plot-schema depth behind the same port), `PipelineReleaseFacts` (a pinned pipeline release: status, read-only, parameters, caller output columns — `application` implements it over `ReadOnlyPipelineRule`, L1b), `ParameterSetFacts` (a pinned set version's parameters and their dependents — `ParameterSetFacts.over(ParameterSetRepository)` is the production adapter).
+- `VisualizationRepository` / `DashboardRepository` (jdbc; V42) over ONE generic core, `ArtifactRepository` — the `ParameterSetRepository` API for each family: every statement takes the workspace, the hash is the database's (`HASH_EXPR` over the bound body), the one-draft index and the draft race mapped to `*.version.conflict`.
+- `VisualizationService` / `DashboardService` — the versioning §3.5 verb table over one generic core (`ArtifactLifecycle`): create, the draft write, release, purge, discard, restore, switch, import, and the lensed reads (every read takes a `ReadLens`, no default). A visualization's release cascades its DRAFT transform pins with consent (`TemplateReleaser`) and passes the `ReleaseEvidence` gate — whose default REFUSES (`visualization.release.tests_missing`) until L4 installs the evidence tables' gate. A dashboard's release checks its sources, set and visualizations and cascades DRAFT visualization pins with consent through `VisualizationService.release`, inside ONE transaction.
+- `ArtifactTransferService` — the export envelopes (rest-api §21.4's shape: `templates` at a visualization envelope's root, `visualizations` at a dashboard's) and the import (the lifecycle keys stripped by name, the strict bind, templates → visualizations → the artifact) behind the `TemplateBundle` port; the routes are L1c's.
+- `VisualizationProperties` / `VisualizationConfig` — `datapipelines.visualization.*` ([Configuration §3.33](configuration.md)).
+
+**Why it is its own module.** The design record's D29: a separate module whose responsibilities and edges are specified before implementation. Dashboards and visualizations are two aggregates that share one lifecycle shape; the runtime that executes a dashboard (`DashboardRuntime`, L2) is cross-aggregate and lives in `application`.
+
+**Tests:** the readers' key tables pinned against the models' properties by reflection, every reason and bound; the validators — one case per code, the count of codes covered asserted equal to the family's catalogued validation set, the spec's two worked documents accepted unchanged; the two repositories and every lifecycle verb against the module's own Postgres container (`VisualizationTestDb`, the shipped migrations through plain JDBC), one suite over both families — workspace scoping, the DB-projection hash, the one-draft index and the draft race FORCED; the release cascades rolled back by a stale hash; the transfer strip and order; the spec-drift suites (§13.22/§13.23 both directions, configuration §3.33, enums §31–§37).
 
 ## 6. Version Catalog
 
@@ -1248,6 +1274,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | #10 L1a — the visualization module | L1a | New **§5.20 `visualization`** — layer 5, above `parameters` and below `application` (§4.1 renumbers the layers above it): the visualization and dashboard documents, readers, validators, repositories, lifecycle and transfer. §3/§3.1 rows, §4.1 layer, §4.2's table gains the row (`typesystem`, `pipeline-contract`, `templates`, `parameters`) and `application`, `mcp-server` and `web` gain `visualization` (allowed ahead, undeclared — L1b/L1c/L2 declare it). The root build's allowed-dependency map, `COVERAGE_FLOORS` (90 until measured) and `ArchitectureGuardTest`'s below-the-surfaces list carry the module; its `gradle.lockfile` ships in the same commit. |
 | 2026-09-29 | #266 persistence batching, with its correction round 266b | 266 | New **§5.19 `persistence`** — layer 0 beside `typesystem` and `graph`, no internal dependency: `BatchingWriter<T>` and its `BatchSink` seam, the one group commit the audit log (`auth`) and the execution-event record and replay log (`web`) share. §3/§3.1 rows, §4.1 layer, §4.2's allowed map gains `auth → persistence` and `web → persistence` (`dag` needs none: `appendAll` is a plain repository method); §5.7 names the edge. 266b: `BatchSink.propagates` (a failure that belongs to the caller) and `FailureShape` (a failure's class and SQLState for a log line, never its message) join the public API; `logback-classic` as a test-only dependency. (Round 1 changed §3–§5 without this row.) |
 | 2026-09-28 | #194 lane D — the surfaces | 194d | `web`, `mcp-server` and `application` DECLARE their `parameters` edges (§4.2/§5.18): the REST routes and the wiring in `web` (ParametersConfiguration builds the runner, the evaluator and the ONE pool from one config, plus the `parameters.selectors.abandoned` gauge), the six `parameter_sets_*` tools in `mcp-server` (a `parameters` DocArea with its guide), and the reverse-arrow composition `TemplateUsage` + `ParameterSetTemplatePins` in `application`. `AuthoringStartupCheck` covers parameter-set drafts (versioning §5.5, C14). |
 | 2026-09-27 | #194 lane C — the selector runtime | 194c | §4.2's note: `parameters` DECLARES `templates` and `datasources` (the selector runtime renders and runs through them; the table's row is unchanged — it always allowed both). §5.18 gains the runtime's public API — `SelectorRunner` (the production `SelectorProbe`, now REQUIRED; `selector_probe_unavailable` retired) with its evaluate-time face, `SelectorPool`, `ParameterEvaluator` with the §5.3 model and writer — and `kotlinx-coroutines-core` (BOM-managed). `datasources` (§5.4's module, datasources.md §5.3) gains `ConnectionPool.discard` and `ReadOnlyStatementLease`. |
