@@ -18,7 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationContext
 import org.springframework.scheduling.TaskScheduler
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor
-import org.springframework.scheduling.concurrent.ConcurrentTaskScheduler
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import org.springframework.scheduling.config.ScheduledTaskRegistrar
 import org.springframework.scheduling.config.TaskManagementConfigUtils
 import org.springframework.scheduling.config.TaskSchedulerRouter
@@ -52,14 +52,13 @@ import java.util.concurrent.TimeUnit
  * startup ticks queued ahead of it. Synchronised on the event, never on time.
  *
  * ## Which thread that is — measured here, not assumed
- * There is no `TaskScheduler` bean: `WebSurfaceConfiguration` declares a single-thread
- * `ScheduledExecutorService` (`sseLogScheduler`, the `dp-sse-log` thread that serves SSE replays
- * and idempotent-retry follows), which makes Boot's scheduler back off, and Spring's
- * `@Scheduled` processor then runs every scheduled job on the context's unique
- * `ScheduledExecutorService` — that one. [drainStartupTicks] reads the scheduler the processor
- * actually holds and pins that it is `sseLogScheduler`: the drain is sound only on one thread, and
- * the retention tick's time budget is sized for sharing it (`AuditLogRetention.DEFAULT_TICK_BUDGET`).
- * #316 tracks giving scheduled jobs their own scheduler; when it lands, this pin moves with it.
+ * The jobs' own scheduler since #316: `SweepSchedulingConfiguration`'s `taskScheduler`, ONE thread
+ * (`dp-scheduled`) that every `@Scheduled` job ticks on and nothing else uses. [drainStartupTicks]
+ * reads the scheduler the processor actually holds and pins that it is that bean with one thread:
+ * the drain is sound only on one thread. (Until #316 the pin read `sseLogScheduler` — the SSE log
+ * streamer's `dp-sse-log` thread, which Spring fell back to while no `TaskScheduler` bean existed;
+ * the retention tick's two-second budget, `AuditLogRetention.DEFAULT_TICK_BUDGET`, was sized for
+ * sharing THAT thread and now bounds how long the sweep and the reaper wait behind it.)
  *
  * The tick is invoked directly rather than by lowering the delay: the cadence is a code constant
  * (not a key), and a test-only knob would be a key the product ships for a test.
@@ -129,10 +128,10 @@ class AuditLogRetentionE2eTest {
                 .getField(scheduler, "defaultScheduler")
                 .shouldBeInstanceOf<java.util.function.Supplier<*>>()
                 .get()
-        // The drain is only sound on ONE thread. The default resolved to sseLogScheduler, which
-        // WebSurfaceConfiguration builds with Executors.newSingleThreadScheduledExecutor.
-        resolved.shouldBeInstanceOf<ConcurrentTaskScheduler>().concurrentExecutor shouldBeSameInstanceAs
-            applicationContext.getBean("sseLogScheduler")
+        // The drain is only sound on ONE thread. The default resolved to the jobs' own scheduler
+        // (#316), which SweepSchedulingConfiguration builds with one thread.
+        resolved shouldBeSameInstanceAs applicationContext.getBean("taskScheduler")
+        resolved.shouldBeInstanceOf<ThreadPoolTaskScheduler>().poolSize shouldBe 1
         val drained = CompletableFuture<Unit>()
         scheduler.schedule({ drained.complete(Unit) }, Instant.now())
         drained.get(DRAIN_TIMEOUT_SECONDS, TimeUnit.SECONDS)

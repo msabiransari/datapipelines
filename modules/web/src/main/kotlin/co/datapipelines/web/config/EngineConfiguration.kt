@@ -273,6 +273,8 @@ class EngineConfiguration {
         // @Qualifier-pinned: `sseLogScheduler` is also an ExecutorService (ScheduledExecutorService
         // extends it), so an unqualified by-type injection is ambiguous once both beans share one
         // context — which only the assembled application does; module slice tests never saw it.
+        // (The jobs' `taskScheduler`, #316, is an Executor but not an ExecutorService: it adds no
+        // candidate here, and nothing injects it — Spring's @Scheduled registrar looks it up.)
         @Qualifier("eventPersistenceExecutor") executor: java.util.concurrent.ExecutorService,
     ): CoroutineDispatcher = executor.asCoroutineDispatcher()
 
