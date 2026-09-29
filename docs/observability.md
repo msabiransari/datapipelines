@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.17 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.20 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-29
 
 ---
 
@@ -227,6 +227,7 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.auth.login.attempts` | counter | `outcome` (`success`/`domain_not_allowed`/`user_inactive`/`oidc_error`) | Login attempts. Outcomes mirror the audit events in [Auth §10.1](auth.md#101-events). There is **no** lockout outcome: authentication is OIDC-only, the product stores no local passwords, and no lockout mechanism exists to count. |
 | `datapipelines.auth.api_key.validations` | counter | `outcome` (success/invalid/expired/revoked) | API key validations |
 | `datapipelines.auth.login_rate_limit.saturated` | counter | (none) | Login rate-limit admissions made with the tracked-client table FULL — the limiter's fail-open branch ([Auth §11.5](auth.md#115-other-auth-configuration-keys)). The table is bounded at 10,000 client addresses; past that a new client is admitted unmetered rather than the map grown, so a spoofed-IP flood cannot exhaust the heap. Registered eagerly, so a healthy deployment reports `0` rather than an absent series. Any sustained non-zero rate means the login surface is unmetered for new clients right now. No tags: it is one closed condition, and §4.3 forbids inventing a dimension that is not a bounded set |
+| `datapipelines.audit.retention.purged` | counter | (none) | `audit_log` rows deleted by the audit-log retention job (§7, #310) — the sum of every tick's `purged=`, a batch that failed mid-tick included (its committed rows are gone). Registered when the job is built, so a deployment reports `0` rather than an absent series. The steady-state rate is roughly the write rate a retention window ago; a flat line on a deployment older than `datapipelines.audit.retention-days` means the job is not running |
 
 **Result delivery, SSE and idempotency** ([REST API §7](rest-api.md#7-result-delivery), D9):
 
@@ -360,6 +361,8 @@ Already covered in [Auth spec §10](auth.md#10-audit-log) (event catalog §10.1,
 - Structured events (auth events, admin actions) — the catalog in Auth §10.1 is authoritative; there are no password or lockout events, because authentication is OIDC-only.
 - Retention governed by `datapipelines.audit.retention-days` ([configuration.md](configuration.md)).
 
+**Retention (#310).** The retention sweep's last step (`AuditLogRetention`, hourly, [Auth §10.3](auth.md#103-retention), [Metadata DB §8.2](metadata-db.md#82-audit-log-retention)) deletes the rows older than the database's `NOW()` minus [`datapipelines.audit.retention-days`](configuration.md#312-audit) (30–3650, default 365), in batches of at most 5,000, at most 50 batches or 2 seconds a tick. A tick that deleted anything logs one INFO line `event=audit.retention purged=<n> cutoff=<iso> batches=<k>`; a tick that stopped with rows left logs a WARN `event=audit.retention_incomplete … reason=batch_ceiling|time_budget` and the next tick continues; a metadata-DB fault logs a WARN `event=audit.retention_failed purged=<n> batches=<k> cutoff=<iso> message=…` with what it had already committed. Counts and the cutoff only — never a row's content. The meter is `datapipelines.audit.retention.purged` (§4.1). A step of the sweep that throws anything else logs ERROR `event=retention.step_failed step=<execution_events|keys|audit_log>` and the tick continues with the next step.
+
 The audit log captures **who did what when** for compliance / forensic purposes. The general log captures **what happened in the system** for debugging.
 
 ---
@@ -447,6 +450,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.20 | 310 (#310) audit-log retention — numbered after 297's v1.18 and 266b's v1.19 | §4.1 gains `datapipelines.audit.retention.purged` (counter, no tags). §7 gains the retention paragraph: the job, its three log events (`audit.retention` INFO, `audit.retention_incomplete` and `audit.retention_failed` WARN), the sweep's per-step `retention.step_failed` ERROR, and the meter — the "retention governed by" line was true of the documentation only until #310 |
 | 2026-09-28 | v1.17 | 298 (#293) the log-served streams' cut | §4.1's `datapipelines.sse.stream.duration` row: the timer covers the live stream; the log-served streams (replay, idempotent-retry follow) record no duration and tag their cut's log line `close_reason=expired` or `close_reason=revoked` from the same verdict that refused (#271's one-judgement rule) — before, every log-served cut read as a revocation. |
 | 2026-09-28 | v1.16 | 286 (#286) | New **§3.4F the legacy endpoint events**: `endpoint.legacy_rows` (#274's once-per-JVM WARN, its field now `at_least` — the first query's count is a floor) and `endpoint.promotion_legacy_omitted` (#286 — a promotion batch left legacy rows out; before #274 the batch threw, after it the omission was silent). Both carry a count, never a path. |
 | 2026-09-26 | v1.15 | 262 (#263) | §4.1 `datapipelines.sse.stream.duration`'s `close_reason` closed set gains **`expired`**: the same policy cut as `revoked` — the subscriber's re-judgement refuses a write, the final comment is the same static string, the execution keeps running — where the refusal was the subscriber's validated token passing its `exp` (#263), so an expired token is never counted as a standing revocation or a `client_disconnect`. |

@@ -27,7 +27,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
  * behavior is proven at the wire by `AuthHttpBoundaryTest`.
  */
 @Configuration
-@EnableConfigurationProperties(WorkspacesProperties::class, PromotionProperties::class)
+@EnableConfigurationProperties(WorkspacesProperties::class, PromotionProperties::class, AuditProperties::class)
 @Suppress("TooManyFunctions") // the wiring class: one function per bean, which is the point
 class AuthConfiguration {
     /**

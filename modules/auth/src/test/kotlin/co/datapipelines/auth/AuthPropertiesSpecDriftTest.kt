@@ -49,6 +49,11 @@ class AuthPropertiesSpecDriftTest {
         documented.getValue("datapipelines.mail.starttls") shouldBe props.starttls.toString()
     }
 
+    @Test
+    fun `audit property defaults match configuration-md section 3-12`() {
+        documented.getValue("datapipelines.audit.retention-days") shouldBe AuditProperties().retentionDays.toString()
+    }
+
     private companion object {
         /**
          * A full `| \`datapipelines.*\` | \`default\` | description |` row of the §3 tables:
