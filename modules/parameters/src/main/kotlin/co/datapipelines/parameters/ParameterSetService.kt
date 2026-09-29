@@ -28,6 +28,26 @@ data class ParameterSetExport(
     val body: ParameterSetBody,
 )
 
+/**
+ * Record §8.3's IMPORT LENS over a validation answer, the ONE spelling of the rule: a pin this
+ * deployment lacks (`template_not_found` / `template_version_not_found`) is
+ * `parameter.import.missing_template` — templates are promoted first. [ParameterSetService] applies it
+ * in [ParameterSetService.validateForImport]; the promotion receive applies it to the SAME call run
+ * through the batch's template view (#302) — a second spelling of the mapping would drift.
+ */
+fun importRefusals(validation: ParameterSetValidation): ParameterSetValidation {
+    if (validation !is ParameterSetValidation.Invalid) return validation
+    val failures =
+        validation.result.failures.map {
+            if (it.code == ParameterErrorCodes.TEMPLATE_NOT_FOUND || it.code == ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND) {
+                it.copy(code = ParameterErrorCodes.IMPORT_MISSING_TEMPLATE)
+            } else {
+                it
+            }
+        }
+    return ParameterSetValidation.Invalid(ValidationResult(failures))
+}
+
 /** What an import did (versioning §9.2's table). */
 data class ParameterSetImported(
     val detail: ParameterSetVersionDetail,
@@ -258,15 +278,49 @@ class ParameterSetService(
      * exported version, keeping the exported id; the same version with the same hash is a no-op, any
      * other occupant of the number is `parameter.version.conflict`. The pointer moves only when the set
      * has none (D60). Not an authoring write: a promotion receiver accepts it.
+     *
+     * Composed from [validateForImport] and [importValidated] — the same two acts the promotion
+     * receive runs SEPARATELY (#302, record C36): the receive validates before its one transaction
+     * opens (the probe leases a customer connection) and lands a pre-validated export inside it. This
+     * method remains the REST import's one-call path (non-atomic across templates and set — §18 C35,
+     * decided); the receive is the atomic path.
      */
-    @Suppress("ThrowsCount", "ReturnCount") // each §9.2 row is its own answer
     fun import(
         workspaceId: UUID,
         export: ParameterSetExport,
         actor: UUID,
+    ): ParameterSetImported =
+        importValidated(
+            workspaceId,
+            export.copy(body = validateForImport(workspaceId, ParameterSetDocument(export.name, export.body)).body),
+            actor,
+        )
+
+    /**
+     * Record §8.3's validation half of [import], alone: the FULL §4 (the selector probe included) against
+     * THIS deployment, the import lens on the refusals ([importRefusals]), and the canonical body as the
+     * answer. Runs OUTSIDE any transaction — the probe opens a customer-datasource connection; the
+     * promotion receive calls this before its one transaction opens (#302, C36).
+     */
+    fun validateForImport(
+        workspaceId: UUID,
+        document: ParameterSetDocument,
+    ): ParameterSetDocument = validOrThrow(asImport(validator.validate(workspaceId, document)))
+
+    /**
+     * [import]'s landing half, alone: hash check, the id/rename/version-taken rules and the insert —
+     * NO validation. [export]'s body must already be canonical and §4-proven: the receive's transaction
+     * body lands what [validateForImport] answered outside it (#302, C36 — one §10.4 transaction, no
+     * probe inside it). A caller that skips the validation stores an unproven body; the arm exists for
+     * the receive's validate-then-land split, not as a looser import.
+     */
+    @Suppress("ThrowsCount", "ReturnCount") // each §9.2 row is its own refusal/answer
+    fun importValidated(
+        workspaceId: UUID,
+        export: ParameterSetExport,
+        actor: UUID,
     ): ParameterSetImported {
-        val validation = validator.validate(workspaceId, ParameterSetDocument(export.name, export.body))
-        val canonical = validOrThrow(asImport(validation)).body
+        val canonical = export.body
         if (export.version != null) {
             val declared = export.bodyHash ?: throw hashRefused("body_hash_missing", null, null)
             val actual = repository.computeBodyHash(canonical)
@@ -446,18 +500,7 @@ class ParameterSetService(
     }
 
     /** Record §8.3: on import, a pin this deployment lacks is `import.missing_template` (templates are promoted first). */
-    private fun asImport(validation: ParameterSetValidation): ParameterSetValidation {
-        if (validation !is ParameterSetValidation.Invalid) return validation
-        val failures =
-            validation.result.failures.map {
-                if (it.code == ParameterErrorCodes.TEMPLATE_NOT_FOUND || it.code == ParameterErrorCodes.TEMPLATE_VERSION_NOT_FOUND) {
-                    it.copy(code = ParameterErrorCodes.IMPORT_MISSING_TEMPLATE)
-                } else {
-                    it
-                }
-            }
-        return ParameterSetValidation.Invalid(ValidationResult(failures))
-    }
+    private fun asImport(validation: ParameterSetValidation): ParameterSetValidation = importRefusals(validation)
 
     private fun validOrThrow(validation: ParameterSetValidation): ParameterSetDocument =
         when (validation) {

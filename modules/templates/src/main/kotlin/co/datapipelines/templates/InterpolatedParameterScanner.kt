@@ -47,7 +47,7 @@ import freemarker.core.TemplateElement
  * costs a rename; a miss re-opens the hole.
  */
 @Suppress("DEPRECATION") // freemarker.core.TemplateElement — see FreemarkerAst
-internal object InterpolatedParameterScanner {
+object InterpolatedParameterScanner {
     /**
      * Every [declared] name the body references inside a `${}` interpolation, in first-use order.
      *

@@ -23,9 +23,11 @@ import org.springframework.transaction.support.TransactionTemplate
 
 /**
  * The §8.3 push ORDER on the receiver (the record's, #194 lane D): templates, then parameter
- * sets, then pipelines — a set's pins must be stored before the set's validation resolves them,
+ * sets, then pipelines — a set's pins must be stored before the set's landing resolves them,
  * and a set import that ran before the templates would refuse `parameter.import.missing_template`
- * on a pin the SAME batch brings. The order is the guard; this test is its falsification lever.
+ * on a pin the SAME batch brings. Since #302 (C36) the sets' §4 VALIDATION also has a place in
+ * the order: BEFORE the transaction opens (the selector probe leases a customer connection),
+ * with the landing inside it. The order is the guard; this test is its falsification lever.
  */
 class PromotionReceiveSetsOrderTest {
     private val calls = mutableListOf<String>()
@@ -51,7 +53,7 @@ class PromotionReceiveSetsOrderTest {
             templateImportService,
             mockk<AuditLogger>(relaxed = true),
             // Run the callback directly; the ORDER is what this suite pins.
-            TransactionTemplate(NoopTransactionManager),
+            TransactionTemplate(NoopTransactionManager(calls)),
             authoringEnabled = false,
             endpointPromotion = mockk<EndpointPromotion>(relaxed = true),
             checkRunner = mockk<PipelineCheckRunner>(relaxed = true),
@@ -59,14 +61,18 @@ class PromotionReceiveSetsOrderTest {
         )
 
     @Test
-    fun `a batch applies templates, then parameter sets, then pipelines`() {
+    fun `a batch validates its sets, then applies templates, parameter sets, pipelines in one transaction`() {
         every { inventory.contextFor("acme") } returns
             co.datapipelines.auth.WorkspaceContext(UUID, "acme")
+        every { parameterSetPromotion.validate(any(), any(), UUID) } answers {
+            calls += "validate"
+            listOf(mockk<ParameterSetPromotion.Validated>())
+        }
         every { templateImportService.import(any(), UUID, UUID) } answers {
             calls += "templates"
             emptyList()
         }
-        every { parameterSetPromotion.apply(any(), UUID, UUID) } answers {
+        every { parameterSetPromotion.land(any(), UUID, UUID) } answers {
             calls += "sets"
             mockk()
         }
@@ -86,7 +92,10 @@ class PromotionReceiveSetsOrderTest {
             )
         service.apply(batch, peer)
 
-        calls shouldBe listOf("templates", "sets", "pipelines")
+        // `validate` (the probe — a customer connection) BEFORE the transaction opens; the
+        // landing inside it, in the §8.3 order. With the validation moved back inside the
+        // transaction (#302's wall) the first entry is "transaction" — this pin is red.
+        calls shouldBe listOf("validate", "transaction", "templates", "sets", "pipelines")
     }
 
     private companion object {
@@ -99,8 +108,13 @@ class PromotionReceiveSetsOrderTest {
                 .objectNode()
 
         /** No real transaction: the callback runs inline, the ORDER is what this suite pins. */
-        private object NoopTransactionManager : PlatformTransactionManager {
-            override fun getTransaction(definition: TransactionDefinition?): TransactionStatus = SimpleTransactionStatus()
+        private class NoopTransactionManager(
+            private val calls: MutableList<String>,
+        ) : PlatformTransactionManager {
+            override fun getTransaction(definition: TransactionDefinition?): TransactionStatus {
+                calls += "transaction"
+                return SimpleTransactionStatus()
+            }
 
             override fun commit(status: TransactionStatus) = Unit
 

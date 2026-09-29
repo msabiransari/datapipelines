@@ -59,6 +59,23 @@ class WorkspaceTemplateEngines(
     /** The workspace's registry — the same instance its engine renders through. */
     fun registryFor(workspaceId: UUID): TemplateRegistry = bindingFor(workspaceId).registry
 
+    /**
+     * A **caller-owned** engine over a caller-supplied registry — the same hardened
+     * configurations, render budget and pool the workspace engines get, so a render through it
+     * behaves exactly like a render through [engineFor] (#302: the promotion receive validates a
+     * template-backed parameter set BEFORE its one transaction opens, and a pin the batch brings
+     * is still unstored — the batch's §21.4 payloads back an overlay [TemplateRegistry] for the
+     * validation's render alone). The CALLER closes it: unlike the workspace bindings, nothing
+     * here tracks the engine's lifetime, and an engine holds a thread pool.
+     */
+    fun engineOver(registry: TemplateRegistry): TemplateEngine =
+        TemplateEngine(
+            registry = registry,
+            cacheSize = cacheSize,
+            renderTimeoutMs = renderTimeoutMs,
+            maxOutputChars = maxOutputChars,
+        )
+
     private fun bindingFor(workspaceId: UUID): Bound =
         synchronized(lock) {
             bindings

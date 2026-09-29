@@ -1,6 +1,7 @@
 package co.datapipelines.web.parameters
 
 import co.datapipelines.parameters.ParameterErrorCodes
+import co.datapipelines.parameters.ParameterSetBody
 import co.datapipelines.parameters.ParameterSetImported
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
@@ -13,21 +14,46 @@ import java.util.UUID
 
 /**
  * The parameter-set half of promotion (the record's §8.3, #194 lane D) — the sender's payload
- * builder and the receiver's import act, ONE collaborator beside [EndpointPromotion] so both
- * ends of the channel use one spelling of the rules.
+ * builder and the receiver's validation-and-landing act, ONE collaborator beside [EndpointPromotion]
+ * so both ends of the channel use one spelling of the rules.
  *
  * ## The payload
  * The batch entry is the `parameter_set` node of the §21.4 export envelope — the body with its
  * lifecycle fields (`version`, `body_hash`, `released_at`) and the KEPT id (P24). The pinned
  * templates do NOT ride the entry: the sender merges them into the batch's template closure
- * (they must be stored first), and the receiver's import relies on that order — a pin the
- * batch does not bring is `parameter.import.missing_template`.
+ * (they must be stored first), and the receiver's import relies on that order — a pin the batch
+ * does not bring is `parameter.import.missing_template`.
+ *
+ * ## The receive's two acts (#302, record §18 C36)
+ * The set's §4 validation (the selector probe among it — a CUSTOMER-datasource connection) runs
+ * BEFORE the receive's one transaction opens ([validate], through [ParameterSetReceiveValidation]'s
+ * batch template view); the transaction body LANDS the pre-validated entries ([land] → the
+ * service's `importValidated`, no re-probe). A refusal at validation means nothing has landed;
+ * a refusal at landing rolls the transaction back whole — templates included.
  */
 class ParameterSetPromotion(
     private val repository: co.datapipelines.parameters.ParameterSetRepository,
     private val sets: co.datapipelines.parameters.ParameterSetService,
     private val templates: co.datapipelines.templates.TemplateRepository,
+    /** The receive's out-of-transaction §4 validation over the batch's template view (#302, C36). */
+    private val receiveValidation: ParameterSetReceiveValidation,
 ) {
+    /** One bound batch entry: the shape-checked lifecycle fields and the body, not yet validated. */
+    data class Bound(
+        val id: UUID,
+        val name: String,
+        val version: Int?,
+        val bodyHash: String?,
+        val releasedAt: Instant?,
+        val body: ParameterSetBody,
+    )
+
+    /** One validated entry: its binding and the CANONICAL body the transaction body lands. */
+    data class Validated(
+        val bound: Bound,
+        val canonical: ParameterSetBody,
+    )
+
     /**
      * The sender's entry for [name]'s current release, or null when it is not promotable
      * (no release). §10.3's guards: released and NEWER than the target's entry — the same
@@ -89,24 +115,13 @@ class ParameterSetPromotion(
             .toList()
 
     /**
-     * The receiver's import of one batch entry: the set is validated against the TARGET's
-     * templates and datasources (the service's §4 steps 4–6 re-run — a pin the batch did not
-     * bring is `parameter.import.missing_template`), lands RELEASED at the exported version
-     * with the id KEPT (P24), and an id taken by another workspace's set is refused `id_taken`
-     * (C29 — never re-issued).
-     *
-     * The body binds through [parameterSetBodyOf] — the lifecycle keys stripped by name, the
-     * strict mapper still refusing every other undeclared key (#299; the same bind the REST
-     * import makes).
-     *
-     * Not an authoring write: the promotion receiver accepts it.
+     * The receiver's BIND of one batch entry — the #300 shape checks and the lifecycle parse (#299's
+     * strict bind through [parameterSetBodyOf]), with NO validation: a refusal here is a shape
+     * refusal (`body_invalid`, `details.path`/`details.reason`), echoed without the entry. The first
+     * half of [validate]; public so the shape rules are testable without the validator's ports.
      */
     @Suppress("ThrowsCount") // each throw is a distinct catalogued shape refusal — path and reason are the wire
-    fun apply(
-        entry: JsonNode,
-        workspaceId: UUID,
-        actor: UUID,
-    ): ParameterSetImported {
+    fun bind(entry: JsonNode): Bound {
         // The entry's SHAPE is judged before anything is parsed or resolved (#300 — observation 8):
         // a missing id reached `UUID.fromString("")` as an uncatalogued 500 and a missing name was
         // read as "". The refusal echoes only `details.path`/`details.reason`, never the entry.
@@ -130,17 +145,44 @@ class ParameterSetPromotion(
         val body =
             parameterSetBodyOf(objectEntry)
                 ?: throw ApiErrors.malformedParameterSetBody()
-        return sets.import(
+        return Bound(id, nameNode.asText(), version, bodyHash, releasedAt, body)
+    }
+
+    /**
+     * The receiver's VALIDATION of the batch's set entries — BEFORE the receive's one transaction
+     * opens (#302, C36): the full record §4 against the receiver's own datasources (the selector
+     * probe included — legal outside the transaction only), with the batch's template payloads
+     * overlaying the receiver's registry, so a pin the SAME batch brings resolves and a pin neither
+     * the batch brings nor the receiver holds is `parameter.import.missing_template`. Answers the
+     * canonical bodies the transaction body lands; a refusal here has landed NOTHING.
+     */
+    fun validate(
+        entries: List<JsonNode>,
+        batchTemplates: List<JsonNode>,
+        workspaceId: UUID,
+    ): List<Validated> = receiveValidation.validate(workspaceId, batchTemplates, entries.map { bind(it) })
+
+    /**
+     * The receiver's LANDING of one validated entry — the transaction body's act (C36): the kept id,
+     * the hash check and the §9.2 version rules through the service's `importValidated`, which does
+     * NOT re-validate (the probe already ran, outside). Not an authoring write: the promotion
+     * receiver accepts it.
+     */
+    fun land(
+        validated: Validated,
+        workspaceId: UUID,
+        actor: UUID,
+    ): ParameterSetImported =
+        sets.importValidated(
             workspaceId,
             co.datapipelines.parameters.ParameterSetExport(
-                id = id,
-                name = nameNode.asText(),
-                version = version,
-                bodyHash = bodyHash,
-                releasedAt = releasedAt,
-                body = body,
+                id = validated.bound.id,
+                name = validated.bound.name,
+                version = validated.bound.version,
+                bodyHash = validated.bound.bodyHash,
+                releasedAt = validated.bound.releasedAt,
+                body = validated.canonical,
             ),
             actor,
         )
-    }
 }
