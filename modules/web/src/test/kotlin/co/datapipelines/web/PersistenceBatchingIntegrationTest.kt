@@ -260,6 +260,15 @@ class PersistenceBatchingIntegrationTest {
                     rig.count("datapipelines.persistence.failures", "store" to "replay_log").toInt() shouldBeGreaterThan 0
                 }
                 logs.list.any { it.formattedMessage.contains("replay will be incomplete") } shouldBe true
+                // #266b (pass observation 5): the survivors are served in id order, each once — an
+                // indeterminate direct write that landed late must not reorder what a client replays.
+                var replayed = 0
+                run.emitted.keys.forEach { id ->
+                    val survivors = rig.eventLog.replay(id)?.map { it.eventId }.orEmpty()
+                    replayed += survivors.size
+                    withClue("the replay of $id: $survivors") { survivors shouldBe survivors.distinct().sorted() }
+                }
+                withClue("non-vacuity: the replay served entries to order") { replayed shouldBeGreaterThan 0 }
             }
         }
     }

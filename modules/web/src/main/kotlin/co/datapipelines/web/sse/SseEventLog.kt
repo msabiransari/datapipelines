@@ -111,11 +111,16 @@ class SseEventLog(
     }
 
     /**
-     * The stored stream in original order, or null when the log has expired or never existed —
+     * The stored stream in event-id order, or null when the log has expired or never existed —
      * which §10.3 answers with `410`, and which the caller must distinguish from an empty list.
      *
      * Each event id is served ONCE, the first stored copy (#266): the batched append is
      * at-least-once, and a client resuming by `Last-Event-ID` must never see an event twice.
+     *
+     * Sorted by id after that (#266b), so the order is this code's and not the list's: an emitter's
+     * direct fallback that outlived its bound keeps running on the persistence pool while the next
+     * event's entry is batched, and the list then holds whichever reached Redis first. The durable
+     * record orders by `event_id` in SQL; the replay says the same thing the same way.
      */
     fun replay(executionId: UUID): List<LoggedSseEvent>? {
         val stored =
@@ -132,6 +137,7 @@ class SseEventLog(
                     .onFailure { log.warn("Unreadable event in the log for execution {}; skipped.", executionId, it) }
                     .getOrNull()
             }.distinctBy { it.eventId }
+            .sortedBy { it.eventId }
     }
 
     private fun key(executionId: UUID) = "$KEY_PREFIX$executionId"
