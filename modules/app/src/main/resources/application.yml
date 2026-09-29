@@ -264,6 +264,12 @@ datapipelines:
     # §6.4.9); first entries into a state and the terminal sample are never throttled by it.
     progress-sample-interval-seconds: ${DATAPIPELINES_EXECUTOR_PROGRESS_SAMPLE_INTERVAL_SECONDS:1}
     heartbeat-seconds: ${DATAPIPELINES_EXECUTOR_HEARTBEAT_SECONDS:15}
+    # 311 — the bound on the two pipeline_executions lifecycle writes (the RUNNING insert, the
+    # terminal UPDATE): a queryTimeout on the two statements plus the emitter's caller-side wait,
+    # which is what bounds a metadata database that never answers. A past-bound write is stated:
+    # the insert's failure is the fail-closed rule for scheduled runs, the terminal UPDATE leaves
+    # the row RUNNING for the stale sweep and is counted.
+    lifecycle-write-timeout-seconds: ${DATAPIPELINES_EXECUTOR_LIFECYCLE_WRITE_TIMEOUT_SECONDS:10}
 
   pipelines:
     max-composition-depth: ${DATAPIPELINES_PIPELINES_MAX_COMPOSITION_DEPTH:5}

@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.20 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.21 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-29
@@ -228,6 +228,7 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.executions.aborted` | counter | `reason` (`client_disconnect`/`cancelled`/`shutdown`) | Aborted executions by trigger — the three D7 paths ([dag-executor §15.3](dag-executor.md#153-monitoring), [enums `ExecutionStatus`](enums.md)) |
 | `datapipelines.executions.duration` | timer | `pipeline_id` | Execution wall-clock duration |
 | `datapipelines.executions.concurrent` | gauge | (none) | Currently-running executions |
+| `datapipelines.executions.lifecycle_write_failed` | counter | (none) | (#311) The terminal UPDATE of `pipeline_executions` failed or outlived its bound (`datapipelines.executor.lifecycle-write-timeout-seconds`, [Configuration §3.2](configuration.md#32-executor)): the row is left RUNNING for the stale sweep to reap, so this counter is how an operator tells an unrecorded outcome apart from silence. The companion WARN names the execution id. The RUNNING insert's failure is deliberately NOT counted here — for scheduled runs it is the fail-closed refusal the scheduler records (`record_unwritable`), for interactive ones a WARN — the counter exists because a terminal row that stays RUNNING otherwise looks exactly like a dead instance |
 | `datapipelines.nodes.duration` | timer | `pipeline_id`, `node_id`, `source` | Per-node duration |
 | `datapipelines.nodes.rows_out` | counter | `pipeline_id`, `node_id` | Rows emitted by node |
 | `datapipelines.staging.rows` | counter | (none) | Total rows staged across all executions |
@@ -486,6 +487,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.21 | 306/#311 (the execution row's order and bounds) — numbered after 310's v1.20 | §4.1 gains `datapipelines.executions.lifecycle_write_failed` (counter, no tags): the terminal UPDATE of `pipeline_executions` failed or outlived its bound (`datapipelines.executor.lifecycle-write-timeout-seconds`), the row is left RUNNING for the stale sweep, and the counter is the difference between that and a dead instance. The RUNNING insert's failure is deliberately uncounted here (fail-closed for scheduled runs, WARN for interactive). |
 | 2026-09-29 | v1.20 | 310 (#310) audit-log retention — numbered after 297's v1.18 and 266b's v1.19 | §4.1 gains `datapipelines.audit.retention.purged` (counter, no tags). §7 gains the retention paragraph: the job, its three log events (`audit.retention` INFO, `audit.retention_incomplete` and `audit.retention_failed` WARN), the sweep's per-step `retention.step_failed` ERROR, and the meter — the "retention governed by" line was true of the documentation only until #310 |
 | 2026-09-29 | v1.19 | 266 (#266) persistence batching, with its correction round 266b — renumbered from v1.18, which 297 takes | New **§3.4G the persistence events** (`persistence.batch_retried`, `write_failed`, `direct_write_failed`, `indeterminate`, `direct_write_abandoned`, `saturated` — at most once per 10 s — `writer_died`, `drained`, `drain_incomplete`, and the two `shutdown.persistence_*` lines); §4.1 gains the **persistence batching** table (`datapipelines.persistence.*`: batch size and duration, lag, queue depth and bytes, failures by `kind`, fallbacks by `reason`, retried batches, dropped submissions — every one tagged `store`); §7 states the delivery rule and the loss window (only the non-awaited `submit` path, no caller yet) and marks audit retention as documented-not-implemented. 266b: a failure is logged by `cause` (class) and `sql_state`, never by the store's message, which quotes the refused row; the audit writer ships off (`audit.enabled: false`), so `audit.write` reads `direct` by default and the `audit` meters read zero. |
 | 2026-09-28 | v1.18 | 297 (#292) build time opt-in | §6.3's `build_time` becomes **absent when not supplied**, like `commit`: the build stamps a time only with `-Pdatapipelines.buildTime=<instant>` (`app.sh`'s image build passes it), because the plugin's default `Instant.now()` made the app's jar new on every Gradle invocation and re-ran its tests and the whole browser suite each time. |

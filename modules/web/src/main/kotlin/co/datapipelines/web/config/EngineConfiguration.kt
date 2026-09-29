@@ -56,7 +56,10 @@ import java.util.concurrent.Executors
 @Configuration
 class EngineConfiguration {
     @Bean
-    fun executionRepository(jdbc: NamedParameterJdbcTemplate): ExecutionRepository = ExecutionRepository(jdbc)
+    fun executionRepository(
+        jdbc: NamedParameterJdbcTemplate,
+        executor: ExecutorProperties,
+    ): ExecutionRepository = ExecutionRepository(jdbc, executor.lifecycleWriteTimeoutSeconds)
 
     @Bean
     fun executionEventRepository(jdbc: NamedParameterJdbcTemplate): ExecutionEventRepository = ExecutionEventRepository(jdbc)

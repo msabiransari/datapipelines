@@ -84,6 +84,9 @@ class WebPropertiesSpecDriftTest {
         // 149: the node_progress periodic cadence — bound, documented and mirrored in the env files.
         documented.getValue("datapipelines.executor.progress-sample-interval-seconds") shouldBe
             props.progressSampleIntervalSeconds.toString()
+        // 311: the lifecycle writes' bound — statement queryTimeout + the emitter's caller-side wait.
+        documented.getValue("datapipelines.executor.lifecycle-write-timeout-seconds") shouldBe
+            props.lifecycleWriteTimeoutSeconds.toString()
     }
 
     @Test

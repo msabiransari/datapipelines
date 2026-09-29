@@ -82,6 +82,17 @@ class ExecutorMetrics(
         registry.counter(STAGING_ROWS).increment(rows.toDouble())
     }
 
+    /**
+     * `datapipelines.executions.lifecycle_write_failed` (#311) — the terminal UPDATE of
+     * `pipeline_executions` failed or outlived its bound, so the row is left RUNNING for the
+     * stale sweep and this counter is how an operator tells that apart from silence. No tags:
+     * the write carries no dimension worth a card (observability §4.3), and the WARN names the
+     * execution id.
+     */
+    fun lifecycleWriteFailed() {
+        registry.counter(EXECUTIONS_LIFECYCLE_WRITE_FAILED).increment()
+    }
+
     /** Binds `datapipelines.executions.concurrent` to the live slot count. */
     fun bindConcurrency(slots: ExecutionSlots) {
         Gauge
@@ -95,6 +106,7 @@ class ExecutorMetrics(
         const val EXECUTIONS_DURATION = "datapipelines.executions.duration"
         const val EXECUTIONS_CONCURRENT = "datapipelines.executions.concurrent"
         const val EXECUTIONS_ABORTED = "datapipelines.executions.aborted"
+        const val EXECUTIONS_LIFECYCLE_WRITE_FAILED = "datapipelines.executions.lifecycle_write_failed"
         const val NODES_DURATION = "datapipelines.nodes.duration"
         const val NODES_ROWS_OUT = "datapipelines.nodes.rows_out"
         const val STAGING_ROWS = "datapipelines.staging.rows"

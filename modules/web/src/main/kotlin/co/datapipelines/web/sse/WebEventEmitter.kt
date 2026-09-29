@@ -13,14 +13,19 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.executor.ExecutorMetrics
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * Everything one execution needs recorded that the executor does not know (rest-api §10.2,
@@ -71,6 +76,13 @@ data class ExecutionContext(
  *    which is where the execution id first becomes known, since `PipelineExecutor.execute` mints
  *    it internally — and `ExecutionRepository.complete` on the terminal event.
  *
+ * For `execution_started` alone the record's RUNNING row (step 4's first half) moves IN FRONT of
+ * the live send (step 2): an id must never reach a client before the id resolves (#306). The
+ * started hook still runs before all of it — it is where the launcher registers the stream, so
+ * `execution_started` itself reaches the client. #306: a client that cancels or reads on the id
+ * the moment the first frame lands is answered 204 / 200, never `404 result.execution_not_found`
+ * — the row is committed before the frame that carries the id exists.
+ *
  * ## Dispatching
  * Steps 3 and 4 are blocking JDBC and Redis calls, and `emit` is invoked **on the executor's own
  * bounded dispatcher** (dag-executor §15.2 — a pool sized for SQL work, not for the surface's
@@ -86,12 +98,26 @@ data class ExecutionContext(
  * the cancellation is then rethrown — the shape the single blocking hop always had. It is bounded:
  * the recorder waits at most twice `record-max-wait-ms` per store (dag-executor §10).
  *
+ * ## The lifecycle writes' own bound (#311)
+ * The RUNNING insert and the terminal UPDATE are single direct statements, and a statement timeout
+ * cannot reach a server that never answers (measured: pgjdbc's `queryTimeout` timer cannot deliver
+ * its cancel to a paused Postgres). Both writes are therefore bounded at the CALLER by
+ * [lifecycleWriteTimeout] — `emit` hands the statement to [persistenceDispatcher] and waits at most
+ * the bound; past it the caller returns, the statement keeps running on the pool thread and may
+ * still land when the database recovers (the #266 direct-fallback precedent). The statements also
+ * carry a JDBC `queryTimeout` of the same bound (`ExecutionRepository`) so the common case — a
+ * database that answers slowly — is cancelled at the statement and frees its thread. What each
+ * timeout means is stated where it is caught: a RUNNING insert past the bound is `recorded = false`
+ * (fail-closed for scheduled runs, WARN-and-continue for interactive ones), a terminal UPDATE past
+ * it leaves the row RUNNING for the stale sweep and is counted
+ * (`datapipelines.executions.lifecycle_write_failed`) — never a fabricated COMPLETED.
+ *
  * ## Failure policy
  * A persistence failure is logged and **swallowed** — deliberately, and only here. dag-executor
  * §10 requires the emitter never to throw: an exception raised inside `emit` propagates into the
  * executor's coroutine and would fail an execution whose SQL all succeeded, because a bookkeeping
  * row could not be written. The live stream and the durable row are independent for the same
- * reason: losing one must not cost the other.
+ * reason: losing one must not cost the other. The one exception is the fail-closed rule below.
  */
 class WebEventEmitter(
     private val context: ExecutionContext,
@@ -101,6 +127,22 @@ class WebEventEmitter(
     eventRepository: ExecutionEventRepository,
     private val executionRepository: ExecutionRepository,
     private val persistenceDispatcher: CoroutineDispatcher,
+    /**
+     * #311 — the bound on the two direct lifecycle writes (the RUNNING insert, the terminal
+     * UPDATE), from `datapipelines.executor.lifecycle-write-timeout-seconds`. `emit` waits at most
+     * this long for each; past it the caller returns and the statement keeps running on
+     * [persistenceDispatcher] (see the class KDoc). [Duration.ZERO] — the default every direct
+     * construction gets — means unbounded, the pre-#311 shape; the application passes the key's
+     * value through [co.datapipelines.executor.ExecutorConfig].
+     */
+    private val lifecycleWriteTimeout: Duration = Duration.ZERO,
+    /**
+     * #311 — counts `datapipelines.executions.lifecycle_write_failed` when the terminal UPDATE
+     * fails or does not return within [lifecycleWriteTimeout]: the row is left RUNNING for the
+     * stale sweep, and the counter is how an operator tells that apart from silence. Null in
+     * direct constructions that carry no metrics; the application passes `ExecutorMetrics`.
+     */
+    private val metrics: ExecutorMetrics? = null,
     /**
      * #9 A14 — the scheduled path's FAIL-CLOSED rule (scheduler design revision §2.1). When true, a
      * `pipeline_executions` RUNNING row that cannot be written stops the execution before its
@@ -125,10 +167,11 @@ class WebEventEmitter(
      */
     private val onRecorded: (UUID) -> Unit = {},
     /**
-     * Invoked with the executor-minted execution id the moment `execution_started` is persisted —
-     * the first point any code outside the executor learns it. The execute launcher uses this to
-     * rebind the idempotency reservation (which had to be claimed *before* the id existed) onto the
-     * real id; see `ExecutionStreamLauncher`.
+     * Invoked with the executor-minted execution id the moment `execution_started` is seen — the
+     * first point any code outside the executor learns it, before the RUNNING row (#306) and
+     * before the send. The execute launcher uses this to register the live stream and rebind the
+     * idempotency reservation (which had to be claimed *before* the id existed) onto the real id;
+     * see `ExecutionStreamLauncher`.
      *
      * Keep it the LAST parameter: callers pass it as a trailing lambda, and Kotlin binds a trailing
      * lambda to whichever function-typed parameter is last. #9 once appended [onRecorded] after it,
@@ -162,12 +205,26 @@ class WebEventEmitter(
     override suspend fun emit(event: ExecutionEvent) {
         emitted.set(true)
         if (event is ExecutionStarted) {
-            // The hook runs BEFORE the stream lookup: it is where the launcher registers this
-            // execution's stream (the executor mints the id, so registration cannot happen
-            // earlier), and `execution_started` itself must already reach the client.
+            // The hook runs BEFORE everything: it is where the launcher registers this execution's
+            // stream (the executor mints the id, so registration cannot happen earlier).
             executionId.set(event.executionId)
             runCatching { onExecutionStarted(event.executionId) }
                 .onFailure { log.warn("onExecutionStarted hook failed for execution {}.", event.executionId, it) }
+            // #306 — the RUNNING row is committed BEFORE the first frame: the event's own payload
+            // carries the execution id, and a client that cancels or reads on that id the moment the
+            // frame lands must be answered 204/200, never `404 result.execution_not_found`. The
+            // scheduler's start barrier waits on `onRecorded`, which still fires right after the
+            // insert — the row now also precedes every event row AND every frame.
+            currentCoroutineContext().ensureActive()
+            withContext(NonCancellable) {
+                val recorded = createExecutionRow(event)
+                if (!recorded && failClosedOnRecord) throw ExecutionRecordUnwritableException(event.executionId)
+                if (recorded) {
+                    runCatching { onRecorded(event.executionId) }
+                        .onFailure { log.warn("onRecorded hook failed for execution {}.", event.executionId, it) }
+                }
+            }
+            currentCoroutineContext().ensureActive()
         }
         val target = stream ?: streams.find(event.executionId)
         // The counter lives on the emitter, not on the stream: `event_id` is monotonic **per
@@ -199,56 +256,89 @@ class WebEventEmitter(
         name: String,
         payload: Map<String, Any?>,
     ) {
-        // The execution row must exist before any event row: execution_events.execution_id is a
-        // foreign key onto pipeline_executions (metadata-db §4.7). A direct, awaited single insert —
-        // never batched — because the scheduler's start barrier waits on it (#9 A14).
-        if (event is ExecutionStarted) {
-            val recorded = withContext(persistenceDispatcher) { createExecutionRow(event) }
-            if (!recorded && failClosedOnRecord) throw ExecutionRecordUnwritableException(event.executionId)
-            if (recorded) {
-                runCatching { onRecorded(event.executionId) }
-                    .onFailure { log.warn("onRecorded hook failed for execution {}.", event.executionId, it) }
-            }
-        }
-
+        // The execution row already exists: for `execution_started` it was persisted before the
+        // send (#306), and every other event arrives after it — `execution_events.execution_id` is
+        // a foreign key onto pipeline_executions (metadata-db §4.7).
         eventRecorder.record(RecordedEvent(event.executionId, eventId, event.type, name, event.timestamp, payload))
 
         // The terminal UPDATE after the terminal event's own row, as always — direct, never batched.
-        if (event.completesTheRow()) withContext(persistenceDispatcher) { completeExecutionRow(event) }
+        if (event.completesTheRow()) completeExecutionRow(event)
     }
 
-    /** Inserts the RUNNING row; false when the insert failed (logged either way). */
-    private fun createExecutionRow(event: ExecutionStarted): Boolean =
+    /**
+     * Inserts the RUNNING row; false when the insert failed or did not return within
+     * [lifecycleWriteTimeout] (logged either way — the false drives the fail-closed rule).
+     */
+    private suspend fun createExecutionRow(event: ExecutionStarted): Boolean =
         runCatching {
-            executionRepository.create(
-                ExecutionRecord(
-                    executionId = event.executionId,
-                    pipelineId = context.pipelineId,
-                    pipelineVersion = context.pipelineVersion,
-                    status = ExecutionStatus.RUNNING,
-                    parametersJson = context.parametersJson,
-                    executedBy = context.userId,
-                    executedByKeyKind = context.executedByKeyKind,
-                    triggeredVia = context.triggeredVia,
-                    correlationId = context.correlationId,
-                    startedAt = event.startedAt,
-                    parentExecutionId = context.parentExecutionId,
-                    parentNodeId = context.parentNodeId,
-                    rootExecutionId = context.rootExecutionId,
-                ),
-            )
-        }.onFailure { log.error("pipeline_executions row for execution {} not created.", event.executionId, it) }
-            .isSuccess
+            withinLifecycleBound {
+                executionRepository.create(recordFor(event))
+            }
+        }.onFailure {
+            if (it is LifecycleWriteUnconfirmedException) {
+                log.error(
+                    "pipeline_executions row for execution {} did not return within {} — not written yet.",
+                    event.executionId,
+                    lifecycleWriteTimeout,
+                )
+            } else {
+                log.error("pipeline_executions row for execution {} not created.", event.executionId, it)
+            }
+        }.isSuccess
+
+    private fun recordFor(event: ExecutionStarted) =
+        ExecutionRecord(
+            executionId = event.executionId,
+            pipelineId = context.pipelineId,
+            pipelineVersion = context.pipelineVersion,
+            status = ExecutionStatus.RUNNING,
+            parametersJson = context.parametersJson,
+            executedBy = context.userId,
+            executedByKeyKind = context.executedByKeyKind,
+            triggeredVia = context.triggeredVia,
+            correlationId = context.correlationId,
+            startedAt = event.startedAt,
+            parentExecutionId = context.parentExecutionId,
+            parentNodeId = context.parentNodeId,
+            rootExecutionId = context.rootExecutionId,
+        )
 
     /**
-     * The single terminal UPDATE (metadata-db §4.6).
+     * The two lifecycle writes' caller-side bound (#311): hands [block] to [persistenceDispatcher]
+     * and waits at most [lifecycleWriteTimeout]. Past the bound the WAIT returns — the statement
+     * keeps running on the pool thread and may still land when the database recovers — and the
+     * caller is told via [LifecycleWriteUnconfirmedException] so it can state the outcome honestly.
+     * Unbounded ([Duration.ZERO]) keeps the plain blocking hop, the pre-#311 shape every direct
+     * construction gets. The statements themselves carry the same bound as a JDBC `queryTimeout`
+     * (`ExecutionRepository`), so a database that answers slowly is cancelled at the statement and
+     * frees its thread; one that never answers is what this caller-side bound is for — measured,
+     * a statement timeout cannot reach a paused Postgres.
+     */
+    private suspend fun <T> withinLifecycleBound(block: () -> T): T {
+        if (lifecycleWriteTimeout.isZero()) return withContext(persistenceDispatcher) { block() }
+        val done = CompletableDeferred<T>()
+        persistenceDispatcher.dispatch(EmptyCoroutineContext) {
+            runCatching { block() }.fold(onSuccess = done::complete, onFailure = done::completeExceptionally)
+        }
+        return withTimeoutOrNull(lifecycleWriteTimeout.toMillis()) { done.await() }
+            ?: throw LifecycleWriteUnconfirmedException(lifecycleWriteTimeout)
+    }
+
+    /**
+     * The single terminal UPDATE (metadata-db §4.6), bounded (#311).
      *
      * `data_ready` follows `pipeline_completed` and is not itself terminal, so the row is completed
      * on `pipeline_completed` and the result columns are filled by the caller afterwards from
      * `ExecutionResult` — the event carries no size, and inventing one from the inline page would
      * be wrong for any result larger than a page.
+     *
+     * A failure — or a write that outlives [lifecycleWriteTimeout] — is counted
+     * (`datapipelines.executions.lifecycle_write_failed`) and logged with the execution id; the row
+     * is left RUNNING for the stale sweep to reap. Never a fabricated COMPLETED: an unconfirmed
+     * write is reported as unconfirmed, which is also why nothing retries it here (a retry would
+     * double the wait and park a second pool thread on the same hung database).
      */
-    private fun completeExecutionRow(event: ExecutionEvent) {
+    private suspend fun completeExecutionRow(event: ExecutionEvent) {
         val (status, failedNodeId, errorJson) =
             when (event) {
                 is PipelineCompleted -> {
@@ -292,17 +382,30 @@ class WebEventEmitter(
             }.takeIf { it.isNotEmpty() }
                 ?.let { snapshot -> runCatching { SseJson.mapper.writeValueAsString(snapshot) }.getOrNull() }
         runCatching {
-            executionRepository.complete(
-                executionId = event.executionId,
-                status = status,
-                completedAt = event.timestamp,
-                durationMs = durationMsOf(event),
-                nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
-                failedNodeId = failedNodeId,
-                errorJson = errorJson,
-                contextJson = contextJson,
-            )
-        }.onFailure { log.error("pipeline_executions row for execution {} not completed.", event.executionId, it) }
+            withinLifecycleBound {
+                executionRepository.complete(
+                    executionId = event.executionId,
+                    status = status,
+                    completedAt = event.timestamp,
+                    durationMs = durationMsOf(event),
+                    nodeStatsJson = SseJson.mapper.writeValueAsString(nodeStats),
+                    failedNodeId = failedNodeId,
+                    errorJson = errorJson,
+                    contextJson = contextJson,
+                )
+            }
+        }.onFailure {
+            metrics?.lifecycleWriteFailed()
+            if (it is LifecycleWriteUnconfirmedException) {
+                log.error(
+                    "pipeline_executions row for execution {} did not return within {} — left RUNNING for the stale sweep.",
+                    event.executionId,
+                    lifecycleWriteTimeout,
+                )
+            } else {
+                log.error("pipeline_executions row for execution {} not completed.", event.executionId, it)
+            }
+        }
     }
 
     private fun durationMsOf(event: ExecutionEvent): Long =
@@ -343,3 +446,16 @@ class WebEventEmitter(
 class ExecutionRecordUnwritableException(
     val executionId: UUID,
 ) : IllegalStateException("The execution record of $executionId could not be written; the scheduled run stops before its first node.")
+
+/**
+ * #311: a lifecycle write (the RUNNING insert, the terminal UPDATE) did not return within the
+ * emitter's bound. "Not confirmed" — the statement may still be running on the pool thread and
+ * may land when the database recovers — so the callers report the outcome honestly: the insert's
+ * false drives the fail-closed rule, the terminal UPDATE leaves the row RUNNING for the stale
+ * sweep and is counted. Never thrown as a CancellationException subtype: the await's timeout is
+ * converted here, inside the `NonCancellable` block, so no caller can mistake it for the job's
+ * own cancellation.
+ */
+private class LifecycleWriteUnconfirmedException(
+    val bound: Duration,
+) : RuntimeException("The lifecycle write did not return within $bound; its outcome is unconfirmed.")
