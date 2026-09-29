@@ -171,11 +171,16 @@ class PromotionService(
         // template closure, the payloads ride the set slot (§8.3's order). #300: the collaborator
         // is required — set roots are never silently dropped from a batch.
         val targets = inventory.parameterSetByName()
+        // A set root the lens hides, that does not exist, or that has no promotable release is
+        // REFUSED like a pipeline root — the parameters' catalogued 404 naming the NAME the caller
+        // submitted, nothing about what the lens hides (the 312 security pass: it used to be
+        // silently dropped, and the operator's count and the audit row under-reported the request).
         val setEntries =
             parameterSetNames
                 .distinct()
-                .mapNotNull { name ->
+                .map { name ->
                     parameterSetPromotion.entryFor(workspaceId, name, targets[name])
+                        ?: throw ApiErrors.parameterNotFound(name)
                 }
         setEntries
             .flatMap { parameterSetPromotion.templatePins(it) }

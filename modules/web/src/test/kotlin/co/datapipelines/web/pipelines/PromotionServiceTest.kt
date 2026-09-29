@@ -184,6 +184,26 @@ class PromotionServiceTest {
     // ------------------------------------------------------------------ §10.3, the push guards
 
     @Test
+    fun `promote refuses a parameter-set root the lens hides or that does not exist - never a silent drop`() {
+        // The 312 security pass: ParameterSetPromotion.entryFor answers null for a hidden or
+        // unknown name (the lens's 404 shape), and the sender used to DROP it — the operator's
+        // count and the audit row under-reported the request. A set root is refused the way a
+        // pipeline root is: the parameters' catalogued 404, naming the NAME the caller submitted
+        // and nothing about what the lens hides.
+        every { client.inventory(workspace) } returns inventory()
+        every { parameterSetPromotion.entryFor(workspaceId, "finance/hidden", any()) } returns null
+
+        val thrown =
+            shouldThrow<ApiException> {
+                service.promote(workspaceId, workspace, emptyList(), listOf("finance/hidden"))
+            }
+
+        thrown.code shouldBe co.datapipelines.parameters.ParameterErrorCodes.NOT_FOUND
+        thrown.details["id"] shouldBe "finance/hidden"
+        verify(exactly = 0) { client.push(any()) }
+    }
+
+    @Test
     fun `promote refuses a target that has authoring enabled`() {
         every { client.inventory(workspace) } returns inventory(authoringEnabled = true)
 

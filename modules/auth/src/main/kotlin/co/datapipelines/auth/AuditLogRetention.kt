@@ -1,5 +1,6 @@
 package co.datapipelines.auth
 
+import co.datapipelines.persistence.FailureShape
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
@@ -123,12 +124,15 @@ class AuditLogRetention(
                 }
                 outcome
             } catch (e: DataAccessException) {
+                // The class and the SQLState, never the message: Spring's message carries the
+                // statement text and the driver's text (observability §9.2's rule; the 310 pass).
                 LOG.warn(
-                    "event=audit.retention_failed purged={} batches={} cutoff={} message=\"{}\"",
+                    "event=audit.retention_failed purged={} batches={} cutoff={} error={} sql_state={}",
                     purged,
                     batches,
                     cutoff,
-                    e.message,
+                    e.javaClass.simpleName,
+                    FailureShape.sqlState(e),
                 )
                 Stop.FAILED
             }

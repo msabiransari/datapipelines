@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuditProperties
 import co.datapipelines.auth.KeyRetentionPurge
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionEventRetention
+import co.datapipelines.persistence.FailureShape
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
@@ -99,7 +100,13 @@ class ExecutionEventRetentionScheduler(
         try {
             block()
         } catch (e: RuntimeException) {
-            LOG.error("event=retention.step_failed step={} error={} message=\"{}\"", name, e.javaClass.simpleName, e.message, e)
+            // The class and the SQLState only — no message, no stack (a store's message can carry a row; the 310 pass).
+            LOG.error(
+                "event=retention.step_failed step={} error={} sql_state={}",
+                name,
+                e.javaClass.simpleName,
+                FailureShape.sqlState(e),
+            )
         }
     }
 
