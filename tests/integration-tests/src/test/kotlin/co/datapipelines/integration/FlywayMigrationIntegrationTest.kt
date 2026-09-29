@@ -144,6 +144,9 @@ class FlywayMigrationIntegrationTest {
                 // #258 (V40) — the run carries the execution's own timing (scheduler follow-ups, lane 253).
                 "40|schedule run execution timing|true",
                 "41|retire pre rep5 endpoint rows|true",
+                // #10 L1a — visualizations + dashboards (the V39 shape twice, one-draft index each) and the two
+                // test-evidence tables L4 writes (a run per session over one version, one capped screenshot per run).
+                "42|visualizations and dashboards|true",
             )
     }
 
@@ -431,6 +434,88 @@ class FlywayMigrationIntegrationTest {
             )
         columnsOf("parameter_sets") shouldContainExactlyInAnyOrder
             listOf("id", "workspace_id", "name", "display_name", "description", "current_version", "created_at", "updated_at", "created_by")
+    }
+
+    /**
+     * #10 L1a (V42) — the two artifact families, read from the SHIPPED database: V39's lifecycle CHECKs and
+     * one-draft partial index, twice, with the names changed (the dashboard implementation spec §2.1). The
+     * lifecycle itself is `modules/visualization`'s own container suite; this pins that production Flyway
+     * builds the schema that suite runs on.
+     */
+    @Test
+    fun `V42 creates the visualization and dashboard tables with the lifecycle's checks and the one-draft indexes`() {
+        listOf("visualization", "dashboard").forEach { family ->
+            query(
+                "SELECT conname FROM pg_constraint WHERE conrelid = '${family}_versions'::regclass AND contype = 'c' ORDER BY conname",
+            ) { it.getString(1) } shouldContainExactly
+                listOf("body", "discard_stamps", "release_stamps", "status", "version", "via").map { "chk_${family}_versions_$it" }
+            query(
+                "SELECT pg_get_indexdef(indexrelid) FROM pg_index WHERE indexrelid = 'uq_${family}_versions_one_draft'::regclass",
+            ) { it.getString(1) } shouldContainExactly
+                listOf(
+                    "CREATE UNIQUE INDEX uq_${family}_versions_one_draft ON public.${family}_versions USING btree (${family}_id) " +
+                        "WHERE (status = 'DRAFT'::text)",
+                )
+            columnsOf("${family}s") shouldContainExactlyInAnyOrder
+                listOf(
+                    "id",
+                    "workspace_id",
+                    "name",
+                    "display_name",
+                    "description",
+                    "current_version",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                )
+            query(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_${family}_versions_body'",
+            ) { it.getString(1) } shouldContainExactly
+                listOf("CHECK (((jsonb_typeof(body_json) = 'object'::text) AND (NOT (body_json ? 'name'::text))))")
+        }
+    }
+
+    /**
+     * #10 L1a (V42) — the test-evidence tables L4 writes (spec §2.1, §11.2, §17): a run hangs off ONE
+     * version (purging a draft takes its evidence), one run per session, the closed status list; a
+     * screenshot is PNG or WebP and at most 4 MiB — the cap is the schema's, not only the route's.
+     */
+    @Test
+    fun `V42 creates the test-evidence tables - a run per version and session, a capped screenshot per run`() {
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint" +
+                " WHERE conname IN ('fk_visualization_test_runs_version', 'uq_visualization_test_runs_session'," +
+                " 'chk_visualization_test_runs_status', 'chk_visualization_test_screenshots_media_type'," +
+                " 'chk_visualization_test_screenshots_size') ORDER BY conname",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_visualization_test_runs_status|CHECK ((status = ANY (ARRAY['RUNNING'::text, 'GREEN'::text, 'RED'::text, " +
+                    "'INCOMPLETE'::text, 'EXPIRED'::text])))",
+                "chk_visualization_test_screenshots_media_type|CHECK ((media_type = ANY (ARRAY['image/png'::text, 'image/webp'::text])))",
+                "chk_visualization_test_screenshots_size|CHECK (((octet_length(bytes) >= 1) AND (octet_length(bytes) <= 4194304)))",
+                "fk_visualization_test_runs_version|FOREIGN KEY (visualization_id, version) " +
+                    "REFERENCES visualization_versions(visualization_id, version) ON DELETE CASCADE",
+                "uq_visualization_test_runs_session|UNIQUE (visualization_id, version, session_id)",
+            )
+        columnsOf("visualization_test_runs") shouldContainExactlyInAnyOrder
+            listOf(
+                "id",
+                "visualization_id",
+                "version",
+                "body_hash",
+                "session_id",
+                "preview_token_hash",
+                "expires_at",
+                "started_by",
+                "started_at",
+                "completed_at",
+                "status",
+                "cases_json",
+                "environment_json",
+                "mechanical_json",
+            )
+        columnsOf("visualization_test_screenshots") shouldContainExactlyInAnyOrder
+            listOf("run_id", "media_type", "bytes", "sha256", "width", "height", "depicted_case", "uploaded_by", "uploaded_at")
     }
 
     /**
@@ -887,7 +972,7 @@ class FlywayMigrationIntegrationTest {
     }
 
     @Test
-    fun `creates exactly the twenty-seven tables of metadata-db §4`() {
+    fun `creates exactly the thirty-three tables of metadata-db §4`() {
         val tables =
             query(
                 """
@@ -916,6 +1001,13 @@ class FlywayMigrationIntegrationTest {
                 // #194 (V39) — the parameter engine's sets and their versions (metadata-db §4.26/§4.27).
                 "parameter_set_versions",
                 "parameter_sets",
+                // #10 L1a (V42) — the two artifact families and the test evidence (metadata-db §4.28–§4.33).
+                "dashboard_versions",
+                "dashboards",
+                "visualization_test_runs",
+                "visualization_test_screenshots",
+                "visualization_versions",
+                "visualizations",
                 // #9 (V38) — the scheduler: db-scheduler's queue, the schedules, their runs and the runs' trail.
                 "scheduled_tasks",
                 "schedule_run_events",
@@ -1003,6 +1095,19 @@ class FlywayMigrationIntegrationTest {
                 "parameter_set_versions.uq_parameter_set_versions_one_draft",
                 "parameter_sets.parameter_sets_pkey",
                 "parameter_sets.uq_parameter_sets_workspace_name",
+                // #10 L1a (V42) — the same four per family; a run's (visualization, version, session) uniqueness
+                // is also its per-version lookup; a screenshot's PK is its run.
+                "dashboard_versions.dashboard_versions_pkey",
+                "dashboard_versions.uq_dashboard_versions_one_draft",
+                "dashboards.dashboards_pkey",
+                "dashboards.uq_dashboards_workspace_name",
+                "visualization_test_runs.uq_visualization_test_runs_session",
+                "visualization_test_runs.visualization_test_runs_pkey",
+                "visualization_test_screenshots.visualization_test_screenshots_pkey",
+                "visualization_versions.uq_visualization_versions_one_draft",
+                "visualization_versions.visualization_versions_pkey",
+                "visualizations.uq_visualizations_workspace_name",
+                "visualizations.visualizations_pkey",
                 // 140 (V28) — the latest-run-per-check read.
                 "pipeline_check_runs.idx_pipeline_check_runs_latest",
                 "pipeline_check_runs.pipeline_check_runs_pkey",
@@ -1102,6 +1207,15 @@ class FlywayMigrationIntegrationTest {
                 // 215b (V34) — a key's role follows its kind (api_caller | promotion_receiver | NULL),
                 // each non-null arm spelled `role IS NOT NULL AND …` (a NULL role would pass otherwise).
                 "chk_api_keys_role",
+                // #10 L1a (V42) — dashboard_versions' body shape, stamps, status, version floor and write surface,
+                // then dashboards' pointer floor: pg_constraint's collation sorts `dashboard_versions` first.
+                "chk_dashboard_versions_body",
+                "chk_dashboard_versions_discard_stamps",
+                "chk_dashboard_versions_release_stamps",
+                "chk_dashboard_versions_status",
+                "chk_dashboard_versions_version",
+                "chk_dashboard_versions_via",
+                "chk_dashboards_current_version",
                 // 087 §A (V13) — the three credential CHECKs of metadata-db §4.10: the kind is
                 // in the enums.md §5A set, `kind = 'none'` iff no ciphertext (which is what makes
                 // `password_set` derivable), and `username` is present exactly when the kind
@@ -1177,6 +1291,22 @@ class FlywayMigrationIntegrationTest {
                 "chk_type_dialect",
                 // 215b (V34) — users.kind is human | service (a key's identity) | system.
                 "chk_users_kind",
+                // #10 L1a (V42) — the test evidence (status list, completion stamp, JSON kinds; media type, the 4 MiB
+                // cap, digest shape, dimensions), then the visualization family's twins of the dashboard rows above.
+                "chk_visualization_test_runs_completed",
+                "chk_visualization_test_runs_json",
+                "chk_visualization_test_runs_status",
+                "chk_visualization_test_screenshots_dimensions",
+                "chk_visualization_test_screenshots_media_type",
+                "chk_visualization_test_screenshots_sha256",
+                "chk_visualization_test_screenshots_size",
+                "chk_visualization_versions_body",
+                "chk_visualization_versions_discard_stamps",
+                "chk_visualization_versions_release_stamps",
+                "chk_visualization_versions_status",
+                "chk_visualization_versions_version",
+                "chk_visualization_versions_via",
+                "chk_visualizations_current_version",
                 // V24 (113) — the invitation row stores the email in the one canonical form §4.2
                 // mandates; V29 (177) gave it the same ONE-role CHECK the membership carries (D20).
                 // Sorted BEFORE the members' CHECK: pg_constraint's ORDER BY conname puts

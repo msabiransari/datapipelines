@@ -242,8 +242,11 @@ for p, t in texts.items():
 # #194 added): until then a misspelt or retired `parameter.*` code in any doc passed. The
 # retired `parameter.validation.selector_probe_unavailable` needs no new exemption — every
 # mention in the scan set sits in a Change Log row, which body_lines() already skips.
+# `visualization|dashboard` join in #10 L1a for the two artifact families' codes (pipeline-contract
+# §13.22/§13.23, the implementation spec §15): a misspelt `dashboard.*` code in any doc now fails here.
 CODE_RE = (r"(?<![.\w-])(?:pipeline|template|datasource|auth|workspace|result|rate_limit|"
-           r"idempotency|type_mapping|mcp|endpoint|mail|lake|schedule|scheduler|parameter)\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
+           r"idempotency|type_mapping|mcp|endpoint|mail|lake|schedule|scheduler|parameter|visualization|dashboard)"
+           r"\.[a-z0-9_]+(?:\.[a-z0-9_*]+)*(?![\w-])")
 catalog = set(re.findall(CODE_RE, texts["docs/pipeline-contract.md"]))
 # datasource.validation.* is delegated: pipeline-contract §13.8 names Datasources §9
 # as the defining list, so codes defined there join the catalog.
@@ -339,7 +342,9 @@ for p, t in texts.items():
         if NEGATION.search(line):
             continue
         for c in set(re.findall(CODE_RE, line)):
-            if c.startswith(CONFIG_PREFIXES) or c.endswith(".js") or c.endswith(".md"):
+            # A FILENAME is not a code: `dashboard.html` (a Thymeleaf template ui-screens cites) joined the
+            # .js/.md skip when #10 L1a added `dashboard` to CODE_RE.
+            if c.startswith(CONFIG_PREFIXES) or c.endswith((".js", ".md", ".html")):
                 continue
             if (c + "(") in line:   # Kotlin method call, e.g. pipeline.copy(...)
                 continue

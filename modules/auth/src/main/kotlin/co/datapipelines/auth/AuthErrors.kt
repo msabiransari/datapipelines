@@ -224,6 +224,10 @@ object AuthErrorCodes {
             // `request.body_too_large` envelope's doc_url lands on the catalog top — the 194b
             // lesson, refused in the same commit as the family.
             "request." to "1321-request-limits",
+            // #10 L1a — the two dashboard artifacts' refusals (§13.22, §13.23), anchored in the same commit as the
+            // families so no `doc_url` falls to the catalog top (the 194b lesson).
+            "visualization." to "1322-visualizations",
+            "dashboard." to "1323-dashboards",
         )
 }
 

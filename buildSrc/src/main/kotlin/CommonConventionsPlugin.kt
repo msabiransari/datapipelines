@@ -441,6 +441,9 @@ class CommonConventionsPlugin : Plugin<Project> {
             // #194 lane B: measured baseline 95.71 on the module as delivered (A.1's 91.18 measured the model alone),
             // minus 2, floored. The container suite (the repository and the lifecycle) carries a third of the lines.
             ":modules:parameters" to 93,
+            // #10 L1a (dashboard implementation spec §1, §17): 90 until the first measured baseline; the
+            // orchestrator sets baseline minus 2 at the merge (the house rule).
+            ":modules:visualization" to 90,
             ":modules:mcp-server" to 94,
             ":modules:web" to 72,
             ":modules:app" to 90,

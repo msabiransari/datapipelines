@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.23 (living document — updated as enums evolve)
+**Status:** v1.24 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -492,7 +492,7 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 **Source:** [Pipeline Contract §13](pipeline-contract.md#13-error-code-catalog) — the ONLY catalog of concrete error codes. This section registers domains; deliberately no code list here, so there is exactly one place a code can drift from.
 **Used by:** every spec that defines error codes.
 
-Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `datasource.table_not_found`, `datasource.table_forbidden`, `template.not_found`, the bare `template.*` block and citation codes (`template.contract_invalid`, …, `template.implements_unresolved` — about the version's own content, 7b/7e), `rate_limit.exceeded`, `rate_limit.unavailable`, every `semantics.*` code — a learned fact has no sub-entity — `mcp.doc_not_found`, the schedule's own states: `schedule.not_found`, `schedule.name_taken`, `schedule.revision_conflict`, `schedule.blocked`, `schedule.not_blocked`, and `parameter.not_found` — a parameter set is the entity; and the request cap's `request.body_too_large` — the body itself is the refused thing). Additive-only — never reused, never renamed.
+Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowercase snake_case, dot-separated, ASCII. Two-segment codes exist only where the domain has no entity dimension (`datasource.in_use`, `datasource.driver_not_loaded`, `datasource.not_found`, `datasource.lease_in_transaction`, `datasource.table_not_found`, `datasource.table_forbidden`, `template.not_found`, the bare `template.*` block and citation codes (`template.contract_invalid`, …, `template.implements_unresolved` — about the version's own content, 7b/7e), `rate_limit.exceeded`, `rate_limit.unavailable`, every `semantics.*` code — a learned fact has no sub-entity — `mcp.doc_not_found`, the schedule's own states: `schedule.not_found`, `schedule.name_taken`, `schedule.revision_conflict`, `schedule.blocked`, `schedule.not_blocked`, and `parameter.not_found` — a parameter set is the entity; `visualization.not_found` and `dashboard.not_found` likewise; and the request cap's `request.body_too_large` — the body itself is the refused thing). Additive-only — never reused, never renamed.
 
 | Domain | Description | Catalog section |
 |---|---|---|
@@ -517,6 +517,8 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `semantics.*` | The learned semantic layer: recording, evidence, duplicate and drift refusals | pipeline-contract §13.15 (defined in the [learned-semantic-layer design record](superpowers/specs/2026-09-11-learned-semantic-layer-design.md)) |
 | `mcp.*` | The MCP surface's own refusals (the resource surface's not-found is the JSON-RPC protocol's, not a code) | pipeline-contract §13.16 (defined in [MCP §6.2](mcp-server.md#62-tool-definitions)) |
 | `parameter.*` (`parameter.validation.*`, `parameter.evaluate.*`, `parameter.version.*`, `parameter.release.*`, `parameter.import.*`, `parameter.authoring.*`, `parameter.not_found`) | The parameter engine (#194): a parameter set's save-time validation, the evaluate runtime's whole-request and per-parameter refusals (the per-parameter ones are reported in `state.errors[]` of a 200, never as a response status), and the `template.*` twins of the lifecycle | pipeline-contract §13.20 (defined in the [parameter-engine design record](superpowers/specs/2026-09-21-parameter-engine-design.md) §10) |
+| `visualization.*` (`visualization.validation.*`, `visualization.version.*`, `visualization.release.*`, `visualization.import.*`, `visualization.authoring.*`, `visualization.test.*`, `visualization.not_found`) | The visualization artifact (#10): save-time validation, the lifecycle, the D56 release gate, the test sessions | pipeline-contract §13.22 (defined in [Dashboards](dashboards.md)) |
+| `dashboard.*` (`dashboard.validation.*`, `dashboard.version.*`, `dashboard.release.*`, `dashboard.import.*`, `dashboard.authoring.*`, `dashboard.runtime.*`, `dashboard.refresh.*`, `dashboard.key.*`, `dashboard.not_found`) | The dashboard artifact (#10): save-time validation, the lifecycle, the runtime and the `dashboard` key kind | pipeline-contract §13.23 (defined in [Dashboards](dashboards.md)) |
 | `schedule.*` (incl. `schedule.validation.*`, `schedule.run.*`, `schedule.limit.*`) | Schedule save-time validation, state conflicts and not-found (#9) — never raised while a schedule fires; a run that could not start is a `not_started` run (§24) | pipeline-contract §13.19 (defined in [Scheduler](scheduler.md)) |
 | `request.*` | The platform's transport-level request refusals (#279): the body-cap filter's 413 on `/api/v1` and `/mcp`, before any handler or parser | pipeline-contract §13.21 |
 
@@ -795,6 +797,119 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 
 ---
 
+## 31. `RendererKind` — what a visualization's configuration targets (#10)
+
+**Source:** the [dashboard implementation spec §3.1](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (D4, D12, D13); the Kotlin enum is `RendererKind` (`visualization`, `VisualizationModel.kt`), `renderer.kind` of a visualization ([Dashboards §2.1](dashboards.md)).
+**Used by:** the visualization module; the client runtime's adapters (L3).
+
+| Value | Meaning |
+|---|---|
+| `plotly` | A Plotly figure (`data` traces, `layout`, Plotly's own `config`) — the preferred chart renderer (D12) |
+| `table` | A table of labelled columns ([Dashboards §2.1.2](dashboards.md)) |
+| `kpi` | A single value with a label, an optional format and comparison |
+| `html` | RESERVED — authored HTML (D13, D46); refused in round one |
+| `svg` | RESERVED — authored SVG (D13, D46); refused in round one |
+
+**Closed.** An unknown value — and, in round one, `html` or `svg` — is `visualization.validation.renderer_unsupported`.
+
+---
+
+## 32. `AssertionKind` — what a visualization test case asserts (#10)
+
+**Source:** the spec's §3.1 `tests.cases[].assertions` (D34, D56 (a)); the Kotlin enum is `AssertionKind` (`visualization`).
+**Used by:** the visualization module; the agent's test session (L4).
+
+| Value | Argument | Meaning |
+|---|---|---|
+| `rendered` | — | The renderer reported completion |
+| `trace_count` | `equals` (≥ 0) | The rendered trace count |
+| `no_console_errors` | — | No console error while rendering |
+| `text_visible` | `text` | A title, legend or cell string is visible |
+| `no_data` | — | The case expects the empty state |
+| `value_visible` | `text` | A KPI value is visible |
+
+**Closed.** An unknown kind, a missing argument or an argument the kind does not take is `visualization.validation.test_case_invalid`.
+
+---
+
+## 33. `TestRunStatus` — a visualization test run's state (#10)
+
+**Source:** the spec's §2.1 and §11.2; the `CHECK` of `visualization_test_runs.status` (V42, [metadata-db §4.32](metadata-db.md)). The Kotlin enum is `TestRunStatus` (`visualization`); the tests lane (L4) writes the rows.
+**Used by:** the release gate (L4), the test-session routes.
+
+| Value | Meaning |
+|---|---|
+| `RUNNING` | A session is open; no verdict yet |
+| `GREEN` | Every case's verdict green AND the server's mechanical test passed at submit |
+| `RED` | A case red, or the mechanical test failed |
+| `INCOMPLETE` | A case has no verdict |
+| `EXPIRED` | The session timed out unsubmitted, or the version's content moved on — never qualifies a release |
+
+**Closed.** The database's `chk_visualization_test_runs_status` refuses any other value.
+
+---
+
+## 34. `DashboardObjectType` — the `type` of a dashboard object (#10)
+
+**Source:** the spec's §3.2 (D15, D17); the Kotlin enum is `DashboardObjectType` (`visualization`). Every object carries its type, and each list admits exactly one.
+**Used by:** the visualization module; the runtime's object-directed events (L2, the spec's §8.3).
+
+| Value | The list it sits in |
+|---|---|
+| `visualization` | `visualizations[]` — an occurrence of a pinned visualization release |
+| `group` | `groups[]` — a container (D47) |
+| `refresh` | `actions[]` — the one action kind of round one |
+| `action_control` | `action_controls[]` — a button, or a parameter's automatic binding |
+
+**Closed.** A missing type, or one that is not its list's, is `dashboard.validation.body_invalid` (`details.reason = wrong_object_type`).
+
+---
+
+## 35. `ActionScope` — what a refresh action targets (#10)
+
+**Source:** D55 (superseding R11/D18's empty-list shorthand); the Kotlin enum is `ActionScope` (`visualization`).
+**Used by:** the visualization module; the runtime's refresh request (L2).
+
+| Value | Meaning |
+|---|---|
+| `all` | Every visualization of the dashboard; the action carries no targets |
+| `targets` | Exactly the action's non-empty `targets` list |
+
+**Closed.** Any other value is `dashboard.validation.body_invalid`; `targets` with no list, or `all` with one, is `dashboard.validation.empty_targets`.
+
+---
+
+## 36. `StateSetting` — a parameter-state override (#10)
+
+**Source:** D20 and the record's §4.4; the Kotlin enum is `StateSetting` (`visualization`), each dimension (`visible`, `enabled`) of a `parameter_state` override.
+**Used by:** the visualization module; the runtime's parameter operation (L2).
+
+| Value | Meaning |
+|---|---|
+| `inherit` | The parameter engine's own state |
+| `force_true` | Shown / enabled whatever the engine says |
+| `force_false` | Hidden / disabled whatever the engine says — the value is still submitted (D23) |
+
+**Closed.** Any other value is `dashboard.validation.body_invalid`.
+
+---
+
+## 37. `LayoutPosition` — a layout region (#10)
+
+**Source:** R6 and the record's §7.4; the Kotlin enum is `LayoutPosition` (`visualization`) — `layout.parameter_set.position` and a parameter placement's `region`.
+**Used by:** the visualization module; the client runtime's layout (L3).
+
+| Value | Meaning |
+|---|---|
+| `left` | The left region |
+| `right` | The right region |
+| `top` | Above the grid |
+| `bottom` | Below the grid |
+
+**Closed.** Any other value is `dashboard.validation.body_invalid`.
+
+---
+
 ## Cross-Reference: Where Each Enum Is Authored
 
 | Enum | Authoring spec | Consuming specs |
@@ -827,6 +942,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 | `MissedRunPolicy`, `RunOrigin`, `RunState`, `TrailKind` | [scheduler.md](scheduler.md) (`scheduler` declares them; §22–§25 here are the wire tables) | metadata-db (the V38 CHECKs), rest-api §20 |
 | `ParameterCardinality` | pipeline-contract §6.1 (`typesystem` declares it; §26 here is the wire table) | the parameter engine (#194), rest-api, mcp-server |
 | `ParameterKind`, `SelectorSourceKind`, `PresentationControl`, `NumericFormatKind` | the [parameter-engine record §3](superpowers/specs/2026-09-21-parameter-engine-design.md) (`parameters` declares them; §27–§30 here are the wire tables) | rest-api, mcp-server (#194 lane D) |
+| `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
 
 ---
 
@@ -849,6 +965,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.24 | L1a (#10) the visualization module | New **§31 `RendererKind`**, **§32 `AssertionKind`**, **§33 `TestRunStatus`**, **§34 `DashboardObjectType`**, **§35 `ActionScope`**, **§36 `StateSetting`**, **§37 `LayoutPosition`** — the dashboard documents' closed vocabularies, each held to its Kotlin enum by `VisualizationEnumsSpecDriftTest`; §16 registers the `visualization.*` and `dashboard.*` domains (pipeline-contract §13.22/§13.23) and their entity-level `not_found`s as two-segment. |
 | 2026-09-28 | v1.23 | 279 (#279) the request-body cap | §16 registers the `request.*` domain (pipeline-contract §13.21) with `request.body_too_large` as its one two-segment code; §17 gains the `413 Content Too Large` row. |
 | 2026-09-26 | v1.22 | 194b (#194) parameter engine lane B | New **§27 `ParameterKind`** (`INPUT`, `SELECT`), **§28 `SelectorSourceKind`** (`constants`, `template` — derived, never a wire key), **§29 `PresentationControl`** (twelve controls, the record's §3.7 table) and **§30 `NumericFormatKind`** (`plain`, `currency`, `percent`); §16 registers the `parameter.*` domain (pipeline-contract §13.20) and `parameter.not_found` as its one two-segment code. |
 | 2026-09-26 | v1.21 | 194a (#194) parameter engine lane A | New **§26 `ParameterCardinality`** (`SINGLE`, `MULTI`) — a pipeline parameter's optional `cardinality`, shared with the parameter engine; `MULTI` is refused on a pipeline until the dashboard round. Cross-reference row added. |

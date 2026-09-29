@@ -292,8 +292,14 @@ class ApiErrorCatalogSpecDriftTest {
          * `pipeline.execution.parameter_declaration_invalid` (409, an explicit catalog row — the
          * `pipeline.execution.` family default is 500), landed in the SAME commit as its constant.
          * 279's §13.21 row (above) landed first; the merged document parses to 307.
+         *
+         * 307 → 371 with #10 L1a: the new §13.22 (Visualizations, 30 rows) and §13.23 (Dashboards, 34 rows) —
+         * the spec §14's 21 + 24 codes (its "18" and "22" miscount its own lists) plus the lifecycle rows the
+         * verbs need — landed in the SAME commit as their constants (`PipelineErrorCodes.Visualization` /
+         * `.Dashboard` and the module's mirrors), these catalog rows and the two `AuthErrors` anchors.
+         * Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 307
+        const val SECTION_13_ROW_COUNT = 371
 
         /**
          * §12's distinct validation codes.

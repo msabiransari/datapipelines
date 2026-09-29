@@ -118,6 +118,8 @@ tasks.named<ProcessResources>("processResources") {
             "calculators.md",
             "configuration.md",
             "dag-executor.md",
+            // #10 L1a — the two dashboard documents and their lifecycle (the implementation spec §15).
+            "dashboards.md",
             "datasources.md",
             "deployment.md",
             "enums.md",
