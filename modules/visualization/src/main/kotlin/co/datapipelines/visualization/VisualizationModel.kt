@@ -181,3 +181,25 @@ enum class AssertionKind(
 
 /** The JSON node types a reader reports, lower-case — `object`, `array`, `string`, `number`, … */
 internal fun JsonNode.kindName(): String = nodeType.name.lowercase()
+
+/**
+ * A visualization test run's state (enums.md §33, the spec's §2.1/§11.2) — the `CHECK` of
+ * `visualization_test_runs.status` (V42). Declared here with the evidence tables' DDL; the tests lane (L4) writes and
+ * reads the rows.
+ */
+enum class TestRunStatus {
+    /** A session is open; no verdict yet. */
+    RUNNING,
+
+    /** Every case green AND the mechanical test passed at submit. */
+    GREEN,
+
+    /** A case red, or the mechanical test failed. */
+    RED,
+
+    /** A case has no verdict. */
+    INCOMPLETE,
+
+    /** Timed out unsubmitted, or the version's content moved on — never qualifies a release. */
+    EXPIRED,
+}

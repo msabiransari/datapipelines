@@ -272,6 +272,9 @@ class DocsCatalog(
                         "pipeline-contract",
                         "templates",
                         "versioning",
+                        // #10 L1a — the visualization and dashboard documents: a contract, written into versioned,
+                        // exported, promoted bodies like a pipeline's.
+                        "dashboards",
                         "rest-api",
                         "type-system",
                         "enums",
