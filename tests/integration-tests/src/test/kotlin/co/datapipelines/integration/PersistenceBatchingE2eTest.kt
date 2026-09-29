@@ -46,6 +46,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * `PersistenceBatchingIntegrationTest`; the restart and the application's shutdown order in
  * `PersistenceRestartE2eTest`.
  *
+ * The audit writer ships switched off (#266b; configuration §3.32): this suite switches it ON in its
+ * property source, so D.2 proves the batched audit path — the default direct INSERT is
+ * `AuditDirectByDefaultE2eTest`'s.
+ *
  * - **D.1 order, real executions**: 32 REST executions at once — each one's `id:` sequence on its live
  *   stream, in the durable record and in the replay route is the same contiguous 1..N; no persistence
  *   failure of any kind is counted.
@@ -267,6 +271,7 @@ class PersistenceBatchingE2eTest {
         withClue("update: $updated") { updateError shouldBe false }
         templateHash = updated["body_hash"].asText()
         var renderMs = -1L
+        val auditBatchesBefore = statistic(metric("datapipelines.persistence.batch.size", "store:audit"), "COUNT")
         holdingLock("audit_log") { release ->
             val releaser =
                 Thread {
@@ -286,6 +291,11 @@ class PersistenceBatchingE2eTest {
         }
         withClue("the render waited for its row while the table was held ($HELD_MS ms), measured $renderMs ms") {
             (renderMs >= HELD_MS / 2) shouldBe true
+        }
+        // #266b: the direct INSERT (the default path) would wait on the held table just the same, so
+        // without this the case could pass with the writer switched off and prove nothing about it.
+        withClue("non-vacuity: the held rows were committed by the audit WRITER, the path this case proves") {
+            (statistic(metric("datapipelines.persistence.batch.size", "store:audit"), "COUNT") > auditBatchesBefore) shouldBe true
         }
     }
 
@@ -878,6 +888,9 @@ class PersistenceBatchingE2eTest {
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
             registry.add("management.server.port") { "0" }
+            // #266b: the audit writer ships OFF (configuration §3.32); D.2's read-your-own-write cases
+            // prove the BATCHED audit path, so this suite switches it on — explicitly, never by default.
+            registry.add("datapipelines.persistence.audit.enabled") { "true" }
             // This suite reads the persistence meters; health stays exposed as in production.
             registry.add("management.endpoints.web.exposure.include") { "health,metrics" }
             // The load is the point: the per-user budgets would refuse it before persistence saw it.

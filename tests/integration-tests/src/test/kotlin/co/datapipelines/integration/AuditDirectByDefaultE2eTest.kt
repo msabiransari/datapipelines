@@ -3,12 +3,11 @@ package co.datapipelines.integration
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import co.datapipelines.DatapipelinesApplication
-import co.datapipelines.integration.E2eSession.asSession
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.withClue
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
-import io.restassured.RestAssured.given
-import io.restassured.http.ContentType
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
@@ -18,6 +17,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
+import org.springframework.boot.test.web.server.LocalManagementPort
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -31,22 +31,17 @@ import java.util.Base64
 import java.util.UUID
 
 /**
- * #266 A.1 — **which audit call sites write inside the caller's transaction?** The runtime half of
- * the census (the static half is the evidence's `audit_call_sites.py`, which cannot see a caller in
- * another class that opened the transaction).
+ * #266b — the ruling, over the REAL application with its SHIPPED persistence configuration: no
+ * `datapipelines.persistence.*` key is set here, so `application.yml`'s defaults bind, and
+ * `datapipelines.persistence.audit.enabled` ships false (configuration §3.32). Every audit row is
+ * then the direct INSERT — the path the batched suites (`PersistenceBatchingE2eTest`,
+ * `AuditTransactionProbeE2eTest`) switch away from explicitly.
  *
- * Over the REAL application: `AuditLogger` logs every row's path at DEBUG
- * (`event=audit.write audit_event=… path=transactional|batched|direct`), decided by
- * `TransactionSynchronizationManager.isActualTransactionActive()` on the calling thread — the same
- * test that routes the row. This probe raises that logger to DEBUG in-process, drives
- * representative flows over the wire — a key minted and revoked, a member added and removed, an
- * MCP call, a rejected credential — and prints the census the evidence records.
- *
- * What it pins: a transactional caller's row stays on the caller's connection (it commits and rolls
- * back with the business write — `api_key.created` inside the issuance transaction), and the
- * request-path rows the writer exists for (`mcp.tool.called`, `auth.api_key.rejected`) are batched —
- * with `datapipelines.persistence.audit.enabled=true` set in the property source below, since the
- * writer ships off (#266b). The default path is `AuditDirectByDefaultE2eTest`'s.
+ * Two witnesses, because either alone could be fooled: `AuditLogger`'s DEBUG line reports the path
+ * each row took (`event=audit.write … path=direct`), and the audit writer's own meters — still
+ * bound, the writer is built idle — read zero batches. The rows chosen are the request-path ones
+ * the writer exists for and would carry if it were on: an MCP call's `mcp.tool.called` and a
+ * rejected credential's `auth.api_key.rejected`. Red with the default flipped in `application.yml`.
  */
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
@@ -54,9 +49,15 @@ import java.util.UUID
 )
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @ExtendWith(OutputCaptureExtension::class)
-class AuditTransactionProbeE2eTest {
+class AuditDirectByDefaultE2eTest {
     @LocalServerPort
     private var port: Int = 0
+
+    @LocalManagementPort
+    private var managementPort: Int = 0
+
+    private val mapper = ObjectMapper()
+    private val http: HttpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build()
 
     /** By name: this module compiles against `app` alone (module-structure §4.2), never against `auth`. */
     private val auditLog = LoggerFactory.getLogger("co.datapipelines.auth.AuditLogger") as Logger
@@ -76,52 +77,15 @@ class AuditTransactionProbeE2eTest {
     }
 
     @Test
-    fun `the census - each representative flow's audit rows, by the path they took`(output: CapturedOutput) {
-        // A key minted and revoked through the REST surface (ApiKeyService: @Transactional).
-        val minted =
-            given()
-                .port(port)
-                .contentType(ContentType.JSON)
-                .asSession(ADMIN_SESSION)
-                .body("""{"name": "probe-266-$RUN_ID", "kind": "mcp", "role": "author"}""")
-                .`when`()
-                .post("/api/v1/auth/api-keys")
-                .then()
-                .statusCode(201)
-                .extract()
-                .jsonPath()
-        given()
-            .port(port)
-            .asSession(ADMIN_SESSION)
-            .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
-            .`when`()
-            .delete("/api/v1/auth/api-keys/${minted.getString("data.id")}")
-            .then()
-            .statusCode(204)
+    fun `with the shipped configuration, request-path audit rows take the direct INSERT and the audit writer commits nothing`(
+        output: CapturedOutput,
+    ) {
+        checkNotNull(metric("datapipelines.persistence.batch.size", "store:audit")) {
+            "the audit writer's meters are bound whether or not it is used — absent means the wiring changed"
+        }
 
-        // A member added and removed (WorkspaceService.removeMember: @Transactional).
-        given()
-            .port(port)
-            .contentType(ContentType.JSON)
-            .asSession(ADMIN_SESSION)
-            .body("""{"email": "$MEMBER_EMAIL", "role": "viewer"}""")
-            .`when`()
-            .post("/api/v1/workspaces/default/members")
-            .then()
-            .statusCode(200)
-        given()
-            .port(port)
-            .asSession(ADMIN_SESSION)
-            .header(E2eSession.CSRF_HEADER, E2eSession.CSRF_TOKEN)
-            .`when`()
-            .delete("/api/v1/workspaces/default/members/$MEMBER_ID")
-            .then()
-            .statusCode(204)
-
-        // An MCP tool call (McpToolDispatcher, after every call — the request path).
         mcp(MCP_KEY.plaintext).statusCode() shouldBe 200
-        // A well-formed credential nobody holds (ApiKeyFilter).
-        mcp(E2eAuth.generateKey("probe-266-unknown").plaintext).statusCode() shouldBe 401
+        mcp(E2eAuth.generateKey("default-266b-unknown").plaintext).statusCode() shouldBe 401
 
         val census =
             Regex("event=audit\\.write audit_event=(\\S+) path=(\\S+)")
@@ -130,18 +94,19 @@ class AuditTransactionProbeE2eTest {
                 .groupBy({ it.first }, { it.second })
                 .mapValues { (_, paths) -> paths.toSortedSet() }
                 .toSortedMap()
-        println("audit-probe census (event -> paths): ")
-        census.forEach { (event, paths) -> println("audit-probe | $event | ${paths.joinToString(",")} |") }
-
+        println("audit-default census (event -> paths): $census")
         withClue("census: $census") {
-            census["auth.api_key.created"] shouldBe sortedSetOf("transactional")
-            census["mcp.tool.called"] shouldBe sortedSetOf("batched")
-            census["auth.api_key.rejected"] shouldBe sortedSetOf("batched")
+            census["mcp.tool.called"] shouldBe sortedSetOf("direct")
+            census["auth.api_key.rejected"] shouldBe sortedSetOf("direct")
+        }
+        withClue("non-vacuity: the MCP call's row was written — by the direct INSERT") { toolCalledRows() shouldBe 1 }
+        withClue("the audit writer committed nothing — not these rows, not any row since the application started") {
+            statistic(metric("datapipelines.persistence.batch.size", "store:audit").shouldNotBeNull(), "COUNT") shouldBe 0.0
         }
     }
 
     private fun mcp(plaintext: String): HttpResponse<String> =
-        HttpClient.newHttpClient().send(
+        http.send(
             HttpRequest
                 .newBuilder(URI.create("http://localhost:$port/mcp"))
                 .header("DP-API-Key", plaintext)
@@ -149,7 +114,7 @@ class AuditTransactionProbeE2eTest {
                 .header("Accept", "application/json, text/event-stream")
                 .POST(
                     HttpRequest.BodyPublishers.ofString(
-                        ObjectMapper().writeValueAsString(
+                        mapper.writeValueAsString(
                             mapOf(
                                 "jsonrpc" to "2.0",
                                 "id" to 1,
@@ -162,21 +127,60 @@ class AuditTransactionProbeE2eTest {
             HttpResponse.BodyHandlers.ofString(),
         )
 
+    /**
+     * `/actuator/metrics/{name}` on the management port; null when THAT meter does not exist. The
+     * endpoint itself must answer — reading "unreachable" as "zero" would pass the assertions above.
+     */
+    private fun metric(
+        name: String,
+        tag: String,
+    ): JsonNode? {
+        fun get(url: String) =
+            http.send(
+                HttpRequest
+                    .newBuilder(URI.create(url))
+                    .header("Cookie", E2eSession.cookieHeader(ADMIN_SESSION))
+                    .GET()
+                    .build(),
+                HttpResponse.BodyHandlers.ofString(),
+            )
+        val root = get("http://localhost:$managementPort/actuator/metrics")
+        check(root.statusCode() == 200) { "the metrics endpoint answered ${root.statusCode()} — the case cannot read a meter" }
+        val response = get("http://localhost:$managementPort/actuator/metrics/$name?tag=$tag")
+        return if (response.statusCode() == 200) mapper.readTree(response.body()) else null
+    }
+
+    private fun statistic(
+        node: JsonNode,
+        statistic: String,
+    ): Double = node["measurements"].single { it["statistic"].asText() == statistic }["value"].asDouble()
+
+    private fun toolCalledRows(): Int {
+        val pg = SharedE2e.postgres
+        return DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
+            connection
+                .prepareStatement("SELECT COUNT(*) FROM audit_log WHERE event = 'mcp.tool.called' AND key_id = ?")
+                .use { ps ->
+                    ps.setString(1, MCP_KEY.id)
+                    ps.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+                }
+        }
+    }
+
     private fun seedRows() {
         val pg = SharedE2e.postgres
         DriverManager.getConnection(pg.jdbcUrl, pg.username, pg.password).use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute(
                     "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
-                        "('$ADMIN_ID', 'probe-266-$RUN_ID@datapipelines.test', 'Probe 266', 'test', 'probe-266-$RUN_ID', TRUE, TRUE)",
+                        "('$ADMIN_ID', 'default-266b-$RUN_ID@datapipelines.test', 'Default 266b', 'test', 'default-266b-$RUN_ID', TRUE, TRUE)",
                 )
                 statement.execute(
                     "INSERT INTO workspace_members (workspace_id, user_id, role) " +
                         "VALUES ('$DEFAULT_WORKSPACE', '$ADMIN_ID', 'workspace_admin')",
-                )
-                statement.execute(
-                    "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active) VALUES " +
-                        "('$MEMBER_ID', '$MEMBER_EMAIL', 'Probe member', 'test', 'probe-member-$RUN_ID', TRUE)",
                 )
                 statement.execute(
                     "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin, kind) VALUES " +
@@ -204,22 +208,19 @@ class AuditTransactionProbeE2eTest {
         private val RUN_ID = Integer.toHexString(SecureRandom().nextInt(0x10000))
         private val DEFAULT_WORKSPACE: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
         private val ADMIN_ID: UUID = UUID.randomUUID()
-        private val MEMBER_ID: UUID = UUID.randomUUID()
-        private val MEMBER_EMAIL = "probe-member-$RUN_ID@datapipelines.test"
         private val KEY_IDENTITY: UUID = UUID.randomUUID()
-        private val MCP_KEY = E2eAuth.generateKey("probe-266-mcp-$RUN_ID")
+        private val MCP_KEY = E2eAuth.generateKey("default-266b-mcp-$RUN_ID")
         private val JWT_SECRET = E2eSession.newSecret()
-        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_ID.toString(), "probe-266-$RUN_ID@datapipelines.test")
+        private val ADMIN_SESSION get() = E2eSession.jwt(JWT_SECRET, ADMIN_ID.toString(), "default-266b-$RUN_ID@datapipelines.test")
         private val random = SecureRandom()
         private val oidc = OidcDiscoveryStub()
 
         @DynamicPropertySource
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
+            // NO datapipelines.persistence.* key: the shipped defaults are what this case is about.
             registry.add("management.server.port") { "0" }
-            // #266b: the audit writer ships OFF; the census reports which rows the writer carries, so it
-            // runs with the writer switched on — explicitly. The default is AuditDirectByDefaultE2eTest's.
-            registry.add("datapipelines.persistence.audit.enabled") { "true" }
+            registry.add("management.endpoints.web.exposure.include") { "health,metrics" }
             registry.add("spring.datasource.url") { SharedE2e.postgres.jdbcUrl }
             registry.add("spring.datasource.username") { SharedE2e.postgres.username }
             registry.add("spring.datasource.password") { SharedE2e.postgres.password }
