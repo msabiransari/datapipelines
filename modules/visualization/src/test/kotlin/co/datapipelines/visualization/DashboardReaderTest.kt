@@ -238,6 +238,22 @@ class DashboardReaderTest {
             listOf("visualizations[0].inputs" to VisualizationKey.MAX_INPUTS_PER_VISUALIZATION.path)
     }
 
+    /** The L1b pass's F3: `sources[]` had no count bound — `dashboards_get` runs one release read per source. */
+    @Test
+    fun `the sources list is bounded by what the visualizations can consume - refused BEFORE any source is walked`() {
+        val config = VisualizationConfig(maxVisualizationsPerDashboard = 2, maxInputsPerVisualization = 2)
+        val wide = DocumentFixtures.dashboard()
+        val sources = wide.get("sources") as ArrayNode
+        repeat(DashboardReader.maxSources(config) + 1 - sources.size()) { i ->
+            sources.addObject().put("name", "extra_$i").put("pipeline", "finance/pipelines/extra@1")
+        }
+        DashboardReader(config)
+            .read(wide)
+            .shouldBeInstanceOf<ReadOutcome.Refused>()
+            .result.failures
+            .map { it.path to it.details["reason"] } shouldBe listOf("sources" to JsonScan.REASON_TOO_MANY)
+    }
+
     private fun read(tree: JsonNode): DashboardDocument =
         reader.read(tree).shouldBeInstanceOf<ReadOutcome.Read<DashboardDocument>>().document
 

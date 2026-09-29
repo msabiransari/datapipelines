@@ -50,6 +50,13 @@ class DashboardReader(
          */
         val MAX_SOURCE_PARAMETERS: Int = checkNotNull(ParametersKey.MAX_PARAMETERS_PER_SET.max).toInt()
 
+        /** The two keys whose product bounds `sources[]` — named together in the refusal's `config_key`. */
+        val MAX_SOURCES_KEYS: String =
+            "${VisualizationKey.MAX_VISUALIZATIONS_PER_DASHBOARD.path} × ${VisualizationKey.MAX_INPUTS_PER_VISUALIZATION.path}"
+
+        /** `max-visualizations-per-dashboard × max-inputs-per-visualization`: no dashboard consumes more sources. */
+        fun maxSources(config: VisualizationConfig): Int = config.maxVisualizationsPerDashboard * config.maxInputsPerVisualization
+
         /** The keys of each level — the binding's own properties, pinned equal by `DashboardReaderTest`. */
         val DOCUMENT_KEYS: Set<String> =
             setOf(
@@ -104,7 +111,7 @@ private class DashboardScan(
         scan.requiredText(tree, "display_name", "display_name")
         scan.optionalText(tree, "description", "description")
         scan.present(tree, "parameter_set")?.let { scan.ref(it, "parameter_set") }
-        list(tree, "sources", required = false) { node, path -> source(node, path) }
+        sources(tree)
         occurrences(tree)
         list(tree, "groups", required = false) { node, path -> group(node, path) }
         list(tree, "actions", required = false) { node, path -> action(node, path) }
@@ -117,6 +124,21 @@ private class DashboardScan(
             scan.unknownKeys(timeouts, DashboardReader.TIMEOUT_KEYS, "timeouts")
             scan.optionalInt(timeouts, "refresh_seconds", "timeouts.refresh_seconds")
         }
+    }
+
+    /**
+     * A dashboard needs no more sources than its visualizations can consume — `max-visualizations-per-dashboard ×
+     * max-inputs-per-visualization` (400 by default) — so the list is bounded before any source is walked: the tools
+     * read one pipeline release per source (the L1b review's F3).
+     */
+    private fun sources(tree: JsonNode) {
+        val sources = scan.arrayAt(tree, "sources", "sources", required = false) ?: return
+        val max = DashboardReader.maxSources(config)
+        if (sources.size() > max) {
+            scan.tooMany("sources", sources.size(), DashboardReader.MAX_SOURCES_KEYS, max)
+            return
+        }
+        sources.forEachIndexed { index, node -> objectOf(node, "sources[$index]") { source(it, "sources[$index]") } }
     }
 
     private fun occurrences(tree: JsonNode) {
