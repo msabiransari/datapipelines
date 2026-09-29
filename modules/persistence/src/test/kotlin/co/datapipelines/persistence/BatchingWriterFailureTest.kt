@@ -220,7 +220,7 @@ class BatchingWriterFailureTest {
 
         override fun writeOne(item: String) {
             when (item) {
-                "bug" -> throw IllegalStateException("not a store failure: $item")
+                "bug" -> error("not a store failure: $item")
                 "refused" -> throw StoreRefusal("refused", SQLException("refused", SQL_STATE))
             }
         }

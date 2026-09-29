@@ -209,7 +209,14 @@ class WebPersistenceIntegrationTest {
             recorderLog.addAppender(appender)
             try {
                 DirectEventRecorder(events, eventLog, Dispatchers.IO).record(
-                    RecordedEvent(UUID.randomUUID(), 1, SseEventType.NODE_STARTED, "node_started", Instant.now(), mapOf("v" to "$ROW_CONTENT\u0000")),
+                    RecordedEvent(
+                        UUID.randomUUID(),
+                        1,
+                        SseEventType.NODE_STARTED,
+                        "node_started",
+                        Instant.now(),
+                        mapOf("v" to "$ROW_CONTENT\u0000"),
+                    ),
                 )
             } finally {
                 recorderLog.detachAppender(appender)

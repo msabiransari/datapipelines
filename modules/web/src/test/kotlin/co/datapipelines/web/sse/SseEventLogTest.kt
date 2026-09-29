@@ -27,7 +27,8 @@ class SseEventLogTest {
     fun `replay serves the stored stream in event-id order, each id once, whatever order the list holds`() {
         // Red while replay only deduplicated: the list's order was served as it stood.
         val id = UUID.randomUUID()
-        every { ops.range("dp:events:$id", 0, -1) } returns listOf(entry(1), entry(3), entry(2, "late copy"), entry(2), entry(4), entry(3, "resend"))
+        every { ops.range("dp:events:$id", 0, -1) } returns
+            listOf(entry(1), entry(3), entry(2, "late copy"), entry(2), entry(4), entry(3, "resend"))
         val replayed = log.replay(id).shouldNotBeNull()
         replayed.map { it.eventId } shouldBe listOf(1, 2, 3, 4)
         // The FIRST stored copy of an id is the one served — the dedup's rule, unchanged by the sort.
@@ -38,5 +39,12 @@ class SseEventLogTest {
     private fun entry(
         eventId: Int,
         note: String? = null,
-    ): String = ExecutorJson.mapper.writeValueAsString(LoggedSseEvent(eventId, "node_started", note?.let { mapOf("note" to it) } ?: emptyMap()))
+    ): String =
+        ExecutorJson.mapper.writeValueAsString(
+            LoggedSseEvent(
+                eventId,
+                "node_started",
+                note?.let { mapOf("note" to it) } ?: emptyMap(),
+            ),
+        )
 }

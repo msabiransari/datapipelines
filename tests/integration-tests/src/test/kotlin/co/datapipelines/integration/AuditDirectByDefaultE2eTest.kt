@@ -176,7 +176,8 @@ class AuditDirectByDefaultE2eTest {
             connection.createStatement().use { statement ->
                 statement.execute(
                     "INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES " +
-                        "('$ADMIN_ID', 'default-266b-$RUN_ID@datapipelines.test', 'Default 266b', 'test', 'default-266b-$RUN_ID', TRUE, TRUE)",
+                        "('$ADMIN_ID', 'default-266b-$RUN_ID@datapipelines.test', 'Default 266b', 'test', " +
+                        "'default-266b-$RUN_ID', TRUE, TRUE)",
                 )
                 statement.execute(
                     "INSERT INTO workspace_members (workspace_id, user_id, role) " +

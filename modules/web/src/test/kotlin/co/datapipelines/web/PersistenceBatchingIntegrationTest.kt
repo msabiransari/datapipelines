@@ -264,7 +264,11 @@ class PersistenceBatchingIntegrationTest {
                 // indeterminate direct write that landed late must not reorder what a client replays.
                 var replayed = 0
                 run.emitted.keys.forEach { id ->
-                    val survivors = rig.eventLog.replay(id)?.map { it.eventId }.orEmpty()
+                    val survivors =
+                        rig.eventLog
+                            .replay(id)
+                            ?.map { it.eventId }
+                            .orEmpty()
                     replayed += survivors.size
                     withClue("the replay of $id: $survivors") { survivors shouldBe survivors.distinct().sorted() }
                 }

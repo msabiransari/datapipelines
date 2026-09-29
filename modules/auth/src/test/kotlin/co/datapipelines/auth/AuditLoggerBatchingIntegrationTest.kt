@@ -23,7 +23,6 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
-import javax.sql.DataSource
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
 import java.sql.Connection
@@ -34,6 +33,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import javax.sql.DataSource
 
 /**
  * The audit sink over its batching writer (#266 B.5; auth.md §10), against the real `audit_log`.
@@ -247,11 +247,14 @@ class AuditLoggerBatchingIntegrationTest {
             loggers.forEach { it.detachAppender(appender) }
         }
         val rendered = appender.list.map { it.formattedMessage + " " + it.throwableProxy.render() }
+
+        // 22P05: untranslatable_character — the jsonb refusal, named by its state, never its text.
+        fun linesNamingTheState(prefix: String) = rendered.count { it.startsWith(prefix) && it.contains("sql_state=22P05") }
         withClue("every WARN, rendered whole: $rendered") {
             rendered.none { it.contains(ROW_CONTENT) } shouldBe true
-            rendered.count { it.startsWith("audit_log write failed event=audit.leak.direct") && it.contains("sql_state=22P05") } shouldBe 1
-            rendered.count { it.startsWith("event=persistence.write_failed writer=audit") && it.contains("sql_state=22P05") } shouldBe 1
-            rendered.count { it.startsWith("event=persistence.direct_write_failed writer=audit") && it.contains("sql_state=22P05") } shouldBe 1
+            linesNamingTheState("audit_log write failed event=audit.leak.direct") shouldBe 1
+            linesNamingTheState("event=persistence.write_failed writer=audit") shouldBe 1
+            linesNamingTheState("event=persistence.direct_write_failed writer=audit") shouldBe 1
         }
     }
 
