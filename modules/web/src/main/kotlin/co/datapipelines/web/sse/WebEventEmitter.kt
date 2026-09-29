@@ -14,6 +14,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorMetrics
+import co.datapipelines.persistence.FailureShape
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
@@ -274,17 +275,8 @@ class WebEventEmitter(
             withinLifecycleBound {
                 executionRepository.create(recordFor(event))
             }
-        }.onFailure {
-            if (it is LifecycleWriteUnconfirmedException) {
-                log.error(
-                    "pipeline_executions row for execution {} did not return within {} — not written yet.",
-                    event.executionId,
-                    lifecycleWriteTimeout,
-                )
-            } else {
-                log.error("pipeline_executions row for execution {} not created.", event.executionId, it)
-            }
-        }.isSuccess
+        }.onFailure { reportLifecycleWriteFailure(event.executionId, "not created", "not written yet", it) }
+            .isSuccess
 
     private fun recordFor(event: ExecutionStarted) =
         ExecutionRecord(
@@ -394,17 +386,49 @@ class WebEventEmitter(
                     contextJson = contextJson,
                 )
             }
-        }.onFailure {
-            metrics?.lifecycleWriteFailed()
-            if (it is LifecycleWriteUnconfirmedException) {
-                log.error(
-                    "pipeline_executions row for execution {} did not return within {} — left RUNNING for the stale sweep.",
-                    event.executionId,
-                    lifecycleWriteTimeout,
-                )
-            } else {
-                log.error("pipeline_executions row for execution {} not completed.", event.executionId, it)
+        }.onSuccess { updated -> if (!updated) reportTerminalRowMissing(event.executionId) }
+            .onFailure {
+                metrics?.lifecycleWriteFailed()
+                reportLifecycleWriteFailure(event.executionId, "not completed", "left RUNNING for the stale sweep", it)
             }
+    }
+
+    /**
+     * The UPDATE matched no row: the RUNNING insert was abandoned past its bound or never landed (the
+     * composition case, #325). Counted like a failed terminal write — the row, if it lands late, is RUNNING
+     * and the stale sweep reaps it; nothing here fabricates a COMPLETED.
+     */
+    private fun reportTerminalRowMissing(executionId: UUID) {
+        metrics?.lifecycleWriteFailed()
+        log.warn(
+            "pipeline_executions row for execution {} not found at completion (0 rows updated) — " +
+                "a late RUNNING insert is left for the stale sweep.",
+            executionId,
+        )
+    }
+
+    /** Class and SQLState only (observability §3.4G): the driver's message quotes the statement. */
+    private fun reportLifecycleWriteFailure(
+        executionId: UUID,
+        what: String,
+        pastBound: String,
+        failure: Throwable,
+    ) {
+        if (failure is LifecycleWriteUnconfirmedException) {
+            log.warn(
+                "pipeline_executions row for execution {} did not return within {} — {}.",
+                executionId,
+                lifecycleWriteTimeout,
+                pastBound,
+            )
+        } else {
+            log.warn(
+                "pipeline_executions row for execution {} {}: error={} sql_state={}",
+                executionId,
+                what,
+                failure.javaClass.simpleName,
+                FailureShape.sqlState(failure),
+            )
         }
     }
 

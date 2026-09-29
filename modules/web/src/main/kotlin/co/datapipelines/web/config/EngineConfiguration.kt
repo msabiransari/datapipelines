@@ -101,6 +101,8 @@ class EngineConfiguration {
             progressWriteIntervalSeconds = executor.progressWriteIntervalSeconds,
             progressSampleIntervalSeconds = executor.progressSampleIntervalSeconds,
             heartbeatSeconds = executor.heartbeatSeconds,
+            // #311's caller-side wait reads the CONFIG (the 306 merge's review: the bean had forgotten it).
+            lifecycleWriteTimeoutSeconds = executor.lifecycleWriteTimeoutSeconds,
             stagingMaxMemoryMb = staging.maxMemoryMb,
             // dag polls the cross-instance cancel flag on this cadence, and §10.4 promises a
             // cancellation lands "within ~one heartbeat interval" — so it IS the heartbeat.

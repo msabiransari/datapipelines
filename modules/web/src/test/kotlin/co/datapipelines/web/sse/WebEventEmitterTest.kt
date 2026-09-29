@@ -11,9 +11,11 @@ import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
+import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.web.config.SseProperties
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -52,7 +54,7 @@ class WebEventEmitterTest {
     private val correlationId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
 
-    private fun emitter(): WebEventEmitter =
+    private fun emitter(metrics: ExecutorMetrics? = null): WebEventEmitter =
         WebEventEmitter(
             context =
                 ExecutionContext(
@@ -70,6 +72,7 @@ class WebEventEmitterTest {
             eventRepository = eventRepository,
             executionRepository = executionRepository,
             persistenceDispatcher = Dispatchers.Default,
+            metrics = metrics,
         )
 
     @Test
@@ -150,6 +153,27 @@ class WebEventEmitterTest {
             verify(exactly = 1) {
                 executionRepository.complete(executionId, ExecutionStatus.SUCCESS, any(), 900, any(), null, null, any(), any())
             }
+        }
+
+    /**
+     * The 306 merge's review (#325): a terminal UPDATE that matches NO row — the RUNNING insert was abandoned
+     * past its bound or never landed — is counted as a lifecycle write failure and logged, never silent, and
+     * nothing fabricates a COMPLETED. A real registry, not a mock: the assertion is the counter's value.
+     */
+    @Test
+    fun `a terminal UPDATE that matches no row is counted as a lifecycle write failure - never a silent success`() =
+        runTest {
+            every { executionRepository.create(any()) } answers { firstArg() }
+            every { executionRepository.complete(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns false
+            every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } just runs
+            every { eventLog.append(any(), any()) } just runs
+            val registry = SimpleMeterRegistry()
+
+            val emitter = emitter(metrics = ExecutorMetrics(registry))
+            emitter.emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
+            emitter.emit(PipelineCompleted(executionId, pipelineId, 3, NOW, NOW.plusMillis(900), 900, emptyList()))
+
+            registry.counter(ExecutorMetrics.EXECUTIONS_LIFECYCLE_WRITE_FAILED).count() shouldBe 1.0
         }
 
     /**
