@@ -81,8 +81,9 @@ class SseEventLog(
 
     /**
      * Appends a batch — entries of any number of executions — in ONE round trip: one Lua script
-     * ([APPEND_SCRIPT], `EVALSHA` after its first load) that, per execution, runs one variadic
-     * `RPUSH` of its entries in order and one `PEXPIRE` (#266 B.2; [append] costs two round trips per
+     * ([APPEND_SCRIPT], `EVALSHA` after its first load) that, per execution, pushes its entries in
+     * order — variadic `RPUSH`es of at most [APPEND_CHUNK] values each, Lua's unpack limit — and runs
+     * one `PEXPIRE` (#266 B.2; [append] costs two round trips per
      * event and re-sets the TTL on every one). A script runs atomically on the server, and — unlike a
      * pipelined `MULTI`/`EXEC`, which Spring Data Redis runs on a DEDICATED Lettuce connection, a new
      * TCP connection and handshake per batch (measured: 20 batches, 20 connections, ~7 ms each) — it
@@ -144,8 +145,18 @@ class SseEventLog(
 
     private companion object {
         /**
-         * [appendAll]'s one round trip. `unpack` of one execution's entries is bounded by the batch
-         * (`batch-max-events`, default 200) — far under Lua's stack limit.
+         * The most values [APPEND_SCRIPT] unpacks into one `RPUSH` (#266b). Lua refuses to unpack more
+         * than about 7,990 values ("too many results to unpack"), so one execution's entries are
+         * pushed in chunks of this size — all inside the one script, so the append stays atomic and
+         * one round trip whatever the batch holds. `batch-max-events` is bounded at 7,000 as well
+         * (`PersistenceProperties`); the chunk is what makes the script safe on its own.
+         */
+        const val APPEND_CHUNK = 1_000
+
+        /**
+         * [appendAll]'s one round trip: per key, its entries in order in `RPUSH`es of at most
+         * [APPEND_CHUNK] values, then one `PEXPIRE`. The chunk size is a compile-time constant of
+         * this class — no key, value or count from a caller is ever part of the script text.
          */
         val APPEND_SCRIPT: RedisScript<Long> =
             RedisScript.of(
@@ -153,10 +164,13 @@ class SseEventLog(
                 local ttl = ARGV[1]
                 local i = 2
                 for k = 1, #KEYS do
-                  local n = tonumber(ARGV[i])
+                  local last = i + tonumber(ARGV[i])
                   i = i + 1
-                  redis.call('RPUSH', KEYS[k], unpack(ARGV, i, i + n - 1))
-                  i = i + n
+                  while i <= last do
+                    local j = math.min(i + $APPEND_CHUNK - 1, last)
+                    redis.call('RPUSH', KEYS[k], unpack(ARGV, i, j))
+                    i = j + 1
+                  end
                   redis.call('PEXPIRE', KEYS[k], ttl)
                 end
                 return #KEYS

@@ -327,6 +327,27 @@ class WebPersistenceIntegrationTest {
     }
 
     @Test
+    fun `a batched replay-log append of 9000 entries for one execution commits whole - the script chunks its RPUSH`() {
+        // #266b (the pass's observation 4): Lua refuses to unpack more than ~7,990 values ("too many
+        // results to unpack"), and the script unpacked one execution's whole batch into ONE RPUSH. Red
+        // before the chunking: the call threw and nothing landed. Now at most APPEND_CHUNK values per
+        // RPUSH, all inside the one script — atomic still, one TTL still.
+        val executionId = UUID.randomUUID()
+        val before = commandCalls()
+
+        eventLog.appendAll((1..HUGE_BATCH).map { eventLog.entry(executionId, LoggedSseEvent(it, "node_started", emptyMap())) })
+
+        val after = commandCalls()
+        eventLog.replay(executionId).shouldNotBeNull().map { it.eventId } shouldBe (1..HUGE_BATCH).toList()
+        val delta = after.mapValues { (k, v) -> v - (before[k] ?: 0) }.filterValues { it > 0 }
+        withClue("server-side command counts for one 9,000-entry append: $delta") {
+            delta["rpush"] shouldBe HUGE_BATCH / APPEND_CHUNK
+            delta["pexpire"] shouldBe 1
+            (delta.getOrDefault("evalsha", 0) + delta.getOrDefault("eval", 0) in 1..2) shouldBe true
+        }
+    }
+
+    @Test
     fun `a batched replay-log append opens no connection - it rides the shared one`() {
         // Measured (#266 C run 1): a pipelined MULTI/EXEC through Spring Data Redis takes a DEDICATED
         // Lettuce connection — a new TCP connection and handshake per batch, ~7 ms, which made the
@@ -552,6 +573,12 @@ class WebPersistenceIntegrationTest {
         const val ONE_HOUR_SECONDS = 3_600L
         const val TTL_SLACK_SECONDS = 60L
         const val ROW_CONTENT = "row-content-266b-must-not-be-logged"
+
+        /** Past Lua's unpack limit (~7,990) for one execution in one append. */
+        const val HUGE_BATCH = 9_000
+
+        /** SseEventLog's RPUSH chunk — the most values the script unpacks at once. */
+        const val APPEND_CHUNK = 1_000
 
         /** The V4-seeded `default` workspace the pipeline fixture and every repository read are scoped to. */
         val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")

@@ -50,9 +50,16 @@ data class PersistenceProperties(
         require(shutdownDrainMs <= MAX_SHUTDOWN_DRAIN_MS) {
             "datapipelines.persistence.shutdown-drain-ms must be <= $MAX_SHUTDOWN_DRAIN_MS (the drain runs inside one 30 s shutdown phase)"
         }
+        // #266b: one replay-log batch is one Redis Lua script, and Lua refuses to unpack more than
+        // ~7,990 values. The script chunks its RPUSH as well; this bound is the second guard.
+        require(batchMaxEvents <= MAX_BATCH_MAX_EVENTS) {
+            "datapipelines.persistence.batch-max-events must be <= $MAX_BATCH_MAX_EVENTS (one replay-log batch runs inside one " +
+                "Redis Lua script, and Lua refuses to unpack more than ~7,990 values)"
+        }
     }
 
     companion object {
         const val MAX_SHUTDOWN_DRAIN_MS = 25_000L
+        const val MAX_BATCH_MAX_EVENTS = 7_000
     }
 }
