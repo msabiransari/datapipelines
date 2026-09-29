@@ -112,6 +112,19 @@ object ApiErrorCatalog {
             "parameter.release." to HttpStatus.CONFLICT,
             "parameter.import." to HttpStatus.BAD_REQUEST,
             "parameter.authoring." to HttpStatus.FORBIDDEN,
+            // #10 L1a §13.22/§13.23 — the two dashboard artifacts, the parameter.* shape: save-time validation 400,
+            // the lifecycle and the release gate 409, import 400, authoring 403. Every other status (404, 409s
+            // under a 400 family, 410, 413, 422, 429 and the key kind's 403) is an explicit row below.
+            "visualization.validation." to HttpStatus.BAD_REQUEST,
+            "visualization.version." to HttpStatus.CONFLICT,
+            "visualization.release." to HttpStatus.CONFLICT,
+            "visualization.import." to HttpStatus.BAD_REQUEST,
+            "visualization.authoring." to HttpStatus.FORBIDDEN,
+            "dashboard.validation." to HttpStatus.BAD_REQUEST,
+            "dashboard.version." to HttpStatus.CONFLICT,
+            "dashboard.release." to HttpStatus.CONFLICT,
+            "dashboard.import." to HttpStatus.BAD_REQUEST,
+            "dashboard.authoring." to HttpStatus.FORBIDDEN,
             // #279 §13.21 — the request-body cap: one code, and it IS the 413 (the family has no
             // other status to default away from), wired explicitly so the code owns a row rather
             // than being absorbed by the catalog's unknown-code 500.
@@ -247,6 +260,25 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Parameters.EVALUATE_TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,
             PipelineErrorCodes.Parameters.DUPLICATE_NAME to HttpStatus.CONFLICT,
             PipelineErrorCodes.Parameters.VERSION_CONFIRM_MISMATCH to HttpStatus.BAD_REQUEST,
+            // §13.22 (#10 L1a) — the visualization codes whose status differs from their family default, or that
+            // have no family status at all (`not_found`, `test.*`): wired explicitly, the 025 A2 convention.
+            PipelineErrorCodes.Visualization.NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Visualization.NAME_TAKEN to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Visualization.IMPORT_ID_TAKEN to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Visualization.TEST_SESSION_NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Visualization.TEST_SESSION_EXPIRED to HttpStatus.GONE,
+            PipelineErrorCodes.Visualization.TEST_SCREENSHOT_TOO_LARGE to HttpStatus.PAYLOAD_TOO_LARGE,
+            PipelineErrorCodes.Visualization.TEST_SCREENSHOT_INVALID to HttpStatus.BAD_REQUEST,
+            // §13.23 (#10 L1a) — the dashboard codes likewise; the runtime/refresh/key rows are L2's and L5's.
+            PipelineErrorCodes.Dashboard.NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Dashboard.NAME_TAKEN to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Dashboard.IMPORT_ID_TAKEN to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Dashboard.RUNTIME_CONFIGURATION_STALE to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Dashboard.RUNTIME_DEPENDENCY_MISSING to HttpStatus.CONFLICT,
+            PipelineErrorCodes.Dashboard.REFRESH_SATURATED to HttpStatus.TOO_MANY_REQUESTS,
+            PipelineErrorCodes.Dashboard.REFRESH_RESULT_TOO_LARGE to HttpStatus.UNPROCESSABLE_ENTITY,
+            PipelineErrorCodes.Dashboard.REFRESH_NOT_FOUND to HttpStatus.NOT_FOUND,
+            PipelineErrorCodes.Dashboard.KEY_KIND_REFUSED to HttpStatus.FORBIDDEN,
             // §13.9 (7b, the transform types) — 400s, wired explicitly so each code owns a row
             // rather than being absorbed by a default (the 025 A2 convention).
             PipelineErrorCodes.Template.FREEMARKER_FORBIDDEN to HttpStatus.BAD_REQUEST,
@@ -458,6 +490,24 @@ object ApiErrorCatalog {
             "parameter.import." to "This parameter set can't be imported here yet. The details say what is missing.",
             "parameter.authoring." to "Parameter sets can't be edited on this server. Edit them where authoring is enabled and promote.",
             "parameter." to "We couldn't find that parameter set.",
+            // #10 L1a — the two dashboard artifacts' families (§13.22/§13.23), the parameter-set sentences' shape.
+            "visualization.validation." to "This visualization isn't valid yet. Every problem is listed with the field it concerns.",
+            "visualization.version." to "This visualization changed or isn't in the right state for that. Reload it and try again.",
+            "visualization.release." to "This visualization can't be released yet. The details say what is missing.",
+            "visualization.import." to "This visualization can't be imported here yet. The details say what is missing.",
+            "visualization.authoring." to
+                "Visualizations can't be edited on this server. Edit them where authoring is enabled and promote.",
+            "visualization.test." to "That visualization test session isn't available. Start a new session and try again.",
+            "visualization." to "We couldn't find that visualization.",
+            "dashboard.validation." to "This dashboard isn't valid yet. Every problem is listed with the field it concerns.",
+            "dashboard.version." to "This dashboard changed or isn't in the right state for that. Reload it and try again.",
+            "dashboard.release." to "This dashboard can't be released yet. The details say what to release first.",
+            "dashboard.import." to "This dashboard can't be imported here yet. The details say what is missing.",
+            "dashboard.authoring." to "Dashboards can't be edited on this server. Edit them where authoring is enabled and promote.",
+            "dashboard.runtime." to "This dashboard changed while it was open. Reload it and try again.",
+            "dashboard.refresh." to "This dashboard couldn't be refreshed right now. Try again in a moment.",
+            "dashboard.key." to "This key can't be used here.",
+            "dashboard." to "We couldn't find that dashboard.",
             // #279 §13.21 — the body the caller sent is over the platform's cap; nothing about the
             // server refused them, so the sentence points at the payload.
             "request." to "That request is too large. Send less data and try again.",

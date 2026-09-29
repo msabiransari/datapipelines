@@ -1686,4 +1686,146 @@ object PipelineErrorCodes {
 
         const val AUTHORING_DISABLED = "parameter.authoring.disabled"
     }
+
+    /**
+     * §13.22 — the visualization artifact (#10, the dashboard implementation spec §14). The catalog's copy of
+     * `VisualizationErrorCodes` (`modules/visualization`), pinned equal by reflection there (`VisualizationErrorCodesTest`);
+     * `web`'s `ApiErrorCatalog` reads these until it depends on the module (L1b).
+     */
+    object Visualization {
+        const val BODY_INVALID = "visualization.validation.body_invalid"
+
+        const val NAME_INVALID = "visualization.validation.name_invalid"
+
+        const val NEW_ROOT_REQUIRES_CONFIRMATION = "visualization.validation.new_root_requires_confirmation"
+
+        const val NAME_TAKEN = "visualization.validation.name_taken"
+
+        const val RENDERER_UNSUPPORTED = "visualization.validation.renderer_unsupported"
+
+        const val INPUT_CONTRACT_INVALID = "visualization.validation.input_contract_invalid"
+
+        const val TRANSFORM_BINDING_INVALID = "visualization.validation.transform_binding_invalid"
+
+        const val CONFIG_SCHEMA_INVALID = "visualization.validation.config_schema_invalid"
+
+        const val BINDING_UNBOUND = "visualization.validation.binding_unbound"
+
+        const val TEST_CASE_INVALID = "visualization.validation.test_case_invalid"
+
+        const val NOT_FOUND = "visualization.not_found"
+
+        const val VERSION_CONFLICT = "visualization.version.conflict"
+
+        const val VERSION_NOT_DRAFT = "visualization.version.not_draft"
+
+        const val VERSION_NOT_RELEASED = "visualization.version.not_released"
+
+        const val VERSION_NOT_DISCARDED = "visualization.version.not_discarded"
+
+        const val VERSION_LAST_RELEASE = "visualization.version.last_release"
+
+        const val VERSION_NOT_ELIGIBLE = "visualization.version.not_eligible"
+
+        const val VERSION_PINNED = "visualization.version.pinned"
+
+        const val RELEASE_TESTS_MISSING = "visualization.release.tests_missing"
+
+        const val RELEASE_TESTS_STALE = "visualization.release.tests_stale"
+
+        const val RELEASE_TESTS_RED = "visualization.release.tests_red"
+
+        const val RELEASE_MECHANICAL_FAILED = "visualization.release.mechanical_failed"
+
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "visualization.release.dependency_not_released"
+
+        const val IMPORT_ID_TAKEN = "visualization.import.id_taken"
+
+        const val IMPORT_MISSING_TEMPLATE = "visualization.import.missing_template"
+
+        const val AUTHORING_DISABLED = "visualization.authoring.disabled"
+
+        const val TEST_SESSION_NOT_FOUND = "visualization.test.session_not_found"
+
+        const val TEST_SESSION_EXPIRED = "visualization.test.session_expired"
+
+        const val TEST_SCREENSHOT_TOO_LARGE = "visualization.test.screenshot_too_large"
+
+        const val TEST_SCREENSHOT_INVALID = "visualization.test.screenshot_invalid"
+    }
+
+    /**
+     * §13.23 — the dashboard artifact (#10, the dashboard implementation spec §14). The catalog's copy of
+     * `DashboardErrorCodes` (`modules/visualization`), pinned equal by reflection there (`DashboardErrorCodesTest`);
+     * `web`'s `ApiErrorCatalog` reads these until it depends on the module (L1b).
+     */
+    object Dashboard {
+        const val BODY_INVALID = "dashboard.validation.body_invalid"
+
+        const val NAME_INVALID = "dashboard.validation.name_invalid"
+
+        const val NEW_ROOT_REQUIRES_CONFIRMATION = "dashboard.validation.new_root_requires_confirmation"
+
+        const val NAME_TAKEN = "dashboard.validation.name_taken"
+
+        const val DUPLICATE_NAME = "dashboard.validation.duplicate_name"
+
+        const val UNKNOWN_OBJECT = "dashboard.validation.unknown_object"
+
+        const val TARGET_NOT_VISUALIZATION = "dashboard.validation.target_not_visualization"
+
+        const val EMPTY_TARGETS = "dashboard.validation.empty_targets"
+
+        const val PARENT_ACTION_BINDING = "dashboard.validation.parent_action_binding"
+
+        const val SCOPE_OMITS_CONSUMER = "dashboard.validation.scope_omits_consumer"
+
+        const val SOURCE_NOT_RELEASED = "dashboard.validation.source_not_released"
+
+        const val SOURCE_NOT_READ_ONLY = "dashboard.validation.source_not_read_only"
+
+        const val PARAMETER_UNBOUND = "dashboard.validation.parameter_unbound"
+
+        const val INPUT_UNBOUND = "dashboard.validation.input_unbound"
+
+        const val INPUT_CONTRACT_MISMATCH = "dashboard.validation.input_contract_mismatch"
+
+        const val LAYOUT_INVALID = "dashboard.validation.layout_invalid"
+
+        const val DEPENDENCY_NOT_FOUND = "dashboard.validation.dependency_not_found"
+
+        const val NOT_FOUND = "dashboard.not_found"
+
+        const val VERSION_CONFLICT = "dashboard.version.conflict"
+
+        const val VERSION_NOT_DRAFT = "dashboard.version.not_draft"
+
+        const val VERSION_NOT_RELEASED = "dashboard.version.not_released"
+
+        const val VERSION_NOT_DISCARDED = "dashboard.version.not_discarded"
+
+        const val VERSION_LAST_RELEASE = "dashboard.version.last_release"
+
+        const val VERSION_NOT_ELIGIBLE = "dashboard.version.not_eligible"
+
+        const val RELEASE_DEPENDENCY_NOT_RELEASED = "dashboard.release.dependency_not_released"
+
+        const val IMPORT_ID_TAKEN = "dashboard.import.id_taken"
+
+        const val IMPORT_MISSING_DEPENDENCY = "dashboard.import.missing_dependency"
+
+        const val AUTHORING_DISABLED = "dashboard.authoring.disabled"
+
+        const val RUNTIME_CONFIGURATION_STALE = "dashboard.runtime.configuration_stale"
+
+        const val RUNTIME_DEPENDENCY_MISSING = "dashboard.runtime.dependency_missing"
+
+        const val REFRESH_SATURATED = "dashboard.refresh.saturated"
+
+        const val REFRESH_RESULT_TOO_LARGE = "dashboard.refresh.result_too_large"
+
+        const val REFRESH_NOT_FOUND = "dashboard.refresh.not_found"
+
+        const val KEY_KIND_REFUSED = "dashboard.key.kind_refused"
+    }
 }

@@ -151,6 +151,12 @@ class PipelineErrorCodesSpecDriftTest {
                 "parameter.version.",
                 // #279 — the request limits (§13.21).
                 "request.",
+                // #10 L1a — the two dashboard artifacts (§13.22, §13.23): the save-time and the lifecycle halves of
+                // each, because a truncated parse could drop one run of rows.
+                "visualization.validation.",
+                "visualization.version.",
+                "dashboard.validation.",
+                "dashboard.version.",
             )
 
         val SEGMENTATION = Regex("^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$")
@@ -218,6 +224,9 @@ class PipelineErrorCodesSpecDriftTest {
                 // #194 §13.20 — a parameter set IS the entity (like `template.not_found`): its not-found has
                 // no entity dimension under it. Every other parameter code keeps three segments.
                 PipelineErrorCodes.Parameters.NOT_FOUND,
+                // #10 L1a §13.22/§13.23 — each artifact IS the entity: its not-found has no entity dimension under it.
+                PipelineErrorCodes.Visualization.NOT_FOUND,
+                PipelineErrorCodes.Dashboard.NOT_FOUND,
                 PipelineErrorCodes.Result.EXECUTION_NOT_FOUND,
                 PipelineErrorCodes.Result.EXECUTION_INCOMPLETE,
                 PipelineErrorCodes.Result.EXECUTION_FAILED,

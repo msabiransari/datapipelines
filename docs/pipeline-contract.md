@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.43 (revised — see Change Log)
+**Status:** v1.44 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-29
@@ -1509,6 +1509,85 @@ The platform's transport-level refusals (#279; [Configuration §3.31](configurat
 | `request.body_too_large` | 413 | the request body exceeds `datapipelines.web.max-request-bytes` — refused before any handler; `details.limit_bytes` names the cap in effect |
 
 
+### 13.22 Visualizations
+
+The visualization artifact's refusals (#10; the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) §3.1, §11, §14; [Dashboards §2.1](dashboards.md)). `visualization.validation.*` is the author's document at save — the strict reader's shape first, then the spec's §3.1 rules — every failure collected (§17.2's rule), `details.path` naming the field. The `visualization.version.*` / `import` / `authoring` rows are the `parameter.*` twins of the lifecycle ([Versioning §3.5](versioning.md#35-the-lifecycle-table)); `release.*` is the gate (D56) — `tests_*` and `mechanical_failed` are raised by the evidence gate the tests lane (L4) installs, and until then the module's default gate refuses every visualization release with `tests_missing`. `test.*` belongs to the test-session routes (L4). The spec's list gained eight rows at L1a — `name_invalid`, `name_taken`, the five `version.*` lifecycle refusals and `version.pinned` (the design record's §4.2: purge and discard guards keep referenced releases) — and `authoring.disabled`; `name_taken` takes the place of the mould's `duplicate_name` because the dashboard family's `duplicate_name` names its object namespace. Landed with the constants — `VisualizationErrorCodes` in `modules/visualization` and its mirror `PipelineErrorCodes.Visualization`, pinned equal by reflection (`VisualizationErrorCodesTest`), held to this table by `VisualizationErrorCodesSpecDriftTest` — and their `ApiErrorCatalog` rows.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `visualization.validation.body_invalid` | 400 | the document's shape ([Dashboards §2.1](dashboards.md)): an unknown key at any level, a wrong JSON type, a missing structural key, an out-of-vocabulary literal, or a collection over its `datapipelines.visualization.*` bound (refused before its members are read) — `details.reason` `unknown_key` / `wrong_type` / `missing` / `not_allowed` / `too_many` / `too_large` / `too_long` / `blank`, `details.path` naming the field; a refusal echoes a key or a path, never a value |
+| `visualization.validation.name_invalid` | 400 | the visualization name fails the folder grammar pipelines, templates and parameter sets use (`details.reason`: `folder_required` / `grammar` / `missing`, or `immutable` when a write names a different visualization than the one it addresses — a visualization is never renamed) |
+| `visualization.validation.new_root_requires_confirmation` | 400 | agent surface only — a visualization under a top-level folder that holds nothing yet, without `confirm_new_root: true` |
+| `visualization.validation.name_taken` | 409 | the name exists in the workspace — discarded visualizations included, names are unique forever ([Versioning §3.2](versioning.md)) |
+| `visualization.validation.renderer_unsupported` | 400 | `renderer.kind` is a reserved kind round one does not render (`html`, `svg` — D13, D46), or a `renderer.version` the kind does not accept |
+| `visualization.validation.input_contract_invalid` | 400 | an input contract that cannot be satisfied: no inputs, an input name outside `[a-z][a-z0-9_]{0,63}`, an input with no columns, a column name outside the column grammar, or two columns of one input sharing a name |
+| `visualization.validation.transform_binding_invalid` | 400 | `transform` does not bind: the pinned template is missing or DISCARDED at that version (`details.reason` `template_not_found` / `template_version_not_found`), not a transform (`not_a_transform`), its contract's input names differ from `transform.inputs`' keys, a `transform.inputs` value names no visualization input, or a declared input column differs from the named input's column by name, type or nullability (`details.column`); a transform-less visualization with more than one input (`transform_required`) |
+| `visualization.validation.config_schema_invalid` | 400 | `config` fails the renderer's schema: for `plotly` an object whose `data` is an array of objects each with a `type` from the vendored bundle's list and whose `layout` is an object; for `table` and `kpi` their own schemas ([Dashboards §2.1](dashboards.md)); `details.path` names the offending path inside `config` |
+| `visualization.validation.binding_unbound` | 400 | a `bindings` entry does not bind: its path is not the binding grammar or does not resolve inside `config` (`details.reason` `path_invalid` / `path_unresolved`), or its column is not in the transform's OUTPUT contract (or, with no transform, the one input's columns) — `details.column` |
+| `visualization.validation.test_case_invalid` | 400 | a `tests.cases[]` entry that is not runnable: a missing or duplicate case name, fixtures missing an input or naming an unknown one, a fixture row with a column outside the input's contract or a value outside its type, an assertion kind outside the closed vocabulary or missing its argument |
+| `visualization.not_found` | 404 | no such visualization (or version) in the workspace, hidden by the promoter lens, or discarded on a read/mutate path — indistinguishable by design |
+| `visualization.version.conflict` | 409 | the precondition hash is stale — draft write, release, discard, purge; `details` carry the current hash, status and last writer |
+| `visualization.version.not_draft` | 409 | release or a draft verb on a visualization with no DRAFT |
+| `visualization.version.not_released` | 409 | discard of a version that is not RELEASED (drafts are purged, never discarded) |
+| `visualization.version.not_discarded` | 409 | restore of a version that is not DISCARDED |
+| `visualization.version.last_release` | 409 | purge of a released version, or of an entity holding one |
+| `visualization.version.not_eligible` | 409 | switch to a version that is not live and posture-eligible |
+| `visualization.version.pinned` | 409 | discard or purge of a version a LIVE dashboard version pins (graph rule 1 of [Versioning §3.5](versioning.md)); `details.pinned_by` names the dashboards |
+| `visualization.release.tests_missing` | 409 | release without evidence: no test case, no completed run for the candidate — or, until the tests lane installs the gate (L4), every release (the default gate refuses) |
+| `visualization.release.tests_stale` | 409 | release whose latest run's `body_hash` is not the candidate's — the content changed after the run |
+| `visualization.release.tests_red` | 409 | release whose latest run for the candidate is not GREEN; `details` name the case |
+| `visualization.release.mechanical_failed` | 409 | release whose server-run mechanical test (the spec's §11.3) fails now; `details` name the step, case and path |
+| `visualization.release.dependency_not_released` | 409 | release with a pinned transform template version that is not RELEASED, without `release_pinned_templates` consent (or MISSING); `details.pins_not_released` lists every one |
+| `visualization.import.id_taken` | 409 | an import whose exported id is held by another visualization on this server — ids are globally unique and never re-issued (C29) |
+| `visualization.import.missing_template` | 400 | an import whose pinned template version is absent on the target — promotion order is templates first |
+| `visualization.authoring.disabled` | 403 | `datapipelines.deployment.authoring-enabled=false` refuses every authoring write ([Versioning §5.5](versioning.md#55-drafts-are-a-deployment-capability-039)) |
+| `visualization.test.session_not_found` | 404 | no such test session for the visualization, or its token does not match |
+| `visualization.test.session_expired` | 410 | the session's preview token outlived `tests.session-ttl-minutes`, or was revoked by its submit |
+| `visualization.test.screenshot_too_large` | 413 | a screenshot over 4 MiB — the upload route's own cap, independent of the platform's 2 MiB request-body cap |
+| `visualization.test.screenshot_invalid` | 400 | a screenshot that is not a PNG or WebP image the server can read (media type, magic bytes, dimensions) |
+
+### 13.23 Dashboards
+
+The dashboard artifact's refusals (#10; the implementation spec §3.2, §8, §9, §14; [Dashboards §2.2](dashboards.md)). `dashboard.validation.*` is the author's document at save, again at release and — against the pinned dependencies' CURRENT state — at every runtime configuration read; `details.path` names the field and a refusal names the object, never a value. The `version.*` / `import.*` / `authoring.*` rows are the lifecycle twins; `release.dependency_not_released` names every dependency a release needs released (D61). `runtime.*` and `refresh.*` belong to the server runtime (L2) and `key.*` to the `dashboard` key kind (L5); they are catalogued now so the families are complete. The spec's list gained ten rows at L1a — `name_invalid`, `name_taken`, `dependency_not_found`, the five `version.*` lifecycle refusals, `import.missing_dependency` and `authoring.disabled`. Landed with `DashboardErrorCodes` (`modules/visualization`) and its mirror `PipelineErrorCodes.Dashboard`, pinned by `DashboardErrorCodesTest` and `DashboardErrorCodesSpecDriftTest`.
+
+| Code | HTTP | Description |
+|---|---|---|
+| `dashboard.validation.body_invalid` | 400 | the document's shape ([Dashboards §2.2](dashboards.md)): an unknown key at any level, a wrong JSON type, a missing structural key, an out-of-vocabulary literal (`scope`, a `parameter_state` setting, a position), an object whose `type` does not match the list it sits in (`details.reason` `wrong_object_type`), a timeout outside its bounds (`out_of_range`) or a collection over its bound (`too_many`) — `details.path` naming the field |
+| `dashboard.validation.name_invalid` | 400 | the dashboard name fails the folder grammar (`details.reason`: `folder_required` / `grammar` / `missing` / `immutable`) |
+| `dashboard.validation.new_root_requires_confirmation` | 400 | agent surface only — a dashboard under a top-level folder that holds nothing yet, without `confirm_new_root: true` |
+| `dashboard.validation.name_taken` | 409 | the name exists in the workspace — discarded dashboards included, names are unique forever |
+| `dashboard.validation.duplicate_name` | 400 | two objects of one dashboard — visualization occurrences, groups, actions, action controls, sources and the pinned set's parameters — share a name, or a name is outside `[a-z][a-z0-9_]{0,63}` (`details.reason` `grammar`); ONE namespace per dashboard, across types |
+| `dashboard.validation.unknown_object` | 400 | a reference to nothing: a group member, action target, action control's action, layout placement, grid item, parameter scope or override naming no object, source or pipeline parameter of this dashboard |
+| `dashboard.validation.target_not_visualization` | 400 | an action's target names an object that is not a visualization occurrence |
+| `dashboard.validation.empty_targets` | 400 | an action with `scope: targets` and an empty or missing `targets` list, or `scope: all` carrying targets (D55) |
+| `dashboard.validation.parent_action_binding` | 400 | an action control bound to a PARENT parameter's control — a parameter whose `dependents` is non-empty in the pinned set (R2, D42) |
+| `dashboard.validation.scope_omits_consumer` | 400 | a declared `parameter_scopes` entry that omits a group consuming the parameter, directly or through a dependent (D41) |
+| `dashboard.validation.source_not_released` | 400 | a source pins a pipeline version that is not RELEASED (D1) |
+| `dashboard.validation.source_not_read_only` | 400 | a source pins a pipeline release that fails the read-only rule, transitively through its child pipelines (D38) |
+| `dashboard.validation.parameter_unbound` | 400 | a REQUIRED parameter of a source's pinned pipeline release is bound neither to a set parameter nor to a literal; or a `{parameter}` binding names no parameter of the pinned set |
+| `dashboard.validation.input_unbound` | 400 | a named input of an occurrence's pinned visualization is mapped to no source, or a mapping names an input the visualization does not declare |
+| `dashboard.validation.input_contract_mismatch` | 400 | a source's caller output columns do not satisfy the mapped input's columns by name and type; `details.column` names the first |
+| `dashboard.validation.layout_invalid` | 400 | the layout does not place every visualization occurrence, group and action control exactly once, places one outside the 12-column grid, or declares `columns` other than 12 |
+| `dashboard.validation.dependency_not_found` | 400 | a pinned visualization, pipeline or parameter-set version does not exist in the workspace (or only DISCARDED there) |
+| `dashboard.not_found` | 404 | no such dashboard (or version) in the workspace, hidden by the promoter lens, or discarded on a read/mutate path — indistinguishable by design |
+| `dashboard.version.conflict` | 409 | the precondition hash is stale — draft write, release, discard, purge; `details` carry the current hash, status and last writer |
+| `dashboard.version.not_draft` | 409 | release or a draft verb on a dashboard with no DRAFT |
+| `dashboard.version.not_released` | 409 | discard of a version that is not RELEASED |
+| `dashboard.version.not_discarded` | 409 | restore of a version that is not DISCARDED |
+| `dashboard.version.last_release` | 409 | purge of a released version, or of an entity holding one |
+| `dashboard.version.not_eligible` | 409 | switch to a version that is not live and posture-eligible |
+| `dashboard.release.dependency_not_released` | 409 | release with a pinned visualization version that is not RELEASED (without `release_pinned_visualizations` consent), a pinned pipeline version that is not RELEASED and read-only, or a pinned set version that is not RELEASED; `details.dependencies_not_released` lists every one |
+| `dashboard.import.id_taken` | 409 | an import whose exported id is held by another dashboard on this server — never re-issued (C29) |
+| `dashboard.import.missing_dependency` | 400 | an import whose pinned pipeline, parameter set or visualization version is absent on the target and not in the bundle — promotion order is templates → parameter sets → pipelines → visualizations → dashboards (D61) |
+| `dashboard.authoring.disabled` | 403 | `datapipelines.deployment.authoring-enabled=false` refuses every authoring write |
+| `dashboard.runtime.configuration_stale` | 409 | a runtime operation's `configuration_id` is not the current one — the client reloads (the spec's §8.1) |
+| `dashboard.runtime.dependency_missing` | 409 | a pinned dependency of the served version no longer resolves at config time (a purged or discarded source release) — never a 500 |
+| `dashboard.refresh.saturated` | 429 | a refresh could not reserve its execution slots within `admission.max-wait-seconds`; `Retry-After` set (D53) |
+| `dashboard.refresh.result_too_large` | 422 | a source's result exceeded `results.max-bytes-per-source` (or the refresh's budget); inside the stream it is a `visualization_status` reason (D54) |
+| `dashboard.refresh.not_found` | 404 | an abort or read of a refresh that does not exist, is not the caller's, or already finished |
+| `dashboard.key.kind_refused` | 403 | a `dashboard` API key presented outside the runtime and refresh routes, or on `/mcp` |
+
+
 ---
 ## 14. Pipeline Lifecycle Operations
 
@@ -1748,6 +1827,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.44 | L1a (#10) the visualization module | New **§13.22 Visualizations** (30 rows) and **§13.23 Dashboards** (34 rows): the spec §14's 21 + 24 codes (its "18" and "22" miscount its own lists) plus the lifecycle rows the verbs need — `name_invalid`, `name_taken` (409; the mould's `duplicate_name`, renamed because the dashboard family's `duplicate_name` is its object namespace), `version.not_draft` / `not_released` / `not_discarded` / `last_release` / `not_eligible`, `authoring.disabled`, and `visualization.version.pinned` (a live dashboard pins it), `dashboard.validation.dependency_not_found`, `dashboard.import.missing_dependency`. Landed with their constants, catalog rows and `doc_url` anchors. |
 | 2026-09-29 | v1.43 | 310 (#310) audit-log retention | §12.11's `pipeline.validation.table_not_learned` row: the learning lasts as long as the audit row it reads — once per `datapipelines.audit.retention-days` (default a year), not "the key's lifetime", now that the audit log is retained (auth §10.3). The code, its status and its details are unchanged |
 | 2026-09-28 | v1.42 | 298 (#298) the server's fault names the status | §6.2: a binding that carries both a caller's bad value and a stored declaration refused today answers the stored declaration's 409 (`PipelineValidationException` ranks the server-owned code first) with both failures in `details.failures` in the order found — before, the first failure's code won, so a caller's error listed earlier made it a 400. Each judged declaration is compiled once per bind. No code or row added. |
 | 2026-09-28 | v1.41 | 298 (#291) request constraints on every body | §13.21: the stated Jackson constraints now hold on every route that parses its own `@RequestBody String` too — each reads through a REQUEST copy of its domain mapper (`RequestLimits.requestMapper`, `copy()` then the copy's own factory: the domain mappers keep the library's bounds for stored rows, transform values and JSON columns) and answers a read failure with its family's malformed-body 400; the parameter-set routes remain, tracked in #300. No code added. |
