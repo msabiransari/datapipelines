@@ -7,8 +7,12 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.MapperFeature
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.cfg.CoercionAction
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape
 import com.fasterxml.jackson.databind.json.JsonMapper
+import com.fasterxml.jackson.databind.type.LogicalType.Textual
 import com.fasterxml.jackson.module.kotlin.KotlinModule
+import com.fasterxml.jackson.databind.type.LogicalType.Boolean as JacksonBoolean
 
 /**
  * The parameter-set JSON binding — strict at every level (record §3; lane B's security brief: "a
@@ -26,7 +30,10 @@ import com.fasterxml.jackson.module.kotlin.KotlinModule
  * true)` for their own modules' reasons, and a class annotation beats a mapper feature. The
  * [StrictDeclaredKeys] mix-in overrides it for THIS mapper only, so neither module's own binding changes.
  * Scalar coercion is off (`"5"` is not the integer 5, `1` is not `true`) — the pre-scan reports a
- * wrong JSON type, and this mapper refuses one rather than guessing.
+ * wrong JSON type, and this mapper refuses one rather than guessing. That feature does not reach a
+ * scalar-to-STRING bind, though (Jackson's `StringDeserializer` takes a number or a boolean as text
+ * until the `Textual` coercion config refuses it — #319), so the `Textual`/`Boolean` coercion
+ * configs and `ACCEPT_FLOAT_AS_INT` off are the mapper's own refusal of every wrong scalar type.
  */
 object ParameterSetJson {
     /** The strict mapper — the ONLY one this module binds or writes parameter-set JSON with. */
@@ -38,6 +45,16 @@ object ParameterSetJson {
             .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
             .enable(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
             .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+            .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            // ALLOW_COERCION_OF_SCALARS does not reach a scalar-to-STRING bind: Jackson's StringDeserializer
+            // takes a number or a boolean as text unless the coercion config refuses it — `"display_name": 5`
+            // bound as "5" until these lines (#319). The transfer path binds WITHOUT a pre-scan, so this is
+            // where a wrong JSON type must stop.
+            .withCoercionConfig(Textual) { config ->
+                listOf(CoercionInputShape.Integer, CoercionInputShape.Float, CoercionInputShape.Boolean).forEach {
+                    config.setCoercion(it, CoercionAction.Fail)
+                }
+            }.withCoercionConfig(JacksonBoolean) { it.setCoercion(CoercionInputShape.Integer, CoercionAction.Fail) }
             .addMixIn(TemplateRef::class.java, StrictDeclaredKeys::class.java)
             .addMixIn(ParameterConstraints::class.java, StrictDeclaredKeys::class.java)
             .build()

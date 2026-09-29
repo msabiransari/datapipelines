@@ -28,6 +28,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import java.time.Instant
 import java.util.UUID
 
@@ -141,6 +142,24 @@ class ParameterSetTransferServiceTest {
         val refusal = shouldThrow<ApiException> { service.import(WIRE.writeValueAsString(envelope), workspaceId, actor) }
 
         refusal.code shouldBe ParameterErrorCodes.BODY_INVALID
+    }
+
+    /** #319: the transfer binds WITHOUT the reader's pre-scan, so a number where a String is declared
+     * must stop at the mapper — never bind as the text "5". */
+    @Test
+    fun `an envelope whose display_name is a number refuses body_invalid - never bound as text`() {
+        val envelope = service.export(workspaceId, setId)
+        (envelope["parameter_set"] as ObjectNode).put("display_name", 5)
+        every { sets.import(any(), any(), any()) } answers { throw IllegalStateException("must not be reached") }
+
+        val refusal = shouldThrow<ApiException> { service.import(WIRE.writeValueAsString(envelope), workspaceId, actor) }
+
+        assertAll(
+            { refusal.code shouldBe ParameterErrorCodes.BODY_INVALID },
+            { refusal.details["reason"] shouldBe "wrong_type" },
+            { verify { templateImport wasNot Called } },
+            { verify { sets wasNot Called } },
+        )
     }
 
     @Test
