@@ -189,7 +189,9 @@ class DashboardValidator(
         fact: PipelineReleaseFact,
         failures: ArtifactFailures,
     ) {
-        val output = fact.outputColumns.associateBy { it.name }
+        // A release that does not DECLARE its caller columns (a SQL caller node) is not judged here: the columns are
+        // unknown until it runs, and a guess would refuse or admit on nothing (L1b; the runtime checks them, L2).
+        val output = (fact.outputColumns ?: return).associateBy { it.name }
         contract.columns.firstOrNull { output[it.name]?.type != it.type }?.let { column ->
             failures.add(
                 DashboardErrorCodes.INPUT_CONTRACT_MISMATCH,

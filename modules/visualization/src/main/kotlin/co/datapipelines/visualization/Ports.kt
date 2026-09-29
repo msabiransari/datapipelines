@@ -93,8 +93,13 @@ data class PipelineReleaseFact(
     /** True when the release passes the read-only rule, child pipelines included (D38). */
     val readOnly: Boolean,
     val parameters: List<PipelineParameterFact>,
-    /** The caller output columns of this release — what a visualization input can be fed. */
-    val outputColumns: List<OutputColumn>,
+    /**
+     * The caller output columns of this release — what a visualization input can be fed. EMPTY when the release has
+     * no caller node (it returns no rows); NULL when the release returns rows whose columns it does not DECLARE (a
+     * SQL caller node — only a transform caller node's contract names its columns): the save-time
+     * `input_contract_mismatch` check is then skipped, never guessed, and the runtime judges the real columns (L2).
+     */
+    val outputColumns: List<OutputColumn>?,
 )
 
 /** One declared pipeline parameter: its name, and whether a caller MUST supply it (required and no default). */

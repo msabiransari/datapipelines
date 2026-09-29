@@ -98,6 +98,15 @@ class DashboardValidatorTest {
     }
 
     @Test
+    fun `a source whose release does not declare its caller columns is not judged at save - never a guess`() {
+        // L1b: a SQL caller node names no columns (only a transform's contract does), so the port answers null and the
+        // input contract is the runtime's to check (L2). EMPTY stays a refusal: that release returns no rows at all.
+        valid(DocumentFixtures.dashboard()) {
+            it.pipelines[ValidatorFakes.PIPELINE_REF] = it.pipelines.getValue(ValidatorFakes.PIPELINE_REF).copy(outputColumns = null)
+        }
+    }
+
+    @Test
     fun `the actions and controls - scope all with targets, an unknown target, a control naming no action or parameter`() {
         reasons(mutate = { it.obj("actions[0]").put("scope", "all") }) shouldBe listOf("actions[0].targets" to "targets_with_all")
         codes(mutate = { (it.obj("actions[0]").get("targets") as ArrayNode).add("pie_chart") }) shouldBe
