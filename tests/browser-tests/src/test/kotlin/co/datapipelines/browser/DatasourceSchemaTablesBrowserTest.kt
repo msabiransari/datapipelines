@@ -100,7 +100,12 @@ class DatasourceSchemaTablesBrowserTest : BrowserSuite() {
             { response -> response.url().contains("/tables/zones/columns") },
             { zonesRow.click() },
         )
-        val columnNames = page.locator(".tpl-leaf-static .tpl-label").allInnerTexts()
+        // The response wait above resolves on the NETWORK reply; htmx swaps the columns in after it,
+        // and `allInnerTexts()` does not auto-wait — on CI's runner it read the pre-swap tree (#318,
+        // run 36574861399: `but was: []`). Wait for the first leaf to be attached before reading.
+        val leaves = page.locator(".tpl-leaf-static .tpl-label")
+        leaves.first().waitFor()
+        val columnNames = leaves.allInnerTexts()
         columnNames shouldContainExactly listOf("location_id", "borough", "zone")
         // 179: the screen's verbs — the top bar's MCP-key chip (every role, own key) is
         // chrome, not this screen, so the count reads the main region only.

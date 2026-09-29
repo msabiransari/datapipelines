@@ -422,8 +422,14 @@ class PersistenceBatchingIntegrationTest {
                     .tag("store", "audit")
                     .summary()!!
                     .totalAmount()
+            // WHICH fallback a full-queue caller records is timing: `reserveBlocking` waits for ROOM
+            // until its deadline, and a slot freed by another caller's reclaim lets it queue (then
+            // `timeout`) instead of refusing (`saturated`). CI's 2-vCPU runner reclaimed continuously
+            // and recorded saturated=0 timeout=29 by_writer=1 (run 36574861399) while this box records
+            // both — so this case asserts the invariant that does not depend on the race (every caller's
+            // row lands, by the writer or by its own hand) and leaves "a full queue with no room
+            // coming is `saturated`" to BatchingWriterTest's deterministic saturation case.
             withClue("saturated=${fallbacks("saturated")} timeout=${fallbacks("timeout")} by_writer=$byWriter") {
-                (fallbacks("saturated") > 0.0) shouldBe true
                 fallbacks("saturated") + fallbacks("timeout") + byWriter shouldBe CALLERS.toDouble()
             }
             registry
