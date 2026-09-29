@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.20 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.21 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-29
@@ -205,6 +205,15 @@ The batching writers in front of the audit log, the execution-event record and t
 | WARN | `persistence.drain_incomplete` | A writer's drain reached `shutdown-drain-ms` with items left: `lost` were never written (only `submit` items can be — nothing awaits them), `in_flight` were inside a commit and may or may not have landed | `writer`, `lost`, `in_flight`, `drain_ms` |
 
 A failure is named by `cause` (the exception's simple class name) and `sql_state` (the first SQLState in its cause chain, `none` without one) — never by the exception's message or its cause chain, which a store fills with the refused row (Postgres's DETAIL and CONTEXT; PgJDBC's batch exception quotes the bound values). `23xxx` is a row the store refuses, `08xxx` a connection lost (#266b). The emitter and the audit sink keep their own lines too — `Durable event … not written (kind)`, `SSE event log append failed … (replay will be incomplete)`, `audit_log write failed … kind=…` (on the direct path `… cause=… sql_state=…`) — the ones operators have always searched for. A steady `persistence.saturated` or a rising `datapipelines.persistence.fallbacks{reason=timeout}` (§4.1) means the store cannot keep up; `batch_retried` with `kind=poison` means rows the store refuses, which no retry will fix.
+
+#### 3.4H The scheduled jobs' thread (#316)
+
+Every `@Scheduled` job — the stale-execution sweep (every 15 s), the pool reaper (every 5 s) and the hourly retention sweep — runs on ONE thread of its own, `dp-scheduled` (`SweepSchedulingConfiguration`'s `taskScheduler`), and nothing else runs there. Their lines therefore carry `thread: dp-scheduled` (§3.1): `execution.swept` / `execution.sweep_failed`, `execution.events_purged` / `execution.event_retention_failed`, `keys.purged`, the `audit.retention*` lines and `retention.step_failed` (§7), and §3.4A's `datasource.pool_hard_closed`. Until #316 they carried `dp-sse-log`: the jobs ran on the SSE log streamer's thread ([REST API §10.3](rest-api.md#103-replay-sse-stream)'s replays), so a slow tick stalled every replay and a burst of replays delayed the sweep.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `shutdown.scheduled_jobs_stopped` | Shutdown, after the execution drain and every writer's drain (§3.4G): the jobs' scheduler has stopped and its thread has ended. No tick STARTS once the application begins to close; a tick already running finished before this line, while the metadata pool was still open | `thread` |
+| WARN | `shutdown.scheduled_jobs_incomplete` | The same point, but a tick was still running — it outlived `spring.lifecycle.timeout-per-shutdown-phase` (30 s by default) and a further `await_ms`. It is cut when the metadata pool closes, and the next tick, on this instance or another, redoes it: every job is idempotent | `thread`, `await_ms` |
 
 ### 3.5 Log destination
 
@@ -486,6 +495,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.21 | 316 (#316) the scheduled jobs' own thread — numbered after 310's v1.20 | New **§3.4H**: every `@Scheduled` job runs on `dp-scheduled`, the jobs' own scheduler, so their lines (named there) carry that `thread` — until #316 they carried `dp-sse-log`, the SSE log streamer's; two shutdown lines, `shutdown.scheduled_jobs_stopped` (INFO, after both drains) and `shutdown.scheduled_jobs_incomplete` (WARN, a tick outlived the shutdown wait). |
 | 2026-09-29 | v1.20 | 310 (#310) audit-log retention — numbered after 297's v1.18 and 266b's v1.19 | §4.1 gains `datapipelines.audit.retention.purged` (counter, no tags). §7 gains the retention paragraph: the job, its three log events (`audit.retention` INFO, `audit.retention_incomplete` and `audit.retention_failed` WARN), the sweep's per-step `retention.step_failed` ERROR, and the meter — the "retention governed by" line was true of the documentation only until #310 |
 | 2026-09-29 | v1.19 | 266 (#266) persistence batching, with its correction round 266b — renumbered from v1.18, which 297 takes | New **§3.4G the persistence events** (`persistence.batch_retried`, `write_failed`, `direct_write_failed`, `indeterminate`, `direct_write_abandoned`, `saturated` — at most once per 10 s — `writer_died`, `drained`, `drain_incomplete`, and the two `shutdown.persistence_*` lines); §4.1 gains the **persistence batching** table (`datapipelines.persistence.*`: batch size and duration, lag, queue depth and bytes, failures by `kind`, fallbacks by `reason`, retried batches, dropped submissions — every one tagged `store`); §7 states the delivery rule and the loss window (only the non-awaited `submit` path, no caller yet) and marks audit retention as documented-not-implemented. 266b: a failure is logged by `cause` (class) and `sql_state`, never by the store's message, which quotes the refused row; the audit writer ships off (`audit.enabled: false`), so `audit.write` reads `direct` by default and the `audit` meters read zero. |
 | 2026-09-28 | v1.18 | 297 (#292) build time opt-in | §6.3's `build_time` becomes **absent when not supplied**, like `commit`: the build stamps a time only with `-Pdatapipelines.buildTime=<instant>` (`app.sh`'s image build passes it), because the plugin's default `Instant.now()` made the app's jar new on every Gradle invocation and re-ran its tests and the whole browser suite each time. |
