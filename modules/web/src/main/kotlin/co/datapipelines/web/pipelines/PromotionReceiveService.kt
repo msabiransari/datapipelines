@@ -105,16 +105,32 @@ class PromotionReceiveService(
         // the first one commissioned after the batch lands.
         gateChecks(batch, workspace.id, actor)
 
+        // #302 (record §18 C36) — the sets' §4 validation BEFORE the transaction, the `gateChecks`
+        // precedent: a template-backed parameter's selector probe opens a CUSTOMER-datasource
+        // connection, which `ConnectionLease` refuses while a metadata transaction is open on the
+        // thread. The batch's template payloads overlay the receiver's registry for this step, so a
+        // pin the SAME batch brings resolves before the templates have landed; a pin neither the
+        // batch brings nor the receiver holds is `parameter.import.missing_template`. A refusal here
+        // has landed NOTHING. The transaction body lands the pre-validated entries (`land` — no
+        // re-probe); a refusal there rolls the batch back whole, templates included.
+        val validatedSets =
+            if (batch.parameterSets.isEmpty()) {
+                emptyList()
+            } else {
+                parameterSetPromotion.validate(batch.parameterSets, batch.templates, workspace.id)
+            }
+
         transactionTemplate.executeWithoutResult {
             if (batch.templates.isNotEmpty()) {
                 templateImportService.import(templatesPayload(batch), workspace.id, actor)
             }
             // #194 lane D — sets BEFORE pipelines, AFTER templates (§8.3's order): a set's
             // pins must resolve, and the pipelines' editors read the released sets beside
-            // the released templates. A pin the batch did not bring is the import's own
-            // `parameter.import.missing_template`.
-            batch.parameterSets.forEach { entry ->
-                parameterSetPromotion.apply(entry, workspace.id, actor)
+            // the released templates. The entries were VALIDATED above (#302, C36); what can
+            // still refuse here (a hash mismatch on a brought template's landing, C29's
+            // id_taken) rolls the whole batch back.
+            validatedSets.forEach { validated ->
+                parameterSetPromotion.land(validated, workspace.id, actor)
             }
             batch.pipelines.forEach { pipeline ->
                 pipelineImportService.import(pipeline.toString(), workspace.id, actor)

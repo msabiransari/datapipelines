@@ -99,15 +99,36 @@ class PromotionConfiguration {
             parameterSetPromotion,
         )
 
-    /** #194 lane D — the sender's set payloads and the receiver's set imports, ONE collaborator. */
+    /**
+     * #194 lane D — the sender's set payloads and the receiver's validation-and-landing, ONE
+     * collaborator. The receiver's validation (#302, C36) rides [ParameterSetReceiveValidation]:
+     * the SAME ports the save-time validator uses, with the batch's template payloads overlaying
+     * the receiver's registry for the out-of-transaction probe. The org tier is the validator's
+     * own default — the production `parameterSetValidator` bean's wiring, copied exactly.
+     */
     @Bean
+    // A DI factory's arity is the container's business, not a design smell: every parameter is a
+    // port the receive validation genuinely needs (the validator's five, plus the service).
+    @Suppress("LongParameterList")
     fun parameterSetPromotion(
         repository: co.datapipelines.parameters.ParameterSetRepository,
         sets: co.datapipelines.parameters.ParameterSetService,
         templates: TemplateRepository,
+        engines: co.datapipelines.templates.WorkspaceTemplateEngines,
+        renderer: co.datapipelines.pipeline.TemplateDryRenderer,
+        statuses: co.datapipelines.pipeline.TemplateVersionStatuses,
+        datasources: co.datapipelines.pipeline.DatasourceRegistry,
+        probe: co.datapipelines.parameters.SelectorProbe,
+        config: co.datapipelines.parameters.ParametersConfig,
     ): co.datapipelines.web.parameters.ParameterSetPromotion =
         co.datapipelines.web.parameters
-            .ParameterSetPromotion(repository, sets, templates)
+            .ParameterSetPromotion(
+                repository,
+                sets,
+                templates,
+                co.datapipelines.web.parameters
+                    .ParameterSetReceiveValidation(sets, engines, renderer, statuses, datasources, probe, config),
+            )
 
     /** 074 — the endpoint half of a promotion batch, sender and receiver rules in one place. */
     @Bean

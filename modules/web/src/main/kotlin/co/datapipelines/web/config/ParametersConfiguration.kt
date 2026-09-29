@@ -102,9 +102,10 @@ class ParametersConfiguration {
     ): ParameterEvaluator = ParameterEvaluator(runner, pool, config, org, Clock.systemUTC())
 
     /**
-     * The ONE import/export path REST and the promotion receive share (the
-     * `PipelineImportService` precedent): the D9-style second caller must never re-implement
-     * an import.
+     * The REST import/export path (the `PipelineImportService` precedent — the import is never
+     * re-implemented per route). The promotion receive is the ATOMIC twin since #302 (record C36):
+     * it validates before its transaction and lands through `ParameterSetService.importValidated`,
+     * not through this service (C35 keeps the REST import the non-atomic one-call path).
      */
     @Bean
     fun parameterSetTransferService(

@@ -20,8 +20,16 @@ import java.util.UUID
 
 /**
  * The parameter-set **export/import** acts (record §8.3; the `PipelineImportService` /
- * `PipelineTransferController` shape, lifted from the controller so the promotion receive path
- * can perform the SAME import).
+ * `PipelineTransferController` shape, lifted from the controller so a second caller can perform
+ * the import).
+ *
+ * ## The twin paths (record §18 C35/C36)
+ * THIS service is the REST import — the ONE-CALL path, deliberately NON-atomic across templates
+ * and set (C35: the envelope's shape is judged before anything lands; the set's own refusal after
+ * the templates landed leaves them — template versions are idempotent). The promotion receive is
+ * the ATOMIC counterpart (C36): it validates each set entry BEFORE its one transaction — the
+ * selector probe included — and lands pre-validated entries inside it (`ParameterSetPromotion`.
+ * `validate`/`land` over `ParameterSetService.importValidated`), never through this service.
  *
  * ## The envelope
  * `GET /{id}/export` answers `{"parameter_set": body + lifecycle fields, "templates": [pinned
