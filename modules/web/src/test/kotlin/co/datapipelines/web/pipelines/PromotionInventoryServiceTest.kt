@@ -35,6 +35,9 @@ class PromotionInventoryServiceTest {
     private val pipelines = mockk<PipelineRepository>()
     private val templates = mockk<TemplateRepository>()
     private val datasources = mockk<DatasourceRegistry>()
+
+    // #300: required — the inventory's set arm is never silently empty.
+    private val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>(relaxed = true)
     private val service =
         PromotionInventoryService(
             workspaces = workspaces,
@@ -43,6 +46,7 @@ class PromotionInventoryServiceTest {
             datasources = datasources,
             deploymentName = "prod",
             authoringEnabled = false,
+            parameterSets = parameterSets,
         )
 
     private val workspaceId = UUID.randomUUID()

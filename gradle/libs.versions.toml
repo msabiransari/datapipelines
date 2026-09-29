@@ -79,8 +79,13 @@ postgresql = "42.7.13"
 # Applied as a BOM (jackson-bom) rather than a per-artifact pin so that
 # jackson-databind — the artifact the advisories actually name, which we never
 # declare directly — is covered along with every other Jackson module.
-# RETIRE when the Spring Boot BOM imports jackson-bom >= 2.21.5.
-jackson = "2.21.5"
+# 2026-09-28: three further jackson-databind advisories published — GHSA-wjgm-6hv5-3cvf
+# (5.3), GHSA-gx83-3vf8-gh7j (5.6), GHSA-q4xh-88c3-wmh7 (7.5, HIGH) — vulnerable includes
+# 2.21.5, first_patched_version = "2.21.6" (OSV-Scanner at the 300 merge's gate; every
+# lockfile named). Same smallest-step rule: 2.21.6 is the patch on the BOM's minor line;
+# 2.22.3 (the latest) stays a minor upgrade nothing forces.
+# RETIRE when the Spring Boot BOM imports jackson-bom >= 2.21.6.
+jackson = "2.21.6"
 
 # netty — GHSA-558v-64gr-wgg4 (HIGH 8.7, Bzip2Decoder infinite loop hangs the
 # event-loop thread). Advisory API, verified 2026-08-15:

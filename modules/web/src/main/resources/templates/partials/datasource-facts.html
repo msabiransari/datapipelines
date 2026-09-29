@@ -77,7 +77,10 @@
           <!-- D-S9: a fact another workspace established arrives with its evidence and trust,
                marked; its pipeline link only when this workspace can read that pipeline. -->
           <span th:if="${!f['from_this_workspace']}" class="ds-badge ds-badge-default">via another workspace</span>
-          <a th:if="${f['source_pipeline']} != null" class="u-text-sm"
+          <!-- #149: a full document load like every route into the editor — on a boosted swap
+               Alpine binds the editor's component before its scripts have executed and the
+               page mounts no canvas (the rule pipeline-detail.html's own Open link states). -->
+          <a th:if="${f['source_pipeline']} != null" class="u-text-sm" hx-boost="false"
              th:href="@{/pipelines/{id}/editor(id=${f['source_pipeline']['id']})}" th:text="${f['source_pipeline']['name']}">finance/revenue</a>
         </td>
       </tr>

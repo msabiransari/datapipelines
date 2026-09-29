@@ -197,10 +197,13 @@ class PipelineExplorerRenderTest {
 
     @Test
     fun `every link into the pipeline editor is a full document load, never a boosted swap`() {
-        // The editor's Alpine root is initialised by alpine.min.js as soon as swapped markup
-        // lands, before the editor scripts that define pipelineEditor() have run: boosted
-        // entry renders a graph with no Execute, no dock and no inspector, and every binding
-        // throws. Found live on 2026-09-05, the first walk after 076 turned boost on.
+        // The editor page's scripts (init.js, graph.js) load WITH the document, so Alpine's
+        // CSP build binds the registered `pipelineEditor` component as the page paints. On a
+        // boosted swap the bindings evaluate the instant the markup lands — before those
+        // scripts have executed — and the page renders with no Execute, no dock and no
+        // inspector, every binding thrown. Found live on 2026-09-05, the first walk after
+        // 076 turned boost on. (301 #305: the comment said the root was
+        // `x-data="pipelineEditor()"`, the pre-195 standard build's call form.)
         val html = render("partials/pipeline-detail") { fillDetail() }
 
         val editorLinks = Regex("""<a [^>]*href="/pipelines/[^"]+/editor"[^>]*>""").findAll(html).map { it.value }.toList()

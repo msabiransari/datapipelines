@@ -11,7 +11,9 @@ import co.datapipelines.parameters.ParameterSetReader
 import co.datapipelines.parameters.ParameterSetRepository
 import co.datapipelines.parameters.ParameterSetService
 import co.datapipelines.parameters.ParametersConfig
+import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.web.api.ApiErrors
+import co.datapipelines.web.api.ApiException
 import co.datapipelines.web.api.ApiResponse
 import co.datapipelines.web.api.PagedData
 import co.datapipelines.web.api.Pagination
@@ -48,12 +50,16 @@ import java.util.UUID
  *
  * ## The evaluate request's own bounds (the #279 gap is THIS route's to bound)
  * A viewer-reachable POST that runs SQL on customer datasources is bounded before anything runs:
- * the body is refused over [MAX_EVALUATE_REQUEST_BYTES] before its JSON is parsed (the largest
- * legal selections document is bounded by `max-parameters-per-set` × `max-input-length`, roughly
- * 256 KiB — the cap is stated, never negotiated); every key must name a parameter of the set
- * (`parameter.evaluate.unknown_parameter` — the caller's error, the whole request refused); and
- * every value is judged by the shared validator inside the evaluator (P28). The response is the
- * runtime's JSON verbatim — no echo of the request rides it.
+ * the body is refused over [MAX_EVALUATE_REQUEST_BYTES] before its JSON is parsed — the platform's
+ * `request.body_too_large` 413 (#300); the PRE-READ bound is the 2 MiB `RequestLimits` filter on
+ * the `/api/v1` prefix (the largest legal selections document is bounded by `max-parameters-per-set` ×
+ * `max-input-length`, roughly 256 KiB — the cap is stated, never negotiated). A present `version`
+ * or `selections` of the wrong JSON type, and a missing `version` on the switch, refuse
+ * `parameter.validation.body_invalid` naming `details.path`/`details.reason` (#300); every
+ * selections key must name a parameter of the set (`parameter.evaluate.unknown_parameter` — the
+ * caller's error, the whole request refused); and every value is judged by the shared validator
+ * inside the evaluator (P28). The response is the runtime's JSON verbatim — no echo of the request
+ * rides it.
  */
 @RestController
 @RequestMapping("/api/v1/parameter-sets")
@@ -225,16 +231,20 @@ class ParameterSetsController(
     /** §21 — the manual switch (the promotion receiver's rollout/rollback lever). Session-only. */
     @PostMapping("/{id}/current")
     @RequiredScope(Permission.PARAMETER_SET_SWITCH_VERSION)
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal — shape 400s before the 404, never merged
     fun switchCurrent(
         @PathVariable id: UUID,
         @RequestBody body: JsonNode,
     ): ApiResponse<Map<String, Any?>> {
         val principal = LifecycleVerbs.requireSession()
         val workspaceId = principal.requireWorkspace().id
-        if (!body.has("version") || !body["version"].canConvertToInt()) {
-            throw ApiErrors.parameterNotFound(id.toString())
-        }
-        val target = body["version"].asInt()
+        // The body's shape is judged BEFORE the lookup: a missing or non-int `version` is the
+        // catalogued 400 (`parameter.validation.body_invalid`), never a 404 that reads as if the
+        // SET were absent (#300 — the 194d security pass, observation 5).
+        val versionNode = body.get("version")
+        if (versionNode == null || versionNode.isNull) throw ApiErrors.parameterSetBodyInvalid("version", ApiErrors.REASON_MISSING)
+        if (!versionNode.canConvertToInt()) throw ApiErrors.parameterSetBodyInvalid("version", ApiErrors.REASON_WRONG_TYPE)
+        val target = versionNode.asInt()
         repository.findRecord(workspaceId, id) ?: throw ApiErrors.parameterNotFound(id.toString())
         val current = sets.switchCurrent(workspaceId, id, target)
         return ApiResponse.of(mapOf("id" to id.toString(), "current_version" to current))
@@ -259,20 +269,25 @@ class ParameterSetsController(
         @RequestParam(required = false) offset: Int?,
         @RequestParam(required = false) limit: Int?,
     ): ApiResponse<Map<String, Any?>> {
+        val page = Pagination.clampOffset(offset)
+        val size = Pagination.clampLimit(limit)
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val view = lens.viewFor(principal).parameterSets
         val folders = sets.listChildFolders(workspaceId, view, prefix)
-        val loaded =
-            sets.listChildSets(workspaceId, view, prefix, Pagination.clampOffset(offset), Pagination.clampLimit(limit))
+        val loaded = sets.listChildSets(workspaceId, view, prefix, page, size)
+        // `total` counts the level's PARAMETER SETS the lens admits — not the folders: folders are
+        // navigation, the sets are what `has_more` pages (#300, observation 7; rest-api §21.2). The
+        // count is lens-true: a promoter learns her lens's level size, never the workspace's.
+        val total = sets.countChildSets(workspaceId, view, prefix)
         return ApiResponse.of(
             mapOf(
                 "prefix" to prefix,
                 "folders" to
                     folders.map { mapOf("path" to it.path, "segment" to it.segment, "parameter_set_count" to it.setCount) },
                 "parameter_sets" to loaded.map { ParameterSetResponses.listEntry(it) },
-                "total" to (folders.size + loaded.size),
-                "has_more" to false,
+                "total" to total,
+                "has_more" to (page + loaded.size < total),
             ),
         )
     }
@@ -290,8 +305,9 @@ class ParameterSetsController(
         val workspaceId = principal.requireWorkspace().id
         val view = lens.viewFor(principal).parameterSets
         val loaded = sets.listChildSets(workspaceId, view, null, page, size)
+        val total = sets.countChildSets(workspaceId, view, null)
         val items = loaded.map { ParameterSetResponses.listEntry(it) }
-        return ApiResponse.of(PagedData(items, Pagination.of(page, size, items.size.toLong(), items.size)))
+        return ApiResponse.of(PagedData(items, Pagination.of(page, size, total.toLong(), items.size)))
     }
 
     /** §21 — export (§8.3): the current release, the pinned templates' closure, the manifest. */
@@ -338,6 +354,7 @@ class ParameterSetsController(
      */
     @PostMapping("/{id}/evaluate")
     @RequiredScope(Permission.PARAMETER_SET_EVALUATE)
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal — shape 400s before the 404s, never merged
     fun evaluate(
         @PathVariable id: UUID,
         @RequestBody body: String,
@@ -348,16 +365,32 @@ class ParameterSetsController(
         val workspaceId = principal.requireWorkspace().id
         val view = lens.viewFor(principal).parameterSets
         // An EXPLICIT version never falls back to the served one: a miss is the catalogued 404,
-        // not a silent evaluate of a different version than the caller named (§5.1).
+        // not a silent evaluate of a different version than the caller named (§5.1). A PRESENT
+        // value of the wrong JSON type is refused outright (`body_invalid`) — `{"version":"2"}`
+        // never evaluates the served version while claiming it named 2 (#300, observation 6); an
+        // explicit JSON null is no version at all (the MCP twin's absent-argument rule).
+        val versionNode = tree.get("version")
+        val explicitVersion =
+            when {
+                versionNode == null || versionNode.isNull -> null
+                versionNode.isInt -> versionNode.asInt()
+                else -> throw ApiErrors.parameterSetBodyInvalid("version", ApiErrors.REASON_WRONG_TYPE)
+            }
+        // A PRESENT non-object `selections` is refused, never silently read as "nothing chosen"
+        // (#300, observation 6); an absent or null one is the first render's {}. The body's shape
+        // is judged BEFORE the set is resolved — a malformed body is the 400 whatever the id.
+        val selectionsNode = tree.get("selections")
+        if (selectionsNode != null && !selectionsNode.isNull && !selectionsNode.isObject) {
+            throw ApiErrors.parameterSetBodyInvalid("selections", ApiErrors.REASON_WRONG_TYPE)
+        }
         val loaded =
-            tree.get("version")?.takeIf(JsonNode::isInt)?.asInt()?.let { version ->
+            explicitVersion?.let { version ->
                 sets.findVersion(workspaceId, view, id, version)
                     ?: throw ApiErrors.parameterNotFound(id.toString(), version)
             } ?: repository.findCurrent(workspaceId, id)?.takeIf { view.admits(it.record.name) }
         val set = loaded ?: throw ApiErrors.parameterNotFound(id.toString())
         val selections =
-            tree
-                .get("selections")
+            selectionsNode
                 ?.takeIf(JsonNode::isObject)
                 ?.properties()
                 ?.associate { it.key to it.value as JsonNode }
@@ -366,14 +399,18 @@ class ParameterSetsController(
         return ApiResponse.of(EvaluateResponseJson.write(response))
     }
 
-    /** The stated bound, BEFORE the JSON parse: an oversized body never reaches the parser (#279). */
+    /**
+     * The stated PRE-PARSE bound (#279): a body over it is the platform's `request.body_too_large`
+     * 413 (#300 — the 400 stand-in retired; the 2 MiB `RequestLimits` filter ahead of every
+     * `/api/v1` route remains the PRE-READ bound, this cap is the pre-PARSE one).
+     */
     private fun refuseOversizedBody(body: String) {
         if (body.toByteArray(Charsets.UTF_8).size <= MAX_EVALUATE_REQUEST_BYTES) return
-        throw co.datapipelines.web.api.ApiException(
-            ParameterErrorCodes.EVALUATE_UNKNOWN_PARAMETER,
-            "The evaluate request body exceeds $MAX_EVALUATE_REQUEST_BYTES bytes; the largest legal " +
-                "selections document for any set is far smaller.",
-            mapOf("reason" to "request_too_large", "max_request_bytes" to MAX_EVALUATE_REQUEST_BYTES),
+        throw ApiException(
+            PipelineErrorCodes.Request.BODY_TOO_LARGE,
+            "The evaluate request body exceeds $MAX_EVALUATE_REQUEST_BYTES bytes; refused before its JSON is parsed. " +
+                "The largest legal selections document for any set is far smaller.",
+            mapOf("limit_bytes" to MAX_EVALUATE_REQUEST_BYTES),
         )
     }
 

@@ -36,7 +36,10 @@ class TemplatesPurgeDraftTool(
     private val templates: TemplateRepository,
     private val usage: TemplateUsage,
     private val authoring: AuthoringGuard,
-    /** 194d — the lens, so the guard's set scan narrows exactly as every read does. */
+    /**
+     * 178 — the caller's view. #300: the guard's SCANS run under the whole workspace (the web
+     * guard's rule); the lens decides only which pinned names the refusal may ECHO.
+     */
     private val lens: PromoterLens,
 ) : McpTool {
     override val definition: McpSchema.Tool =
@@ -64,37 +67,80 @@ class TemplatesPurgeDraftTool(
                 """.trimIndent(),
         )
 
-    /** The D4 guard, both aggregates: every pipeline version ever, then every set version ever. */
+    /**
+     * The D4 guard, both aggregates: every pipeline version ever, then every set version ever.
+     * #300 (the 194d security pass, observation 11): BOTH scans run under the WHOLE workspace —
+     * the web guard's rule, unlensed ([TemplateUsage.referencedAnywhere] under a narrowing view
+     * dropped hidden sets, so a lensed caller could purge a template a hidden set still pins).
+     * Only the ECHO narrows: the refusal names the pins the caller's view admits and flags that others exist
+     * ("pins_hidden": true) — never a name, and never a count, of what the caller cannot see.
+     */
     private fun refuseIfPinned(
         workspaceId: java.util.UUID,
         id: String,
-        view: co.datapipelines.application.lens.LensedView,
+        caller: co.datapipelines.application.lens.LensedView,
     ) {
-        val pinners = usage.pipelinesReferencedAnywhere(workspaceId, view, id)
+        val pinners = usage.pipelinesReferencedAnywhere(workspaceId, co.datapipelines.application.lens.LensedView.EVERYTHING, id)
         if (pinners.isNotEmpty()) {
             // The web service's `template.in_use` wire shape, verbatim: the refusal names the
-            // pipelines to go and change.
+            // pipelines to go and change — the admitted ones; hidden ones are a flag.
             val names = pinners.map { it.pipelineName }.distinct()
+            val (admitted, hidden) = splitByAdmission(names, caller.pipelines)
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.IN_USE,
                 message =
-                    "Version of template '$id' is pinned by ${names.size} live pipeline version(s): " +
-                        names.joinToString(", ") + "; discard or repoint them first.",
-                details = mapOf("template_id" to id, "pinned_by" to names),
+                    "Version of template '$id' is pinned by " + pinnedBy("live pipeline version(s)", names.size, admitted, hidden) +
+                        "; discard or repoint them first.",
+                details =
+                    buildMap {
+                        put("template_id", id)
+                        put("pinned_by", admitted)
+                        if (hidden > 0) put("pins_hidden", true)
+                    },
             )
         }
-        val setPinners = usage.referencedAnywhere(workspaceId, view, id)
+        val setPinners = usage.referencedAnywhere(workspaceId, co.datapipelines.application.lens.LensedView.EVERYTHING, id)
         if (setPinners.isNotEmpty()) {
             val setNames = setPinners.map { it.setName }.distinct()
+            val (admitted, hidden) = splitByAdmission(setNames, caller.parameterSets)
             throw DatapipelinesException(
                 code = PipelineErrorCodes.Template.IN_USE,
                 message =
-                    "Version of template '$id' is pinned by ${setNames.size} parameter set version(s): " +
-                        setNames.joinToString(", ") + "; discard or repoint them first.",
-                details = mapOf("template_id" to id, "referencing_parameter_sets" to setNames),
+                    "Version of template '$id' is pinned by " + pinnedBy("parameter set version(s)", setNames.size, admitted, hidden) +
+                        "; discard or repoint them first.",
+                details =
+                    buildMap {
+                        put("template_id", id)
+                        put("referencing_parameter_sets", admitted)
+                        if (hidden > 0) put("pins_hidden", true)
+                    },
             )
         }
     }
+
+    /** Split pinned names into what [lens] admits (echoed) and how many it hides (flagged, never echoed). */
+    private fun splitByAdmission(
+        names: List<String>,
+        lens: co.datapipelines.pipeline.ReadLens,
+    ): Pair<List<String>, Int> = names.filter { lens.admits(it) } to names.count { !lens.admits(it) }
+
+    /**
+     * The web guard's sentence, byte-for-byte, for a caller whose view admits every pin; when a
+     * pin is HIDDEN the sentence carries no cardinality at all — neither the total nor the hidden
+     * count (the 300 security pass: a count of hidden objects is an existence oracle) — only the
+     * admitted names and the fact that others exist outside the view.
+     */
+    private fun pinnedBy(
+        kind: String,
+        total: Int,
+        admitted: List<String>,
+        hidden: Int,
+    ): String =
+        when {
+            hidden == 0 -> "$total $kind: " + admitted.joinToString(", ")
+            admitted.isEmpty() -> "$kind outside your view"
+            else -> "$kind: " + admitted.joinToString(", ") + " and others outside your view"
+        }
 
     override fun call(
         args: McpArguments,
@@ -132,8 +178,8 @@ class TemplatesPurgeDraftTool(
                     ),
             )
         }
-        // #194 lane D — the guard covers parameter-set pins too (the record's §8.4); the lens
-        // narrows both scans exactly as the read tools narrow.
+        // #194 lane D — the guard covers parameter-set pins too (the record's §8.4). #300: the
+        // scans read the WHOLE workspace; the caller's view narrows only the echo.
         refuseIfPinned(workspaceId, id, lens.viewFor(ctx.principal))
 
         val draft = templates.findDraftDetail(workspaceId, id) ?: throw McpNotFound.template(id)

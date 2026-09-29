@@ -55,8 +55,8 @@ class PromotionReceiveService(
     private val endpointPromotion: EndpointPromotion,
     /** 140 — the receiver's release-check gate (§10.5): the one runner, shared with every surface. */
     private val checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
-    /** #194 lane D — the parameter-set half of promotion (§8.3). Nullable, the endpointPromotion precedent. */
-    private val parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion? = null,
+    /** #194 lane D — the parameter-set half of promotion (§8.3). Required: a set entry is never silently dropped (#300). */
+    private val parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion,
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
@@ -114,8 +114,7 @@ class PromotionReceiveService(
             // the released templates. A pin the batch did not bring is the import's own
             // `parameter.import.missing_template`.
             batch.parameterSets.forEach { entry ->
-                parameterSetPromotion?.apply(entry, workspace.id, actor)
-                    ?: error("a batch carrying parameter sets reached a receiver wired before #194")
+                parameterSetPromotion.apply(entry, workspace.id, actor)
             }
             batch.pipelines.forEach { pipeline ->
                 pipelineImportService.import(pipeline.toString(), workspace.id, actor)

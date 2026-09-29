@@ -24,6 +24,11 @@
   var sqlHighlightHandler = null;
   var fitKeyHandler = null;
 
+  /* The graph zoom steps (301 #305): in by 1.25, out by its exact reciprocal, so a
+     zoom-in then zoom-out returns the view and the two buttons move together. */
+  var ZOOM_IN_STEP = 1.25;
+  var ZOOM_OUT_STEP = 0.8;
+
   function wireSqlCopy(editor) {
     if (sqlCopyHandler) document.removeEventListener("click", sqlCopyHandler);
     sqlCopyHandler = function (evt) {
@@ -1144,7 +1149,10 @@
           : undefined;
       },
 
-      /* --- graph controls (the old expressions guarded with `graph &&`) --- */
+      /* --- graph controls (the old expressions guarded with `graph &&`) ---
+         The zoom steps are named (301 #305): ZOOM_IN_STEP/ZOOM_OUT_STEP — a ×1.25 in and
+         its exact reciprocal out, so in-then-out lands the view where it started and a
+         changed step moves both buttons together. */
       fitGraph: function () {
         if (this.graph && this.graph.fitToView) this.graph.fitToView();
       },
@@ -1152,10 +1160,10 @@
         if (this.graph && this.graph.resetView) this.graph.resetView();
       },
       zoomIn: function () {
-        if (this.graph && this.graph.zoomBy) this.graph.zoomBy(1.25);
+        if (this.graph && this.graph.zoomBy) this.graph.zoomBy(ZOOM_IN_STEP);
       },
       zoomOut: function () {
-        if (this.graph && this.graph.zoomBy) this.graph.zoomBy(0.8);
+        if (this.graph && this.graph.zoomBy) this.graph.zoomBy(ZOOM_OUT_STEP);
       },
 
       /* --- the dock's badges (dock state + result panel, read together) --- */

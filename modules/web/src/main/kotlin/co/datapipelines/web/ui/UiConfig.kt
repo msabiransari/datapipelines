@@ -147,8 +147,21 @@ class UiConfig {
         usage: co.datapipelines.templates.TemplateUsageService,
         // 7e — the release dialog's needs-review rows read the SAME port the release warning does.
         reviewMarks: co.datapipelines.pipeline.TemplateReviewMarks,
+        // #273 — the discard dialog's schedules evidence, the Usage tab's by-target read.
+        schedules: co.datapipelines.scheduler.ScheduleService,
     ): PipelineLifecycleDialogModel =
-        PipelineLifecycleDialogModel(repository, templates, exclusiveTemplates, runStats, actorNames, authoring, usage, reviewMarks)
+        PipelineLifecycleDialogModel(
+            repository,
+            templates,
+            exclusiveTemplates,
+            runStats,
+            actorNames,
+            authoring,
+            usage,
+            reviewMarks,
+            co.datapipelines.pipeline.PipelineDeserializer(),
+            schedules,
+        )
 
     /** 102: the template twin of [pipelineLifecycleDialogModel]. */
     @Bean

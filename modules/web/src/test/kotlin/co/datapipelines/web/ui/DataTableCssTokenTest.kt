@@ -61,11 +61,13 @@ class DataTableCssTokenTest {
      * 288 #3 — every animated property names a duration token (`--duration-*`, the vendored
      * design system's motion scale). The skeleton's shimmer carried a literal `1.2s`; the
      * house precedent (app.css's ds-spin) folded the vendored literal into `--duration-slower`.
-     * `none` (the reduced-motion kill) and a `0s` delay are not timings.
+     * `none` (the reduced-motion kill) and a `0s` delay are not timings. 301 (#301): the
+     * longhand properties match too — `animation-duration: 1.2s;` is the same literal the
+     * shorthand is, and read only the shorthand before.
      */
     @Test
     fun `every animation and transition names a duration token`() {
-        val timed = Regex("""(animation|transition):(?![^;]*(\bnone\b|\b0s\b))[^;]*;""")
+        val timed = Regex("""(animation|transition)(-duration|-delay)?:(?![^;]*(\bnone\b|\b0s\b))[^;]*;""")
         val tokenised = Regex("""var\(--duration-""")
         val found =
             declarations

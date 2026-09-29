@@ -101,29 +101,40 @@ class ParameterSetPromotion(
      *
      * Not an authoring write: the promotion receiver accepts it.
      */
+    @Suppress("ThrowsCount") // each throw is a distinct catalogued shape refusal — path and reason are the wire
     fun apply(
         entry: JsonNode,
         workspaceId: UUID,
         actor: UUID,
     ): ParameterSetImported {
-        val id = UUID.fromString(entry.path("id").asText())
-        val name = entry.path("name").asText()
-        val version = entry.get("version")?.takeIf(JsonNode::isInt)?.asInt()
-        val bodyHash = entry.get("body_hash")?.takeIf(JsonNode::isTextual)?.asText()
+        // The entry's SHAPE is judged before anything is parsed or resolved (#300 — observation 8):
+        // a missing id reached `UUID.fromString("")` as an uncatalogued 500 and a missing name was
+        // read as "". The refusal echoes only `details.path`/`details.reason`, never the entry.
+        val objectEntry = entry as? ObjectNode ?: throw ApiErrors.parameterSetBodyInvalid("parameter_set", ApiErrors.REASON_WRONG_TYPE)
+        val idNode = objectEntry.get("id") ?: throw ApiErrors.parameterSetBodyInvalid("id", ApiErrors.REASON_MISSING)
+        if (!idNode.isTextual) throw ApiErrors.parameterSetBodyInvalid("id", ApiErrors.REASON_WRONG_TYPE)
+        val id =
+            runCatching { UUID.fromString(idNode.asText()) }
+                .getOrElse { throw ApiErrors.parameterSetBodyInvalid("id", ApiErrors.REASON_WRONG_TYPE) }
+        val nameNode = objectEntry.get("name") ?: throw ApiErrors.parameterSetBodyInvalid("name", ApiErrors.REASON_MISSING)
+        if (!nameNode.isTextual) throw ApiErrors.parameterSetBodyInvalid("name", ApiErrors.REASON_WRONG_TYPE)
+        if (nameNode.asText().isBlank()) throw ApiErrors.parameterSetBodyInvalid("name", ApiErrors.REASON_MISSING)
+        val version = objectEntry.get("version")?.takeIf(JsonNode::isInt)?.asInt()
+        val bodyHash = objectEntry.get("body_hash")?.takeIf(JsonNode::isTextual)?.asText()
         val releasedAt =
-            entry
+            objectEntry
                 .get("released_at")
                 ?.takeIf(JsonNode::isTextual)
                 ?.asText()
                 ?.let(Instant::parse)
         val body =
-            parameterSetBodyOf(entry as? ObjectNode ?: throw ApiErrors.malformedParameterSetBody())
+            parameterSetBodyOf(objectEntry)
                 ?: throw ApiErrors.malformedParameterSetBody()
         return sets.import(
             workspaceId,
             co.datapipelines.parameters.ParameterSetExport(
                 id = id,
-                name = name,
+                name = nameNode.asText(),
                 version = version,
                 bodyHash = bodyHash,
                 releasedAt = releasedAt,

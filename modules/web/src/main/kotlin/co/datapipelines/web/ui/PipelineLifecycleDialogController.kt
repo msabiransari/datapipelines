@@ -12,6 +12,7 @@ import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.api.currentPrincipal
 import co.datapipelines.web.pipelines.LifecycleVerbs
+import co.datapipelines.web.schedules.PrincipalTargetViewer
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.ResponseEntity
 import org.springframework.ui.Model
@@ -202,7 +203,12 @@ class PipelineLifecycleDialogController(
         @RequestParam(required = false) from: String?,
     ): String {
         LifecycleVerbs.requireSession()
-        model.addAttribute("dlg", dialogs.discard(currentPrincipal().requireWorkspace().id, id, version))
+        // #273 — the dialog's schedules evidence is read through the caller's lens (the Usage
+        // tab's PrincipalTargetViewer): a promoter's view is R3's, never a second answer.
+        model.addAttribute(
+            "dlg",
+            dialogs.discard(currentPrincipal().requireWorkspace().id, id, version, PrincipalTargetViewer(currentPrincipal())),
+        )
         model.addAttribute("from", from ?: FROM_EXPLORER)
         // 177 §D.8: the dialog's verb renders inside a role guard like every other verb — the route
         // already refuses the wrong role; the markup now says so too, and the exemption list is empty.

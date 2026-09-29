@@ -1,9 +1,11 @@
 package co.datapipelines.mcp
 
+import co.datapipelines.application.lens.PromoterLens
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplatePin
 import co.datapipelines.templates.TemplateRepository
 import co.datapipelines.templates.TemplateUsageService
@@ -12,6 +14,8 @@ import co.datapipelines.templates.TemplateVersionSummary
 import co.datapipelines.typesystem.DatapipelinesException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -27,15 +31,28 @@ import java.time.Instant
 class TemplatesPurgeDraftToolTest {
     private val templates = mockk<TemplateRepository>()
     private val pipelines = mockk<PipelineRepository>()
+    private val parameterPins = mockk<co.datapipelines.parameters.ParameterSetTemplatePins>()
     private val usage =
         co.datapipelines.application.templates.TemplateUsage(
             TemplateUsageService(templates, pipelines),
-            io.mockk.mockk<co.datapipelines.parameters.ParameterSetTemplatePins> {
-                every { anyVersionPins(any(), any()) } returns emptyList()
-            },
+            parameterPins,
         )
     private val tool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), McpFixtures.EVERYTHING_LENS)
     private val ctx = McpFixtures.ctx()
+
+    /** The promoter's lens over parameter sets (178) — admits only the names given. */
+    private fun narrowedSetLens(vararg admitted: String) =
+        PromoterLens {
+            co.datapipelines.application.lens.LensedView(
+                ReadLens.Everything,
+                ReadLens.Everything,
+                parameterSets = ReadLens.Only(admitted.toSet()),
+            )
+        }
+
+    init {
+        every { parameterPins.anyVersionPins(any(), any()) } returns emptyList()
+    }
 
     private val id = "test/scratch.sql"
 
@@ -130,6 +147,71 @@ class TemplatesPurgeDraftToolTest {
         assertAll(
             { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
             { thrown.details["pinned_by"] shouldBe listOf("nyc/mobility/daily") },
+        )
+        verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a set pin the caller's lens hides still refuses the purge - the guard scans the whole workspace (#300)`() {
+        val narrowedTool =
+            TemplatesPurgeDraftTool(
+                templates,
+                usage,
+                AuthoringGuard(true),
+                narrowedSetLens("acme/other/nowhere"),
+            )
+        every { templates.existsId(McpFixtures.WORKSPACE_ID, id) } returns true
+        every { templates.listVersions(McpFixtures.WORKSPACE_ID, id) } returns listOf(draftSummary())
+        every { pipelines.findAnyVersionTemplatePins(McpFixtures.WORKSPACE_ID, id) } returns emptyList()
+        every { parameterPins.anyVersionPins(McpFixtures.WORKSPACE_ID, id) } returns
+            listOf(
+                co.datapipelines.parameters.ParameterSetPin(
+                    setId = java.util.UUID.randomUUID(),
+                    setName = "acme/sales/region_filters",
+                    parameter = "state",
+                    setVersion = 1,
+                    versionStatus = PipelineVersionStatus.RELEASED,
+                    pinnedVersion = 1,
+                ),
+            )
+
+        val thrown = shouldThrow<DatapipelinesException> { narrowedTool.call(McpArguments(mapOf("id" to id)), ctx) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
+            // The hidden set is FLAGGED only - the refusal echoes neither a name nor a count of what the caller cannot see.
+            { thrown.details["referencing_parameter_sets"] shouldBe emptyList<String>() },
+            { thrown.details["pins_hidden"] shouldBe true },
+            { thrown.message shouldContain "parameter set version(s) outside your view" },
+            { thrown.message shouldNotContain "1 parameter set" },
+            { thrown.message shouldNotContain "acme/sales/region_filters" },
+        )
+        verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a set pin the caller's lens ADMITS is refused and named as the web guard names it`() {
+        every { templates.existsId(McpFixtures.WORKSPACE_ID, id) } returns true
+        every { templates.listVersions(McpFixtures.WORKSPACE_ID, id) } returns listOf(draftSummary())
+        every { pipelines.findAnyVersionTemplatePins(McpFixtures.WORKSPACE_ID, id) } returns emptyList()
+        every { parameterPins.anyVersionPins(McpFixtures.WORKSPACE_ID, id) } returns
+            listOf(
+                co.datapipelines.parameters.ParameterSetPin(
+                    setId = java.util.UUID.randomUUID(),
+                    setName = "acme/sales/region_filters",
+                    parameter = "state",
+                    setVersion = 1,
+                    versionStatus = PipelineVersionStatus.RELEASED,
+                    pinnedVersion = 1,
+                ),
+            )
+
+        val thrown = shouldThrow<DatapipelinesException> { tool.call(McpArguments(mapOf("id" to id)), ctx) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
+            { thrown.details["referencing_parameter_sets"] shouldBe listOf("acme/sales/region_filters") },
+            { thrown.details.containsKey("pins_hidden") shouldBe false },
         )
         verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
     }

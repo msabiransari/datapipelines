@@ -293,11 +293,16 @@ download).
 deliberate, in the same commit as the lockfile update:
 
 ```bash
-./gradlew --write-verification-metadata sha256 --write-locks resolveAndLockAll
+GRADLE_USER_HOME=$(mktemp -d) ./gradlew --write-verification-metadata sha256 --write-locks \
+  resolveAndLockAll help :modules:app:bootJar resolveDependencyVerificationSurface
 ```
 
 This resolves every configuration (the point of `resolveAndLockAll`) and
-records each artifact's checksum. Review the diff like the lockfile diff:
+records each artifact's checksum. **Run it against a COLD `GRADLE_USER_HOME`** (the
+`mktemp -d` above) with the same surface tasks CI's cold-verify job runs: a warm cache
+already holds parent POMs Gradle reads off the metadata graph, so the writer never
+records them and only CI's cold job finds the gap (2026-09-29, the jackson 2.21.6 bump:
+`jackson-modules-java8-2.21.6.pom` was missing on every CI job while the laptop was green). Review the diff like the lockfile diff:
 new entries must be exactly the artifacts your change introduced.
 
 #### Hand-verified entries

@@ -507,6 +507,31 @@ class PromotionTwoDeploymentE2eTest {
         return key
     }
 
+    /**
+     * #300 — the sender's parameter-set slot, end to end. Since 194d the promotion beans were
+     * built WITHOUT the set collaborators (a `= null` default nobody wired), so `promote()`
+     * silently sent no sets and the promoter lens's set arm admitted nothing; no test drove a set
+     * through the SENDER (the transfer E2E posts straight to the receiver's push). This case does:
+     * a released constants-only set on dev, promoted by name through the four-argument
+     * `promote`, must be live on uat at dev's version. Red when the sender drops set roots.
+     */
+    @Test
+    @Order(54)
+    fun `a released parameter set promotes through the SENDER and is live on uat at dev's version`() {
+        createReleasedSetOn(portDev, PROMO_SET)
+
+        val applied = promoteSetsOrExplain(PROMO_SET)
+
+        assertEquals(WORKSPACE, applied["workspace"])
+        assertEquals(1, applied["parameter_sets"], "one set root")
+        assertEquals(0, applied["templates"], "a constants-only set pins no template")
+        assertAll(
+            { assertEquals(1, devParameterSetVersion(PROMO_SET), "dev's current version") },
+            { assertEquals(devParameterSetVersion(PROMO_SET), uatParameterSetVersion(PROMO_SET), "uat's current version") },
+            { assertEquals(devParameterSetHash(PROMO_SET), uatParameterSetHash(PROMO_SET), "body hash") },
+        )
+    }
+
     // ------------------------------------------------------------------ content on dev
 
     /** A parent that runs a child through a PIPELINE node and pins a template that imports a library. */
@@ -593,6 +618,91 @@ class PromotionTwoDeploymentE2eTest {
         } catch (e: Throwable) {
             throw AssertionError("promotion refused: code=${codeOf(e)} details=${detailsOf(e)} message=${e.message}", e)
         }
+
+    /** `promote` through the FOUR-argument overload (#194 lane D's set roots) — the sender's set slot. */
+    private fun promoteSets(vararg setNames: String): Map<String, Any?> {
+        val service = devPromotionService()
+        val method = service.javaClass.getMethod("promote", UUID::class.java, String::class.java, List::class.java, List::class.java)
+        val applied =
+            try {
+                method.invoke(service, WORKSPACE_ID, WORKSPACE, emptyList<String>(), setNames.toList())
+            } catch (e: java.lang.reflect.InvocationTargetException) {
+                throw e.targetException
+            }
+        return mapOf(
+            "workspace" to applied.javaClass.getMethod("getWorkspace").invoke(applied),
+            "templates" to applied.javaClass.getMethod("getTemplates").invoke(applied),
+            "pipelines" to applied.javaClass.getMethod("getPipelines").invoke(applied),
+            "parameter_sets" to applied.javaClass.getMethod("getParameterSets").invoke(applied),
+        )
+    }
+
+    private fun promoteSetsOrExplain(vararg setNames: String): Map<String, Any?> =
+        try {
+            promoteSets(*setNames)
+        } catch (e: Throwable) {
+            throw AssertionError("set promotion refused: code=${codeOf(e)} details=${detailsOf(e)} message=${e.message}", e)
+        }
+
+    /** A released constants-only parameter set (no template pin, no datasource) — the smallest promotable set. */
+    private fun createReleasedSetOn(
+        port: Int,
+        name: String,
+    ) {
+        val created =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(adminSession())
+                .body(
+                    """
+                    {"name": "$name", "display_name": "Promotion E2E filters", "description": "the sender's set slot (#300)",
+                     "parameters": [
+                       {"name": "region", "label": "Region", "type": "STRING", "kind": "SELECT",
+                        "cardinality": "SINGLE", "required": true,
+                        "source": {"constants": [{"value": "EMEA", "display_value": "EMEA", "is_default": true}]}}
+                     ]}
+                    """.trimIndent(),
+                ).`when`()
+                .post("/api/v1/parameter-sets")
+                .then()
+                .extract()
+        require(created.statusCode() == 201) { "set '$name' create failed ${created.statusCode()}: ${created.body().asString()}" }
+        val id = created.jsonPath().getString("data.id")
+        val hash = created.jsonPath().getString("data.body_hash")
+        given()
+            .port(port)
+            .contentType(ContentType.JSON)
+            .asSession(adminSession())
+            .header("If-Match", hash)
+            .`when`()
+            .post("/api/v1/parameter-sets/$id/release")
+            .then()
+            .extract()
+            .let { require(it.statusCode() == 200) { "set '$name' release failed ${it.statusCode()}: ${it.body().asString()}" } }
+    }
+
+    private fun devParameterSetVersion(name: String): Int = parameterSetVersion(devJdbc, name)
+
+    private fun uatParameterSetVersion(name: String): Int = parameterSetVersion(uatJdbc, name)
+
+    private fun devParameterSetHash(name: String): String = parameterSetHash(devJdbc, name)
+
+    private fun uatParameterSetHash(name: String): String = parameterSetHash(uatJdbc, name)
+
+    private fun parameterSetVersion(
+        jdbc: Jdbc,
+        name: String,
+    ): Int = jdbc.scalar("SELECT current_version FROM parameter_sets WHERE name = '$name'").toInt()
+
+    private fun parameterSetHash(
+        jdbc: Jdbc,
+        name: String,
+    ): String =
+        jdbc.scalar(
+            "SELECT v.body_hash FROM parameter_set_versions v JOIN parameter_sets s ON s.id = v.parameter_set_id " +
+                "WHERE s.name = '$name' AND v.version = s.current_version",
+        )
 
     private fun detailsOf(error: Throwable): Any? = error.javaClass.getMethod("getDetails").invoke(error)
 
@@ -983,6 +1093,7 @@ class PromotionTwoDeploymentE2eTest {
         private const val ORPHAN_TEMPLATE = "test/promo_e2e_orphan.sql"
         private const val CHILD = "test/promo_e2e_child"
         private const val PARENT = "test/promo_e2e_parent"
+        private const val PROMO_SET = "test/promo_e2e_filters"
         private const val ORPHAN = "test/promo_e2e_orphan"
         private const val TX_TEMPLATE = "test/promo_e2e_tx.sql"
         private const val TX_OK = "test/promo_e2e_tx_ok"

@@ -11,9 +11,11 @@ import co.datapipelines.pipeline.PipelineVersionStatus.DISCARDED
 import co.datapipelines.pipeline.PipelineVersionStatus.DRAFT
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.scheduler.TargetViewer
 import co.datapipelines.templates.TemplateUsageService
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.web.anonymousActors
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -34,6 +36,7 @@ class PipelineLifecycleDialogModelTest {
     private val exclusive = mockk<ExclusiveDraftTemplates>()
     private val runStats = mockk<PipelineRunStats>()
     private val usage = mockk<TemplateUsageService>()
+    private val schedules = mockk<co.datapipelines.scheduler.ScheduleService>()
 
     private val model =
         PipelineLifecycleDialogModel(
@@ -44,6 +47,7 @@ class PipelineLifecycleDialogModelTest {
             anonymousActors(),
             AuthoringGuard(enabled = true),
             usage,
+            schedules = schedules,
         )
 
     @Test
@@ -132,6 +136,7 @@ class PipelineLifecycleDialogModelTest {
                 AuthoringGuard(enabled = true),
                 usage,
                 marks,
+                schedules = schedules,
             )
         every { repository.findById(any(), any()) } returns recordOf(current = 1)
         every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
@@ -220,7 +225,7 @@ class PipelineLifecycleDialogModelTest {
     fun `discard - a draft target is not_released and the fallback preview follows the versions`() {
         every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = 2)
         every { repository.findVersionDetail(any(), any(), any()) } returns detail(status = DRAFT)
-        shouldThrow<DatapipelinesException> { model.discard(WS, ID, 2) }.code shouldBe
+        shouldThrow<DatapipelinesException> { model.discard(WS, ID, 2, TargetViewer.EVERYONE) }.code shouldBe
             PipelineErrorCodes.Versioning.NOT_RELEASED
     }
 
@@ -230,10 +235,71 @@ class PipelineLifecycleDialogModelTest {
         every { repository.findVersionDetail(any(), any(), any()) } returns detail(status = RELEASED)
         every { repository.findLiveParentsPinningVersion(any(), any(), any()) } returns emptyList()
         every { repository.listVersions(any(), any()) } returns emptyList()
+        every { schedules.listByTarget(any(), any(), any()) } returns emptyList()
 
-        val dialog = model.discard(WS, ID, 1)
+        val dialog = model.discard(WS, ID, 1, TargetViewer.EVERYONE)
         dialog.isCurrent shouldBe true
         dialog.fallback!!.contains("503") shouldBe true
+        dialog.schedules shouldBe emptyList()
+    }
+
+    /**
+     * #273 — the schedules that run the pipeline are the dialog's evidence, from the SAME
+     * by-target read the Usage tab makes (`pipeline:<name>`), the caller's lens riding along:
+     * name, condition (the Usage tab's vocabulary) and the stored next occurrence, rendered
+     * label included; a schedule with no next run (paused) renders "—".
+     */
+    @Test
+    fun `discard - the schedules that run the pipeline are evidence, by name, state and next run`() {
+        every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = 1)
+        every { repository.findVersionDetail(any(), any(), any()) } returns detail(status = RELEASED)
+        every { repository.findLiveParentsPinningVersion(any(), any(), any()) } returns emptyList()
+        every { repository.listVersions(any(), any()) } returns emptyList()
+        every { schedules.listByTarget(WS, "pipeline:test/probe", TargetViewer.EVERYONE) } returns
+            listOf(
+                schedule("reports/nightly", enabled = true, nextDueAt = T0),
+                schedule("reports/backfill", enabled = false, nextDueAt = null),
+            )
+
+        val dialog = model.discard(WS, ID, 1, TargetViewer.EVERYONE)
+        dialog.schedules.map { it.name } shouldBe listOf("reports/nightly", "reports/backfill")
+        dialog.schedules[0].state shouldBe "enabled"
+        dialog.schedules[0].nextRunLabel shouldBe RelativeTime.absolute(T0)
+        dialog.schedules[1].state shouldBe "paused"
+        dialog.schedules[1].nextRunLabel shouldBe null
+    }
+
+    /** A `schedules` row with only the fields the evidence read touches (the rest are inert). */
+    private fun schedule(
+        name: String,
+        enabled: Boolean,
+        nextDueAt: Instant?,
+    ): co.datapipelines.scheduler.Schedule {
+        val json = ObjectMapper()
+        return co.datapipelines.scheduler.Schedule(
+            id = UUID.randomUUID(),
+            workspaceId = WS,
+            name = name,
+            revision = 1,
+            executorId = "pipeline",
+            payloadSchemaVersion = 1,
+            payload = json.readTree("""{"pipeline":"test/probe","version":"current"}"""),
+            parameters = json.readTree("{}"),
+            targetRef = "pipeline:test/probe",
+            cron = "0 3 1 1 *",
+            timezone = "UTC",
+            missedRunPolicy = co.datapipelines.scheduler.MissedRunPolicy.SKIP,
+            enabled = enabled,
+            blockedReason = null,
+            blockedAt = null,
+            blockedRunId = null,
+            nextDueAt = nextDueAt,
+            createdBy = USER,
+            updatedBy = USER,
+            createdAt = T0,
+            updatedAt = T0,
+            deletedAt = null,
+        )
     }
 
     @Test
@@ -280,6 +346,7 @@ class PipelineLifecycleDialogModelTest {
                 anonymousActors(),
                 AuthoringGuard(enabled = false),
                 usage,
+                schedules = schedules,
             )
         val hard = hardened.switch(WS, ID)
         hard.options.first { it.version == 2 }.eligible shouldBe false

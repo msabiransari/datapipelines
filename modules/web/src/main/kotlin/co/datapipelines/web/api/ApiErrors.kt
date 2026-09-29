@@ -198,6 +198,31 @@ object ApiErrors {
             mapOf("path" to "", "reason" to "wrong_type"),
         )
 
+    /** `details.reason` value for a body key that is absent (or an explicit JSON null). */
+    const val REASON_MISSING = "missing"
+
+    /** `details.reason` value for a body key that is present but not the type the route reads. */
+    const val REASON_WRONG_TYPE = "wrong_type"
+
+    /**
+     * A parameter-set route's request body is the wrong SHAPE — a key missing, or present but of the
+     * wrong JSON type (`parameter.validation.body_invalid`, pipeline-contract §13.20: `details.path`
+     * names the key, `details.reason` is `missing` / `wrong_type`). The refusal never echoes the
+     * body's values — only its shape.
+     */
+    fun parameterSetBodyInvalid(
+        path: String,
+        reason: String,
+    ): ApiException =
+        ApiException(
+            ParameterErrorCodes.BODY_INVALID,
+            when (reason) {
+                REASON_MISSING -> "The request body is missing '$path'."
+                else -> "The request body's '$path' has the wrong JSON type."
+            },
+            mapOf("path" to path, "reason" to reason),
+        )
+
     /** `?format=` was not one of json/arrow/csv (rest-api §7.5/§7.6). */
     fun formatUnsupported(
         format: String,
