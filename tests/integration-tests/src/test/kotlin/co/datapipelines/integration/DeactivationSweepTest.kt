@@ -561,10 +561,11 @@ class DeactivationSweepTest {
 
         /**
          * Floors, not targets. The 2026-09-21 sweep: 176 routes + the real endpoint, every arm
-         * refused on all of them; 41 tools × 5 key arms (48 since the 300 merge — the catalog is 48); the control reached 150+.
+         * refused on all of them; 41 tools × 5 key arms (48 since the 300 merge, 59 since #10 L1b — the catalog's size);
+         * the control reached 150+.
          */
         private const val MINIMUM_ROUTES = 60
-        private const val MINIMUM_TOOLS = 48
+        private const val MINIMUM_TOOLS = 59
         private const val CONTROL_REACHED_FLOOR = 60
 
         private val VARIABLE_PATTERN = Regex("\\{([^}]+)\\}")

@@ -132,7 +132,8 @@ class NewRootConfirmationTest {
         val schemas = realShippedTools().associate { it.name to McpTools.readTree(schemaOf(it)) }
         val accepting = schemas.filterValues { it["properties"]?.has(NewRootConfirmation.ARG) == true }.keys
 
-        accepting shouldBe setOf("pipelines_create", "templates_create", "parameter_sets_create")
+        accepting shouldBe
+            setOf("pipelines_create", "templates_create", "parameter_sets_create", "visualizations_create", "dashboards_create")
     }
 
     @Test

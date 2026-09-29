@@ -78,5 +78,11 @@ fun realShippedTools(): List<McpTool> {
             mockk<ObjectProvider<co.datapipelines.mcp.docs.DocSet>>().also { provider ->
                 every { provider.getObject() } returns DocSetTestSupport.minimalDocSet()
             },
+        // #10 L1b — the visualization/dashboard tools' collaborators; the tools under these tests never reach them.
+        visualizationService = mockk<co.datapipelines.visualization.VisualizationService>(),
+        dashboardService = mockk<co.datapipelines.visualization.DashboardService>(),
+        visualizationReader = co.datapipelines.visualization.VisualizationReader(),
+        dashboardReader = co.datapipelines.visualization.DashboardReader(),
+        pipelineReleaseFacts = co.datapipelines.visualization.PipelineReleaseFacts { _, _ -> null },
     )
 }

@@ -126,6 +126,18 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun parametersProperties() = co.datapipelines.parameters.ParametersProperties()
 
+        // #10 L1b — the visualization and dashboard tools' collaborators (declared by `web`'s
+        // VisualizationConfiguration in the assembled application). Mocked like every other one.
+        @Bean fun visualizationService(): co.datapipelines.visualization.VisualizationService = mockk()
+
+        @Bean fun dashboardService(): co.datapipelines.visualization.DashboardService = mockk()
+
+        @Bean fun visualizationReader() = co.datapipelines.visualization.VisualizationReader()
+
+        @Bean fun dashboardReader() = co.datapipelines.visualization.DashboardReader()
+
+        @Bean fun pipelineReleaseFacts(): co.datapipelines.visualization.PipelineReleaseFacts = mockk()
+
         @Bean fun mcpToolLearnings(): co.datapipelines.application.mcp.McpToolLearnings = mockk()
 
         @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()

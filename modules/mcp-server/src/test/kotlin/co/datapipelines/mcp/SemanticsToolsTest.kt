@@ -72,8 +72,9 @@ class SemanticsToolsTest {
             { McpToolCatalog.permissionOf("semantics_retire") shouldBe Permission.SEMANTIC_RETIRE },
             {
                 // 120 appended the two docs tools after these three, 140 the check run after
-                // those, and #194 lane D the six parameter_sets_* tools last — the tail is now twelve.
-                realShippedTools().map { it.name }.takeLast(12) shouldContainExactly
+                // those, #194 lane D the six parameter_sets_* tools, and #10 L1b the eleven visualization and
+                // dashboard tools last — the tail is now twenty-three.
+                realShippedTools().map { it.name }.takeLast(23) shouldContainExactly
                     listOf(
                         "semantics_record",
                         "semantics_list",
@@ -87,6 +88,17 @@ class SemanticsToolsTest {
                         "parameter_sets_update",
                         "parameter_sets_evaluate",
                         "parameter_sets_purge_draft",
+                        "visualizations_list",
+                        "visualizations_get",
+                        "visualizations_create",
+                        "visualizations_update",
+                        "visualizations_purge_draft",
+                        "dashboards_list",
+                        "dashboards_get",
+                        "dashboards_create",
+                        "dashboards_update",
+                        "dashboards_purge_draft",
+                        "dashboards_validate",
                     )
             },
         )

@@ -1,12 +1,14 @@
 package co.datapipelines.visualization
 
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.visualization.VisualizationTestDb.AUTHOR
 import co.datapipelines.visualization.VisualizationTestDb.OTHER_WORKSPACE
 import co.datapipelines.visualization.VisualizationTestDb.WORKSPACE
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.BeforeEach
@@ -49,6 +51,51 @@ class DashboardServiceIntegrationTest {
         val created = h.dashboards.create(WORKSPACE, h.dashboardDocument(1), AUTHOR, WriteSurface.MCP)
         created.detail.status shouldBe PipelineVersionStatus.DRAFT
         h.dashboards.validate(WORKSPACE, h.dashboardDocument(1)).shouldBeInstanceOf<ArtifactValidation.Valid<DashboardDocument>>()
+    }
+
+    // ---- L1b: the two lensed reads the MCP tools use ------------------------------------------------------
+
+    @Test
+    fun `pinnedBy - the whole view sees every live pin, a narrowing lens only the admitted RELEASED dashboards`() {
+        h.createVisualization()
+        val dashboard = h.dashboards.create(WORKSPACE, h.dashboardDocument(1), AUTHOR, WriteSurface.MCP)
+        val pin = "${DocumentFixtures.DASHBOARD_NAME}@1"
+        val admitting = ReadLens.Only(setOf(DocumentFixtures.DASHBOARD_NAME))
+
+        h.dashboards.pinnedBy(WORKSPACE, ReadLens.Everything, DocumentFixtures.VISUALIZATION_NAME) shouldBe listOf(pin)
+        withClue("a DRAFT dashboard is never in a narrowing lens's answer, admitted name or not") {
+            h.dashboards.pinnedBy(WORKSPACE, admitting, DocumentFixtures.VISUALIZATION_NAME) shouldBe emptyList()
+        }
+
+        h.dashboards.release(WORKSPACE, dashboard.record.id, dashboard.detail.bodyHash, AUTHOR, releasePinnedVisualizations = true)
+
+        h.dashboards.pinnedBy(WORKSPACE, admitting, DocumentFixtures.VISUALIZATION_NAME) shouldBe listOf(pin)
+        h.dashboards.pinnedBy(WORKSPACE, ReadLens.NOTHING, DocumentFixtures.VISUALIZATION_NAME) shouldBe emptyList()
+        h.dashboards.pinnedBy(WORKSPACE, admitting, "finance/visualizations/unpinned") shouldBe emptyList()
+        h.dashboards.pinnedBy(OTHER_WORKSPACE, ReadLens.Everything, DocumentFixtures.VISUALIZATION_NAME) shouldBe emptyList()
+    }
+
+    @Test
+    fun `findVersionByName - a pin's address, through the lens - DRAFT and hidden answer as absent under a narrowing one`() {
+        h.createVisualization()
+        val name = DocumentFixtures.VISUALIZATION_NAME
+        val admitting = ReadLens.Only(setOf(name))
+
+        checkNotNull(h.visualizations.findVersionByName(WORKSPACE, ReadLens.Everything, name, 1)).detail.status shouldBe
+            PipelineVersionStatus.DRAFT
+        h.visualizations.findVersionByName(WORKSPACE, admitting, name, 1) shouldBe null
+        h.visualizations.findVersionByName(WORKSPACE, ReadLens.Everything, name, 2) shouldBe null
+        h.visualizations.findVersionByName(WORKSPACE, ReadLens.Everything, "finance/visualizations/absent", 1) shouldBe null
+        h.visualizations.findVersionByName(OTHER_WORKSPACE, ReadLens.Everything, name, 1) shouldBe null
+
+        val dashboard = h.dashboards.create(WORKSPACE, h.dashboardDocument(1), AUTHOR, WriteSurface.MCP)
+        h.dashboards.release(WORKSPACE, dashboard.record.id, dashboard.detail.bodyHash, AUTHOR, releasePinnedVisualizations = true)
+
+        checkNotNull(h.visualizations.findVersionByName(WORKSPACE, admitting, name, 1)).detail.status shouldBe
+            PipelineVersionStatus.RELEASED
+        h.visualizations.findVersionByName(WORKSPACE, ReadLens.NOTHING, name, 1) shouldBe null
+        val board = h.dashboards.findVersionByName(WORKSPACE, ReadLens.Everything, DocumentFixtures.DASHBOARD_NAME, 1)
+        checkNotNull(board).detail.status shouldBe PipelineVersionStatus.RELEASED
     }
 
     @Test

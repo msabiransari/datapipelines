@@ -124,8 +124,20 @@ class McpServerWiringTest {
             DocsTools.all { DocSetTestSupport.minimalDocSet() } +
             // 140 — the release-check run, appended after the docs tools.
             listOf(PipelineRunChecksTool(service, mockk())) +
-            parameterSetTools()
+            parameterSetTools() +
+            visualizationAndDashboardTools()
     }
+
+    /** #10 L1b — the five visualization and six dashboard tools, appended last. */
+    private fun visualizationAndDashboardTools(): List<McpTool> =
+        visualizationTools(mockk(), mockk(), co.datapipelines.visualization.VisualizationReader(), McpFixtures.EVERYTHING_LENS) +
+            dashboardTools(
+                mockk(),
+                mockk(),
+                co.datapipelines.visualization.PipelineReleaseFacts { _, _ -> null },
+                co.datapipelines.visualization.DashboardReader(),
+                McpFixtures.EVERYTHING_LENS,
+            )
 
     /** #194 lane D — the six parameter-set tools, appended last (the 117/107 append rule). */
     private fun parameterSetTools(): List<McpTool> =
@@ -144,7 +156,8 @@ class McpServerWiringTest {
      * documented capability that does not exist. (28 → 27 with 094 removing
      * `datasources_create`; 30 → 34 with 107's probe/cancel/purge four; 34 → 35 with 117's `templates_update`; 35 → 38 with 118's
      * `semantics_*` three; 38 → 40 with 120's `docs_*` two; 40 → 41 with 140's `pipelines_run_checks`;
-     * 41 → 48 with #194 lane D's six `parameter_sets_*` tools.)
+     * 41 → 48 with #194 lane D's six `parameter_sets_*` tools; 48 → 59 with #10 L1b's `visualizations_*` five and
+     * `dashboards_*` six.)
      */
     @Test
     fun `the tool surface is exactly the catalog the scope matrix knows`() {
@@ -157,7 +170,7 @@ class McpServerWiringTest {
     }
 
     @Test
-    fun `the server builds with all 48 tools and all three prompts registered`() {
+    fun `the server builds with all 59 tools and all three prompts registered`() {
         val transport = McpServerFactory.transport()
         val server =
             McpServerFactory.server(

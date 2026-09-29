@@ -23,6 +23,7 @@ enum class DocArea(
     LAKE("lake"),
     ENDPOINTS("endpoints"),
     PARAMETERS("parameters"),
+    DASHBOARDS("dashboards"),
     ;
 
     companion object {
@@ -33,7 +34,7 @@ enum class DocArea(
          * a tool without growing the catalog is exactly the drift this package exists to catch,
          * and [DocRenderer] refuses to render such a set.
          */
-        val RESERVED_PREFIXES: Set<String> = setOf("scheduling", "reporting", "dashboards")
+        val RESERVED_PREFIXES: Set<String> = setOf("scheduling", "reporting")
 
         /**
          * The area a shipped tool belongs to, from its catalog name (the record §3.2's table).
@@ -50,36 +51,35 @@ enum class DocArea(
                 "docs: tool '$toolName' maps to the reserved area '$prefix' — the record says the " +
                     "area is added by the lane that ships the capability, never listed before (§3.2)"
             }
-            return when (prefix) {
-                "calculators" -> PIPELINES
+            if (toolName == "templates_evaluate") return TRANSFORMS
+            return BY_PREFIX[prefix] ?: throw IllegalStateException(
+                "docs: tool '$toolName' has no area in the record §3.2 catalog — add the mapping " +
+                    "here in the same commit that ships the tool",
+            )
+        }
 
-                "semantics" -> DATASOURCES
-
-                "docs" -> CORE
-
-                "templates" -> if (toolName == "templates_evaluate") TRANSFORMS else TEMPLATES
-
-                "pipelines" -> PIPELINES
-
-                "executions" -> EXECUTIONS
-
-                "datasources" -> DATASOURCES
-
-                "lake" -> LAKE
-
-                "endpoints" -> ENDPOINTS
-
+        /**
+         * The name-prefix placements (a map since #10 L1b added the eleventh: a `when` over them passed detekt's
+         * complexity ceiling; the placements are data, not branches).
+         */
+        private val BY_PREFIX: Map<String, DocArea> =
+            mapOf(
+                "calculators" to PIPELINES,
+                "semantics" to DATASOURCES,
+                "docs" to CORE,
+                "templates" to TEMPLATES,
+                "pipelines" to PIPELINES,
+                "executions" to EXECUTIONS,
+                "datasources" to DATASOURCES,
+                "lake" to LAKE,
+                "endpoints" to ENDPOINTS,
                 // #194 lane D — the parameter engine's six tools are their own area: a consumer
                 // (a dashboard renderer, an agent building a form) meets them as one offering.
-                "parameter" -> PARAMETERS
-
-                "sql" -> DATASOURCES
-
-                else -> throw IllegalStateException(
-                    "docs: tool '$toolName' has no area in the record §3.2 catalog — add the mapping " +
-                        "here in the same commit that ships the tool",
-                )
-            }
-        }
+                "parameter" to PARAMETERS,
+                "sql" to DATASOURCES,
+                // #10 L1b — a visualization is authored for a dashboard and read beside it: one area, one guide.
+                "visualizations" to DASHBOARDS,
+                "dashboards" to DASHBOARDS,
+            )
     }
 }

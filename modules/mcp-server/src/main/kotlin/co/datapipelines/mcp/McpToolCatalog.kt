@@ -139,6 +139,22 @@ object McpToolCatalog {
             Entry("parameter_sets_update", mutating = true, permission = Permission.PARAMETER_SET_UPDATE),
             Entry("parameter_sets_evaluate", mutating = false, permission = Permission.PARAMETER_SET_EVALUATE),
             Entry("parameter_sets_purge_draft", mutating = true, permission = Permission.PARAMETER_SET_VERSION_MANAGE),
+            // #10 L1b — the visualization and dashboard authoring tools (the implementation spec's §7). list/get and
+            // validate are reads; create/update write definitions; purge_draft is the bounded self-service verb. No
+            // tool releases or executes anything (the house rule); dashboards_validate is an AUTHOR verb on
+            // dashboard.update (owner ruling 2026-09-29 — the validator reads pin statuses unlensed, O5). The two
+            // visualizations_test_* tools land with L4's sessions.
+            Entry("visualizations_list", mutating = false, permission = Permission.VISUALIZATION_READ),
+            Entry("visualizations_get", mutating = false, permission = Permission.VISUALIZATION_READ),
+            Entry("visualizations_create", mutating = true, permission = Permission.VISUALIZATION_CREATE),
+            Entry("visualizations_update", mutating = true, permission = Permission.VISUALIZATION_UPDATE),
+            Entry("visualizations_purge_draft", mutating = true, permission = Permission.VISUALIZATION_VERSION_MANAGE),
+            Entry("dashboards_list", mutating = false, permission = Permission.DASHBOARD_READ),
+            Entry("dashboards_get", mutating = false, permission = Permission.DASHBOARD_READ),
+            Entry("dashboards_create", mutating = true, permission = Permission.DASHBOARD_CREATE),
+            Entry("dashboards_update", mutating = true, permission = Permission.DASHBOARD_UPDATE),
+            Entry("dashboards_purge_draft", mutating = true, permission = Permission.DASHBOARD_VERSION_MANAGE),
+            Entry("dashboards_validate", mutating = false, permission = Permission.DASHBOARD_UPDATE),
         )
 
     /** §6.1's names, in `tools/list` order — [ENTRIES] projected, so the two cannot drift. */

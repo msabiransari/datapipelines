@@ -634,7 +634,7 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
         private val PATH_NAMED_ARGUMENTS = setOf("name", "datasource", "path", "id", "pipeline")
         private val MCP_UNKNOWN_TOOL = listOf("Unknown tool", "tool_not_found", "Tool not found")
         private const val API_KEY_HEADER = "DP-API-Key"
-        private const val MINIMUM_TOOLS = 48
+        private const val MINIMUM_TOOLS = 59
         private const val TOOL_REFUSED_FLOOR = 20
         private val MAPPER = ObjectMapper()
     }

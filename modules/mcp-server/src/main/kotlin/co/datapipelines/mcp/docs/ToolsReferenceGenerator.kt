@@ -154,5 +154,6 @@ object ToolsReferenceGenerator {
             DocArea.LAKE to "The dp-lake registry writes: register, import, unregister.",
             DocArea.ENDPOINTS to "Publish and read the HTTP interfaces of released pipelines.",
             DocArea.PARAMETERS to "The parameter sets: list, read, write, evaluate and purge drafts.",
+            DocArea.DASHBOARDS to "Visualizations and dashboards: list, read, write, validate and purge drafts.",
         )
 }

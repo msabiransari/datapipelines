@@ -282,6 +282,22 @@ class ArtifactLifecycle<B : Any>(
         version: Int,
     ): ArtifactVersion<B>? = repository.findVersion(workspaceId, id, version)?.takeIf { visible(lens, it.record.name, it.detail.status) }
 
+    /**
+     * One stored version by NAME — the address a pin uses (L1b: `dashboards_get`'s dependency state) — through [lens]:
+     * null when absent, hidden, or not RELEASED under a narrowing lens; a hidden name is not even looked up.
+     */
+    fun findVersionByName(
+        workspaceId: UUID,
+        lens: ReadLens,
+        name: String,
+        version: Int,
+    ): ArtifactVersion<B>? =
+        if (!lens.admits(name)) {
+            null
+        } else {
+            repository.findRecordByName(workspaceId, name)?.let { findVersion(workspaceId, lens, it.id, version) }
+        }
+
     /** Every version's detail, newest first — RELEASED ones only under a narrowing lens; empty when hidden. */
     fun listVersions(
         workspaceId: UUID,
