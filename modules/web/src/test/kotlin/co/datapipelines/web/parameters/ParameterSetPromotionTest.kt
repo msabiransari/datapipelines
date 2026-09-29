@@ -191,6 +191,21 @@ class ParameterSetPromotionTest {
         )
     }
 
+    /** #319: the same strict bind the import uses — a number where a String is declared refuses, never binds as text. */
+    @Test
+    fun `a batch entry whose display_name is a number refuses body_invalid - never bound as text`() {
+        val malformed = entry()
+        malformed.put("display_name", 5)
+
+        val refusal = shouldThrow<ApiException> { promotion.bind(malformed) }
+
+        assertAll(
+            { refusal.code shouldBe ParameterErrorCodes.BODY_INVALID },
+            { refusal.details["reason"] shouldBe "wrong_type" },
+            { verify { receiveValidation wasNot Called } },
+        )
+    }
+
     private companion object {
         const val SET_NAME = "acme/sales/region_filters"
         const val TEMPLATE_ID = "acme/sales/states_of_country.sql"
