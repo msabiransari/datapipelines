@@ -94,6 +94,13 @@ class WebSurfaceConfiguration {
     @Bean(name = ["h2_factory"])
     fun stagingHealthIndicator(stagingFactory: StagingFactory): StagingHealthIndicator = StagingHealthIndicator(stagingFactory)
 
+    /**
+     * The SSE log streamer's executor (`dp-sse-log`): replays (rest-api §10.3) and idempotent-retry
+     * follows, and nothing else. Not the `@Scheduled` jobs' — they have their own scheduler,
+     * `SweepSchedulingConfiguration.taskScheduler` (#316); before it existed, Spring's registrar
+     * fell back to this bean, the context's unique `ScheduledExecutorService`, and a slow sweep tick
+     * stalled every replay.
+     */
     @Bean(destroyMethod = "shutdown")
     fun sseLogScheduler(): ScheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor { runnable ->

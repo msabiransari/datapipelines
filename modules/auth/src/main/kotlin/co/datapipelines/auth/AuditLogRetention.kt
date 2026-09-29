@@ -203,13 +203,12 @@ class AuditLogRetention(
         const val DEFAULT_MAX_BATCHES = 50
 
         /**
-         * Wall-clock per tick. Every `@Scheduled` job in the application runs on ONE thread — and
-         * it is `WebSurfaceConfiguration`'s `sseLogScheduler`, the thread that also serves SSE
-         * replays and idempotent-retry follows (Spring resolves the context's unique
-         * `ScheduledExecutorService` when no `TaskScheduler` bean exists; `AuditLogRetentionE2eTest`
-         * pins it; #316 tracks giving scheduled jobs their own thread). A backlog must therefore
-         * never hold that thread for long: two seconds, checked between batches, so one batch may
-         * overrun it. A steady-state tick is one short batch.
+         * Wall-clock per tick. Every `@Scheduled` job in the application runs on ONE thread — the
+         * jobs' own scheduler, `dp-scheduled` (#316; `AuditLogRetentionE2eTest` pins it) — and the
+         * stale-execution sweep and the pool reaper wait behind this tick, so a backlog must never
+         * hold it for long: two seconds, checked between batches, so one batch may overrun it. A
+         * steady-state tick is one short batch. (Set when that thread was still the SSE log
+         * streamer's, `dp-sse-log`, where a long tick stalled every replay; #316 separated them.)
          */
         val DEFAULT_TICK_BUDGET: Duration = Duration.ofSeconds(2)
 

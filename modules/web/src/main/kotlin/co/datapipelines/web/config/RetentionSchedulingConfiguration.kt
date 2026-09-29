@@ -21,13 +21,12 @@ import java.time.Duration
  * standing decisions:
  *
  * - **No second `@EnableScheduling`:** the sweep configuration's annotation is the context's
- *   one; `@Scheduled` here rides the same single thread as every other scheduled job. That
- *  thread is NOT a Spring default: with no `TaskScheduler` bean, Spring runs `@Scheduled` on the
- *  context's unique `ScheduledExecutorService`, which is `WebSurfaceConfiguration`'s
- *  `sseLogScheduler` — the thread that also serves SSE replays (measured and pinned by
- *  `AuditLogRetentionE2eTest`; #316 tracks separating them). Every step is therefore a bounded
- *  statement or a bounded loop of them ([AuditLogRetention]'s batch ceiling and two-second time
- *  budget).
+ *   one; `@Scheduled` here rides the same single thread as every other scheduled job — the jobs'
+ *   own scheduler, `dp-scheduled` (#316; the sweep configuration's KDoc has the decision). Until
+ *   #316 that thread was `WebSurfaceConfiguration`'s `sseLogScheduler`, the one that serves SSE
+ *   replays, which Spring fell back to while no `TaskScheduler` bean existed. Every step is still a
+ *   bounded statement or a bounded loop of them ([AuditLogRetention]'s batch ceiling and
+ *   two-second time budget): the stale sweep and the pool reaper wait behind this tick.
  * - **`fixedDelay`, not `fixedRate`:** a slow tick (metadata DB busy) delays the next instead
  *  of piling on. Retention catches up by construction — the cutoff is `now − retention`, not
  *  a tick-aligned slot.

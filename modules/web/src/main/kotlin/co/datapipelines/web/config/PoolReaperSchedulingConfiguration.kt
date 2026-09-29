@@ -14,14 +14,16 @@ import org.springframework.scheduling.annotation.Scheduled
  * decisions:
  *
  * - **No second `@EnableScheduling`:** the sweep configuration's annotation is the context's
- *   one; `@Scheduled` here rides the same default single-thread scheduler. The tick reads one
- *   in-memory queue — usually empty — and closes what has drained.
+ *   one; `@Scheduled` here rides the jobs' own scheduler, its one `dp-scheduled` thread (#316 —
+ *   not Spring's default, and no longer the SSE log streamer's `dp-sse-log` thread it fell back to
+ *   before; the sweep configuration's KDoc has the decision). The tick reads one in-memory queue —
+ *   usually empty — and closes what has drained.
  * - **`fixedDelay`, not `fixedRate`:** a slow tick delays the next instead of piling on. The
  *   reaper catches up by construction: every decision is made from the pool's CURRENT active
  *   count and its own absolute deadline, never from how long ago the last tick ran.
  * - **The cadence is a code constant, not a configuration key.** Five seconds, and this is the
- *   one place these three jobs differ — the sweep and the retention job tick at a minute and an
- *   hour because their subjects are measured in minutes and days. This one bounds two things a
+ *   one place these three jobs differ — the sweep and the retention job tick at fifteen seconds and
+ *   an hour because their subjects are measured in beats and days. This one bounds two things a
  *   minute would blur: how long a *drained* pool's Hikari house-keeper thread and socket
  *   survive after the query that was using them finished, and how far past its CEILING a hung
  *   pool runs before the hard close. With a default ceiling of 90 s, a 60 s cadence would make
