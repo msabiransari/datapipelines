@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.33 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.34 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-29
@@ -1100,6 +1100,207 @@ CREATE UNIQUE INDEX uq_parameter_set_versions_one_draft
 - `chk_parameter_set_versions_release_stamps` holds a RELEASED or DISCARDED row to its `released_at` (a release stamps it, an import copies the source's, discard and restore never touch it). The discard-stamps and via CHECKs are the template twins.
 - A version is referenced by nothing else: no execution row (a set is evaluated, never executed), and the templates reverse arrow (record §8.4, lane D) scans `body_json` for pins — no foreign key. So a purge is always a hard delete, and the entity purge cascades.
 
+### 4.28 `visualizations`
+
+**A visualization** (V42, #10 L1a; the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) §2.1, [Dashboards §2](dashboards.md)) — the INDEX over a visualization's versions: [§4.26 `parameter_sets`](#426-parameter_sets) line for line with the names changed.
+
+```sql
+CREATE TABLE visualizations (
+    id              UUID        PRIMARY KEY,
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id),
+    name            TEXT        NOT NULL,
+    display_name    TEXT        NOT NULL,
+    description     TEXT        NOT NULL DEFAULT '',
+    current_version INTEGER     NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by      UUID        NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_visualizations_workspace_name UNIQUE (workspace_id, name),
+    CONSTRAINT chk_visualizations_current_version CHECK (current_version IS NULL OR current_version >= 1)
+);
+```
+
+**Notes:** every note of §4.26 holds with "visualization" for "set": the id has no database default (the application generates it and an import KEEPS it — a taken id is refused `visualization.import.id_taken`, never re-issued); `name` is unique per workspace forever and follows the folder grammar in code; `display_name` / `description` index the CURRENT body; no entity status column; every statement filters by `workspace_id` (`VisualizationRepository`).
+
+### 4.29 `visualization_versions`
+
+**One version of a visualization** (V42) — [§4.27 `parameter_set_versions`](#427-parameter_set_versions) line for line; `body_json` holds [Dashboards §2.1](dashboards.md)'s document with `name` omitted.
+
+```sql
+CREATE TABLE visualization_versions (
+    visualization_id UUID        NOT NULL REFERENCES visualizations(id) ON DELETE CASCADE,
+    version          INTEGER     NOT NULL,
+    body_json        JSONB       NOT NULL,
+    status           TEXT        NOT NULL DEFAULT 'DRAFT'
+                         CONSTRAINT chk_visualization_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
+    body_hash        TEXT        NOT NULL,
+    released_at      TIMESTAMPTZ NULL,
+    released_by      UUID        REFERENCES users(id),
+    discarded_at     TIMESTAMPTZ NULL,
+    discarded_by     UUID        REFERENCES users(id),
+    updated_by       UUID        REFERENCES users(id),
+    updated_at       TIMESTAMPTZ NULL,
+    created_via      TEXT        NOT NULL DEFAULT 'session',
+    updated_via      TEXT        NOT NULL DEFAULT 'session',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by       UUID        NOT NULL REFERENCES users(id),
+    PRIMARY KEY (visualization_id, version),
+    CONSTRAINT chk_visualization_versions_version CHECK (version >= 1),
+    -- The body is an object whose versioned artifact never carries the visualization's name (spec §3).
+    CONSTRAINT chk_visualization_versions_body CHECK (jsonb_typeof(body_json) = 'object' AND NOT (body_json ? 'name')),
+    -- A DRAFT has never been released; every other row has (released_at survives discard/restore).
+    CONSTRAINT chk_visualization_versions_release_stamps CHECK (
+        (status = 'DRAFT' AND released_at IS NULL AND released_by IS NULL)
+        OR (status <> 'DRAFT' AND released_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_visualization_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
+    ),
+    CONSTRAINT chk_visualization_versions_via CHECK (
+        created_via IN ('session', 'api_key', 'mcp') AND updated_via IN ('session', 'api_key', 'mcp')
+    )
+);
+
+CREATE UNIQUE INDEX uq_visualization_versions_one_draft
+    ON visualization_versions (visualization_id) WHERE status = 'DRAFT';
+```
+
+**Notes:** the lifecycle is §4.27's (versioning §3.5): the same statuses, the one-draft partial index, the database-computed hash (`HASH_EXPR` over the bound body, versioning §4.1's pipeline rule), the release/discard/via stamps. `ArtifactRepository` maps the first-writer race (on the version PRIMARY KEY or the one-draft index) to `visualization.version.conflict` carrying the winner's state. The one row that references a version is its test evidence ([§4.32](#432-visualization_test_runs)), which cascades: purging a draft takes its runs.
+
+### 4.30 `dashboards`
+
+**A dashboard** (V42) — §4.28 again for the second family; addressed by its UUID, named by the folder grammar, unique per workspace forever.
+
+```sql
+CREATE TABLE dashboards (
+    id              UUID        PRIMARY KEY,
+    workspace_id    UUID        NOT NULL REFERENCES workspaces(id),
+    name            TEXT        NOT NULL,
+    display_name    TEXT        NOT NULL,
+    description     TEXT        NOT NULL DEFAULT '',
+    current_version INTEGER     NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by      UUID        NOT NULL REFERENCES users(id),
+    CONSTRAINT uq_dashboards_workspace_name UNIQUE (workspace_id, name),
+    CONSTRAINT chk_dashboards_current_version CHECK (current_version IS NULL OR current_version >= 1)
+);
+```
+
+### 4.31 `dashboard_versions`
+
+**One version of a dashboard** (V42) — §4.29 again; `body_json` holds [Dashboards §2.2](dashboards.md)'s document with `name` omitted. Nothing references a dashboard version in this migration; the refresh record that will (`dashboard_refreshes`, spec §2.2) is V43's (L2).
+
+```sql
+CREATE TABLE dashboard_versions (
+    dashboard_id     UUID        NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
+    version          INTEGER     NOT NULL,
+    body_json        JSONB       NOT NULL,
+    status           TEXT        NOT NULL DEFAULT 'DRAFT'
+                         CONSTRAINT chk_dashboard_versions_status CHECK (status IN ('DRAFT', 'RELEASED', 'DISCARDED')),
+    body_hash        TEXT        NOT NULL,
+    released_at      TIMESTAMPTZ NULL,
+    released_by      UUID        REFERENCES users(id),
+    discarded_at     TIMESTAMPTZ NULL,
+    discarded_by     UUID        REFERENCES users(id),
+    updated_by       UUID        REFERENCES users(id),
+    updated_at       TIMESTAMPTZ NULL,
+    created_via      TEXT        NOT NULL DEFAULT 'session',
+    updated_via      TEXT        NOT NULL DEFAULT 'session',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by       UUID        NOT NULL REFERENCES users(id),
+    PRIMARY KEY (dashboard_id, version),
+    CONSTRAINT chk_dashboard_versions_version CHECK (version >= 1),
+    -- The body is an object whose versioned artifact never carries the dashboard's name (spec §3).
+    CONSTRAINT chk_dashboard_versions_body CHECK (jsonb_typeof(body_json) = 'object' AND NOT (body_json ? 'name')),
+    CONSTRAINT chk_dashboard_versions_release_stamps CHECK (
+        (status = 'DRAFT' AND released_at IS NULL AND released_by IS NULL)
+        OR (status <> 'DRAFT' AND released_at IS NOT NULL)
+    ),
+    CONSTRAINT chk_dashboard_versions_discard_stamps CHECK (
+        (status = 'DISCARDED' AND discarded_at IS NOT NULL)
+        OR (status <> 'DISCARDED' AND discarded_at IS NULL AND discarded_by IS NULL)
+    ),
+    CONSTRAINT chk_dashboard_versions_via CHECK (
+        created_via IN ('session', 'api_key', 'mcp') AND updated_via IN ('session', 'api_key', 'mcp')
+    )
+);
+
+CREATE UNIQUE INDEX uq_dashboard_versions_one_draft
+    ON dashboard_versions (dashboard_id) WHERE status = 'DRAFT';
+```
+
+### 4.32 `visualization_test_runs`
+
+**One agent test session over one visualization version** (V42; spec §11.2, D56 (a)) — DDL only in L1a, written by the tests lane (L4). The candidate content is `body_hash`: a run whose hash no longer matches its version's is void (EXPIRED on read) and can never qualify a release.
+
+```sql
+CREATE TABLE visualization_test_runs (
+    id                 UUID        PRIMARY KEY,
+    visualization_id   UUID        NOT NULL,
+    version            INTEGER     NOT NULL,
+    body_hash          TEXT        NOT NULL,
+    session_id         UUID        NOT NULL,
+    preview_token_hash TEXT        NULL,
+    expires_at         TIMESTAMPTZ NOT NULL,
+    started_by         UUID        NOT NULL REFERENCES users(id),
+    started_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at       TIMESTAMPTZ NULL,
+    status             TEXT        NOT NULL DEFAULT 'RUNNING',
+    cases_json         JSONB       NULL,
+    environment_json   JSONB       NULL,
+    mechanical_json    JSONB       NULL,
+    -- The run belongs to one VERSION: purging a draft takes its evidence with it.
+    CONSTRAINT fk_visualization_test_runs_version FOREIGN KEY (visualization_id, version)
+        REFERENCES visualization_versions (visualization_id, version) ON DELETE CASCADE,
+    CONSTRAINT uq_visualization_test_runs_session UNIQUE (visualization_id, version, session_id),
+    CONSTRAINT chk_visualization_test_runs_status CHECK (status IN ('RUNNING', 'GREEN', 'RED', 'INCOMPLETE', 'EXPIRED')),
+    -- A verdict is a completed run; a running one has none. EXPIRED is either (a session that timed
+    -- out unsubmitted, or a completed run whose version's hash moved on).
+    CONSTRAINT chk_visualization_test_runs_completed CHECK (
+        (status = 'RUNNING' AND completed_at IS NULL)
+        OR (status IN ('GREEN', 'RED', 'INCOMPLETE') AND completed_at IS NOT NULL)
+        OR status = 'EXPIRED'
+    ),
+    CONSTRAINT chk_visualization_test_runs_json CHECK (
+        (cases_json IS NULL OR jsonb_typeof(cases_json) = 'array')
+        AND (environment_json IS NULL OR jsonb_typeof(environment_json) = 'object')
+        AND (mechanical_json IS NULL OR jsonb_typeof(mechanical_json) = 'object')
+    )
+);
+```
+
+**Notes:**
+- **The run hangs off the VERSION** (`fk_visualization_test_runs_version`, `ON DELETE CASCADE`), not only the visualization: purging a draft takes its evidence, and a release keeps the run that qualified it for the version's life (the retention rule of spec §2.1 is the SERVICE's — at most one completed run per draft keeps its screenshot).
+- **The preview token is stored hashed** (`preview_token_hash`, spec §11.2): the 32-byte capability the agent's browser presents is never in the database; `expires_at` is its TTL (`tests.session-ttl-minutes`, 60 by default) and the hash is cleared on submit or expiry.
+- `cases_json` (per case: name, verdict, notes ≤ 2,000 characters), `environment_json` (agent-reported — theme, viewport, browser, locale, renderer version) and `mechanical_json` (the server's §11.3 outcome) are bounded by the service; the schema holds only their JSON kind.
+
+### 4.33 `visualization_test_screenshots`
+
+**The one representative image of a run** (V42; D35) — a separate table so a run listing never loads bytes. DDL only in L1a (L4).
+
+```sql
+CREATE TABLE visualization_test_screenshots (
+    run_id        UUID        PRIMARY KEY REFERENCES visualization_test_runs(id) ON DELETE CASCADE,
+    media_type    TEXT        NOT NULL,
+    bytes         BYTEA       NOT NULL,
+    sha256        TEXT        NOT NULL,
+    width         INTEGER     NOT NULL,
+    height        INTEGER     NOT NULL,
+    depicted_case TEXT        NULL,
+    uploaded_by   UUID        NOT NULL REFERENCES users(id),
+    uploaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_visualization_test_screenshots_media_type CHECK (media_type IN ('image/png', 'image/webp')),
+    -- The spec §17 cap: 4 MiB, independent of the platform's 2 MiB request-body cap.
+    CONSTRAINT chk_visualization_test_screenshots_size CHECK (octet_length(bytes) BETWEEN 1 AND 4194304),
+    CONSTRAINT chk_visualization_test_screenshots_sha256 CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_visualization_test_screenshots_dimensions CHECK (width >= 1 AND height >= 1)
+);
+```
+
+**Notes:** the 4 MiB cap is the schema's as well as the route's (spec §17 — its own cap, independent of the platform's 2 MiB request-body cap); `sha256` is the server's digest of the stored bytes (integrity, not authorship — D56's trust boundary); `ON DELETE CASCADE` from the run.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1192,6 +1393,17 @@ CREATE UNIQUE INDEX uq_parameter_set_versions_one_draft
 | `parameter_sets` | `uq_parameter_sets_workspace_name` | via UNIQUE | V39 (#194): one name per workspace forever; leads the tree browse's bounded range scan ([§4.26](#426-parameter_sets)) |
 | `parameter_set_versions` | `parameter_set_versions_pkey` | via PK | `(parameter_set_id, version)` — every version read |
 | `parameter_set_versions` | `uq_parameter_set_versions_one_draft` | explicit (partial, unique) | V39: the one-DRAFT-per-set rule of versioning §3.3 ([§4.27](#427-parameter_set_versions)) |
+| `visualizations` | `visualizations_pkey` | via PK | Lookup by id — every route and tool addresses a visualization by it (spec §4) |
+| `visualizations` | `uq_visualizations_workspace_name` | via UNIQUE | V42 (#10): one name per workspace forever; leads the tree browse's bounded range scan ([§4.28](#428-visualizations)) |
+| `visualization_versions` | `visualization_versions_pkey` | via PK | `(visualization_id, version)` — every version read |
+| `visualization_versions` | `uq_visualization_versions_one_draft` | explicit (partial, unique) | V42: the one-DRAFT rule of versioning §3.3 ([§4.29](#429-visualization_versions)) |
+| `dashboards` | `dashboards_pkey` | via PK | Lookup by id |
+| `dashboards` | `uq_dashboards_workspace_name` | via UNIQUE | V42: one name per workspace forever; the tree browse ([§4.30](#430-dashboards)) |
+| `dashboard_versions` | `dashboard_versions_pkey` | via PK | `(dashboard_id, version)` — every version read |
+| `dashboard_versions` | `uq_dashboard_versions_one_draft` | explicit (partial, unique) | V42: the one-DRAFT rule ([§4.31](#431-dashboard_versions)) |
+| `visualization_test_runs` | `visualization_test_runs_pkey` | via PK | Lookup by run id |
+| `visualization_test_runs` | `uq_visualization_test_runs_session` | via UNIQUE | V42: one run per (visualization, version, session); its leading `(visualization_id, version)` is the per-version run lookup and the cascade's index ([§4.32](#432-visualization_test_runs)) |
+| `visualization_test_screenshots` | `visualization_test_screenshots_pkey` | via PK | One image per run, fetched by the run ([§4.33](#433-visualization_test_screenshots)) |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1246,6 +1458,12 @@ table and the test's expected-table list in the same commit.
 | `scheduled_tasks` | derived | ScheduledTask | — | — | db-scheduler's queue of this deployment's pending tasks; library-owned, never transferred |
 | `parameter_sets` | promotable | ParameterSet | `current_version` (sticky; versioning §3.4) | `id` (UUID, portable — an import keeps it, record P24) | The index over the current body; promotion is by name and carries the id (record §8.3) |
 | `parameter_set_versions` | promotable | ParameterSet | per-set `version` — global identity, preserved on import (D5) | `(id, version)` | The artifacts; an import validates against the TARGET's templates and datasources and lands RELEASED (record §8.3) |
+| `visualizations` | promotable | Visualization | `current_version` (sticky; versioning §3.4) | `id` (UUID, portable — an import keeps it; C29 refuses a taken one) | The index over the current body; promotion order templates → parameter sets → pipelines → visualizations → dashboards (D61) |
+| `visualization_versions` | promotable | Visualization | per-visualization `version` — global identity, preserved on import (D5) | `(id, version)` | The artifacts; an import validates against the TARGET's templates (spec §12) and lands RELEASED |
+| `dashboards` | promotable | Dashboard | `current_version` (sticky) | `id` (UUID, portable) | The index over the current body; promoted last (D61) |
+| `dashboard_versions` | promotable | Dashboard | per-dashboard `version` — global identity, preserved on import (D5) | `(id, version)` | The artifacts; an export carries its pinned visualizations and REFERENCES its pipelines and set (spec §12) |
+| `visualization_test_runs` | environment-local | Visualization | — | — | Test evidence qualifies a release in the environment that ran it; the released version travels, its evidence does not |
+| `visualization_test_screenshots` | environment-local | Visualization | — | — | A run's image — the run's classification |
 | `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
 
 ---
@@ -1522,6 +1740,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.34 | V42 (#10 L1a, dashboards round one) | New **§4.28 `visualizations`**, **§4.29 `visualization_versions`**, **§4.30 `dashboards`**, **§4.31 `dashboard_versions`** (V39's two tables twice, the names changed: the kept UUID, the per-workspace name unique forever, the index row over the current body, the one-draft partial index, the database-computed hash, the release/discard/via stamps) and the test evidence L4 writes — **§4.32 `visualization_test_runs`** (a run per version and session, hanging off the version by a composite foreign key that cascades, the preview token stored hashed with its expiry, the closed status list) and **§4.33 `visualization_test_screenshots`** (PNG/WebP, ≤ 4 MiB in the schema, the server's SHA-256). §5 gains their eleven indexes; §5A classifies the four artifact tables promotable and the evidence environment-local. The spec's `byte_length(bytes)` is Postgres's `octet_length`. Down path documented in the migration's header and proven on a copy of the demo database. |
 | 2026-09-29 | v1.33 | 310 (#310) | §8.2 is IMPLEMENTED (it was documented and never run): the batched form of the same statement — the cutoff read once per tick from the database's clock, then `DELETE … WHERE id IN (SELECT id … WHERE "timestamp" < :cutoff ORDER BY "timestamp" LIMIT :batchSize)` until a batch comes back short, at most 50 batches or 2 s a tick. The rows deleted are exactly the one-statement form's; no schema change |
 | 2026-09-28 | v1.32 | 286 (#286) | §4.13's `retired_reason` bullet says what sees a legacy row: the workspace-scoped legacy read (the unscoped `null` branch, which had no caller, is removed), the unpublish row read, and nothing valid-only — the registry, the conflict check, key binding (`requireInsideWorkspace`), the Usage tab (`findByPipeline`), promotion (omitted, the count logged). The echo of a stored path is cut at the grammar's 200 characters; the column is unchanged (no CHECK added — unpublish is by path). The boot WARN reads `at_least`. No DDL change. |
 | 2026-09-27 | v1.31 | V41 (#274) | §4.13 `published_endpoints` gains `retired_reason TEXT NULL` (NULL = a normal row), and V41 retires every row whose stored path has fewer than three segments — the R-EP5 rows saved before 2026-09-19 made the row mapper throw at boot (#274). `is_enabled` goes FALSE with the reason `'pre-R-EP5 path'`; rows are never deleted (the listing flags them; unpublishing is the fix). The repository's legacy mapping is the fail-closed second half — a row whose path fails today's grammar never reaches the serve registry or the conflict check even without this migration. Down path is in the migration header (re-enables every retired row; the column cannot distinguish its own disables from an operator's). |
