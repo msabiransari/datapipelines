@@ -130,7 +130,7 @@ layer 3
 layer 4
 ┌──────────────┐ ┌──────────────┐
 │     dag      │ │  parameters  │  dag ← typesystem, calculators, pipeline-contract, templates,
-│  (executor)  │ │              │        datasources, staging, scripting, graph
+│  (executor)  │ │              │        datasources, staging, scripting, graph, persistence
 └──────────────┘ └──────────────┘  parameters ← typesystem, graph, pipeline-contract, templates, datasources
 
 layer 5
@@ -188,7 +188,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `staging` | `typesystem` |
 | `auth` | `typesystem`, `persistence` |
 | `scheduler` | `typesystem`, `pipeline-contract` |
-| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph` |
+| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph`, `persistence` |
 | `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
 | `visualization` | `typesystem`, `pipeline-contract`, `templates`, `parameters` |
 | `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization` |
@@ -204,7 +204,7 @@ Notes on the shape (explanatory, not additional rules):
 - `calculators`' row is the shortest one in the table on purpose (072, calculators design §0.4/C12). A calculator kind is a **pure function of its inputs**; a row that admitted `datasources` or `dag` would make that a hope rather than a fact, and the executor's freedom to evaluate a kind anywhere, in any order, rests on it. Adding an entry to that row is the edit a reviewer must refuse.
 - `scheduler` lists `pipeline-contract` for exactly ONE thing, the published `PipelineNameGrammar` (a schedule is named like a pipeline — scheduler design revision §6, A2); its `SchedulerBoundaryTest` fails on any other `co.datapipelines.pipeline` import, so the edge cannot quietly become pipeline knowledge. It lists no `dag`, `auth` or `application`: the executor adapter, the capacity lease and the system principal live on `web`'s side of its port.
 - `parameters` (#194) declares all five of its edges — `typesystem` (the shared value validator, `LogicalType`), `graph` (`Dag<T>`), `pipeline-contract` (`TemplateRef`, the name grammars, the `TemplateDryRenderer` / `DatasourceRegistry` / `TemplateVersionStatuses` / `TemplateReleaser` ports it validates and releases through, `ReadLens`, `AuthoringGuard`), and since lane C `templates` (the selector runtime renders a pinned template through `WorkspaceTemplateEngines`) and `datasources` (it runs through the registry's pools, `ReadOnlyStatementLease` and `ResultRowReader`). Since lane D the `parameters` edges of `application`, `mcp-server` and `web` are DECLARED (the record's §2.4): the surfaces compile against the engine, the reverse-arrow composition in `application`, the six tools in `mcp-server`, the routes and the wiring in `web`.
-- `persistence` (#266) is the second empty row beside `graph`, for the same reason: it is a primitive every store-owning module can sit on. `auth` lists it for the audit log's writer and `web` for the execution-event record's and the replay log's; `dag` does NOT — its repository offers the batch statement (`ExecutionEventRepository.appendAll`) and knows nothing of the queue in front of it, which is `web`'s wiring.
+- `persistence` (#266) is the second empty row beside `graph`, for the same reason: it is a primitive every store-owning module can sit on. `auth` lists it for the audit log's writer and `web` for the execution-event record's and the replay log's. `dag` lists it (#321) for `FailureShape` alone — the stale sweep's and the event retention's failure lines name a store failure by its class and SQLState like every other scheduled job's — and does NOT sit on the writer: its repository offers the batch statement (`ExecutionEventRepository.appendAll`) and knows nothing of the queue in front of it, which is `web`'s wiring.
 - `visualization` (#10) sits above `parameters` and below `application`: it declares `typesystem`, `pipeline-contract` (the name grammar, `ReadLens`, `AuthoringGuard`, the template ports it validates and releases through) and `parameters` (the production `ParameterSetFacts` reads a pinned set release through `ParameterSetRepository`). `templates` is allowed and NOT declared — every template fact reaches it through `pipeline-contract`'s ports. The pipeline facts a dashboard needs (released? read-only? the caller output columns) arrive through its `PipelineReleaseFacts` port, which `application` implements over `ReadOnlyPipelineRule` (L1b), so no `dag` edge exists. `application`, `mcp-server` and `web` list it ahead of the lanes that declare it (L1b, L1c, L2).
 - `dag` does **not** list `auth`: the executor is handed an already-authenticated principal by its caller. `mcp-server` **does** list `auth` (it authenticates its own transport, [MCP Server §3.2](mcp-server.md)) and `dag` (the `pipelines_execute` / `executions_*` tools drive the executor directly rather than looping back through HTTP).
 - `web` lists everything it touches **explicitly**. It could reach most of these transitively through `mcp-server`; declaring them is what makes the table checkable.
@@ -398,7 +398,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 
 ### 5.6 `dag`
 
-**Dependencies (internal):** `pipeline-contract`, `templates`, `datasources`, `staging`, `typesystem`.
+**Dependencies (internal):** `pipeline-contract`, `templates`, `datasources`, `staging`, `typesystem`, `scripting`, `graph`, `persistence` (#321 — `FailureShape` for the two scheduled jobs' failure lines, nothing else; §4.2 note); `calculators` allowed and not declared.
 
 **Dependencies (external):**
 - `org.jetbrains.kotlinx:kotlinx-coroutines-core`
@@ -1276,6 +1276,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | #321 the scheduled jobs' failure lines | 321 | §4.2's allowed map gains `dag → persistence` (the root map and `modules/dag/build.gradle.kts` follow it; owner's ruling on the lane's question, 2026-09-29): `StaleExecutionSweeper` and `ExecutionEventRetention` log a store failure by `FailureShape`'s class and SQLState, never by its message (observability §3.4G). The edge is for `FailureShape` only — `dag` still does not sit on the batching writer (§4.2 note). §4.1's layer-4 row and §5.6's dependency line follow; §5.6's line also names the declared `scripting` and `graph` edges it had missed. |
 | 2026-09-29 | #10 L1a — the visualization module | L1a | New **§5.20 `visualization`** — layer 5, above `parameters` and below `application` (§4.1 renumbers the layers above it): the visualization and dashboard documents, readers, validators, repositories, lifecycle and transfer. §3/§3.1 rows, §4.1 layer, §4.2's table gains the row (`typesystem`, `pipeline-contract`, `templates`, `parameters`) and `application`, `mcp-server` and `web` gain `visualization` (allowed ahead, undeclared — L1b/L1c/L2 declare it). The root build's allowed-dependency map, `COVERAGE_FLOORS` (90 until measured) and `ArchitectureGuardTest`'s below-the-surfaces list carry the module; its `gradle.lockfile` ships in the same commit. |
 | 2026-09-29 | #308 the browser suite's invocation truth | 307 | The `tests/browser-tests` tree comment (§3), the §3.1 matrix row and §5.12's design rule said the suite was "NOT part of/wired into `build`/`check`" — false since #292/#297: `build`/`check` run `:tests:browser-tests:test` like every module's `test`; `./gradlew browserTest` is the name for running the suite ALONE, and only `siteShots` (a running demo deployment needed) is outside. TEST-GAP-2026-09.md's decision 4 carries the correction beside its original proposal. |
 | 2026-09-29 | #266 persistence batching, with its correction round 266b | 266 | New **§5.19 `persistence`** — layer 0 beside `typesystem` and `graph`, no internal dependency: `BatchingWriter<T>` and its `BatchSink` seam, the one group commit the audit log (`auth`) and the execution-event record and replay log (`web`) share. §3/§3.1 rows, §4.1 layer, §4.2's allowed map gains `auth → persistence` and `web → persistence` (`dag` needs none: `appendAll` is a plain repository method); §5.7 names the edge. 266b: `BatchSink.propagates` (a failure that belongs to the caller) and `FailureShape` (a failure's class and SQLState for a log line, never its message) join the public API; `logback-classic` as a test-only dependency. (Round 1 changed §3–§5 without this row.) |

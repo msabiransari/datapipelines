@@ -1,16 +1,24 @@
 package co.datapipelines.executor
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
+import java.sql.SQLException
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -96,6 +104,34 @@ class ExecutionEventRetentionTest {
             )
 
         failing.retainOnce() shouldBe 0
+    }
+
+    /**
+     * #321 (observability §3.4G): the failure line names the store's failure by its class and its
+     * SQLState — never its message, which Spring fills with the statement and the driver's text,
+     * and never its stack, which would print that message again.
+     */
+    @Test
+    fun `the failure line names the class and the SQLState - never the store's message`() {
+        val failing =
+            ExecutionEventRetention(
+                mockk {
+                    every { deleteOlderThan(any()) } throws
+                        DataAccessResourceFailureException("DELETE refused: $SENTINEL", SQLException("driver: $SENTINEL", SQL_STATE))
+                },
+                retention = Duration.ofDays(7),
+            )
+
+        val (purged, lines) = captured { failing.retainOnce() }
+
+        purged shouldBe 0
+        val warn = lines.single { it.level == Level.WARN }
+        warn.formattedMessage shouldContain "event=execution.event_retention_failed"
+        warn.formattedMessage shouldContain "error=DataAccessResourceFailureException"
+        warn.formattedMessage shouldContain "sql_state=$SQL_STATE"
+        warn.formattedMessage shouldNotContain SENTINEL
+        warn.formattedMessage shouldNotContain "message="
+        warn.throwableProxy.shouldBeNull()
     }
 
     @Test
@@ -202,4 +238,26 @@ class ExecutionEventRetentionTest {
         }
 
     private fun dataSource(): DriverManagerDataSource = SharedPostgres.dataSource()
+
+    /** Runs [block] with the job's logger captured; returns its value and every line it logged. */
+    private fun <T> captured(block: () -> T): Pair<T, List<ILoggingEvent>> {
+        val logger = LoggerFactory.getLogger(ExecutionEventRetention::class.java) as ch.qos.logback.classic.Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        val value =
+            try {
+                block()
+            } finally {
+                logger.detachAppender(appender)
+            }
+        return value to appender.list.toList()
+    }
+
+    private companion object {
+        /** Stands in for a refused row's text in the store's message; a log line must never carry it. */
+        const val SENTINEL = "SENTINEL-ROW-TEXT"
+
+        /** `connection_failure` — a state the driver, not the message, reports. */
+        const val SQL_STATE = "08006"
+    }
 }
