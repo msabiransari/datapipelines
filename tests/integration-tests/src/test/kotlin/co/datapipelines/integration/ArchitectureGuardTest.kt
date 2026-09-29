@@ -407,15 +407,16 @@ class ArchitectureGuardTest {
             )
 
         /**
-         * The jobs no transport may name (B5): the three `@Scheduled` services and schedulers, and —
-         * #9 — the scheduler's db-scheduler jobs (dispatcher, run worker, reconciler), their task
-         * factory and the admission gate. A transport reaches the scheduler through
+         * The jobs no transport may name (B5): the three `@Scheduled` services and schedulers, the
+         * audit-log retention (#310 — the job that DELETES audit rows; no route or tool may reach
+         * it), and — #9 — the scheduler's db-scheduler jobs (dispatcher, run worker, reconciler),
+         * their task factory and the admission gate. A transport reaches the scheduler through
          * `ScheduleService` only, which is deliberately NOT in this list.
          */
         val JOB_SERVICE =
             Regex(
                 "\\b(StaleExecutionSweeper|ExecutionEventRetention|reapRetiredPools|StaleExecutionSweepScheduler|" +
-                    "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|" +
+                    "DatasourcePoolReaperScheduler|ExecutionEventRetentionScheduler|AuditLogRetention|" +
                     "ScheduleDispatcher|ScheduledRunWorker|RunReconciler|SchedulerTasks|SchedulerAdmission)\\b",
             )
     }

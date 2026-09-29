@@ -37,9 +37,11 @@ import java.util.UUID
  *
  * Every listed table a saved template body names must be a table THIS API key has read the
  * columns of (`datasources_get_columns` with that datasource as `target` and the table in
- * `details.table`, a success row, any time in the key's lifetime — no time window: a key
- * learns once). The tokeniser is [FactRefMismatchCheck]'s: `[a-z0-9_]{4,}` tokens over the
- * lowercased body, so `my_orders` is not `orders` and `row_count` is not a table; every
+ * `details.table`, a success row, any time the audit log still holds it — no window of its
+ * own: a key learns a table once per `datapipelines.audit.retention-days`, after which the
+ * row ages out with the log (auth.md §10.3, #310)). The tokeniser is
+ * [FactRefMismatchCheck]'s: `[a-z0-9_]{4,}` tokens over the lowercased body, so
+ * `my_orders` is not `orders` and `row_count` is not a table; every
  * `${…}` interpolation span is stripped first, because an interpolated name is DYNAMIC —
  * the check cannot know what it produces and refuses nothing on its behalf (say-so: the
  * spanRegex below). A token the catalog does not list is prose to this check — the probe

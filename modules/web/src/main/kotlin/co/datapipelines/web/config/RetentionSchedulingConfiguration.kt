@@ -1,21 +1,32 @@
 package co.datapipelines.web.config
 
+import co.datapipelines.auth.AuditLogRetention
+import co.datapipelines.auth.AuditProperties
 import co.datapipelines.auth.KeyRetentionPurge
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionEventRetention
+import io.micrometer.core.instrument.MeterRegistry
+import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import java.time.Duration
 
 /**
- * The `execution_events` retention job, scheduled (metadata-db §8.1, deployment.md §6.2,
- * 050/T60) — **M2's sibling** (`SweepSchedulingConfiguration`), matching its standing
- * decisions:
+ * The retention sweep, scheduled (metadata-db §8, deployment.md §6.2): the `execution_events`
+ * retention (§8.1, 050/T60), the keys purge (keys v2 A17/B5) and the `audit_log` retention (§8.2,
+ * #310), one hourly tick — **M2's sibling** (`SweepSchedulingConfiguration`), matching its
+ * standing decisions:
  *
  * - **No second `@EnableScheduling`:** the sweep configuration's annotation is the context's
- *   one; `@Scheduled` here rides the same default single-thread scheduler. Both jobs are one
- *  cheap statement each, so a shared thread is the pool that fits.
+ *   one; `@Scheduled` here rides the same single thread as every other scheduled job. That
+ *  thread is NOT a Spring default: with no `TaskScheduler` bean, Spring runs `@Scheduled` on the
+ *  context's unique `ScheduledExecutorService`, which is `WebSurfaceConfiguration`'s
+ *  `sseLogScheduler` — the thread that also serves SSE replays (measured and pinned by
+ *  `AuditLogRetentionE2eTest`; #316 tracks separating them). Every step is therefore a bounded
+ *  statement or a bounded loop of them ([AuditLogRetention]'s batch ceiling and two-second time
+ *  budget).
  * - **`fixedDelay`, not `fixedRate`:** a slow tick (metadata DB busy) delays the next instead
  *  of piling on. Retention catches up by construction — the cutoff is `now − retention`, not
  *  a tick-aligned slot.
@@ -34,31 +45,68 @@ class RetentionSchedulingConfiguration {
     ): ExecutionEventRetention = ExecutionEventRetention(events, Duration.ofDays(properties.eventRetentionDays))
 
     @Bean
+    fun auditLogRetention(
+        jdbc: NamedParameterJdbcTemplate,
+        properties: AuditProperties,
+        meterRegistry: MeterRegistry,
+    ): AuditLogRetention = AuditLogRetention(jdbc, properties.retentionDays, meterRegistry)
+
+    @Bean
     fun executionEventRetentionScheduler(
         retention: ExecutionEventRetention,
         keyPurge: KeyRetentionPurge,
-    ): ExecutionEventRetentionScheduler = ExecutionEventRetentionScheduler(retention, keyPurge)
+        auditRetention: AuditLogRetention,
+    ): ExecutionEventRetentionScheduler = ExecutionEventRetentionScheduler(retention, keyPurge, auditRetention)
 }
 
 /**
- * The `@Scheduled` adapter over [ExecutionEventRetention] — see [RetentionSchedulingConfiguration].
+ * The `@Scheduled` adapter over the retention sweep's three steps — see
+ * [RetentionSchedulingConfiguration]. In order:
  *
- * Keys v2 A17/B5: the key/identity purge runs here as the sweep's LAST step — the one delete the
- * product performs, of revoked keys and their identities once nothing references them. It runs
- * after the event retention so a purge never competes with it for the sweep's hour.
+ * 1. [ExecutionEventRetention] — `execution_events` past their execution's retention;
+ * 2. [KeyRetentionPurge] (keys v2 A17/B5) — revoked keys and their identities once nothing
+ *    references them;
+ * 3. [AuditLogRetention] (#310) — `audit_log` rows older than `datapipelines.audit.retention-days`.
+ *    Last, so the purges before it never compete with a backlog for the sweep's hour. An audit
+ *    row naming a key's identity is one of the references that keeps that key (step 2), so an
+ *    identity whose last audit rows expire here is purged by the NEXT tick's step 2, an hour on.
+ *
+ * ## Each step is isolated
+ * A step that throws is one ERROR line naming it (`event=retention.step_failed step=<name>`), and
+ * the tick moves on to the next step: before #310 the keys purge was the last step, so its
+ * exception reaching Spring's scheduler stopped nothing — with the audit retention after it, the
+ * same exception would skip the audit retention every hour it recurred. Each step already turns
+ * a metadata-DB fault into its own WARN; this catches what is left, so nothing reaches the
+ * scheduler thread the stale-execution sweep and the pool reaper share.
  */
 class ExecutionEventRetentionScheduler(
     private val retention: ExecutionEventRetention,
     private val keyPurge: KeyRetentionPurge,
+    private val auditRetention: AuditLogRetention,
 ) {
     @Scheduled(fixedDelay = RETENTION_INTERVAL_MILLIS)
     fun retain() {
-        retention.retainOnce()
-        keyPurge.purgeOnce()
+        step("execution_events") { retention.retainOnce() }
+        step("keys") { keyPurge.purgeOnce() }
+        step("audit_log") { auditRetention.purgeOnce() }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // the point IS any failure: one ERROR line, the next step runs
+    private inline fun step(
+        name: String,
+        block: () -> Unit,
+    ) {
+        try {
+            block()
+        } catch (e: RuntimeException) {
+            LOG.error("event=retention.step_failed step={} error={} message=\"{}\"", name, e.javaClass.simpleName, e.message, e)
+        }
     }
 
     companion object {
         /** One hour — see [RetentionSchedulingConfiguration] for why this is not a config key. */
         const val RETENTION_INTERVAL_MILLIS = 3_600_000L
+
+        private val LOG = LoggerFactory.getLogger(ExecutionEventRetentionScheduler::class.java)
     }
 }

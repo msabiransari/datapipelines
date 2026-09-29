@@ -1,9 +1,9 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.32 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.33 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
-**Last updated:** 2026-09-27
+**Last updated:** 2026-09-29
 
 ---
 
@@ -1436,11 +1436,23 @@ This purges the **durable** 7-day record only. The 1-hour Redis event log ([§9]
 ### 8.2 Audit log retention
 
 ```sql
+-- once per tick: the cutoff, from the database's clock
+SELECT NOW() - make_interval(days => :auditRetentionDays);
+
+-- then, until a batch comes back short (or the tick's bound is reached):
 DELETE FROM audit_log
- WHERE timestamp < NOW() - make_interval(days => :auditRetentionDays);
+ WHERE id IN (
+           SELECT id
+             FROM audit_log
+            WHERE "timestamp" < :cutoff
+            ORDER BY "timestamp"
+            LIMIT :batchSize
+       );
 ```
 
-`:auditRetentionDays` ← [`datapipelines.audit.retention-days`](configuration.md#312-audit).
+`:auditRetentionDays` ← [`datapipelines.audit.retention-days`](configuration.md#312-audit) (30–3650, refused at startup outside them). Implemented by `AuditLogRetention` in `auth` (#310), the retention sweep's last step, hourly.
+
+The rows it deletes are exactly the ones the one-statement form `DELETE FROM audit_log WHERE timestamp < NOW() - make_interval(days => :auditRetentionDays)` would — one cutoff, every event — but in bounded batches, so a year's backlog never holds a lock or a transaction for minutes: each `DELETE` is its own auto-committed statement of at most `:batchSize` (5,000) rows, chosen oldest-first through `idx_audit_timestamp`, and a tick runs at most 50 of them or 2 seconds. The cutoff is read ONCE per tick and bound into every batch — `timestamp` is the database's `NOW()` at write, so the database's clock decides, never an instance's; a row inserted during the tick is younger than the cutoff by construction. Rows are only ever INSERTed, so a batch contends with nothing but another replica's batch, which then deletes zero. The bounds are code constants, not keys ([Auth §10.3](auth.md#103-retention) states what the job never deletes and what the audit read-backs lose).
 
 ### 8.3 Stale execution sweep
 
@@ -1510,6 +1522,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.33 | 310 (#310) | §8.2 is IMPLEMENTED (it was documented and never run): the batched form of the same statement — the cutoff read once per tick from the database's clock, then `DELETE … WHERE id IN (SELECT id … WHERE "timestamp" < :cutoff ORDER BY "timestamp" LIMIT :batchSize)` until a batch comes back short, at most 50 batches or 2 s a tick. The rows deleted are exactly the one-statement form's; no schema change |
 | 2026-09-28 | v1.32 | 286 (#286) | §4.13's `retired_reason` bullet says what sees a legacy row: the workspace-scoped legacy read (the unscoped `null` branch, which had no caller, is removed), the unpublish row read, and nothing valid-only — the registry, the conflict check, key binding (`requireInsideWorkspace`), the Usage tab (`findByPipeline`), promotion (omitted, the count logged). The echo of a stored path is cut at the grammar's 200 characters; the column is unchanged (no CHECK added — unpublish is by path). The boot WARN reads `at_least`. No DDL change. |
 | 2026-09-27 | v1.31 | V41 (#274) | §4.13 `published_endpoints` gains `retired_reason TEXT NULL` (NULL = a normal row), and V41 retires every row whose stored path has fewer than three segments — the R-EP5 rows saved before 2026-09-19 made the row mapper throw at boot (#274). `is_enabled` goes FALSE with the reason `'pre-R-EP5 path'`; rows are never deleted (the listing flags them; unpublishing is the fix). The repository's legacy mapping is the fail-closed second half — a row whose path fails today's grammar never reaches the serve registry or the conflict check even without this migration. Down path is in the migration header (re-enables every retired row; the column cannot distinguish its own disables from an operator's). |
 | 2026-09-26 | v1.30 | V39 (#194 lane B, the parameter engine) | New **§4.26 `parameter_sets`** (the index row: a UUID id kept by import, the per-workspace name unique forever, display metadata indexing the CURRENT body, the sticky pointer) and **§4.27 `parameter_set_versions`** (the template_versions shape minus the template-only columns: `body_json` without the name, the database-computed hash, the release/discard/via stamps with CHECKs, the one-draft partial index). §5 gains their four indexes; §5A classifies both promotable. The record's §8.1 said "§4.21/§4.22" — stale since V36/V38 took them. Down path documented in the migration's header and proven on a copy of the demo database. |

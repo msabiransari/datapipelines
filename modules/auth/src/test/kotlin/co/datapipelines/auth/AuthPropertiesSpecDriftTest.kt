@@ -66,6 +66,11 @@ class AuthPropertiesSpecDriftTest {
         documented.getValue("datapipelines.persistence.shutdown-drain-ms") shouldBe props.shutdownDrainMs.toString()
     }
 
+    @Test
+    fun `audit property defaults match configuration-md section 3-12`() {
+        documented.getValue("datapipelines.audit.retention-days") shouldBe AuditProperties().retentionDays.toString()
+    }
+
     private companion object {
         /**
          * A full `| \`datapipelines.*\` | \`default\` | description |` row of the §3 tables:

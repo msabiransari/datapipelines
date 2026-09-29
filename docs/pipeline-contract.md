@@ -1,9 +1,9 @@
 # Pipeline Contract Specification
 
-**Status:** v1.42 (revised — see Change Log)
+**Status:** v1.43 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
-**Last updated:** 2026-09-28
+**Last updated:** 2026-09-29
 
 ---
 
@@ -1004,7 +1004,7 @@ Two save-time refusals that live only on the AGENT surface (`pipelines_create` /
 
 | Code | Check |
 |---|---|
-| `pipeline.validation.table_not_learned` | A saved body's template names a table the CALLING KEY never read the columns of: every `[a-z0-9_]{4,}` token of each pinned template body (the semantics fact check's tokeniser; every `${…}` interpolation span stripped first — a dynamic name is exempt because it is unknowable) that case-fold matches the node's source datasource's catalog listing must appear as a successful `datasources_get_columns` audit row with that `target` + `table` for this key — any time in the key's lifetime (a key learns once; rows written before 139 carry no `table` and simply do not count). `details.tables` lists each `{datasource, table, clearing_call}`. `tempdb` sources are exempt; a name the catalog does not list is not this check's business (the probe and §12.5 say so); `_get_table_stats` is NOT required — columns are correctness, stats are performance |
+| `pipeline.validation.table_not_learned` | A saved body's template names a table the CALLING KEY never read the columns of: every `[a-z0-9_]{4,}` token of each pinned template body (the semantics fact check's tokeniser; every `${…}` interpolation span stripped first — a dynamic name is exempt because it is unknowable) that case-fold matches the node's source datasource's catalog listing must appear as a successful `datasources_get_columns` audit row with that `target` + `table` for this key — any time the audit log still holds the row (a key learns a table once per `datapipelines.audit.retention-days`, default a year: the rows age out with the log, [Auth §10.3](auth.md#103-retention); rows written before 139 carry no `table` and simply do not count). `details.tables` lists each `{datasource, table, clearing_call}`. `tempdb` sources are exempt; a name the catalog does not list is not this check's business (the probe and §12.5 say so); `_get_table_stats` is NOT required — columns are correctness, stats are performance |
 | `pipeline.validation.door_unacknowledged` | The body's door is a RAW_DATE_PAIR — two or more DATE parameters, no INTEGER parameter named `year`/`quarter`/`month`/`*_year`, and no CALCULATOR node whose kind declares a DATE output (the window writers: `period_start`, `period_end`, `prior_period`, `date_trunc`, `period_bounds`, `trailing_periods`) — and the call does not carry `door_acknowledged: true`. `details.parameters` names the pair; the refusal states rule 13's alternatives (a period parameter, or an anchor date with a window calculator). `NONE` when there are no DATE parameters; `PERIOD` otherwise. The flag is the `confirm_new_root` shape: a decision forced, not a copy |
 
 ### 12.12 Release checks
@@ -1748,6 +1748,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.43 | 310 (#310) audit-log retention | §12.11's `pipeline.validation.table_not_learned` row: the learning lasts as long as the audit row it reads — once per `datapipelines.audit.retention-days` (default a year), not "the key's lifetime", now that the audit log is retained (auth §10.3). The code, its status and its details are unchanged |
 | 2026-09-28 | v1.42 | 298 (#298) the server's fault names the status | §6.2: a binding that carries both a caller's bad value and a stored declaration refused today answers the stored declaration's 409 (`PipelineValidationException` ranks the server-owned code first) with both failures in `details.failures` in the order found — before, the first failure's code won, so a caller's error listed earlier made it a 400. Each judged declaration is compiled once per bind. No code or row added. |
 | 2026-09-28 | v1.41 | 298 (#291) request constraints on every body | §13.21: the stated Jackson constraints now hold on every route that parses its own `@RequestBody String` too — each reads through a REQUEST copy of its domain mapper (`RequestLimits.requestMapper`, `copy()` then the copy's own factory: the domain mappers keep the library's bounds for stored rows, transform values and JSON columns) and answers a read failure with its family's malformed-body 400; the parameter-set routes remain, tracked in #300. No code added. |
 | 2026-09-28 | v1.40 | 286 (#268) — renumbered at merge after 279's v1.38 and 278's v1.39 | **§13.3** gains `pipeline.execution.parameter_declaration_invalid` (409) and **§6.2**'s one-validator rule says when it answers: a stored declaration save refuses today — a body saved before #194 with a `constraints` block or a `cardinality` that `Parameter` then ignored — judged by a value or a default. It used to reach the validator's `IllegalArgumentException` (a 500); a stored `MULTI` used to bind as a list. Nothing changes for a valid declaration, or for a broken one nothing judges. The pre-deploy scan for such bodies is in deployment §8.3. |
