@@ -363,8 +363,11 @@ class JsonataBreachTest {
          * The most a case may start with still held (after gc) and be measured. The corpus is
          * calibrated on a JVM that starts every case with nearly all of its 512m free: measured
          * 2026-09-28, 8–9 MB in use at every case's start (503–504 MB free). Past this a bomb's
-         * outcome says more about what an earlier case left behind than about the bomb. Relative
-         * to the JVM's own max, so a collector that reports a smaller `maxMemory` cannot trip it.
+         * outcome says more about what an earlier case left behind than about the bomb. An
+         * ABSOLUTE bound on the heap still held, not a share of the max: the check in [measure]
+         * compares the used heap with this constant and never reads `maxMemory` (that is read only
+         * for the logged free figure), so a collector that reports a smaller `maxMemory` cannot trip
+         * it. The max itself is pinned separately, by the test's [HEAP_FLOOR_MB]..[HEAP_MB] assertion.
          */
         const val MAX_HELD_AT_START_MB = 128L
 

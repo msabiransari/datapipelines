@@ -1,5 +1,6 @@
 import org.springframework.boot.gradle.tasks.bundling.BootJar
 import org.springframework.boot.gradle.tasks.run.BootRun
+import java.time.Instant
 
 // module-structure.md §5.10 — allowed internal deps: web only (§4.2).
 // Contains main(), configuration, logback config and the Flyway migrations.
@@ -50,6 +51,23 @@ dependencies {
 // (observability.md §6.3: version, commit hash, build timestamp).
 springBoot {
     buildInfo {
+        // Build time is OPT-IN too (#292), for the same reason and one more: the plugin's default
+        // is Instant.now() per invocation, so bootBuildInfo and the jar were never up to date and
+        // every consumer of this module — its own tests and the whole browser suite — re-ran in
+        // the next Gradle invocation. The release build supplies it (app.sh does):
+        //     ./gradlew -Pdatapipelines.buildTime=2026-09-28T21:00:00Z :modules:app:bootJar
+        // When absent, "time" is EXCLUDED — in spring-boot-gradle-plugin 3.5.x `time` is a
+        // Property whose unset value falls back to now, so `time = null` would change nothing —
+        // and /info omits `build_time` rather than reporting a time that is not the build's.
+        val buildTime = providers.gradleProperty("datapipelines.buildTime").orNull
+        if (buildTime == null) {
+            excludes.add("time")
+        } else {
+            runCatching { Instant.parse(buildTime) }.getOrElse {
+                throw GradleException("-Pdatapipelines.buildTime must be an ISO-8601 instant; was '$buildTime'")
+            }
+            properties { time.set(buildTime) }
+        }
         properties {
             // Commit hash is OPT-IN via a Gradle property, never read from git by
             // the build itself: shelling out to `git rev-parse` would break builds

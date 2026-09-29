@@ -1,5 +1,6 @@
 // module-structure.md §5.12 — allowed internal deps: app (full context, end-to-end).
-// Separately invoked via the root `browserTest` task; NOT part of build/check.
+// Its `test` runs in `build`/`check` like every module's (the root `browserTest` runs it alone);
+// only `siteShots` below stays outside build/check (#297).
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
