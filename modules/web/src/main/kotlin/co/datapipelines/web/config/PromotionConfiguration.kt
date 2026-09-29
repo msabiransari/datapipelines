@@ -120,6 +120,7 @@ class PromotionConfiguration {
         datasources: co.datapipelines.pipeline.DatasourceRegistry,
         probe: co.datapipelines.parameters.SelectorProbe,
         config: co.datapipelines.parameters.ParametersConfig,
+        templateValidator: co.datapipelines.templates.TemplateValidator,
     ): co.datapipelines.web.parameters.ParameterSetPromotion =
         co.datapipelines.web.parameters
             .ParameterSetPromotion(
@@ -127,7 +128,7 @@ class PromotionConfiguration {
                 sets,
                 templates,
                 co.datapipelines.web.parameters
-                    .ParameterSetReceiveValidation(engines, renderer, statuses, datasources, probe, config),
+                    .ParameterSetReceiveValidation(engines, renderer, statuses, datasources, probe, config, templateValidator),
             )
 
     /** 074 — the endpoint half of a promotion batch, sender and receiver rules in one place. */

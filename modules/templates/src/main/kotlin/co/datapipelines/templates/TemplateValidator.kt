@@ -130,6 +130,24 @@ class TemplateValidator(
         return TemplateValidationResult(failures)
     }
 
+    /**
+     * The BODY-level half of [validate] — the type/dialect rules, the body cap and the forbidden-
+     * construct scan + parse + AST scan — with no registry, no workspace and no test suite: for a
+     * body that must be judged BEFORE it can be stored anywhere. The promotion receive's overlay
+     * (#302; the 302 security pass's F1) renders a batch's template payload on the receiver before
+     * the templates land, and the import's guards must run on that payload first — `?eval` and the
+     * `<#ftl>` header have no configuration switch, so this scan is the only guard the product has,
+     * and the cap keeps an adversarial body away from the parser. Imports/libraries are NOT judged
+     * here (a library may ride the same batch); the import inside the transaction remains the
+     * authority on everything else.
+     */
+    fun validateBody(draft: TemplateDraft): TemplateValidationResult {
+        val failures = mutableListOf<TemplateValidationFailure>()
+        addTypeDialectFailures(draft, failures)
+        if (failures.isEmpty()) addBodyFailures(draft, failures, ValidationTrace())
+        return TemplateValidationResult(failures)
+    }
+
     /** Runs §7 and throws [TemplateValidationException] if anything failed; returns [draft] otherwise. */
     fun validateOrThrow(
         draft: TemplateDraft,

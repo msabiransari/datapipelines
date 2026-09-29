@@ -66,6 +66,11 @@ class ParameterSetReceiveValidation(
     /** The production probe — step 6's execution is pin-INDEPENDENT and always delegates. */
     private val probe: SelectorProbe,
     private val config: ParametersConfig,
+    /**
+     * The production template validator — its body-level half judges every batch payload before
+     * the overlay renders it (the 302 security pass's F1).
+     */
+    private val templateValidator: co.datapipelines.templates.TemplateValidator,
 ) {
     /**
      * Validates every bound entry against the batch's template payloads overlaying the receiver's
@@ -80,7 +85,7 @@ class ParameterSetReceiveValidation(
         batchTemplates: List<JsonNode>,
         entries: List<ParameterSetPromotion.Bound>,
     ): List<ParameterSetPromotion.Validated> {
-        val payloads = PayloadTemplates.of(batchTemplates)
+        val payloads = PayloadTemplates.of(templateValidator, batchTemplates)
         val registry = OverlayRegistry(payloads, engines.registryFor(workspaceId))
         return engines.engineOver(registry).use { engine ->
             val validator =
@@ -122,13 +127,23 @@ internal class PayloadTemplates private constructor(
          * without the exact `{id, version}` a pin needs — backs no pin (the class KDoc's split);
          * the import inside the transaction remains the authority on template payload shape.
          */
-        fun of(entries: List<JsonNode>): PayloadTemplates {
+        fun of(
+            validator: co.datapipelines.templates.TemplateValidator,
+            entries: List<JsonNode>,
+        ): PayloadTemplates {
             val deserializer = TemplateDeserializer()
             val byKey = HashMap<String, TemplateVersion>()
             entries.forEach { entry ->
                 val version = entry.get("version")?.takeIf(JsonNode::isInt)?.asInt() ?: return@forEach
                 when (val outcome = deserializer.fromTree(entry)) {
                     is TemplateDeserializationOutcome.Parsed -> {
+                        // The import's body-level guards run on the payload BEFORE it can back a pin and
+                        // be rendered by the overlay (the 302 security pass's F1): the cap keeps an
+                        // adversarial body away from the parser, the forbidden-construct scan is the
+                        // only guard against `?eval` and the `<#ftl>` header's parse-time burn. A
+                        // refusal is the template's own catalogued code — the same answer the import
+                        // inside the transaction would have given, arriving before the render.
+                        validator.validateBody(outcome.draft).orThrow()
                         outcome.draft.id?.let { id ->
                             byKey["$id@$version"] =
                                 TemplateVersion(

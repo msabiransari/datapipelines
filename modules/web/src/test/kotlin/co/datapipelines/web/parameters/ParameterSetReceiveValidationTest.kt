@@ -12,7 +12,10 @@ import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateLookup
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TemplateVersionStatuses
+import co.datapipelines.templates.LibraryResolver
 import co.datapipelines.templates.TemplateRepository
+import co.datapipelines.templates.TemplateValidationException
+import co.datapipelines.templates.TemplateValidator
 import co.datapipelines.templates.WorkspaceTemplateEngines
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.Dialect
@@ -45,14 +48,16 @@ class ParameterSetReceiveValidationTest {
 
     private val workspaceId = UUID.randomUUID()
 
+    private val engines = WorkspaceTemplateEngines(repository, 16, 5_000, 64L * 1024 * 1024)
     private val validation =
         ParameterSetReceiveValidation(
-            WorkspaceTemplateEngines(repository, 16, 5_000, 64L * 1024 * 1024),
+            engines,
             renderer,
             statuses,
             { name, _ -> if (name == DATASOURCE) DatasourceFacts(Dialect.H2) else null },
             probe,
             ParametersConfig(),
+            TemplateValidator(LibraryResolver { engines.registryFor(it) }),
         )
 
     init {
@@ -125,6 +130,41 @@ class ParameterSetReceiveValidationTest {
 
         val interpolated = refusal.result.failures.single()
         interpolated.code shouldBe "template.validation.parameter_interpolated"
+    }
+
+    @Test
+    fun `a payload with a forbidden construct refuses before the overlay renders it - the import's scan runs first (302 pass F1)`() {
+        // The renderer and the probe are STRICT mocks: a render before the refusal throws, which is
+        // exactly what today's order did (the pass measured the <#ftl> header's parse-time burn).
+        val refusal =
+            shouldThrow<TemplateValidationException> {
+                validation.validate(
+                    workspaceId,
+                    listOf(templatePayload("SELECT \${\"1\"?eval} AS n")),
+                    listOf(entry(DOCUMENT)),
+                )
+            }
+        refusal.result.failures
+            .single()
+            .code shouldBe "template.validation.dangerous_construct"
+        verify { renderer wasNot Called }
+        verify { probe wasNot Called }
+    }
+
+    @Test
+    fun `a payload over the body cap refuses without being parsed - the cap keeps it away from the parser (302 pass F1)`() {
+        val refusal =
+            shouldThrow<TemplateValidationException> {
+                validation.validate(
+                    workspaceId,
+                    listOf(templatePayload("SELECT 1 AS n -- " + "x".repeat(262_144))),
+                    listOf(entry(DOCUMENT)),
+                )
+            }
+        refusal.result.failures
+            .single()
+            .details["max_body_chars"] shouldBe 262_144
+        verify { renderer wasNot Called }
     }
 
     @Test
