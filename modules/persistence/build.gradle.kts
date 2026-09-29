@@ -17,4 +17,7 @@ dependencies {
     implementation(libs.slf4j.api)
 
     testImplementation(libs.kotlinx.coroutines.test)
+    // A logging backend for the suite alone: it records the writer's WARN lines and asserts a
+    // store's exception message never reaches them (#266b). Production stays on slf4j-api.
+    testImplementation(libs.logback.classic)
 }

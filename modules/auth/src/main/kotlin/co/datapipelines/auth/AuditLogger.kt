@@ -1,6 +1,7 @@
 package co.datapipelines.auth
 
 import co.datapipelines.persistence.BatchingWriter
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.persistence.Outcome
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -81,12 +82,15 @@ class AuditLogger(
         try {
             jdbc.update(AuditRowSink.INSERT, AuditRowSink.params(row))
         } catch (e: org.springframework.dao.DataAccessException) {
+            // The class and the SQLState, never the exception: Postgres quotes the refused row in its
+            // message (a JSONB refusal's CONTEXT carries `details`, which are redaction-bound) — #266b.
             log.warn(
-                "audit_log write failed event={} user_id={} key_id={}",
+                "audit_log write failed event={} user_id={} key_id={} cause={} sql_state={}",
                 row.event,
                 row.userId,
                 row.keyId,
-                e,
+                FailureShape.cause(e),
+                FailureShape.sqlState(e),
             )
         }
     }

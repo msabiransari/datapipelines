@@ -6,6 +6,7 @@ import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.persistence.BatchSink
 import co.datapipelines.persistence.BatchingWriter
 import co.datapipelines.persistence.FailureKinds
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.persistence.Outcome
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.async
@@ -66,7 +67,17 @@ class DirectEventRecorder(
                     // from the durable record instead of failing loudly. T36, third path.
                     payloadJson = SseJson.mapper.writeValueAsString(event.payload),
                 )
-            }.onFailure { log.warn("Durable event {} for execution {} not written.", event.name, event.executionId, it) }
+            }.onFailure {
+                // The class and the SQLState, never the exception: Postgres quotes a refused row in its
+                // message — a jsonb refusal's CONTEXT carries the payload (#266b, FailureShape).
+                log.warn(
+                    "Durable event {} for execution {} not written (cause={} sql_state={}).",
+                    event.name,
+                    event.executionId,
+                    FailureShape.cause(it),
+                    FailureShape.sqlState(it),
+                )
+            }
             eventLog.append(event.executionId, LoggedSseEvent(event.eventId, event.name, event.payload))
         }
 }

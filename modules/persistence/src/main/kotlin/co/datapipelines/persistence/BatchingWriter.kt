@@ -44,7 +44,9 @@ import kotlin.concurrent.withLock
  * - **Bounded shutdown.** [stop] flushes for at most [BatchingConfig.shutdownDrainMillis], then
  *   fails what is left, counts it and says so — the only loss the writer itself can cause.
  *
- * The writer never inspects, logs or truncates an item: the [BatchSink] names it for log lines.
+ * The writer never inspects, logs or truncates an item: the [BatchSink] names it for log lines, and
+ * a failure is named by its class and SQLState alone ([FailureShape]) — a store's exception message
+ * can carry the very row it refused.
  */
 class BatchingWriter<T : Any>(
     val name: String,
@@ -343,7 +345,15 @@ class BatchingWriter<T : Any>(
         } catch (e: Exception) {
             val kind = sink.classify(e)
             hooks.onFailure(kind, 1)
-            log.warn("event=persistence.direct_write_failed writer={} kind={} item={}", name, kind, sink.describe(item), e)
+            // The class and the SQLState, never the Throwable: a store's message can carry the row (FailureShape).
+            log.warn(
+                "event=persistence.direct_write_failed writer={} kind={} item={} cause={} sql_state={}",
+                name,
+                kind,
+                sink.describe(item),
+                FailureShape.cause(e),
+                FailureShape.sqlState(e),
+            )
             Outcome.Failed(kind, e)
         }
 
@@ -542,13 +552,14 @@ class BatchingWriter<T : Any>(
                 }
             }
             log.warn(
-                "event=persistence.batch_retried writer={} batch={} committed={} failed={} failed_items={} cause={}",
+                "event=persistence.batch_retried writer={} batch={} committed={} failed={} failed_items={} cause={} sql_state={}",
                 name,
                 batch.size,
                 batch.size - failed.size,
                 failed.size,
                 failed.joinToString(","),
-                batchFailure.javaClass.simpleName,
+                FailureShape.cause(batchFailure),
+                FailureShape.sqlState(batchFailure),
             )
         }
 
@@ -558,7 +569,14 @@ class BatchingWriter<T : Any>(
         ) {
             val kind = sink.classify(e)
             hooks.onFailure(kind, 1)
-            log.warn("event=persistence.write_failed writer={} kind={} item={}", name, kind, sink.describe(entry.item), e)
+            log.warn(
+                "event=persistence.write_failed writer={} kind={} item={} cause={} sql_state={}",
+                name,
+                kind,
+                sink.describe(entry.item),
+                FailureShape.cause(e),
+                FailureShape.sqlState(e),
+            )
             finish(entry, Outcome.Failed(kind, e), System.nanoTime())
         }
     }

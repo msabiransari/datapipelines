@@ -1,17 +1,24 @@
 package co.datapipelines.auth
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.classic.spi.IThrowableProxy
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.persistence.BatchingConfig
 import co.datapipelines.persistence.BatchingHooks
 import co.datapipelines.persistence.BatchingWriter
 import co.datapipelines.persistence.FallbackReason
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.slf4j.LoggerFactory
+import org.springframework.dao.DataAccessException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
@@ -179,6 +186,47 @@ class AuditLoggerBatchingIntegrationTest {
         rowsWith(marker) shouldBe 0
     }
 
+    @Test
+    fun `a refused row's WARN names the failure's class and SQLState, never the row - direct, batched and fallback`() {
+        // #266b (the security pass's observation 3): Postgres quotes a refused row in its message —
+        // a JSONB parse refusal's CONTEXT carries the JSON up to the bad token — and `details` are
+        // redaction-bound. A NUL in a detail value is such a row: Jackson escapes it, JSONB refuses it.
+        val details = mapOf("v" to "$ROW_CONTENT\u0000")
+        withClue("non-vacuity: the store's own message must carry the row, or this case proves nothing") {
+            val refusal = shouldThrow<DataAccessException> { AuditRowSink(jdbc).writeOne(row("audit.leak.probe", details)) }
+            generateSequence<Throwable>(refusal) { it.cause }.any { it.message.orEmpty().contains(ROW_CONTENT) } shouldBe true
+        }
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        val loggers = listOf(AuditLogger::class.java, BatchingWriter::class.java).map { LoggerFactory.getLogger(it) as Logger }
+        loggers.forEach { it.addAppender(appender) }
+        try {
+            // The DEFAULT path (#266b: the audit writer ships switched off) — the pre-266 INSERT.
+            AuditLogger(jdbc, ObjectMapper()).log("audit.leak.direct", userId = userId, details = details)
+            // The batched path — a batch of one the store refuses: write_failed.
+            logger.log("audit.leak.batched", userId = userId, details = details)
+            // The writer stopped — the caller's own direct write: direct_write_failed.
+            writer.close()
+            logger.log("audit.leak.fallback", userId = userId, details = details)
+        } finally {
+            loggers.forEach { it.detachAppender(appender) }
+        }
+        val rendered = appender.list.map { it.formattedMessage + " " + it.throwableProxy.render() }
+        withClue("every WARN, rendered whole: $rendered") {
+            rendered.none { it.contains(ROW_CONTENT) } shouldBe true
+            rendered.count { it.startsWith("audit_log write failed event=audit.leak.direct") && it.contains("sql_state=22P05") } shouldBe 1
+            rendered.count { it.startsWith("event=persistence.write_failed writer=audit") && it.contains("sql_state=22P05") } shouldBe 1
+            rendered.count { it.startsWith("event=persistence.direct_write_failed writer=audit") && it.contains("sql_state=22P05") } shouldBe 1
+        }
+    }
+
+    private fun row(
+        event: String,
+        details: Map<String, Any?>,
+    ) = AuditRow(event, userId, null, null, null, ObjectMapper().writeValueAsString(details))
+
+    private fun IThrowableProxy?.render(): String =
+        if (this == null) "" else "$className: $message | " + cause.render() + suppressed.joinToString(" ") { it.render() }
+
     private fun rowsWith(marker: String): Int =
         jdbc.queryForObject(
             "SELECT COUNT(*) FROM audit_log WHERE details_json ->> 'marker' = :marker",
@@ -192,5 +240,6 @@ class AuditLoggerBatchingIntegrationTest {
         const val ORDERED = 100
         const val BATCH = 500
         const val SIXTY_SECONDS = 60L
+        const val ROW_CONTENT = "row-content-266b-must-not-be-logged"
     }
 }

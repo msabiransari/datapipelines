@@ -1,11 +1,16 @@
 package co.datapipelines.web
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.classic.spi.IThrowableProxy
+import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuthErrorWriter
 import co.datapipelines.events.DataReady
 import co.datapipelines.events.ExecutionStarted
 import co.datapipelines.events.NodeCompleted
 import co.datapipelines.events.NodeStarted
 import co.datapipelines.events.PipelineCompleted
+import co.datapipelines.events.SseEventType
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
@@ -25,9 +30,11 @@ import co.datapipelines.web.metrics.WebMetrics
 import co.datapipelines.web.ratelimit.RateLimitFilter
 import co.datapipelines.web.ratelimit.RedisRateLimiter
 import co.datapipelines.web.sse.BatchedEventRecorder
+import co.datapipelines.web.sse.DirectEventRecorder
 import co.datapipelines.web.sse.ExecutionContext
 import co.datapipelines.web.sse.ExecutionEventRowSink
 import co.datapipelines.web.sse.LoggedSseEvent
+import co.datapipelines.web.sse.RecordedEvent
 import co.datapipelines.web.sse.ReplayLogSink
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.WebEventEmitter
@@ -47,6 +54,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.mock.web.MockHttpServletRequest
@@ -188,6 +196,33 @@ class WebPersistenceIntegrationTest {
                 listOf("execution_started", "node_started", "node_completed", "pipeline_completed", "data_ready")
             replayed.map { it.eventId } shouldBe listOf(1, 2, 3, 4, 5)
         }
+
+    @Test
+    fun `the direct recorder's WARN for a refused row names the failure's class and SQLState, never the payload`() =
+        runBlocking<Unit> {
+            // #266b: the pre-266 path (`datapipelines.persistence.enabled: false`) attached the store's
+            // exception to its WARN, and Postgres quotes a refused JSONB payload in CONTEXT. A NUL in a
+            // payload value is such a row: Jackson escapes it, the jsonb cast refuses it — before any
+            // foreign key is checked, so no execution row is needed.
+            val appender = ListAppender<ILoggingEvent>().apply { start() }
+            val recorderLog = LoggerFactory.getLogger(DirectEventRecorder::class.java) as Logger
+            recorderLog.addAppender(appender)
+            try {
+                DirectEventRecorder(events, eventLog, Dispatchers.IO).record(
+                    RecordedEvent(UUID.randomUUID(), 1, SseEventType.NODE_STARTED, "node_started", Instant.now(), mapOf("v" to "$ROW_CONTENT\u0000")),
+                )
+            } finally {
+                recorderLog.detachAppender(appender)
+            }
+            val rendered = appender.list.map { it.formattedMessage + " " + it.throwableProxy.render() }
+            withClue("every WARN, rendered whole: $rendered") {
+                rendered.none { it.contains(ROW_CONTENT) } shouldBe true
+                rendered.single() shouldContain "sql_state=22P05"
+            }
+        }
+
+    private fun IThrowableProxy?.render(): String =
+        if (this == null) "" else "$className: $message | " + cause.render() + suppressed.joinToString(" ") { it.render() }
 
     @Test
     fun `the same sequence through the BATCHED recorder lands the same rows and the same replay, 1 to N`() =
@@ -516,6 +551,7 @@ class WebPersistenceIntegrationTest {
         const val BATCHES = 20
         const val ONE_HOUR_SECONDS = 3_600L
         const val TTL_SLACK_SECONDS = 60L
+        const val ROW_CONTENT = "row-content-266b-must-not-be-logged"
 
         /** The V4-seeded `default` workspace the pipeline fixture and every repository read are scoped to. */
         val DEFAULT_WORKSPACE_ID: UUID = UUID.fromString("defa0000-0000-0000-0000-000000000001")
