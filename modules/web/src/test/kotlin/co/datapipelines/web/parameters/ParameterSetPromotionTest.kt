@@ -88,7 +88,10 @@ class ParameterSetPromotionTest {
             { bound.releasedAt shouldBe now },
             { bound.body.displayName shouldBe "Region filters" },
             { bound.body.parameters.size shouldBe 2 },
-            { bound.body.parameters[1].source?.template?.id shouldBe TEMPLATE_ID },
+            {
+                val state = bound.body.parameters[1].source
+                state?.template?.id shouldBe TEMPLATE_ID
+            },
         )
         verify { receiveValidation wasNot Called }
     }

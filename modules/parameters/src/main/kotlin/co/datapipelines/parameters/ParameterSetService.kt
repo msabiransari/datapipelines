@@ -290,7 +290,11 @@ class ParameterSetService(
         export: ParameterSetExport,
         actor: UUID,
     ): ParameterSetImported =
-        importValidated(workspaceId, export.copy(body = validateForImport(workspaceId, ParameterSetDocument(export.name, export.body)).body), actor)
+        importValidated(
+            workspaceId,
+            export.copy(body = validateForImport(workspaceId, ParameterSetDocument(export.name, export.body)).body),
+            actor,
+        )
 
     /**
      * Record §8.3's validation half of [import], alone: the FULL §4 (the selector probe included) against

@@ -252,7 +252,11 @@ class ParameterSetTransferE2eTest {
 
         withClue("C29 at the landing: $refused") { status shouldBe 409 }
         errorCode(refused) shouldBe "parameter.version.conflict"
-        refused.path("error").path("details").path("reason").asText() shouldBe "id_taken"
+        refused
+            .path("error")
+            .path("details")
+            .path("reason")
+            .asText() shouldBe "id_taken"
 
         val receiverDb = checkNotNull(receiver).jdbc
         val ws2 = receiverDb.scalar("SELECT id::text FROM workspaces WHERE name = '$WS_PROMO2'")
@@ -265,7 +269,8 @@ class ParameterSetTransferE2eTest {
         withClue("the refusing set must NOT be in the target workspace") {
             receiverDb
                 .scalar(
-                    "SELECT count(*) FROM parameter_sets WHERE workspace_id::text = '$ws2' AND id = '${envelope.path("parameter_set").path("id").asText()}'",
+                    "SELECT count(*) FROM parameter_sets WHERE workspace_id::text = '$ws2'" +
+                        " AND id = '${envelope.path("parameter_set").path("id").asText()}'",
                 ) shouldBe "0"
         }
     }

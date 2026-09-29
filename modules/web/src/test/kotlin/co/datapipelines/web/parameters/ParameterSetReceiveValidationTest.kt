@@ -38,7 +38,6 @@ import java.util.UUID
  * argument, OUTSIDE any transaction.
  */
 class ParameterSetReceiveValidationTest {
-    private val sets = mockk<co.datapipelines.parameters.ParameterSetService>()
     private val repository = mockk<TemplateRepository>()
     private val renderer = mockk<TemplateDryRenderer>()
     private val statuses = mockk<TemplateVersionStatuses>()
@@ -48,7 +47,6 @@ class ParameterSetReceiveValidationTest {
 
     private val validation =
         ParameterSetReceiveValidation(
-            sets,
             WorkspaceTemplateEngines(repository, 16, 5_000, 64L * 1024 * 1024),
             renderer,
             statuses,
@@ -77,11 +75,15 @@ class ParameterSetReceiveValidationTest {
                 listOf(entry(DOCUMENT)),
             )
 
+        val single = validated.single()
         assertAll(
             { validated.size shouldBe 1 },
-            { validated.single().bound.name shouldBe SET_NAME },
-            { validated.single().canonical.parameters.size shouldBe 2 },
-            { validated.single().canonical.parameters[1].source?.template?.id shouldBe TEMPLATE_ID },
+            { single.bound.name shouldBe SET_NAME },
+            { single.canonical.parameters.size shouldBe 2 },
+            {
+                val state = single.canonical.parameters[1].source
+                state?.template?.id shouldBe TEMPLATE_ID
+            },
             // Step 5 rendered the PAYLOAD through the engine; step 6 ran it on the TARGET
             // workspace's own datasource — the workspace as an argument, never the principal.
             { probedWorkspace.captured shouldBe workspaceId },
@@ -102,9 +104,10 @@ class ParameterSetReceiveValidationTest {
                 validation.validate(workspaceId, emptyList(), listOf(entry(DOCUMENT)))
             }
 
+        val failure = refusal.result.failures.single()
         assertAll(
             { refusal.code shouldBe ParameterErrorCodes.IMPORT_MISSING_TEMPLATE },
-            { refusal.result.failures.single().code shouldBe ParameterErrorCodes.IMPORT_MISSING_TEMPLATE },
+            { failure.code shouldBe ParameterErrorCodes.IMPORT_MISSING_TEMPLATE },
         )
         verify { probe wasNot Called }
     }
@@ -120,7 +123,8 @@ class ParameterSetReceiveValidationTest {
                 )
             }
 
-        refusal.result.failures.single().code shouldBe "template.validation.parameter_interpolated"
+        val interpolated = refusal.result.failures.single()
+        interpolated.code shouldBe "template.validation.parameter_interpolated"
     }
 
     @Test
@@ -133,7 +137,9 @@ class ParameterSetReceiveValidationTest {
         // Step 5's render for a STORED pin goes through the production probe (SelectorRunner's
         // render via the workspace engines) — the delegation arm under test.
         every { probe.render(workspaceId, TemplateRef(TEMPLATE_ID, 1), any()) } returns
-            co.datapipelines.parameters.SelectorRender.Rendered(SELECT_BODY)
+            co.datapipelines.parameters
+                .SelectorRender
+                .Rendered(SELECT_BODY)
         val rendered = slot<String>()
         every { probe.probe(any(), DATASOURCE, capture(rendered), any(), any()) } returns SELECT_PROBED
 

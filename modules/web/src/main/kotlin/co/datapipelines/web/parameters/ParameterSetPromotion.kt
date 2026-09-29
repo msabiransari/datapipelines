@@ -53,6 +53,7 @@ class ParameterSetPromotion(
         val bound: Bound,
         val canonical: ParameterSetBody,
     )
+
     /**
      * The sender's entry for [name]'s current release, or null when it is not promotable
      * (no release). §10.3's guards: released and NEWER than the target's entry — the same

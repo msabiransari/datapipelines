@@ -56,7 +56,6 @@ import java.util.UUID
  * landing inside the transaction and rolls the batch back whole on a mismatch (C36).
  */
 class ParameterSetReceiveValidation(
-    private val sets: co.datapipelines.parameters.ParameterSetService,
     private val engines: WorkspaceTemplateEngines,
     /** The receiver's production renderer — what non-batch pins read (delegation). */
     private val renderer: TemplateDryRenderer,
@@ -129,7 +128,7 @@ internal class PayloadTemplates private constructor(
             entries.forEach { entry ->
                 val version = entry.get("version")?.takeIf(JsonNode::isInt)?.asInt() ?: return@forEach
                 when (val outcome = deserializer.fromTree(entry)) {
-                    is TemplateDeserializationOutcome.Parsed ->
+                    is TemplateDeserializationOutcome.Parsed -> {
                         outcome.draft.id?.let { id ->
                             byKey["$id@$version"] =
                                 TemplateVersion(
@@ -147,7 +146,11 @@ internal class PayloadTemplates private constructor(
                                     bodyHash = "",
                                 )
                         }
-                    is TemplateDeserializationOutcome.Rejected -> Unit
+                    }
+
+                    is TemplateDeserializationOutcome.Rejected -> {
+                        // The import inside the transaction remains the authority on template shape.
+                    }
                 }
             }
             return PayloadTemplates(byKey)
@@ -168,7 +171,11 @@ private class OverlayRegistry(
     override fun existsId(id: String): Boolean = payloads.holdsId(id) || stored.existsId(id)
 }
 
-/** A batch-brought pin is RELEASED: the preserved-version import lands it RELEASED (or is the idempotent no-op of one); anything else refuses `template.version.conflict` inside the transaction and rolls the batch back whole. */
+/**
+ * A batch-brought pin is RELEASED: the preserved-version import lands it RELEASED (or is the
+ * idempotent no-op of one); anything else refuses `template.version.conflict` inside the
+ * transaction and rolls the batch back whole.
+ */
 private class OverlayStatuses(
     private val payloads: PayloadTemplates,
     private val stored: TemplateVersionStatuses,
@@ -178,7 +185,11 @@ private class OverlayStatuses(
         templateId: String,
         version: Int,
     ): PipelineVersionStatus? =
-        if (payloads.versionOf(templateId, version) != null) PipelineVersionStatus.RELEASED else stored.statusOf(workspaceId, templateId, version)
+        if (payloads.versionOf(templateId, version) != null) {
+            PipelineVersionStatus.RELEASED
+        } else {
+            stored.statusOf(workspaceId, templateId, version)
+        }
 }
 
 /**
