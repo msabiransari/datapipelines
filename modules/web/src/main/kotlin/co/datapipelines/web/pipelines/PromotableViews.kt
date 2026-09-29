@@ -31,6 +31,8 @@ class PromotableViews(
     private val client: PromotionTargetClient,
     /** #194 lane D — the set arm of §10.2. Required: the lens's set arm is never silently empty (#300). */
     private val parameterSets: co.datapipelines.parameters.ParameterSetRepository,
+    /** #10 L1b — the dashboards the dashboard and visualization lenses derive from. Required, the #300 rule. */
+    private val dashboards: co.datapipelines.visualization.DashboardService,
 ) : PromoterLens {
     override fun viewFor(principal: AuthenticatedPrincipal): LensedView {
         if (!principal.isLensed) return LensedView.EVERYTHING
@@ -39,10 +41,13 @@ class PromotableViews(
         val workspace = principal.workspace ?: return unavailable("no_workspace")
         return when (val computed = compute(workspace.id, workspace.name)) {
             is Computed.Ready -> {
+                val derived = dashboardLenses(workspace.id, computed.view.pipelineLens)
                 LensedView(
                     computed.view.pipelineLens,
                     computed.view.templateLens,
                     parameterSets = computed.view.parameterSetLens,
+                    visualizations = derived.visualizations,
+                    dashboards = derived.dashboards,
                 )
             }
 
@@ -78,8 +83,31 @@ class PromotableViews(
             parameterSets.findCurrentVersions(workspaceId),
         )
 
+    /**
+     * #10 L1b — the workspace's current RELEASED dashboards (one lensless read each: the derivation needs the pins),
+     * judged against the pipeline lens by [PromotableView.dashboardLenses]. Only a lensed principal pays for it.
+     */
+    private fun dashboardLenses(
+        workspaceId: UUID,
+        pipelineLens: ReadLens,
+    ): PromotableView.DashboardLenses =
+        PromotableView.dashboardLenses(
+            dashboards.currentVersions(workspaceId).mapNotNull { current ->
+                dashboards.findVersion(workspaceId, ReadLens.Everything, current.id, current.version)?.let { current.name to it.body }
+            },
+            pipelineLens,
+        )
+
+    /** Fail closed: every lens — the dashboard and visualization arms included — admits NOTHING. */
     private fun unavailable(reason: String): LensedView =
-        LensedView(ReadLens.NOTHING, ReadLens.NOTHING, LensedView.Unavailable(client.targetBaseUrl, reason), ReadLens.NOTHING)
+        LensedView(
+            ReadLens.NOTHING,
+            ReadLens.NOTHING,
+            LensedView.Unavailable(client.targetBaseUrl, reason),
+            ReadLens.NOTHING,
+            visualizations = ReadLens.NOTHING,
+            dashboards = ReadLens.NOTHING,
+        )
 
     /** [compute]'s two outcomes: the view against the inventory it was computed from, or why there is none. */
     sealed interface Computed {

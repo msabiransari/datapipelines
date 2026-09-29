@@ -351,6 +351,12 @@ class ApiExceptionHandler {
             // what the code cannot.
             uri.startsWith("$API_PREFIX/endpoints") -> PipelineErrorCodes.Endpoint.PATH_INVALID
 
+            // #10 L1b: the two artifact families answer an unreadable body with their OWN `body_invalid` 400
+            // (pipeline-contract §13.22/§13.23) — never the pipeline family's code, which names no visualization.
+            uri.startsWith("$API_PREFIX/visualizations") -> PipelineErrorCodes.Visualization.BODY_INVALID
+
+            uri.startsWith("$API_PREFIX/dashboards") -> PipelineErrorCodes.Dashboard.BODY_INVALID
+
             else -> PipelineErrorCodes.Validation.SCHEMA_VERSION_UNSUPPORTED
         }
 

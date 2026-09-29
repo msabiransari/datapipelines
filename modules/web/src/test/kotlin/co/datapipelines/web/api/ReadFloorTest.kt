@@ -67,6 +67,10 @@ class ReadFloorTest {
         // …and the sharp ones by name, so the classifier has to get the DIRECTION right.
         familyOf("/api/v1/parameter-sets") shouldBeFamily Family.PARAMETER_SETS
         familyOf("/api/v1/parameter-sets/{id}/versions/{version}") shouldBeFamily Family.PARAMETER_SETS
+        familyOf("/api/v1/visualizations") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/api/v1/visualizations/{id}/versions/{version}") shouldBeFamily Family.VISUALIZATIONS
+        familyOf("/api/v1/dashboards") shouldBeFamily Family.DASHBOARDS
+        familyOf("/api/v1/dashboards/{id}/versions") shouldBeFamily Family.DASHBOARDS
         familyOf("/executions") shouldBeFamily Family.EXECUTIONS
         familyOf("/api/v1/executions/{id}/result") shouldBeFamily Family.EXECUTIONS
         familyOf("/partials/recent-executions") shouldBeFamily Family.EXECUTIONS
@@ -216,6 +220,20 @@ class ReadFloorTest {
             floor = 4,
             permissions = setOf(Permission.PARAMETER_SET_READ),
             matches = { path -> path.startsWith("/api/v1/parameter-sets") },
+        ),
+
+        /** #10 L1b: the visualizations — an every-role read (the lens aside); floor = the family's five GET handlers. */
+        VISUALIZATIONS(
+            floor = 5,
+            permissions = setOf(Permission.VISUALIZATION_READ),
+            matches = { path -> path.startsWith("/api/v1/visualizations") },
+        ),
+
+        /** #10 L1b: the dashboards — the same row shape; floor = the family's five GET handlers. */
+        DASHBOARDS(
+            floor = 5,
+            permissions = setOf(Permission.DASHBOARD_READ),
+            matches = { path -> path.startsWith("/api/v1/dashboards") },
         ),
 
         /** Everything else a signed-in person reads: the every-role reads (the lens aside, one row shape). */

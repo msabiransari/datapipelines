@@ -55,6 +55,12 @@ class PromotableView private constructor(
     val templateLens: ReadLens = ReadLens.Only(templates.mapTo(LinkedHashSet()) { it.name })
     val parameterSetLens: ReadLens = ReadLens.Only(parameterSets.mapTo(LinkedHashSet()) { it.name })
 
+    /** #10 L1b — the two lenses [dashboardLenses] derives; both admit nothing when no dashboard qualifies. */
+    data class DashboardLenses(
+        val visualizations: ReadLens,
+        val dashboards: ReadLens,
+    )
+
     /** The listing row for [name], or null when [name] is not promotable — the promote path's root guard reads this. */
     fun pipeline(name: String): Candidate? = pipelines.firstOrNull { it.name == name }
 
@@ -91,6 +97,32 @@ class PromotableView private constructor(
                 examinedPipelines = localPipelines.size,
                 examinedTemplates = localTemplates.size,
             )
+        }
+
+        /**
+         * #10 L1b — the dashboard and visualization lenses (D50; the implementation spec's §5/§6.1), derived from
+         * the pipeline lens this view already computed, so a promoter's dashboards can never outrun her pipelines:
+         *
+         * - **dashboards**: every RELEASED current dashboard newer than the promotion target's whose EVERY source
+         *   pipeline [pipelineLens] admits. "Newer than the target" is §10.2's rule over the dashboard itself; the
+         *   promotion wire carries no dashboard inventory until L1c adds it, so today the target holds none (rule 2:
+         *   a name the target lacks counts as version 0) and only the pipeline condition narrows. The spec defines
+         *   the promoter's `dashboard.execute` visibility this way and leaves `dashboard.read` open — this is the
+         *   orchestrator's rule for the read.
+         * - **visualizations**: the ones an admitted dashboard pins (§6.1's rule; its "or own" arm is vacuous — a
+         *   promoter creates nothing).
+         *
+         * [currentDashboards] are the workspace's live dashboards at their current RELEASED version (a draft never
+         * enters: `findCurrentVersions` holds released pointers only).
+         */
+        fun dashboardLenses(
+            currentDashboards: List<Pair<String, co.datapipelines.visualization.DashboardBody>>,
+            pipelineLens: ReadLens,
+        ): DashboardLenses {
+            val admitted = currentDashboards.filter { (_, body) -> body.sources.all { pipelineLens.admits(it.pipeline.name) } }
+            val pinned = admitted.flatMapTo(LinkedHashSet()) { (_, body) -> body.visualizations.map { it.visualization.name } }
+            val names = admitted.mapTo(LinkedHashSet()) { it.first }
+            return DashboardLenses(visualizations = ReadLens.Only(pinned), dashboards = ReadLens.Only(names))
         }
 
         /**

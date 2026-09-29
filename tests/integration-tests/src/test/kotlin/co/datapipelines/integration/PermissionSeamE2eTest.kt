@@ -535,6 +535,7 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
          * #194 lane D adds the NINE parameter-set pairs (the record's §9.3): read/evaluate are
          * every-role rows held also by the author, so no role walk can separate
          * `parameter_set.evaluate`'s route from `parameter_set.read`'s — only a grant can.
+         * #10 L1b adds the FOURTEEN visualization and dashboard rows, for the same reason.
          */
         val WITNESSED =
             listOf(
@@ -562,6 +563,23 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
                 "parameter_set.release",
                 "parameter_set.switch_version",
                 "parameter_set.evaluate",
+                // #10 L1b — the fourteen visualization and dashboard lifecycle rows. read/update are every-author
+                // rows beside create/delete/release; only a grant separates `dashboard.update`'s validate route
+                // from `dashboard.read`'s GETs.
+                "visualization.read",
+                "visualization.create",
+                "visualization.update",
+                "visualization.version.manage",
+                "visualization.delete",
+                "visualization.release",
+                "visualization.switch_version",
+                "dashboard.read",
+                "dashboard.create",
+                "dashboard.update",
+                "dashboard.version.manage",
+                "dashboard.delete",
+                "dashboard.release",
+                "dashboard.switch_version",
             )
 
         /** `workspace id -> the one permission granted there`, read by the synthetic grant. */

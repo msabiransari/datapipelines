@@ -58,6 +58,25 @@ enum class Permission(
     PARAMETER_SET_SWITCH_VERSION("parameter_set.switch_version"),
     PARAMETER_SET_EVALUATE("parameter_set.evaluate"),
 
+    // #10 dashboards (the implementation spec's §5; L1b) — the two artifact families' lifecycle rows, the
+    // parameter-set rows' shape. `*_IMPORT` lands with L1c's import routes (between DELETE and RELEASE),
+    // `DASHBOARD_EXECUTE` with L2's runtime, `DASHBOARD_KEY_BIND` with L5 — a row nothing claims fails
+    // MatrixRowReachabilityTest, so none is declared ahead of its surface.
+    VISUALIZATION_READ("visualization.read"),
+    VISUALIZATION_CREATE("visualization.create"),
+    VISUALIZATION_UPDATE("visualization.update"),
+    VISUALIZATION_VERSION_MANAGE("visualization.version.manage"),
+    VISUALIZATION_DELETE("visualization.delete"),
+    VISUALIZATION_RELEASE("visualization.release"),
+    VISUALIZATION_SWITCH_VERSION("visualization.switch_version"),
+    DASHBOARD_READ("dashboard.read"),
+    DASHBOARD_CREATE("dashboard.create"),
+    DASHBOARD_UPDATE("dashboard.update"),
+    DASHBOARD_VERSION_MANAGE("dashboard.version.manage"),
+    DASHBOARD_DELETE("dashboard.delete"),
+    DASHBOARD_RELEASE("dashboard.release"),
+    DASHBOARD_SWITCH_VERSION("dashboard.switch_version"),
+
     // §2.2 — executions. The two `_all` rows have no surface of their own: they lift "own"
     // (D11) where a read or cancel path asks for them.
     EXECUTION_READ("execution.read"),

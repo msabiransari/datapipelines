@@ -5,6 +5,13 @@ import co.datapipelines.auth.Permission.API_KEY_CREATE
 import co.datapipelines.auth.Permission.API_KEY_READ
 import co.datapipelines.auth.Permission.API_KEY_REVOKE
 import co.datapipelines.auth.Permission.CALCULATOR_READ
+import co.datapipelines.auth.Permission.DASHBOARD_CREATE
+import co.datapipelines.auth.Permission.DASHBOARD_DELETE
+import co.datapipelines.auth.Permission.DASHBOARD_READ
+import co.datapipelines.auth.Permission.DASHBOARD_RELEASE
+import co.datapipelines.auth.Permission.DASHBOARD_SWITCH_VERSION
+import co.datapipelines.auth.Permission.DASHBOARD_UPDATE
+import co.datapipelines.auth.Permission.DASHBOARD_VERSION_MANAGE
 import co.datapipelines.auth.Permission.DATASOURCE_GRANT
 import co.datapipelines.auth.Permission.DATASOURCE_INTROSPECT
 import co.datapipelines.auth.Permission.DATASOURCE_MANAGE
@@ -76,6 +83,13 @@ import co.datapipelines.auth.Permission.TEMPLATE_UPDATE
 import co.datapipelines.auth.Permission.TEMPLATE_VERSION_MANAGE
 import co.datapipelines.auth.Permission.USER_IDENTITY_RESET
 import co.datapipelines.auth.Permission.USER_MANAGE
+import co.datapipelines.auth.Permission.VISUALIZATION_CREATE
+import co.datapipelines.auth.Permission.VISUALIZATION_DELETE
+import co.datapipelines.auth.Permission.VISUALIZATION_READ
+import co.datapipelines.auth.Permission.VISUALIZATION_RELEASE
+import co.datapipelines.auth.Permission.VISUALIZATION_SWITCH_VERSION
+import co.datapipelines.auth.Permission.VISUALIZATION_UPDATE
+import co.datapipelines.auth.Permission.VISUALIZATION_VERSION_MANAGE
 import co.datapipelines.auth.Permission.WORKSPACE_CREATE
 import co.datapipelines.auth.Permission.WORKSPACE_LIFECYCLE
 import co.datapipelines.auth.Permission.WORKSPACE_MEMBERS_MANAGE
@@ -115,6 +129,10 @@ object RolePermissions {
             // lens is a value on the read surface, never a row here).
             PARAMETER_SET_READ,
             PARAMETER_SET_EVALUATE,
+            // #10 L1b: every role reads visualizations and dashboards (the parameter-set read row's cells); the
+            // promoter's read is LENSED — a value on the read surface, never a row here.
+            VISUALIZATION_READ,
+            DASHBOARD_READ,
             EXECUTION_READ,
             EXECUTION_RESULT_READ,
             EXECUTION_CANCEL,
@@ -164,6 +182,20 @@ object RolePermissions {
                 PARAMETER_SET_IMPORT,
                 PARAMETER_SET_RELEASE,
                 PARAMETER_SET_SWITCH_VERSION,
+                // #10 L1b: authoring visualizations and dashboards is the author's, exactly as parameter sets'
+                // (validate is `dashboard.update` — an authoring verb, owner ruling 2026-09-29).
+                VISUALIZATION_CREATE,
+                VISUALIZATION_UPDATE,
+                VISUALIZATION_VERSION_MANAGE,
+                VISUALIZATION_DELETE,
+                VISUALIZATION_RELEASE,
+                VISUALIZATION_SWITCH_VERSION,
+                DASHBOARD_CREATE,
+                DASHBOARD_UPDATE,
+                DASHBOARD_VERSION_MANAGE,
+                DASHBOARD_DELETE,
+                DASHBOARD_RELEASE,
+                DASHBOARD_SWITCH_VERSION,
                 DATASOURCE_PREVIEW_ROWS,
                 DATASOURCE_SQL_PROBE,
                 LAKE_TABLE_MANAGE,
@@ -194,6 +226,10 @@ object RolePermissions {
             // #194 lane D: the promoter reads parameter sets through the LENS (§9.3) — released
             // sets newer than the promotion target's; the lens travels on the read.
             PARAMETER_SET_READ,
+            // #10 L1b: the promoter reads dashboards and visualizations through the LENS — released dashboards whose
+            // every source pipeline the pipeline lens admits, and the visualizations they pin.
+            VISUALIZATION_READ,
+            DASHBOARD_READ,
             DATASOURCE_READ,
             DATASOURCE_INTROSPECT,
             ENDPOINT_READ,
