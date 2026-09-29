@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
 import java.util.UUID
 
@@ -370,6 +371,14 @@ class WebEventEmitterTest {
             verify(exactly = 1) { sse.send(any<org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEventBuilder>()) }
         }
 
+    /**
+     * #306 — the order for the first event: the started HOOK (the launcher's stream registration)
+     * → the RUNNING row's insert → `onRecorded` (the scheduler's start barrier) → the live SEND.
+     * The row is committed before the frame that carries the id, so a client that cancels or reads
+     * on the id the moment the frame lands is answered 204/200, never `404
+     * result.execution_not_found`. Red on the pre-#306 order (hook, send, insert, recorded) — the
+     * send is first there. The stream is registered through the hook, exactly as the launcher does.
+     */
     @Test
     fun `the started hook runs before persistence, the recorded hook only after the row exists`() =
         runTest {
@@ -380,11 +389,25 @@ class WebEventEmitterTest {
             }
             every { eventRepository.append(any<UUID>(), any(), any(), any(), any()) } just runs
             every { eventLog.append(any(), any()) } just runs
+            val sse = mockk<org.springframework.web.servlet.mvc.method.annotation.SseEmitter>(relaxed = true)
+            every { sse.send(any<SseEmitter.SseEventBuilder>()) } answers { order += "send" }
 
-            hookedEmitter(onRecorded = { order += "recorded" }, onStarted = { order += "started" })
-                .emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
+            hookedEmitter(
+                onRecorded = { order += "recorded" },
+                onStarted = {
+                    order += "started"
+                    // The payload carries java.time values; production's mapper has the module, so
+                    // this one does too — the same shape the trailing-lambda case below uses.
+                    val mapper =
+                        com.fasterxml.jackson.databind.json.JsonMapper
+                            .builder()
+                            .findAndAddModules()
+                            .build()
+                    registry.register(ExecutionStream(it, userId, sse, mapper))
+                },
+            ).emit(ExecutionStarted(executionId, pipelineId, 3, emptyMap(), startedAt = NOW))
 
-            order shouldBe listOf("started", "insert", "recorded")
+            order shouldBe listOf("started", "insert", "recorded", "send")
         }
 
     @Test

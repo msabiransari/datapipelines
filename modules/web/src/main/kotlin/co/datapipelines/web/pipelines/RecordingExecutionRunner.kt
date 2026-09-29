@@ -153,6 +153,8 @@ class RecordingExecutionRunner(
                 eventRepository = eventRepository,
                 executionRepository = executionRepository,
                 persistenceDispatcher = persistenceDispatcher,
+                lifecycleWriteTimeout = java.time.Duration.ofSeconds(executorConfig.lifecycleWriteTimeoutSeconds.toLong()),
+                metrics = executorMetrics,
                 eventRecorder = eventRecorder,
                 failClosedOnRecord = failClosed,
                 onRecorded = onRecorded,

@@ -239,6 +239,8 @@ class ExecutionStreamLauncher(
                 eventRepository = eventRepository,
                 executionRepository = executionRepository,
                 persistenceDispatcher = persistenceDispatcher,
+                lifecycleWriteTimeout = Duration.ofSeconds(executorConfig.lifecycleWriteTimeoutSeconds.toLong()),
+                metrics = executorMetrics,
                 eventRecorder = eventRecorder,
             ) { onExecutionStarted(it, request, sse) }
         val executor = executorFactory?.invoke(emitter) ?: newExecutor(emitter, workspaceId)

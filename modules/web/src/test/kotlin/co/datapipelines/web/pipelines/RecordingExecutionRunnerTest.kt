@@ -56,7 +56,11 @@ class RecordingExecutionRunnerTest {
             cancellationFlags = mockk(),
             executionSlots = mockk(),
             executorDispatcher = mockk(),
-            executorConfig = mockk(),
+            // The runner reads the #311 lifecycle bound off the config at emit construction.
+            executorConfig =
+                mockk {
+                    every { lifecycleWriteTimeoutSeconds } returns 10
+                },
             resultUrls = mockk(),
             executorMetrics = mockk(),
             executionProgress = ExecutionProgress.NONE,

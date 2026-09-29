@@ -1,6 +1,7 @@
 package co.datapipelines.executor
 
 import co.datapipelines.pipeline.PipelineErrorCodes
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import java.sql.ResultSet
@@ -143,10 +144,35 @@ data class ExecutionRecord(
  */
 class ExecutionRepository(
     private val jdbc: NamedParameterJdbcTemplate,
+    /**
+     * #311 — `datapipelines.executor.lifecycle-write-timeout-seconds`: a JDBC `queryTimeout` on
+     * exactly the two lifecycle statements ([create], [complete]), the tier that cancels a
+     * statement at the driver when the database answers slowly and frees its thread. The bound
+     * rides a dedicated `JdbcTemplate` on the same DataSource so no other statement in this
+     * repository inherits it — the reads and the sweep stay unbounded. 0 (every direct
+     * construction, tests) means unbounded. A server that never answers cannot be reached by a
+     * statement timeout at all (measured: pgjdbc's cancel cannot be delivered to a paused
+     * Postgres); that case is the CALLER-side bound in `WebEventEmitter`, which reads the same
+     * key through `ExecutorConfig`.
+     */
+    lifecycleWriteTimeoutSeconds: Int = 0,
 ) {
+    private val lifecycleJdbc: NamedParameterJdbcTemplate =
+        if (lifecycleWriteTimeoutSeconds > 0) {
+            val dataSource =
+                requireNotNull(jdbc.jdbcTemplate.dataSource) {
+                    "lifecycleWriteTimeoutSeconds requires a DataSource-backed NamedParameterJdbcTemplate"
+                }
+            NamedParameterJdbcTemplate(
+                JdbcTemplate(dataSource).apply { queryTimeout = lifecycleWriteTimeoutSeconds },
+            )
+        } else {
+            jdbc
+        }
+
     /** Inserts the `RUNNING` row at execution start. */
     fun create(record: ExecutionRecord): ExecutionRecord {
-        jdbc.update(
+        lifecycleJdbc.update(
             """
             INSERT INTO pipeline_executions (
                 execution_id, pipeline_id, pipeline_version, status, parameters_json,
@@ -203,7 +229,7 @@ class ExecutionRepository(
         resultSizeBytes: Long? = null,
         contextJson: String? = null,
     ): Boolean =
-        jdbc.update(
+        lifecycleJdbc.update(
             """
             UPDATE pipeline_executions
                SET status = :status,

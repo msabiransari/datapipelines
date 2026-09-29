@@ -558,7 +558,7 @@ class PipelineShapesE2eTest {
         // The DELETE's answer is judged only after the stream has ended, so a red names WHICH
         // refusal it was (a 404 is `result.execution_not_found` or `pipeline.execution.not_running`)
         // beside every event the execution emitted (#295).
-        val answer = cancel ?: throw AssertionError("No DELETE was sent — the stream never reached node_started: ${describe(events)}")
+        val answer = cancel ?: throw AssertionError("No DELETE was sent — the stream never reached execution_started: ${describe(events)}")
         val refused = "DELETE /api/v1/executions/$executionId answered ${answer.status} ${answer.code}: ${answer.body}"
         withClue("$refused | events: ${describe(events)}") {
             answer.status shouldBe 204
@@ -570,13 +570,13 @@ class PipelineShapesE2eTest {
     }
 
     /**
-     * Reads the stream to its end, sending the DELETE on the first `node_started` — never on
-     * `execution_started`. The stream SENDS `execution_started` before the emitter persists the
-     * execution's RUNNING row (`WebEventEmitter.emit`: the send, then `persist`), so a DELETE fired
-     * on that event can reach the controller's lookup first and be refused
-     * `404 result.execution_not_found` (CI run 36381499550: the whole test took 78 ms). The executor
-     * emits `node_started` only after `execution_started`'s emit — the row insert included — has
-     * returned, so on that event the row is RUNNING and visible.
+     * Reads the stream to its end, sending the DELETE on the first `execution_started`. #306 was
+     * the reason this test once cancelled on `node_started` instead: the stream SENT
+     * `execution_started` before the emitter persisted the RUNNING row, so a DELETE fired on it
+     * could be refused `404 result.execution_not_found` (CI run 36381499550). Since #306 the row
+     * is committed before the first frame — `ExecutionStartedRowOrderE2eTest` forces exactly that
+     * race with a held table lock — so the test cancels on the first event again, which is what a
+     * client that reacts to the stream's very first word does.
      */
     private fun readEventsAndCancel(
         reader: BufferedReader,
@@ -594,8 +594,10 @@ class PipelineShapesE2eTest {
                 line.startsWith("data:") -> {
                     val payload = mapper.readTree(line.removePrefix("data:").trim())
                     events += (currentEvent ?: "unknown") to payload
-                    if (currentEvent == "execution_started") executionId = payload["execution_id"].asText()
-                    if (currentEvent == "node_started" && cancel == null) cancel = cancelExecution(executionId)
+                    if (currentEvent == "execution_started" && cancel == null) {
+                        executionId = payload["execution_id"].asText()
+                        cancel = cancelExecution(executionId)
+                    }
                 }
             }
         }

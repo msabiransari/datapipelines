@@ -98,6 +98,17 @@ data class ExecutorConfig(
      */
     val progressSampleIntervalSeconds: Long = 1,
     val heartbeatSeconds: Long = 15,
+    /**
+     * `lifecycle-write-timeout-seconds` (#311) — the bound on the two `pipeline_executions`
+     * lifecycle writes: the RUNNING insert (on `execution_started`) and the terminal UPDATE. Both
+     * layers read it: `ExecutionRepository` sets it as a JDBC `queryTimeout` on exactly those two
+     * statements (a database that answers slowly is cancelled at the statement), and `web`'s
+     * emitter waits at most this long for each (a database that never answers cannot be reached
+     * by a statement timeout — measured). On a past-bound write the outcome is stated: the
+     * insert's failure is the fail-closed rule for scheduled runs, the terminal UPDATE leaves the
+     * row RUNNING for the stale sweep and is counted.
+     */
+    val lifecycleWriteTimeoutSeconds: Int = 10,
     val stagingMaxMemoryMb: Long = 1024,
     val cancelPollIntervalSeconds: Long = 15,
     val maxCompositionDepth: Int = 5,
@@ -135,6 +146,7 @@ data class ExecutorConfig(
             }
         }
         require(cancelGraceSeconds > 0) { "cancelGraceSeconds must be positive, was $cancelGraceSeconds" }
+        require(lifecycleWriteTimeoutSeconds > 0) { "lifecycleWriteTimeoutSeconds must be positive, was $lifecycleWriteTimeoutSeconds" }
         // ZERO IS LEGAL AND MEANS "DO NOT STREAM" — the operator's escape hatch (108 §B). A DQL
         // node's author SQL may legitimately be multi-statement, and pgjdbc's server-side cursor
         // path uses the extended query protocol, which does not carry multiple statements. Every

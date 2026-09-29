@@ -132,7 +132,7 @@ A run is admitted by a worker: capacity first (§7), then the executor prepares 
 
 ### 5.1 Not started means nothing ran
 
-A scheduled launch **fails closed**: the execution may begin only after its `RUNNING` record is written, under an id minted at the claim. So a launch that could not write its record is `not_started` / `record_unwritable` — no node ran — rather than a run in an unknown state. Every `not_started` run still has its trail, which says why.
+A scheduled launch **fails closed**: the execution may begin only after its `RUNNING` record is written, under an id minted at the claim. So a launch that could not write its record is `not_started` / `record_unwritable` — no node ran — rather than a run in an unknown state. Every `not_started` run still has its trail, which says why. The barrier is now trivially true of the wire too (#306): the RUNNING row is committed before the first frame leaves the emitter, so the every-surface assumption "an id that reached a client resolves" holds for the scheduled path and the interactive ones alike. The insert itself is bounded (`datapipelines.executor.lifecycle-write-timeout-seconds`, #311): a past-bound insert is the same `recorded = false` refusal — fail-closed here, a WARN on the interactive paths.
 
 ### 5.2 What blocks
 

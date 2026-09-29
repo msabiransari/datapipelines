@@ -238,6 +238,16 @@ data class ExecutorProperties(
     val progressSampleIntervalSeconds: Long = 1,
     /** `heartbeat-seconds` (108) — how often a running execution stamps `heartbeat_at`; the sweep reaps at 3×. */
     val heartbeatSeconds: Long = 15,
+    /**
+     * `lifecycle-write-timeout-seconds` (#311) — the bound on the two `pipeline_executions`
+     * lifecycle writes: the RUNNING insert and the terminal UPDATE, applied as a JDBC
+     * `queryTimeout` on the two statements (`ExecutionRepository`) and as the emitter's caller-side
+     * wait (which is what bounds a database that never answers). Past it the outcome is stated:
+     * the insert's failure is the fail-closed rule for scheduled runs, the terminal UPDATE leaves
+     * the row RUNNING for the stale sweep and is counted
+     * (`datapipelines.executions.lifecycle_write_failed`).
+     */
+    val lifecycleWriteTimeoutSeconds: Int = 10,
 ) {
     /**
      * What the executor runs with: the alias's value while it is set (the one-release bridge),
@@ -273,6 +283,7 @@ data class ExecutorProperties(
         require(progressWriteIntervalSeconds > 0) { "datapipelines.executor.progress-write-interval-seconds must be > 0" }
         require(progressSampleIntervalSeconds > 0) { "datapipelines.executor.progress-sample-interval-seconds must be > 0" }
         require(heartbeatSeconds > 0) { "datapipelines.executor.heartbeat-seconds must be > 0" }
+        require(lifecycleWriteTimeoutSeconds > 0) { "datapipelines.executor.lifecycle-write-timeout-seconds must be > 0" }
     }
 
     companion object {
