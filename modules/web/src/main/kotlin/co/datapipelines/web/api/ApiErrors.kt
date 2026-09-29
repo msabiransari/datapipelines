@@ -83,6 +83,7 @@ class ApiException(
  * body demonstrably fails — plus `details.reason = "malformed_json"` so the real cause is never
  * ambiguous. The status (400) is right either way; only the code is a stand-in.
  */
+@Suppress("TooManyFunctions") // a catalogue: one constructor per catalogued refusal the surface raises
 object ApiErrors {
     /** `details` key carrying why a 400 was raised when the code alone is a stand-in. */
     const val REASON = "reason"
