@@ -2,8 +2,13 @@ package co.datapipelines.scripting
 
 import co.datapipelines.scripting.ScriptingTestSupport.engine
 import co.datapipelines.scripting.ScriptingTestSupport.limits
+import com.dashjoin.jsonata.Jsonata
+import io.kotest.assertions.withClue
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
@@ -147,9 +152,10 @@ class JsonataEngineNestingLimitTest {
         // red, 2026-09-29) — the boundary guard must answer with the typed refusal.
         // The overflow itself is JIT-state dependent (measured: a warmed JVM ran this
         // shape to completion iteratively even on 256 KB), so a run where the body
-        // merely SUCCEEDS skips honestly — the suite does not pretend to have tested
-        // the guard on a state that never reached it (the conformance suite's
-        // capability-skip precedent).
+        // merely SUCCEEDS is recorded as SKIPPED — an aborted test in the XML, counted by
+        // test-recount.sh's `skipped=` (#322), never a pass: the suite does not pretend to
+        // have tested the guard on a state that never reached it. The two DETERMINISTIC
+        // boundary tests below pin both catches whatever this one does.
         val nonTail = "(\$f := function(\$x){ \$x <= 0 ? 0 : 1 + \$f(\$x - 1) }; \$f(100000))"
         warmEvaluate()
         val caught =
@@ -158,16 +164,118 @@ class JsonataEngineNestingLimitTest {
                     engine.evaluate(engine.compile(nonTail), null, limits(Duration.ofSeconds(30), maxDepth = 1_000_000))
                 }.exceptionOrNull()
             }
-        if (caught == null) {
-            println(
-                "[nesting-limit] SKIPPED: the evaluator ran the deep non-tail body to completion on the " +
-                    "256 KB probe thread (no overflow in this JVM state) — the boundary guard had no input here",
-            )
-            return
+        assumeTrue(caught != null) {
+            "[nesting-limit] SKIPPED: the evaluator ran the deep non-tail body to completion on the " +
+                "256 KB probe thread (no overflow in this JVM state) — the boundary guard had no input here"
         }
         val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
         refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
         refusal.code shouldBe "pipeline.transform.resource_limit"
+    }
+
+    /**
+     * The COMPILE boundary, deterministically (#322). The pre-scan is a bound, not a parser, and
+     * `//` is its blind spot: it skips `//` to the end of the line as a comment, but JSONata has
+     * no line comment — the library reads `1 / /x/[…]`, a division whose right side is a regex
+     * literal with a predicate holding the nested arrays. So the scan counts nothing past it and
+     * the library's recursive parse meets every level.
+     *
+     * [BOUNDARY_DEPTH] levels on a 256 KB thread overflow by construction, in any JIT state:
+     * measured 2026-09-29 (lane 321), this library's parse carries at most 89 levels on 256 KB
+     * cold and 577 once compiled — ~272 bytes a level at best (30,454 levels on 8 MB, 246,337 on
+     * 64 MB). A stack that carried the parse would make the test FAIL, not pass: a compiled script
+     * is not the refusal this test exists to reach.
+     */
+    @Test
+    fun `a body that defeats the pre-scan is refused by the compile boundary, never an Error`() {
+        val body = HIDDEN_BY_LINE_COMMENT + "[".repeat(BOUNDARY_DEPTH) + "0" + "]".repeat(BOUNDARY_DEPTH)
+        // Non-vacuity, the scan: it passes this body, so the scan is not what refuses it.
+        JsonataNestingScan.exceeds(body) shouldBe false
+        // Non-vacuity, the grammar: the same shape past the ceiling (100 levels) COMPILES on the
+        // full stack — the deep body is refused for its depth alone, never for its syntax.
+        engine.compile(HIDDEN_BY_LINE_COMMENT + "[".repeat(100) + "0" + "]".repeat(100))
+        warmCompile()
+        val caught =
+            onSmallStack(256) {
+                runCatching { engine.compile(body) }.exceptionOrNull()
+            }
+        withClue("the parse must overflow the probe thread — a compiled script means the catch was never reached") {
+            caught.shouldNotBeNull()
+        }
+        val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
+        refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
+        refusal.code shouldBe "pipeline.transform.resource_limit"
+        // The boundary's wording, not the scan's ("refused before parsing"): the library parsed.
+        refusal.message shouldContain "overflowed the evaluation stack at compile"
+    }
+
+    /**
+     * The EVALUATE boundary, deterministically (#322). The library's evaluator recurses per
+     * nesting level as its parser does, and the catch at evaluate turns its overflow into the
+     * same refusal. A body this deep cannot pass compile — the ceiling refuses it, which is the
+     * ceiling's point (asserted below) — so the tree is parsed here on a [PARSE_STACK_KB] thread
+     * and handed to evaluate as the compiled script a body that defeated the pre-scan would be.
+     *
+     * [EVALUATE_DEPTH] levels on a 256 KB thread overflow in any JIT state: measured 2026-09-29
+     * (lane 321), the evaluator carries at most 232 levels on 256 KB cold and 444 warm (~356
+     * bytes a level at best: 23,531 on 8 MB). The parse needs at most ~3 KB a level cold, so
+     * ~30 MB of the 64 MB thread.
+     */
+    @Test
+    fun `an evaluation that overflows the stack is refused by the evaluate boundary, never an Error`() {
+        val body = "[".repeat(EVALUATE_DEPTH) + "0" + "]".repeat(EVALUATE_DEPTH)
+        // Why the script is built here and not compiled: compile refuses this body before parsing.
+        JsonataNestingScan.exceeds(body) shouldBe true
+        val parsed = onSmallStack(PARSE_STACK_KB) { Jsonata.jsonata(body) }
+        val script = JsonataCompiledScript(body, parsed.shouldBeInstanceOf<Jsonata>())
+        warmEvaluate()
+        val caught =
+            onSmallStack(256) {
+                runCatching {
+                    engine.evaluate(script, null, limits(Duration.ofSeconds(30), maxDepth = 1_000_000))
+                }.exceptionOrNull()
+            }
+        withClue("the evaluation must overflow the probe thread — a value means the catch was never reached") {
+            caught.shouldNotBeNull()
+        }
+        val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
+        refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
+        refusal.code shouldBe "pipeline.transform.resource_limit"
+        // The direct catch's wording — not the counter's (maxDepth is out of reach) and not the
+        // belt's "mid-evaluation" (nothing wrapped the Error on this path).
+        refusal.message shouldContain "overflowed the evaluation stack at evaluate"
+    }
+
+    /**
+     * The `$eval` route, end to end (#322): a `$eval` string is a string literal to the pre-scan
+     * (skipped by design) and is parsed at EVALUATE time — the engine's `$eval` shadow parses it
+     * with the library's parser for the reserved-bind check before the library runs it.
+     * [BOUNDARY_DEPTH] levels overflow the 256 KB thread in that parse, whatever the JIT state
+     * (the same parser, the same measurement as the compile case). The library WRAPS what a bound
+     * function throws, so this overflow reaches the guard's belt (`JsonataEvaluationGuard.escaped`),
+     * not the evaluate catch — measured by falsification: the evaluate catch replaced by a rethrow
+     * left this test green, the belt's branch removed turned it red.
+     */
+    @Test
+    fun `a $eval string the pre-scan cannot see is refused at evaluate, never an Error`() {
+        val body = "\$eval('" + "[".repeat(BOUNDARY_DEPTH) + "0" + "]".repeat(BOUNDARY_DEPTH) + "')"
+        JsonataNestingScan.exceeds(body) shouldBe false
+        // Non-vacuity, the grammar: a shallow `$eval` string evaluates on the full stack.
+        engine.evaluate(engine.compile("\$eval('[[0]]')"), null, limits()) shouldBe listOf(listOf(0))
+        warmEvaluate()
+        // Compiled on the caller's full stack: to the library's tokenizer the string is one token.
+        val script = engine.compile(body)
+        val caught =
+            onSmallStack(256) {
+                runCatching { engine.evaluate(script, null, limits()) }.exceptionOrNull()
+            }
+        withClue("the \$eval parse must overflow the probe thread — a value means the catch was never reached") {
+            caught.shouldNotBeNull()
+        }
+        val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
+        refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
+        refusal.code shouldBe "pipeline.transform.resource_limit"
+        refusal.message shouldContain "overflowed the evaluation stack mid-evaluation"
     }
 
     @Test
@@ -196,5 +304,23 @@ class JsonataEngineNestingLimitTest {
         val caught = runCatching { engine.compile(hidden) }.exceptionOrNull()
         val refusal = caught.shouldBeInstanceOf<ScriptResourceLimitException>()
         refusal.kind shouldBe ScriptResourceLimitException.Kind.DEPTH
+    }
+
+    private companion object {
+        /**
+         * What the pre-scan reads as a line comment and the library reads as `1 / /x/` — a
+         * division, then a regex literal whatever follows is a predicate on (see the compile
+         * boundary test).
+         */
+        const val HIDDEN_BY_LINE_COMMENT = "1 //x/ "
+
+        /** ~86× the deepest parse a 256 KB thread was measured to carry (577 levels, JIT-compiled). */
+        const val BOUNDARY_DEPTH = 50_000
+
+        /** ~22× the deepest evaluation a 256 KB thread was measured to carry (444 levels, warm). */
+        const val EVALUATE_DEPTH = 10_000
+
+        /** The thread the evaluate case parses its tree on: 64 MB, twice the cold parse's need. */
+        const val PARSE_STACK_KB = 65_536
     }
 }
