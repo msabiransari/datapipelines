@@ -560,6 +560,14 @@ datapipelines:
     audit:
       # #266b: the audit log's own switch, OFF by measurement (configuration.md §3.32).
       enabled: ${DATAPIPELINES_PERSISTENCE_AUDIT_ENABLED:false}
+  # #10 L1a — the visualization and dashboard documents' collection bounds (configuration.md §3.33). Appended
+  # after the whole tree (the reparenting lesson); VisualizationConfigKeysSpecDriftTest pins the neighbours.
+  visualization:
+    max-visualizations-per-dashboard: ${DATAPIPELINES_VISUALIZATION_MAX_VISUALIZATIONS_PER_DASHBOARD:50}
+    max-cases-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_CASES_PER_VISUALIZATION:20}
+    max-fixture-rows-per-case: ${DATAPIPELINES_VISUALIZATION_MAX_FIXTURE_ROWS_PER_CASE:1000}
+    max-config-bytes: ${DATAPIPELINES_VISUALIZATION_MAX_CONFIG_BYTES:262144}
+    max-bindings-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_BINDINGS_PER_VISUALIZATION:64}
 
 # db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
 # (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a
