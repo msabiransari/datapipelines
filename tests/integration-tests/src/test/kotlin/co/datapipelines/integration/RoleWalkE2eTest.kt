@@ -525,7 +525,7 @@ class RoleWalkE2eTest {
          */
         private const val MINIMUM_ROUTES = 60
         private const val MINIMUM_HANDLERS = 100
-        private const val MINIMUM_TOOLS = 48
+        private const val MINIMUM_TOOLS = 59
         private const val ALLOWED_FLOOR = 20
         private const val VIEWER_REFUSED_FLOOR = 40
         private const val AUTHOR_REFUSED_FLOOR = 15

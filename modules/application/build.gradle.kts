@@ -25,6 +25,9 @@ dependencies {
     // the templates scan with ParameterSetTemplatePins (the record's §8.4; the edge was
     // allowed ahead, now that something here compiles against it it is declared).
     implementation(project(":modules:parameters"))
+    // #10 L1b: the dashboard validator's pipeline-release port (PipelineReleaseFactsReader) implements a
+    // `visualization` interface over the read-only rule this module owns — the edge the root map allowed ahead.
+    implementation(project(":modules:visualization"))
 
     // ExecutionLauncher binds parameters and reserves idempotency keys before the surface
     // starts anything; the reservation store and ExecuteRequest are dag types, the principal

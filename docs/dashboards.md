@@ -1,12 +1,13 @@
 # Dashboards
 
-**Status:** v0.1 — the two documents and their lifecycle (#10, lane L1a). The REST routes, the MCP tools and the
-permissions (L1b), the transfer routes (L1c), the runtime (L2), the client runtime and the first-party page (L3),
-the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add their sections as they land.
+**Status:** v0.2 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+permissions (§4, lane L1b). The transfer routes (L1c), the runtime (L2), the client runtime and the first-party page
+(L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add their sections as they land.
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
 (§13.22, §13.23 — the codes), [Metadata DB](metadata-db.md) (§4.28–§4.33 — the tables), [Enumerations](enums.md)
-(§31–§37), [Configuration](configuration.md) (§3.33 — the bounds)
+(§31–§37), [Configuration](configuration.md) (§3.33 — the bounds), [REST API](rest-api.md) (§22, §23 — the routes),
+[MCP Server](mcp-server.md) (§6.2.50–§6.2.60 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
 **Last updated:** 2026-09-29
@@ -219,3 +220,73 @@ envelope's shape is judged before anything lands, the lifecycle fields beside a 
 other unknown key refuses; the same version with the same hash is a no-op; a pin the target lacks is
 `visualization.import.missing_template` or `dashboard.import.missing_dependency`; an id another artifact on the
 server holds is `*.import.id_taken` — never re-issued (C29).
+
+---
+
+## 4. The surfaces
+
+Both families are authored over REST ([REST API §22, §23](rest-api.md)) and MCP ([MCP Server §6.2.50–§6.2.60](mcp-server.md)),
+addressed by id (P24); a multi-segment name never travels in a path. There is no UI page yet (L3). Every body a surface
+takes is read by §1's strict reader with §2.3's bounds, so REST and MCP refuse the same documents with the same codes.
+
+### 4.1 Permissions
+
+Fourteen rows of the permission catalog ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative)), the
+parameter sets' shape:
+
+| Permission | viewer | author | promoter | workspace admin | super admin | What it governs |
+|---|---|---|---|---|---|---|
+| `visualization.read`, `dashboard.read` | ✓ | ✓ | lens | ✓ | ✓ | The reads: the flat listing, the `?prefix=` browse, the working version, the versions |
+| `visualization.create`, `dashboard.create` | ✗ | ✓ | ✗ | ✓ | ✓ | Create (version 1 DRAFT) |
+| `visualization.update`, `dashboard.update` | ✗ | ✓ | ✗ | ✓ | ✓ | The draft write — and, for dashboards, VALIDATE (§4.2) |
+| `visualization.version.manage`, `dashboard.version.manage` | ✗ | ✓ | ✗ | ✓ | ✓ | Purge a draft, discard / restore / purge a version |
+| `visualization.delete`, `dashboard.delete` | ✗ | ✓ | ✗ | ✓ | ✓ | The entity purge (only a draft-only artifact) |
+| `visualization.release`, `dashboard.release` | ✗ | ✓ | ✗ | ✓ | ✓ | Release (§3.1, §3.2) |
+| `visualization.switch_version`, `dashboard.switch_version` | ✗ | ✓ | ✗ | ✓ | ✓ | Switch the served version |
+
+The two transport key roles (`api_caller`, `promotion_receiver`) hold none of them. **The promoter's lens:** a
+RELEASED dashboard newer than the promotion target's whose EVERY source pipeline her pipeline lens admits — so her
+dashboards never outrun her pipelines — and the visualizations those dashboards pin; anything else answers as an absent
+id. The two import rows land with the transfer routes (L1c), the execute row with the runtime (L2), and the key-binding
+row and the `dashboard_viewer` key column with the key kind (L5).
+
+### 4.2 Validate is an author verb
+
+`POST /api/v1/dashboards/{id}/validate` and `dashboards_validate` run §2.2's rules on the WORKING version against the
+dependencies as they are now, write nothing, and answer the verdict (`valid` and every failure) with a `200`. The
+validator reads the pinned pipelines', set's and visualizations' statuses without a lens, so a refusal can name the
+state of a pin the caller could not otherwise see; the verb therefore sits on `dashboard.update`, not
+`dashboard.read` (owner ruling 2026-09-29): a viewer and a promoter never reach it.
+
+### 4.3 What a source must declare
+
+A dashboard source's release is judged at save by its status, its read-only verdict (the published-endpoint rule,
+through child pipelines) and its parameters. Its OUTPUT columns are judged against the visualization input it feeds
+(`dashboard.validation.input_contract_mismatch`) only when the release DECLARES them — when its caller node is a
+transform whose contract names a table output. A release with no caller node declares an empty output (every mapped
+input is refused); a SQL caller node declares nothing, and the check is left to the runtime, which judges the real
+columns (L2) — a guess would refuse or admit on nothing.
+
+### 4.4 The tools
+
+| Tool | Permission | What |
+|---|---|---|
+| `visualizations_list`, `visualizations_get` | `visualization.read` | Browse a level (each row with `used_by`: the dashboards that pin it); read the working version |
+| `visualizations_create`, `visualizations_update` | create / update | Write the document (the arguments ARE its keys); the new-root confirmation on create; `expected_hash` on update |
+| `visualizations_purge_draft` | `visualization.version.manage` | Purge a draft at its hash — never one a live dashboard pins |
+| `dashboards_list`, `dashboards_get` | `dashboard.read` | Browse; read the working version with each pin's status, each source's release and read-only verdict (lensed), and `last_refresh` (null until L2) |
+| `dashboards_create`, `dashboards_update`, `dashboards_purge_draft` | create / update / version.manage | As the visualization tools |
+| `dashboards_validate` | `dashboard.update` | §4.2 |
+
+No tool releases or executes anything; the visualization test tools (`visualizations_test_start`,
+`visualizations_test_submit`) land with the test sessions (L4). The served manual's `dashboards` guide is the
+authoring loop in the order an agent needs it.
+
+---
+
+## Appendix A: Change Log
+
+| Date | Version | Author | Change |
+|---|---|---|---|
+| 2026-09-29 | v0.2 | L1b (#10) the surfaces | **New §4 The surfaces** — the fourteen permission rows and the promoter's lens (§4.1), validate as an author verb (§4.2, owner ruling), what a source must declare for the save-time input check (§4.3), and the eleven MCP tools (§4.4); the REST routes are rest-api §22/§23. The status line names what L1b added. |
+| 2026-09-29 | v0.1 | L1a (#10) the module | The two documents, their bounds and their lifecycle (§1–§3). |

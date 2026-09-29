@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.62 (frozen contract — additive-only changes after this point)
+**Status:** v1.63 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-29
@@ -167,7 +167,7 @@ For self-hosted, internal-users-only deployment, API keys are simpler and suffic
 
 - `instructions` (workspaces design §9) states the workspace context every agent reads first: content in other workspaces is absent (not hidden) — it resolves as not-found — and the key sees exactly the datasources granted to its workspace (D-R7). What follows is ranked for a client that truncates it (#241): where the manual lives, then the draft rule, the name grammar, "humans register datasources" and the three recoveries — all inside 1,843 characters, 10 % under the 2,048-character cap Claude Code applies by default. The full text is §15's Delivery 1 block and ships as `McpServerFactory.SERVER_INSTRUCTIONS`.
 
-- `tools.listChanged: false` — the tool surface is **static**: the same 48 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
+- `tools.listChanged: false` — the tool surface is **static**: the same 59 tools (§6.1) for every caller, for the lifetime of the server. Advertising `true` would promise `notifications/tools/list_changed` messages the v1 server never sends. Dynamic per-pipeline tools (`pipeline_execute_{name}`, which would make the list genuinely mutable) are a v2 item — [ROADMAP §3.7](ROADMAP.md#37-mcp-server). When they land, this flips to `true` together with the notification implementation.
 - `resources.listChanged: false` — the *set of resource URIs* does change as pipelines and executions are created, but the v1 server sends no change notifications; clients re-fetch `resources/list` (§7.3) when they need a current view.
 - `resources.subscribe: false` — no live subscriptions in v1. Clients re-fetch resources as needed.
 - `prompts.listChanged: false` — the prompt surface (§8) is static in v1.
@@ -231,6 +231,17 @@ Tools are named `{domain}_{action}`:
 - `parameter_sets_update`
 - `parameter_sets_evaluate`
 - `parameter_sets_purge_draft`
+- `visualizations_list`
+- `visualizations_get`
+- `visualizations_create`
+- `visualizations_update`
+- `visualizations_purge_draft`
+- `dashboards_list`
+- `dashboards_get`
+- `dashboards_create`
+- `dashboards_update`
+- `dashboards_purge_draft`
+- `dashboards_validate`
 
 A future enhancement: dynamically-generated per-pipeline tools (e.g., `pipeline_execute_monthly_revenue_report`) for pipelines the user wants to expose as named tools to agents. Marked for v2 ([ROADMAP §3.7](ROADMAP.md#37-mcp-server)) — this is why `tools.listChanged` is `false` in v1 (§5.1).
 
@@ -1904,6 +1915,546 @@ Hard-delete a set's DRAFT by id (versioning §5.4): the draft row is deleted, ne
 
 **Permission:** `parameter_set.version.manage`. **Mutating** — the `mcp.tool.write` audit row is the trace of who purged it. **Returns:** `{id, purged: true}`. **Errors:** `parameter.not_found`, `parameter.version.not_draft` (no draft), `parameter.version.conflict` (stale hash).
 
+#### 6.2.50 `visualizations_list`
+
+Browse ONE level of the key's pinned workspace's visualization tree (`prefix` — the `parameter_sets_list` shape; names are folder paths, P24; an absent or empty `prefix` is the roots). Every row carries the visualization's `id` (what the other `visualizations_*` tools take), `name`, `display_name`, `version`, `status`, `current_version` and `used_by` — the dashboards that pin it, as `name@version` (D30): every live one under the whole view, only the dashboards the key's lens admits for a promoter. A promoter's key sees only the visualizations a released dashboard its lens admits pins (rest-api §23.1).
+
+```json
+{
+  "name": "visualizations_list",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "prefix": {
+        "type": "string",
+        "description": "Browse ONE level of the visualization name tree at this prefix. Empty string (or absent) browses the roots."
+      },
+      "limit": {
+        "type": "integer",
+        "default": 50,
+        "maximum": 200
+      }
+    }
+  }
+}
+```
+
+**Permission:** `visualization.read` — every role (the promoter lensed). **Returns:** `{prefix, folders: [{path, segment, visualization_count}], visualizations: [{id, name, display_name, version, status, current_version, used_by: ["name@version"]}], returned}`. **Cost:** one pin scan per row (`limit` ≤ 200).
+
+#### 6.2.51 `visualizations_get`
+
+Read one visualization by id: the WORKING version's full document (renderer, inputs, transform, config, bindings, presentation, tests), its lifecycle state (`version`, `status`, `body_hash`, `current_version`, the `draft` pointer) and `used_by`. Another workspace's visualization — or a lens-hidden one — answers `visualization.not_found`, never a permission error (§11A.1).
+
+```json
+{
+  "name": "visualizations_get",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The visualization's id (visualizations_list returns it)."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `visualization.read`. **Returns:** `{id, name, display_name, description, version, status, body_hash, current_version, draft?, document, used_by}` — `draft` is null under a promoter's narrowing lens. **Errors:** `visualization.not_found`.
+
+#### 6.2.52 `visualizations_create`
+
+Create a visualization: version 1 lands as a DRAFT (no tool releases anything), validated in FULL at save by the same strict reader and validator REST's `POST /api/v1/visualizations` uses — the seven `datapipelines.visualization.*` bounds, the renderer's configuration schema, every binding path (it must already exist in `config`) and column, the transform pin's contract against the inputs (a DRAFT pin is accepted), the test cases. The arguments ARE the document's keys; the 094 new-root confirmation applies.
+
+```json
+{
+  "name": "visualizations_create",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "name",
+      "display_name",
+      "renderer",
+      "inputs",
+      "config"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Folder-path name (2-10 segments, lower-case): acme/visualizations/monthly_revenue. Never renamed."
+      },
+      "display_name": {
+        "type": "string",
+        "description": "Human label, 1-120 characters."
+      },
+      "description": {
+        "type": "string",
+        "description": "Optional; 2000 characters max."
+      },
+      "renderer": {
+        "type": "object",
+        "description": "{kind, version}: kind is plotly, table or kpi (html and svg are reserved and refused); version is the renderer major the host must provide, as a string (\"4\")."
+      },
+      "inputs": {
+        "type": "object",
+        "description": "Named input contracts: {<input>: {columns: [{name, type, nullable}]}}; type is a LogicalType (STRING, INTEGER, DECIMAL, DATE, TIMESTAMP, BOOLEAN, ...). At most 8 inputs, 256 columns each."
+      },
+      "transform": {
+        "type": "object",
+        "description": "Optional: {template: {name, version}, inputs: {<contract input>: <visualization input>}} — a pinned TRANSFORM template whose declared input columns equal the named inputs' columns. Absent: the renderer binds one input directly."
+      },
+      "config": {
+        "type": "object",
+        "description": "The renderer's native configuration, stored verbatim and validated against its schema (plotly: a non-empty data array of supported traces). At most 262,144 bytes."
+      },
+      "bindings": {
+        "type": "object",
+        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
+      },
+      "presentation": {
+        "type": "object",
+        "description": "Optional: {title, tokens} — tokens name theme tokens, never colours."
+      },
+      "tests": {
+        "type": "object",
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, trace_count (with equals), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+      },
+      "confirm_new_root": {
+        "type": "boolean",
+        "description": "Set true ONLY after a person has agreed to a new top-level folder; the refusal names the roots that exist. 'test/' never needs it."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `visualization.create`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`. **Errors:** `visualization.validation.*` (every failure in `details.failures`; `name_taken` 409), `visualization.validation.new_root_requires_confirmation` (`details.existing_roots`), `visualization.authoring.disabled`.
+
+#### 6.2.53 `visualizations_update`
+
+The hash-preconditioned draft write (`parameter_sets_update`'s twin): the first change after a release opens a DRAFT (copy-on-write), later updates overwrite it in place. The whole document is sent and validated in full; a visualization is never renamed.
+
+```json
+{
+  "name": "visualizations_update",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id",
+      "expected_hash",
+      "name",
+      "display_name",
+      "renderer",
+      "inputs",
+      "config"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "expected_hash": {
+        "type": "string",
+        "description": "The body_hash of the version this edit is based on. A mismatch is a 409 conflict; re-read and rebase."
+      },
+      "name": {
+        "type": "string",
+        "description": "Folder-path name (2-10 segments, lower-case): acme/visualizations/monthly_revenue. Never renamed."
+      },
+      "display_name": {
+        "type": "string",
+        "description": "Human label, 1-120 characters."
+      },
+      "description": {
+        "type": "string",
+        "description": "Optional; 2000 characters max."
+      },
+      "renderer": {
+        "type": "object",
+        "description": "{kind, version}: kind is plotly, table or kpi (html and svg are reserved and refused); version is the renderer major the host must provide, as a string (\"4\")."
+      },
+      "inputs": {
+        "type": "object",
+        "description": "Named input contracts: {<input>: {columns: [{name, type, nullable}]}}; type is a LogicalType (STRING, INTEGER, DECIMAL, DATE, TIMESTAMP, BOOLEAN, ...). At most 8 inputs, 256 columns each."
+      },
+      "transform": {
+        "type": "object",
+        "description": "Optional: {template: {name, version}, inputs: {<contract input>: <visualization input>}} — a pinned TRANSFORM template whose declared input columns equal the named inputs' columns. Absent: the renderer binds one input directly."
+      },
+      "config": {
+        "type": "object",
+        "description": "The renderer's native configuration, stored verbatim and validated against its schema (plotly: a non-empty data array of supported traces). At most 262,144 bytes."
+      },
+      "bindings": {
+        "type": "object",
+        "description": "Optional: {<path into config, e.g. data[0].y>: <column of the transform's output, or of the single input>}. Each path must already exist in config; its value is replaced by the column's values at render."
+      },
+      "presentation": {
+        "type": "object",
+        "description": "Optional: {title, tokens} — tokens name theme tokens, never colours."
+      },
+      "tests": {
+        "type": "object",
+        "description": "{cases: [{name, fixtures: {<input>: [rows]}, assertions: [{kind}]}]}; kind is rendered, trace_count (with equals), no_console_errors, text_visible (with text), no_data or value_visible (with text). A release needs at least one case."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `visualization.update`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`. **Errors:** `visualization.not_found`, `visualization.version.conflict` (stale `expected_hash` — re-read and rebase), `visualization.validation.*` (`name_invalid` / `immutable` for another name).
+
+#### 6.2.54 `visualizations_purge_draft`
+
+Hard-delete a visualization's DRAFT by id (versioning §5.4): never restorable; the sole draft takes the visualization with it. `expected_hash` guards the purge. A draft a LIVE dashboard version pins is refused. A RELEASED version is never touched here.
+
+```json
+{
+  "name": "visualizations_purge_draft",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id",
+      "expected_hash"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The visualization's id (visualizations_list returns it)."
+      },
+      "expected_hash": {
+        "type": "string",
+        "description": "The draft's body_hash. A mismatch is a 409 conflict; re-read first."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `visualization.version.manage`. **Mutating** — the `mcp.tool.write` audit row is the trace of who purged it. **Returns:** `{id, purged: true}`. **Errors:** `visualization.not_found`, `visualization.version.not_draft`, `visualization.version.conflict`, `visualization.version.pinned` (`details.pinned_by`).
+
+#### 6.2.55 `dashboards_list`
+
+Browse ONE level of the dashboard tree, the `visualizations_list` shape. A promoter's key sees only RELEASED dashboards whose every source pipeline its pipeline lens admits (rest-api §23.1).
+
+```json
+{
+  "name": "dashboards_list",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "prefix": {
+        "type": "string",
+        "description": "Browse ONE level of the dashboard name tree at this prefix. Empty string (or absent) browses the roots."
+      },
+      "limit": {
+        "type": "integer",
+        "default": 50,
+        "maximum": 200
+      }
+    }
+  }
+}
+```
+
+**Permission:** `dashboard.read` — every role (the promoter lensed). **Returns:** `{prefix, folders: [{path, segment, dashboard_count}], dashboards: [{id, name, display_name, version, status, current_version}], returned}`.
+
+#### 6.2.56 `dashboards_get`
+
+Read one dashboard by id: the WORKING version's full document and lifecycle state, plus `dependencies` — each pinned visualization occurrence's version status and each source pipeline release's status and `read_only` verdict as they are NOW, each read through the caller's lens (a hidden or absent pin answers `status: null` alike; one read per pin, bounded by the reader's 50 visualizations) — and `last_refresh`, which is the dashboard runtime's and answers `null` until it ships.
+
+```json
+{
+  "name": "dashboards_get",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The dashboard's id (dashboards_list returns it)."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `dashboard.read`. **Returns:** `{id, name, display_name, description, version, status, body_hash, current_version, draft?, document, dependencies: {visualizations: [{occurrence, name, version, status}], pipelines: [{source, name, version, status, read_only}]}, last_refresh: null}`. **Errors:** `dashboard.not_found`.
+
+#### 6.2.57 `dashboards_create`
+
+Create a dashboard: version 1 lands as a DRAFT, validated in FULL against the pins as they are now (every source release RELEASED and read-only with its required parameters bound; every visualization input mapped; one namespace for occurrences, groups, actions, controls and the set's parameters; every occurrence and control placed on the grid). A pinned visualization or set may still be a DRAFT at save. The arguments ARE the document's keys; the 094 new-root confirmation applies.
+
+```json
+{
+  "name": "dashboards_create",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "name",
+      "display_name",
+      "visualizations",
+      "layout"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Folder-path name (2-10 segments, lower-case): acme/dashboards/revenue_overview. Never renamed."
+      },
+      "display_name": {
+        "type": "string",
+        "description": "Human label, 1-120 characters."
+      },
+      "description": {
+        "type": "string",
+        "description": "Optional; 2000 characters max."
+      },
+      "parameter_set": {
+        "type": "object",
+        "description": "Optional: {name, version} — the parameter set whose controls the dashboard shows."
+      },
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "[{name, pipeline: {name, version}, parameters: {<pipeline parameter>: {parameter: <set parameter>} or {value: <literal>}}}] — each pinned release RELEASED and read-only; every required pipeline parameter bound."
+      },
+      "visualizations": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "[{name, type: \"visualization\", visualization: {name, version}, inputs: {<visualization input>: {source: <source name>}}, timeout_seconds}] — at most 50; every named input of the pinned visualization mapped."
+      },
+      "groups": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Optional: [{name, type: \"group\", members: [<object or parameter names>]}]."
+      },
+      "actions": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Optional: [{name, type: \"refresh\", scope: all or targets, targets: [<visualization occurrence names>] (iff scope is targets), initial}]."
+      },
+      "action_controls": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Optional: [{name, type: \"action_control\", action: <action name>, label, parameter}] — parameter binds the action to a LEAF parameter's control."
+      },
+      "parameter_scopes": {
+        "type": "object",
+        "description": "Optional: {<set parameter>: [<group names>]} — a scope may not omit a group that consumes the parameter."
+      },
+      "parameter_state": {
+        "type": "object",
+        "description": "Optional: {dashboard: {visible, enabled}, parameters: {<name>: {visible, enabled}}}; each inherit, force_true or force_false."
+      },
+      "outgoing_overrides": {
+        "type": "object",
+        "description": "Optional: {<source name>: {<pipeline parameter>: {value: <literal>}}} — the value the pipeline receives whatever the control showed."
+      },
+      "layout": {
+        "type": "object",
+        "description": "{grid: [{name, x, y, w, h}], columns: 12, breakpoint_px, parameter_set: {position}, parameter_placements: {<parameter>: {group}}} — every occurrence and control placed exactly once (a group at most once)."
+      },
+      "timeouts": {
+        "type": "object",
+        "description": "Optional: {refresh_seconds} — at most 900."
+      },
+      "confirm_new_root": {
+        "type": "boolean",
+        "description": "Set true ONLY after a person has agreed to a new top-level folder; the refusal names the roots that exist. 'test/' never needs it."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `dashboard.create`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`. **Errors:** `dashboard.validation.*` (every failure in `details.failures`; `name_taken` 409), `dashboard.validation.new_root_requires_confirmation`, `dashboard.authoring.disabled`.
+
+#### 6.2.58 `dashboards_update`
+
+The hash-preconditioned draft write — `visualizations_update`'s twin.
+
+```json
+{
+  "name": "dashboards_update",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id",
+      "expected_hash",
+      "name",
+      "display_name",
+      "visualizations",
+      "layout"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "expected_hash": {
+        "type": "string",
+        "description": "The body_hash of the version this edit is based on. A mismatch is a 409 conflict; re-read and rebase."
+      },
+      "name": {
+        "type": "string",
+        "description": "Folder-path name (2-10 segments, lower-case): acme/dashboards/revenue_overview. Never renamed."
+      },
+      "display_name": {
+        "type": "string",
+        "description": "Human label, 1-120 characters."
+      },
+      "description": {
+        "type": "string",
+        "description": "Optional; 2000 characters max."
+      },
+      "parameter_set": {
+        "type": "object",
+        "description": "Optional: {name, version} — the parameter set whose controls the dashboard shows."
+      },
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "[{name, pipeline: {name, version}, parameters: {<pipeline parameter>: {parameter: <set parameter>} or {value: <literal>}}}] — each pinned release RELEASED and read-only; every required pipeline parameter bound."
+      },
+      "visualizations": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "[{name, type: \"visualization\", visualization: {name, version}, inputs: {<visualization input>: {source: <source name>}}, timeout_seconds}] — at most 50; every named input of the pinned visualization mapped."
+      },
+      "groups": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Optional: [{name, type: \"group\", members: [<object or parameter names>]}]."
+      },
+      "actions": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Optional: [{name, type: \"refresh\", scope: all or targets, targets: [<visualization occurrence names>] (iff scope is targets), initial}]."
+      },
+      "action_controls": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        },
+        "description": "Optional: [{name, type: \"action_control\", action: <action name>, label, parameter}] — parameter binds the action to a LEAF parameter's control."
+      },
+      "parameter_scopes": {
+        "type": "object",
+        "description": "Optional: {<set parameter>: [<group names>]} — a scope may not omit a group that consumes the parameter."
+      },
+      "parameter_state": {
+        "type": "object",
+        "description": "Optional: {dashboard: {visible, enabled}, parameters: {<name>: {visible, enabled}}}; each inherit, force_true or force_false."
+      },
+      "outgoing_overrides": {
+        "type": "object",
+        "description": "Optional: {<source name>: {<pipeline parameter>: {value: <literal>}}} — the value the pipeline receives whatever the control showed."
+      },
+      "layout": {
+        "type": "object",
+        "description": "{grid: [{name, x, y, w, h}], columns: 12, breakpoint_px, parameter_set: {position}, parameter_placements: {<parameter>: {group}}} — every occurrence and control placed exactly once (a group at most once)."
+      },
+      "timeouts": {
+        "type": "object",
+        "description": "Optional: {refresh_seconds} — at most 900."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `dashboard.update`. **Mutating.** **Returns:** `{id, name, version, status, body_hash}`. **Errors:** `dashboard.not_found`, `dashboard.version.conflict`, `dashboard.validation.*`.
+
+#### 6.2.59 `dashboards_purge_draft`
+
+Hard-delete a dashboard's DRAFT by id (versioning §5.4); the sole draft takes the dashboard. `expected_hash` guards the purge.
+
+```json
+{
+  "name": "dashboards_purge_draft",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id",
+      "expected_hash"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The dashboard's id (dashboards_list returns it)."
+      },
+      "expected_hash": {
+        "type": "string",
+        "description": "The draft's body_hash. A mismatch is a 409 conflict; re-read first."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `dashboard.version.manage`. **Mutating.** **Returns:** `{id, purged: true}`. **Errors:** `dashboard.not_found`, `dashboard.version.not_draft`, `dashboard.version.conflict`.
+
+#### 6.2.60 `dashboards_validate`
+
+§3.2's rules against the dependencies' CURRENT state for the WORKING version, no write — the agent's loop before a person releases (rest-api §23.2's `POST /api/v1/dashboards/{id}/validate`). The verdict is the answer: `valid` and every failure in the refusal's `details.failures` shape.
+
+```json
+{
+  "name": "dashboards_validate",
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "The dashboard's id (dashboards_list returns it)."
+      }
+    },
+    "additionalProperties": false
+  }
+}
+```
+
+**Permission:** `dashboard.update` — an AUTHOR verb (owner ruling 2026-09-29; the implementation spec's §7 said `dashboard.read`): the validator reads the pinned pipelines', set's and visualizations' statuses unlensed (the L1a security pass's O5), so a promoter's key is refused by the dispatcher. **Not mutating** (nothing is written). **Returns:** `{id, name, version, body_hash, valid, failures: [{code, path, message, details}]}`. **Errors:** `dashboard.not_found`.
+
 ### 6.3 Tool result schema
 
 All tool results follow this envelope:
@@ -2425,6 +2976,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.63 | L1b (#10) the visualization and dashboard tools | **§6.1: 48 → 59 tools — five `visualizations_*` and six `dashboards_*`** (the implementation spec §7; addressed by id per P24; no tool releases or executes anything): `visualizations_list`/`get` and `dashboards_list`/`get` (reads, the promoter lens — dashboards whose every source pipeline the pipeline lens admits, and the visualizations they pin; `used_by` on the visualization rows; `dashboards_get` carries each pin's lensed status and `last_refresh: null` until the runtime ships), `_create`/`_update` (writes through the same strict reader, bounds and save-time validation REST uses; the 094 new-root confirmation), `_purge_draft` (versioning §5.4, hash-guarded; a pinned visualization draft refused `visualization.version.pinned`), and `dashboards_validate` — the §3.2 rules against current state, no write, on `dashboard.update` (owner ruling 2026-09-29; the spec said `dashboard.read` — the validator reads pin statuses unlensed, O5). New §6.2.50–6.2.60; §5.1's static count 48 → 59. The manual gains the `dashboards` area (`skill/dashboards.md`, the `visualizations`/`dashboards` prefixes mapped; `dashboards` leaves the reserved prefixes). `visualizations_test_start` / `_submit` land with the test sessions (L4). |
 | 2026-09-29 | v1.62 | 310 (#310) audit-log retention | §6.2.4's learn-before-you-write paragraph: check A's learning lasts as long as the audit row it reads — once per `datapipelines.audit.retention-days` (default a year), not "the key's lifetime", now that the audit log is retained (auth §10.3). No tool, input or refusal changes; the status line (left at v1.60 by v1.61) catches up |
 | 2026-09-28 | v1.61 | the 300 merge's security pass (#300) | **§6.2.32: `templates_purge_draft`'s guard reads the whole workspace and its refusal is view-narrowed without a cardinality.** Both scans (pipelines, parameter sets) run unlensed — a pin the caller's view hides still refuses; the refusal names only the admitted pins and, when others exist outside the view, `details.pins_hidden: true` (the lane's count was retired at merge: a count of hidden objects is an existence oracle). No route, permission or code added. |
 | 2026-09-28 | v1.60 | 298 (#291) the transport's error bodies — renumbered at merge after 116's v1.59 | **§3**: a body the transport cannot read (malformed, or nested past §13.21's 100) answers `400` with the SDK's JSON-RPC error and nothing else — the transport's mapper drops `stackTrace`, `cause`, `suppressed` and `localizedMessage` from every throwable it writes. Measured before: the 400's body was the SDK's serialized `McpError`, stack trace and all. No tool, schema or permission changed. |

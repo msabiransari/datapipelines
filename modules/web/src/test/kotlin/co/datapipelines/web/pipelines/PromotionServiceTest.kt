@@ -61,7 +61,8 @@ class PromotionServiceTest {
     // #300: views and the set half of promotion are required constructor arguments now — the
     // page's set arm and the sender's set payloads can no longer be silently absent.
     private val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>(relaxed = true)
-    private val views = PromotableViews(pipelines, templates, client, parameterSets)
+    private val views =
+        PromotableViews(pipelines, templates, client, parameterSets, mockk<co.datapipelines.visualization.DashboardService>(relaxed = true))
     private val parameterSetPromotion = mockk<co.datapipelines.web.parameters.ParameterSetPromotion>()
     private val service =
         PromotionService(pipelines, templates, client, properties, "dev", views = views, parameterSetPromotion = parameterSetPromotion)

@@ -99,9 +99,11 @@ class ScopeMatrixSpecDriftTest {
         /**
          * The record's 64 + `template.evaluate` (7b) + keys v2's two (#233 A14) + the scheduler's six
          * (#9: `schedule.read`, `.create`, `.update`, `.pause`, `.delete`, `.run`) + the parameter
-         * engine's nine (#194 lane D, the record's §9.3 table verbatim), re-derived.
+         * engine's nine (#194 lane D, the record's §9.3 table verbatim) + the dashboards' fourteen lifecycle rows
+         * (#10 L1b: `visualization.*` and `dashboard.*` — read, create, update, version.manage, delete, release,
+         * switch_version; the two imports, `dashboard.execute` and `dashboard.key.bind` land with their surfaces), re-derived.
          */
-        const val PERMISSION_COUNT = 82
+        const val PERMISSION_COUNT = 96
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

@@ -35,7 +35,8 @@ data class VisualizationReleased(
  */
 @Suppress("TooManyFunctions", "LongParameterList", "ThrowsCount") // one façade over the verb table; each throw is its own refusal
 class VisualizationService(
-    val repository: VisualizationRepository,
+    /** Module-internal (O3): the surfaces read through the lensed reads below, never through this. */
+    internal val repository: VisualizationRepository,
     private val validator: VisualizationValidator,
     private val dashboards: DashboardRepository,
     authoring: AuthoringGuard,
@@ -200,6 +201,14 @@ class VisualizationService(
         id: UUID,
         version: Int,
     ): ArtifactVersion<VisualizationBody>? = lifecycle.findVersion(workspaceId, lens, id, version)
+
+    /** A pinned version by name (a dashboard's pin), through [lens] — `ArtifactLifecycle.findVersionByName`. */
+    fun findVersionByName(
+        workspaceId: UUID,
+        lens: ReadLens,
+        name: String,
+        version: Int,
+    ): ArtifactVersion<VisualizationBody>? = lifecycle.findVersionByName(workspaceId, lens, name, version)
 
     fun listVersions(
         workspaceId: UUID,

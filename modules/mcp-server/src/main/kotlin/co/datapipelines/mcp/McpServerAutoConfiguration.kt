@@ -73,7 +73,7 @@ class McpServerAutoConfiguration {
     }
 
     /**
-     * The 48 tools of §6.1, in `tools/list` order. The BODY is now grouped into per-family
+     * The 59 tools of §6.1, in `tools/list` order. The BODY is now grouped into per-family
      * helpers; what remains is the DI FACTORY's arity — the parameters ARE the wiring, and a
      * holder type would exist only to be counted (the DomainConfiguration `TooManyFunctions`
      * precedent). 139 and 140 each grew it; 194d's six parameter-set tools passed the ceiling.
@@ -161,6 +161,15 @@ class McpServerAutoConfiguration {
         // bean's tools, so the tools take it deferred and the cycle never exists at
         // construction time.
         docSet: ObjectProvider<co.datapipelines.mcp.docs.DocSet>,
+        // #10 L1b — the visualization and dashboard services, the readers bound from
+        // `datapipelines.visualization.*` and the pipeline-release port (declared by `web`'s
+        // VisualizationConfiguration), so the tools cross the SAME strict read, bounds, lensed reads and
+        // save-time validation REST does. Plain parameters, the 068/074 pattern.
+        visualizationService: co.datapipelines.visualization.VisualizationService,
+        dashboardService: co.datapipelines.visualization.DashboardService,
+        visualizationReader: co.datapipelines.visualization.VisualizationReader,
+        dashboardReader: co.datapipelines.visualization.DashboardReader,
+        pipelineReleaseFacts: co.datapipelines.visualization.PipelineReleaseFacts,
     ): List<McpTool> {
         val runtime =
             inlineRuntime(pipelines, templates, templateEngines, datasources, introspector, jdbc)
@@ -232,7 +241,9 @@ class McpServerAutoConfiguration {
                     .McpToolLearnings(jdbc),
                 templates,
                 lens,
-            )
+            ) +
+            visualizationTools(visualizationService, dashboardService, visualizationReader, lens) +
+            dashboardTools(dashboardService, visualizationService, pipelineReleaseFacts, dashboardReader, lens)
     }
 
     /** The datasource, execution and calculator tools, extracted at 194d when the list passed detekt's length. */

@@ -25,6 +25,9 @@ dependencies {
     // #266: the execution-event record's and the replay log's batching writers, their recorder and
     // their metrics (module-structure §5.19).
     implementation(project(":modules:persistence"))
+    // #10 L1b: the visualization/dashboard REST routes and the module's wiring (web/config/VisualizationConfiguration)
+    // — the edge the root map allowed ahead, declared now that `web` compiles against it.
+    implementation(project(":modules:visualization"))
 
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.actuator)

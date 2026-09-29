@@ -32,7 +32,8 @@ data class DashboardReleased(
  */
 @Suppress("TooManyFunctions", "LongParameterList") // one façade over the aggregate's verb table; its ports are the constructor
 class DashboardService(
-    val repository: DashboardRepository,
+    /** Module-internal (O3): the surfaces read through the lensed reads below, never through this. */
+    internal val repository: DashboardRepository,
     private val validator: DashboardValidator,
     private val visualizations: VisualizationService,
     private val sets: ParameterSetFacts,
@@ -175,6 +176,37 @@ class DashboardService(
         id: UUID,
         version: Int,
     ): ArtifactVersion<DashboardBody>? = lifecycle.findVersion(workspaceId, lens, id, version)
+
+    /** A version by name, through [lens] — `ArtifactLifecycle.findVersionByName`. */
+    fun findVersionByName(
+        workspaceId: UUID,
+        lens: ReadLens,
+        name: String,
+        version: Int,
+    ): ArtifactVersion<DashboardBody>? = lifecycle.findVersionByName(workspaceId, lens, name, version)
+
+    /**
+     * The dashboards that pin visualization [visualizationName] at any version, as `name@version` (D30's `used_by`),
+     * through [lens]: under the whole view every LIVE (DRAFT or RELEASED) version — the pin guard's own probe; under a
+     * narrowing lens only the admitted dashboards' current RELEASED versions, so a promoter never learns of a draft
+     * or a hidden dashboard. One pin scan (whole view), or one body read per admitted dashboard (narrowing).
+     */
+    fun pinnedBy(
+        workspaceId: UUID,
+        lens: ReadLens,
+        visualizationName: String,
+    ): List<String> {
+        if (lens.isEverything) return repository.livePinsOf(workspaceId, visualizationName, null)
+        return lifecycle
+            .currentVersions(workspaceId)
+            .filter { lens.admits(it.name) }
+            .mapNotNull { current ->
+                repository
+                    .findVersion(workspaceId, current.id, current.version)
+                    ?.takeIf { loaded -> loaded.body.visualizations.any { it.visualization.name == visualizationName } }
+                    ?.let { "${current.name}@${current.version}" }
+            }.sorted()
+    }
 
     fun listVersions(
         workspaceId: UUID,

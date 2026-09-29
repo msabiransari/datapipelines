@@ -25,9 +25,21 @@ data class LensedView(
      * everything, never a silent narrowing.
      */
     val parameterSets: ReadLens = ReadLens.Everything,
+    /**
+     * #10 L1b — the visualization lens (`visualization.read`'s promoter cell): the visualizations an admitted
+     * dashboard pins. Appended after the set lens and defaulted, the same compatibility rule.
+     */
+    val visualizations: ReadLens = ReadLens.Everything,
+    /**
+     * #10 L1b — the dashboard lens (`dashboard.read`'s promoter cell): RELEASED dashboards newer than the promotion
+     * target's whose EVERY source pipeline the [pipelines] lens admits.
+     */
+    val dashboards: ReadLens = ReadLens.Everything,
 ) {
     /** True when this view narrows anything — the surfaces that pay for a view ask this first. */
-    val isLensed: Boolean get() = !pipelines.isEverything || !templates.isEverything || !parameterSets.isEverything
+    val isLensed: Boolean
+        get() =
+            listOf(pipelines, templates, parameterSets, visualizations, dashboards).any { !it.isEverything }
 
     /**
      * Why a lensed view is empty: the target's base URL (never its key) and the transport or

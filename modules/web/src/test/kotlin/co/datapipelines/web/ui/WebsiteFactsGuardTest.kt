@@ -236,6 +236,12 @@ class WebsiteFactsGuardTest {
                             co.datapipelines.mcp.docs
                                 .DocSet(emptyList())
                     },
+                // #10 L1b — the visualization/dashboard tools' collaborators; never queried here.
+                visualizationService = mockk<co.datapipelines.visualization.VisualizationService>(),
+                dashboardService = mockk<co.datapipelines.visualization.DashboardService>(),
+                visualizationReader = co.datapipelines.visualization.VisualizationReader(),
+                dashboardReader = co.datapipelines.visualization.DashboardReader(),
+                pipelineReleaseFacts = co.datapipelines.visualization.PipelineReleaseFacts { _, _ -> null },
             ).size
     }
 

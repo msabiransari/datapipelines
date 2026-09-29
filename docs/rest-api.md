@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.54 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.55 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-09-27
+**Last updated:** 2026-09-29
 
 ---
 
@@ -2463,8 +2463,76 @@ Export bundles the CURRENT release — the set body with its lifecycle fields, t
 | `parameter.evaluate.response_too_large` | 413 | The response would exceed `max-evaluate-response-bytes` — options are never truncated |
 | `request.body_too_large` | 413 | The evaluate body over the route's stated 1,048,576-byte cap (`details.limit_bytes`), refused before its JSON is parsed; the same code the platform filter answers over `datapipelines.web.max-request-bytes` (§4.2) |
 
+## 22. Visualizations
+
+The visualization artifact's REST surface (#10; the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) §6.1 — §21's parameter-set routes are the mould, addressed by **id** per P24; a multi-segment NAME never travels in a path segment). The document is [Dashboards §2.1](dashboards.md#21-visualization); the lifecycle is [Dashboards §3](dashboards.md#3-the-lifecycle). Authorization is the seven `visualization.*` rows of [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative); every route is session-or-key like §5 (the MCP key refused as everywhere off `/mcp`), and the version verbs are session-only like §21's. Envelopes per §4; every refusal is a `visualization.*` code of [Pipeline Contract §13.22](pipeline-contract.md#1322-visualizations). No UI page exists yet — this section and the MCP tools ([MCP Server §6.2.50](mcp-server.md)) are the whole surface. **Audit:** no new event kinds — the routes ride the request-interceptor logging (and a refusal's `auth.scope.denied`); the MCP tools ride the dispatcher's `mcp.tool.called`.
+
+### 22.1 Reading and writing
+
+Reads follow the working-version rule ([Versioning §7.1](versioning.md#71-authoring-reads-return-the-working-version-039)) exactly as §21.1 states it: a GET answers the DRAFT when one exists, else the current RELEASED version; `version` and `status` name the returned row, `current_version` the latest release, and a `draft` pointer (its `version`, `body_hash`, `updated_by`, `updated_at`) rides the whole-view read — never a promoter's. Every read is the caller's LENS: a promoter sees the visualizations a dashboard her lens admits pins (§23.1), RELEASED only, and anything else answers the same `404 visualization.not_found` an absent id gets. Every mutation takes `If-Match: <body_hash>` ([Versioning §4.2](versioning.md#42-the-precondition-protocol)); a stale hash is `409 visualization.version.conflict`.
+
+**Bodies.** A `POST`/`PUT` body is read through the request copy of the module's strict mapper (§13.21's nesting, string and number bounds) and bound by the visualization READER, which refuses an unknown key, a wrong JSON type or a missing key naming its path, and applies the seven `datapipelines.visualization.*` bounds ([Configuration §3.33](configuration.md)) before it walks a member; the platform's 2 MiB request cap (§4.2) stands ahead of both. A body that is not JSON — or no body where one is required — is `400 visualization.validation.body_invalid` with `details.reason = "malformed_json"`, never another family's code and never a 500.
+
+### 22.2 Routes
+
+| Route | Permission | What |
+|---|---|---|
+| `POST /api/v1/visualizations` | `visualization.create` | Create: read and validate the document in full (the renderer's configuration schema, the bindings, the transform pin — a DRAFT pin is accepted at save — and the test cases), land version 1 **DRAFT** with a server-assigned id. `201`. |
+| `GET /api/v1/visualizations` | `visualization.read` | The flat listing (offset/limit) — every visualization the caller's lens admits at its listed version, paged against a lens-true `total` (#312's shape) — or, with `?prefix=`, ONE level of the tree: `folders` (with `visualization_count`) and the level's `visualizations`. `total` counts visualizations, never folders; `has_more` is `offset + page size < total` on both. `?prefix=` (empty) is the ROOT. |
+| `GET /api/v1/visualizations/{id}` | `visualization.read` | The working version's full JSON: the document + `id`, `name`, `version`, `status`, `body_hash`, `current_version`, `created_at`, `updated_at`, `draft`. |
+| `GET /api/v1/visualizations/{id}/versions` | `visualization.read` | Version metadata, newest first; no bodies. RELEASED ones only under a narrowing lens. |
+| `GET /api/v1/visualizations/{id}/versions/{version}` | `visualization.read` | One version. A version other than RELEASED is `404` under a narrowing lens. |
+| `PUT /api/v1/visualizations/{id}` | `visualization.update` | The draft write (copy-on-write after a release, then in place; `If-Match` required and checked BEFORE the body is parsed). A document naming another visualization is `400 visualization.validation.name_invalid` (`reason: immutable`) — nothing is renamed. |
+| `POST /api/v1/visualizations/{id}/release?release_pinned_templates=` | `visualization.release` | Release the draft at `If-Match` ([Dashboards §3.1](dashboards.md#31-releasing-a-visualization)): at least one test case, the rules re-run against the pin as it is NOW, the transform pin RELEASED — or released WITH the visualization under `release_pinned_templates=true` (D61, the 142 cascade) — then, in ONE transaction, the evidence gate. **Until the test sessions land (L4) the gate refuses every release**: `409 visualization.release.tests_missing` with `details.reason = "gate_not_installed"` (`"no_cases"` for a body without a case). The answer names `templates_released`. |
+| `POST /api/v1/visualizations/{id}/draft/discard` | `visualization.version.manage` | Purge the DRAFT at `If-Match` (versioning §5.4); the sole draft takes the visualization. `204`. Session-only. |
+| `POST /api/v1/visualizations/{id}/versions/{version}/discard` | `visualization.version.manage` | Discard a RELEASED version (reversible); the pointer falls back per D60. Session-only. |
+| `POST /api/v1/visualizations/{id}/versions/{version}/restore` | `visualization.version.manage` | Restore a DISCARDED version; the pointer moves only above-current-or-NULL. Session-only. |
+| `DELETE /api/v1/visualizations/{id}/versions/{version}` | `visualization.version.manage` | Purge a DRAFT version (a release is discarded, never purged — `409 visualization.version.last_release`). `204`. Session-only. |
+| `POST /api/v1/visualizations/{id}/current` | `visualization.switch_version` | The manual switch: body `{"version": n}`, its shape judged BEFORE the lookup (`400 visualization.validation.body_invalid`, `details.path = "version"`, `details.reason` `missing` / `wrong_type`). Session-only. |
+| `DELETE /api/v1/visualizations/{id}` | `visualization.delete` | The entity purge — only when the only version is a DRAFT. `204`. Session-only. |
+
+**The pin guard.** A visualization version a LIVE (DRAFT or RELEASED) dashboard version pins is never discarded or purged, and the entity is never purged while any of its versions is pinned: `409 visualization.version.pinned`, `details.pinned_by` naming each dashboard as `name@version` (the design record §4.2). Export, import (L1c) and the test sessions, runs and on-demand check (L4) are not routes yet.
+
+| Error | HTTP | When |
+|---|---|---|
+| `visualization.not_found` | 404 | No such visualization (or version) in the workspace, hidden by the lens, or another workspace's |
+| `visualization.validation.*` | 400 | The document failed a rule ([Pipeline Contract §13.22](pipeline-contract.md#1322-visualizations); every failure rides `details.failures`); `name_taken` is **409**. A malformed or wrong-shaped request body is `body_invalid` |
+| `visualization.authoring.disabled` | 403 | A promotion receiver refuses every authoring write (reads and the switch unaffected) |
+| `visualization.version.conflict` | 409 | A stale `If-Match` |
+| `visualization.version.not_draft` / `.not_released` / `.not_discarded` / `.last_release` / `.not_eligible` / `.pinned` | 409 | The lifecycle precondition of the verb, or a live dashboard's pin |
+| `visualization.release.tests_missing` / `.dependency_not_released` | 409 | No case, the evidence gate (until L4), or a transform pin not RELEASED without consent (`details.pins_not_released`) |
+
+## 23. Dashboards
+
+The dashboard artifact's REST surface (#10; the implementation spec's §6.2) — §22's twin, plus `validate`. The document is [Dashboards §2.2](dashboards.md#22-dashboard). Authorization is the seven `dashboard.*` rows of [Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative); every refusal is a `dashboard.*` code of [Pipeline Contract §13.23](pipeline-contract.md#1323-dashboards). The reading, writing and body rules are §22.1's word for word, with the dashboard's own codes (`dashboard.not_found`, `dashboard.version.conflict`, `dashboard.validation.body_invalid`). **Audit:** as §22.
+
+### 23.1 The promoter's lens
+
+A promoter reads a dashboard only when it is RELEASED, newer than the promotion target's, and her pipeline lens admits EVERY pipeline it sources — so her dashboards can never outrun her pipelines; the visualizations she reads (§22.1) are the ones such a dashboard pins. The promotion wire carries no dashboard inventory until the promotion lane (L1c) adds it, so today the target holds none and only the pipeline condition narrows. An unreadable target admits nothing (fail closed).
+
+### 23.2 Routes
+
+The seven lifecycle permissions govern the same thirteen routes as §22.2 under `/api/v1/dashboards` — `POST` (create, `201`), `GET` (the flat listing, or `?prefix=` with `folders` carrying `dashboard_count` and the level's `dashboards`), `GET /{id}`, `GET /{id}/versions`, `GET /{id}/versions/{version}`, `PUT /{id}`, `POST /{id}/release`, `POST /{id}/draft/discard`, `POST /{id}/versions/{version}/discard`, `POST /{id}/versions/{version}/restore`, `DELETE /{id}/versions/{version}`, `POST /{id}/current`, `DELETE /{id}` — with these differences:
+
+| Route | Permission | What |
+|---|---|---|
+| `POST /api/v1/dashboards/{id}/release?release_pinned_visualizations=` | `dashboard.release` | Release the draft at `If-Match` ([Dashboards §3.2](dashboards.md#32-releasing-a-dashboard)): the rules re-run against the dependencies as they are NOW; the pinned set release RELEASED; every pinned visualization RELEASED — or, under `release_pinned_visualizations=true`, released through ITS OWN release (its gate, and its template drafts NOT consented by this flag — they need that visualization's own `release_pinned_templates`); every source release RELEASED and read-only. Otherwise `409 dashboard.release.dependency_not_released` naming every dependency. One transaction; the answer names `visualizations_released`. Until L4 a DRAFT visualization cannot be released, so the consented cascade answers the visualization's `409 visualization.release.tests_missing`. |
+| `POST /api/v1/dashboards/{id}/validate` | `dashboard.update` | Validate the WORKING version against the dependencies' CURRENT state — the §3.2 rules, no write (the agent's loop before a human releases). The verdict is the answer: `200` with `id`, `name`, `version`, `status`, `body_hash`, `valid` and `failures` (each `{code, path, message, details}` — the 400's failure shape, exhaustive). An AUTHOR verb — the implementation spec's §6.2 names `dashboard.read`; the owner ruled it `dashboard.update` (2026-09-29) because the validator reads the pinned pipelines', set's and visualizations' statuses unlensed, so a viewer and a promoter are refused `403 auth.role_required` before the handler. No body. |
+
+A source whose pinned release does not DECLARE its caller columns — a SQL caller node; only a transform caller node's contract names them — is not judged against its visualization's input contract at save (`input_contract_mismatch` needs declared columns); the runtime judges the real columns ([Dashboards §2.2](dashboards.md#22-dashboard)). The runtime, refresh and key-binding routes (L2, L5) and export/import (L1c) are not routes yet.
+
+| Error | HTTP | When |
+|---|---|---|
+| `dashboard.not_found` | 404 | No such dashboard (or version) in the workspace, hidden by the lens, or another workspace's |
+| `dashboard.validation.*` | 400 | The document failed a rule ([Pipeline Contract §13.23](pipeline-contract.md#1323-dashboards)); `name_taken` is **409**. A malformed or wrong-shaped request body is `body_invalid` |
+| `dashboard.authoring.disabled` | 403 | A promotion receiver refuses every authoring write |
+| `dashboard.version.conflict` | 409 | A stale `If-Match` |
+| `dashboard.version.not_draft` / `.not_released` / `.not_discarded` / `.last_release` / `.not_eligible` | 409 | The lifecycle precondition of the verb |
+| `dashboard.release.dependency_not_released` | 409 | A pinned visualization, set or source not RELEASED (and not cascaded) — `details` names each |
+
 ## Appendix A: Change Log
 
+| 2026-09-29 | v2.55 | L1b (#10) the visualization and dashboard surfaces | Additive. **New §22 Visualizations and §23 Dashboards** — the parameter-set routes' shape addressed by id (P24): create, the flat listing and the `?prefix=` browse (lens-true totals, #312), the working-version read, versions, the `If-Match` draft write, release (the visualization under the evidence gate, which refuses `visualization.release.tests_missing` / `gate_not_installed` until L4; the dashboard's D61 cascade under `release_pinned_visualizations`), the draft and version purges, discard/restore, the switch and the entity purge — and **`POST /api/v1/dashboards/{id}/validate`**, the §3.2 rules against current state with the verdict as a `200` answer, an author verb on `dashboard.update` (owner ruling 2026-09-29; the spec named `dashboard.read`). The pin guard (`visualization.version.pinned`) and the promoter lens over both families (§23.1) are stated. A malformed body is the family's own `body_invalid` 400. Export/import (L1c), the test sessions (L4), the runtime and refresh routes (L2) and key bindings (L5) are not routes yet. The §13.22/§13.23 codes existed (L1a); none added. |
 | 2026-09-29 | v2.54 | 312 (#312) the flat listing lists — renumbered from v2.53 at merge, which 302 takes | **§21.2, one row:** `GET /api/v1/parameter-sets` without a prefix now lists EVERY set the caller's lens admits at its listed version, paged against a lens-true `total` — a flat repository read (the pipelines §5.7 mould). It had reused the ROOT tree level's read, and the name grammar's `folder_required` kept that level empty: every workspace answered `[]` / `total 0`. The tree routes (`?prefix=`) are unchanged; no permission, code or route added. |
 | 2026-09-29 | v2.53 | 302 (#302) the template-backed promotion receive | **§18.2: a template-backed parameter set is received whole.** The batch sets' validation (the full §4 — the selector probe included, a customer-datasource connection) moved BEFORE the one transaction, on the receiver's own datasources, with the batch's template payloads overlaying the receiver's registry; the transaction lands pre-validated entries. A refusal at validation is the entry's own catalogued code (`parameter.import.missing_template`, `parameter.validation.*`) and lands nothing; a refusal at landing (C29's `id_taken`, a hash mismatch) rolls the batch back whole, templates included. The §18.2 error table names the set-family codes. No route, permission or §13 code added. |
 | 2026-09-28 | v2.52 | the 300 merge's security pass (#300) | **§21.3, one clause:** an explicit JSON `null` `version` on evaluate is absent (the served version), while the switch's `null` is `missing` — the two routes' deliberate divergence stated. Docs only. |

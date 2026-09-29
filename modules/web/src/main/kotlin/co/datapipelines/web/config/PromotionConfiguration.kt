@@ -165,7 +165,9 @@ class PromotionConfiguration {
         // default here since the engine landed, so the lens's set arm admitted nothing and the
         // page's plan carried no sets.
         parameterSets: co.datapipelines.parameters.ParameterSetRepository,
-    ): PromotableViews = PromotableViews(pipelines, templates, client, parameterSets)
+        // #10 L1b — the dashboard and visualization lenses derive from the current released dashboards.
+        dashboards: co.datapipelines.visualization.DashboardService,
+    ): PromotableViews = PromotableViews(pipelines, templates, client, parameterSets, dashboards)
 
     @Bean
     @Suppress("LongParameterList")
