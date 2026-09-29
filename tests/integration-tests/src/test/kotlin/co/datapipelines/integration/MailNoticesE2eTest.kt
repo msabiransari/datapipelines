@@ -493,6 +493,22 @@ class MailNoticesE2eTest {
         private val CSRF_FIELD = Regex("""name="_csrf" value="([^"]+)"""")
         private val ONE_TIME_PASSWORD = Regex("""([A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4})""")
 
+        /**
+         * #317 — every identity the suite authenticates with or delivers to, provisioned at
+         * container start instead of GreenMail's auth-disabled auto-create (see [greenmail]
+         * for the race this removes). `greenmail.users.login=email` makes each mailbox's
+         * LOGIN the full address, the exact string the IMAP reads present; the passwords are
+         * placeholders — auth stays disabled, so any credential is accepted.
+         */
+        private const val GREENMAIL_ADDITIONAL_OPTS =
+            "-Dgreenmail.users.login=email " +
+                "-Dgreenmail.users=dp:dp-any" +
+                ",mail-created:" + CREATED_EMAIL +
+                ",mail-claimed:" + CLAIMED_EMAIL +
+                ",carol:" + CAROL_EMAIL +
+                ",ops:" + OPS_EMAIL +
+                ",sec:" + SEC_EMAIL
+
         private val random = SecureRandom()
 
         /** Generated per run — no literal secret in any test fixture (HIGH-2). */
@@ -508,14 +524,34 @@ class MailNoticesE2eTest {
 
         /**
          * GreenMail (2.1.13, verified on Docker Hub 2026-09-14): SMTP on 3025, IMAP on 3143,
-         * `greenmail.auth.disabled` in the image's default GREENMAIL_OPTS — any credentials,
-         * mailboxes created on delivery. STARTTLS is OFF in this context (the development
-         * posture allows it; the hardened refusal is `ConfigValidatorMailTest`'s).
+         * `greenmail.auth.disabled` in the image's default GREENMAIL_OPTS — any credentials.
+         * STARTTLS is OFF in this context (the development posture allows it; the hardened
+         * refusal is `ConfigValidatorMailTest`'s).
+         *
+         * Every address the suite touches is PROVISIONED at container start
+         * (`GREENMAIL_ADDITIONAL_OPTS` — the image appends it after its own defaults, so the
+         * default opts are never duplicated or drifted): the app's SMTP credentials `dp` plus
+         * each mailbox, with `greenmail.users.login=email` so the login IS the address the
+         * IMAP reads present. #317: with auth disabled, GreenMail's `UserManager.test`
+         * AUTO-CREATES an unknown login on first AUTH — a check-then-act with no lock, so two
+         * concurrent FIRST-time AUTHs for the same login race, the loser dies on
+         * "Mailbox already exists" (`HierarchicalFolder.createChild`) — and `SmtpHandler`
+         * closes that connection with NO reply to AUTH. angus-mail then reports any AUTH that
+         * did not end in 235 — including a connection closed mid-handshake — as
+         * `AuthenticationFailedException`, which Spring wraps as the constant
+         * `MailAuthenticationException: Authentication failed`: the CI red here (the SECOND
+         * send of a test refused while the FIRST succeeded, fresh container every CI job)
+         * was the container racing its own first-auth auto-creates, never a credentials
+         * check. Provisioned, every AUTH/delivery/read finds its user and the auto-create
+         * path — the whole defect class — is unreachable. (The same auto-create raced the
+         * IMAP reads under the #247 family; that side already treats a dropped poll as
+         * "not yet".)
          */
         @JvmStatic
         val greenmail: GenericContainer<*> =
             GenericContainer("greenmail/standalone:2.1.13")
                 .withExposedPorts(SMTP_PORT, IMAP_PORT)
+                .withEnv("GREENMAIL_ADDITIONAL_OPTS", GREENMAIL_ADDITIONAL_OPTS)
                 .withReuse(true)
                 .waitingFor(Wait.forListeningPorts(SMTP_PORT, IMAP_PORT).withStartupTimeout(Duration.ofMinutes(2)))
 
