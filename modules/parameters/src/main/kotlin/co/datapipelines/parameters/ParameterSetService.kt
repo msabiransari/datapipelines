@@ -454,6 +454,44 @@ class ParameterSetService(
                 .count { lens.admits(it.name) && it.name.startsWith(scope) && '/' !in it.name.removePrefix(scope) }
         }
 
+    /**
+     * The FLAT listing (#312): EVERY set the lens admits, at its listed version — the pipelines
+     * §5.7 shape, no level clause. The everything lens reads [ParameterSetRepository.listAll] in
+     * SQL; a narrowing lens filters the admitted names in memory over `findCurrentVersions`
+     * (the [countChildSets] shape), so a promoter's page can never name a set her lens hides.
+     */
+    fun listAll(
+        workspaceId: UUID,
+        lens: ReadLens,
+        offset: Int = 0,
+        limit: Int = ParameterSetRepository.DEFAULT_PAGE_LIMIT,
+    ): List<ParameterSetVersion> {
+        if (lens.isEverything) return repository.listAll(workspaceId, offset, limit)
+        return repository
+            .findCurrentVersions(workspaceId)
+            .filter { lens.admits(it.name) }
+            .drop(maxOf(0, offset))
+            .take(limit.coerceIn(1, ParameterSetRepository.MAX_PAGE_LIMIT + 1))
+            .mapNotNull { repository.findCurrent(workspaceId, it.id) }
+    }
+
+    /**
+     * The truthful total of [listAll] over the WHOLE workspace — what the flat listing's `total`
+     * reports and `has_more` pages against (#312; the [countChildSets] shape, lens-true): the
+     * everything lens counts in SQL, a narrowing lens counts in memory with the very predicate
+     * [listAll] filters by. A promoter learns how many sets HER LENS admits, never how many the
+     * workspace holds.
+     */
+    fun countAll(
+        workspaceId: UUID,
+        lens: ReadLens,
+    ): Int =
+        if (lens.isEverything) {
+            repository.countAll(workspaceId)
+        } else {
+            repository.findCurrentVersions(workspaceId).count { lens.admits(it.name) }
+        }
+
     /** The promoter lens's input — every live set's current RELEASED version (versioning §10.2). */
     fun currentVersions(workspaceId: UUID): List<CurrentParameterSetVersion> = repository.findCurrentVersions(workspaceId)
 

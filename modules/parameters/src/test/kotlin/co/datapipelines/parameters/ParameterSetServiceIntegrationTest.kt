@@ -312,6 +312,44 @@ class ParameterSetServiceIntegrationTest {
             h.service.listChildSets(WORKSPACE, ReadLens.Everything, "acme/sales", 0, 200).size shouldBe 3
             h.service.countChildSets(WORKSPACE, ReadLens.Everything, "acme") shouldBe 0
         }
+
+        @Test
+        fun `the flat listing lists every set, paged, lens-true - not the ROOT level's empty cut (#312)`() {
+            val a = h.create(constants(name = "acme/sales/a"))
+            h.service.release(WORKSPACE, a.record.id, a.detail.bodyHash, AUTHOR)
+            val b = h.create(constants(name = "acme/sales/b"))
+            h.service.release(WORKSPACE, b.record.id, b.detail.bodyHash, AUTHOR)
+            val c = h.create(constants(name = "acme/ops/c"))
+            h.service.release(WORKSPACE, c.record.id, c.detail.bodyHash, AUTHOR)
+
+            // Everything lens: the whole workspace, name-ordered, paged — two folders, three sets.
+            h.service.listAll(WORKSPACE, ReadLens.Everything, 0, 2).map { it.record.name } shouldBe
+                listOf("acme/ops/c", "acme/sales/a")
+            h.service.listAll(WORKSPACE, ReadLens.Everything, 2, 2).map { it.record.name } shouldBe
+                listOf("acme/sales/b")
+            h.service.countAll(WORKSPACE, ReadLens.Everything) shouldBe 3
+
+            // A narrowing lens hides one: total 2, the page the two admitted names make — never
+            // the workspace's 3, never the hidden name.
+            val lens = ReadLens.Only(setOf("acme/sales/a", "acme/sales/b"))
+            h.service.listAll(WORKSPACE, lens, 0, 2).map { it.record.name } shouldBe listOf("acme/sales/a", "acme/sales/b")
+            h.service.countAll(WORKSPACE, lens) shouldBe 2
+        }
+
+        @Test
+        fun `the flat listing keeps the tree read's listing rule - D55 draft listed, a dead set absent`() {
+            h.create(constants(name = "acme/sales/draft_only")) // never released: lists at its draft (D55)
+
+            val everything = h.service.listAll(WORKSPACE, ReadLens.Everything, 0, 50)
+            everything.map { it.record.name } shouldBe listOf("acme/sales/draft_only")
+            everything.single().detail.status shouldBe PipelineVersionStatus.DRAFT
+            h.service.countAll(WORKSPACE, ReadLens.Everything) shouldBe 1
+
+            // The promoter lens admits the name but drafts are never hers: absent from both.
+            val lens = ReadLens.Only(setOf("acme/sales/draft_only"))
+            h.service.listAll(WORKSPACE, lens, 0, 50).shouldBeEmpty()
+            h.service.countAll(WORKSPACE, lens) shouldBe 0
+        }
     }
 
     @Nested

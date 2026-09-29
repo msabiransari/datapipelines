@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.85
+**Status:** v1.86
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-09-28 (301, #301/#273/#149)
+**Last updated:** 2026-09-29 (313, #313/#312)
 
 ---
 
@@ -1458,7 +1458,13 @@ The signed-in index's page header carries the app's second **Report a problem** 
 same `PromotableView` computation (the record's §8.3): a released set newer than the target's
 is one more row (Name / Here / On target), pushed AFTER the templates and BEFORE the pipelines
 when selected. The rows ride the model (`Plan.promotableParameterSets`); the table markup is
-owned by the 282 round.
+owned by the 282 round. **Since 313 the rows are their own table** — the pipelines table's
+frame, Send column and role guard, heading "Parameter sets", checkboxes `name="parameter_set"`
+— rendered whenever the plan carries set candidates, for the promoter inside the form and for
+a reader as a second read-only table; the "Nothing to promote" empty state covers BOTH lists,
+and the success flash names the applied set count (`?ok=promoted&…&parameter_sets=N`, the
+toast's sentence). A set-only selection is a valid submit; `nothing_selected` fires only when
+BOTH lists arrive empty.
 
 **178 — the listing IS the lens.** The plan this page renders is `PromotableView`, the same
 computation every other read a promoter makes narrows by ([Auth §11A.1](auth.md#11a1-the-404-rule),
@@ -1812,6 +1818,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.86 | 313 (#313, with #312) the promotion page offers parameter sets | **§4.17 Promotion**: the plan's parameter-set rows render as their own table — the pipelines table's frame, Send column and `canPromote` role guard, heading "Parameter sets", checkboxes `name="parameter_set"` — inside the form for a promoter and as a second read-only table for a reader; the "Nothing to promote" empty state fires only when BOTH lists are empty, and the success flash carries `parameter_sets=N` into the toast's sentence. The action reads the second field and calls the sender's four-argument `promote` (§8.3's order: templates → sets → pipelines); a set-only selection is a valid submit. Guards: `PromotionSetsRenderTest` (the sets table inside the same role guard; red with the table removed), `PromotionUiControllerTest` (the four-argument call, the counts in the flash), `PromotionTwoDeploymentE2eTest` Order 55 (the form post promotes a set to uat), `PromotionSetsBrowserTest` (light/dark screens of the page with a set candidate, against a stub target — the browser harness boots one app). No route, permission or role changed. |
 | 2026-09-28 | v1.85 | 301 (#301, #273, #149) UI residue — the 287 security pass's observations 2–9, the discard dialog's schedules, the facts link | **§4.3d, the Discard dialog**: it now lists **the schedules that run the pipeline** (273) — the SAME by-target read the Usage tab makes, lensed for the caller, one row per schedule with its condition and stored next occurrence, under a note that says the consequence (the discard succeeds; each schedule then blocks at its next run — the §5.2 `pointer_null` shape — until repointed or deleted). **§3.7, keyboard viewports**: the `tabindex="0"` tab stop lands only on a viewport that actually scrolls (301) — the enhancer checks the computed overflow and the content, re-checked in `measure()`; a fitting page-flow frame (`overflow: clip`) keeps its inert `-1`. The history snapshot cleanups run on the **live page** an instant before it is snapshotted (301 — htmx clones only after the event), wording corrected in the shell and the enhancer; the app.css modal comment matches the class toggle the scripts actually do; the token test's duration rule reads the longhand properties too; the paged-sort rule's every-row-new decision is a node-tested seam (`allRowsNew`) and the dock's ancestor walk is linear in the batch (a Set). **The datasource facts' source-pipeline link is a full document load** (149) — it carried the one boosting `<a>` into the editor, which cannot initialise on a swap. Guards: `DataTableBrowserTest` (a non-scrolling frame keeps `-1`; the evidence names in the observer KDoc corrected to the numbers), `DataTableCssTokenTest` (longhand), `data-table.test.mjs` (`allRowsNew`), `PipelineLifecycleDialogRenderTest`/`RoleVisibilityRenderTest` (the schedules evidence, the promoter contract), `DiscardDialogSchedulesBrowserTest` (two schedules; a promoter sees no Discard verb), `DatasourceFactsLinkBrowserTest` (the full load, red on the boosting tree at the issue's own symptom). No route, permission or role changed — the dialog's read rides `pipeline.version.manage` as before. |
 | 2026-09-28 | v1.84 | 298 (#293) every surface answers as `visibleTo` | §4.2 and the role-guard table: the dashboard's stat tiles count a promoter's OWN runs (`listVisibleTo`'s third arm, in SQL) instead of zero — the explorers' Runs tabs and the search palette already did; the Recent executions panel stays `execution.read` and undrawn for a promoter. The API console's Legacy paths row withholds Unpublish when its echoed path was cut (a database-written path past the grammar's 200 characters — an unpublish of the echo would address another path) and says so on the row. Default ruling by the orchestrator, recorded as a decision the owner may overturn. |
 | 2026-09-28 | v1.83 | 194d (#194) parameter sets — numbered at merge after 287's v1.82 | **§4.17 Promotion**: the plan carries parameter-set rows through `Plan.promotableParameterSets` (the record's §8.3 — pushed after templates, before pipelines); the table markup stays 282's. **§4.6/§4.7 the template explorer/detail**: the per-version in-use count and the used-by list now cover PARAMETER SETS too (`application`'s `TemplateUsage` composition) — a set pinning a template version is one user, counted beside the pipelines, and the `template.in_use` delete refusal names `referencing_parameter_sets`. The lens covers sets on every read (the same `LensedView`). |

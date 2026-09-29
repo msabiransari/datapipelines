@@ -365,10 +365,10 @@ class ParameterSetsControllerTest {
     }
 
     @Test
-    fun `the flat listing paginates against the whole level's total, not the page size`() {
+    fun `the flat listing paginates against the whole workspace's total, not the page size`() {
         authenticate()
-        every { sets.listChildSets(workspaceId, any(), null, 0, 2) } returns listOf(loaded, loaded)
-        every { sets.countChildSets(workspaceId, any(), null) } returns 3
+        every { sets.listAll(workspaceId, any(), 0, 2) } returns listOf(loaded, loaded)
+        every { sets.countAll(workspaceId, any()) } returns 3
 
         val response = controller.list(offset = null, limit = 2)
 
@@ -376,6 +376,34 @@ class ParameterSetsControllerTest {
             { response.data.items.size shouldBe 2 },
             { response.data.pagination.total shouldBe 3L },
             { response.data.pagination.hasMore shouldBe true },
+        )
+
+        every { sets.listAll(workspaceId, any(), 2, 2) } returns listOf(loaded)
+
+        val lastPage = controller.list(offset = 2, limit = 2).data
+
+        assertAll(
+            { lastPage.items.size shouldBe 1 },
+            { lastPage.pagination.total shouldBe 3L },
+            { lastPage.pagination.hasMore shouldBe false },
+        )
+    }
+
+    @Test
+    fun `the flat listing under a narrowing lens reports the lens-admitted total - never the workspace's size`() {
+        authenticate()
+        every { sets.listAll(workspaceId, any(), 0, 50) } returns listOf(loaded, loaded)
+        // Lens-truth is the SERVICE's contract, integration-proven over real tables
+        // (ParameterSetServiceIntegrationTest); the controller reports what the lensed service
+        // counted — here 2, not the workspace's 3.
+        every { sets.countAll(workspaceId, any()) } returns 2
+
+        val page = narrowed("acme/sales/a").list(offset = null, limit = null).data
+
+        assertAll(
+            { page.items.size shouldBe 2 },
+            { page.pagination.total shouldBe 2L },
+            { page.pagination.hasMore shouldBe false },
         )
     }
 

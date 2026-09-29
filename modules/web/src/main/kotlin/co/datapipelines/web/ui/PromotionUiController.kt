@@ -87,8 +87,10 @@ class PromotionUiController(
     }
 
     /**
-     * The Promote action. [names] is the selection the human ticked; every one of them is
-     * re-guarded server-side (§10.3) and the dependency closure is recomputed from scratch.
+     * The Promote action. [names] is the pipeline selection and [parameterSetNames] the
+     * parameter-set selection the human ticked (#313 — the record's §8.3 order: templates →
+     * sets → pipelines); every one of them is re-guarded server-side (§10.3, the sender's
+     * four-argument `promote`) and the dependency closure is recomputed from scratch.
      *
      * Outcomes bounce back to the screen as `?ok=` / `?error=` flashes — the layout's toast
      * contract (ui-screens §5.1) — so a refusal lands on the listing the operator can act on
@@ -98,14 +100,17 @@ class PromotionUiController(
     @RequiredScope(Permission.PROMOTION_PROMOTE)
     fun promote(
         @RequestParam(name = "name", required = false) names: List<String>?,
+        @RequestParam(name = "parameter_set", required = false) parameterSetNames: List<String>?,
     ): String {
         val selected = names?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-        if (selected.isEmpty()) return "redirect:/promotion?error=nothing_selected"
+        val selectedSets = parameterSetNames?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+        if (selected.isEmpty() && selectedSets.isEmpty()) return "redirect:/promotion?error=nothing_selected"
         return try {
             val principal = requireSessionPrincipal()
             val workspace = principal.requireWorkspace()
-            val applied = promotionService.promote(workspace.id, workspace.name, selected)
-            "redirect:/promotion?ok=promoted&pipelines=${applied.pipelines}&templates=${applied.templates}"
+            val applied = promotionService.promote(workspace.id, workspace.name, selected, selectedSets)
+            "redirect:/promotion?ok=promoted&pipelines=${applied.pipelines}&templates=${applied.templates}" +
+                "&parameter_sets=${applied.parameterSets}"
         } catch (e: DatapipelinesException) {
             // The code's LAST segment is the flash key the template renders — the same idiom
             // the workspaces screen uses. The full code and message are already logged and,
