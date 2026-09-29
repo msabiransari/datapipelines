@@ -200,6 +200,26 @@ class VisualizationReaderTest {
     }
 
     @Test
+    fun `the input and column bounds refuse BEFORE the contracts are read - the fixture check stays rows x a bounded width`() {
+        val tree = DocumentFixtures.visualization()
+        tree.obj("inputs").set<JsonNode>("target", tree.obj("inputs.revenue").deepCopy())
+        (tree.obj("inputs.revenue").get("columns") as ArrayNode).add(JsonNodeFactory.instance.textNode("not a column"))
+        VisualizationReader(VisualizationConfig(maxInputsPerVisualization = 1))
+            .read(tree)
+            .shouldBeInstanceOf<ReadOutcome.Refused>()
+            .result.failures
+            .map { it.path to it.details["config_key"] } shouldBe listOf("inputs" to VisualizationKey.MAX_INPUTS_PER_VISUALIZATION.path)
+        VisualizationReader(VisualizationConfig(maxColumnsPerInput = 2))
+            .read(
+                DocumentFixtures.visualization().also {
+                    (it.obj("inputs.revenue").get("columns") as ArrayNode).add(JsonNodeFactory.instance.textNode("x"))
+                },
+            ).shouldBeInstanceOf<ReadOutcome.Refused>()
+            .result.failures
+            .map { it.path to it.details["reason"] } shouldBe listOf("inputs.revenue.columns" to JsonScan.REASON_TOO_MANY)
+    }
+
+    @Test
     fun `a configuration nested a hundred thousand deep is refused too_deep by a bounded walk, never the host stack`() {
         var deep: JsonNode = JsonNodeFactory.instance.textNode("x")
         repeat(100_000) { deep = JsonNodeFactory.instance.arrayNode().add(deep) }

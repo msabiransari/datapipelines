@@ -166,7 +166,8 @@ the dashboard.
 
 The readers check each collection's bound BEFORE they read its members (`*.validation.body_invalid` with
 `details.reason` `too_many`, or `too_large`, and `details.config_key`): visualizations per dashboard, test cases per
-visualization, fixture rows per case, `config` bytes and bindings per visualization —
+visualization, fixture rows per case, `config` bytes, bindings and inputs per visualization, and columns per
+input —
 [Configuration §3.33](configuration.md). A renderer configuration nests at most 32 levels and a literal at most 2,
 checked by a bounded walk.
 

@@ -1,5 +1,7 @@
 package co.datapipelines.visualization
 
+import java.util.BitSet
+
 /** The names a dashboard declares, by kind, with the path each one was declared at (the D15 namespace). */
 internal class DashboardNames private constructor(
     val occurrences: Set<String>,
@@ -49,24 +51,49 @@ internal class DashboardNames private constructor(
 
 /**
  * Which groups consume a parameter (D41, the record's §4.5): a group consumes P when an occurrence inside it —
- * directly or through nested groups — maps an input to a source that binds P, or binds a parameter that depends
- * on P (transitively through the set's `dependents`).
+ * directly or through nested groups — maps an input to a source that binds P, or binds a parameter that depends on P
+ * (transitively through the set's `dependents`). Computed as ONE bottom-up pass of parameter bitsets over the
+ * [GroupGraph]; each declared scope then costs one intersection per group.
  */
 internal class ScopeConsumers(
-    private val body: DashboardBody,
+    body: DashboardBody,
     set: ParameterSetFact?,
+    graph: GroupGraph,
 ) {
+    private val index: Map<String, Int> =
+        set
+            ?.parameters
+            ?.mapIndexed { i, parameter -> parameter.name to i }
+            ?.toMap()
+            .orEmpty()
     private val dependents: Map<String, Set<String>> = set?.parameters?.associate { it.name to it.dependents }.orEmpty()
-    private val groupsByName = body.groups.associateBy { it.name }
-    private val occurrencesByName = body.visualizations.associateBy { it.name }
-    private val sourcesByName = body.sources.associateBy { it.name }
+    private val groupNames = body.groups.map { it.name }
+    private val masks: List<BitSet>
 
-    /** Every group consuming [parameter]. */
+    init {
+        val sources = body.sources.associateBy { it.name }
+        val byOccurrence =
+            body.visualizations.associate { occurrence ->
+                occurrence.name to
+                    BitSet().also { mask ->
+                        occurrence.inputs.values.forEach { mapping ->
+                            sources[mapping.source]?.parameters?.values?.forEach { binding ->
+                                binding.parameter?.let { index[it] }?.let(mask::set)
+                            }
+                        }
+                    }
+            }
+        masks =
+            graph.bottomUp { group -> BitSet().also { mask -> group.members.forEach { member -> byOccurrence[member]?.let(mask::or) } } }
+    }
+
+    /** Every group consuming [parameter]; nothing for a name the set does not declare. */
     fun groupsConsuming(parameter: String): Set<String> {
-        val affected = closure(parameter)
-        return body.groups
-            .filter { group -> occurrencesIn(group.name).any { consumes(it, affected) } }
-            .map { it.name }
+        if (parameter !in index) return emptySet()
+        val affected = BitSet().also { mask -> closure(parameter).forEach { name -> index[name]?.let(mask::set) } }
+        return masks.indices
+            .filter { masks[it].intersects(affected) }
+            .map { groupNames[it] }
             .toSet()
     }
 
@@ -79,34 +106,13 @@ internal class ScopeConsumers(
         }
         return seen
     }
-
-    private fun consumes(
-        occurrence: VisualizationOccurrence,
-        affected: Set<String>,
-    ): Boolean =
-        occurrence.inputs.values.any { mapping ->
-            sourcesByName[mapping.source]?.parameters?.values?.any { it.parameter in affected } ?: false
-        }
-
-    /** The occurrences inside [group], through nested groups — a cycle is walked once (the layout rule refuses it). */
-    private fun occurrencesIn(group: String): List<VisualizationOccurrence> {
-        val seen = mutableSetOf(group)
-        val pending = ArrayDeque(listOf(group))
-        val found = mutableListOf<VisualizationOccurrence>()
-        while (pending.isNotEmpty()) {
-            groupsByName[pending.removeFirst()]?.members?.forEach { member ->
-                occurrencesByName[member]?.let(found::add)
-                if (member in groupsByName && seen.add(member)) pending.addLast(member)
-            }
-        }
-        return found
-    }
 }
 
 /** The layout rules (the spec's §3.2 `layout`, §17's 12 columns) — see [DashboardValidator]'s KDoc for the placement reading. */
 internal class DashboardLayoutRules(
     private val body: DashboardBody,
     private val names: DashboardNames,
+    private val graph: GroupGraph,
     private val failures: ArtifactFailures,
 ) {
     private val layout = body.layout
@@ -175,18 +181,8 @@ internal class DashboardLayoutRules(
     }
 
     private fun cycles() {
-        val children = body.groups.associate { group -> group.name to group.members.filter { it in names.groups } }
-        body.groups.forEachIndexed { index, group ->
-            val seen = mutableSetOf<String>()
-            val pending = ArrayDeque(children[group.name].orEmpty())
-            while (pending.isNotEmpty()) {
-                val next = pending.removeFirst()
-                if (next == group.name) {
-                    invalid("groups[$index].members", "cycle", "Group '${group.name.safeEcho()}' contains itself.")
-                    return@forEachIndexed
-                }
-                if (seen.add(next)) pending.addAll(children[next].orEmpty())
-            }
+        graph.cycleClosers().forEach { index ->
+            invalid("groups[$index].members", "cycle", "Group '${body.groups[index].name.safeEcho()}' contains itself.")
         }
     }
 

@@ -3,7 +3,7 @@ package co.datapipelines.config
 /**
  * §7 / §3.33 (#10) — the dashboard documents' collection bounds: every `datapipelines.visualization.*` key an
  * integer within its bounds. A value arrives as a raw STRING, so a malformed one is a NAMED violation here
- * rather than a binder crash; an unset block is not a violation (application.yml always supplies all five).
+ * rather than a binder crash; an unset block is not a violation (application.yml always supplies all seven).
  *
  * The bounds are the twins of `VisualizationKey` in `modules/visualization` (`app` compiles against `web`
  * only, so it cannot import them); `VisualizationConfigKeysSpecDriftTest` there parses THIS file and holds
@@ -24,6 +24,8 @@ internal object VisualizationRules {
             Bound(key = "datapipelines.visualization.max-fixture-rows-per-case", min = 1, max = 100_000),
             Bound(key = "datapipelines.visualization.max-config-bytes", min = 1_024, max = 2_097_152),
             Bound(key = "datapipelines.visualization.max-bindings-per-visualization", min = 1, max = 1_024),
+            Bound(key = "datapipelines.visualization.max-inputs-per-visualization", min = 1, max = 64),
+            Bound(key = "datapipelines.visualization.max-columns-per-input", min = 1, max = 4_096),
         )
 
     /** Every key this rule reads — `ConfigValidator.snapshotFrom` reads exactly these off the environment. */

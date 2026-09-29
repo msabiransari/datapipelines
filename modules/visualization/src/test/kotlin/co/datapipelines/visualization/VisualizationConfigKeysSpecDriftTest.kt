@@ -34,12 +34,12 @@ class VisualizationConfigKeysSpecDriftTest {
     }
 
     @Test
-    fun `the doc table, the doc template, application yml, the boot rule and the enum name the same five keys`() {
+    fun `the doc table, the doc template, application yml, the boot rule and the enum name the same seven keys`() {
         val doc = VisualizationTestFiles.read("docs/configuration.md")
         val template = doc.substringAfter("  visualization:                   # §3.33").substringBefore("\n\n")
         val templateKeys =
             Regex("""^\s{4}([a-z-]+):""", RegexOption.MULTILINE).findAll(template).map { "${VisualizationKey.PREFIX}.${it.groupValues[1]}" }
-        expected.size shouldBe 5
+        expected.size shouldBe 7
         withClue("configuration.md §3.33 table") { keysIn(section) shouldContainExactly expected }
         withClue("configuration.md §5 template") { templateKeys.sorted().toList() shouldContainExactly expected }
         withClue("application.yml") {

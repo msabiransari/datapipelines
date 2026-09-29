@@ -568,6 +568,8 @@ datapipelines:
     max-fixture-rows-per-case: ${DATAPIPELINES_VISUALIZATION_MAX_FIXTURE_ROWS_PER_CASE:1000}
     max-config-bytes: ${DATAPIPELINES_VISUALIZATION_MAX_CONFIG_BYTES:262144}
     max-bindings-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_BINDINGS_PER_VISUALIZATION:64}
+    max-inputs-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_INPUTS_PER_VISUALIZATION:8}
+    max-columns-per-input: ${DATAPIPELINES_VISUALIZATION_MAX_COLUMNS_PER_INPUT:256}
 
 # db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
 # (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a

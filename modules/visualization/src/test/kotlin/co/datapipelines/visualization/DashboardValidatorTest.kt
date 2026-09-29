@@ -10,7 +10,10 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.function.ThrowingSupplier
+import java.time.Duration
 
 /**
  * [DashboardValidator]: the spec's worked document passes unchanged; each validation code the validator owns
@@ -197,6 +200,34 @@ class DashboardValidatorTest {
             listOf(DashboardErrorCodes.UNKNOWN_OBJECT to "layout.parameter_placements.year.group")
     }
 
+    @Test
+    fun `a 30,000-deep group chain validates in linear time - one cycle pass, one scope pass, every consumer still found`() {
+        val tree = DocumentFixtures.dashboard()
+        val groups = tree.get("groups") as ArrayNode
+        // g0 → g1 → … → g29999 → overview_group: the scoped consumer (revenue_chart) sits at the bottom of the chain,
+        // so every chain group consumes `year` and the declared scope, which names overview_group only, omits them all.
+        (0 until CHAIN_DEPTH).forEach { i ->
+            groups
+                .addObject()
+                .put("name", "g$i")
+                .put("type", "group")
+                .putArray("members")
+                .add(if (i == CHAIN_DEPTH - 1) "overview_group" else "g${i + 1}")
+        }
+        val document = ValidatorFakes.dashboardDocument(tree)
+        val validator = ValidatorFakes.Fakes().dashboardValidator()
+        val result =
+            assertTimeoutPreemptively(
+                Duration.ofSeconds(CHAIN_SECONDS),
+                ThrowingSupplier { validator.validate(ValidatorFakes.WORKSPACE, document) },
+            )
+        val failures = result.shouldBeInstanceOf<ArtifactValidation.Invalid>().result.failures
+        failures.first().code shouldBe DashboardErrorCodes.SCOPE_OMITS_CONSUMER
+        failures.first().details["group"] shouldBe "g0"
+        failures.size shouldBe ArtifactFailures.MAX_FAILURES + 1
+        failures.last().details["reason"] shouldBe "too_many_failures"
+    }
+
     private fun grid(tree: ObjectNode): ArrayNode = tree.obj("layout").get("grid") as ArrayNode
 
     private fun valid(
@@ -244,6 +275,10 @@ class DashboardValidatorTest {
     )
 
     private companion object {
+        /** Deep enough that a walk per group (quadratic) takes minutes; the linear passes take well under a second. */
+        const val CHAIN_DEPTH = 30_000
+        const val CHAIN_SECONDS = 10L
+
         /** The validation codes the VALIDATOR raises — `new_root_requires_confirmation` is L1b's, `name_taken` the repository's. */
         val VALIDATOR_CODES: Set<String> =
             DashboardErrorCodes.ALL.filter { it.startsWith("dashboard.validation.") }.toSet() -

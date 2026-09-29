@@ -40,15 +40,16 @@ class DashboardValidator(
         DocumentRules.texts(body.displayName, body.description, DashboardErrorCodes.BODY_INVALID, failures)
         val set = parameterSet(workspaceId, body, failures)
         val names = DashboardNames.of(body, set)
+        val graph = GroupGraph(body)
         namespace(body, names, failures)
         val sources = sources(workspaceId, body, set, failures)
         occurrences(workspaceId, body, names, sources, failures)
         groups(body, names, failures)
         actions(body, names, failures)
         controls(body, names, set, failures)
-        scopes(body, names, set, failures)
+        scopes(body, names, set, graph, failures)
         overrides(body, names, sources, failures)
-        DashboardLayoutRules(body, names, failures).check()
+        DashboardLayoutRules(body, names, graph, failures).check()
         timeouts(body, failures)
         val result = failures.toResult()
         return if (result.isValid) ArtifactValidation.Valid(document) else ArtifactValidation.Invalid(result)
@@ -307,13 +308,15 @@ class DashboardValidator(
         }
     }
 
+    @Suppress("LongParameterList") // the document, its names, the set, the group graph and the collector
     private fun scopes(
         body: DashboardBody,
         names: DashboardNames,
         set: ParameterSetFact?,
+        graph: GroupGraph,
         failures: ArtifactFailures,
     ) {
-        val consumers = ScopeConsumers(body, set)
+        val consumers = ScopeConsumers(body, set, graph)
         body.parameterScopes.forEach { (parameter, groups) ->
             val path = "parameter_scopes.$parameter"
             if (parameter !in names.parameters) unknownObject(path, parameter, "parameter", failures)

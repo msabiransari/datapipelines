@@ -24,7 +24,7 @@ sealed interface ReadOutcome<out D> {
  * `visualization.validation.body_invalid` (`details.reason` `unknown_key` / `wrong_type` / `missing`); a field
  * with its own code owns its refusal — the name (`name_invalid`), an unknown renderer kind
  * (`renderer_unsupported`), an unknown column type (`input_contract_invalid`), an unknown assertion kind
- * (`test_case_invalid`). The four collection bounds (`datapipelines.visualization.*`) are checked BEFORE their
+ * (`test_case_invalid`). The six collection bounds (`datapipelines.visualization.*`) are checked BEFORE their
  * members are walked, and `config`'s byte size before anything reads it (`too_many` / `too_large`).
  *
  * Everything else — a rule that needs the whole document or another aggregate — is [VisualizationValidator]'s.
@@ -120,6 +120,10 @@ private class VisualizationScan(
     }
 
     private fun inputs(node: JsonNode) {
+        if (node.size() > config.maxInputsPerVisualization) {
+            scan.tooMany("inputs", node.size(), VisualizationKey.MAX_INPUTS_PER_VISUALIZATION, config.maxInputsPerVisualization)
+            return
+        }
         node.properties().forEach { (name, input) ->
             val path = "inputs.$name"
             if (!input.isObject) {
@@ -127,9 +131,12 @@ private class VisualizationScan(
                 return@forEach
             }
             scan.unknownKeys(input, VisualizationReader.INPUT_KEYS, path)
-            scan.arrayAt(input, "columns", "$path.columns", required = true)?.forEachIndexed { index, column ->
-                column(column, "$path.columns[$index]")
+            val columns = scan.arrayAt(input, "columns", "$path.columns", required = true) ?: return@forEach
+            if (columns.size() > config.maxColumnsPerInput) {
+                scan.tooMany("$path.columns", columns.size(), VisualizationKey.MAX_COLUMNS_PER_INPUT, config.maxColumnsPerInput)
+                return@forEach
             }
+            columns.forEachIndexed { index, column -> column(column, "$path.columns[$index]") }
         }
     }
 

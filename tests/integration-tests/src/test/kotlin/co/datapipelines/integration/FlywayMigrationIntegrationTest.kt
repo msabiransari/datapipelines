@@ -457,7 +457,17 @@ class FlywayMigrationIntegrationTest {
                         "WHERE (status = 'DRAFT'::text)",
                 )
             columnsOf("${family}s") shouldContainExactlyInAnyOrder
-                listOf("id", "workspace_id", "name", "display_name", "description", "current_version", "created_at", "updated_at", "created_by")
+                listOf(
+                    "id",
+                    "workspace_id",
+                    "name",
+                    "display_name",
+                    "description",
+                    "current_version",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                )
             query(
                 "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'chk_${family}_versions_body'",
             ) { it.getString(1) } shouldContainExactly
