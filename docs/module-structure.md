@@ -130,7 +130,7 @@ layer 3
 layer 4
 ┌──────────────┐ ┌──────────────┐
 │     dag      │ │  parameters  │  dag ← typesystem, calculators, pipeline-contract, templates,
-│  (executor)  │ │              │        datasources, staging, scripting, graph
+│  (executor)  │ │              │        datasources, staging, scripting, graph, persistence
 └──────────────┘ └──────────────┘  parameters ← typesystem, graph, pipeline-contract, templates, datasources
 
 layer 5
@@ -188,7 +188,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `staging` | `typesystem` |
 | `auth` | `typesystem`, `persistence` |
 | `scheduler` | `typesystem`, `pipeline-contract` |
-| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph` |
+| `dag` | `typesystem`, `calculators`, `pipeline-contract`, `templates`, `datasources`, `staging`, `scripting`, `graph`, `persistence` |
 | `parameters` | `typesystem`, `graph`, `pipeline-contract`, `templates`, `datasources` |
 | `visualization` | `typesystem`, `pipeline-contract`, `templates`, `parameters` |
 | `application` | `typesystem`, `scripting`, `pipeline-contract`, `templates`, `datasources`, `dag`, `auth`, `parameters`, `visualization` |
@@ -398,7 +398,7 @@ No repository: tempdb lives and dies with one execution and is never persisted (
 
 ### 5.6 `dag`
 
-**Dependencies (internal):** `pipeline-contract`, `templates`, `datasources`, `staging`, `typesystem`.
+**Dependencies (internal):** `pipeline-contract`, `templates`, `datasources`, `staging`, `typesystem`, `scripting`, `graph`, `persistence` (#321 — `FailureShape` for the two scheduled jobs' failure lines, nothing else; §4.2 note); `calculators` allowed and not declared.
 
 **Dependencies (external):**
 - `org.jetbrains.kotlinx:kotlinx-coroutines-core`
@@ -1276,6 +1276,7 @@ Before considering the module structure "ready":
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | #321 the scheduled jobs' failure lines | 321 | §4.2's allowed map gains `dag → persistence` (the root map and `modules/dag/build.gradle.kts` follow it; owner's ruling on the lane's question, 2026-09-29): `StaleExecutionSweeper` and `ExecutionEventRetention` log a store failure by `FailureShape`'s class and SQLState, never by its message (observability §3.4G). The edge is for `FailureShape` only — `dag` still does not sit on the batching writer (§4.2 note). §4.1's layer-4 row and §5.6's dependency line follow; §5.6's line also names the declared `scripting` and `graph` edges it had missed. |
 | 2026-09-29 | #10 L1b — the visualization surfaces | L1b | §4.2's `visualization` note: the edges of `application` (`PipelineReleaseFactsReader`), `mcp-server` (the eleven tools) and `web` (the routes and `VisualizationConfiguration`) are DECLARED — they were allowed ahead. §5.20: the lifecycle core's and the services' repository, transactions and `flipDraft` are module-internal (O3); the lensed reads gain `findVersionByName` and `pinnedBy`. No module, layer or allowed edge added. |
 | 2026-09-29 | #316 the scheduled jobs' own scheduler | 316 | §5.6: `SweepSchedulingConfiguration` declares `taskScheduler`, one daemon thread `dp-scheduled`, for every `@Scheduled` job (the stale sweep, the pool reaper, the retention sweep) — they had been running on the SSE log streamer's `dp-sse-log` thread, Spring's fallback while no `TaskScheduler` bean existed; `ExecutionEventRetention`'s line names the thread. No module or dependency change. |
 | 2026-09-29 | #10 L1a — the visualization module | L1a | New **§5.20 `visualization`** — layer 5, above `parameters` and below `application` (§4.1 renumbers the layers above it): the visualization and dashboard documents, readers, validators, repositories, lifecycle and transfer. §3/§3.1 rows, §4.1 layer, §4.2's table gains the row (`typesystem`, `pipeline-contract`, `templates`, `parameters`) and `application`, `mcp-server` and `web` gain `visualization` (allowed ahead, undeclared — L1b/L1c/L2 declare it). The root build's allowed-dependency map, `COVERAGE_FLOORS` (90 until measured) and `ArchitectureGuardTest`'s below-the-surfaces list carry the module; its `gradle.lockfile` ships in the same commit. |

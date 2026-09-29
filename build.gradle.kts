@@ -167,6 +167,9 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
         ":modules:scripting",
         // #194 — `Dag<T>` now lives in `graph` (same package); the executor builds its DAGs from it.
         ":modules:graph",
+        // #321 — `FailureShape` only: the stale sweep's and the event retention's failure lines name a
+        // store failure by its class and SQLState. `dag` does not sit on the batching writer (§4.2 note).
+        ":modules:persistence",
     ),
     // #194 lane B (parameter-engine record §2.2/§2.4) — the parameter engine, layer 4 beside `dag`.
     // `pipeline-contract` is compiled against (TemplateRef, the name grammars, the template/datasource

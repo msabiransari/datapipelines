@@ -1,5 +1,6 @@
 package co.datapipelines.executor
 
+import co.datapipelines.persistence.FailureShape
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessException
 import java.time.Duration
@@ -43,7 +44,14 @@ class ExecutionEventRetention(
             try {
                 events.deleteOlderThan(cutoff)
             } catch (e: DataAccessException) {
-                LOG.warn("event=execution.event_retention_failed cutoff={} message=\"{}\"", cutoff, e.message)
+                // The class and the SQLState, never the message: Spring's message carries the
+                // statement text and the driver's text (observability §3.4G; #321).
+                LOG.warn(
+                    "event=execution.event_retention_failed cutoff={} error={} sql_state={}",
+                    cutoff,
+                    FailureShape.cause(e),
+                    FailureShape.sqlState(e),
+                )
                 return 0
             }
         if (purged > 0) {

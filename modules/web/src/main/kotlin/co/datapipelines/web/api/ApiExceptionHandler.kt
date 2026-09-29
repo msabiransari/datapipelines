@@ -357,6 +357,10 @@ class ApiExceptionHandler {
 
             uri.startsWith("$API_PREFIX/dashboards") -> PipelineErrorCodes.Dashboard.BODY_INVALID
 
+            // #323: the parameter-set family answers an unreadable body with its OWN `body_invalid` 400
+            // (pipeline-contract §13.20) — the routes read their body the #291 way since 321.
+            uri.startsWith("$API_PREFIX/parameter-sets") -> PipelineErrorCodes.Parameters.BODY_INVALID
+
             else -> PipelineErrorCodes.Validation.SCHEMA_VERSION_UNSUPPORTED
         }
 

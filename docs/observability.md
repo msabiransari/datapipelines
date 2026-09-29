@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.24 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.25 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-29
@@ -93,7 +93,7 @@ Standard fields: `@timestamp`, `level`, `logger`, `thread`, `message`. Context f
 | `auth` | login success/failure, key issuance/revocation (via audit log, not general log); the §3.4B mail events |
 | `datasources` | datasource registered/updated/deleted, pool built/retired/reconciled, connection acquisition failures, and the §3.4A pool hard-close WARN |
 | `staging` | H2 instance created/closed, staging operation success (table name + row count), memory-limit warnings |
-| `dag` | execution started/completed/failed, node started/completed/failed, cancellation |
+| `dag` | execution started/completed/failed, node started/completed/failed, cancellation; the crash sweep's and the event retention's ticks — a failed tick names the store failure by `error` (its class) and `sql_state`, never its message (§3.4G's rule, #321) |
 | `templates` | template registered (id + version), render failures |
 | `mcp-server` | tool calls (tool name + caller), transport errors |
 | `web` | request log (method, path, status, duration), CORS preflight, SSE connections opened/closed |
@@ -217,13 +217,13 @@ Every `@Scheduled` job — the stale-execution sweep (every 15 s), the pool reap
 
 #### 3.4I The executor's retention events (#316 review)
 
-The executor's two scheduled jobs on the `dp-scheduled` thread (§3.4H) — the stale-execution sweep (`StaleExecutionSweeper`, every 15 s) and the hourly retention sweep over `execution_events` (`ExecutionEventRetention`) — log these. The two failure lines still carry the store's `message` today; #321 replaces it with `cause` + `sql_state` (the §3.4G rule). Catalogued at the 316 merge: §3.4H cited two of these names before any table defined them, and the docs audit (whose `execution` event family joined in the same commit — `execution` is also a permission family) refused the citation.
+The executor's two scheduled jobs on the `dp-scheduled` thread (§3.4H) — the stale-execution sweep (`StaleExecutionSweeper`, every 15 s) and the hourly retention sweep over `execution_events` (`ExecutionEventRetention`) — log these. The two failure lines name the store failure by `error` (its class) and `sql_state`, never its message (#321, the §3.4G rule; `error=` is the scheduled-job mould's field name — `audit.retention_failed` — where §3.4G's writers say `cause=`). Catalogued at the 316 merge: §3.4H cited two of these names before any table defined them, and the docs audit (whose `execution` event family joined in the same commit — `execution` is also a permission family) refused the citation.
 
 | Level | `event=` | When | Fields |
 |---|---|---|---|
 | INFO | `execution.events_purged` | A retention tick deleted at least one `execution_events` row for executions completed before the cutoff (nothing is logged for an empty tick) | `count`, `cutoff` |
-| WARN | `execution.sweep_failed` | The stale sweep's UPDATE threw; the tick is skipped and the next one retries | `cutoff`, `heartbeat_cutoff`, `message` (the store's — #321 replaces it with `cause`, `sql_state`) |
-| WARN | `execution.event_retention_failed` | The retention tick's DELETE threw; the next tick retries | `cutoff`, `message` (the store's — #321 replaces it with `cause`, `sql_state`) |
+| WARN | `execution.sweep_failed` | The stale sweep's UPDATE threw; the tick is skipped and the next one retries | `cutoff`, `heartbeat_cutoff`, `error`, `sql_state` |
+| WARN | `execution.event_retention_failed` | The retention tick's DELETE threw; the next tick retries | `cutoff`, `error`, `sql_state` |
 
 ### 3.5 Log destination
 
@@ -417,7 +417,7 @@ Already covered in [Auth spec §10](auth.md#10-audit-log) (event catalog §10.1,
 - **Delivery (#266).** A row is committed before `AuditEventSink.log` returns — by default the direct INSERT (on the caller's own connection inside its transaction); with `datapipelines.persistence.audit.enabled: true`, batched outside a transaction ([Auth §10.1A](auth.md#101a-delivery-durable-before-log-returns-266)). The same holds for every execution event ([DAG Executor §10.1](dag-executor.md#101-how-an-emitted-event-becomes-durable-266)).
 - **The loss window, stated.** No awaited row — audit or event — is ever acknowledged before it is durable, so a crash cannot lose a row whose caller proceeded: a caller interrupted mid-write had not proceeded (for an execution, the outcome is "not completed", never "completed without a record"). The batching writers' non-awaited `submit` path is the one exception — its queue at the moment of a crash, and whatever the shutdown drain could not write by `shutdown-drain-ms` (`persistence.drain_incomplete`, `failures{kind=drain_lost}`) — and it has no production caller yet (the dashboard's refresh event, D27, will be its first).
 
-**Retention (#310).** The retention sweep's last step (`AuditLogRetention`, hourly, [Auth §10.3](auth.md#103-retention), [Metadata DB §8.2](metadata-db.md#82-audit-log-retention)) deletes the rows older than the database's `NOW()` minus [`datapipelines.audit.retention-days`](configuration.md#312-audit) (30–3650, default 365), in batches of at most 5,000, at most 50 batches or 2 seconds a tick. A tick that deleted anything logs one INFO line `event=audit.retention purged=<n> cutoff=<iso> batches=<k>`; a tick that stopped with rows left logs a WARN `event=audit.retention_incomplete … reason=batch_ceiling|time_budget` and the next tick continues; a metadata-DB fault logs a WARN `event=audit.retention_failed purged=<n> batches=<k> cutoff=<iso> message=…` with what it had already committed. Counts and the cutoff only — never a row's content. The meter is `datapipelines.audit.retention.purged` (§4.1). A step of the sweep that throws anything else logs ERROR `event=retention.step_failed step=<execution_events|keys|audit_log>` and the tick continues with the next step.
+**Retention (#310).** The retention sweep's last step (`AuditLogRetention`, hourly, [Auth §10.3](auth.md#103-retention), [Metadata DB §8.2](metadata-db.md#82-audit-log-retention)) deletes the rows older than the database's `NOW()` minus [`datapipelines.audit.retention-days`](configuration.md#312-audit) (30–3650, default 365), in batches of at most 5,000, at most 50 batches or 2 seconds a tick. A tick that deleted anything logs one INFO line `event=audit.retention purged=<n> cutoff=<iso> batches=<k>`; a tick that stopped with rows left logs a WARN `event=audit.retention_incomplete … reason=batch_ceiling|time_budget` and the next tick continues; a metadata-DB fault logs a WARN `event=audit.retention_failed purged=<n> batches=<k> cutoff=<iso> error=<class> sql_state=<state>` with what it had already committed — the class and SQLState, never the store's message (§3.4G). Counts and the cutoff only — never a row's content. The meter is `datapipelines.audit.retention.purged` (§4.1). A step of the sweep that throws anything else logs ERROR `event=retention.step_failed step=<execution_events|keys|audit_log>` and the tick continues with the next step.
 
 The audit log captures **who did what when** for compliance / forensic purposes. The general log captures **what happened in the system** for debugging.
 
@@ -506,6 +506,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.25 | 321 (#321) the scheduled jobs' failure lines — renumbered at merge: 306/316 and their reviews took v1.21–v1.24 | §3.4's `dag` row states the rule for the crash sweep's and the event retention's failure lines: a failed tick logs `error=<class> sql_state=<state>` where it logged the store's message (`FailureShape`, the §3.4G rule; `dag` gains the `persistence` edge for it, module-structure §4.2). The event names are not cited here: on this base the docs audit reads `execution.*` as a permission family (#307), and the events' own table arrives with the 316 merge (§3.4I). §7's retention paragraph said `audit.retention_failed … message=…`; the line has logged `error=`/`sql_state=` since #310 — corrected. |
 | 2026-09-29 | v1.24 | the 316 merge's review (#316) | New **§3.4I**: `execution.events_purged` catalogued — §3.4H cited it and the docs audit's citation check (#307, on main since 4b91c387; not on the lane's base) refused the uncatalogued name; #321 adds the two failure rows. |
 | 2026-09-29 | v1.23 | 316 (#316) the scheduled jobs' own thread — renumbered at merge: 306 took v1.21 and its pass v1.22 | New **§3.4H**: every `@Scheduled` job runs on `dp-scheduled`, the jobs' own scheduler, so their lines (named there) carry that `thread` — until #316 they carried `dp-sse-log`, the SSE log streamer's; two shutdown lines, `shutdown.scheduled_jobs_stopped` (INFO, after both drains) and `shutdown.scheduled_jobs_incomplete` (WARN, a tick outlived the shutdown wait). |
 | 2026-09-29 | v1.22 | the 306 merge's security pass (#311) | §4.1: `lifecycle_write_failed` also counts a terminal UPDATE that matched no row (#325); the emitter's lifecycle failure lines log class + SQLState at WARN (§3.4G), never the driver's message. |
