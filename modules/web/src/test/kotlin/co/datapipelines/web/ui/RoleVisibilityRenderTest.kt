@@ -631,12 +631,12 @@ class RoleVisibilityRenderTest {
         setVariable("pipelineJson", "{}")
     }
 
-    private fun WebContext.promotionModel() {
+    private fun WebContext.promotionModel(sets: List<PromotionService.Candidate> = PROMOTION_SETS) {
         chrome()
         setVariable("currentPath", "/promotion")
         setVariable("hasTarget", true)
         setVariable("targetBaseUrl", "https://prod.example")
-        setVariable("plan", PROMOTION_PLAN)
+        setVariable("plan", PROMOTION_PLAN.copy(promotableParameterSets = sets))
     }
 
     private fun WebContext.workspacesModel(
@@ -780,6 +780,17 @@ class RoleVisibilityRenderTest {
         const val SHIPPED_CONTROLS = 71
         const val SHIPPED_VERBS = 56
 
+        /** #313 — the page's set rows: one promotable constants-only set. */
+        val PROMOTION_SETS =
+            listOf(
+                PromotionService.Candidate(
+                    name = "acme/sales/region_filters",
+                    displayName = "Region filters",
+                    localVersion = 4,
+                    targetVersion = 3,
+                ),
+            )
+
         /** The promotion plan the screen reads (055, `PromotionService.Plan`) — the real type. */
         val PROMOTION_PLAN =
             PromotionService.Plan(
@@ -796,7 +807,7 @@ class RoleVisibilityRenderTest {
                             targetVersion = 1,
                         ),
                     ),
-                promotableParameterSets = emptyList(),
+                promotableParameterSets = PROMOTION_SETS,
                 examined = 4,
             )
     }

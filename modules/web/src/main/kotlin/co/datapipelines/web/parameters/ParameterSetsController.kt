@@ -292,7 +292,11 @@ class ParameterSetsController(
         )
     }
 
-    /** §21 — the flat listing (offset/limit), the pipelines §5.7 shape without its owner/datasource filters. */
+    /**
+     * §21 — the flat listing (offset/limit), the pipelines §5.7 shape without its owner/datasource
+     * filters. A FLAT read (#312): every set the caller's lens admits, paged — never the ROOT tree
+     * level, whose folder cut would answer `[]` for a grammar where every name carries a folder.
+     */
     @GetMapping(params = ["!prefix"])
     @RequiredScope(Permission.PARAMETER_SET_READ)
     fun list(
@@ -304,8 +308,8 @@ class ParameterSetsController(
         val principal = currentPrincipal()
         val workspaceId = principal.requireWorkspace().id
         val view = lens.viewFor(principal).parameterSets
-        val loaded = sets.listChildSets(workspaceId, view, null, page, size)
-        val total = sets.countChildSets(workspaceId, view, null)
+        val loaded = sets.listAll(workspaceId, view, page, size)
+        val total = sets.countAll(workspaceId, view)
         val items = loaded.map { ParameterSetResponses.listEntry(it) }
         return ApiResponse.of(PagedData(items, Pagination.of(page, size, total.toLong(), items.size)))
     }

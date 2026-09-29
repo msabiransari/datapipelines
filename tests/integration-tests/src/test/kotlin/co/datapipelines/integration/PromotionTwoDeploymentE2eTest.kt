@@ -532,6 +532,44 @@ class PromotionTwoDeploymentE2eTest {
         )
     }
 
+    /**
+     * #313 — the PAGE promotes a set. The promotion page's form post (`POST
+     * /promotion/promote`, session-only, CSRF double-submit) carries the new
+     * `parameter_set` field; the flash must name the applied set count, and uat must hold the
+     * set at dev's version — the same sender path the case above proves at the service level,
+     * now through the one production surface that reaches it. Red when the page sends no set
+     * names (the three-argument overload's `emptyList()`).
+     */
+    @Test
+    @Order(55)
+    fun `a parameter set promotes from the PAGE - the form post reaches the sender's set slot`() {
+        createReleasedSetOn(portDev, PAGE_SET)
+
+        val response =
+            given()
+                .port(portDev)
+                .asSession(adminSession())
+                .contentType(ContentType.URLENC)
+                .formParam("parameter_set", PAGE_SET)
+                .`when`()
+                .post("/promotion/promote")
+                .then()
+                .extract()
+
+        assertEquals(302, response.statusCode(), "the action answers a redirect flash")
+        val location = response.header("Location")
+        assertTrue(
+            location.orEmpty().contains("parameter_sets=1"),
+            "the flash must name the applied set count, was: $location",
+        )
+
+        assertAll(
+            { assertEquals(1, devParameterSetVersion(PAGE_SET), "dev's current version") },
+            { assertEquals(devParameterSetVersion(PAGE_SET), uatParameterSetVersion(PAGE_SET), "uat's current version") },
+            { assertEquals(devParameterSetHash(PAGE_SET), uatParameterSetHash(PAGE_SET), "body hash") },
+        )
+    }
+
     // ------------------------------------------------------------------ content on dev
 
     /** A parent that runs a child through a PIPELINE node and pins a template that imports a library. */
@@ -1094,6 +1132,9 @@ class PromotionTwoDeploymentE2eTest {
         private const val CHILD = "test/promo_e2e_child"
         private const val PARENT = "test/promo_e2e_parent"
         private const val PROMO_SET = "test/promo_e2e_filters"
+
+        /** #313 — the set the PAGE's form post promotes (Order 55), distinct from Order 54's. */
+        private const val PAGE_SET = "test/page_e2e_filters"
         private const val ORPHAN = "test/promo_e2e_orphan"
         private const val TX_TEMPLATE = "test/promo_e2e_tx.sql"
         private const val TX_OK = "test/promo_e2e_tx_ok"

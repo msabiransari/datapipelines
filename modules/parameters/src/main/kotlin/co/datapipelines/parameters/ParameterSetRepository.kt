@@ -229,6 +229,38 @@ class ParameterSetRepository(
         )
 
     /**
+     * The FLAT listing (#312): every live set at its LISTED version (D55), no level clause — the
+     * pipelines §5.7 mould, [listChildSets] minus the folder cut. The tree routes keep
+     * [listChildSets]; this is what `GET /parameter-sets` without a prefix pages through.
+     */
+    fun listAll(
+        workspaceId: UUID,
+        offset: Int = 0,
+        limit: Int = DEFAULT_PAGE_LIMIT,
+    ): List<ParameterSetVersion> =
+        jdbc.query(
+            """
+            $SELECT_VERSION
+            WHERE s.workspace_id = :workspaceId AND $LIVE_S
+               AND v.version = $LISTED_VERSION
+             ORDER BY s.name
+             LIMIT :limit OFFSET :offset
+            """.trimIndent(),
+            mapOf("workspaceId" to workspaceId, "limit" to limit.coerceIn(1, MAX_PAGE_LIMIT + 1), "offset" to maxOf(0, offset)),
+            VERSION,
+        )
+
+    /** The truthful total of [listAll] — the same predicate, no paging. */
+    fun countAll(workspaceId: UUID): Int =
+        checkNotNull(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM parameter_sets s WHERE s.workspace_id = :workspaceId AND $LIVE_S",
+                mapOf("workspaceId" to workspaceId),
+                Int::class.java,
+            ),
+        )
+
+    /**
      * Every live set that HAS a current version, with that version's number and hash — the promoter
      * lens's input (versioning §10.2: released and newer than the target's). A never-released set is
      * absent: a draft is never promotable.
