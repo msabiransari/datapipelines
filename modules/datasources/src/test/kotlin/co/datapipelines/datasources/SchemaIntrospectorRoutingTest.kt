@@ -820,6 +820,7 @@ class SchemaIntrospectorRoutingTest {
             },
         )
     }
+
     @Test
     fun `a failing outer-catalog read is classified, never the silent merge fallback (#336)`() {
         // The outer segment is what separates two ATTACHed catalogs' tables — `getCatalog()`

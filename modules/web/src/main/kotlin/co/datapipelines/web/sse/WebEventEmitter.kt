@@ -384,8 +384,7 @@ class WebEventEmitter(
                                 FailureShape.cause(it),
                                 FailureShape.sqlState(it),
                             )
-                        }
-                        .getOrNull()
+                        }.getOrNull()
                 }
         runCatching {
             withinLifecycleBound {

@@ -136,10 +136,11 @@ class WorkspacesUiController(
         val keyOwners =
             listings.mapValues { (name, listing) ->
                 when {
-                    listing == null ->
+                    listing == null -> {
                         emptySet()
+                    }
 
-                    else ->
+                    else -> {
                         runCatching { workspaceService.liveUserKeyOwnerIds(principal, name) }
                             .getOrElse { failure ->
                                 if (failure is AuthException) {
@@ -155,6 +156,7 @@ class WorkspacesUiController(
                                     emptySet()
                                 }
                             }
+                    }
                 }
             }
         model.addAttribute(

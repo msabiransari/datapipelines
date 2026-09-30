@@ -164,7 +164,10 @@ class PipelineJobExecutorTest {
             listOf(ExecutionEventRecord(executionId, 7, "execution_aborted", Instant.EPOCH, """{"reason": not-json"""))
 
         val logger = org.slf4j.LoggerFactory.getLogger(PipelineJobExecutor::class.java) as ch.qos.logback.classic.Logger
-        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
+        val appender =
+            ch.qos.logback.core.read
+                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+                .apply { start() }
         logger.addAppender(appender)
         val outcome =
             try {

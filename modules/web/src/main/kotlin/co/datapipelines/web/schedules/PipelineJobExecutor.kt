@@ -16,6 +16,7 @@ import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
 import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.Pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes
@@ -44,7 +45,6 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import co.datapipelines.persistence.FailureShape
 import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.time.LocalDate

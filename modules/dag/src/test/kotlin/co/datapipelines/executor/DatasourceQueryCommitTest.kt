@@ -1,14 +1,14 @@
 package co.datapipelines.executor
 
-import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
-import co.datapipelines.typesystem.Dialect
+import co.datapipelines.datasources.DeleteResult
 import co.datapipelines.datasources.LakeBrokenTable
 import co.datapipelines.datasources.TestResult
 import co.datapipelines.datasources.ValidationResult
-import co.datapipelines.datasources.DeleteResult
+import co.datapipelines.datasources.pooling.ConnectionPool
 import co.datapipelines.pipeline.NodeOutput
+import co.datapipelines.typesystem.Dialect
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.runBlocking
@@ -103,7 +103,10 @@ class DatasourceQueryCommitTest {
 
     /** A POSTGRES-declared datasource on a real H2 in PostgreSQL mode, one table, one row. */
     private fun postgresDialectSource(name: String): Datasource {
-        val url = "jdbc:h2:mem:commit_${name}_${UUID.randomUUID().toString().replace("-", "")};DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE"
+        val url = "jdbc:h2:mem:commit_${name}_${UUID.randomUUID().toString().replace(
+            "-",
+            "",
+        )};DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE"
         DriverManager.getConnection(url, "sa", "").use { connection ->
             connection.createStatement().use { statement ->
                 statement.execute("CREATE TABLE t (n INT)")

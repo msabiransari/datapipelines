@@ -18,12 +18,12 @@ import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.ReplayLogSink
 import co.datapipelines.web.sse.SseEventLog
 import co.datapipelines.web.sse.WebEventEmitter
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterAll
@@ -67,20 +67,21 @@ class EmitterDegradedDiagnosticsIntegrationTest {
         val executionId = UUID.randomUUID()
         rig.emitStarted(executionId)
 
-        val events = captureEmitterLogs {
-            runBlocking {
-                rig.emitter(executionId, rig.executions).emit(
-                    ExecutionAborted(
-                        executionId,
-                        rig.pipelineId,
-                        AbortReason.CANCELLED,
-                        Instant.now(),
-                        emptyList(),
-                        contextSnapshot = mapOf("poisoned" to Any()), // no properties — Jackson refuses
-                    ),
-                )
+        val events =
+            captureEmitterLogs {
+                runBlocking {
+                    rig.emitter(executionId, rig.executions).emit(
+                        ExecutionAborted(
+                            executionId,
+                            rig.pipelineId,
+                            AbortReason.CANCELLED,
+                            Instant.now(),
+                            emptyList(),
+                            contextSnapshot = mapOf("poisoned" to Any()), // no properties — Jackson refuses
+                        ),
+                    )
+                }
             }
-        }
 
         val row = rig.jdbcRow(executionId)
         row["status"] shouldBe "ABORTED"
@@ -203,7 +204,12 @@ class EmitterDegradedDiagnosticsIntegrationTest {
         }
 
         fun jdbcRow(executionId: UUID): Map<String, Any> =
-            JdbcTemplate(pool).queryForMap("SELECT status, parameters_json::text AS parameters_json, duration_ms FROM pipeline_executions WHERE execution_id = ?", executionId)
+            JdbcTemplate(
+                pool,
+            ).queryForMap(
+                "SELECT status, parameters_json::text AS parameters_json, duration_ms FROM pipeline_executions WHERE execution_id = ?",
+                executionId,
+            )
 
         private fun cleanSchema() {
             JdbcTemplate(pool).execute("TRUNCATE pipeline_executions, pipeline_versions, pipelines, users, workspaces CASCADE")
@@ -243,8 +249,11 @@ class EmitterDegradedDiagnosticsIntegrationTest {
     /** A private Redis — the replay log's store for this suite only. */
     private class PrivateRedis : AutoCloseable {
         private val container =
-            org.testcontainers.containers.GenericContainer(org.testcontainers.utility.DockerImageName.parse("redis:7-alpine"))
-                .withExposedPorts(6379)
+            org.testcontainers.containers
+                .GenericContainer(
+                    org.testcontainers.utility.DockerImageName
+                        .parse("redis:7-alpine"),
+                ).withExposedPorts(6379)
                 .also { it.start() }
         private val factory =
             LettuceConnectionFactory(RedisStandaloneConfiguration(container.host, container.getMappedPort(6379)))

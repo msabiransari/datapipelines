@@ -245,7 +245,9 @@ class ReadOnlyStatementLeaseTest {
         private val refuseCancel: Boolean,
         private val refuseClose: Boolean,
     ) : java.sql.PreparedStatement by delegate {
-        val closeAttempts = java.util.concurrent.atomic.AtomicInteger()
+        val closeAttempts =
+            java.util.concurrent.atomic
+                .AtomicInteger()
 
         override fun cancel() {
             if (refuseCancel) throw java.sql.SQLException("cancel refused by the double", "0A000")
@@ -266,7 +268,9 @@ class ReadOnlyStatementLeaseTest {
         private val refuseClose: Boolean = false,
         private val refusePrepare: Boolean = false,
     ) : Connection by delegate {
-        val closeAttempts = java.util.concurrent.atomic.AtomicInteger()
+        val closeAttempts =
+            java.util.concurrent.atomic
+                .AtomicInteger()
 
         override fun prepareStatement(sql: String): java.sql.PreparedStatement {
             if (refusePrepare) throw java.sql.SQLException("prepare refused by the double", "HY000")
@@ -327,7 +331,10 @@ class ReadOnlyStatementLeaseTest {
 
     private fun capturedLeaseLogs(block: () -> Unit): List<ch.qos.logback.classic.spi.ILoggingEvent> {
         val logger = org.slf4j.LoggerFactory.getLogger(LeasedStatement::class.java) as ch.qos.logback.classic.Logger
-        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
+        val appender =
+            ch.qos.logback.core.read
+                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+                .apply { start() }
         logger.addAppender(appender)
         return try {
             block()
@@ -383,7 +390,8 @@ class ReadOnlyStatementLeaseTest {
 
     @Test
     fun `a close whose statement AND connection refuse logs both WARNs and discards the connection`() {
-        val pool = SingleConnectionPool(RefusingConnection(realConnection(), statementRefusal = Triple(false, false, true), refuseClose = true))
+        val pool =
+            SingleConnectionPool(RefusingConnection(realConnection(), statementRefusal = Triple(false, false, true), refuseClose = true))
         val lease = ReadOnlyStatementLease(registryOver(pool))
         val statement = lease.open(datasource(), "SELECT 1", emptyList(), 2, 10)
 
@@ -397,7 +405,11 @@ class ReadOnlyStatementLeaseTest {
         warns.forEach { it.formattedMessage.shouldContain("SQLException") }
     }
 
-    private fun realConnection(): Connection = DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).also { opened += it }
+    private fun realConnection(): Connection =
+        DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).also {
+            opened +=
+                it
+        }
 
     private fun waitUntil(
         what: String,

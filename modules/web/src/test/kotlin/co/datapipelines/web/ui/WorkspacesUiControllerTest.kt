@@ -4,7 +4,6 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.JwtService
-import co.datapipelines.auth.WorkspaceNotFoundException
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
@@ -14,6 +13,7 @@ import co.datapipelines.auth.WorkspaceLastAdminException
 import co.datapipelines.auth.WorkspaceMemberRow
 import co.datapipelines.auth.WorkspaceMembership
 import co.datapipelines.auth.WorkspaceMembershipRequiredException
+import co.datapipelines.auth.WorkspaceNotFoundException
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.auth.WorkspaceSelfMembershipException
 import co.datapipelines.auth.WorkspaceService

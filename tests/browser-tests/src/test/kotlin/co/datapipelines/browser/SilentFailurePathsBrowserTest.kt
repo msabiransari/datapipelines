@@ -41,7 +41,8 @@ class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
             if (route.request().method() == "DELETE") {
                 deleteHits++
                 route.fulfill(
-                    com.microsoft.playwright.Route.FulfillOptions()
+                    com.microsoft.playwright.Route
+                        .FulfillOptions()
                         .setStatus(500)
                         .setBody("""{"error":{"code":"internal","message":"catalogued refusal for the browser proof"}}"""),
                 )
@@ -81,7 +82,10 @@ class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
             val body = route.fetch().text()
             val tampered = body.replaceFirst("\"hasDraft\":true", "\"hasDraft\":broken-")
             route.fulfill(
-                com.microsoft.playwright.Route.FulfillOptions().setBody(tampered).setContentType("text/html"),
+                com.microsoft.playwright.Route
+                    .FulfillOptions()
+                    .setBody(tampered)
+                    .setContentType("text/html"),
             )
         }
         page.navigate("$baseUrl/pipelines/$pipelineId/editor")
@@ -117,7 +121,12 @@ class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
         staleNote.shouldBeHidden()
 
         page.route("**/api/v1/schedules/*/runs**") { route ->
-            route.fulfill(com.microsoft.playwright.Route.FulfillOptions().setStatus(500).setBody("server down"))
+            route.fulfill(
+                com.microsoft.playwright.Route
+                    .FulfillOptions()
+                    .setStatus(500)
+                    .setBody("server down"),
+            )
         }
         try {
             page.locator("[data-sch-action='refresh-runs']").click()
