@@ -101,6 +101,24 @@ class PipelineBrowseModelUsageTest {
         usage.total shouldBe 1
     }
 
+    @Test
+    fun `a narrowing lens reports RELEASED dashboard versions only - a DRAFT of an ADMITTED dashboard never reaches a promoter`() {
+        // The 320 security pass's F1: the lens admits BOTH names, and version 2's pin is a DRAFT version of
+        // `acme/boards/secret`. The families' own rule (178b, "a draft never reaches a promoter") keeps it off the tab and
+        // out of the badge: a narrowing view reports RELEASED rows only, as every template arm does.
+        val narrowed =
+            LensedView(
+                ReadLens.Everything,
+                ReadLens.Everything,
+                dashboards = ReadLens.Only(setOf("acme/boards/shown", "acme/boards/secret")),
+            )
+
+        val usage = usage(narrowed)
+
+        usage.dashboards shouldBe listOf(UsageView.DashboardUse("acme/boards/shown", 3, "RELEASED", pinnedVersion = 1))
+        usage.total shouldBe 1
+    }
+
     private companion object {
         val WS: UUID = UUID.fromString("00000000-0000-0000-0000-000000000010")
         val PIPELINE: UUID = UUID.fromString("22222222-2222-2222-2222-222222222222")

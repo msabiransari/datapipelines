@@ -443,11 +443,13 @@ class PipelineBrowseModel(
         val runsOnIt = runSchedules(workspaceId, record, principal)
         // #320: the dashboards whose sources pin a version — the SAME question `PipelineService.refuseIfPinned` asks per
         // version (`pipeline.version.pinned`'s `referencing_dashboards`), through the dashboard lens (a hidden dashboard
-        // must not leak through the reverse arrow either).
+        // must not leak through the reverse arrow either). Both halves of the lens apply: the NAME, and under a narrowing
+        // lens RELEASED rows only — a draft's number and status never reach a promoter (178b; the 320 security pass, F1).
         val dashboardUses =
             versions
                 .flatMap { v -> dashboards.liveVersionPins(workspaceId, record.name, v.version).map { it to v.version } }
                 .through(view.dashboards) { (pin, _) -> pin.name }
+                .filter { (pin, _) -> view.dashboards.isEverything || pin.status == PipelineVersionStatus.RELEASED }
                 .map { (pin, pinned) -> UsageView.DashboardUse(pin.name, pin.version, pin.status.name, pinned) }
         return UsageView(endpoints = served, parents = parents, schedules = runsOnIt, dashboards = dashboardUses)
     }
