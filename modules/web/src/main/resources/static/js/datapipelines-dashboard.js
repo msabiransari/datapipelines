@@ -1701,6 +1701,13 @@
       renderers: function () {
         return REGISTERED_RENDERERS;
       },
+      /** Swap one registration wholesale — the host's instrumentation point (a counting wrapper). */
+      replaceRenderer: function (kind, spec) {
+        if (!REGISTERED_RENDERERS[kind]) {
+          throw DashboardError("renderer.unknown_kind", "no renderer named '" + kind + "' is registered");
+        }
+        return registerRenderer(Object.assign({ kind: kind }, spec));
+      },
       MOUNTED_ATTRIBUTE: MOUNTED_ATTRIBUTE,
     },
   };

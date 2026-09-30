@@ -61,7 +61,10 @@ class VendoredPlotlyAuditTest {
         var end = start
         while (end < manifest.length) {
             when (manifest[end]) {
-                '{' -> depth++
+                '{' -> {
+                    depth++
+                }
+
                 '}' -> {
                     depth--
                     if (depth == 0) return manifest.substring(start, end + 1)
@@ -95,8 +98,10 @@ class VendoredPlotlyAuditTest {
             (twoD != null) shouldBe true
             (threeD != null) shouldBe true
         }
-        QUOTED_WORDS.findAll(twoD!!).map { it.groupValues[1] }.toList() shouldContainExactlyInAnyOrder RendererConfigValidators.PLOTLY_2D_TRACES
-        QUOTED_WORDS.findAll(threeD!!).map { it.groupValues[1] }.toList() shouldContainExactlyInAnyOrder RendererConfigValidators.PLOTLY_TRACES
+        val declared2D = QUOTED_WORDS.findAll(twoD!!).map { it.groupValues[1] }.toList()
+        val declared3D = QUOTED_WORDS.findAll(threeD!!).map { it.groupValues[1] }.toList()
+        declared2D shouldContainExactlyInAnyOrder RendererConfigValidators.PLOTLY_2D_TRACES
+        declared3D shouldContainExactlyInAnyOrder RendererConfigValidators.PLOTLY_TRACES
     }
 
     @Test

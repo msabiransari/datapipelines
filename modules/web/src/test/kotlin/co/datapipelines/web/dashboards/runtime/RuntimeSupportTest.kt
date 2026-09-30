@@ -3,6 +3,7 @@ package co.datapipelines.web.dashboards.runtime
 import co.datapipelines.application.dashboards.RefreshAdmission
 import co.datapipelines.executor.ExecutionSlots
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.visualization.ActionScope
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRecord
@@ -13,7 +14,6 @@ import co.datapipelines.visualization.DashboardLayout
 import co.datapipelines.visualization.DashboardRefreshRepository
 import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.visualization.DashboardTimeouts
-import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.visualization.RefreshExecutionLink
 import co.datapipelines.visualization.RefreshRecord
 import co.datapipelines.visualization.RefreshStatus
