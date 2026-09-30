@@ -159,6 +159,54 @@
       "calendar-clock": "991bc4e6b93a534eb406346a342ffc0b7ea3dc70ed74476fc9255fa157ace17a"
     }
   },
+  "plotly": {
+    "package": "plotly.js",
+    "version": "4.1.1",
+    "files": [
+      "vendor/plotly/plotly-2d.min.js",
+      "vendor/plotly/plotly-3d.min.js",
+      "vendor/plotly/plotly.css",
+      "vendor/plotly/LICENSE"
+    ],
+    "sha256": {
+      "vendor/plotly/plotly-2d.min.js": "c2cc230939101edc95a2e585d5a3394437156c9eb7cc9a31e461d2dcec7b3d7a",
+      "vendor/plotly/plotly-3d.min.js": "7bdc63949e0010b62e725f075cde7a3e91a93d97f42c17f721846c8d4beedc60",
+      "vendor/plotly/plotly.css": "2ac4dc70c5023a2ecc62a626fa61da33b38327b1926312a7af6111308473acdb"
+    },
+    "license": "MIT",
+    "license_file": "vendor/plotly/LICENSE",
+    "source": "https://github.com/plotly/plotly.js (git clone --branch v4.1.1, commit 0aabc3c5cc4f1d91fd6dd3846c5353de1beb0885; the npm tarball plotly.js-4.1.1.tgz sha1 f797e8f2d54603fd9d11b08aae8eb31147200b67 was verified against the same tag)",
+    "traces": {
+      "plotly-2d.min.js": ["scatter", "bar", "pie", "histogram", "box", "heatmap"],
+      "plotly-3d.min.js": ["scatter", "bar", "pie", "histogram", "box", "heatmap", "scatter3d", "surface", "mesh3d"]
+    },
+    "build": "git clone --depth 1 --branch v4.1.1 https://github.com/plotly/plotly.js.git && cd plotly.js && npm i && npm run custom-bundle -- --traces scatter,bar,pie,histogram,box,heatmap --strict --out 2d && npm run custom-bundle -- --traces scatter,bar,pie,histogram,box,heatmap,scatter3d,surface,mesh3d --strict --out 3d; plotly.css is the npm package's dist/plotly.css (the release build's own strict-CSP sheet). Rebuild recipe in docs/deployment.md.",
+    "sizes": {
+      "plotly-2d.min.js": "1254444 bytes (418500 gzipped)",
+      "plotly-3d.min.js": "1831489 bytes (588881 gzipped)",
+      "plotly.css": "7467 bytes"
+    },
+    "note": "#10 L3a — two self-contained custom bundles (the implementation spec's §10.4, D63): the 2D bundle is the default, the 3D bundle loads only on a dashboard whose pinned visualizations carry a 3D trace (renderer.bundle on runtime/config). Neither contains a new Worker site (measured); the 3D bundle carries webpack's `new Function(\"return this\")` globalThis fallback, dead code on any browser this app serves (the conformance suite renders under the live CSP, no unsafe-eval, to keep that true). Plotly's runtime sheet injection is designed around, not allowed: the host pre-places the empty <style id=plotly.js-style-global class=no-inline-styles> element Plotly checks (src/lib/dom.js addRelatedStyleRule) and loads the vendored plotly.css — a real stylesheet under style-src 'self' — so the bundle injects nothing."
+  },
+  "datapipelines-dashboard-runtime": {
+    "package": "first-party (this repository)",
+    "version": "1",
+    "files": [
+      "js/datapipelines-dashboard.js",
+      "js/datapipelines-dashboard-plotly.js",
+      "js/datapipelines-dashboard-table.js",
+      "js/datapipelines-dashboard-kpi.js"
+    ],
+    "sha256": {
+      "js/datapipelines-dashboard.js": "1822f5134c5b699d94fb0876544717d347612b0bbf6b2ba7cdf8d011b2080187",
+      "js/datapipelines-dashboard-plotly.js": "527c8135296f1ce24976dac6a6e995b215de78acb7e1a9f4f85d0760e0ba5938",
+      "js/datapipelines-dashboard-table.js": "84e0a5476389b6ea887e4c03d8a95e6bfab5822a97520a57a37532f7a0a005e6",
+      "js/datapipelines-dashboard-kpi.js": "910122e6ded8791ec7a42167b9107a7e433623c0204c8321f1e3abfd7a723687"
+    },
+    "source": "modules/web/src/main/resources/static/js/ (built by no one — hand-authored ES2019 IIFEs)",
+    "license": "AGPL-3.0-only",
+    "note": "#10 L3a — NEW convention (the implementation spec's §10.1): the first-party client runtime and its adapters are versioned in this manifest with their sha256 like every vendored asset, so VendoredPlotlyAuditTest pins their bytes too — a changed first-party file must move its hash here in the same commit, and a hash that drifts from the served file is red. The versions are the ADAPTER versions the wire contract names (table and kpi answer \"1\"), not npm versions."
+  },
   "htmx": {
     "package": "htmx.org",
     "version": "2.0.10",
