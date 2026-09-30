@@ -172,9 +172,10 @@ class PromotionService(
 
     /**
      * #10 L1c — the full form: the two transfer families' roots ride the batch after the sets and
-     * pipelines (D61's order), each dashboard root carrying its pinned visualizations WITH it (the
-     * receiver lands the batch's visualizations before any dashboard, so the dashboard's validation
-     * sees every pin RELEASED inside its transaction). Another DELIBERATE overload, for the same
+     * pipelines (D61's order), each dashboard root bringing its pinned visualizations as dependency
+     * ENTRIES of the visualization arm (deduplicated against the roots, O1) and its own payload alone
+     * into the dashboard arm, so the receiver's reader binds each entry as what it is and lands the
+     * visualizations before the dashboards that pin them. Another DELIBERATE overload, for the same
      * reason its siblings are: the promotion E2Es invoke `promote` reflectively BY SIGNATURE, and a
      * defaulted parameter would silently erase the shape the callers reflect on.
      */
@@ -233,7 +234,7 @@ class PromotionService(
                 pipelines = closure.pipelinePayloads(inventory),
                 endpoints = endpointPromotion?.entriesFor(workspaceId, closure.pipelineNames()).orEmpty(),
                 visualizations = visualizationEntries,
-                dashboards = dashboardEntries.flatten(),
+                dashboards = dashboardEntries,
             )
         log.info(
             "event=pipeline.promotion.pushing target={} workspace={} roots={} templates={} sets={} pipelines={}" +
@@ -256,6 +257,12 @@ class PromotionService(
      * A root the view hides or that has no promotable release REFUSES with the family's 404 naming
      * the submitted name (76e8af98's refuse-not-drop, the families' spelling); a dashboard's missing
      * pin dependency refuses too — the batch must be able to keep the dashboard's promise.
+     *
+     * O1's arms: a dashboard's pinned visualizations are ENTRIES OF THE VISUALIZATION arm — the
+     * receiver binds each `dashboards` entry with the DASHBOARD reader, which refuses a visualization
+     * body — deduplicated by wire identity (name + version + body hash) against the explicit
+     * visualization roots and against each other; the dashboard's own payload alone fills the
+     * dashboard arm.
      */
     private fun addTransferRoots(
         workspaceId: UUID,
@@ -264,7 +271,7 @@ class PromotionService(
         closure: Closure,
         visualizationNames: List<String>,
         dashboardNames: List<String>,
-    ): Pair<List<JsonNode>, List<List<JsonNode>>> {
+    ): Pair<List<JsonNode>, List<JsonNode>> {
         val visualizationTargets = inventory.visualizationByName()
         val visualizationEntries =
             visualizationNames
@@ -274,7 +281,7 @@ class PromotionService(
                         ?: throw ApiErrors.visualizationNotFound(name)
                 }
         val dashboardTargets = inventory.dashboardByName()
-        val dashboardEntries =
+        val dashboardRoots =
             dashboardNames
                 .distinct()
                 .map { name ->
@@ -282,10 +289,20 @@ class PromotionService(
                         .entriesForRoot(workspaceId, name, dashboardTargets[name], view, visualizationTargets, visualizationPromotion)
                         ?: throw ApiErrors.dashboardNotFound(name)
                 }
-        (visualizationEntries + dashboardEntries.flatten()).forEach { entry ->
+        val transferEntries =
+            distinctByWireIdentity(visualizationEntries + dashboardRoots.flatMap { it.dependencies })
+        transferEntries.forEach { entry ->
             visualizationPromotion.templatePins(entry).forEach(closure::addTemplate)
         }
-        return visualizationEntries to dashboardEntries
+        return transferEntries to dashboardRoots.map { it.dashboard }
+    }
+
+    /** The transfer entries distinct by the identity a receiver lands them under — name + version + body hash. */
+    private fun distinctByWireIdentity(entries: List<JsonNode>): List<JsonNode> {
+        val seen = mutableSetOf<Triple<String, Int, String>>()
+        return entries.filter { entry ->
+            seen.add(Triple(entry.path("name").asText(), entry.path("version").asInt(), entry.path("body_hash").asText()))
+        }
     }
 
     /**

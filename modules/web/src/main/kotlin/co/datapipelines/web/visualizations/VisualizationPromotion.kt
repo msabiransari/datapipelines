@@ -3,6 +3,7 @@ package co.datapipelines.web.visualizations
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.visualization.ArtifactExport
+import co.datapipelines.visualization.ArtifactImportReleaseRules
 import co.datapipelines.visualization.ArtifactImported
 import co.datapipelines.visualization.ArtifactTransferService
 import co.datapipelines.visualization.ArtifactVersion
@@ -49,6 +50,8 @@ class VisualizationPromotion(
     private val visualizations: VisualizationService,
     /** The ONE entry bind — the readers, so the document bounds hold on receive as on save (the L1c HIGH item). */
     private val transfer: ArtifactTransferService,
+    /** O2: a receive lands RELEASED — the RELEASE rules judge the pins before the landing, both surfaces' one judge. */
+    private val releaseRules: ArtifactImportReleaseRules,
 ) {
     /**
      * The sender's entry for [name]'s current release, or null when it is not promotable. §10.3's guards over
@@ -126,14 +129,19 @@ class VisualizationPromotion(
     /**
      * The receiver's LANDING of one bound entry — the transaction body's act (C36): the kept id, the hash check
      * and the §9.2 version rules through the service's `import`, whose `validateForImport` judges the transform
-     * pin against the rows the SAME transaction has just landed. Not an authoring write: the promotion receiver
-     * accepts it.
+     * pin against the rows the SAME transaction has just landed. The RELEASE rules judge first (O2): the entry
+     * lands RELEASED, so its pin must be RELEASED here — the batch's own templates landed before this family,
+     * and their just-landed RELEASED rows are what the judge reads. Not an authoring write: the promotion
+     * receiver accepts it.
      */
     fun land(
         bound: ArtifactExport<VisualizationBody>,
         workspaceId: UUID,
         actor: UUID,
-    ): ArtifactImported = visualizations.import(workspaceId, bound, actor)
+    ): ArtifactImported {
+        releaseRules.judgeVisualization(workspaceId, bound.body)
+        return visualizations.import(workspaceId, bound, actor)
+    }
 
     private fun objectOrRefuse(entry: JsonNode): ObjectNode =
         entry as? ObjectNode
@@ -145,6 +153,19 @@ class VisualizationPromotion(
 }
 
 /**
+ * One dashboard root's wire contribution (O1): the pinned visualizations' dependency ENTRIES — each a
+ * visualization NODE the receiver binds and lands through the visualization reader — and the dashboard's
+ * own payload, the ONE entry the batch's dashboard arm carries. A visualization payload inside the
+ * dashboard arm reaches the receiver's DASHBOARD reader, whose key table refuses it
+ * `dashboard.validation.body_invalid` and rolls the whole batch back — the sender separates the arms,
+ * the receiver's D61 landing order does the rest.
+ */
+data class DashboardRoot(
+    val dependencies: List<JsonNode>,
+    val dashboard: JsonNode,
+)
+
+/**
  * The dashboard twin of [VisualizationPromotion]. A dashboard ROOT carries its pinned visualizations WITH it —
  * the sender derives their dependency entries, and the receiver lands the batch's visualizations before any
  * dashboard (D61), so the dashboard's validation sees every pin RELEASED inside the transaction.
@@ -153,10 +174,12 @@ class DashboardPromotion(
     private val repository: DashboardRepository,
     private val dashboards: DashboardService,
     private val transfer: ArtifactTransferService,
+    /** O2: a receive lands RELEASED — the RELEASE rules judge the pins before the landing, both surfaces' one judge. */
+    private val releaseRules: ArtifactImportReleaseRules,
 ) {
     /**
-     * The sender's entries for one dashboard root: each pinned visualization's dependency entry first, the
-     * dashboard's own payload last. Null REFUSES — the dashboard is absent, not newer, not released, or the
+     * The sender's entries for one dashboard root: each pinned visualization's dependency entry, the
+     * dashboard's own payload alone. Null REFUSES — the dashboard is absent, not newer, not released, or the
      * view does not admit it (the same refuse-not-drop rule the other roots follow).
      */
     fun entriesForRoot(
@@ -166,7 +189,7 @@ class DashboardPromotion(
         view: PromotableView,
         visualizationTargets: Map<String, PromotionWire.Entry>,
         visualizationPromotion: VisualizationPromotion,
-    ): List<JsonNode>? {
+    ): DashboardRoot? {
         val version = promotableDashboardRelease(workspaceId, name, target, view) ?: return null
         val dependencies =
             version.body.visualizations
@@ -175,7 +198,7 @@ class DashboardPromotion(
                 .mapNotNull { pin ->
                     visualizationPromotion.entryForPin(workspaceId, pin.name, pin.version, visualizationTargets[pin.name])
                 }
-        return dependencies + ArtifactTransferService.payloadOf(version)
+        return DashboardRoot(dependencies, ArtifactTransferService.payloadOf(version))
     }
 
     /** The admitted, released, newer-than-target current release of dashboard [name] — the root guards in one read. */
@@ -205,11 +228,16 @@ class DashboardPromotion(
     /**
      * The receiver's LANDING of one bound dashboard — inside the transaction, after every visualization it pins:
      * `validateForImport` judges the pinned set's, pipelines' and visualizations' statuses against the rows the
-     * SAME transaction has just landed, and any refusal rolls the whole batch back.
+     * SAME transaction has just landed, and any refusal rolls the whole batch back. The RELEASE rules judge
+     * first (O2): the dashboard lands RELEASED, so its pinned set and visualizations must be RELEASED here —
+     * the batch's own visualizations landed before this family, and the judge reads their just-landed rows.
      */
     fun land(
         bound: ArtifactExport<DashboardBody>,
         workspaceId: UUID,
         actor: UUID,
-    ): ArtifactImported = dashboards.import(workspaceId, bound, actor)
+    ): ArtifactImported {
+        releaseRules.judgeDashboard(workspaceId, bound.body)
+        return dashboards.import(workspaceId, bound, actor)
+    }
 }

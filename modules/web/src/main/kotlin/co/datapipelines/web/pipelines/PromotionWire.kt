@@ -140,7 +140,9 @@ object PromotionWire {
         @field:JsonProperty("visualizations") @get:JsonProperty("visualizations") @param:JsonProperty("visualizations")
         val visualizations: List<JsonNode> = emptyList(),
         /**
-         * #10 L1c — the dashboards as NODES, after every visualization they pin (D61's order). The pinned
+         * #10 L1c — the dashboards as NODES, after every visualization they pin (D61's order) — DASHBOARDS
+         * alone (O1): a dashboard's pinned visualizations travel as entries of the [visualizations] arm,
+         * because this arm's every entry is bound by the receiver with the DASHBOARD reader. The pinned
          * pipelines and set travel BY REFERENCE — a dashboard assumes they were promoted first — and the
          * receiver's validation judges them against the just-landed rows inside its one transaction.
          */

@@ -570,16 +570,32 @@ class PromotionTwoDeploymentE2eTest {
         )
     }
 
+    /**
+     * The sender's dashboard arm re-derived (the orchestrator's pass, O1): a dashboard root whose pins uat
+     * lacks contributes its pins' dependency entries to the batch's VISUALIZATION arm and its own payload
+     * alone to the DASHBOARD arm, so the receiver binds each entry with the right reader and lands the
+     * visualizations before the dashboard that pins them (D61). One of the two pins is ALSO an explicit
+     * visualization root — the arms' deduplication by name + version + hash is what keeps it one entry.
+     *
+     * The §12 walk is real: a dashboard is promotable only when its SOURCE pipeline is (the view admits a
+     * dashboard whose every source is newer), so the case bumps CHILD, sends it as a PIPELINE root, and the
+     * dashboard's by-reference pin @3 resolves against the version the SAME batch just landed. Red at
+     * 3f50873c: the pins travelled inside the DASHBOARD arm and uat's reader refused the first one
+     * `dashboard.validation.body_invalid`, rolling the whole batch back.
+     */
+    @Test
     @Order(60)
     fun `a released visualization and a dashboard bundling its pins promote through the SENDER (#10 L1c)`() {
         createReleasedVisualizationOn(portDev, VIZ_A)
         createReleasedVisualizationOn(portDev, VIZ_B)
+        bumpAndRelease(CHILD)
         createReleasedDashboardOn(portDev, PAGE_DASH, listOf(VIZ_A to VIZ_B))
 
-        val applied = promoteTransferOrExplain(listOf(VIZ_A), listOf(PAGE_DASH))
+        val applied = promoteTransferOrExplain(listOf(VIZ_A), listOf(PAGE_DASH), pipelines = listOf(CHILD))
 
-        assertEquals(1, applied["visualizations"], "the sender's visualization slot")
-        assertEquals(1, applied["dashboards"], "the sender's dashboard slot")
+        assertEquals(1, applied["pipelines"], "the dashboard's source, at the version the dashboard pins")
+        assertEquals(2, applied["visualizations"], "the root and the dashboard's second pin")
+        assertEquals(1, applied["dashboards"], "the dashboard alone")
         assertAll(
             {
                 assertEquals(
@@ -602,6 +618,13 @@ class PromotionTwoDeploymentE2eTest {
                     "the visualization's body hash",
                 )
             },
+            {
+                assertEquals(
+                    1,
+                    artifactVersion(uatJdbc, "visualizations", VIZ_B),
+                    "uat's second pin — the dashboard's dependency entry",
+                )
+            },
             { assertEquals(1, artifactVersion(devJdbc, "dashboards", PAGE_DASH), "dev's dash") },
             { assertEquals(1, artifactVersion(uatJdbc, "dashboards", PAGE_DASH), "uat's dash") },
             {
@@ -614,9 +637,17 @@ class PromotionTwoDeploymentE2eTest {
         )
     }
 
+    /**
+     * The PAGE posts both families — the form's family slots reach the six-argument promote. Its dashboard
+     * root is a NEW one pinning the same new visualization (Order 60 already moved PAGE_DASH to uat, and a
+     * same-version-same-hash root is REFUSED, not silently re-sent — Order 20's rule), so the flash must
+     * carry one of each and uat must hold both.
+     */
+    @Test
     @Order(61)
     fun `the PAGE posts both families - the form's family slots reach the six-argument promote`() {
         createReleasedVisualizationOn(portDev, VIZ_PAGE)
+        createReleasedDashboardOn(portDev, PAGE_DASH_2, listOf(VIZ_PAGE to VIZ_PAGE))
 
         val response =
             given()
@@ -624,7 +655,7 @@ class PromotionTwoDeploymentE2eTest {
                 .asSession(adminSession())
                 .contentType(ContentType.URLENC)
                 .formParam("visualization", VIZ_PAGE)
-                .formParam("dashboard", PAGE_DASH)
+                .formParam("dashboard", PAGE_DASH_2)
                 .`when`()
                 .post("/promotion/promote")
                 .then()
@@ -636,7 +667,10 @@ class PromotionTwoDeploymentE2eTest {
             location.orEmpty().contains("visualizations=1") && location.orEmpty().contains("dashboards=1"),
             "the flash must name the applied family counts, was: $location",
         )
-        assertEquals(1, artifactVersion(uatJdbc, "visualizations", VIZ_PAGE), "uat's viz")
+        assertAll(
+            { assertEquals(1, artifactVersion(uatJdbc, "visualizations", VIZ_PAGE), "uat's viz") },
+            { assertEquals(1, artifactVersion(uatJdbc, "dashboards", PAGE_DASH_2), "uat's new dashboard") },
+        )
     }
 
     // ------------------------------------------------------------------ content on dev
@@ -748,6 +782,7 @@ class PromotionTwoDeploymentE2eTest {
     private fun promoteTransfer(
         visualizations: List<String>,
         dashboards: List<String>,
+        pipelines: List<String> = emptyList(),
     ): Map<String, Any?> {
         val service = devPromotionService()
         val method =
@@ -762,7 +797,7 @@ class PromotionTwoDeploymentE2eTest {
             )
         val applied =
             try {
-                method.invoke(service, WORKSPACE_ID, WORKSPACE, emptyList<String>(), emptyList<String>(), visualizations, dashboards)
+                method.invoke(service, WORKSPACE_ID, WORKSPACE, pipelines, emptyList<String>(), visualizations, dashboards)
             } catch (e: java.lang.reflect.InvocationTargetException) {
                 throw e.targetException
             }
@@ -779,9 +814,10 @@ class PromotionTwoDeploymentE2eTest {
     private fun promoteTransferOrExplain(
         visualizations: List<String>,
         dashboards: List<String>,
+        pipelines: List<String> = emptyList(),
     ): Map<String, Any?> =
         try {
-            promoteTransfer(visualizations, dashboards)
+            promoteTransfer(visualizations, dashboards, pipelines)
         } catch (e: Throwable) {
             throw AssertionError("transfer promotion refused: code=${codeOf(e)} details=${detailsOf(e)} message=${e.message}", e)
         }
@@ -825,7 +861,7 @@ class PromotionTwoDeploymentE2eTest {
                 .then()
                 .extract()
         require(created.statusCode() == 201) { "visualization '$name' create failed ${created.statusCode()}: ${created.body().asString()}" }
-        stampReleased(port, "visualizations", "visualization_versions", "visualization_id", created.jsonPath().getString("data.id"))
+        stampReleased("visualizations", "visualization_versions", "visualization_id", created.jsonPath().getString("data.id"))
     }
 
     /**
@@ -855,6 +891,9 @@ class PromotionTwoDeploymentE2eTest {
             (names + "refresh_button").joinToString(",") { occurrenceName ->
                 """{"name": "$occurrenceName", "x": 0, "y": ${gridRows.indexOf(occurrenceName)}, "w": 6, "h": 4}"""
             }
+        // The generated occurrence names are chart_<index>a/chart_<index>b — the action must target
+        // one of THOSE (the first draft targeted the literal `chart_a0`, which names nothing), and the
+        // grid places each name exactly once (refresh_button is already in gridRows).
         val body =
             """
             {"name": "$name", "display_name": "Promotion dash", "description": "promotion round trip",
@@ -863,11 +902,10 @@ class PromotionTwoDeploymentE2eTest {
              ],
              "visualizations": [${occurrences.joinToString(",")}],
              "actions": [{"name": "refresh_overview", "type": "refresh", "scope": "targets",
-                          "targets": ["chart_a0"], "initial": true}],
+                          "targets": ["${names.first()}"], "initial": true}],
              "action_controls": [{"name": "refresh_button", "type": "action_control",
                                   "action": "refresh_overview", "label": "Apply"}],
-             "layout": {"grid": [$gridItems,
-                        {"name": "refresh_button", "x": 0, "y": 9, "w": 2, "h": 1}], "columns": 12},
+             "layout": {"grid": [$gridItems], "columns": 12},
              "timeouts": {"refresh_seconds": 300}}
             """.trimIndent()
         val created =
@@ -881,31 +919,21 @@ class PromotionTwoDeploymentE2eTest {
                 .then()
                 .extract()
         require(created.statusCode() == 201) { "dashboard '$name' create failed ${created.statusCode()}: ${created.body().asString()}" }
-        stampReleased(port, "dashboards", "dashboard_versions", "dashboard_id", created.jsonPath().getString("data.id"))
+        stampReleased("dashboards", "dashboard_versions", "dashboard_id", created.jsonPath().getString("data.id"))
     }
 
     /** The rows a real release writes (V42), stamped by SQL — the L2 fixtures' precedent. */
     private fun stampReleased(
-        port: Int,
         table: String,
         versionsTable: String,
         fkColumn: String,
         id: String,
     ) {
-        // The fixtures run on dev only; the admin's id is the released_by FK's real user row.
-        val admin =
-            given()
-                .port(
-                    port,
-                ).asSession(adminSession())
-                .`when`()
-                .get("/api/v1/auth/me")
-                .then()
-                .extract()
-                .jsonPath()
-                .getString("data.id")
+        // The fixtures run on dev only; released_by is the SEEDED admin's row (the transfer E2E's
+        // releaseBySql shape). The first (never-run) draft read the id off /api/v1/auth/me — whose
+        // envelope answers `user_id`, so the stamp wrote the literal "null" and Postgres refused it.
         devJdbc.execute(
-            "UPDATE $versionsTable SET status = 'RELEASED', released_at = NOW(), released_by = '$admin'" +
+            "UPDATE $versionsTable SET status = 'RELEASED', released_at = NOW(), released_by = '$ADMIN_USER_ID'" +
                 " WHERE $fkColumn = '$id' AND version = 1",
         )
         devJdbc.execute("UPDATE $table SET current_version = 1 WHERE id = '$id'")
@@ -1383,11 +1411,12 @@ class PromotionTwoDeploymentE2eTest {
         /** #313 — the set the PAGE's form post promotes (Order 55), distinct from Order 54's. */
         private const val PAGE_SET = "test/page_e2e_filters"
 
-        /** #10 L1c — the transfer families' fixtures (Orders 60–61): two pins, the page's viz, the dashboard. */
+        /** #10 L1c — the transfer families' fixtures (Orders 60–61): two pins, the page's viz, the dashboards. */
         private const val VIZ_A = "test/page_e2e_viz_a"
         private const val VIZ_B = "test/page_e2e_viz_b"
         private const val VIZ_PAGE = "test/page_e2e_viz_page"
         private const val PAGE_DASH = "test/page_e2e_dash"
+        private const val PAGE_DASH_2 = "test/page_e2e_dash_two"
         private const val ORPHAN = "test/promo_e2e_orphan"
         private const val TX_TEMPLATE = "test/promo_e2e_tx.sql"
         private const val TX_OK = "test/promo_e2e_tx_ok"
