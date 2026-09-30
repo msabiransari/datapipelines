@@ -184,7 +184,7 @@ There is **one** layering rule, and it is a table lookup, not a judgment call:
 | `scripting` | `typesystem` |
 | `pipeline-contract` | `typesystem`, `calculators` |
 | `templates` | `typesystem`, `pipeline-contract`, `scripting` |
-| `datasources` | `typesystem` |
+| `datasources` | `typesystem`, `persistence` (#336: `FailureShape`, the lease's cleanup WARNs) |
 | `staging` | `typesystem` |
 | `auth` | `typesystem`, `persistence` |
 | `scheduler` | `typesystem`, `pipeline-contract` |

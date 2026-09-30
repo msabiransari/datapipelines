@@ -8,8 +8,10 @@ import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -230,6 +232,172 @@ class ReadOnlyStatementLeaseTest {
 
     private fun <T> admin(block: (java.sql.Statement) -> T): T =
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { c -> c.createStatement().use(block) }
+
+    // ---------------------------------------------------------------------
+    // #336 D2 — the cleanup endings' evidence. The doubles are REAL Postgres
+    // connection/statement behind delegating wrappers whose close/cancel
+    // refuses: the flow is the production one, and only the finalization lies.
+    // ---------------------------------------------------------------------
+
+    /** A statement that is real for everything but the two endings this class refuses on demand. */
+    private class RefusingStatement(
+        private val delegate: java.sql.PreparedStatement,
+        private val refuseCancel: Boolean,
+        private val refuseClose: Boolean,
+    ) : java.sql.PreparedStatement by delegate {
+        val closeAttempts = java.util.concurrent.atomic.AtomicInteger()
+
+        override fun cancel() {
+            if (refuseCancel) throw java.sql.SQLException("cancel refused by the double", "0A000")
+            delegate.cancel()
+        }
+
+        override fun close() {
+            closeAttempts.incrementAndGet()
+            if (refuseClose) throw java.sql.SQLException("close refused by the double", "08003")
+            delegate.close()
+        }
+    }
+
+    /** A connection that is real for everything but the statement it hands out and its own close. */
+    private class RefusingConnection(
+        private val delegate: Connection,
+        private val statementRefusal: Triple<Boolean, Boolean, Boolean>? = null, // (setQueryTimeout, refuseCancel, refuseClose)
+        private val refuseClose: Boolean = false,
+        private val refusePrepare: Boolean = false,
+    ) : Connection by delegate {
+        val closeAttempts = java.util.concurrent.atomic.AtomicInteger()
+
+        override fun prepareStatement(sql: String): java.sql.PreparedStatement {
+            if (refusePrepare) throw java.sql.SQLException("prepare refused by the double", "HY000")
+            val real = delegate.prepareStatement(sql)
+            return if (statementRefusal != null) {
+                val (refuseTimeout, refuseCancel, refuseStmtClose) = statementRefusal
+                object : java.sql.PreparedStatement by real {
+                    override fun setQueryTimeout(seconds: Int) {
+                        if (refuseTimeout) throw java.sql.SQLException("timeout refused by the double", "HY000")
+                        real.queryTimeout = seconds
+                    }
+
+                    override fun setFetchSize(rows: Int) {
+                        real.fetchSize = rows
+                    }
+
+                    override fun setMaxRows(rows: Int) {
+                        real.maxRows = rows
+                    }
+
+                    override fun cancel() {
+                        if (refuseCancel) throw java.sql.SQLException("cancel refused by the double", "0A000")
+                        real.cancel()
+                    }
+
+                    override fun close() {
+                        if (refuseStmtClose) throw java.sql.SQLException("close refused by the double", "08003")
+                        real.close()
+                    }
+                }
+            } else {
+                real
+            }
+        }
+
+        override fun close() {
+            closeAttempts.incrementAndGet()
+            if (refuseClose) throw java.sql.SQLException("close refused by the double", "08003")
+            delegate.close()
+        }
+    }
+
+    /** A pool handing out ONE wrapped connection; records what the lease did with it. */
+    private inner class SingleConnectionPool(
+        val connection: Connection,
+    ) : ConnectionPool {
+        override val name = "pg_lease"
+        val discarded = mutableListOf<Connection>()
+
+        override fun leaseConnection(): Connection = connection
+
+        override fun discard(connection: Connection) {
+            discarded += connection
+        }
+
+        override fun close() = Unit
+    }
+
+    private fun capturedLeaseLogs(block: () -> Unit): List<ch.qos.logback.classic.spi.ILoggingEvent> {
+        val logger = org.slf4j.LoggerFactory.getLogger(LeasedStatement::class.java) as ch.qos.logback.classic.Logger
+        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        return try {
+            block()
+            appender.list
+        } finally {
+            logger.detachAppender(appender)
+        }
+    }
+
+    @Test
+    fun `a statement-close refusal during a failed setup is suppressed onto the primary failure`() {
+        val pool = SingleConnectionPool(RefusingConnection(realConnection(), statementRefusal = Triple(true, false, true)))
+        val lease = ReadOnlyStatementLease(registryOver(pool))
+
+        val failure =
+            shouldThrow<SqlProbeExecutionException> {
+                lease.open(datasource(), "SELECT 1", emptyList(), 2, 10)
+            }
+
+        // The primary failure is the setup refusal; the close refusal rides suppressed.
+        failure.cause!!.message shouldBe "timeout refused by the double"
+        failure.cause!!.suppressed.map { it.message } shouldContainExactly listOf("close refused by the double")
+    }
+
+    @Test
+    fun `a connection-close refusal during a failed prepare is suppressed onto the primary failure`() {
+        val pool = SingleConnectionPool(RefusingConnection(realConnection(), refusePrepare = true, refuseClose = true))
+        val lease = ReadOnlyStatementLease(registryOver(pool))
+
+        val failure =
+            shouldThrow<SqlProbeExecutionException> {
+                lease.open(datasource(), "SELECT 1", emptyList(), 2, 10)
+            }
+
+        failure.cause!!.message shouldBe "prepare refused by the double"
+        failure.cause!!.suppressed.map { it.message } shouldContainExactly listOf("close refused by the double")
+    }
+
+    @Test
+    fun `a refused cancel still abandons - one WARN, and the connection is discarded, never returned`() {
+        val pool = SingleConnectionPool(RefusingConnection(realConnection(), statementRefusal = Triple(false, true, false)))
+        val lease = ReadOnlyStatementLease(registryOver(pool))
+        val statement = lease.open(datasource(), "SELECT 1", emptyList(), 2, 10)
+
+        val events = capturedLeaseLogs { statement.abandon() }
+
+        pool.discarded shouldContainExactly listOf(pool.connection)
+        statement.isAbandoned shouldBe true
+        val warns = events.filter { it.level == ch.qos.logback.classic.Level.WARN }
+        warns shouldHaveSize 1
+        warns.single().formattedMessage.shouldContain("SQLException")
+    }
+
+    @Test
+    fun `a close whose statement AND connection refuse logs both WARNs and discards the connection`() {
+        val pool = SingleConnectionPool(RefusingConnection(realConnection(), statementRefusal = Triple(false, false, true), refuseClose = true))
+        val lease = ReadOnlyStatementLease(registryOver(pool))
+        val statement = lease.open(datasource(), "SELECT 1", emptyList(), 2, 10)
+
+        val events = capturedLeaseLogs { statement.close() }
+
+        // The disposition proof: a connection whose close() failed is DISCARDED, never
+        // silently left in service — the pool's own discard path is what it gets.
+        pool.discarded shouldContainExactly listOf(pool.connection)
+        val warns = events.filter { it.level == ch.qos.logback.classic.Level.WARN }
+        warns shouldHaveSize 2
+        warns.forEach { it.formattedMessage.shouldContain("SQLException") }
+    }
+
+    private fun realConnection(): Connection = DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).also { opened += it }
 
     private fun waitUntil(
         what: String,

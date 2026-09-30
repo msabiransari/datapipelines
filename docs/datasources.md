@@ -1,6 +1,6 @@
 # Datasources Specification
 
-**Status:** v2.46 (frozen contract — additive-only changes after this point)
+**Status:** v2.47 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md) · [Enums](enums.md) · [Configuration](configuration.md) · [Metadata DB](metadata-db.md) · [Pipeline Contract](pipeline-contract.md)
 **Last updated:** 2026-09-27
@@ -457,6 +457,14 @@ suspend fun <T> withConnection(datasourceName: String, block: (Connection) -> T)
 No credential decryption happens on this path — the pool already holds the credential from its build (§7.4).
 
 Acquisition timeout (`properties.hikari.connectionTimeout`, 30 000 ms default) exceeded → `pipeline.node.datasource_connection_failed`.
+
+#### The selector lease's cleanup endings (#336)
+
+`ReadOnlyStatementLease`'s endings (§7D's read path) follow one rule at each of its three seams:
+
+- **Unwinding under a primary failure** — a refused statement or connection close while `open`'s own failure propagates — attaches the refusal to that failure with `addSuppressed`. The primary stays the result; the refusal is never discarded.
+- **A refused cancel in `abandon()`** is one WARN (`event=datasource.lease_cleanup_failed`, class + SQLState, the datasource named — [Observability §3.4K](observability.md#34-whats-logged-per-module)), and the discard runs unconditionally: the connection is never returned to service because a cancel did not land.
+- **A refused close** is one WARN per refused ending (statement, connection), and **a connection whose `close()` failed is DISCARDED, never returned** — a driver that refuses the close may hold session state the pool would hand to the next borrower. The pool's own `discard` is the disposition: for `HikariConnectionPool`, `evictConnection` (the entry leaves the bag, the physical close is the close executor's problem); the interface default closes. A refused physical close remains the driver's residual, as in the §5.2 pool retirement.
 
 #### Discard — a connection that must never return (#194 lane C)
 
@@ -1710,6 +1718,7 @@ fixture) get their Testcontainers twin.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v2.47 | lane 336 (#336 D2) | **§5.3 gains "The selector lease's cleanup endings":** a close/cancel refusal under a primary failure is `addSuppressed` to it; a refused cancel or close is one WARN (`datasource.lease_cleanup_failed`, class + SQLState — observability §3.4K); a connection whose `close()` failed is DISCARDED, never returned to service. The gate, the classification and the two endings' exclusivity are unchanged. |
 | 2026-09-27 | v2.46 | 194c (#194) parameter engine lane C — discard | **§5.3:** `ConnectionPool.discard(connection)` — a connection that must never return to its pool — implemented on every pool kind through HikariCP's `evictConnection` (a no-op on a shut-down pool, never throws; the interface default closes, correct only for a non-pooling pool); `ReadOnlyStatementLease`, the selector runner's lease: §7D's gate before the lease, the statement timeout clamped to the caller's ceiling, a `LeasedStatement` whose `abandon()` is `cancel()` then `discard` and which never cancels a connection it already returned. Measured: discard closes the client side only — a Postgres backend keeps sleeping until it next writes, so the cancel comes first. **§7D:** the selector runner shares the gate. The block-shaped lease, `SqlRunner` and `SqlProbe` are unchanged. |
 | 2026-09-25 | v2.45 | 7e (#7) the semantic link | **§7E:** a WORKSPACE rule can be cited by a transform version's `implements` ([Templates §3.4](templates.md#34-implements-and-drift)); `implemented_by` rides every WORKSPACE fact on `semantics_list` and the listing's `definitions`; retiring a cited rule marks the citing versions `needs_review` on read and never edits them; a cited fact cannot be hard-deleted. No datasource behaviour changed. |
 | 2026-09-22 | v2.44 | 186 review M1 (#186) — LAKE joins the in-process gate | **§9:** registering or re-pointing a `LAKE` datasource is a super-admin act like every in-process engine — its embedded DuckDB runs with external access ON and no local-filesystem lock, and the URL form (which classifies it as Server) was the only thing exempting it. Refusal family unchanged (`workspace_forbidden`). A future lake surface decides its own posture; this closes the JDBC-URL path today. |

@@ -236,6 +236,14 @@ The executor's two scheduled jobs on the `dp-scheduled` thread (§3.4H) — the 
 
 A refusal is named by `error` (its class) and `sql_state` (`FailureShape`, the §3.4G rule), never the driver's message.
 
+#### 3.4K The selector-lease cleanup events (#336)
+
+`ReadOnlyStatementLease`'s cleanup endings ([Datasources §5.3](datasources.md#53-lease-lifecycle)) log one WARN per refused ending — a statement close, a connection close, or a statement cancel in `abandon()`. The cancelled-connection path's discard runs unconditionally; the WARN is evidence, not a reason to keep a connection in service.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| WARN | `datasource.lease_cleanup_failed` | A selector lease's statement close, connection close or statement cancel was refused; a refused connection close DISCARDS the connection (never returned to service) | `datasource`, `operation` (`statement_close`/`connection_close`/`statement_cancel`), `error`, `sql_state` |
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -518,7 +526,8 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
-| 2026-09-30 | v1.26 | lane 336 (#336 D7) | New **§3.4J the live-write outage events**: `execution.progress_write_failed` (WARN, once per execution per outage — §3.2's rule at heartbeat cadence) and `execution.progress_write_recovered` (INFO), named by class and SQLState through `FailureShape`. §4.1 gains `datapipelines.executions.progress_write_failed` (counter, no tags): a live heartbeat/progress write refused — the state that makes a LIVE execution look dead to another instance's stale sweep. Merge note: L2's dashboard events may also claim §3.4J; whoever lands second renumbers, per the lane brief. |
+| 2026-09-30 | v1.26 | lane 336 (#336 D7) | New **§3.4J the live-write outage events**: `execution.progress_write_failed` (WARN, once per execution per outage — §3.2's rule at heartbeat cadence) and `execution.progress_write_recovered` (INFO), named by class and SQLState through `FailureShape`. §4.1 gains `datapipelines.executions.progress_write_failed` (counter, no tags): a live heartbeat/progress write refused — the state that makes a LIVE execution look dead to another instance's stale sweep. Merge note: L2's dashboard events may also claim §3.4J; whoever lands second renumbers, per the lane brief. New **§3.4K**: the selector-lease cleanup WARN `datasource.lease_cleanup_failed` (operation-named, class + SQLState — a refused connection close discards the connection). |
+| 2026-09-29 | v1.25 |
 | 2026-09-29 | v1.25 | 321 (#321) the scheduled jobs' failure lines — renumbered at merge: 306/316 and their reviews took v1.21–v1.24 | §3.4's `dag` row states the rule for the crash sweep's and the event retention's failure lines: a failed tick logs `error=<class> sql_state=<state>` where it logged the store's message (`FailureShape`, the §3.4G rule; `dag` gains the `persistence` edge for it, module-structure §4.2). The event names are not cited here: on this base the docs audit reads `execution.*` as a permission family (#307), and the events' own table arrives with the 316 merge (§3.4I). §7's retention paragraph said `audit.retention_failed … message=…`; the line has logged `error=`/`sql_state=` since #310 — corrected. |
 | 2026-09-29 | v1.24 | the 316 merge's review (#316) | New **§3.4I**: `execution.events_purged` catalogued — §3.4H cited it and the docs audit's citation check (#307, on main since 4b91c387; not on the lane's base) refused the uncatalogued name; #321 adds the two failure rows. |
 | 2026-09-29 | v1.23 | 316 (#316) the scheduled jobs' own thread — renumbered at merge: 306 took v1.21 and its pass v1.22 | New **§3.4H**: every `@Scheduled` job runs on `dp-scheduled`, the jobs' own scheduler, so their lines (named there) carry that `thread` — until #316 they carried `dp-sse-log`, the SSE log streamer's; two shutdown lines, `shutdown.scheduled_jobs_stopped` (INFO, after both drains) and `shutdown.scheduled_jobs_incomplete` (WARN, a tick outlived the shutdown wait). |

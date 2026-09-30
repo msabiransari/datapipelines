@@ -1,8 +1,10 @@
-// module-structure.md §5.4 — allowed internal deps: typesystem.
+// module-structure.md §5.4 — allowed internal deps: typesystem, persistence (#336: FailureShape
+// for the lease's cleanup WARNs; the SQLState walk stays in its one implementation).
 plugins { id("datapipelines.common-conventions") }
 
 dependencies {
     implementation(project(":modules:typesystem")) // IngressTypeMapper per dialect
+    implementation(project(":modules:persistence")) // FailureShape (#336 D2)
 
     implementation(libs.hikaricp)
     // DatasourceRepository (§8.1), and — since 056 §E.2 — spring-tx's

@@ -1,6 +1,8 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.datasources.pooling.ConnectionPool
+import co.datapipelines.persistence.FailureShape
+import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.SqlTypeValue
 import org.springframework.jdbc.core.StatementCreatorUtils
 import java.sql.Connection
@@ -90,12 +92,14 @@ class ReadOnlyStatementLease(
                     StatementCreatorUtils.setParameterValue(statement, index + 1, SqlTypeValue.TYPE_UNKNOWN, jdbcForm(value))
                 }
             } catch (e: SQLException) {
-                runCatching { statement.close() }
+                // #336 D2: the statement's close refusal is secondary evidence on the primary
+                // setup failure — never discarded, never replacing it.
+                runCatching { statement.close() }.onFailure { e.addSuppressed(it) }
                 throw e
             }
             LeasedStatement(datasource.name, pool, connection, statement)
         } catch (e: SQLException) {
-            runCatching { connection.close() }
+            runCatching { connection.close() }.onFailure { e.addSuppressed(it) }
             if (e.isConnectionFailure()) ConnectionLease.unreachable(datasource.name, e)
             throw SqlProbeExecutionException(datasource.name, e)
         }
@@ -176,27 +180,70 @@ class LeasedStatement internal constructor(
      * physical connection is closed now and never handed to another borrower, whether or not the
      * cancel landed. Callable from any thread while [query] still blocks on another; a no-op once
      * [close] has returned the connection (see the class KDoc).
+     *
+     * #336 D2: a cancel refusal is one WARN (class + SQLState, `datasources.md` §5.3) — evidence,
+     * not a reason to skip the discard, which runs unconditionally.
      */
     fun abandon() {
         if (!ending.compareAndSet(OPEN, ABANDONED)) return
-        runCatching { statement.cancel() }
+        try {
+            statement.cancel()
+        } catch (e: Exception) {
+            logCleanupFailure("statement_cancel", e)
+        }
         pool.discard(connection)
     }
 
-    /** Closes the statement and — unless [abandon] claimed the connection first — returns the connection to its pool. */
+    /**
+     * Closes the statement and — unless [abandon] claimed the connection first — returns the
+     * connection to its pool.
+     *
+     * #336 D2: a close failure is one WARN per refused ending, and a connection whose `close()`
+     * refused is **discarded, never returned to service** — a driver that refuses the close may
+     * be holding session state the pool would hand to the next borrower. The pool's own
+     * `discard` is the disposition (for Hikari, `evictConnection`; the interface default closes).
+     */
     override fun close() {
         if (ending.compareAndSet(OPEN, CLOSED)) {
-            runCatching { statement.close() }
-            runCatching { connection.close() }
+            try {
+                statement.close()
+            } catch (e: Exception) {
+                logCleanupFailure("statement_close", e)
+            }
+            try {
+                connection.close()
+            } catch (e: Exception) {
+                logCleanupFailure("connection_close", e)
+                pool.discard(connection)
+            }
         } else if (ending.get() == ABANDONED) {
             // The connection is the pool's no more; only the statement object is ours to release.
-            runCatching { statement.close() }
+            try {
+                statement.close()
+            } catch (e: Exception) {
+                logCleanupFailure("statement_close", e)
+            }
         }
+    }
+
+    /** The one cleanup WARN per refused ending: class + SQLState, the datasource named, never a message. */
+    private fun logCleanupFailure(
+        operation: String,
+        e: Exception,
+    ) {
+        LOG.warn(
+            "event=datasource.lease_cleanup_failed datasource={} operation={} error={} sql_state={}",
+            datasourceName,
+            operation,
+            FailureShape.cause(e),
+            FailureShape.sqlState(e),
+        )
     }
 
     private fun wallMs(startedAt: Long): Long = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
 
     private companion object {
+        val LOG = LoggerFactory.getLogger(LeasedStatement::class.java)
         const val OPEN = 0
         const val CLOSED = 1
         const val ABANDONED = 2
