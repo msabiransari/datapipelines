@@ -86,9 +86,12 @@ class RequestNestingDepthE2eTest {
             StringRoute("POST", "/api/v1/visualizations", VISUALIZATION_MALFORMED),
             StringRoute("PUT", "/api/v1/visualizations/${UUID.randomUUID()}", VISUALIZATION_MALFORMED),
             StringRoute("POST", "/api/v1/visualizations/${UUID.randomUUID()}/current", VISUALIZATION_MALFORMED),
+            // #10 L1c: the transfer routes read their envelope bodies themselves.
+            StringRoute("POST", "/api/v1/visualizations/import", VISUALIZATION_MALFORMED),
             StringRoute("POST", "/api/v1/dashboards", DASHBOARD_MALFORMED),
             StringRoute("PUT", "/api/v1/dashboards/${UUID.randomUUID()}", DASHBOARD_MALFORMED),
             StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/current", DASHBOARD_MALFORMED),
+            StringRoute("POST", "/api/v1/dashboards/import", DASHBOARD_MALFORMED),
             // #323 (lane 321): the parameter-set routes read their body the #291 way too — swept, no longer allowlisted.
             StringRoute("POST", "/api/v1/parameter-sets", PARAMETER_MALFORMED),
             StringRoute("PUT", "/api/v1/parameter-sets/${UUID.randomUUID()}", PARAMETER_MALFORMED),
@@ -171,12 +174,15 @@ class RequestNestingDepthE2eTest {
                 "VisualizationsController.kt" to 3,
                 "DashboardsController.kt" to 3,
                 "ParameterSetsController.kt" to 4,
+                // #10 L1c: the transfer routes read their envelope bodies themselves.
+                "VisualizationTransferController.kt" to 1,
+                "DashboardTransferController.kt" to 1,
             )
         withClue("files declaring an @RequestBody String parameter, and how many each declares") {
             found.entries.map { it.key to it.value } shouldContainExactlyInAnyOrder
                 (swept + ALLOWLISTED).entries.map { it.key to it.value }
         }
-        stringRoutes.size shouldBe swept.values.sum()
+        stringRoutes.size shouldBe swept.values.sum() // 28 routes sweep themselves: the allowlist is empty (#323, #10 L1c)
     }
 
     @Test
