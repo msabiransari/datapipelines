@@ -108,6 +108,26 @@ class RedactionScannerGrammarOracleTest {
         withClue("strings with a merged (overlapping) region") { (merged >= MIN_MERGED) shouldBe true }
     }
 
+    @Test
+    fun `the scan work stays linear on amplified random text`() {
+        // A random unit repeated hundreds of times is the shape that makes a rescanning scanner
+        // quadratic (nested starts, repeated prefixes, open quotes). The measured worst ratio on
+        // 300,000 such strings up to 60 KB was 8 steps per character; the ceiling is 24.
+        val random = Random(99L)
+        var redacted = 0
+        repeat(AMPLIFIED_CASES) {
+            val unit = StringBuilder()
+            repeat(1 + random.nextInt(MAX_UNIT_FRAGMENTS)) { unit.append(fragments[random.nextInt(fragments.size)]) }
+            val text = unit.toString().repeat(AMPLIFICATION)
+            val measured = LogRedactor.scrubMeasured(text)
+            withClue("unit '${unit.replace(Regex("\n"), "\\n")}' x $AMPLIFICATION (${text.length} chars): ${measured.work} steps") {
+                (measured.work <= WORK_PER_CHARACTER_CEILING * text.length + WORK_SLACK) shouldBe true
+            }
+            if (measured.text != text) redacted++
+        }
+        withClue("non-vacuity: amplified strings the scanner redacted") { (redacted >= AMPLIFIED_CASES / 4) shouldBe true }
+    }
+
     private fun randomText(random: Random): String {
         val builder = StringBuilder()
         repeat(2 + random.nextInt(MAX_FRAGMENTS)) {
@@ -170,5 +190,10 @@ class RedactionScannerGrammarOracleTest {
         const val MAX_FRAGMENTS = 16
         const val MIN_REDACTED = 10_000
         const val MIN_MERGED = 500
+        const val AMPLIFIED_CASES = 2_000
+        const val AMPLIFICATION = 400
+        const val MAX_UNIT_FRAGMENTS = 6
+        const val WORK_PER_CHARACTER_CEILING = 24
+        const val WORK_SLACK = 64
     }
 }
