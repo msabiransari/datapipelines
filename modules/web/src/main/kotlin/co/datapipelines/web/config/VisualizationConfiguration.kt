@@ -160,9 +160,14 @@ class VisualizationConfiguration {
     /**
      * The export/import acts of both families (rest-api §22/§23) — the import and the promotion receive bind
      * through BOTH readers, so the document bounds hold off the save path too (the L1c HIGH item). The
-     * dashboard import runs in ONE transaction over the metadata manager (F1 of the L1c pass).
+     * dashboard import runs in ONE transaction over the metadata manager (F1 of the L1c pass). The envelope
+     * arrays' count ceiling is the operator's configured [VisualizationConfig] (C1 of the L1c-c round: the
+     * constructor's default would silently stand in for the operator's value — the bean passes it explicitly,
+     * and [co.datapipelines.web.config.ArtifactTransferConfigWiringTest] proves the override both ways
+     * through this factory).
      */
     @Bean
+    @Suppress("LongParameterList") // the aggregate's ports ARE the wiring
     fun artifactTransferService(
         visualizations: VisualizationService,
         dashboards: DashboardService,
@@ -171,6 +176,7 @@ class VisualizationConfiguration {
         dashboardReader: DashboardReader,
         transactionManager: PlatformTransactionManager,
         releaseRules: co.datapipelines.visualization.ArtifactImportReleaseRules,
+        config: VisualizationConfig,
     ): co.datapipelines.visualization.ArtifactTransferService =
         co.datapipelines.visualization
             .ArtifactTransferService(
@@ -181,5 +187,6 @@ class VisualizationConfiguration {
                 dashboardReader,
                 transactions = TransactionTemplate(transactionManager) as TransactionOperations,
                 releaseRules = releaseRules,
+                config = config,
             )
 }
