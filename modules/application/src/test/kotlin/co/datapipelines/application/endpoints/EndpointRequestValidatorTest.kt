@@ -278,6 +278,24 @@ class EndpointRequestValidatorTest {
     }
 
     @Test
+    fun `a decimal value over the digit cap is invalid_parameter_type, not a late coercion refusal (#265)`() {
+        // The shared lift's #278 cap: 1,025 digits is under this surface's 4 KB value bound and
+        // over the §6.3 digit cap, so the lift refuses BEFORE any BigDecimal is constructed (the
+        // bound's falsification lives in typesystem's ParameterLiftTest, where the cap lives).
+        val outcome =
+            typed("d" to Parameter(LogicalType.DECIMAL)).validate(
+                request(pathVariables = emptyMap(), query = mapOf("d" to listOf("9".repeat(1_025)))),
+            )
+
+        outcome
+            .shouldBeInstanceOf<EndpointRequestValidator.Outcome.Invalid>()
+            .defects
+            .single()
+            .code shouldBe
+            PipelineErrorCodes.Execution.INVALID_PARAMETER_TYPE
+    }
+
+    @Test
     fun `a path variable the version does not declare is its own code`() {
         // Distinct from an unknown QUERY parameter: this one means the endpoint's released
         // version changed underneath a published path, which is an operator's problem, not the

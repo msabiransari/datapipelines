@@ -120,6 +120,57 @@ class SqlProbeH2Test {
         )
     }
 
+    /**
+     * #265 — the probe's parameters are judged by the shared typesystem coercion, whose
+     * no-trim rule rest-api's change log v2.36 recorded as a deliberate break for every OTHER
+     * surface. The old datasources copy trimmed (and lowercased booleans), so each padded form
+     * below used to bind.
+     */
+    @Test
+    fun `a padded parameter value is refused, never trimmed`() {
+        val ds = wireDatasource()
+
+        val thrown =
+            shouldThrow<SqlProbeParameterException> {
+                probe.probe(ds, "SELECT 1 WHERE 1 = :n", parameters = mapOf("n" to SqlProbeParameter(LogicalType.INTEGER, " 12 ")))
+            }
+
+        assertAll(
+            { thrown.parameter shouldBe "n" },
+            { thrown.declaredType shouldBe LogicalType.INTEGER },
+            // The static message names the parameter and the declared type, never the value text.
+            { thrown.message shouldBe "A probe parameter could not be coerced to its declared type INTEGER." },
+        )
+    }
+
+    /** #265 — strict booleans: the old copy's trim + lowercase accepted `"TRUE"`. */
+    @Test
+    fun `a boolean takes only true or false - a padded or upper-case form is refused`() {
+        val ds = wireDatasource()
+
+        shouldThrow<SqlProbeParameterException> {
+            probe.probe(ds, "SELECT 1 WHERE :flag", parameters = mapOf("flag" to SqlProbeParameter(LogicalType.BOOLEAN, "TRUE")))
+        }
+        shouldThrow<SqlProbeParameterException> {
+            probe.probe(ds, "SELECT 1 WHERE :flag", parameters = mapOf("flag" to SqlProbeParameter(LogicalType.BOOLEAN, " true ")))
+        }
+
+        // The strict forms still bind.
+        probe
+            .probe(ds, "SELECT 1 WHERE :flag", parameters = mapOf("flag" to SqlProbeParameter(LogicalType.BOOLEAN, "true")))
+            .rows.rows.size shouldBe 1
+    }
+
+    /** #265 — a padded BIGINTEGER wire string is refused like every other padded value. */
+    @Test
+    fun `a padded BIGINTEGER value is refused`() {
+        val ds = wireDatasource()
+
+        shouldThrow<SqlProbeParameterException> {
+            probe.probe(ds, "SELECT 1 WHERE 1 = :n", parameters = mapOf("n" to SqlProbeParameter(LogicalType.BIGINTEGER, " 5")))
+        }
+    }
+
     @Test
     fun `the row cap clamps rather than refuses, and truncation still reports`() {
         h2.createStatement().use { st ->
