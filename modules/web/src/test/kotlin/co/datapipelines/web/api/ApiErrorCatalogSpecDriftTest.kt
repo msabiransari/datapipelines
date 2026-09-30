@@ -299,7 +299,7 @@ class ApiErrorCatalogSpecDriftTest {
          * `.Dashboard` and the module's mirrors), these catalog rows and the two `AuthErrors` anchors.
          * Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 371
+        const val SECTION_13_ROW_COUNT = 372
 
         /**
          * §12's distinct validation codes.

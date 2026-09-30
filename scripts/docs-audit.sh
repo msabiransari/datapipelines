@@ -280,10 +280,12 @@ events |= set(re.findall(r"auth\.[a-z_]+(?:\.[a-z_]+)*", enums_txt))
 # `execution.events_purged` / `execution.sweep_failed` / `execution.event_retention_failed`, and
 # `execution` is ALSO a permission family (§7.6 `execution.read`, …), so the #307 citation scan
 # below refused the first doc that cited one of them until a §3.4 table could define it.
+# `dashboard` joined at #10 L2 (§3.4J), for the same reason: `dashboard.refresh_finished` and its siblings are
+# structured log events, and `dashboard` is a code namespace (L1a) and a permission family (`dashboard.execute`).
 obs_txt = texts.get("docs/observability.md", "")
 sec34 = re.search(r"^#### 3\.4A\b.*?(?=^### )", obs_txt, re.M | re.S)
 if sec34:
-    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake|scheduler|execution)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
+    events |= set(re.findall(r"`((?:auth|datasource|mcp|endpoint|pipeline|mail|lake|scheduler|execution|dashboard)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*)`", sec34.group(0)))
 # PERMISSIONS (#215). The auth.md §7.6 catalog's FIRST column defines every
 # `<functionality>.<permission>` name (`pipeline.read`, `workspace.members.manage`). They share
 # the error codes' domain words but are neither codes nor events, and the catalog is their one

@@ -7,6 +7,7 @@ import co.datapipelines.auth.Permission.API_KEY_REVOKE
 import co.datapipelines.auth.Permission.CALCULATOR_READ
 import co.datapipelines.auth.Permission.DASHBOARD_CREATE
 import co.datapipelines.auth.Permission.DASHBOARD_DELETE
+import co.datapipelines.auth.Permission.DASHBOARD_EXECUTE
 import co.datapipelines.auth.Permission.DASHBOARD_READ
 import co.datapipelines.auth.Permission.DASHBOARD_RELEASE
 import co.datapipelines.auth.Permission.DASHBOARD_SWITCH_VERSION
@@ -133,6 +134,9 @@ object RolePermissions {
             // promoter's read is LENSED — a value on the read surface, never a row here.
             VISUALIZATION_READ,
             DASHBOARD_READ,
+            // #10 L2 (D50): refreshing a dashboard is the viewer's — the row authorizes the delegated act, and the
+            // author and the workspace admin inherit it. The promoter's is LENSED, like her read.
+            DASHBOARD_EXECUTE,
             EXECUTION_READ,
             EXECUTION_RESULT_READ,
             EXECUTION_CANCEL,
@@ -216,8 +220,9 @@ object RolePermissions {
 
     /**
      * The ops role (D5): reads (through the LENS, #178 — a value on every read, not a row here),
-     * introspects, reads the promotion page and promotes. Executes nothing, reads no executions,
-     * authors and releases nothing.
+     * introspects, reads the promotion page and promotes. Executes no pipeline of her own, reads no executions,
+     * authors and releases nothing. The one execution she holds is `dashboard.execute` (#10 L2, D50): a
+     * dashboard she can read (through the lens) refreshes on her word, the sources running as the delegated act.
      */
     private val PROMOTER: Set<Permission> =
         setOf(
@@ -230,6 +235,9 @@ object RolePermissions {
             // every source pipeline the pipeline lens admits, and the visualizations they pin.
             VISUALIZATION_READ,
             DASHBOARD_READ,
+            // #10 L2: she refreshes a dashboard she can read (the lens is the same value on the runtime routes — a
+            // dashboard with an unadmitted pinned pipeline is a 404), though she holds no execution.read.
+            DASHBOARD_EXECUTE,
             DATASOURCE_READ,
             DATASOURCE_INTROSPECT,
             ENDPOINT_READ,

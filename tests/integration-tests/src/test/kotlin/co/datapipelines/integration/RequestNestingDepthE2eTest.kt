@@ -89,6 +89,14 @@ class RequestNestingDepthE2eTest {
             StringRoute("POST", "/api/v1/dashboards", DASHBOARD_MALFORMED),
             StringRoute("PUT", "/api/v1/dashboards/${UUID.randomUUID()}", DASHBOARD_MALFORMED),
             StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/current", DASHBOARD_MALFORMED),
+            // #10 L2: the three runtime POSTs parse their own body too — read whole BEFORE any lookup, so a random id is enough.
+            StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/runtime/parameters", DASHBOARD_MALFORMED),
+            StringRoute("POST", "/api/v1/dashboards/${UUID.randomUUID()}/runtime/visualizations", DASHBOARD_MALFORMED),
+            StringRoute(
+                "POST",
+                "/api/v1/dashboards/${UUID.randomUUID()}/runtime/refreshes/${UUID.randomUUID()}/abort",
+                DASHBOARD_MALFORMED,
+            ),
             // #323 (lane 321): the parameter-set routes read their body the #291 way too — swept, no longer allowlisted.
             StringRoute("POST", "/api/v1/parameter-sets", PARAMETER_MALFORMED),
             StringRoute("PUT", "/api/v1/parameter-sets/${UUID.randomUUID()}", PARAMETER_MALFORMED),
@@ -170,6 +178,7 @@ class RequestNestingDepthE2eTest {
                 "SchedulesController.kt" to 2,
                 "VisualizationsController.kt" to 3,
                 "DashboardsController.kt" to 3,
+                "DashboardRuntimeController.kt" to 3,
                 "ParameterSetsController.kt" to 4,
             )
         withClue("files declaring an @RequestBody String parameter, and how many each declares") {

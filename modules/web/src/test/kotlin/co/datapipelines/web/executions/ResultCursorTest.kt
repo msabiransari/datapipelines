@@ -72,6 +72,21 @@ class ResultCursorTest {
         resultRowCount = rows,
     )
 
+    /**
+     * #10 L2: a dashboard run streams into the refresh's collector and stores nothing, so its cursor would answer an
+     * empty page that reads as a successful zero-row result. It is the same 404 as an unknown execution — for its own
+     * owner too, whose run it is.
+     */
+    @Test
+    fun `a dashboard-triggered run has no result - the same 404 for its owner, whatever its status`() {
+        listOf(ExecutionStatus.SUCCESS, ExecutionStatus.RUNNING, ExecutionStatus.FAILED).forEach { status ->
+            every { executions.findById(any(), executionId) } returns
+                record(status).copy(triggeredVia = ExecutionTrigger.DASHBOARD, resultRowCount = null)
+
+            shouldThrow<ApiException> { cursor.readable(executionId, principal()) }.code shouldBe "result.execution_not_found"
+        }
+    }
+
     @Test
     fun `an unknown or non-owned execution is the same 404`() {
         every { executions.findById(any(), executionId) } returns null

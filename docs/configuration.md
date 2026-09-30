@@ -1,6 +1,6 @@
 # Configuration Reference
 
-**Status:** v1.40 (single source of truth for every config key)
+**Status:** v1.41 (single source of truth for every config key)
 **Owner:** datapipelines.co core
 **Last updated:** 2026-09-29
 
@@ -571,6 +571,31 @@ A renderer configuration also nests at most 32 levels and a literal parameter va
 
 ---
 
+### 3.34 The dashboard runtime (#10 L2)
+
+The server side of a dashboard refresh ([Dashboards §5](dashboards.md), the [implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) §9.4–§9.6): how many refreshes and executions may run at once, how many bytes a source and a refresh may hold in memory, and the deadlines. Every default is the number the owner confirmed on 2026-09-28. Each key is bound-checked at boot (§7) and again when the keys bind (`DashboardRuntimeProperties` → `DashboardRuntimeConfig`), naming the key; three RELATIONS are refused too (below the table).
+
+**The admission counters are JVM-LOCAL**, like `ExecutionSlots` (the parameter-engine record's 050/R2 shape): two API instances each admit `max-concurrent-refreshes-per-workspace` refreshes of one workspace and `max-concurrent-dashboard-executions-per-instance` executions. A cluster-wide count is a later decision; nothing here is a per-user cap — a dashboard execution takes no per-user slot (D53), so a refresh never starves the viewer's own runs.
+
+| YAML path | Default | Description |
+|---|---|---|
+| `datapipelines.dashboards.admission.max-concurrent-refreshes-per-workspace` | `4` | Refreshes RUNNING at once in one workspace on this instance; a fifth is refused `429 dashboard.refresh.saturated` with `Retry-After`, and writes no row. 1..100 |
+| `datapipelines.dashboards.admission.max-executions-per-refresh` | `16` | Distinct executions (a pipeline release plus its resolved parameters) one refresh may start. The dashboard validator refuses, at save, a document that needs more (`dashboard.validation.too_many_invocations`). 1..200 |
+| `datapipelines.dashboards.admission.max-concurrent-dashboard-executions-per-instance` | `40` | Dashboard-triggered executions running at once on this instance — a share of `datapipelines.executor.max-concurrent-executions-per-instance`. A refresh reserves all its slots or none. 1..1000 |
+| `datapipelines.dashboards.admission.max-wait-seconds` | `10` | The longest a refresh waits for room before it is refused `saturated`; never queued past it. 0..120 (0 = refuse at once) |
+| `datapipelines.dashboards.results.max-bytes-per-source` | `4194304` | A source's result held in memory, 4 MiB, counted with the result store's own byte accounting; over it that source fails `dashboard.refresh.result_too_large` and its dependents error. 1024..268435456 |
+| `datapipelines.dashboards.results.max-bytes-per-refresh` | `33554432` | All sources of one refresh together, 32 MiB; over it the refresh ends PARTIAL. 1024..1073741824 |
+| `datapipelines.dashboards.timeouts.default-refresh-seconds` | `600` | A refresh's deadline when the dashboard states no `timeouts.refresh_seconds`. 1..3600 |
+| `datapipelines.dashboards.timeouts.max-refresh-seconds` | `900` | The cap on any refresh deadline — the dashboard validator's bound on `timeouts.refresh_seconds` and on every occurrence's `timeout_seconds`. 1..7200 |
+| `datapipelines.dashboards.timeouts.parameter-lock-seconds` | `30` | How long the client holds the parameter lock while a parent change evaluates. 1..600 |
+| `datapipelines.dashboards.timeouts.render-seconds` | `20` | The client's render allowance per visualization. 1..600 |
+
+The three relations, each refused at boot naming both keys: `default-refresh-seconds` ≤ `max-refresh-seconds`; `max-bytes-per-source` ≤ `max-bytes-per-refresh`; `max-executions-per-refresh` ≤ `max-concurrent-dashboard-executions-per-instance` (else a maximal refresh could never be admitted — a permanent 429). The earliest deadline wins: the refresh's own, an occurrence's `timeout_seconds`, and the source's own executor limits.
+
+Retention of the `dashboard_refreshes` rows has no key of its own: they are deleted by the execution-event retention step, on the same hourly tick and the same cutoff as `datapipelines.executions.event-retention-days` (§3.11, 7 days) — see [Metadata DB §8](metadata-db.md).
+
+---
+
 ## 4. Precedence
 
 Resolution order for any key, highest first:
@@ -875,6 +900,21 @@ datapipelines:
     max-inputs-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_INPUTS_PER_VISUALIZATION:8}
     max-columns-per-input: ${DATAPIPELINES_VISUALIZATION_MAX_COLUMNS_PER_INPUT:256}
 
+  dashboards:                      # §3.34 — the dashboard runtime (#10 L2)
+    admission:
+      max-concurrent-refreshes-per-workspace: ${DATAPIPELINES_DASHBOARDS_MAX_CONCURRENT_REFRESHES_PER_WORKSPACE:4}
+      max-executions-per-refresh: ${DATAPIPELINES_DASHBOARDS_MAX_EXECUTIONS_PER_REFRESH:16}
+      max-concurrent-dashboard-executions-per-instance: ${DATAPIPELINES_DASHBOARDS_MAX_CONCURRENT_DASHBOARD_EXECUTIONS_PER_INSTANCE:40}
+      max-wait-seconds: ${DATAPIPELINES_DASHBOARDS_MAX_WAIT_SECONDS:10}
+    results:
+      max-bytes-per-source: ${DATAPIPELINES_DASHBOARDS_MAX_BYTES_PER_SOURCE:4194304}
+      max-bytes-per-refresh: ${DATAPIPELINES_DASHBOARDS_MAX_BYTES_PER_REFRESH:33554432}
+    timeouts:
+      default-refresh-seconds: ${DATAPIPELINES_DASHBOARDS_DEFAULT_REFRESH_SECONDS:600}
+      max-refresh-seconds: ${DATAPIPELINES_DASHBOARDS_MAX_REFRESH_SECONDS:900}
+      parameter-lock-seconds: ${DATAPIPELINES_DASHBOARDS_PARAMETER_LOCK_SECONDS:30}
+      render-seconds: ${DATAPIPELINES_DASHBOARDS_RENDER_SECONDS:20}
+
 # The scheduler's library reads its own prefix; every value comes from datapipelines.scheduler.*
 # above (§3.29). Framework wiring, not an operator surface.
 db-scheduler:
@@ -972,6 +1012,7 @@ On startup, the app validates:
 - **Parameter engine (§3.30, #194):** every `datapipelines.parameters.*` key is an integer within its row's bounds, and `selector-query-timeout-seconds` ≤ `evaluate-timeout-seconds` — one statement must fit inside its evaluate; every refusal names the key.
 - **Audit retention (§3.12, #310):** `datapipelines.audit.retention-days` is an integer in 30..3650 — refused while the key binds, naming it (the retention job deletes every audit row older than it, so a floor protects the trail from a typo).
 - **Visualizations and dashboards (§3.33, #10):** every `datapipelines.visualization.*` key is an integer within its row's bounds; every refusal names the key.
+- **Dashboard runtime (§3.34, #10 L2):** every `datapipelines.dashboards.*` key is an integer within its row's bounds; `default-refresh-seconds` ≤ `max-refresh-seconds`, `max-bytes-per-source` ≤ `max-bytes-per-refresh` and `max-executions-per-refresh` ≤ `max-concurrent-dashboard-executions-per-instance`; every refusal names the key(s).
 - **Request limits (§3.31, #279):** `datapipelines.web.max-request-bytes` is an integer within its row's bounds (65536..67108864) — the cap bounds every JSON request body on `/api/v1` and `/mcp`; a malformed or out-of-window value names the key and the window.
 - **Redis auth:** when `datapipelines.redis.password` is empty (after trimming) and `datapipelines.redis.host` is not loopback — under `development`, log a structured WARN `event=config.redis_no_password` (production Redis holds materialized caller results — [Deployment §9](deployment.md#9-security-hardening-checklist-deployment)); under the **`hardened` posture** it is a REFUSAL naming the key and the host, the same treatment Postgres's password gets as a §2 required key (#189). The refusal replaces the warning; a hardened boot never logs both.
 - `datapipelines.deployment.promotion.server-key` set ⇒ **WARN** (091): the value is deprecated in favour of a `server`-kind API key and is removed next release. Presence only — the warning never carries the secret.
@@ -989,6 +1030,7 @@ Validation runs in `@PostConstruct` of a `ConfigValidator` bean. Failures stop s
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.41 | L2 (#10) the dashboard runtime | New **§3.34 The dashboard runtime**: `datapipelines.dashboards.*`, the ten admission / result / deadline numbers of the spec's §9.4–§9.6, each the owner-confirmed default (4 / 16 / 40 / 10 s; 4 MiB / 32 MiB; 600 / 900 / 30 / 20 s), with three boot-time relations, in the §5 template, `application.yml`, `deploy/compose.yml`, `deploy/env/defaults.env`, `deploy/secrets.env.example` and `ConfigValidator` (§7). The admission counters are stated JVM-LOCAL. §3.33 had already promised these keys. |
 | 2026-09-29 | v1.40 | 306/#311 (the execution row's order and bounds) — renumbered at merge: L1a took v1.39 | §3.2 gains **`datapipelines.executor.lifecycle-write-timeout-seconds`** (`10`): the bound on the two `pipeline_executions` lifecycle writes, read by two layers — a JDBC `queryTimeout` on exactly the RUNNING insert and the terminal UPDATE (`ExecutionRepository`; a database that answers slowly is cancelled at the statement) and the emitter's caller-side wait (`WebEventEmitter`; the layer that bounds a never-answering database, which a statement timeout cannot reach — measured). A past-bound write is stated, never fabricated: insert failure = the existing `recorded = false` path, terminal failure = the row left RUNNING for the stale sweep, counted (`datapipelines.executions.lifecycle_write_failed`). Mirrored in `application.yml`, `defaults.env`, `secrets.env.example`, `compose.yml`; `WebPropertiesSpecDriftTest` pins the default. |
 | 2026-09-29 | v1.39 | L1a (#10) the visualization module | New **§3.33 Visualizations and dashboards**: `datapipelines.visualization.*`, the seven collection bounds of the two documents' readers — `max-visualizations-per-dashboard` 50, `max-cases-per-visualization` 20, `max-fixture-rows-per-case` 1000, `max-config-bytes` 262144, `max-bindings-per-visualization` 64, `max-inputs-per-visualization` 8, `max-columns-per-input` 256 (proposed; confirmed at review) — in the §5 template, `application.yml`, `deploy/compose.yml`'s pass-through, `deploy/env/defaults.env` and `ConfigValidator` (§7). The spec reserved §3.32 for the dashboard keys; 266 took it. |
 | 2026-09-29 | v1.38 | 310 (#310) audit-log retention — numbered after 266b's v1.37 | §3.12's `datapipelines.audit.retention-days` now BINDS (`AuditProperties`) and is ENFORCED: the retention sweep's last step deletes `audit_log` rows older than the database's `NOW()` minus the key, one cutoff for every event, in bounded batches (5,000 rows a statement, 50 statements or 2 s a tick). Before #310 the key was documented and shipped but read by nothing. **New bounds 30–3650**, refused at bind (§7 gains the rule); the default (365) is unchanged, and no shipped env file sets a value below the floor |

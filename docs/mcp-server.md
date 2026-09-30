@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.63 (frozen contract — additive-only changes after this point)
+**Status:** v1.64 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-29
@@ -2170,7 +2170,7 @@ Browse ONE level of the dashboard tree, the `visualizations_list` shape. A promo
 
 #### 6.2.56 `dashboards_get`
 
-Read one dashboard by id: the WORKING version's full document and lifecycle state, plus `dependencies` — each pinned visualization occurrence's version status and each source pipeline release's status and `read_only` verdict as they are NOW, each read through the caller's lens (a hidden or absent pin answers `status: null` alike; one read per pin, bounded by the reader's 50 visualizations) — and `last_refresh`, which is the dashboard runtime's and answers `null` until it ships.
+Read one dashboard by id: the WORKING version's full document and lifecycle state, plus `dependencies` — each pinned visualization occurrence's version status and each source pipeline release's status and `read_only` verdict as they are NOW, each read through the caller's lens (a hidden or absent pin answers `status: null` alike; one read per pin, bounded by the reader's 50 visualizations) — and `last_refresh`, the CALLER's own latest refresh of the dashboard (#10 L2) — `{refresh_id, dashboard_version, status, started_at, finished_at}` — or `null` when they have none. It names nobody else's refresh, whatever their role, and carries no selection; an MCP key acts as its OWN identity (keys v2 A13) and a refresh belongs to a person's session until the `dashboard` key kind (L5), so through a key it is `null` today; no tool refreshes a dashboard (the runtime is a person's surface until the `dashboard` key kind, L5).
 
 ```json
 {
@@ -2192,7 +2192,7 @@ Read one dashboard by id: the WORKING version's full document and lifecycle stat
 }
 ```
 
-**Permission:** `dashboard.read`. **Returns:** `{id, name, display_name, description, version, status, body_hash, current_version, draft?, document, dependencies: {visualizations: [{occurrence, name, version, status}], pipelines: [{source, name, version, status, read_only}]}, last_refresh: null}`. **Errors:** `dashboard.not_found`.
+**Permission:** `dashboard.read`. **Returns:** `{id, name, display_name, description, version, status, body_hash, current_version, draft?, document, dependencies: {visualizations: [{occurrence, name, version, status}], pipelines: [{source, name, version, status, read_only}]}, last_refresh: {refresh_id, dashboard_version, status, started_at, finished_at} | null}`. **Errors:** `dashboard.not_found`.
 
 #### 6.2.57 `dashboards_create`
 
@@ -2976,6 +2976,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.64 | L2 (#10) the dashboard runtime | §6.2.56 `dashboards_get`: `last_refresh` is live — the CALLER's own latest refresh of the dashboard, `{refresh_id, dashboard_version, status, started_at, finished_at}`, or `null` when they have none (it was always `null` until the runtime shipped). Read through `DashboardRefreshHistory`, which asks by the caller's user id and no other: nobody else's refresh appears, whatever their role, and no selection is returned. No tool refreshes a dashboard — `dashboard.execute` has no MCP placement until the `dashboard` key kind (L5). The served manual's dashboards page gains one sentence. |
 | 2026-09-29 | v1.63 | L1b (#10) the visualization and dashboard tools | **§6.1: 48 → 59 tools — five `visualizations_*` and six `dashboards_*`** (the implementation spec §7; addressed by id per P24; no tool releases or executes anything): `visualizations_list`/`get` and `dashboards_list`/`get` (reads, the promoter lens — dashboards whose every source pipeline the pipeline lens admits, and the visualizations they pin; `used_by` on the visualization rows; `dashboards_get` carries each pin's lensed status and `last_refresh: null` until the runtime ships), `_create`/`_update` (writes through the same strict reader, bounds and save-time validation REST uses; the 094 new-root confirmation), `_purge_draft` (versioning §5.4, hash-guarded; a pinned visualization draft refused `visualization.version.pinned`), and `dashboards_validate` — the §3.2 rules against current state, no write, on `dashboard.update` (owner ruling 2026-09-29; the spec said `dashboard.read` — the validator reads pin statuses unlensed, O5). New §6.2.50–6.2.60; §5.1's static count 48 → 59. The manual gains the `dashboards` area (`skill/dashboards.md`, the `visualizations`/`dashboards` prefixes mapped; `dashboards` leaves the reserved prefixes). `visualizations_test_start` / `_submit` land with the test sessions (L4). |
 | 2026-09-29 | v1.62 | 310 (#310) audit-log retention | §6.2.4's learn-before-you-write paragraph: check A's learning lasts as long as the audit row it reads — once per `datapipelines.audit.retention-days` (default a year), not "the key's lifetime", now that the audit log is retained (auth §10.3). No tool, input or refusal changes; the status line (left at v1.60 by v1.61) catches up |
 | 2026-09-28 | v1.61 | the 300 merge's security pass (#300) | **§6.2.32: `templates_purge_draft`'s guard reads the whole workspace and its refusal is view-narrowed without a cardinality.** Both scans (pipelines, parameter sets) run unlensed — a pin the caller's view hides still refuses; the refusal names only the admitted pins and, when others exist outside the view, `details.pins_hidden: true` (the lane's count was retired at merge: a count of hidden objects is an existence oracle). No route, permission or code added. |

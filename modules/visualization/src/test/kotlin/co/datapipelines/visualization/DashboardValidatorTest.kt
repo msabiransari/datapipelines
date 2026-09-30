@@ -321,6 +321,8 @@ class DashboardValidatorTest {
                     "empty",
                     mutate = { it.obj("actions[0]").putArray("targets") },
                 ),
+                // The spec's worked dashboard runs ONE distinct execution; a runtime that admits none refuses it at save.
+                Case(DashboardErrorCodes.TOO_MANY_INVOCATIONS, "sources", null, setup = { it.maxExecutionsPerRefresh = 0 }),
                 Case(DashboardErrorCodes.PARENT_ACTION_BINDING, "action_controls[0].parameter", null, setup = {
                     it.sets[ValidatorFakes.SET_REF] =
                         it.sets

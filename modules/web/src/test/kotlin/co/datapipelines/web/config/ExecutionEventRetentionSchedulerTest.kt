@@ -6,6 +6,7 @@ import ch.qos.logback.core.read.ListAppender
 import co.datapipelines.auth.AuditLogRetention
 import co.datapipelines.auth.KeyRetentionPurge
 import co.datapipelines.executor.ExecutionEventRetention
+import co.datapipelines.web.dashboards.runtime.DashboardRefreshRetention
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -18,8 +19,9 @@ import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessResourceFailureException
 
 /**
- * The retention sweep's one `@Scheduled` tick (metadata-db §8, #310): three steps in a fixed
- * order — execution events, the keys purge, the audit log — each isolated from the others.
+ * The retention sweep's one `@Scheduled` tick (metadata-db §8, #310): four steps in a fixed
+ * order — execution events, the finished dashboard refreshes (#10 L2), the keys purge, the audit log — each isolated
+ * from the others.
  *
  * Isolation is the point of this suite. Before #310 the keys purge was the LAST step, so its
  * exception reaching Spring's scheduler stopped nothing; with the audit purge after it, an
@@ -34,18 +36,31 @@ class ExecutionEventRetentionSchedulerTest {
     private val events = mockk<ExecutionEventRetention>(relaxed = true)
     private val keys = mockk<KeyRetentionPurge>(relaxed = true)
     private val audit = mockk<AuditLogRetention>(relaxed = true)
-    private val scheduler = ExecutionEventRetentionScheduler(events, keys, audit)
+    private val dashboards = mockk<DashboardRefreshRetention>(relaxed = true)
+    private val scheduler = ExecutionEventRetentionScheduler(events, keys, audit, dashboards)
 
     @Test
-    fun `a tick runs the three steps in order - events, keys, then the audit log`() {
+    fun `a tick runs the four steps in order - events, dashboard refreshes, keys, then the audit log`() {
         val lines = captured { scheduler.retain() }
 
         verifyOrder {
             events.retainOnce()
+            dashboards.retainOnce()
             keys.purgeOnce()
             audit.purgeOnce()
         }
         lines.filter { it.level == Level.ERROR }.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a failing dashboard refresh retention does not stop the purges after it`() {
+        every { dashboards.retainOnce() } throws DataAccessResourceFailureException("metadata database unreachable")
+
+        val lines = captured { scheduler.retain() }
+
+        verify(exactly = 1) { keys.purgeOnce() }
+        verify(exactly = 1) { audit.purgeOnce() }
+        lines.single { it.level == Level.ERROR }.formattedMessage shouldContain "event=retention.step_failed step=dashboard_refreshes"
     }
 
     @Test

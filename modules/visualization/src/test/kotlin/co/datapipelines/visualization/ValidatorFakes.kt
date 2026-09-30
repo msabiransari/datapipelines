@@ -88,7 +88,16 @@ internal object ValidatorFakes {
 
         fun visualizationValidator() = VisualizationValidator(templateFacts)
 
-        fun dashboardValidator() = DashboardValidator(pipelineFacts, setFacts, visualizationPins)
+        /** The most distinct executions one refresh may run — the runtime's `max-executions-per-refresh`; a case lowers it. */
+        var maxExecutionsPerRefresh: Int = DashboardValidator.DEFAULT_MAX_EXECUTIONS_PER_REFRESH
+
+        fun dashboardValidator() =
+            DashboardValidator(
+                pipelineFacts,
+                setFacts,
+                visualizationPins,
+                maxExecutionsPerRefresh = maxExecutionsPerRefresh,
+            )
     }
 
     fun visualizationDocument(tree: ObjectNode): VisualizationDocument = VisualizationReader().readOrThrow(tree)

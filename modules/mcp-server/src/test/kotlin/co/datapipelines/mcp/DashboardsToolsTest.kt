@@ -8,6 +8,7 @@ import co.datapipelines.pipeline.ValidationFailure
 import co.datapipelines.pipeline.ValidationResult
 import co.datapipelines.pipeline.WriteSurface
 import co.datapipelines.typesystem.DatapipelinesException
+import co.datapipelines.visualization.ActionScope
 import co.datapipelines.visualization.ArtifactFolder
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRecord
@@ -19,9 +20,12 @@ import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardDocument
 import co.datapipelines.visualization.DashboardErrorCodes
 import co.datapipelines.visualization.DashboardReader
+import co.datapipelines.visualization.DashboardRefreshHistory
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.PipelineReleaseFact
 import co.datapipelines.visualization.PipelineReleaseFacts
+import co.datapipelines.visualization.RefreshRecord
+import co.datapipelines.visualization.RefreshStatus
 import co.datapipelines.visualization.VisualizationBody
 import co.datapipelines.visualization.VisualizationService
 import com.fasterxml.jackson.core.type.TypeReference
@@ -47,6 +51,7 @@ class DashboardsToolsTest {
     private val dashboards = mockk<DashboardService>()
     private val visualizations = mockk<VisualizationService>()
     private val pipelines = mockk<PipelineReleaseFacts>()
+    private val refreshes = mockk<DashboardRefreshHistory>()
     private val reader = DashboardReader()
     private val ctx = McpFixtures.ctx()
     private val workspaceId = McpFixtures.WORKSPACE.id
@@ -59,8 +64,16 @@ class DashboardsToolsTest {
         every { visualizations.findVersionByName(workspaceId, ReadLens.Everything, CHART, 3) } returns chart(PipelineVersionStatus.RELEASED)
         every { pipelines.releaseOf(workspaceId, ArtifactRef(PIPELINE, 7)) } returns
             PipelineReleaseFact(PipelineVersionStatus.RELEASED, readOnly = true, parameters = emptyList(), outputColumns = null)
+        every { refreshes.latestOf(workspaceId, any(), McpFixtures.USER) } returns null
 
-        val answer = DashboardsGetTool(dashboards, visualizations, pipelines, McpFixtures.EVERYTHING_LENS).call(args(), ctx) as Map<*, *>
+        val answer =
+            DashboardsGetTool(
+                dashboards,
+                visualizations,
+                pipelines,
+                McpFixtures.EVERYTHING_LENS,
+                refreshes,
+            ).call(args(), ctx) as Map<*, *>
         val dependencies = answer["dependencies"] as Map<*, *>
 
         assertAll(
@@ -86,6 +99,56 @@ class DashboardsToolsTest {
         )
     }
 
+    /**
+     * `last_refresh` is the CALLER's own (#10 L2): the history is asked with the caller's user id and nothing else —
+     * the mock is strict on that argument, so a lookup by any other id is an unstubbed call and fails here — and the
+     * answer names the refresh, its version, status and stamps, never a selection or a source.
+     */
+    @Test
+    fun `last_refresh is the callers own latest refresh - asked by their id and answered without a selection`() {
+        every { dashboards.findWorking(workspaceId, ReadLens.Everything, id) } returns loaded(PipelineVersionStatus.RELEASED)
+        every { visualizations.findVersionByName(workspaceId, ReadLens.Everything, CHART, 3) } returns chart(PipelineVersionStatus.RELEASED)
+        every { pipelines.releaseOf(workspaceId, ArtifactRef(PIPELINE, 7)) } returns null
+        val refreshId = UUID.randomUUID()
+        every { refreshes.latestOf(workspaceId, id, McpFixtures.USER) } returns
+            RefreshRecord(
+                id = refreshId,
+                dashboardId = id,
+                dashboardVersion = 4,
+                workspaceId = workspaceId,
+                instanceId = UUID.randomUUID(),
+                principalUserId = McpFixtures.USER,
+                principalKeyId = null,
+                scope = ActionScope.ALL,
+                targetsJson = "[]",
+                parameterRevision = 1,
+                selectionsJson = """{"year": 424242}""",
+                status = RefreshStatus.PARTIAL,
+                startedAt = at,
+                finishedAt = at.plusSeconds(3),
+                summaryJson = "{}",
+            )
+
+        val answer =
+            DashboardsGetTool(
+                dashboards,
+                visualizations,
+                pipelines,
+                McpFixtures.EVERYTHING_LENS,
+                refreshes,
+            ).call(args(), ctx) as Map<*, *>
+
+        answer["last_refresh"] shouldBe
+            mapOf(
+                "refresh_id" to refreshId.toString(),
+                "dashboard_version" to 4,
+                "status" to "PARTIAL",
+                "started_at" to at.toString(),
+                "finished_at" to at.plusSeconds(3).toString(),
+            )
+        answer.toString().contains("424242") shouldBe false // no selection leaks into the tool result
+    }
+
     @Test
     fun `under a promoter's lens a hidden source is never asked about and a hidden pin reads null - no draft pointer`() {
         val boards = ReadLens.Only(setOf(NAME))
@@ -94,7 +157,9 @@ class DashboardsToolsTest {
         val promoter =
             PromoterLens { LensedView(ReadLens.NOTHING, ReadLens.NOTHING, visualizations = ReadLens.NOTHING, dashboards = boards) }
 
-        val answer = DashboardsGetTool(dashboards, visualizations, pipelines, promoter).call(args(), ctx) as Map<*, *>
+        every { refreshes.latestOf(workspaceId, any(), McpFixtures.USER) } returns null
+
+        val answer = DashboardsGetTool(dashboards, visualizations, pipelines, promoter, refreshes).call(args(), ctx) as Map<*, *>
         val dependencies = answer["dependencies"] as Map<*, *>
 
         assertAll(
@@ -176,7 +241,14 @@ class DashboardsToolsTest {
 
     @Test
     fun `the tools list in section 6-1's order`() {
-        dashboardTools(dashboards, visualizations, pipelines, reader, McpFixtures.EVERYTHING_LENS).map { it.name } shouldContainExactly
+        dashboardTools(
+            dashboards,
+            visualizations,
+            pipelines,
+            reader,
+            McpFixtures.EVERYTHING_LENS,
+            refreshes,
+        ).map { it.name } shouldContainExactly
             listOf(
                 "dashboards_list",
                 "dashboards_get",

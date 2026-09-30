@@ -1,12 +1,13 @@
 # Dashboards
 
-**Status:** v0.2 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
-permissions (§4, lane L1b). The transfer routes (L1c), the runtime (L2), the client runtime and the first-party page
-(L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add their sections as they land.
+**Status:** v0.3 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+permissions (§4, lane L1b); the server runtime (§5, lane L2). The transfer routes (L1c), the client runtime and the
+first-party page (L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add
+their sections as they land.
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
-(§13.22, §13.23 — the codes), [Metadata DB](metadata-db.md) (§4.28–§4.33 — the tables), [Enumerations](enums.md)
-(§31–§37), [Configuration](configuration.md) (§3.33 — the bounds), [REST API](rest-api.md) (§22, §23 — the routes),
+(§13.22, §13.23 — the codes), [Metadata DB](metadata-db.md) (§4.28–§4.35 — the tables), [Enumerations](enums.md)
+(§31–§38), [Configuration](configuration.md) (§3.33, §3.34 — the bounds and the runtime's numbers), [REST API](rest-api.md) (§22, §23 — the routes),
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.60 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
@@ -274,7 +275,7 @@ columns (L2) — a guess would refuse or admit on nothing.
 | `visualizations_list`, `visualizations_get` | `visualization.read` | Browse a level (each row with `used_by`: the dashboards that pin it); read the working version |
 | `visualizations_create`, `visualizations_update` | create / update | Write the document (the arguments ARE its keys); the new-root confirmation on create; `expected_hash` on update |
 | `visualizations_purge_draft` | `visualization.version.manage` | Purge a draft at its hash — never one a live dashboard pins |
-| `dashboards_list`, `dashboards_get` | `dashboard.read` | Browse; read the working version with each pin's status, each source's release and read-only verdict (lensed), and `last_refresh` (null until L2) |
+| `dashboards_list`, `dashboards_get` | `dashboard.read` | Browse; read the working version with each pin's status, each source's release and read-only verdict (lensed), and `last_refresh` (the CALLER's own latest refresh — id, version, status, stamps — or null; through an MCP key, which is its own identity, it is null today: no tool refreshes a dashboard, §5) |
 | `dashboards_create`, `dashboards_update`, `dashboards_purge_draft` | create / update / version.manage | As the visualization tools |
 | `dashboards_validate` | `dashboard.update` | §4.2 |
 
@@ -284,9 +285,124 @@ authoring loop in the order an agent needs it.
 
 ---
 
+## 5. The runtime
+
+A person opens a RELEASED dashboard and it comes alive: the server runs the dashboard's pinned source pipelines, hands
+the results to its visualizations, and streams them. This section is the SERVER half (lane L2); the browser half —
+the client runtime, the renderer adapters and the first-party page — is L3's. Six routes, all under
+`/api/v1/dashboards/{id}`, all `dashboard.execute` ([Auth §7.6](auth.md)).
+
+### 5.1 The delegated act (D50)
+
+`dashboard.execute` is the ONE authorization event. A viewer who holds it refreshes a dashboard whose source pipelines,
+parameter set and transform templates they could not run or evaluate themselves: the sources run WITHOUT consulting the
+caller's `pipeline.execute`, the set is evaluated without `parameter_set.evaluate`, the transform without
+`template.evaluate`. Two things keep that safe:
+
+- **Sources are read-only.** Every source pins a RELEASED pipeline that passes the read-only rule (D38),
+  transitively through its child pipelines. It is checked at save, at release, at every configuration read AND at
+  every refresh; a pin that stops holding is `dashboard.runtime.dependency_missing` (409), never a run.
+- **Isolation.** Every read is workspace-scoped; the dashboard is read through the caller's lens (a promoter refreshes
+  a dashboard only if every source pipeline her lens admits — otherwise the family's 404); a refresh belongs to the
+  person who started it.
+
+Each source execution is `executed_by` the refreshing person with `triggered_via = DASHBOARD` ([Enums §18](enums.md)); it
+is visible like any of their runs, but it is cancelled ONLY through its refresh's abort — the executions route refuses
+it for everyone — and it writes NO stored result (§5.5).
+
+### 5.2 The routes
+
+| Route | Answers |
+|---|---|
+| `GET /{id}/runtime/config` | The runtime configuration and its `configuration_id`. |
+| `POST /{id}/runtime/parameters` | The pinned set evaluated against the submitted selections. |
+| `POST /{id}/runtime/visualizations` | One refresh, as a server-sent stream. |
+| `POST /{id}/runtime/refreshes/{refresh_id}/abort` | 202; aborts a RUNNING refresh the caller owns. |
+| `GET /{id}/refreshes`, `GET /{id}/refreshes/{refresh_id}` | The caller's own refreshes; every refresh with `execution.read_all`. |
+
+The dashboard served is its CURRENT RELEASED version, never a draft (the draft preview is L4's). A dashboard with no
+release is absent, exactly like a hidden one.
+
+### 5.3 The configuration
+
+`configuration_id` is `sha256(dashboard id | version | body_hash | every pinned dependency's kind, name, version and
+body_hash)` — the pinned visualizations, the parameter set and each source pipeline. Every later call sends it; a mismatch
+is `dashboard.runtime.configuration_stale` (409) and the client reloads. The answer carries the layout, each
+occurrence's renderer, configuration and `bindings` (a configuration path to a column, filled later from
+`visualization_data`), the groups, actions, controls, scopes and parameter-state overrides, the resolved refresh
+deadline, and the budgets the client is held to.
+
+### 5.4 Parameters
+
+`POST /runtime/parameters` answers the parameter engine's evaluate response UNCHANGED plus `overrides_applied` (only the
+parameters whose hide/show or enable/disable the dashboard's `parameter_state` changed, with both effective values),
+`parents` (parameters that have dependents) and `parameter_revision`, assigned by the server per client instance and
+increasing — a hint the client compares, held in memory, that starts again after a restart. A dashboard with no set
+answers an empty evaluation.
+
+### 5.5 A refresh
+
+The order matters. A request is judged whole first (a malformed body is `dashboard.validation.body_invalid` naming the
+FIELD, never its value); then the stream cap, the served dashboard and `configuration_id`; then the selections are
+evaluated — an invalid selection is a 400 before anything is held; then the plan; then **admission**; and only then the
+`RUNNING` row. A refused refresh writes nothing.
+
+- **Sharing.** Two sources whose pinned release AND resolved parameters — after the outgoing overrides — are identical are
+  ONE execution, fed to every consumer. Sharing is within one refresh; nothing is ever aliased across refreshes.
+- **Admission (D53).** A refresh reserves one instance slot per distinct execution, all or none, plus one of the
+  workspace's refresh places and its share of the instance's dashboard-execution cap — waiting at most
+  `max-wait-seconds`. It takes no per-user slot, so a refresh never starves the viewer's own runs. A full instance is
+  `429 dashboard.refresh.saturated` with `Retry-After`. The counters are JVM-local ([Configuration §3.34](configuration.md)).
+  A dashboard needing more distinct executions than one refresh may run is refused at SAVE
+  (`dashboard.validation.too_many_invocations`), so no valid document is permanently saturated.
+- **Caps (D54).** A source's rows are held in a bounded collector counted with the result store's own byte accounting;
+  at the first row over `max-bytes-per-source` that source fails `dashboard.refresh.result_too_large` and its dependents
+  error; over `max-bytes-per-refresh` the refresh ends PARTIAL. A dashboard run writes NO result store entry and no
+  `result_row_count`; `GET /api/v1/executions/{id}/result` answers `not_found` for it.
+- **Dependencies.** A target waits for ALL its inputs; a failed source fails every target reading it, and a transform
+  never runs on a stand-in for a missing input. The first refresh judges the input contract against the source's real
+  columns (a SQL result node's columns are unknown until it runs, #328): a mismatch fails the target naming the column.
+- **Deadlines (§9.6).** The refresh's own (`timeouts.refresh_seconds`, default 600, cap 900), each occurrence's
+  `timeout_seconds` and each source's own executor limits — the earliest that applies wins.
+
+The stream is the execution stream's framing (`event:`, monotonic `id:`, `data:`, a `: heartbeat` every 15 s, the
+disconnect grace of rest-api §6.8): `refresh_started`, `source_started` / `source_completed` / `source_failed`,
+`visualization_status`, `visualization_data`, and `refresh_completed` ALWAYS last. A source is LINKED to the refresh
+before it is announced, so a pane can open its execution the moment `source_started` arrives. `source_failed` names a
+code, never a driver's message; the execution's own events (visible to its owner) carry the detail. A subscriber is
+re-judged before every write (a revoked session, a removed member or a lost `dashboard.execute` cuts the STREAM at that
+write); the refresh itself runs to its end.
+
+### 5.6 Abort
+
+`POST …/refreshes/{refresh_id}/abort` with `{ instance_id }` answers 202 without waiting. It requires `dashboard.execute`
+plus OWN (the refresh's principal AND client instance) or `execution.cancel_all`; anything else — no such refresh,
+another dashboard's, another person's, one already finished — is `dashboard.refresh.not_found`. It sets a refresh-level
+flag the OWNING instance polls (`dp:refresh-abort:{refresh_id}`), pulls the local trigger when this IS the owner, and
+cancels each execution the refresh has started through the executor's own path. The refresh ends `ABORTED`, every
+not-yet-started source is skipped and `refresh_completed` is last. A client that disconnects and stays away past the grace
+aborts its refresh the same way.
+
+### 5.7 The record
+
+`dashboard_refreshes` and `dashboard_refresh_executions` ([Metadata DB §4.34–§4.35](metadata-db.md)) hold every refresh that
+was admitted. The row is closed however the refresh ends — the client gone, the deadline passed, the process stopping —
+because the terminal work runs non-cancellably at the one point that owns it; a refresh an instance crash left
+`RUNNING` is closed `TIMED_OUT` by the sweeper ([§8.4](metadata-db.md)). Finished refreshes are retained like execution
+events. One `dashboard.refresh` audit row per refresh is written awaited at its end ([Enums §15](enums.md)).
+
+The events pane links a refresh's executions only for a person who may read executions: a promoter refreshes a
+dashboard she can read but holds no `execution.read`, so her refresh names no execution.
+
+### 5.8 What is not here
+
+The draft preview and the visualization tests (L4), the client runtime (L3), and the `dashboard` key kind and its
+confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard.
+
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v0.3 | L2 (#10) the runtime | **New §5 The runtime** — the delegated act (D50) and what keeps it safe, the six routes, `configuration_id`, the parameter evaluation, a refresh (order, sharing, admission, caps, dependencies, deadlines, the stream), abort, the record. §4.4's `last_refresh` is live (the caller's own). |
 | 2026-09-29 | v0.2 | L1b (#10) the surfaces | **New §4 The surfaces** — the fourteen permission rows and the promoter's lens (§4.1), validate as an author verb (§4.2, owner ruling), what a source must declare for the save-time input check (§4.3), and the eleven MCP tools (§4.4); the REST routes are rest-api §22/§23. The status line names what L1b added. |
 | 2026-09-29 | v0.1 | L1a (#10) the module | The two documents, their bounds and their lifecycle (§1–§3). |

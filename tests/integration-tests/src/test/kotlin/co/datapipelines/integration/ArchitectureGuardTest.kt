@@ -395,9 +395,17 @@ class ArchitectureGuardTest {
                 "AvatarController → UserRepository",
             )
 
-        /** The three `@Scheduled` homes (auth.md §8.6's scheduled rows): the stale-execution sweep, the pool reaper, event retention. */
+        /**
+         * The `@Scheduled` homes (auth.md §8.6's scheduled rows): the stale-execution sweep, the pool reaper, event retention
+         * and — #10 L2 — the stale dashboard-refresh sweep (`DashboardRuntimeConfiguration.kt`, metadata-db §8.4).
+         */
         val APPROVED_SCHEDULING_FILES =
-            setOf("SweepSchedulingConfiguration.kt", "PoolReaperSchedulingConfiguration.kt", "RetentionSchedulingConfiguration.kt")
+            setOf(
+                "SweepSchedulingConfiguration.kt",
+                "PoolReaperSchedulingConfiguration.kt",
+                "RetentionSchedulingConfiguration.kt",
+                "DashboardRuntimeConfiguration.kt",
+            )
 
         /** 100 transport files on the inventory base; a scan that finds far fewer is looking in the wrong place. */
         const val TRANSPORT_FLOOR = 90

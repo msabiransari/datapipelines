@@ -84,5 +84,6 @@ fun realShippedTools(): List<McpTool> {
         visualizationReader = co.datapipelines.visualization.VisualizationReader(),
         dashboardReader = co.datapipelines.visualization.DashboardReader(),
         pipelineReleaseFacts = co.datapipelines.visualization.PipelineReleaseFacts { _, _ -> null },
+        dashboardRefreshHistory = mockk<co.datapipelines.visualization.DashboardRefreshHistory>(),
     )
 }

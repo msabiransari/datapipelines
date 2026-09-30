@@ -1,6 +1,6 @@
 # Pipeline Contract Specification
 
-**Status:** v1.44 (revised — see Change Log)
+**Status:** v1.45 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md)
 **Last updated:** 2026-09-29
@@ -1560,6 +1560,7 @@ The dashboard artifact's refusals (#10; the implementation spec §3.2, §8, §9,
 | `dashboard.validation.unknown_object` | 400 | a reference to nothing: a group member, action target, action control's action, layout placement, grid item, parameter scope or override naming no object, source or pipeline parameter of this dashboard |
 | `dashboard.validation.target_not_visualization` | 400 | an action's target names an object that is not a visualization occurrence |
 | `dashboard.validation.empty_targets` | 400 | an action with `scope: targets` and an empty or missing `targets` list, or `scope: all` carrying targets (D55) |
+| `dashboard.validation.too_many_invocations` | 400 | the dashboard's sources resolve to more DISTINCT executions (a pinned pipeline release with its resolved bindings, outgoing overrides applied — the refresh's sharing identity) than one refresh may run (`datapipelines.dashboards.admission.max-executions-per-refresh`, default 16); `details.invocations` and `details.max`. Refused at save and at release so no valid document is permanently `dashboard.refresh.saturated` |
 | `dashboard.validation.parent_action_binding` | 400 | an action control bound to a PARENT parameter's control — a parameter whose `dependents` is non-empty in the pinned set (R2, D42) |
 | `dashboard.validation.scope_omits_consumer` | 400 | a declared `parameter_scopes` entry that omits a group consuming the parameter, directly or through a dependent (D41) |
 | `dashboard.validation.source_not_released` | 400 | a source pins a pipeline version that is not RELEASED (D1) |
@@ -1827,6 +1828,7 @@ Out of scope for v1.1, tracked for future:
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.45 | L2 (#10) the dashboard runtime | New **§13.23 row `dashboard.validation.too_many_invocations`** (400): the validator counts a dashboard's DISTINCT invocations — the refresh's own sharing identity: a pinned pipeline release plus its resolved bindings, outgoing overrides applied — and refuses more than `max-executions-per-refresh` at save and at release. The reader bounded `sources[]` at 400 (50 × 8) while a refresh admits 16 executions, so a document valid at save could be permanently `dashboard.refresh.saturated` (429 says "retry"); the runtime's saturated answer stays for a genuinely full instance. §13.23 is 35 rows. |
 | 2026-09-29 | v1.44 | L1a (#10) the visualization module | New **§13.22 Visualizations** (30 rows) and **§13.23 Dashboards** (34 rows): the spec §14's 21 + 24 codes (its "18" and "22" miscount its own lists) plus the lifecycle rows the verbs need — `name_invalid`, `name_taken` (409; the mould's `duplicate_name`, renamed because the dashboard family's `duplicate_name` is its object namespace), `version.not_draft` / `not_released` / `not_discarded` / `last_release` / `not_eligible`, `authoring.disabled`, and `visualization.version.pinned` (a live dashboard pins it), `dashboard.validation.dependency_not_found`, `dashboard.import.missing_dependency`. Landed with their constants, catalog rows and `doc_url` anchors. |
 | 2026-09-29 | v1.43 | 310 (#310) audit-log retention | §12.11's `pipeline.validation.table_not_learned` row: the learning lasts as long as the audit row it reads — once per `datapipelines.audit.retention-days` (default a year), not "the key's lifetime", now that the audit log is retained (auth §10.3). The code, its status and its details are unchanged |
 | 2026-09-28 | v1.42 | 298 (#298) the server's fault names the status | §6.2: a binding that carries both a caller's bad value and a stored declaration refused today answers the stored declaration's 409 (`PipelineValidationException` ranks the server-owned code first) with both failures in `details.failures` in the order found — before, the first failure's code won, so a caller's error listed earlier made it a 400. Each judged declaration is compiled once per bind. No code or row added. |

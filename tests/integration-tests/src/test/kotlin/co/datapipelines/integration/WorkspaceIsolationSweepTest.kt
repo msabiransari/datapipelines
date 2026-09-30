@@ -149,6 +149,13 @@ class WorkspaceIsolationSweepTest {
             swept.any { it.path.startsWith("/api/v1/pipelines") } shouldBe true
             swept.any { it.path.startsWith("/api/v1/datasources") } shouldBe true
             swept.any { it.path.startsWith("/partials/") } shouldBe true
+            // #10 L2: the dashboards family is swept WITH a dashboard id and a refresh id — see substitute().
+            swept.any { it.path == "/api/v1/dashboards/${WorkspaceIsolationIntegrationTest.DASH_GLOBEX}/runtime/config" } shouldBe true
+            swept.any {
+                it.path ==
+                    "/api/v1/dashboards/${WorkspaceIsolationIntegrationTest.DASH_GLOBEX}" +
+                    "/refreshes/${WorkspaceIsolationIntegrationTest.REFRESH_GLOBEX}"
+            } shouldBe true
             // 112 merge review: the executions family (metadata, result cursor, SSE replay, cancel)
             // must be swept WITH an execution id — see substitute().
             swept.any { it.path.startsWith("/api/v1/executions/" + WorkspaceIsolationIntegrationTest.EXEC_GLOBEX) } shouldBe true
@@ -318,7 +325,15 @@ class WorkspaceIsolationSweepTest {
         val executionsFamily = EXECUTION_PATH_MARKERS.any { it in pattern }
         variables.forEach { match ->
             val variable = match.groupValues[1].substringBefore(':')
-            val key = if (variable == "id" && executionsFamily) "executionId" else variable
+            // #10 L2: a dashboard route's `{id}` is a DASHBOARD id (globex's, seeded) — not a pipeline's, which no
+            // dashboard route could resolve in any workspace.
+            val dashboardsFamily = "/api/v1/dashboards/" in pattern
+            val key =
+                when {
+                    variable == "id" && executionsFamily -> "executionId"
+                    variable == "id" && dashboardsFamily -> "dashboardId"
+                    else -> variable
+                }
             val value = values[key] ?: return null
             path = path.replace(match.value, value)
         }
@@ -533,6 +548,8 @@ class WorkspaceIsolationSweepTest {
                 "id" to WorkspaceIsolationIntegrationTest.PIPE_GLOBEX,
                 "pipelineId" to WorkspaceIsolationIntegrationTest.PIPE_GLOBEX,
                 "executionId" to WorkspaceIsolationIntegrationTest.EXEC_GLOBEX,
+                "dashboardId" to WorkspaceIsolationIntegrationTest.DASH_GLOBEX,
+                "refresh_id" to WorkspaceIsolationIntegrationTest.REFRESH_GLOBEX,
                 "name" to "globex_tpl",
                 "templateName" to "globex_tpl",
                 "version" to "1",
@@ -568,6 +585,8 @@ class WorkspaceIsolationSweepTest {
                 "executions_get" to """{"execution_id":"${WorkspaceIsolationIntegrationTest.EXEC_GLOBEX}"}""",
                 "executions_get_result" to """{"execution_id":"${WorkspaceIsolationIntegrationTest.EXEC_GLOBEX}"}""",
                 "executions_cancel" to """{"execution_id":"${WorkspaceIsolationIntegrationTest.EXEC_GLOBEX}"}""",
+                // #10 L2: the dashboard read tool with globex's released dashboard (its `last_refresh` is the caller's own).
+                "dashboards_get" to """{"id":"${WorkspaceIsolationIntegrationTest.DASH_GLOBEX}"}""",
                 "datasources_get" to """{"name":"globex-only-db"}""",
                 "datasources_get_schemas" to """{"name":"globex-only-db"}""",
                 "datasources_get_tables" to """{"name":"globex-only-db"}""",
@@ -593,6 +612,8 @@ class WorkspaceIsolationSweepTest {
                 "id" to "0d0e0000-0000-0000-0000-0000000000ff",
                 "pipelineId" to "0d0e0000-0000-0000-0000-0000000000ff",
                 "executionId" to "0d0e0000-0000-0000-0000-0000000000fe",
+                "dashboardId" to "0d0e0000-0000-0000-0000-0000000000fd",
+                "refresh_id" to "0d0e0000-0000-0000-0000-0000000000fc",
                 "name" to "nobody_owns_this",
                 "templateName" to "nobody_owns_this",
                 "version" to "1",

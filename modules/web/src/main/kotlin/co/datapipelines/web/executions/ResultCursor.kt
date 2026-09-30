@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
+import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultPage
 import co.datapipelines.executor.ResultStore
@@ -56,7 +57,9 @@ class ResultCursor(
         principal: AuthenticatedPrincipal,
     ): ExecutionRecord {
         val record = executions.findById(principal.requireWorkspace().id, executionId)
-        if (record == null || !visibility.visible(record, principal, executionId)) {
+        // #10 L2: a DASHBOARD run streams its rows into the refresh's collector and stores NO result — its cursor would
+        // answer an empty page that reads as a successful zero-row result. It is the family's not-found instead.
+        if (record == null || record.triggeredVia == ExecutionTrigger.DASHBOARD || !visibility.visible(record, principal, executionId)) {
             metrics.cursorRead(FORMAT_NONE, WebMetrics.OUTCOME_NOT_FOUND)
             throw ApiErrors.executionNotFound(executionId.toString())
         }

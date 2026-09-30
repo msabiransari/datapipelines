@@ -73,6 +73,8 @@ class ConfigValidatorCheckCountTest {
                 "modules/app/src/main/kotlin/co/datapipelines/config/RequestLimitsRules.kt",
                 // #10 L1a — the §3.33 dashboard documents' bounds, split out like the parameters' ones.
                 "modules/app/src/main/kotlin/co/datapipelines/config/VisualizationRules.kt",
+                // #10 L2 — the §3.34 dashboard runtime's bounds and relations, likewise.
+                "modules/app/src/main/kotlin/co/datapipelines/config/DashboardRuntimeRules.kt",
             )
     }
 }

@@ -5,7 +5,7 @@ import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 
 /**
- * enums.md §31–§37 (the wire tables) versus the seven closed vocabularies this module declares — the
+ * enums.md §31–§38 (the wire tables) versus the eight closed vocabularies this module declares — the
  * `ParameterEnumsSpecDriftTest` shape: the doc's first column is parsed, the Kotlin wire values are read, and a
  * value on one side only is red. `TestRunStatus` is also V42's CHECK list (FlywayMigrationIntegrationTest pins that).
  */
@@ -23,6 +23,7 @@ class VisualizationEnumsSpecDriftTest {
         withClue("§35 ActionScope") { values("## 35. `ActionScope`") shouldBe ActionScope.WIRE_VALUES.toSet() }
         withClue("§36 StateSetting") { values("## 36. `StateSetting`") shouldBe StateSetting.WIRE_VALUES.toSet() }
         withClue("§37 LayoutPosition") { values("## 37. `LayoutPosition`") shouldBe LayoutPosition.WIRE_VALUES.toSet() }
+        withClue("§38 RefreshStatus") { values("## 38. `RefreshStatus`") shouldBe RefreshStatus.entries.map { it.name }.toSet() }
     }
 
     /** The backticked first cells of the table under [heading], up to the next `---`. */

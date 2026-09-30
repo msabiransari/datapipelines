@@ -137,6 +137,7 @@ class McpServerWiringTest {
                 co.datapipelines.visualization.PipelineReleaseFacts { _, _ -> null },
                 co.datapipelines.visualization.DashboardReader(),
                 McpFixtures.EVERYTHING_LENS,
+                mockk(),
             )
 
     /** #194 lane D — the six parameter-set tools, appended last (the 117/107 append rule). */

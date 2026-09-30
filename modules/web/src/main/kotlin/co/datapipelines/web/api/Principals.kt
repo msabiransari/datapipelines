@@ -69,6 +69,13 @@ fun ExecutionRecord.visibleTo(principal: AuthenticatedPrincipal): Boolean =
  * [visibleTo]'s twin for CANCEL (#215): the caller's own run, or any run with
  * `execution.cancel_all`. An endpoint key cancels nothing — it is confined to the serve surface
  * and its own results. A run the caller may not cancel answers not-found, like a read.
+ *
+ * #10 L2: a DASHBOARD-triggered run is cancelled ONLY through its refresh's abort (`dashboard.execute` + own, or
+ * `execution.cancel_all`, on the refresh route) — the executions route refuses it for everyone, so a viewer who
+ * owns the run (D50: `executed_by` is the viewer) cannot cancel one source out from under a refresh that other
+ * targets share, and the refresh's abort stays the one place its bookkeeping happens.
  */
 fun ExecutionRecord.cancellableBy(principal: AuthenticatedPrincipal): Boolean =
-    !principal.isEndpointKey && (isOwnRunOf(principal.userId) || principal.holds(Permission.EXECUTION_CANCEL_ALL))
+    triggeredVia != ExecutionTrigger.DASHBOARD &&
+        !principal.isEndpointKey &&
+        (isOwnRunOf(principal.userId) || principal.holds(Permission.EXECUTION_CANCEL_ALL))

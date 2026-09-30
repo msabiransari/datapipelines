@@ -138,6 +138,8 @@ class McpServerAutoConfigurationTest {
 
         @Bean fun pipelineReleaseFacts(): co.datapipelines.visualization.PipelineReleaseFacts = mockk()
 
+        @Bean fun dashboardRefreshHistory(): co.datapipelines.visualization.DashboardRefreshHistory = mockk()
+
         @Bean fun mcpToolLearnings(): co.datapipelines.application.mcp.McpToolLearnings = mockk()
 
         @Bean fun schemaIntrospector(): SchemaIntrospector = mockk()

@@ -32,7 +32,9 @@ Build in this order — each step's refusal names the path to fix.
    `*.version.conflict` — re-read and rebase; never retry blindly.
 6. **Validate** with `dashboards_validate` whenever a pinned pipeline, set or visualization may have
    changed: it judges the working version against the dependencies as they are now and answers `valid`
-   with every failure. `dashboards_get` shows each pin's status and each source's read-only verdict.
+   with every failure. `dashboards_get` shows each pin's status and each source's read-only verdict, and
+   `last_refresh` — the latest refresh made under YOUR identity, which for a key is null today: no tool refreshes a
+   dashboard (people do, in the UI, as themselves).
 7. **Release is a person's step.** No tool releases anything. A visualization release also needs its
    evidence gate, which refuses every release until the visualization test sessions ship
    (`visualization.release.tests_missing`); tell the person the dashboard is ready for review instead.

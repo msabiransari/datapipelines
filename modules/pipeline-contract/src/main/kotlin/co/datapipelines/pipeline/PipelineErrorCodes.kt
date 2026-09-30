@@ -1778,6 +1778,8 @@ object PipelineErrorCodes {
 
         const val PARENT_ACTION_BINDING = "dashboard.validation.parent_action_binding"
 
+        const val TOO_MANY_INVOCATIONS = "dashboard.validation.too_many_invocations"
+
         const val SCOPE_OMITS_CONSUMER = "dashboard.validation.scope_omits_consumer"
 
         const val SOURCE_NOT_RELEASED = "dashboard.validation.source_not_released"

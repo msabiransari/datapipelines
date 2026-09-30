@@ -170,6 +170,7 @@ class McpServerAutoConfiguration {
         visualizationReader: co.datapipelines.visualization.VisualizationReader,
         dashboardReader: co.datapipelines.visualization.DashboardReader,
         pipelineReleaseFacts: co.datapipelines.visualization.PipelineReleaseFacts,
+        dashboardRefreshHistory: co.datapipelines.visualization.DashboardRefreshHistory,
     ): List<McpTool> {
         val runtime =
             inlineRuntime(pipelines, templates, templateEngines, datasources, introspector, jdbc)
@@ -243,7 +244,7 @@ class McpServerAutoConfiguration {
                 lens,
             ) +
             visualizationTools(visualizationService, dashboardService, visualizationReader, lens) +
-            dashboardTools(dashboardService, visualizationService, pipelineReleaseFacts, dashboardReader, lens)
+            dashboardTools(dashboardService, visualizationService, pipelineReleaseFacts, dashboardReader, lens, dashboardRefreshHistory)
     }
 
     /** The datasource, execution and calculator tools, extracted at 194d when the list passed detekt's length. */
