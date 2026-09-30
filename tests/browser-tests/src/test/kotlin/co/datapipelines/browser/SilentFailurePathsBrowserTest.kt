@@ -2,9 +2,11 @@ package co.datapipelines.browser
 
 import com.microsoft.playwright.Locator
 import com.microsoft.playwright.Page
+import com.microsoft.playwright.Route
 import com.microsoft.playwright.options.WaitForSelectorState
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * #336 D8 in a real browser — the failure paths the scripts used to swallow, with Playwright
@@ -19,6 +21,10 @@ import org.junit.jupiter.api.Test
  *    version while the person edits a draft.
  * 3. **A failed runs refresh** keeps the runs shown and MARKS them stale, with the toast once,
  *    until a refresh answers — then the marker clears.
+ * 4. **A late failed refresh from a SUPERSEDED selection** (#336-b) marks nothing: A's held
+ *    refresh, answered after B was selected, leaves B fresh, toasts nothing and throws nothing
+ *    — and B's own failing refresh still marks B stale and toasts (the assertions above are
+ *    not green because the machinery cannot act).
  */
 class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
     @Test
@@ -143,6 +149,78 @@ class SilentFailurePathsBrowserTest : SchedulesBrowserSuite() {
             null,
             Page.WaitForFunctionOptions().setTimeout(10_000.0),
         )
+    }
+
+    /**
+     * #336-b — A's refresh is held on the wire, B is selected, and only then is A's refusal
+     * released: the late failure must act on nothing. Red on the delivered f470b30f (the
+     * orchestrator's witness: B went stale and A's toast fired over it).
+     */
+    @Test
+    fun `a late failing refresh from a superseded selection marks nothing on the new schedule`() {
+        startTrace()
+        val root = ready("d8own")
+        val pipeline = "$root/jobs/rows"
+        ScheduleFixtures.releasedPipeline(page, pipeline)
+        val idA = ScheduleFixtures.createSchedule(page, "$root/own/first", pipeline)
+        val idB = ScheduleFixtures.createSchedule(page, "$root/own/second", pipeline)
+        openSchedules("?id=$idA")
+        detail().waitFor()
+
+        val consoleErrors = CopyOnWriteArrayList<String>()
+        val pageErrors = CopyOnWriteArrayList<String>()
+        page.onConsoleMessage { message -> if (message.type() == "error") consoleErrors.add(message.text()) }
+        page.onPageError { error -> pageErrors.add(error.toString()) }
+
+        // A's runs read hangs on the wire until the test releases it; everything else flows.
+        var held: Route? = null
+        var failAll = false
+        page.route("**/api/v1/schedules/*/runs**") { route ->
+            val url = route.request().url()
+            when {
+                failAll -> route.fulfill(Route.FulfillOptions().setStatus(500).setBody("outage"))
+                held == null && url.contains("/api/v1/schedules/$idA/runs") -> held = route
+                else -> route.resume()
+            }
+        }
+        try {
+            page.waitForRequest({ it.url().contains("/api/v1/schedules/$idA/runs") }) {
+                page.locator("[data-sch-action='refresh-runs']").click()
+            }
+            // B selected while A's refresh is still unanswered.
+            leaf("$root/own/second").click()
+            page.locator("#schedule-detail [data-schedule-id='$idB']").waitFor()
+            checkNotNull(held) { "A's refresh was never held on the wire" }
+
+            page.waitForResponse({ it.url().contains("/api/v1/schedules/$idA/runs") }) {
+                held.fulfill(Route.FulfillOptions().setStatus(500).setBody("A's late failure"))
+            }
+            // The rejection lands within microtasks of the response (the positive control
+            // below acts inside the same window); the page is read after it settled.
+            page.waitForTimeout(300.0)
+
+            // B stays fresh: no stale mark, no A toast, no unhandled rejection.
+            (page.locator("#schedule-detail [data-slot='runs-stale']").getAttribute("hidden") != null) shouldBe true
+            page.locator("#toast .ds-toast-danger").count() shouldBe 0
+
+            // Non-vacuity: B's OWN failing refresh marks B stale and toasts — so the two
+            // assertions above are green because the guard held, not because nothing can act.
+            failAll = true
+            page.locator("[data-sch-action='refresh-runs']").click()
+            val note = page.locator("#schedule-detail [data-slot='runs-stale']")
+            note.waitFor(Locator.WaitForOptions().setTimeout(10_000.0).setState(WaitForSelectorState.VISIBLE))
+            page.locator("#toast .ds-toast-danger").first().waitFor(
+                Locator.WaitForOptions().setTimeout(10_000.0).setState(WaitForSelectorState.VISIBLE),
+            )
+        } finally {
+            page.unroute("**/api/v1/schedules/*/runs**")
+        }
+        // Chromium logs its own network line for every refused route — exactly the two 500s
+        // this test served (A's release, B's outage control). Any OTHER console error, and
+        // any page error (an unhandled rejection is one), fails the test.
+        consoleErrors.filter { it.contains("Failed to load resource") }.size shouldBe 2
+        consoleErrors.filterNot { it.contains("Failed to load resource") } shouldBe emptyList()
+        pageErrors shouldBe emptyList()
     }
 
     /** A one-node caller pipeline whose single statement holds the run for [sleepSeconds]. */
