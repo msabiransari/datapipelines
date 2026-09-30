@@ -116,12 +116,12 @@ class LogRedactorTest {
 
     @Test
     fun `failed matches are linear - mixed case and dotted and hyphenated repeats`() {
-        assertLinear("mixed case repeats") { n -> "Password.Secret-Api_Key_".repeat(n) + "end" }
+        assertLinear("mixed case repeats") { n -> "Password.Secret-Api_Key_".repeat(n) + "end:" }
     }
 
     @Test
     fun `failed matches are linear - a sensitive word with nothing after the blanks`() {
-        assertLinear("word then blanks then a non-equals") { n -> "password_x".repeat(n) + " ".repeat(n) + "z" }
+        assertLinear("word then blanks then a non-equals") { n -> "password_x".repeat(n) + " ".repeat(n) + "z:" }
     }
 
     @Test
@@ -151,7 +151,7 @@ class LogRedactorTest {
 
     @Test
     fun `failed matches are linear - a json key followed by blanks and no colon`() {
-        assertLinear("json key then blanks") { n -> "\"password\"" + " ".repeat(n) + "z" }
+        assertLinear("json key then blanks") { n -> "\"password\"" + " ".repeat(n) + "z:" }
     }
 
     @Test
@@ -187,6 +187,10 @@ class LogRedactorTest {
                 val input = build(n)
                 val measured = LogRedactor.scrubMeasured(input)
                 withClue("$label n=$n: scan steps ${measured.work} over ${input.length} characters") {
+                    // Non-vacuity floor (a quarter step per character; matched values are consumed in a few
+                    // steps): text with neither `=` nor `:` is returned before any scan
+                    // (work 0) and could never fail the ceiling, so every family must really scan.
+                    (measured.work >= input.length / 4) shouldBe true
                     (measured.work <= WORK_PER_CHARACTER_CEILING * input.length + WORK_SLACK) shouldBe true
                 }
                 measured.work
