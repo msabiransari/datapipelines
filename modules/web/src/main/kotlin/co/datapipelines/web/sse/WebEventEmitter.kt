@@ -461,8 +461,7 @@ class WebEventEmitter(
                     FailureShape.cause(it),
                     FailureShape.sqlState(it),
                 )
-            }
-            .getOrNull()
+            }.getOrNull()
 
     private fun abortedDurationMs(
         executionId: UUID,

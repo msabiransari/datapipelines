@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestParam
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The workspace screens' actions (ui-screens.md §4.13): create, members and their ONE role
@@ -102,8 +103,8 @@ class WorkspacesUiController(
         // The listings map is filtered to the ACTIVE workspace above, so each flag is at most
         // one workspace's verdict — booleans, not names. (The first cut passed Sets of names
         // in the model; the browser suite hung every page load with them — see the handback.)
-        val degradedMembers = java.util.concurrent.atomic.AtomicBoolean(false)
-        val degradedKeyOwners = java.util.concurrent.atomic.AtomicBoolean(false)
+        val degradedMembers = AtomicBoolean(false)
+        val degradedKeyOwners = AtomicBoolean(false)
         val listings =
             administered
                 .filter { it.workspaceName == activeWorkspace }
@@ -436,6 +437,14 @@ class WorkspacesUiController(
      * the doc row and the drift counts in one commit — too much for a pre-merge hotfix;
      * this is the recorded follow-up landing it properly.
      */
+    private fun requireSessionPrincipal(): AuthenticatedPrincipal {
+        val principal = requirePrincipal()
+        if (principal.authMethod != AuthMethod.OIDC) {
+            throw WorkspaceSessionRequiredException()
+        }
+        return principal
+    }
+
     /**
      * One workspace's members-and-invitations listing, with its failure classified (#336 D4):
      * a catalogued refusal ([AuthException] — the role/visibility verdicts the role model
@@ -445,7 +454,7 @@ class WorkspacesUiController(
     private fun listingOf(
         principal: AuthenticatedPrincipal,
         name: String,
-        degraded: java.util.concurrent.atomic.AtomicBoolean,
+        degraded: AtomicBoolean,
     ): WorkspaceService.MemberListing? =
         runCatching { workspaceService.membersWithInvitations(principal, name) }.getOrElse { failure ->
             if (failure is AuthException) {
@@ -466,7 +475,7 @@ class WorkspacesUiController(
     private fun keyOwnersOf(
         principal: AuthenticatedPrincipal,
         name: String,
-        degraded: java.util.concurrent.atomic.AtomicBoolean,
+        degraded: AtomicBoolean,
     ): Set<UUID> =
         runCatching { workspaceService.liveUserKeyOwnerIds(principal, name) }.getOrElse { failure ->
             if (failure is AuthException) {
@@ -482,14 +491,6 @@ class WorkspacesUiController(
                 emptySet()
             }
         }
-
-    private fun requireSessionPrincipal(): AuthenticatedPrincipal {
-        val principal = requirePrincipal()
-        if (principal.authMethod != AuthMethod.OIDC) {
-            throw WorkspaceSessionRequiredException()
-        }
-        return principal
-    }
 
     private companion object {
         private val log = LoggerFactory.getLogger(WorkspacesUiController::class.java)
