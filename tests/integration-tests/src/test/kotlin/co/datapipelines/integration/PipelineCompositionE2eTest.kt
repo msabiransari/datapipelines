@@ -559,11 +559,41 @@ class PipelineCompositionE2eTest {
     @Test
     @Order(8)
     fun `a literal over the child's declared max is refused at save with pipeline_parameter_invalid`() {
-        // The child: one DQL caller node over the Order-1 template, declaring `amount` INTEGER
-        // with constraints.max 100 (optional — nothing needs to supply it for the child to run).
+        createReleasedConstrainedChild("test/comp_constrained_leaf")
+
+        // The parent supplies 500 — the value that used to save and fail at run.
+        postPipeline(
+            "test/comp_over_max_parent",
+            "Composition Over-Max Parent",
+            listOf(pipelineNodeSupplying("run_leaf", "test/comp_constrained_leaf", mapOf("amount" to 500))),
+        ).then()
+            .statusCode(400)
+            .body("error.code", org.hamcrest.Matchers.equalTo("pipeline.validation.pipeline_parameter_invalid"))
+            // A validation refusal lists every failure under details.failures (the house shape);
+            // each entry carries its own details, where `reason` names the rule.
+            .body("error.details.failures[0].code", org.hamcrest.Matchers.equalTo("pipeline.validation.pipeline_parameter_invalid"))
+            .body("error.details.failures[0].details.reason", org.hamcrest.Matchers.equalTo("max"))
+            .body("error.details.failures[0].details.parameter", org.hamcrest.Matchers.equalTo("amount"))
+
+        // And the type rule is unchanged beside it: a wrong-typed literal keeps its own code.
+        postPipeline(
+            "test/comp_wrong_type_parent",
+            "Composition Wrong-Type Parent",
+            listOf(pipelineNodeSupplying("run_leaf", "test/comp_constrained_leaf", mapOf("amount" to "not-a-number"))),
+        ).then()
+            .statusCode(400)
+            .body("error.code", org.hamcrest.Matchers.equalTo("pipeline.validation.pipeline_parameter_type_mismatch"))
+    }
+
+    /**
+     * The #264 child fixture: one DQL caller node over the Order-1 template, declaring `amount`
+     * INTEGER with `constraints.max` 100 (optional — nothing needs to supply it to run) —
+     * created AND released (a PIPELINE node pins a released version only).
+     */
+    private fun createReleasedConstrainedChild(name: String) {
         val childBody =
             postPipeline(
-                "test/comp_constrained_leaf",
+                name,
                 "Composition Constrained Leaf",
                 listOf(
                     mapOf(
@@ -598,50 +628,23 @@ class PipelineCompositionE2eTest {
             .post("/api/v1/pipelines/$childId/release")
             .then()
             .statusCode(200)
-
-        // The parent supplies 500 — the value that used to save and fail at run.
-        postPipeline(
-            "test/comp_over_max_parent",
-            "Composition Over-Max Parent",
-            listOf(
-                mapOf(
-                    "id" to "run_leaf",
-                    "description" to "Invoke the constrained child with a value over its max",
-                    "type" to "PIPELINE",
-                    "pipeline" to mapOf("name" to "test/comp_constrained_leaf", "version" to 1),
-                    "parameters" to mapOf("amount" to 500),
-                    "output" to mapOf("target" to "caller"),
-                    "depends_on" to emptyList<String>(),
-                ),
-            ),
-        ).then()
-            .statusCode(400)
-            .body("error.code", org.hamcrest.Matchers.equalTo("pipeline.validation.pipeline_parameter_invalid"))
-            // A validation refusal lists every failure under details.failures (the house shape);
-            // each entry carries its own details, where `reason` names the rule.
-            .body("error.details.failures[0].code", org.hamcrest.Matchers.equalTo("pipeline.validation.pipeline_parameter_invalid"))
-            .body("error.details.failures[0].details.reason", org.hamcrest.Matchers.equalTo("max"))
-            .body("error.details.failures[0].details.parameter", org.hamcrest.Matchers.equalTo("amount"))
-
-        // And the type rule is unchanged beside it: a wrong-typed literal keeps its own code.
-        postPipeline(
-            "test/comp_wrong_type_parent",
-            "Composition Wrong-Type Parent",
-            listOf(
-                mapOf(
-                    "id" to "run_leaf",
-                    "description" to "Invoke the constrained child with a wrong-typed literal",
-                    "type" to "PIPELINE",
-                    "pipeline" to mapOf("name" to "test/comp_constrained_leaf", "version" to 1),
-                    "parameters" to mapOf("amount" to "not-a-number"),
-                    "output" to mapOf("target" to "caller"),
-                    "depends_on" to emptyList<String>(),
-                ),
-            ),
-        ).then()
-            .statusCode(400)
-            .body("error.code", org.hamcrest.Matchers.equalTo("pipeline.validation.pipeline_parameter_type_mismatch"))
     }
+
+    /** A PIPELINE node pinning [childName], supplying [supplied] as the node's parameter map. */
+    private fun pipelineNodeSupplying(
+        id: String,
+        childName: String,
+        supplied: Map<String, Any?>,
+    ): Map<String, Any?> =
+        mapOf(
+            "id" to id,
+            "description" to "Invoke $childName v1",
+            "type" to "PIPELINE",
+            "pipeline" to mapOf("name" to childName, "version" to 1),
+            "parameters" to supplied,
+            "output" to mapOf("target" to "caller"),
+            "depends_on" to emptyList<String>(),
+        )
 
     // ------------------------------------------------------------ helpers
 

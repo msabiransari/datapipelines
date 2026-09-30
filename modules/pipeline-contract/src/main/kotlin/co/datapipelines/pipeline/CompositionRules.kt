@@ -378,62 +378,97 @@ internal object CompositionRules {
         val reference = value.takeIf { it.isTextual }?.asText()?.let { PARAMETER_REFERENCE.matchEntire(it) }
         val path = "nodes[$index].parameters.${key.truncateForError()}"
         if (reference != null) {
-            val parentName = reference.groupValues[1]
-            // 7c (#7): the parent's value-mode TRANSFORM keys resolve as a tier too, untyped
-            // (ANY) like an ANY-output calculator key — the contract types them, not the body.
-            val tier =
-                ParentTier.resolve(
-                    parentName,
-                    pipeline,
-                    pipeline.calculatorOutputs() + pipeline.transformOutputKeys().associateWith { null },
-                    org,
-                )
-            if (mismatched(tier, target)) {
-                into.add(
-                    Validation.PIPELINE_PARAMETER_TYPE_MISMATCH,
-                    path,
-                    "Node '${node.id.truncateForError()}' maps '\${$parentName}' onto ${target.description} " +
-                        "'${key.truncateForError()}'" +
-                        (target.type?.let { " (${it.wire})" } ?: " (ANY)") +
-                        ", but " +
-                        (
-                            tier?.let { "${it.description} is ${it.type?.wire}" }
-                                ?: "'\${$parentName}' names no parent parameter, parent calculator output, " +
-                                "or org/platform key"
-                        ) +
-                        "; a reference must resolve to a value of the identical type.",
-                    mapOf(
-                        "node" to node.id.truncateForError(),
-                        "parameter" to key.truncateForError(),
-                        "reference" to parentName,
-                    ),
-                )
-                return
-            }
-            // #264's tightening — identical type is no longer the whole rule when BOTH sides carry
-            // a descriptor (a parent PARAMETER into a child PARAMETER): the parent's must widen
-            // losslessly into the child's (parameter-engine record §6.4), or the parent's value
-            // can lose digits the child's binder never sees at save. Tiers without a descriptor —
-            // a calculator output, an org/platform key — are typed only by their LogicalType and
-            // stay type-only, as today.
-            if (narrowing(tier, target)) {
-                into.add(
-                    Validation.PIPELINE_PARAMETER_INVALID,
-                    path,
-                    "Node '${node.id.truncateForError()}' maps '\${$parentName}' onto ${target.description} " +
-                        "'${key.truncateForError()}', but ${tier?.description} (${describe(tier?.descriptor)}) does not " +
-                        "widen losslessly into the child's declared ${describe(target.descriptor())}; the parent's value " +
-                        "could lose digits at run (reason: narrowing).",
-                    mapOf(
-                        "node" to node.id.truncateForError(),
-                        "parameter" to key.truncateForError(),
-                        "reference" to parentName,
-                        "reason" to "narrowing",
-                    ),
-                )
-            }
+            checkReference(pipeline, node, key, reference.groupValues[1], target, org, path, into)
+        } else {
+            checkLiteral(index, node, key, value, target, path, into)
+        }
+    }
+
+    /**
+     * The `${ref}` half of [checkValue]: the tier resolution (078 A5-composition), the
+     * identical-type rule, and #264's lossless tightening between descriptor-bearing sides.
+     */
+    @Suppress("LongParameterList")
+    private fun checkReference(
+        pipeline: Pipeline,
+        node: Node,
+        key: String,
+        parentName: String,
+        target: Target,
+        org: OrgContext,
+        path: String,
+        into: FailureCollector,
+    ) {
+        // 7c (#7): the parent's value-mode TRANSFORM keys resolve as a tier too, untyped
+        // (ANY) like an ANY-output calculator key — the contract types them, not the body.
+        val tier =
+            ParentTier.resolve(
+                parentName,
+                pipeline,
+                pipeline.calculatorOutputs() + pipeline.transformOutputKeys().associateWith { null },
+                org,
+            )
+        if (mismatched(tier, target)) {
+            into.add(
+                Validation.PIPELINE_PARAMETER_TYPE_MISMATCH,
+                path,
+                "Node '${node.id.truncateForError()}' maps '\${$parentName}' onto ${target.description} " +
+                    "'${key.truncateForError()}'" +
+                    (target.type?.let { " (${it.wire})" } ?: " (ANY)") +
+                    ", but " +
+                    (
+                        tier?.let { "${it.description} is ${it.type?.wire}" }
+                            ?: "'\${$parentName}' names no parent parameter, parent calculator output, " +
+                            "or org/platform key"
+                    ) +
+                    "; a reference must resolve to a value of the identical type.",
+                mapOf(
+                    "node" to node.id.truncateForError(),
+                    "parameter" to key.truncateForError(),
+                    "reference" to parentName,
+                ),
+            )
             return
         }
+        // #264's tightening — identical type is no longer the whole rule when BOTH sides carry
+        // a descriptor (a parent PARAMETER into a child PARAMETER): the parent's must widen
+        // losslessly into the child's (parameter-engine record §6.4), or the parent's value
+        // can lose digits the child's binder never sees at save. Tiers without a descriptor —
+        // a calculator output, an org/platform key — are typed only by their LogicalType and
+        // stay type-only, as today.
+        if (narrowing(tier, target)) {
+            into.add(
+                Validation.PIPELINE_PARAMETER_INVALID,
+                path,
+                "Node '${node.id.truncateForError()}' maps '\${$parentName}' onto ${target.description} " +
+                    "'${key.truncateForError()}', but ${tier?.description} (${describe(tier?.descriptor)}) does not " +
+                    "widen losslessly into the child's declared ${describe(target.descriptor())}; the parent's value " +
+                    "could lose digits at run (reason: narrowing).",
+                mapOf(
+                    "node" to node.id.truncateForError(),
+                    "parameter" to key.truncateForError(),
+                    "reference" to parentName,
+                    "reason" to "narrowing",
+                ),
+            )
+        }
+    }
+
+    /**
+     * The literal half of [checkValue]: #264's mould — the child's WHOLE declaration judges the
+     * literal through the shared validator, exactly as the child's own default is judged at its
+     * own save (§12.7 `checkDefault`).
+     */
+    @Suppress("LongParameterList")
+    private fun checkLiteral(
+        index: Int,
+        node: Node,
+        key: String,
+        value: JsonNode,
+        target: Target,
+        path: String,
+        into: FailureCollector,
+    ) {
         // A literal against an ANY-output child target takes any JSON scalar — the same reading
         // the execute-time binder gives an ANY-output key (078 A5).
         val targetType = target.type ?: return
@@ -444,10 +479,9 @@ internal object CompositionRules {
             typeOnlyCheck(index, node, key, value, targetType, target.description, into)
             return
         }
-        // #264 — the child's WHOLE declaration judges the literal, the §12.7 `checkDefault` mould:
-        // a value the child's binder would refuse at run (`pipeline_parameter_unmapped`'s twin at
-        // the other end of the supply) is refused at save. The shared validator is the judge, so a
-        // literal and the default it sits beside are one rule apart, never two.
+        // #264 — a value the child's binder would refuse at run (`pipeline_parameter_unmapped`'s
+        // twin at the other end of the supply) is refused at save. The shared validator is the
+        // judge, so a literal and the default it sits beside are one rule apart, never two.
         val problems = VALIDATOR.checkDeclaration(declaration)
         if (problems.isNotEmpty()) {
             // The child's own constraints are one save refuses — reported at the CHILD's save, so
@@ -459,7 +493,7 @@ internal object CompositionRules {
         }
         when (val judged = VALIDATOR.validate(declaration, value)) {
             is ParameterValueOutcome.Accepted -> {
-                Unit
+                // The literal obeys the child's whole declaration — nothing to report.
             }
 
             is ParameterValueOutcome.Refused -> {

@@ -31,6 +31,28 @@ import java.util.UUID
 class CompositionRulesReplayTest {
     @Test
     fun `no shipped or fixture pipeline body is refused by the tightened composition parameter rules`() {
+        val (corpus, bodies) = loadCorpus()
+        withClue("the replay corpus must not silently be empty") { bodies shouldBeGreaterThan 0 }
+
+        val judged = RefusalCounts()
+        corpus.values.flatten().forEach { bodyNode -> replayBody(bodyNode, corpus, judged) }
+
+        println(
+            "REPLAY bodies=$bodies judgedMappings=${judged.judgedMappings} " +
+                "unresolvedMappings=${judged.unresolvedMappings} refused: " +
+                "literalConstraint=${judged.literalConstraint} literalType=${judged.literalType} " +
+                "narrowing=${judged.narrowing}",
+        )
+        withClue("the replay must judge compositions, not an empty parameter set") {
+            judged.judgedMappings shouldBeGreaterThan 0
+        }
+        withClue("a shipped or fixture body newly refused by the tightened rules — the tightening is the owner's call") {
+            judged.total() shouldBe 0
+        }
+    }
+
+    /** Every body from [SOURCES], by name; paired with the total body count. */
+    private fun loadCorpus(): Pair<Map<String, MutableList<JsonNode>>, Int> {
         val corpus = LinkedHashMap<String, MutableList<JsonNode>>()
         var bodies = 0
         SOURCES.forEach { path ->
@@ -49,67 +71,77 @@ class CompositionRulesReplayTest {
                 bodies++
             }
         }
-        withClue("the replay corpus must not silently be empty") { bodies shouldBeGreaterThan 0 }
+        return corpus to bodies
+    }
 
-        fun resolve(
-            name: String,
-            version: Int,
-        ): ResolvedPipeline? =
+    /** Resolves a pin against the corpus itself (the pinned version first, then the only body). */
+    private fun replayResolver(corpus: Map<String, List<JsonNode>>): PipelineResolver =
+        PipelineResolver { _, name, version ->
             corpus[name]
                 ?.let { list -> list.firstOrNull { it.path("version").asInt() == version } ?: list.firstOrNull() }
                 ?.let { ResolvedPipeline(Fixtures.mapper.treeToValue(it, Pipeline::class.java), false) }
+        }
 
-        val resolver = PipelineResolver { _, name, version -> resolve(name, version) }
+    private fun replayBody(
+        bodyNode: JsonNode,
+        corpus: Map<String, List<JsonNode>>,
+        judged: RefusalCounts,
+    ) {
+        val pipeline = Fixtures.mapper.treeToValue(bodyNode, Pipeline::class.java)
+        pipeline.nodes.filter { it.type == NodeType.PIPELINE }.forEach { node ->
+            val ref = node.pipeline
+            val child = if (ref == null) null else resolveIn(corpus, ref.name, ref.version)
+            if (child == null) {
+                judged.unresolvedMappings += node.parameters.orEmpty().size
+            } else {
+                // The composition check alone: this replay asks only the §12.9 parameter rules,
+                // not the whole validator (the corpus bodies cite datasources and templates this
+                // harness does not carry, and those verdicts are not this guard's question).
+                val into = FailureCollector()
+                CompositionRules.check(pipeline, replayResolver(corpus), MAX_DEPTH, UUID.randomUUID(), OrgContext.DEFAULTS, into)
+                judged.count(into.toResult().failures)
+                judged.judgedMappings += node.parameters.orEmpty().count { it.key in child.pipeline.parameters }
+            }
+        }
+    }
 
+    private fun resolveIn(
+        corpus: Map<String, List<JsonNode>>,
+        name: String,
+        version: Int,
+    ): ResolvedPipeline? =
+        corpus[name]
+            ?.let { list -> list.firstOrNull { it.path("version").asInt() == version } ?: list.firstOrNull() }
+            ?.let { ResolvedPipeline(Fixtures.mapper.treeToValue(it, Pipeline::class.java), false) }
+
+    /** The replay's tally, by rule — printed and asserted. */
+    private class RefusalCounts {
         var judgedMappings = 0
         var unresolvedMappings = 0
-        var literalConstraintRefusals = 0
-        var literalTypeRefusals = 0
-        var narrowingRefusals = 0
-        corpus.values.flatten().forEach { bodyNode ->
-            val pipeline = Fixtures.mapper.treeToValue(bodyNode, Pipeline::class.java)
-            pipeline.nodes.filter { it.type == NodeType.PIPELINE }.forEach { node ->
-                val ref = node.pipeline
-                val child = if (ref == null) null else resolve(ref.name, ref.version)
-                val into = FailureCollector()
-                if (child == null) {
-                    unresolvedMappings += node.parameters.orEmpty().size
-                } else {
-                    // The composition check alone: this replay asks only the §12.9 parameter
-                    // rules, not the whole validator (the corpus bodies cite datasources and
-                    // templates this harness does not carry, and those verdicts are not this
-                    // guard's question).
-                    CompositionRules.check(pipeline, resolver, MAX_DEPTH, UUID.randomUUID(), OrgContext.DEFAULTS, into)
-                }
-                into.toResult().failures.forEach { failure ->
-                    when {
-                        failure.code == Validation.PIPELINE_PARAMETER_INVALID && failure.details["reason"] == "narrowing" -> {
-                            narrowingRefusals++
-                        }
+        var literalConstraint = 0
+        var literalType = 0
+        var narrowing = 0
 
-                        failure.code == Validation.PIPELINE_PARAMETER_INVALID -> {
-                            literalConstraintRefusals++
-                        }
-
-                        failure.code == Validation.PIPELINE_PARAMETER_TYPE_MISMATCH &&
-                            failure.path.startsWith("nodes[") && failure.path.contains(".parameters.") -> {
-                            literalTypeRefusals++
-                        }
+        fun count(failures: List<ValidationFailure>) {
+            failures.forEach { failure ->
+                when {
+                    failure.code == Validation.PIPELINE_PARAMETER_INVALID && failure.details["reason"] == "narrowing" -> {
+                        narrowing++
                     }
-                }
-                if (child != null) {
-                    judgedMappings += node.parameters.orEmpty().count { it.key in child.pipeline.parameters }
+
+                    failure.code == Validation.PIPELINE_PARAMETER_INVALID -> {
+                        literalConstraint++
+                    }
+
+                    failure.code == Validation.PIPELINE_PARAMETER_TYPE_MISMATCH &&
+                        failure.path.startsWith("nodes[") && failure.path.contains(".parameters.") -> {
+                        literalType++
+                    }
                 }
             }
         }
-        println(
-            "REPLAY bodies=$bodies judgedMappings=$judgedMappings unresolvedMappings=$unresolvedMappings " +
-                "refused: literalConstraint=$literalConstraintRefusals literalType=$literalTypeRefusals narrowing=$narrowingRefusals",
-        )
-        withClue("the replay must judge compositions, not an empty parameter set") { judgedMappings shouldBeGreaterThan 0 }
-        withClue("a shipped or fixture body newly refused by the tightened rules — the tightening is the owner's call") {
-            literalConstraintRefusals + literalTypeRefusals + narrowingRefusals shouldBe 0
-        }
+
+        fun total(): Int = literalConstraint + literalType + narrowing
     }
 
     private companion object {
