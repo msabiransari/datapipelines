@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.4 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.6 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
 permissions (§4, lane L1b); the server runtime (§5, lane L2). The transfer routes (L1c), the client runtime and the
 first-party page (L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add
 their sections as they land.
@@ -11,7 +11,7 @@ their sections as they land.
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.60 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-09-29
+**Last updated:** 2026-09-30
 
 A dashboard presents released pipeline results. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin released
@@ -387,7 +387,9 @@ disconnect grace of rest-api §6.8): `refresh_started`, `source_started` / `sour
 before it is announced, so a pane can open its execution the moment `source_started` arrives. `source_failed` names a
 code, never a driver's message; the execution's own events (visible to its owner) carry the detail. A subscriber is
 re-judged before every write (a revoked session, a removed member or a lost `dashboard.execute` cuts the STREAM at that
-write); the refresh itself runs to its end. The three source frames include `execution_id` only when the subscriber's
+write). Events and heartbeats resolve the workspace captured when the stream opened without session-navigation
+fallback, and require the resolved immutable workspace id to match; membership in another workspace does not preserve
+access to this stream. The refresh itself runs to its end. The three source frames include `execution_id` only when the subscriber's
 current principal also holds `execution.read`; a role change takes effect under the auth cache's membership window.
 The internal event and durable refresh-execution link retain the id either way.
 
@@ -421,6 +423,7 @@ confinement (L5): until L5, only signed-in sessions reach these routes and no MC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.6 | #343 stream workspace authority | Recheck the opening workspace by immutable id for every event and heartbeat; a different membership cannot keep the stream alive, while the refresh continues. |
 | 2026-09-30 | v0.5 | #343 dashboard runtime residue | Require RELEASED visualization, set and transform pins at runtime; clarify the unchanged bounded parameter response and current-authority execution-id projection on source frames. |
 | 2026-09-29 | v0.4 | L2 (#10) the runtime — renumbered at merge after 320's v0.3 | **New §5 The runtime** — the delegated act (D50) and what keeps it safe, the six routes, `configuration_id`, the parameter evaluation, a refresh (order, sharing, admission, caps, dependencies, deadlines, the stream), abort, the record. §4.4's `last_refresh` is live (the caller's own). |
 | 2026-09-30 | v0.3 | 320 (#320) dependency guards | §3.1: the guard's other direction — a pipeline release, parameter set or transform template a dashboard or visualization pins can no longer be discarded or purged from under it (`pipeline.version.pinned`, `parameter.in_use`, `template.in_use`; [Versioning §3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)); why the visualization's own LIVE-only guard is complete; restoring a DISCARDED dashboard version re-judges its dependencies. |

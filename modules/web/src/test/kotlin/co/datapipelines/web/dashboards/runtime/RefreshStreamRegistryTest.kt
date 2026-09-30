@@ -152,6 +152,17 @@ class RefreshStreamRegistryTest {
     }
 
     @Test
+    fun `a heartbeat refuses a reader whose workspace authority was revoked`() {
+        val stream = open()
+        every { authority.access(any()) } returns RefreshStreamAccess(StreamVerdict.REVOKED, executionRead = false)
+
+        stream.heartbeat().shouldBeFalse()
+
+        stream.isRevoked.shouldBeTrue()
+        verify(exactly = 1) { authority.access(any()) }
+    }
+
+    @Test
     fun `source frame serialization removes every execution link for a current non-reader including null failure ids`() {
         val emitter = CapturingSseEmitter()
         val id = UUID.randomUUID()

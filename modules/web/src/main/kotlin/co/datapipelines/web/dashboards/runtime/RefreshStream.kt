@@ -177,7 +177,8 @@ internal fun projectRefreshPayload(
  *
  * 0. the validated session token's expiry (#263) — before any store read;
  * 1. liveness ([PrincipalLiveness], through the auth cache's TTL);
- * 2. the live identity (`is_admin`), and the workspace the stream OPENED in, re-resolved through the membership cache;
+ * 2. the live identity (`is_admin`), and the workspace the stream OPENED in, strictly re-resolved through the
+ *    membership cache and matched by immutable workspace id;
  * 3. `dashboard.execute` — the route's own declared permission, asked of the refreshed principal.
  *
  * It does not re-run the promoter lens: the dashboard was served at open and the refresh runs to its end; what a
@@ -214,7 +215,9 @@ class RefreshStreamAuthority(
         val user = users.snapshot(subscriber.userId) ?: return denied(StreamVerdict.REVOKED)
         val live = subscriber.copy(superAdmin = user.isAdmin)
         val context =
-            workspaces.resolveForSession(live, subscriber.workspace?.name ?: live.workspaceName) ?: return denied(StreamVerdict.REVOKED)
+            subscriber.workspace?.let { openingWorkspace ->
+                workspaces.contextFor(live, openingWorkspace.name)?.takeIf { it.id == openingWorkspace.id }
+            } ?: return denied(StreamVerdict.REVOKED)
         val current = live.copy(workspace = context)
         return if (current.holds(Permission.DASHBOARD_EXECUTE)) {
             RefreshStreamAccess(StreamVerdict.ALLOWED, current.holds(Permission.EXECUTION_READ))

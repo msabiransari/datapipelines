@@ -106,7 +106,7 @@ class DashboardRuntimeE2eTest {
 
     @Test
     @Order(1)
-    fun `fixture - a workspace, five people, a source database, seven pipelines and the released boards`() {
+    fun `fixture - two workspaces, five people, a source database, ten pipelines and the released boards`() {
         seedPeople()
         registerDatasource()
         createTemplates()
@@ -688,6 +688,49 @@ class DashboardRuntimeE2eTest {
     }
 
     @Test
+    @Order(18)
+    fun `removing workspace A membership revokes its stream while workspace B stays usable and refresh completes`() {
+        val sourceLock = DriverManager.getConnection(source.jdbcUrl, source.username, source.password)
+        val refreshId = uuid()
+        try {
+            sourceLock.autoCommit = false
+            sourceLock.createStatement().use { it.execute("SELECT pg_advisory_xact_lock($CONTROLLED_SOURCE_LOCK)") }
+
+            val config = configurationId(REVOKED_BOARD, OTHER_VIEWER)
+            val live = openRefresh(REVOKED_BOARD, OTHER_VIEWER, refreshBody(config, refreshId))
+            live.await("source_started")
+
+            val removed = delete("/api/v1/workspaces/$WORKSPACE/members/$OTHER_VIEWER_ID", SUPER)
+            removed.statusCode shouldBe 204
+            get("/api/v1/dashboards/$REVOKED_BOARD/runtime/config", OTHER_VIEWER).statusCode shouldBe 404
+
+            val workspaceBProfile =
+                given()
+                    .port(port)
+                    .asSession(OTHER_VIEWER)
+                    .header("DP-Workspace", WORKSPACE_B)
+                    .get("/api/v1/auth/me")
+            withClue(workspaceBProfile.asString().take(EXCERPT)) { workspaceBProfile.statusCode shouldBe 200 }
+            workspaceBProfile.jsonPath().getString("data.role") shouldBe "viewer"
+
+            sourceLock.commit()
+            live.done(30)
+
+            withClue("SSE comments=${live.comments()} frames=${live.frames().names()}") {
+                live.comments() shouldContain "revoked"
+            }
+            live.frames().names() shouldContainExactly listOf("refresh_started", "visualization_status", "source_started")
+            live.frames().of("source_completed").size shouldBe 0
+            live.frames().of("visualization_data").size shouldBe 0
+            awaitRefreshStatus(refreshId, timeoutSeconds = 30) shouldBe "COMPLETED"
+            awaitExecutionsEnded(refreshId)
+        } finally {
+            runCatching { sourceLock.rollback() }
+            sourceLock.close()
+        }
+    }
+
+    @Test
     @Order(20)
     fun `runtime refuses draft and discarded visualization set and transform pins before source work`() {
         val before = rows("SELECT COUNT(*) AS n FROM pipeline_executions WHERE triggered_via = 'DASHBOARD'").single()["n"]
@@ -901,11 +944,12 @@ class DashboardRuntimeE2eTest {
         private val response: HttpResponse<InputStream>,
     ) {
         private val seen = CopyOnWriteArrayList<Frame>()
+        private val seenComments = CopyOnWriteArrayList<String>()
         private val finished = CompletableFuture<Unit>()
 
         init {
             Thread {
-                runCatching { parse(response.body()) { seen += it } }
+                runCatching { parse(response.body(), { seen += it }, { seenComments += it }) }
                 finished.complete(Unit)
             }.apply {
                 isDaemon = true
@@ -914,6 +958,8 @@ class DashboardRuntimeE2eTest {
         }
 
         fun frames(): List<Frame> = seen.toList()
+
+        fun comments(): List<String> = seenComments.toList()
 
         fun await(event: String) {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(STREAM_WAIT_SECONDS)
@@ -935,11 +981,13 @@ class DashboardRuntimeE2eTest {
     private fun parse(
         input: InputStream,
         onFrame: (Frame) -> Unit,
+        onComment: (String) -> Unit = {},
     ) {
         var event: String? = null
         var id = 0
         BufferedReader(InputStreamReader(input)).forEachLine { line ->
             when {
+                line.startsWith(":") -> onComment(line.removePrefix(":").trim())
                 line.startsWith("event:") -> event = line.removePrefix("event:").trim()
                 line.startsWith("id:") -> id = line.removePrefix("id:").trim().toInt()
                 line.startsWith("data:") -> onFrame(Frame(event ?: "", id, mapper.readTree(line.removePrefix("data:").trim())))
@@ -1073,7 +1121,11 @@ class DashboardRuntimeE2eTest {
     // ---------------------------------------------------------------------------------------------- fixture
 
     private fun seedPeople() {
-        sql("INSERT INTO workspaces (id, name, display_name) VALUES ('$WORKSPACE_ID', '$WORKSPACE', 'Dashboard runtime E2E')")
+        sql(
+            "INSERT INTO workspaces (id, name, display_name) VALUES " +
+                "('$WORKSPACE_ID', '$WORKSPACE', 'Dashboard runtime E2E'), " +
+                "('$WORKSPACE_B_ID', '$WORKSPACE_B', 'Dashboard runtime E2E positive control')",
+        )
         sql(
             """
             INSERT INTO users (id, email, display_name, provider, provider_subject, is_active, is_admin) VALUES
@@ -1090,7 +1142,8 @@ class DashboardRuntimeE2eTest {
                 ('$WORKSPACE_ID', '$ADMIN_ID', 'workspace_admin'),
                 ('$WORKSPACE_ID', '$VIEWER_ID', 'viewer'),
                 ('$WORKSPACE_ID', '$OTHER_VIEWER_ID', 'viewer'),
-                ('$WORKSPACE_ID', '$PROMOTER_ID', 'promoter')
+                ('$WORKSPACE_ID', '$PROMOTER_ID', 'promoter'),
+                ('$WORKSPACE_B_ID', '$OTHER_VIEWER_ID', 'viewer')
             """.trimIndent(),
         )
     }
@@ -1307,6 +1360,7 @@ class DashboardRuntimeE2eTest {
                 Board(PROMO_FAILED, "promo_failed", listOf(src("s1", "boom")), listOf(occ("v1", VIZ_X, "s1"))),
                 Board(TRANSFORM_PIN_BOARD, "transform_pin", listOf(src("s1", "small")), listOf(occ("v1", VIZ_TRANSFORM, "s1"))),
                 Board(ROLE_CHANGE_BOARD, "role_change", listOf(src("s1", "slow")), listOf(occ("v1", VIZ_X, "s1"))),
+                Board(REVOKED_BOARD, "revoked_member", listOf(src("s1", "controlled")), listOf(occ("v1", VIZ_X, "s1"))),
             )
         boards.forEach { board ->
             val body =
@@ -1476,8 +1530,10 @@ class DashboardRuntimeE2eTest {
         const val HALF_OF_REFRESH_DEADLINE = 13L
         const val ABORT_ANSWER_MILLIS = 2_500L
         const val SOURCE_CAP = 4_096
+        const val CONTROLLED_SOURCE_LOCK = 343_343_343L
 
         const val WORKSPACE = "dbrun"
+        const val WORKSPACE_B = "dbrun-b"
         const val HIDDEN_PIPELINE = "dbr/pipelines/hidden"
         const val PARAMETER_SET = "dbr/sets/country"
         const val VIZ_X = "dbr/charts/x"
@@ -1491,6 +1547,11 @@ class DashboardRuntimeE2eTest {
                 "dbr/pipelines/small_b" to PipelineSpec("dbr/templates/small_b.sql", "SELECT 10 AS x UNION ALL SELECT 20 AS x"),
                 "dbr/pipelines/boom" to PipelineSpec("dbr/templates/boom.sql", "SELECT 1 / 0 AS x"),
                 "dbr/pipelines/slow" to PipelineSpec("dbr/templates/slow.sql", "SELECT 1 AS x FROM pg_sleep(3)"),
+                "dbr/pipelines/controlled" to
+                    PipelineSpec(
+                        "dbr/templates/controlled.sql",
+                        "SELECT 1 AS x FROM (SELECT pg_advisory_xact_lock($CONTROLLED_SOURCE_LOCK)) AS held",
+                    ),
                 "dbr/pipelines/hang" to PipelineSpec("dbr/templates/hang.sql", "SELECT 1 AS x FROM pg_sleep(120)"),
                 "dbr/pipelines/big" to PipelineSpec("dbr/templates/big.sql", "SELECT g AS x FROM generate_series(1, 5000) g"),
                 "dbr/pipelines/writer" to PipelineSpec("dbr/templates/writer.sql", "SELECT 1 AS x", writeBack = true),
@@ -1504,6 +1565,7 @@ class DashboardRuntimeE2eTest {
             )
 
         private val WORKSPACE_ID = UUID.randomUUID().toString()
+        private val WORKSPACE_B_ID = UUID.randomUUID().toString()
         private val SUPER_ID = UUID.randomUUID().toString()
         private val ADMIN_ID = UUID.randomUUID().toString()
         private val VIEWER_ID = UUID.randomUUID().toString()
@@ -1524,6 +1586,7 @@ class DashboardRuntimeE2eTest {
         val PROMO_FAILED = UUID.randomUUID().toString()
         val TRANSFORM_PIN_BOARD = UUID.randomUUID().toString()
         val ROLE_CHANGE_BOARD = UUID.randomUUID().toString()
+        val REVOKED_BOARD = UUID.randomUUID().toString()
 
         private val JWT_SECRET = E2eSession.newSecret()
         private val ENCRYPTION_KEY = E2eSession.newSecret()

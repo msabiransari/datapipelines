@@ -1,9 +1,9 @@
 # REST API + SSE Specification
 
-**Status:** v2.59 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.61 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
-**Last updated:** 2026-09-29
+**Last updated:** 2026-09-30
 
 ---
 
@@ -2576,7 +2576,9 @@ applies only to stream frames.
 
 The `execution_id` member on each `source_started`, `source_completed` and `source_failed` frame is present only when
 the subscriber's current principal holds `execution.read`; `source_failed` omits the member even when its internal id
-is null. Stream admission and this projection use the same current-authority decision on every write. The internal event
+is null. Before every event or heartbeat, stream admission and this projection use one current-authority decision. It
+strictly resolves the workspace captured when the stream opened and requires the same immutable workspace id; it never
+uses session-navigation fallback, and another membership does not preserve access to this stream. The internal event
 and durable refresh-execution link still retain the id. A role change is reflected under the auth cache's membership
 window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` on it is `404 execution.not_found`, and
 `DELETE /api/v1/executions/{id}` on it is `404` for everyone — it is cancelled only through its refresh's abort.
@@ -2614,6 +2616,7 @@ window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v2.61 | #343 stream workspace authority | Recheck dashboard refresh events and heartbeats only in the stream's opening workspace, matched by immutable id; other memberships do not preserve access, and the refresh remains running. |
 | 2026-09-30 | v2.60 | #343 dashboard runtime residue | Clarify unchanged bounded parameter-evaluation diagnostics and current `execution.read` projection of source-frame execution ids; include transform-template pins in runtime dependency refusals. |
 | 2026-09-27 | v2.42 | 274 (#274) legacy endpoint rows, retired never fatal | **§19.5's listing carries legacy rows.** A stored `published_endpoints` row whose path predates R-EP5 (fewer than three segments — the shape that made the row mapper throw inside the demo seeder's conflict check and refuse the boot) is now retired: the `GET /api/v1/endpoints` listing answers it flagged (`legacy: true`, `reason`, `enabled`) after the valid rows, in the MCP listing too; a single read (`?path=`) and the serve path answer it `404`; the existing `DELETE /api/v1/endpoints` removes it — the one verb the row supports, offered by the API console with its reason. No route, permission or status code changed; the wire shape of a valid row is byte-identical to v2.40. V40 (metadata-db §4.13) disables such rows in the database and records `retired_reason`; the repository's defensive mapping makes the boot itself immune regardless. |
 | 2026-09-27 | v2.41 | scheduler follow-ups (#258, #261) — numbered after origin/main's v2.38 (scheduler-3) at dispatch | Additive. **§20's run object carries the EXECUTION's own timing** — `execution_started_at`, `execution_completed_at`, `execution_duration_ms` — copied by the reconciler from the execution row it already reads (V40's two nullable columns on `schedule_runs`); the run's own `finished_at` stays the reconciler's stamp and is documented as never answering "how long did it take". A runs list answers duration per run in one read, for every member who may read the schedule, including readers without `execution.read`. **§20 names people beside their ids** — `created_by_name` / `updated_by_name` on the schedule, `requested_by_name` on the run (#261): display names resolved in one batched read per response (the pipelines explorer's `ActorNames`), a stamp whose user row is gone falling back to the id's short form. The trail JSON no longer carries `worker` (#253). |
