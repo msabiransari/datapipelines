@@ -224,6 +224,9 @@ class PipelineErrorCodesSpecDriftTest {
                 // #194 §13.20 — a parameter set IS the entity (like `template.not_found`): its not-found has
                 // no entity dimension under it. Every other parameter code keeps three segments.
                 PipelineErrorCodes.Parameters.NOT_FOUND,
+                // #320 §13.20 — "a dashboard pins this set" is a state of the set itself, the `template.in_use` shape
+                // (`workspace.in_use`, `datasource.in_use`): no entity dimension under it.
+                PipelineErrorCodes.Parameters.IN_USE,
                 // #10 L1a §13.22/§13.23 — each artifact IS the entity: its not-found has no entity dimension under it.
                 PipelineErrorCodes.Visualization.NOT_FOUND,
                 PipelineErrorCodes.Dashboard.NOT_FOUND,

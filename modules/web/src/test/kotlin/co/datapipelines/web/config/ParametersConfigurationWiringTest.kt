@@ -119,6 +119,10 @@ class ParametersConfigurationWiringTest {
                 maxOutputChars = 1_000_000,
             )
 
+        /** #320 — the dashboards that pin a set release; the graph test builds the service, it never purges. */
+        @Bean
+        fun parameterSetConsumers(): co.datapipelines.parameters.ParameterSetConsumers = io.mockk.mockk(relaxed = true)
+
         @Bean
         fun templateRepository(): co.datapipelines.templates.TemplateRepository =
             co.datapipelines.templates.TemplateRepository(NamedParameterJdbcTemplate(dataSource()))

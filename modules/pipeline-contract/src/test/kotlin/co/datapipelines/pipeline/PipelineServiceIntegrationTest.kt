@@ -36,6 +36,7 @@ import java.util.UUID
  * `tests/integration-tests` boots a real context and is the only place that claim is made.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@Suppress("LargeClass") // the aggregate's one integration suite; the #320 dashboard-pin cases share its harness (a second copy would drift)
 class PipelineServiceIntegrationTest {
     private lateinit var jdbc: NamedParameterJdbcTemplate
     private lateinit var repository: PipelineRepository
@@ -46,6 +47,13 @@ class PipelineServiceIntegrationTest {
 
     /** Whatever the release gate is told about pinned template versions in a given test. */
     private var templateStatus: PipelineVersionStatus? = PipelineVersionStatus.RELEASED
+
+    /**
+     * #320 — the dashboards that pin a release: none unless a case adds one. [dashboardQuestions] records WHICH question
+     * each verb asked (`live name@version` for graph rule 1, `any name` for rule 3).
+     */
+    private val dashboardPins = mutableListOf<DashboardPin>()
+    private val dashboardQuestions = mutableListOf<String>()
 
     @BeforeAll
     fun connect() {
@@ -62,6 +70,8 @@ class PipelineServiceIntegrationTest {
         )
         owner = insertUser()
         templateStatus = PipelineVersionStatus.RELEASED
+        dashboardPins.clear()
+        dashboardQuestions.clear()
         service = serviceWith(AuthoringGuard(true))
     }
 
@@ -88,8 +98,30 @@ class PipelineServiceIntegrationTest {
                 ),
             authoring = authoring,
             draftTemplates = draftTemplates,
+            dashboards = recordingDashboards(),
         )
     }
+
+    /** #320: the dashboard port, recording each question — there is none by default on purpose; this one answers [dashboardPins]. */
+    private fun recordingDashboards(): PipelineVersionConsumers =
+        object : PipelineVersionConsumers {
+            override fun liveVersionPins(
+                workspaceId: java.util.UUID,
+                pipelineName: String,
+                version: Int,
+            ): List<DashboardPin> {
+                dashboardQuestions += "live $pipelineName@$version"
+                return dashboardPins.toList()
+            }
+
+            override fun anyVersionPins(
+                workspaceId: java.util.UUID,
+                pipelineName: String,
+            ): List<DashboardPin> {
+                dashboardQuestions += "any $pipelineName"
+                return dashboardPins.toList()
+            }
+        }
 
     /** 101: the purge port's default double — an always-empty offer (fixtures pin no templates). */
     private fun emptyDraftTemplates(): ExclusiveDraftTemplates =
@@ -735,6 +767,84 @@ class PipelineServiceIntegrationTest {
             countRows("pipeline_versions") shouldBe 0
         }
         result.executionsDeleted shouldBe 0
+    }
+
+    // ---------------------------------------------------------------------------- #320: the dashboards that pin a release
+
+    @Test
+    fun `discard of a released version a dashboard source pins is refused pinned - naming the dashboard, nothing flipped`() {
+        val released = createReleased()
+        val name = released.record.name
+        dashboardPins += DashboardPin("acme/boards/revenue", 4, PipelineVersionStatus.RELEASED)
+
+        val error = shouldThrow<DatapipelinesException> { service.discardVersion(WORKSPACE_ID, released.record.id, 1, owner) }
+
+        error.code shouldBe PipelineErrorCodes.Versioning.PINNED
+        error.details["pinned_by"] shouldBe emptyList<Any>()
+        error.details["referencing_dashboards"] shouldBe
+            listOf(mapOf("dashboard" to "acme/boards/revenue", "version" to 4, "status" to "RELEASED"))
+        checkNotNull(error.message) shouldContain "pinned by 1 dashboard version(s); discard or repoint them first."
+        dashboardQuestions.first() shouldBe "live $name@1"
+        service.listVersions(WORKSPACE_ID, ReadLens.Everything, released.record.id).map { it.status } shouldContainExactly
+            listOf(PipelineVersionStatus.RELEASED)
+    }
+
+    @Test
+    fun `discard of an unpinned version still discards - the dashboards' guard refuses only what a dashboard holds`() {
+        val released = createReleased()
+
+        service.discardVersion(WORKSPACE_ID, released.record.id, 1, owner).version.status shouldBe PipelineVersionStatus.DISCARDED
+
+        dashboardQuestions shouldContainExactly listOf("live ${released.record.name}@1")
+    }
+
+    @Test
+    fun `an entity purge asks the any-version question of the dashboards - the stated form of a moot case`() {
+        // A draft-only pipeline cannot be pinned by a dashboard (a source must be RELEASED), so this can only be
+        // hit through a stale row; the wiring is asserted, not assumed.
+        val created = service.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
+        dashboardPins += DashboardPin("acme/boards/revenue", 4, PipelineVersionStatus.DISCARDED)
+
+        val error = shouldThrow<DatapipelinesException> { service.purgeEntity(WORKSPACE_ID, created.record.id) }
+
+        error.code shouldBe PipelineErrorCodes.Versioning.PINNED
+        dashboardQuestions shouldContainExactly listOf("any ${created.record.name}")
+        service.findRecord(WORKSPACE_ID, ReadLens.Everything, created.record.id) shouldNotBe null
+    }
+
+    @Test
+    fun `the entity purge's response carries the templates its offer kept - and purges only the offered ones (D5)`() {
+        val purged = mutableListOf<String>()
+        val offerWithKept =
+            serviceWith(
+                AuthoringGuard(true),
+                draftTemplates =
+                    object : ExclusiveDraftTemplates {
+                        override fun exclusiveIds(
+                            workspaceId: java.util.UUID,
+                            pipelineId: java.util.UUID,
+                        ) = listOf("test/only_mine.sql")
+
+                        override fun keptIds(
+                            workspaceId: java.util.UUID,
+                            pipelineId: java.util.UUID,
+                        ) = listOf(KeptDraftTemplate("test/shared.sql", mapOf("referencing_parameter_sets" to listOf("acme/s/regions"))))
+
+                        override fun purge(
+                            workspaceId: java.util.UUID,
+                            templateId: String,
+                        ) {
+                            purged += templateId
+                        }
+                    },
+            )
+        val created = offerWithKept.create(WORKSPACE_ID, body(Fixtures.pipeline()), owner, WriteSurface.SESSION)
+
+        val result = offerWithKept.purgeEntity(WORKSPACE_ID, created.record.id, includeExclusiveDraftTemplates = true)
+
+        purged shouldContainExactly listOf("test/only_mine.sql")
+        result.keptDraftTemplates shouldContainExactly
+            listOf(KeptDraftTemplate("test/shared.sql", mapOf("referencing_parameter_sets" to listOf("acme/s/regions"))))
     }
 
     // ---------------------------------------------------------------------------- D6: execute

@@ -3,10 +3,14 @@ package co.datapipelines.application.templates
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.parameters.ParameterSetPin
 import co.datapipelines.parameters.ParameterSetTemplatePins
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplatePin
 import co.datapipelines.templates.TemplateUsageService
+import co.datapipelines.visualization.ArtifactDependents
+import co.datapipelines.visualization.ArtifactPin
+import co.datapipelines.visualization.PinScope
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -24,7 +28,9 @@ import java.util.UUID
 class TemplateUsageTest {
     private val pipelines = mockk<TemplateUsageService>()
     private val sets = mockk<ParameterSetTemplatePins>()
-    private val usage = TemplateUsage(pipelines, sets)
+    private val pipelineVersions = mockk<PipelineRepository>()
+    private val visualizations = mockk<ArtifactDependents>()
+    private val usage = TemplateUsage(pipelines, sets, pipelineVersions, visualizations)
     private val workspaceId = UUID.randomUUID()
     private val templateId = "acme/sales/states.sql"
     private val everything = LensedView.EVERYTHING
@@ -36,6 +42,18 @@ class TemplateUsageTest {
     private val hiddenReleased = setPin("acme/s/hidden", PipelineVersionStatus.RELEASED, pinnedVersion = 1)
     private val pipelinePin =
         TemplatePin(UUID.randomUUID(), "acme/p/visible", 3, PipelineVersionStatus.RELEASED, "n1", 1)
+
+    private fun vizPin(
+        name: String,
+        status: PipelineVersionStatus,
+        pinnedVersion: Int,
+        artifactId: UUID = UUID.randomUUID(),
+    ) = ArtifactPin(artifactId, name, 1, status, pinnedVersion)
+
+    /** The visualization arm answers nothing — the cases that are not about it. */
+    private fun noVisualizations() {
+        every { visualizations.visualizationsPinningTemplate(any(), any(), any(), any()) } returns emptyList()
+    }
 
     private fun setPin(
         name: String,
@@ -49,6 +67,7 @@ class TemplateUsageTest {
         every { pipelines.usedBy(workspaceId, ReadLens.Everything, ReadLens.Everything, templateId, 1) } returns
             TemplateUsageService.UsedBy(templateId, 1, listOf(pipelinePin), 1)
         every { sets.workingVersionPins(workspaceId, templateId, 1) } returns listOf(visibleReleased, visibleDraft, hiddenReleased)
+        noVisualizations()
 
         val combined = usage.usedBy(workspaceId, everything, templateId, 1)
 
@@ -65,6 +84,7 @@ class TemplateUsageTest {
         every { pipelines.usedBy(workspaceId, onlyVisible.templates, onlyVisible.pipelines, templateId, 1) } returns
             TemplateUsageService.UsedBy(templateId, 1, emptyList(), 0)
         every { sets.workingVersionPins(workspaceId, templateId, 1) } returns listOf(visibleReleased, visibleDraft, hiddenReleased)
+        noVisualizations()
 
         val combined = usage.usedBy(workspaceId, onlyVisible, templateId, 1)
 
@@ -91,6 +111,7 @@ class TemplateUsageTest {
     fun `inUseCounts adds the sets' counts to the pipelines' per pinned version under the whole view`() {
         every { pipelines.inUseCounts(workspaceId, templateId) } returns mapOf(1 to 2, 3 to 1)
         every { sets.countWorkingPinsByPinnedVersion(workspaceId, templateId) } returns mapOf(1 to 1, 2 to 4)
+        noVisualizations()
 
         usage.inUseCounts(workspaceId, everything, templateId) shouldBe mapOf(1 to 3, 2 to 4, 3 to 1)
     }
@@ -101,6 +122,7 @@ class TemplateUsageTest {
         every { pipelines.inUseCounts(workspaceId, templateId) } returns mapOf(1 to 1)
         // The unlensed counts statement is still read and then discarded under a narrowing view.
         every { sets.countWorkingPinsByPinnedVersion(workspaceId, templateId) } returns mapOf(1 to 9, 2 to 9)
+        noVisualizations()
         every { sets.workingVersionPins(workspaceId, templateId) } returns
             listOf(
                 // two parameters of ONE set pin version 1 — one set, one count
@@ -112,5 +134,81 @@ class TemplateUsageTest {
             )
 
         usage.inUseCounts(workspaceId, onlyVisible, templateId) shouldBe mapOf(1 to 2)
+    }
+
+    @Test
+    fun `usedBy reports the visualizations' working-version pins beside the pipelines' and the sets' - the third arm`() {
+        every { pipelines.usedBy(workspaceId, ReadLens.Everything, ReadLens.Everything, templateId, 1) } returns
+            TemplateUsageService.UsedBy(templateId, 1, emptyList(), 0)
+        every { sets.workingVersionPins(workspaceId, templateId, 1) } returns emptyList()
+        val draft = vizPin("acme/v/chart", PipelineVersionStatus.DRAFT, pinnedVersion = 1)
+        every { visualizations.visualizationsPinningTemplate(workspaceId, templateId, 1, PinScope.WORKING) } returns listOf(draft)
+
+        val combined = usage.usedBy(workspaceId, everything, templateId, 1)
+
+        combined.visualizationReferences shouldContainExactly listOf(draft)
+        combined.isEmpty() shouldBe false
+    }
+
+    @Test
+    fun `usedBy under a narrowing visualization lens drops the hidden visualization and the draft`() {
+        val view = LensedView(ReadLens.Everything, ReadLens.Everything, visualizations = ReadLens.Only(setOf("acme/v/visible")))
+        every { pipelines.usedBy(workspaceId, view.templates, view.pipelines, templateId, 1) } returns
+            TemplateUsageService.UsedBy(templateId, 1, emptyList(), 0)
+        every { sets.workingVersionPins(workspaceId, templateId, 1) } returns emptyList()
+        val shown = vizPin("acme/v/visible", PipelineVersionStatus.RELEASED, pinnedVersion = 1)
+        every { visualizations.visualizationsPinningTemplate(workspaceId, templateId, 1, PinScope.WORKING) } returns
+            listOf(
+                shown,
+                vizPin("acme/v/visible", PipelineVersionStatus.DRAFT, pinnedVersion = 1),
+                vizPin("acme/v/hidden", PipelineVersionStatus.RELEASED, pinnedVersion = 1),
+            )
+
+        usage.usedBy(workspaceId, view, templateId, 1).visualizationReferences shouldContainExactly listOf(shown)
+    }
+
+    @Test
+    fun `inUseCounts adds the visualizations' counts per pinned version, one per visualization`() {
+        val chart = UUID.randomUUID()
+        every { pipelines.inUseCounts(workspaceId, templateId) } returns mapOf(1 to 1)
+        every { sets.countWorkingPinsByPinnedVersion(workspaceId, templateId) } returns emptyMap()
+        every { visualizations.visualizationsPinningTemplate(workspaceId, templateId, null, PinScope.WORKING) } returns
+            listOf(
+                vizPin("acme/v/chart", PipelineVersionStatus.RELEASED, pinnedVersion = 1, artifactId = chart),
+                vizPin("acme/v/chart", PipelineVersionStatus.RELEASED, pinnedVersion = 1, artifactId = chart),
+                vizPin("acme/v/other", PipelineVersionStatus.DRAFT, pinnedVersion = 2),
+            )
+
+        usage.inUseCounts(workspaceId, everything, templateId) shouldBe mapOf(1 to 2, 2 to 1)
+    }
+
+    @Test
+    fun `liveVersionPins asks all three aggregates for the exact pin under LIVE - unlensed`() {
+        val viz = vizPin("acme/v/chart", PipelineVersionStatus.DRAFT, pinnedVersion = 3)
+        every { pipelineVersions.findLiveVersionsPinningTemplateVersion(workspaceId, templateId, 3) } returns listOf(pipelinePin)
+        every { sets.liveVersionPins(workspaceId, templateId, 3) } returns listOf(hiddenReleased)
+        every { visualizations.visualizationsPinningTemplate(workspaceId, templateId, 3, PinScope.LIVE) } returns listOf(viz)
+
+        val pins = usage.liveVersionPins(workspaceId, templateId, 3)
+
+        pins.pipelines shouldContainExactly listOf(pipelinePin)
+        pins.parameterSets shouldContainExactly listOf(hiddenReleased)
+        pins.visualizations shouldContainExactly listOf(viz)
+        pins.isEmpty() shouldBe false
+    }
+
+    @Test
+    fun `everPins asks all three aggregates for ANY version under ANY - and is empty only when every arm is`() {
+        every { pipelineVersions.findAnyVersionTemplatePins(workspaceId, templateId) } returns emptyList()
+        every { sets.anyVersionPins(workspaceId, templateId) } returns emptyList()
+        every { visualizations.visualizationsPinningTemplate(workspaceId, templateId, null, PinScope.ANY) } returns emptyList()
+        usage.everPins(workspaceId, templateId).isEmpty() shouldBe true
+
+        val viz = vizPin("acme/v/restorable", PipelineVersionStatus.DISCARDED, pinnedVersion = 1)
+        every { visualizations.visualizationsPinningTemplate(workspaceId, templateId, null, PinScope.ANY) } returns listOf(viz)
+        usage.everPins(workspaceId, templateId).let {
+            it.visualizations shouldContainExactly listOf(viz)
+            it.isEmpty() shouldBe false
+        }
     }
 }

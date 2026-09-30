@@ -26,8 +26,10 @@ class ParameterErrorCodesTest {
     fun `every code is in the parameter family and follows the segmentation scheme`() {
         ParameterErrorCodes.ALL.filterNot { it.startsWith("parameter.") }.shouldBeEmpty()
         ParameterErrorCodes.ALL.filterNot { SEGMENTATION.matches(it) }.shouldBeEmpty()
-        // `parameter.not_found` is the family's one two-segment code (the entity itself).
-        ParameterErrorCodes.ALL.filter { it.count { c -> c == '.' } == 1 }.toSet() shouldBe setOf(ParameterErrorCodes.NOT_FOUND)
+        // `parameter.not_found` and `parameter.in_use` (#320: a dashboard pins the set — the `template.in_use` shape) are
+        // the family's two-segment codes: both are states of the entity itself.
+        ParameterErrorCodes.ALL.filter { it.count { c -> c == '.' } == 1 }.toSet() shouldBe
+            setOf(ParameterErrorCodes.NOT_FOUND, ParameterErrorCodes.IN_USE)
     }
 
     private companion object {

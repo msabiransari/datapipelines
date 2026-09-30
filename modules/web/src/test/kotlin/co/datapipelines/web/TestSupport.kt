@@ -230,7 +230,23 @@ fun pipelineServiceOver(
         authoring = authoring,
         // 101: the entity purge's port — empty offer (this helper's callers pin no templates).
         draftTemplates = NO_EXCLUSIVE_DRAFT_TEMPLATES,
+        dashboards = NO_DASHBOARDS,
     )
+
+/** #320 — the pipeline service's dashboard port with no dashboards: explicit, the port has no default. */
+val NO_DASHBOARDS =
+    object : co.datapipelines.pipeline.PipelineVersionConsumers {
+        override fun liveVersionPins(
+            workspaceId: java.util.UUID,
+            pipelineName: String,
+            version: Int,
+        ) = emptyList<co.datapipelines.pipeline.DashboardPin>()
+
+        override fun anyVersionPins(
+            workspaceId: java.util.UUID,
+            pipelineName: String,
+        ) = emptyList<co.datapipelines.pipeline.DashboardPin>()
+    }
 
 /** The 101 entity-purge port with an always-empty offer — the fixture default. */
 val NO_EXCLUSIVE_DRAFT_TEMPLATES =

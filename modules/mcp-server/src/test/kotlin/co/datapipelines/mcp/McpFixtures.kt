@@ -150,6 +150,20 @@ object McpFixtures {
                         templateId: String,
                     ) = Unit
                 },
+            // #320 — these fixtures have no dashboards; explicit, the port has no default.
+            dashboards =
+                object : co.datapipelines.pipeline.PipelineVersionConsumers {
+                    override fun liveVersionPins(
+                        workspaceId: java.util.UUID,
+                        pipelineName: String,
+                        version: Int,
+                    ) = emptyList<co.datapipelines.pipeline.DashboardPin>()
+
+                    override fun anyVersionPins(
+                        workspaceId: java.util.UUID,
+                        pipelineName: String,
+                    ) = emptyList<co.datapipelines.pipeline.DashboardPin>()
+                },
         )
 
     fun request(

@@ -78,6 +78,8 @@ class ParametersConfiguration {
         validator: ParameterSetValidator,
         authoring: co.datapipelines.pipeline.AuthoringGuard,
         statuses: TemplateVersionStatuses,
+        // #320 — the dashboards that pin a set release (`parameter.in_use`), from DependencyGuardsConfiguration.
+        consumers: co.datapipelines.parameters.ParameterSetConsumers,
         releaser: TemplateReleaser,
         transactionManager: PlatformTransactionManager,
     ): ParameterSetService =
@@ -86,6 +88,7 @@ class ParametersConfiguration {
             validator,
             authoring,
             statuses,
+            consumers,
             releaser,
             // The metadata transaction manager (056's explicit declaration) — the release
             // cascade and the import are all-or-nothing over the same rows the template

@@ -246,6 +246,14 @@ object ParameterErrorCodes {
     /** 404 — no such set (or version) in the workspace, hidden by the lens, or discarded on a read/mutate path. */
     const val NOT_FOUND = "parameter.not_found"
 
+    /**
+     * 409 — purge or discard refused: a LIVE dashboard version pins the set (#320, versioning §3.5's graph rule 1 — the
+     * consumer binding this code was reserved for). `details`: `id`, `version` (absent for an entity purge) and
+     * `pinned_by` — one `{dashboard, version, status}` per pinning dashboard version. An entity purge, and a draft purge
+     * that takes the entity, also count DISCARDED dashboard versions (graph rule 3, R12).
+     */
+    const val IN_USE = "parameter.in_use"
+
     /** 409 — the draft-write / release / discard precondition hash is stale; `details` carry the current state. */
     const val VERSION_CONFLICT = "parameter.version.conflict"
 

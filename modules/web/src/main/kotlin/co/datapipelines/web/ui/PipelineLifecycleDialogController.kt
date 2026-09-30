@@ -346,6 +346,7 @@ class PipelineLifecycleDialogController(
                 "executions_deleted" to result.executionsDeleted,
                 "exclusive_draft_templates" to result.exclusiveDraftTemplates,
                 "exclusive_templates_purged" to result.exclusiveTemplatesPurged,
+                "kept_draft_templates" to result.keptDraftTemplates.map { it.templateId },
             ),
         )
         // The row is gone: redirect so the TREE loses the leaf (the flash carries the toast).

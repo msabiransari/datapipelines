@@ -44,6 +44,7 @@ class ParameterErrorCodesSpecDriftTest {
             .shouldBeEmpty()
         documented[ParameterErrorCodes.DUPLICATE_NAME] shouldBe "409"
         documented[ParameterErrorCodes.NOT_FOUND] shouldBe "404"
+        documented[ParameterErrorCodes.IN_USE] shouldBe "409"
         documented[ParameterErrorCodes.EVALUATE_TIMEOUT] shouldBe "504"
         documented[ParameterErrorCodes.EVALUATE_RESPONSE_TOO_LARGE] shouldBe "413"
         documented[ParameterErrorCodes.EVALUATE_REQUIRED_MISSING] shouldBe "—"

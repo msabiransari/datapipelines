@@ -179,6 +179,8 @@ class McpServerAutoConfiguration {
             co.datapipelines.application.templates.TemplateUsage(
                 runtime.usage,
                 co.datapipelines.parameters.ParameterSetTemplatePins(jdbc),
+                pipelines,
+                co.datapipelines.visualization.ArtifactDependents(jdbc),
             )
         // The authoring capability (versioning §5.5), read from the same property web's guard
         // bean reads — immutable config, so two instances cannot disagree. The template tools

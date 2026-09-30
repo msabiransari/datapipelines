@@ -3,10 +3,15 @@ package co.datapipelines.application.templates
 import co.datapipelines.application.lens.LensedView
 import co.datapipelines.parameters.ParameterSetPin
 import co.datapipelines.parameters.ParameterSetTemplatePins
+import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.pipeline.TemplatePin
 import co.datapipelines.pipeline.through
 import co.datapipelines.templates.TemplateUsageService
+import co.datapipelines.visualization.ArtifactDependents
+import co.datapipelines.visualization.ArtifactPin
+import co.datapipelines.visualization.PinScope
 import java.util.UUID
 
 /**
@@ -32,12 +37,21 @@ import java.util.UUID
  * A narrowing [LensedView] (178/194d): pinning PIPELINES a view does not admit drop out —
  * [TemplateUsageService] already does that — and now pinning PARAMETER SETS too, the same
  * rule on the set arm: a hidden set never leaks through the reverse arrow. When either lens
- * narrows, only RELEASED versions are reported on both arms (a promoter never sees a draft's
+ * narrows, only RELEASED versions are reported on every arm (a promoter never sees a draft's
  * number or status through this answer).
+ *
+ * ## The third arm (#320)
+ * A VISUALIZATION pins a transform template by name and version (`transform.template`), so the
+ * same two questions are asked of `visualization_versions` through [ArtifactDependents], under
+ * `view.visualizations`. The guards' evidence has its OWN two methods, both unlensed — a guard
+ * runs over the whole workspace and the caller's view decides only what its refusal may echo:
+ * [liveVersionPins] (the discard and draft-purge verbs) and [everPins] (the entity purge).
  */
 class TemplateUsage(
     private val pipelines: TemplateUsageService,
     private val parameterSets: ParameterSetTemplatePins,
+    private val pipelineVersions: PipelineRepository,
+    private val visualizations: ArtifactDependents,
 ) {
     /** The combined used-by answer: one row per pinning NODE (pipelines) and per pinning PARAMETER (sets). */
     data class Combined(
@@ -47,9 +61,23 @@ class TemplateUsage(
         val pipelineReferences: List<co.datapipelines.pipeline.TemplatePin>,
         /** The sets' working-version pins, set-lensed and RELEASED-only under a narrowing view. */
         val parameterSetReferences: List<ParameterSetPin>,
+        /** #320 — the visualizations' working-version pins, visualization-lensed and RELEASED-only under a narrowing view. */
+        val visualizationReferences: List<ArtifactPin>,
     ) {
-        /** Everything that pins it, set or pipeline — "is anything using this at all?". */
-        fun isEmpty(): Boolean = pipelineReferences.isEmpty() && parameterSetReferences.isEmpty()
+        /** Everything that pins it, set, pipeline or visualization — "is anything using this at all?". */
+        fun isEmpty(): Boolean = pipelineReferences.isEmpty() && parameterSetReferences.isEmpty() && visualizationReferences.isEmpty()
+    }
+
+    /**
+     * What pins a template — the guards' evidence from all three aggregates, UNLENSED (a guard reads the whole
+     * workspace; only the echo of its refusal is narrowed, by the surface that throws it).
+     */
+    data class Pins(
+        val pipelines: List<TemplatePin>,
+        val parameterSets: List<ParameterSetPin>,
+        val visualizations: List<ArtifactPin>,
+    ) {
+        fun isEmpty(): Boolean = pipelines.isEmpty() && parameterSets.isEmpty() && visualizations.isEmpty()
     }
 
     /**
@@ -73,14 +101,51 @@ class TemplateUsage(
                 .workingVersionPins(workspaceId, id, version)
                 .through(view.parameterSets) { it.setName }
                 .filter { visible(view, it.versionStatus) }
+        val visualizationPins =
+            visualizations
+                .visualizationsPinningTemplate(workspaceId, id, version, PinScope.WORKING)
+                .through(view.visualizations) { it.name }
+                .filter { visible(view, it.status) }
         return Combined(
             templateId = id,
             version = version,
             pipelineCount = pipelinesAnswer.pipelineCount,
             pipelineReferences = pipelinesAnswer.references,
             parameterSetReferences = setPins,
+            visualizationReferences = visualizationPins,
         )
     }
+
+    /**
+     * Question 2's exact-pin form, the discard and draft-purge verbs' evidence: every LIVE (DRAFT or RELEASED)
+     * version of a pipeline, a parameter set or a visualization that pins `id@version` exactly (graph rule 1).
+     * Unlensed and workspace-scoped on every arm.
+     */
+    fun liveVersionPins(
+        workspaceId: UUID,
+        id: String,
+        version: Int,
+    ): Pins =
+        Pins(
+            pipelines = pipelineVersions.findLiveVersionsPinningTemplateVersion(workspaceId, id, version),
+            parameterSets = parameterSets.liveVersionPins(workspaceId, id, version),
+            visualizations = visualizations.visualizationsPinningTemplate(workspaceId, id, version, PinScope.LIVE),
+        )
+
+    /**
+     * Question 2's any-version form, the entity purge's evidence (graph rule 3): EVERY stored version of a pipeline,
+     * a set or a visualization that pins ANY version of `id` — a DISCARDED version included, because a restore would
+     * resurrect a dangling pin (owner ruling R12). Unlensed and workspace-scoped on every arm.
+     */
+    fun everPins(
+        workspaceId: UUID,
+        id: String,
+    ): Pins =
+        Pins(
+            pipelines = pipelineVersions.findAnyVersionTemplatePins(workspaceId, id),
+            parameterSets = parameterSets.anyVersionPins(workspaceId, id),
+            visualizations = visualizations.visualizationsPinningTemplate(workspaceId, id, null, PinScope.ANY),
+        )
 
     /**
      * Question 2, combined — the delete guard's evidence: EVERY version, ever, of both
@@ -97,6 +162,21 @@ class TemplateUsage(
             .anyVersionPins(workspaceId, id)
             .through(view.parameterSets) { it.setName }
             .filter { visible(view, it.versionStatus) }
+
+    /**
+     * The visualization arm of question 2 (#320), the sets' [referencedAnywhere] twin: EVERY stored version of a
+     * visualization that pins ANY version of `id` (a discarded one included, R12), lensed exactly as [usedBy] — a
+     * hidden visualization drops out for a narrowing view, RELEASED-only when any lens narrows.
+     */
+    fun visualizationsReferencedAnywhere(
+        workspaceId: UUID,
+        view: LensedView,
+        id: String,
+    ): List<ArtifactPin> =
+        visualizations
+            .visualizationsPinningTemplate(workspaceId, id, null, PinScope.ANY)
+            .through(view.visualizations) { it.name }
+            .filter { visible(view, it.status) }
 
     /**
      * The pipeline arm of question 2, under the same lens — [TemplateUsageService.referencedAnywhere]'s
@@ -129,10 +209,23 @@ class TemplateUsage(
                         workingSetCounts(workspaceId, view, id)
                     }
                 }
-        return (fromPipelines.keys + fromSets.keys).associateWith { version ->
-            (fromPipelines[version] ?: 0) + (fromSets[version] ?: 0)
+        val fromVisualizations = workingVisualizationCounts(workspaceId, view, id)
+        return (fromPipelines.keys + fromSets.keys + fromVisualizations.keys).associateWith { version ->
+            (fromPipelines[version] ?: 0) + (fromSets[version] ?: 0) + (fromVisualizations[version] ?: 0)
         }
     }
+
+    private fun workingVisualizationCounts(
+        workspaceId: UUID,
+        view: LensedView,
+        id: String,
+    ): Map<Int, Int> =
+        visualizations
+            .visualizationsPinningTemplate(workspaceId, id, null, PinScope.WORKING)
+            .asSequence()
+            .filter { view.visualizations.admits(it.name) && visible(view, it.status) }
+            .groupBy { it.pinnedVersion }
+            .mapValues { (_, pins) -> pins.map(ArtifactPin::artifactId).distinct().size }
 
     private fun workingSetCounts(
         workspaceId: UUID,
@@ -146,9 +239,11 @@ class TemplateUsage(
             .groupBy { it.pinnedVersion }
             .mapValues { (_, pins) -> pins.map(ParameterSetPin::setId).distinct().size }
 
-    /** A narrowing view reports RELEASED rows only (178b, both arms). */
+    /** A narrowing view reports RELEASED rows only (178b, every arm). */
     private fun visible(
         view: LensedView,
         status: PipelineVersionStatus,
-    ): Boolean = (view.pipelines.isEverything && view.parameterSets.isEverything) || status == PipelineVersionStatus.RELEASED
+    ): Boolean =
+        (view.pipelines.isEverything && view.parameterSets.isEverything && view.visualizations.isEverything) ||
+            status == PipelineVersionStatus.RELEASED
 }

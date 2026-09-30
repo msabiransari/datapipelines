@@ -2,6 +2,7 @@ package co.datapipelines.parameters
 
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.CreateLifecycle
+import co.datapipelines.pipeline.DashboardPin
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateRef
@@ -95,6 +96,8 @@ class ParameterSetService(
     private val validator: ParameterSetValidator,
     private val authoring: AuthoringGuard,
     private val templateStatuses: TemplateVersionStatuses,
+    /** #320 — the dashboards that pin a set release (`parameter.in_use`); no default, no "none" (see the port). */
+    private val consumers: ParameterSetConsumers,
     /** The 142 cascade's write, through the template's OWN release path; [TemplateReleaser.NONE] fails loudly if asked. */
     private val templateReleaser: TemplateReleaser = TemplateReleaser.NONE,
     private val transactions: TransactionOperations = DIRECT,
@@ -190,7 +193,8 @@ class ParameterSetService(
         expectedHash: String,
     ) {
         requireAuthoring()
-        repository.findDraft(workspaceId, id) ?: throw notDraft(id)
+        val draft = repository.findDraft(workspaceId, id) ?: throw notDraft(id)
+        refuseIfDraftPinned(workspaceId, id, draft.version)
         val purged = transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) } == true
         if (!purged) throw staleBase(workspaceId, id)
     }
@@ -205,6 +209,7 @@ class ParameterSetService(
         requireAuthoring()
         val detail = repository.findVersionDetail(workspaceId, id, version) ?: throw notFound(id, version)
         if (detail.status != PipelineVersionStatus.DRAFT) throw lastRelease(id, version)
+        refuseIfDraftPinned(workspaceId, id, version)
         val purged = transactions.execute { repository.purgeDraft(workspaceId, id, expectedHash, authoring.developmentPosture) } == true
         if (!purged) throw staleBase(workspaceId, id)
     }
@@ -218,6 +223,7 @@ class ParameterSetService(
         repository.findRecord(workspaceId, id) ?: throw notFound(id)
         val versions = repository.listVersions(workspaceId, id)
         versions.firstOrNull { it.status != PipelineVersionStatus.DRAFT }?.let { throw lastRelease(id, it.version) }
+        refuseIfPinned(workspaceId, id, version = null)
         transactions.execute { repository.purgeDraft(workspaceId, id, null, authoring.developmentPosture) }
     }
 
@@ -235,6 +241,7 @@ class ParameterSetService(
         ) {
             throw wrongStatus(ParameterErrorCodes.VERSION_NOT_RELEASED, id, version, detail.status)
         }
+        refuseIfPinned(workspaceId, id, version)
         return transactions.execute { repository.discardVersion(workspaceId, id, version, actor, authoring.developmentPosture) }
             ?: throw staleBase(workspaceId, id)
     }
@@ -572,6 +579,58 @@ class ParameterSetService(
             )
         }
     }
+
+    /**
+     * The draft purges' guard (#320). A draft purge of a set that KEEPS other versions removes one version, so the
+     * exact-pin question (graph rule 1); when the draft is the set's ONLY version the purge takes the entity with it,
+     * so it is an entity purge and asks rule 3's any-version question.
+     */
+    private fun refuseIfDraftPinned(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int,
+    ) {
+        val takesTheEntity = repository.listVersions(workspaceId, id).size == 1
+        refuseIfPinned(workspaceId, id, version.takeUnless { takesTheEntity })
+    }
+
+    /**
+     * Graph rule 1 (a [version]) or rule 3 (null — every stored dashboard version, discarded included) against the
+     * dashboards that pin this set by name; refuses `parameter.in_use`, naming them. Read outside the write's
+     * transaction, the way every other precondition here is — the residual window (a dashboard saved between this
+     * read and the delete) is stated in versioning §3.5, and the runtime refuses such a dashboard by name.
+     */
+    private fun refuseIfPinned(
+        workspaceId: UUID,
+        id: UUID,
+        version: Int?,
+    ) {
+        val name = repository.findRecord(workspaceId, id)?.name ?: throw notFound(id)
+        val pins =
+            if (version == null) {
+                consumers.anyVersionPins(workspaceId, name)
+            } else {
+                consumers.liveVersionPins(workspaceId, name, version)
+            }
+        if (pins.isNotEmpty()) throw inUse(id, name, version, pins)
+    }
+
+    private fun inUse(
+        id: UUID,
+        name: String,
+        version: Int?,
+        pins: List<DashboardPin>,
+    ) = DatapipelinesException(
+        ParameterErrorCodes.IN_USE,
+        (if (version == null) "Parameter set '$name'" else "Version $version of parameter set '$name'") +
+            " is pinned by ${pins.size} dashboard version(s): ${pins.map { it.name }.distinct().joinToString(", ")}; " +
+            "discard or repoint them first.",
+        buildMap {
+            put("id", id.toString())
+            version?.let { put("version", it) }
+            put("pinned_by", pins.map { mapOf("dashboard" to it.name, "version" to it.version, "status" to it.status.name) })
+        },
+    )
 
     private fun staleBase(
         workspaceId: UUID,

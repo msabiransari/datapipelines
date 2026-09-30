@@ -848,6 +848,7 @@ class VersionLifecycleModelTest {
                 ),
             authoring = guard,
             draftTemplates = NoExclusiveDraftTemplates,
+            dashboards = NoDashboards,
         )
     }
 
@@ -890,6 +891,21 @@ class VersionLifecycleModelTest {
                     workspaceId: UUID,
                     ref: TemplateRef,
                 ): List<String> = emptyList()
+            }
+
+        /** #320: the model's fixtures have no dashboards — explicit, the port has no default. */
+        val NoDashboards =
+            object : PipelineVersionConsumers {
+                override fun liveVersionPins(
+                    workspaceId: UUID,
+                    pipelineName: String,
+                    version: Int,
+                ) = emptyList<DashboardPin>()
+
+                override fun anyVersionPins(
+                    workspaceId: UUID,
+                    pipelineName: String,
+                ) = emptyList<DashboardPin>()
             }
 
         val NoExclusiveDraftTemplates =

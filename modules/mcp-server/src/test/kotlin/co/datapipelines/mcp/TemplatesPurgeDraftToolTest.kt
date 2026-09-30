@@ -32,10 +32,13 @@ class TemplatesPurgeDraftToolTest {
     private val templates = mockk<TemplateRepository>()
     private val pipelines = mockk<PipelineRepository>()
     private val parameterPins = mockk<co.datapipelines.parameters.ParameterSetTemplatePins>()
+    private val visualizationPins = mockk<co.datapipelines.visualization.ArtifactDependents>()
     private val usage =
         co.datapipelines.application.templates.TemplateUsage(
             TemplateUsageService(templates, pipelines),
             parameterPins,
+            pipelines,
+            visualizationPins,
         )
     private val tool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), McpFixtures.EVERYTHING_LENS)
     private val ctx = McpFixtures.ctx()
@@ -50,8 +53,29 @@ class TemplatesPurgeDraftToolTest {
             )
         }
 
+    /** The visualizations' lens (`visualization.read`'s promoter cell) — admits only the names given. */
+    private fun narrowedVisualizationLens(vararg admitted: String) =
+        PromoterLens {
+            co.datapipelines.application.lens.LensedView(
+                ReadLens.Everything,
+                ReadLens.Everything,
+                visualizations = ReadLens.Only(admitted.toSet()),
+            )
+        }
+
+    private fun visualizationPin(name: String = "acme/charts/revenue") =
+        co.datapipelines.visualization.ArtifactPin(java.util.UUID.randomUUID(), name, 2, PipelineVersionStatus.DRAFT, 1)
+
+    /** The visualization arm's ONE scan: every stored version of any visualization pinning ANY version (R12). */
+    private fun stubVisualizationPins(vararg pins: co.datapipelines.visualization.ArtifactPin) {
+        every {
+            visualizationPins.visualizationsPinningTemplate(McpFixtures.WORKSPACE_ID, id, null, co.datapipelines.visualization.PinScope.ANY)
+        } returns pins.toList()
+    }
+
     init {
         every { parameterPins.anyVersionPins(any(), any()) } returns emptyList()
+        every { visualizationPins.visualizationsPinningTemplate(any(), any(), any(), any()) } returns emptyList()
     }
 
     private val id = "test/scratch.sql"
@@ -214,5 +238,61 @@ class TemplatesPurgeDraftToolTest {
             { thrown.details.containsKey("pins_hidden") shouldBe false },
         )
         verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
+    }
+
+    // ---- #320: the third arm
+
+    @Test
+    fun `a visualization that pins the draft refuses the purge - named as the web guard names it (320)`() {
+        stubSoleDraft()
+        stubVisualizationPins(visualizationPin())
+
+        val thrown = shouldThrow<DatapipelinesException> { tool.call(McpArguments(mapOf("id" to id)), ctx) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
+            { thrown.details["referencing_visualizations"] shouldBe listOf("acme/charts/revenue") },
+            { thrown.details.containsKey("pins_hidden") shouldBe false },
+            {
+                thrown.message shouldBe
+                    "Version of template '$id' is pinned by 1 visualization version(s): acme/charts/revenue; discard or repoint them first."
+            },
+        )
+        verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a visualization pin the caller's lens hides still refuses the purge - flagged, never named or counted (320)`() {
+        val narrowedTool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), narrowedVisualizationLens("acme/other/nowhere"))
+        stubSoleDraft()
+        stubVisualizationPins(visualizationPin("acme/charts/secret"), visualizationPin("acme/charts/secret"))
+
+        val thrown = shouldThrow<DatapipelinesException> { narrowedTool.call(McpArguments(mapOf("id" to id)), ctx) }
+
+        assertAll(
+            { thrown.code shouldBe PipelineErrorCodes.Template.IN_USE },
+            { thrown.details["referencing_visualizations"] shouldBe emptyList<String>() },
+            { thrown.details["pins_hidden"] shouldBe true },
+            { thrown.message shouldContain "visualization version(s) outside your view" },
+            { thrown.message shouldNotContain "acme/charts/secret" },
+            { thrown.message shouldNotContain "2 visualization" },
+        )
+        verify(exactly = 0) { templates.purgeDraft(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a lens that admits only some visualizations names those and flags the rest`() {
+        val narrowedTool = TemplatesPurgeDraftTool(templates, usage, AuthoringGuard(true), narrowedVisualizationLens("acme/charts/shown"))
+        stubSoleDraft()
+        stubVisualizationPins(visualizationPin("acme/charts/shown"), visualizationPin("acme/charts/secret"))
+
+        val thrown = shouldThrow<DatapipelinesException> { narrowedTool.call(McpArguments(mapOf("id" to id)), ctx) }
+
+        assertAll(
+            { thrown.details["referencing_visualizations"] shouldBe listOf("acme/charts/shown") },
+            { thrown.details["pins_hidden"] shouldBe true },
+            { thrown.message shouldContain "acme/charts/shown and others outside your view" },
+            { thrown.message shouldNotContain "acme/charts/secret" },
+        )
     }
 }
