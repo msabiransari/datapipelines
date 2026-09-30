@@ -404,6 +404,19 @@ class PipelineLifecycleDialogModel(
         val expected: String,
         /** The `last_release` branch: the dialog opens and says why there is no button. */
         val refusal: Refusal?,
+        /**
+         * #335 — the draft-only templates the offer SKIPS because a parameter set or a visualization also pins them
+         * (`ExclusiveDraftTemplates.keptIds`, the list the REST response reports as `kept_draft_templates`). Not lensed:
+         * the verb is author-or-above, whose view is everything.
+         */
+        val keptTemplates: List<KeptTemplate> = emptyList(),
+    )
+
+    /** A draft-only template the purge leaves in place, and the parameter sets and visualizations that hold it (#335). */
+    data class KeptTemplate(
+        val name: String,
+        val parameterSets: List<String>,
+        val visualizations: List<String>,
     )
 
     fun purgeEntity(
@@ -429,6 +442,19 @@ class PipelineLifecycleDialogModel(
             leafName = record.name.substringAfterLast('/'),
             runCount = runStats.totalRuns(id),
             exclusiveTemplates = if (soleDraft) exclusiveTemplates.exclusiveIds(workspaceId, id) else emptyList(),
+            // #335: the SAME port the service reports `kept_draft_templates` from, so the dialog and the REST answer agree.
+            keptTemplates =
+                if (soleDraft) {
+                    exclusiveTemplates.keptIds(workspaceId, id).map {
+                        KeptTemplate(
+                            name = it.templateId,
+                            parameterSets = it.referencedBy[KEPT_BY_SETS].orEmpty(),
+                            visualizations = it.referencedBy[KEPT_BY_VISUALIZATIONS].orEmpty(),
+                        )
+                    }
+                } else {
+                    emptyList()
+                },
             expected = record.name,
             refusal =
                 if (soleDraft) {
@@ -506,4 +532,10 @@ class PipelineLifecycleDialogModel(
         message = "Pipeline '$id' has no version $version.",
         details = mapOf("pipeline_id" to id.toString(), "version" to version),
     )
+
+    private companion object {
+        /** The keys of a kept template's `referencedBy` — the `template.in_use` keys the REST `kept_draft_templates` uses. */
+        const val KEPT_BY_SETS = "referencing_parameter_sets"
+        const val KEPT_BY_VISUALIZATIONS = "referencing_visualizations"
+    }
 }

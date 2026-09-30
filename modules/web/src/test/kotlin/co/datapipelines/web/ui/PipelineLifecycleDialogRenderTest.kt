@@ -421,6 +421,52 @@ class PipelineLifecycleDialogRenderTest {
     }
 
     @Test
+    fun `purge entity - the kept templates are named beside the offer with the sets and visualizations that hold them (#335)`() {
+        val html =
+            renderPurgeEntity(
+                refusal = null,
+                exclusive = listOf("test/only_here.sql"),
+                kept =
+                    listOf(
+                        PipelineLifecycleDialogModel.KeptTemplate("test/shared.sql", listOf("acme/s/regions"), listOf("acme/charts/by_region")),
+                        PipelineLifecycleDialogModel.KeptTemplate("test/set_only.sql", listOf("acme/s/a", "acme/s/b"), emptyList()),
+                    ),
+            )
+
+        html shouldContain "data-kept-templates"
+        html shouldContain "test/shared.sql"
+        html shouldContain "acme/s/regions"
+        html shouldContain "acme/charts/by_region"
+        html shouldContain "test/set_only.sql"
+        html shouldContain "acme/s/a, acme/s/b"
+        // The offer stays exactly the unpinned template; the kept ones are not in the offer's list.
+        val offer = html.substring(html.indexOf("data-exclusive-templates"), html.indexOf("</ul>", html.indexOf("data-exclusive-templates")))
+        offer shouldContain "test/only_here.sql"
+        offer shouldNotContain "test/shared.sql"
+    }
+
+    @Test
+    fun `purge entity - with nothing kept the dialog renders no kept list and no stray heading (#335)`() {
+        val html = renderPurgeEntity(refusal = null, exclusive = listOf("test/only_here.sql"))
+
+        html shouldNotContain "data-kept-templates"
+        html shouldNotContain "stay"
+    }
+
+    @Test
+    fun `purge entity - a kept template's names render as text, never markup (#335)`() {
+        val html =
+            renderPurgeEntity(
+                refusal = null,
+                kept = listOf(PipelineLifecycleDialogModel.KeptTemplate("test/<b>x</b>.sql", listOf("<i>set</i>"), emptyList())),
+            )
+
+        html shouldContain "test/&lt;b&gt;x&lt;/b&gt;.sql"
+        html shouldContain "&lt;i&gt;set&lt;/i&gt;"
+        html shouldNotContain "<b>x</b>"
+    }
+
+    @Test
     fun `switch - the rows carry the versions, the current mark, and restore-first on discarded`() {
         val html =
             render("partials/pipeline-lifecycle-switch") {
@@ -532,6 +578,7 @@ class PipelineLifecycleDialogRenderTest {
     private fun renderPurgeEntity(
         refusal: PipelineLifecycleDialogModel.Refusal?,
         exclusive: List<String> = emptyList(),
+        kept: List<PipelineLifecycleDialogModel.KeptTemplate> = emptyList(),
     ): String =
         render("partials/pipeline-lifecycle-purge-entity") {
             setVariable(
@@ -542,6 +589,7 @@ class PipelineLifecycleDialogRenderTest {
                     leafName = "probe",
                     runCount = 1,
                     exclusiveTemplates = exclusive,
+                    keptTemplates = kept,
                     expected = "nyc/mobility/probe",
                     refusal = refusal,
                 ),

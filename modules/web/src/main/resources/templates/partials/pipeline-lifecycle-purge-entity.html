@@ -41,6 +41,22 @@
             <li th:each="t : ${dlg.exclusiveTemplates}" class="u-mono" th:text="${t}">test/only_here.sql</li>
           </ul>
         </th:block>
+        <!-- #335: the draft templates the purge leaves because a parameter set or a visualization also pins them —
+             the SAME list the REST response reports as kept_draft_templates. Nothing kept renders nothing. -->
+        <th:block th:if="${!#lists.isEmpty(dlg.keptTemplates)}">
+          <p class="u-secondary u-text-sm u-mt-md">
+            <span th:text="${#lists.size(dlg.keptTemplates)}">1</span> draft template(s) stay — something else pins them:
+          </p>
+          <ul class="u-text-sm u-mb-md" data-kept-templates>
+            <li th:each="k : ${dlg.keptTemplates}">
+              <span class="u-mono" th:text="${k.name}">test/shared.sql</span>
+              <span class="u-secondary">
+                <th:block th:if="${!#lists.isEmpty(k.parameterSets)}">— parameter set(s): <span class="u-mono" th:text="${#strings.listJoin(k.parameterSets, ', ')}">acme/s/regions</span></th:block>
+                <th:block th:if="${!#lists.isEmpty(k.visualizations)}">— visualization(s): <span class="u-mono" th:text="${#strings.listJoin(k.visualizations, ', ')}">acme/charts/by_region</span></th:block>
+              </span>
+            </li>
+          </ul>
+        </th:block>
         <label class="ds-form-label">
           Type the pipeline's name — <span class="u-mono" th:text="${dlg.expected}">test/my_pipeline</span> — to confirm
         </label>
