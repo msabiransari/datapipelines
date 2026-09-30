@@ -1445,7 +1445,14 @@
     var env = {
       uuid: randomUuid,
       now: nowMillis,
-      fetchImpl: typeof fetch === "function" ? fetch : null,
+      // A wrapper, never an alias: calling a bare `fetch` reference throws Illegal invocation
+      // in the browser (the method needs its window receiver).
+      fetchImpl:
+        typeof fetch === "function"
+          ? function (url, init) {
+              return fetch(url, init);
+            }
+          : null,
       setTimeout: function (fn, ms) {
         return setTimeout(fn, ms);
       },

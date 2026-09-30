@@ -63,7 +63,9 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         // The design-around is in force: the element Plotly checks exists and is marked, so the
         // bundle injected nothing (the sheet element stays EMPTY — the rules come from the file).
         val sheetText =
-            page.evaluate("() => { const s = document.getElementById('plotly.js-style-global'); return s ? s.textContent : null; }") as String?
+            page.evaluate(
+                "() => { const s = document.getElementById('plotly.js-style-global'); return s ? s.textContent : null; }",
+            ) as String?
         (sheetText ?: "") shouldBe ""
 
         // The console carried no CSP refusal except the EMPTY element hash — the one Playwright's
@@ -104,12 +106,19 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         // A slow refresh (the 3 s sleep source), targeted at the slow chart.
         val refreshId =
             page.evaluate("() => window.__dp.instance.refresh({ scope: 'targets', targets: ['slowchart'] })") as String
-        page.waitForFunction("() => document.querySelector('[data-dp-viz=\\'slowchart\\'] .dp-dashboard-status').getAttribute('data-dp-state') === 'in-progress'")
+        page.waitForFunction(
+            "() => document.querySelector('[data-dp-viz=\\'slowchart\\'] .dp-dashboard-status').getAttribute('data-dp-state') === 'in-progress'",
+        )
         // Abort it; the chip flips to abort locally and the server answers 202.
         page.evaluate("() => window.__dp.instance.abort('$refreshId')")
-        page.waitForFunction("() => document.querySelector('[data-dp-viz=\\'slowchart\\'] .dp-dashboard-status').getAttribute('data-dp-state') === 'abort'")
+        page.waitForFunction(
+            "() => document.querySelector('[data-dp-viz=\\'slowchart\\'] .dp-dashboard-status').getAttribute('data-dp-state') === 'abort'",
+        )
         // The fast occurrences' state was untouched by the abort of another refresh.
-        val revenueState = page.evaluate("() => document.querySelector('[data-dp-viz=\\'revenue\\'] .dp-dashboard-status').getAttribute('data-dp-state')") as String
+        val revenueState =
+            page.evaluate(
+                "() => document.querySelector('[data-dp-viz=\\'revenue\\'] .dp-dashboard-status').getAttribute('data-dp-state')",
+            ) as String
         (revenueState == "ready" || revenueState == "success") shouldBe true
     }
 
@@ -144,7 +153,11 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         page.route("**/runtime/parameters") { route ->
             val response = route.fetch()
             Thread.sleep(1_500)
-            route.fulfill(com.microsoft.playwright.Route.FulfillOptions().setResponse(response))
+            route.fulfill(
+                com.microsoft.playwright.Route
+                    .FulfillOptions()
+                    .setResponse(response),
+            )
         }
         openHost(board)
         page.waitForFunction("() => window.__dp.ready")
@@ -266,8 +279,12 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => window.__dp.renders.length >= 3")
         page.waitForTimeout(500.0) // Plotly's own draw settle before the shutter
         page.screenshot(
-            com.microsoft.playwright.Page.ScreenshotOptions()
-                .setPath(java.nio.file.Paths.get("build", "reports", "dashboards-conformance-light.png")),
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Paths
+                        .get("build", "reports", "dashboards-conformance-light.png"),
+                ),
         )
         // Dark: the same board with the dark theme's sheets — a reload with ?theme=dark semantics.
         installHostPage(theme = "dark")
@@ -275,8 +292,12 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => window.__dp && window.__dp.renders && window.__dp.renders.length >= 3")
         page.waitForTimeout(500.0)
         page.screenshot(
-            com.microsoft.playwright.Page.ScreenshotOptions()
-                .setPath(java.nio.file.Paths.get("build", "reports", "dashboards-conformance-dark.png")),
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Paths
+                        .get("build", "reports", "dashboards-conformance-dark.png"),
+                ),
         )
     }
 
@@ -306,7 +327,8 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
             """.trimIndent()
         page.route("**/test/dashboards/host*") { route ->
             route.fulfill(
-                com.microsoft.playwright.Route.FulfillOptions()
+                com.microsoft.playwright.Route
+                    .FulfillOptions()
                     .setStatus(200)
                     .setContentType("text/html; charset=utf-8")
                     .setHeaders(mapOf("Content-Security-Policy" to cspHeader))
@@ -315,7 +337,8 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         }
         page.route("**/test/dashboards/host-glue*") { route ->
             route.fulfill(
-                com.microsoft.playwright.Route.FulfillOptions()
+                com.microsoft.playwright.Route
+                    .FulfillOptions()
                     .setStatus(200)
                     .setContentType("application/javascript; charset=utf-8")
                     .setHeaders(mapOf("Content-Security-Policy" to cspHeader))

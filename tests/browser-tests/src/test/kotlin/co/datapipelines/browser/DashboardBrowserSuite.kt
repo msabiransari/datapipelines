@@ -102,7 +102,10 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
      * response, with the Plotly bundle the query names. The page loads the same design-system
      * sheets the app layout loads, so the chart tokens resolve exactly as they do in production.
      */
-    protected fun installHostPage(bundle: String = "2d", theme: String = "dark") {
+    protected fun installHostPage(
+        bundle: String = "2d",
+        theme: String = "dark",
+    ) {
         val cspHeader = fetchLiveCsp()
         val html =
             """
@@ -132,7 +135,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             "**/test/dashboards/host*",
         ) { route ->
             route.fulfill(
-                com.microsoft.playwright.Route.FulfillOptions()
+                com.microsoft.playwright.Route
+                    .FulfillOptions()
                     .setStatus(200)
                     .setContentType("text/html; charset=utf-8")
                     .setHeaders(mapOf("Content-Security-Policy" to cspHeader))
@@ -141,7 +145,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         }
         page.route("**/test/dashboards/host-glue*") { route ->
             route.fulfill(
-                com.microsoft.playwright.Route.FulfillOptions()
+                com.microsoft.playwright.Route
+                    .FulfillOptions()
                     .setStatus(200)
                     .setContentType("application/javascript; charset=utf-8")
                     .setHeaders(mapOf("Content-Security-Policy" to cspHeader))
@@ -161,13 +166,19 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         return csp
     }
 
-    protected fun openHost(dashboardId: String): Unit {
+    protected fun openHost(dashboardId: String) {
         page.navigate("$baseUrl/test/dashboards/host?id=$dashboardId")
         try {
             page.waitForFunction("() => window.__dp && (window.__dp.ready || window.__dp.code)")
         } catch (timeout: Exception) {
-            val keys = page.evaluate("() => Object.keys(window).filter(function (k) { return k.indexOf('Datapipelines') === 0 || k === '__dp'; })")
-            val scripts = page.evaluate("() => Array.from(document.scripts).map(function (s) { return s.src + (s.dataset ? ' dp=' + (s.getAttribute('data-dp-plotly-bundle') || '') : ''); })")
+            val keys =
+                page.evaluate(
+                    "() => Object.keys(window).filter(function (k) { return k.indexOf('Datapipelines') === 0 || k === '__dp'; })",
+                )
+            val scripts =
+                page.evaluate(
+                    "() => Array.from(document.scripts).map(function (s) { return s.src + (s.dataset ? ' dp=' + (s.getAttribute('data-dp-plotly-bundle') || '') : ''); })",
+                )
             val readyState = page.evaluate("() => document.readyState")
             val body = page.evaluate("() => document.body ? document.body.innerHTML.slice(0, 300) : 'no body'")
             throw AssertionError(
@@ -179,7 +190,9 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         if (code != null) {
             val error = page.evaluate("() => String(window.__dp.error)") as String
             val cause =
-                page.evaluate("() => (window.__dp.error && window.__dp.error.details) ? JSON.stringify(window.__dp.error.details) : null") as String?
+                page.evaluate(
+                    "() => (window.__dp.error && window.__dp.error.details) ? JSON.stringify(window.__dp.error.details) : null",
+                ) as String?
             throw AssertionError("the host page failed to boot: $code — $error — details: $cause")
         }
     }
@@ -198,43 +211,54 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         createTemplate("test/${root}_kpi.sql", "SELECT 42 AS v")
         createTemplate("test/${root}_slow.sql", "SELECT 1 AS x, 999 AS y FROM (SELECT pg_sleep(3)) s")
         createTemplate("test/${root}_surface.sql", "SELECT 1 AS a, 2 AS b, 3 AS c UNION ALL SELECT 2, 3, 4 UNION ALL SELECT 3, 2, 1")
-        createPipeline("${root}/pipelines/chart", "test/${root}_chart.sql", datasource)
-        createPipeline("${root}/pipelines/table", "test/${root}_table.sql", datasource)
-        createPipeline("${root}/pipelines/kpi", "test/${root}_kpi.sql", datasource)
-        createPipeline("${root}/pipelines/slow", "test/${root}_slow.sql", datasource)
-        createPipeline("${root}/pipelines/surface", "test/${root}_surface.sql", datasource)
+        createPipeline("$root/pipelines/chart", "test/${root}_chart.sql", datasource)
+        createPipeline("$root/pipelines/table", "test/${root}_table.sql", datasource)
+        createPipeline("$root/pipelines/kpi", "test/${root}_kpi.sql", datasource)
+        createPipeline("$root/pipelines/slow", "test/${root}_slow.sql", datasource)
+        createPipeline("$root/pipelines/surface", "test/${root}_surface.sql", datasource)
         releasePipelines(
             listOf(
-                "${root}/pipelines/chart",
-                "${root}/pipelines/table",
-                "${root}/pipelines/kpi",
-                "${root}/pipelines/slow",
-                "${root}/pipelines/surface",
+                "$root/pipelines/chart",
+                "$root/pipelines/table",
+                "$root/pipelines/kpi",
+                "$root/pipelines/slow",
+                "$root/pipelines/surface",
             ),
         )
-        val chart = seedVisualization("${root}/visualizations/chart", plotlyBody("""{"type":"bar","x":null,"y":null}""", "x", "y", "INTEGER"))
-        val slowChart = seedVisualization("${root}/visualizations/slowchart", plotlyBody("""{"type":"bar","x":null,"y":null}""", "x", "y", "INTEGER"))
-        val cells = seedVisualization(
-            "${root}/visualizations/cells",
-            """{"display_name":"Cells","renderer":{"kind":"table","version":"1"},""" +
-                """"inputs":{"main":{"columns":[{"name":"n","type":"INTEGER","nullable":false}]}},""" +
-                """"config":{"columns":[{"label":"N","values":"n","format":"integer"}]},"bindings":{"n":"n"}}""",
-        )
-        val kpi = seedVisualization(
-            "${root}/visualizations/total",
-            """{"display_name":"Total","renderer":{"kind":"kpi","version":"1"},""" +
-                """"inputs":{"main":{"columns":[{"name":"v","type":"INTEGER","nullable":false}]}},""" +
-                """"config":{"label":"Total","value":"v","format":"integer"},"bindings":{"v":"v"}}""",
-        )
+        val chart =
+            seedVisualization("$root/visualizations/chart", plotlyBody("""{"type":"bar","x":null,"y":null}""", "x", "y", "INTEGER"))
+        val slowChart =
+            seedVisualization("$root/visualizations/slowchart", plotlyBody("""{"type":"bar","x":null,"y":null}""", "x", "y", "INTEGER"))
+        val cells =
+            seedVisualization(
+                "$root/visualizations/cells",
+                """{"display_name":"Cells","renderer":{"kind":"table","version":"1"},""" +
+                    """"inputs":{"main":{"columns":[{"name":"n","type":"INTEGER","nullable":false}]}},""" +
+                    """"config":{"columns":[{"label":"N","values":"n","format":"integer"}]},"bindings":{"n":"n"}}""",
+            )
+        val kpi =
+            seedVisualization(
+                "$root/visualizations/total",
+                """{"display_name":"Total","renderer":{"kind":"kpi","version":"1"},""" +
+                    """"inputs":{"main":{"columns":[{"name":"v","type":"INTEGER","nullable":false}]}},""" +
+                    """"config":{"label":"Total","value":"v","format":"integer"},"bindings":{"v":"v"}}""",
+            )
         return seedDashboard(
-            "${root}/boards/overview",
-            sources = listOf("chart" to "${root}/pipelines/chart", "cells" to "${root}/pipelines/table", "total" to "${root}/pipelines/kpi", "slow" to "${root}/pipelines/slow"),
-            occurrences = listOf(
-                Triple("revenue", chart, "chart"),
-                Triple("cells", cells, "cells"),
-                Triple("total", kpi, "total"),
-                Triple("slowchart", slowChart, "slow"),
-            ),
+            "$root/boards/overview",
+            sources =
+                listOf(
+                    "chart" to "$root/pipelines/chart",
+                    "cells" to "$root/pipelines/table",
+                    "total" to "$root/pipelines/kpi",
+                    "slow" to "$root/pipelines/slow",
+                ),
+            occurrences =
+                listOf(
+                    Triple("revenue", chart, "chart"),
+                    Triple("cells", cells, "cells"),
+                    Triple("total", kpi, "total"),
+                    Triple("slowchart", slowChart, "slow"),
+                ),
             initial = true,
         )
     }
@@ -243,19 +267,21 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
     protected fun seedSurfaceBoard(root: String): String {
         val datasource = registerSourceDatasource()
         createTemplate("test/${root}_surface_src.sql", "SELECT 1 AS a, 2 AS b, 3 AS c UNION ALL SELECT 2, 3, 4 UNION ALL SELECT 3, 2, 1")
-        createPipeline("${root}/pipelines/surface", "test/${root}_surface_src.sql", datasource)
-        releasePipelines(listOf("${root}/pipelines/surface"))
+        createPipeline("$root/pipelines/surface", "test/${root}_surface_src.sql", datasource)
+        releasePipelines(listOf("$root/pipelines/surface"))
         val surface =
             seedVisualization(
-                "${root}/visualizations/surface",
+                "$root/visualizations/surface",
                 """{"display_name":"Surface","renderer":{"kind":"plotly","version":"4"},""" +
-                    """"inputs":{"main":{"columns":[{"name":"a","type":"INTEGER","nullable":false},{"name":"b","type":"INTEGER","nullable":false},{"name":"c","type":"INTEGER","nullable":false}]}},""" +
+                    """"inputs":{"main":{"columns":[{"name":"a","type":"INTEGER","nullable":false},""" +
+                    """{"name":"b","type":"INTEGER","nullable":false},""" +
+                    """{"name":"c","type":"INTEGER","nullable":false}]}},""" +
                     """"config":{"data":[{"type":"surface","x":null,"y":null,"z":null}],"layout":{}},""" +
                     """"bindings":{"data[0].x":"a","data[0].y":"b","data[0].z":"c"}}""",
             )
         return seedDashboard(
-            "${root}/boards/surface",
-            sources = listOf("surface" to "${root}/pipelines/surface"),
+            "$root/boards/surface",
+            sources = listOf("surface" to "$root/pipelines/surface"),
             occurrences = listOf(Triple("hill", surface, "surface")),
             initial = true,
         )
@@ -268,7 +294,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         type: String,
     ): String =
         """{"display_name":"Chart","renderer":{"kind":"plotly","version":"4"},""" +
-            """"inputs":{"main":{"columns":[{"name":"$xColumn","type":"$type","nullable":false},{"name":"$yColumn","type":"$type","nullable":false}]}},""" +
+            """"inputs":{"main":{"columns":[{"name":"$xColumn","type":"$type","nullable":false},""" +
+            """{"name":"$yColumn","type":"$type","nullable":false}]}},""" +
             """"config":{"data":[$trace],"layout":{}},"bindings":{"data[0].x":"$xColumn","data[0].y":"$yColumn"}}"""
 
     /** The suite's own Postgres as the source — the 151 convention; in-page fetch with the CSRF pair. */
@@ -354,13 +381,23 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             UPDATE pipeline_versions v SET status = 'RELEASED', released_at = NOW(), released_by = '$admin'
               FROM pipelines p
               WHERE v.pipeline_id = p.id AND v.version = 1 AND p.name = ANY(ARRAY[{}])
-            """.trimIndent().replace("{}", names.joinToString(",") { "'$it'" }),
+            """.trimIndent().replace(
+                "{}",
+                names.joinToString(",") {
+                    "'$it'"
+                },
+            ),
         )
         sql(
             """
             UPDATE pipelines p SET current_version = 1
               WHERE p.name = ANY(ARRAY[{}])
-            """.trimIndent().replace("{}", names.joinToString(",") { "'$it'" }),
+            """.trimIndent().replace(
+                "{}",
+                names.joinToString(",") {
+                    "'$it'"
+                },
+            ),
         )
     }
 
@@ -398,16 +435,22 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         name: String,
         body: String,
     ): String {
-        val id = java.util.UUID.randomUUID().toString()
+        val id =
+            java.util.UUID
+                .randomUUID()
+                .toString()
         val admin = currentUserId()
         sql(
             "INSERT INTO visualizations (id, workspace_id, name, display_name, description, current_version, created_by) " +
                 "VALUES ('$id', (SELECT id FROM workspaces WHERE name = '${currentWorkspace()}'), '$name', '$name', '', 1, '$admin')",
         )
         sql(
-            "INSERT INTO visualization_versions (visualization_id, version, body_json, status, body_hash, released_at, released_by, created_by) " +
-                "SELECT id, 1, '${body.replace("'", "''")}'::jsonb, 'RELEASED', 'seeded-$id', NOW(), '$admin', '$admin' " +
-                "FROM visualizations WHERE name = '$name' AND workspace_id = (SELECT id FROM workspaces WHERE name = '${currentWorkspace()}')",
+            "INSERT INTO visualization_versions (visualization_id, version, body_json, status, body_hash, " +
+                "released_at, released_by, created_by) " +
+                "SELECT id, 1, " +
+                "'${body.replace("'", "''")}'::jsonb, 'RELEASED', 'seeded-$id', NOW(), '$admin', '$admin' " +
+                "FROM visualizations WHERE name = '$name' AND workspace_id = " +
+                "(SELECT id FROM workspaces WHERE name = '${currentWorkspace()}')",
         )
         return name
     }
@@ -418,7 +461,10 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         occurrences: List<Triple<String, String, String>>,
         initial: Boolean,
     ): String {
-        val id = java.util.UUID.randomUUID().toString()
+        val id =
+            java.util.UUID
+                .randomUUID()
+                .toString()
         val admin = currentUserId()
         val sourcesJson =
             sources.joinToString(",", "[", "]") { (source, pipeline) ->
@@ -438,9 +484,12 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                 "SELECT '$id'::uuid, w.id, '$name', '$name', '', 1, '$admin' FROM workspaces w WHERE w.name = '${currentWorkspace()}'",
         )
         sql(
-            "INSERT INTO dashboard_versions (dashboard_id, version, body_json, status, body_hash, released_at, released_by, created_by) " +
-                "SELECT id, 1, '${body.replace("'", "''")}'::jsonb, 'RELEASED', 'seeded-$name', NOW(), '$admin', '$admin' " +
-                "FROM dashboards WHERE name = '$name' AND workspace_id = (SELECT id FROM workspaces WHERE name = '${currentWorkspace()}')",
+            "INSERT INTO dashboard_versions (dashboard_id, version, body_json, status, body_hash, " +
+                "released_at, released_by, created_by) " +
+                "SELECT id, 1, " +
+                "'${body.replace("'", "''")}'::jsonb, 'RELEASED', 'seeded-$name', NOW(), '$admin', '$admin' " +
+                "FROM dashboards WHERE name = '$name' AND workspace_id = " +
+                "(SELECT id FROM workspaces WHERE name = '${currentWorkspace()}')",
         )
         return rows(
             "SELECT id::text AS i FROM dashboards WHERE name = '$name' AND workspace_id = (SELECT id FROM workspaces WHERE name = '${currentWorkspace()}')",
@@ -449,7 +498,10 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
 
     private fun currentWorkspace(): String {
         // The switcher's hidden option carries the ACTIVE workspace's name — the one this session is in.
-        val name = page.evaluate("() => { const s = document.getElementById('workspace-switcher'); return s ? s.selectedOptions[0].text : null; }") as String?
+        val name =
+            page.evaluate(
+                "() => { const s = document.getElementById('workspace-switcher'); return s ? s.selectedOptions[0].text : null; }",
+            ) as String?
         check(!name.isNullOrBlank()) { "the session's active workspace could not be read from the switcher" }
         return name
     }
