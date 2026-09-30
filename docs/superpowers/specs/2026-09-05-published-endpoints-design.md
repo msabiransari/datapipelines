@@ -1,4 +1,4 @@
-# Design: Published Endpoints — a pipeline as a GET API, under `/api/x/**`
+# Design: Published Endpoints — a pipeline as a GET API, under `/api/<category>/<version>/<path…>`
 
 **Status:** RATIFIED 2026-09-05 (owner rulings R-EP1–R-EP4 below); implementation prompt 074.
 **Amended 2026-09-19:** ruling **R-EP5** (below, 172 / #172) supersedes R-EP1.
@@ -11,7 +11,7 @@ constants (drift tests).
 
 Today a client that wants rows must call `POST /pipelines/{id}/execute`, read an SSE stream
 (§6.4), wait for `data_ready`, and follow `result_url`. That is the right surface for agents and
-the editor; it is the wrong surface for an application that just wants `GET /api/x/lending/home`
+the editor; it is the wrong surface for an application that just wants `GET /api/lending/v1/home`
 to return data. This design publishes a released pipeline as a **GET endpoint** whose response is
 the `data_ready` payload — the first page plus the cursor — with no event handling on the client.
 It is the "Answer over the API" station of the launch poster made literal, and the data source
@@ -38,7 +38,7 @@ the dashboards will consume next.
 
 ## 3. Rulings (owner, 2026-09-05)
 
-- **R-EP1 — root `/api/x/**` — SUPERSEDED by R-EP5 (2026-09-18).** Engineers own everything
+- **R-EP1 — one fixed root segment under `/api` for every endpoint — SUPERSEDED by R-EP5 (2026-09-18).** Engineers own everything
   beneath; `/api/v1/**` stays the product's (its routes and the security allowlist live there).
   One catch-all handler, never runtime route registration. (The catch-all and the no-runtime-
   registration halves survive; the letter `x` does not — the owner read it as a version
@@ -138,7 +138,7 @@ ALTER TABLE pipeline_executions ADD CONSTRAINT chk_triggered_via
   unknown`, 400); the pipeline may declare more (they come from the query string).
 - `timeout_seconds` clamped to `datapipelines.endpoints.timeout-min/max-seconds`.
 
-## 5. Serving `GET /api/x/{path}`
+## 5. Serving `GET /api/<category>/<version>/<path…>`
 
 ### 5.1 Resolution
 Match → endpoint row (`is_enabled`) → **latest released version at request time** (never a
@@ -241,4 +241,5 @@ who retuned one and not the other would get two different clamps on one document
 
 | Date | Lane | Change |
 |---|---|---|
+| 2026-09-30 | orchestrator (the owner's request) | **The retired R-EP1 prefix is no longer spelled anywhere in this record.** The title, §1's example and §5's heading state R-EP5's served shape (`/api/<category>/<version>/<path…>`); the R-EP1 row names what it was (one fixed root segment) without the literal. `RetiredApiPrefixGuardTest` drops this file from its allowlist, so the guard now covers it; `V11__published_endpoints.sql` stays the one exemption (Flyway validates an applied migration's checksum on every existing deployment — a changed comment would stop them booting). |
 | 2026-09-27 | 274 (#274) | **A stored row that fails a later grammar is retired, never fatal.** R-EP5 landed 2026-09-19 with no migration for the rows the old grammar had already saved, and ONE two-segment row made the repository's row mapper throw inside the demo seeder's conflict check — the application refused to boot. V41 disables such rows and records `retired_reason` (metadata-db §4.13; rows are never deleted); the repository maps a row whose path no longer parses as a typed legacy value — skipped by the serve registry and the conflict check, listed flagged with its reason in the tree and in `endpoints_list`, removable by the existing unpublish verb, logged once per boot at WARN. The seeder catches a per-target failure instead of failing the context: a demo seed is never worth a refused boot. R-EP5 itself stands unchanged — the rows are old, the rule is right. |

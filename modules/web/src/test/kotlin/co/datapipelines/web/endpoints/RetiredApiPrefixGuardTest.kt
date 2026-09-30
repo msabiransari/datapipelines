@@ -12,16 +12,16 @@ import java.io.File
  * (The retired spelling is assembled, never written, in this file: the sweep reads sources as
  * TEXT, and a guard that contained the string it hunts would flag itself.)
  *
- * The two places it may still appear are both HISTORY: the published-endpoints design doc
- * (R-EP1 is recorded there as superseded, and rewriting a ratified decision's wording would
- * falsify the record) and the V11 migration (Flyway validates its checksum against every
- * existing deployment — it cannot be edited). Those two files are the whole allowlist; a hit
- * anywhere else fails the build, so the next "just a comment" mention of the old root is a red
- * build, not a silent reintroduction.
+ * The ONE place it may still appear is the V11 migration: Flyway validates an applied
+ * migration's checksum against every existing deployment, so it cannot be edited, and its
+ * comments describe the schema as of V11. That file is the whole allowlist; a hit anywhere else
+ * fails the build, so the next "just a comment" mention of the old root is a red build, not a
+ * silent reintroduction. (Until 2026-09-30 the published-endpoints design doc was exempt too;
+ * its title, §1 example, R-EP1 row and §5 heading now state R-EP5's shape, and it is swept.)
  */
 class RetiredApiPrefixGuardTest {
     @Test
-    fun `no mention of the retired prefix survives outside the design doc's history`() {
+    fun `no mention of the retired prefix survives outside the immutable V11 migration`() {
         val violations =
             sweptFiles().flatMap { file ->
                 file.readText().lines().mapIndexedNotNull { index, line ->
@@ -71,17 +71,14 @@ class RetiredApiPrefixGuardTest {
         val SWEPT_EXTENSIONS = setOf("kt", "kts", "md", "html", "yml", "yaml", "sql", "sh")
 
         /**
-         * The design doc's history rows: R-EP1's original wording and the change record of its
-         * supersession. Not packaged into the product (`docs/superpowers/` is excluded), and the
-         * ONLY file exempt.
+         * The ONE file exempt: an applied Flyway migration is immutable — Flyway validates its
+         * checksum on every existing deployment, so a changed comment would stop them booting —
+         * and V11's comments describe the schema as of V11. The published-endpoints design doc
+         * was exempt until 2026-09-30, when its title, §1 example, R-EP1 row and §5 heading were
+         * rewritten to R-EP5's shape; the guard covers it now.
          */
         val ALLOWLIST =
             setOf(
-                // R-EP1's original wording and the record of its supersession — a ratified
-                // design doc's history is not rewritten.
-                "docs/superpowers/specs/2026-09-05-published-endpoints-design.md",
-                // A Flyway-migrated file is immutable (its checksum is validated against every
-                // existing deployment); its comments describe the schema as of V11.
                 "modules/app/src/main/resources/db/migration/V11__published_endpoints.sql",
             )
 
