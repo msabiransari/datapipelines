@@ -131,4 +131,31 @@ class VisualizationConfiguration {
             authoring,
             transactions = TransactionTemplate(transactionManager) as TransactionOperations,
         )
+
+    /**
+     * The transfer's template half (#10 L1c) — the port's web composition over [TemplateImportService], the
+     * parameter-set transfer's composition. The transfer SERVICE lives in `modules/visualization`; only this
+     * adapter needs the `web`-owned template import.
+     */
+    @Bean
+    fun templateBundle(
+        templates: co.datapipelines.templates.TemplateRepository,
+        templateImport: co.datapipelines.web.templates.TemplateImportService,
+    ): co.datapipelines.visualization.TemplateBundle =
+        co.datapipelines.web.visualizations
+            .TemplateBundleAdapter(templates, templateImport)
+
+    /**
+     * The export/import acts of both families (rest-api §22/§23) — the import and the promotion receive bind
+     * through BOTH readers, so the document bounds hold off the save path too (the L1c HIGH item).
+     */
+    @Bean
+    fun artifactTransferService(
+        visualizations: VisualizationService,
+        dashboards: DashboardService,
+        bundle: co.datapipelines.visualization.TemplateBundle,
+        visualizationReader: VisualizationReader,
+        dashboardReader: DashboardReader,
+    ): co.datapipelines.visualization.ArtifactTransferService =
+        co.datapipelines.visualization.ArtifactTransferService(visualizations, dashboards, bundle, visualizationReader, dashboardReader)
 }

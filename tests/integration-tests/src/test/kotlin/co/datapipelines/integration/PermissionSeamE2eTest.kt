@@ -580,6 +580,10 @@ class PermissionSeamE2eTest : EntryAssuranceE2eBase() {
                 "dashboard.delete",
                 "dashboard.release",
                 "dashboard.switch_version",
+                // #10 L1c — the two transfer rows: workspace-admin rows beside author-held families, so no role
+                // walk can separate the import route from the lifecycle writes — only a grant can.
+                "visualization.import",
+                "dashboard.import",
             )
 
         /** `workspace id -> the one permission granted there`, read by the synthetic grant. */

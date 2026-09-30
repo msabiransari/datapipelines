@@ -103,7 +103,7 @@ class ScopeMatrixSpecDriftTest {
          * (#10 L1b: `visualization.*` and `dashboard.*` — read, create, update, version.manage, delete, release,
          * switch_version; the two imports, `dashboard.execute` and `dashboard.key.bind` land with their surfaces), re-derived.
          */
-        const val PERMISSION_COUNT = 96
+        const val PERMISSION_COUNT = 98
 
         /** Documented rows with no code behind them yet — each one a decision the record made ahead of a surface. */
         val RESERVED_ROWS = listOf("Read the audit log — **reserved** (D12)")

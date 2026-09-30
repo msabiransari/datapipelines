@@ -7,6 +7,7 @@ import co.datapipelines.auth.Permission.API_KEY_REVOKE
 import co.datapipelines.auth.Permission.CALCULATOR_READ
 import co.datapipelines.auth.Permission.DASHBOARD_CREATE
 import co.datapipelines.auth.Permission.DASHBOARD_DELETE
+import co.datapipelines.auth.Permission.DASHBOARD_IMPORT
 import co.datapipelines.auth.Permission.DASHBOARD_READ
 import co.datapipelines.auth.Permission.DASHBOARD_RELEASE
 import co.datapipelines.auth.Permission.DASHBOARD_SWITCH_VERSION
@@ -85,6 +86,7 @@ import co.datapipelines.auth.Permission.USER_IDENTITY_RESET
 import co.datapipelines.auth.Permission.USER_MANAGE
 import co.datapipelines.auth.Permission.VISUALIZATION_CREATE
 import co.datapipelines.auth.Permission.VISUALIZATION_DELETE
+import co.datapipelines.auth.Permission.VISUALIZATION_IMPORT
 import co.datapipelines.auth.Permission.VISUALIZATION_READ
 import co.datapipelines.auth.Permission.VISUALIZATION_RELEASE
 import co.datapipelines.auth.Permission.VISUALIZATION_SWITCH_VERSION
@@ -265,6 +267,11 @@ object RolePermissions {
                 WORKSPACE_READ,
                 WORKSPACE_UPDATE,
                 WORKSPACE_MEMBERS_MANAGE,
+                // #10 L1c — the transfer verbs (the owner's ruling, the `api_key.bind` cells): the import lands
+                // RELEASED content with no evidence run, so the AUTHOR set must never grow it; an author's
+                // deployment exports, the workspace admin imports. SUPER_ADMIN holds both automatically.
+                VISUALIZATION_IMPORT,
+                DASHBOARD_IMPORT,
             )
 
     /**
