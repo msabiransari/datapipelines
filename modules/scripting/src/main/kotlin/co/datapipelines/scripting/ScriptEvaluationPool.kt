@@ -160,10 +160,15 @@ class ScriptEvaluationPool internal constructor(
 
     /** Starts the evaluation's own daemon thread, which returns both permits when [task] ends. */
     private fun <T> slotOwningThread(task: FutureTask<T>): Thread {
+        // #337 (observability §3.3): the evaluation runs on a script-eval-N thread; it carries the
+        // submitter's MDC (the request's or the node's correlation id) for the run, restored after.
+        // Module-local capture: `scripting` sits below every other module and propagation is
+        // normative — there is no switch to inject or remove.
+        val submitted = MdcTask.capture()
         val thread =
             Thread(
                 null,
-                {
+                MdcTask.wrap(submitted) {
                     try {
                         task.run()
                         beforePermitsReturn()

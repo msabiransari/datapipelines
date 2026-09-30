@@ -123,13 +123,19 @@ class PipelineExecutor(
      */
     suspend fun execute(request: ExecuteRequest): ExecutionResult {
         val executionId = request.executionId ?: UUID.randomUUID()
-        // Design §4.4 (corrected 2026-08-13): only ROOT executions take a concurrency slot. A
-        // child holding its own slot while its parent waits on it deadlocks any family larger
-        // than the cap; composition volume is bounded by depth and the per-pipeline node cap.
-        return if (request.rootExecutionId != null) {
-            runExecution(executionId, request)
-        } else {
-            executionSlots.withSlot(request.userId, request.slotLease) { runExecution(executionId, request) }
+        // #337 (observability §3.3): the ids are known here, on every trigger, so the context
+        // element is built from the REQUEST and installed once for the whole run. It flows
+        // through every `withContext`/`launch`/`async(dispatcher.context)` below; the one fresh
+        // scope a node runs under adds it again explicitly (see runWithNodeDeadline).
+        return withContext(LogContext(request.correlationId, executionId)) {
+            // Design §4.4 (corrected 2026-08-13): only ROOT executions take a concurrency slot. A
+            // child holding its own slot while its parent waits on it deadlocks any family larger
+            // than the cap; composition volume is bounded by depth and the per-pipeline node cap.
+            if (request.rootExecutionId != null) {
+                runExecution(executionId, request)
+            } else {
+                executionSlots.withSlot(request.userId, request.slotLease) { runExecution(executionId, request) }
+            }
         }
     }
 
@@ -334,7 +340,11 @@ class PipelineExecutor(
     ): NodeResult {
         if (node.type == NodeType.PIPELINE && node.timeoutSeconds == null) return nodeRunner.run(node, ctx, startedAt)
         val seconds = config.nodeTimeoutSecondsFor(node.timeoutSeconds)
-        val scope = CoroutineScope(dispatcher.context + SupervisorJob())
+        // A fresh scope inherits NO caller context elements (#337, observability §3.3) — the
+        // execution's log context is rebuilt here from the same request, so the node's body and
+        // every task it submits log with the execution's ids. Without this the deadline scope's
+        // lines are the one gap in the execution's correlation.
+        val scope = CoroutineScope(dispatcher.context + SupervisorJob() + LogContext(run.request.correlationId, run.executionId))
         val body = scope.async { nodeRunner.run(node, ctx, startedAt) }
         try {
             return withTimeout(seconds.seconds) { body.await() }

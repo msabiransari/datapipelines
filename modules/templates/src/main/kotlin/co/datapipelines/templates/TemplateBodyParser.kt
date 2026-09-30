@@ -124,7 +124,9 @@ internal object TemplateBodyParser {
         }
         trace.parseAttempts += 1
         var result: BodyParse? = null
-        val worker = Thread(null, { result = parseHere(body) }, "template-parse", PARSE_STACK_BYTES)
+        // #337 (observability §3.3): the parse runs on its own short-lived thread; it carries the
+        // caller's MDC (the request's correlation id) for the parse, restored after.
+        val worker = Thread(null, MdcTask.wrap(MdcTask.capture()) { result = parseHere(body) }, "template-parse", PARSE_STACK_BYTES)
         worker.isDaemon = true
         worker.start()
         worker.join(PARSE_JOIN_TIMEOUT_MS)

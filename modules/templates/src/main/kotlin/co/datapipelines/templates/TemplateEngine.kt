@@ -200,9 +200,13 @@ class TemplateEngine(
         maxOutputChars: Long = this.maxOutputChars,
     ): RenderOutcome {
         val normalized = RenderContextNormalizer.normalize(context)
+        // #337 (observability §3.3): the render runs on a template-render-N thread; it carries the
+        // submitter's MDC (the request's or the node's correlation id) for its duration, restored
+        // after. Module-local: no pool may depend on another module for a logging helper.
+        val submitted = MdcTask.capture()
         val future: Future<String> =
             try {
-                workers.submit(Callable { renderNow(ref, normalized, maxOutputChars) })
+                workers.submit(MdcTask.wrap(submitted, Callable { renderNow(ref, normalized, maxOutputChars) }))
             } catch (e: RejectedExecutionException) {
                 return RenderOutcome.Failed(
                     "render capacity exhausted ($MAX_CONCURRENT_RENDERS concurrent, " +

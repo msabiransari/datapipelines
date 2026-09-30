@@ -175,10 +175,15 @@ class SelectorPool(
         task: SelectorTask,
         result: CompletableDeferred<SelectorRun>,
     ): Thread {
+        // #337 (observability §3.3): the statement runs on a selector-N thread; it carries the
+        // submitter's MDC (the node's correlation id) for the run, restored after. Module-local
+        // capture: `parameters` may not depend on the executor's helpers and propagation is
+        // normative — there is no switch to inject or remove.
+        val submitted = MdcTask.capture()
         val thread =
             Thread(
                 null,
-                {
+                MdcTask.wrap(submitted) {
                     try {
                         result.complete(task.run())
                     } catch (
@@ -224,8 +229,12 @@ class SelectorPool(
             label.parameter.safeEcho(MAX_LABEL_CHARS),
             label.datasource.safeEcho(MAX_LABEL_CHARS),
         )
-        Thread(null, { task.abandon() }, "selector-abandon-${cancellers.incrementAndGet()}")
-            .apply { isDaemon = true }
+        Thread(
+            // #337 (observability §3.3): the abandon work belongs to the evaluate that gave up —
+            // captured from THIS thread (the caller's), installed on the detached thread.
+            MdcTask.wrap(MdcTask.capture()) { task.abandon() },
+            "selector-abandon-${cancellers.incrementAndGet()}",
+        ).apply { isDaemon = true }
             .start()
     }
 
