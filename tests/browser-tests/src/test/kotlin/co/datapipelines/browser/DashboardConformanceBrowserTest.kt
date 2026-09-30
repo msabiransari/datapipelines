@@ -97,7 +97,7 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
 
     @Test
     @Order(4)
-    fun `abort ends the slow occurrence and the finished run cannot overwrite a newer view`() {
+    fun `abort is acknowledged by the real handler, ends durably ABORTED, and a finished refresh is a genuine 404`() {
         val root = ready("dpabort")
         installHostPage()
         val board = seedBoard(root)
@@ -108,15 +108,55 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         val refreshId =
             page.evaluate("() => window.__dp.instance.refresh({ scope: 'targets', targets: ['slowchart'] })") as String
         chipStateIs("slowchart", "in-progress")
-        // Abort it; the chip flips to abort locally and the server answers 202.
-        page.evaluate("() => window.__dp.instance.abort('$refreshId')")
+        // The abort needs the server's row to exist: an abort that outruns the stream POST's row
+        // write is 404 not_found (the finding recorded on #10) — wait for the row, deterministically.
+        page.waitForFunction(
+            """async () => {
+              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
+              if (!res.ok) return false;
+              const doc = await res.json();
+              return doc.data && doc.data.status === 'RUNNING';
+            }""",
+        )
+        // Abort it; the chip flips to abort locally and the REAL handler answers 202 (the runtime's
+        // own abort promise resolving is the acknowledgement, not a stub's).
+        val acked =
+            page.evaluate(
+                "() => window.__dp.instance.abort('$refreshId')",
+            ) as Map<*, *>
+        acked["abort_requested"] shouldBe true
         chipStateIs("slowchart", "abort")
+        // The DURABLE outcome: the refresh row the server owns reads ABORTED (poll the real read route).
+        page.waitForFunction(
+            """async () => {
+              const res = await fetch('/api/v1/dashboards/$board/refreshes/$refreshId', { credentials: 'same-origin' });
+              if (!res.ok) return false;
+              const doc = await res.json();
+              return doc.data && doc.data.status === 'ABORTED';
+            }""",
+        )
         // The fast occurrences' state was untouched by the abort of another refresh.
         val revenueState =
             page.evaluate(
                 "() => document.querySelector('[data-dp-viz=\\'revenue\\'] .dp-dashboard-status').getAttribute('data-dp-state')",
             ) as String
         (revenueState == "ready" || revenueState == "success") shouldBe true
+        // A genuine ALREADY-FINISHED abort against the real route: the finished refresh is the 404
+        // idempotence — no substring stub answers for the handler here.
+        val finished =
+            page.evaluate(
+                """async () => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const res = await fetch('/api/v1/dashboards/$board/runtime/refreshes/$refreshId/abort', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' },
+                    body: JSON.stringify({ instance_id: window.__dp.instance._instanceId }) });
+                  const doc = await res.json();
+                  return { status: res.status, code: (doc.error && doc.error.code) || null };
+                }""",
+            ) as Map<*, *>
+        (finished["status"] as Number).toInt() shouldBe 404
+        finished["code"] shouldBe "dashboard.refresh.not_found"
     }
 
     @Test
@@ -294,6 +334,108 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                 .setPath(
                     java.nio.file.Paths
                         .get("build", "reports", "dashboards-conformance-dark.png"),
+                ),
+        )
+    }
+
+    @Test
+    @Order(11)
+    fun `a parameterized dashboard renders controls, commits, executes the accepted revision and resets`() {
+        val root = ready("dpparam")
+        installHostPage()
+        val board = seedParameterisedBoard(root)
+        // Pass-through interception: the request BODIES are read for the assertions while the real
+        // routes flow untouched (the transport is the oracle, never a callback count).
+        val evaluateBodies = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val refreshBodies = java.util.Collections.synchronizedList(mutableListOf<String>())
+        page.route("**/runtime/parameters") { route ->
+            route.request().postData()?.let(evaluateBodies::add)
+            route.resume()
+        }
+        page.route("**/runtime/visualizations") { route ->
+            route.request().postData()?.let(refreshBodies::add)
+            route.resume()
+        }
+        openHost(board)
+        // The control rendered from the REAL evaluate response (flat definition + state), the
+        // default option selected.
+        page.waitForFunction(
+            "() => document.querySelectorAll('#board .dp-dashboard-parameter select').length === 1",
+        )
+        val selections =
+            page.evaluate(
+                "() => window.__dp.instance._adapter.readSelections()",
+            ) as Map<*, *>
+        selections["country"] shouldBe "USA"
+        page.waitForFunction("() => window.__dp.renders.length >= 1") // the initial action ran with the default
+        // The bootstrap evaluate POST carried the bootstrap intent and the empty first selections
+        // (the body string is parsed where a JSON parser already lives — the page itself).
+        val bootstrap =
+            page.evaluate(
+                """(body) => {
+                  const doc = JSON.parse(body);
+                  return { intent: doc.intent, selections: JSON.stringify(doc.selections) };
+                }""",
+                evaluateBodies.first(),
+            ) as Map<*, *>
+        bootstrap["intent"] shouldBe "bootstrap"
+        bootstrap["selections"] shouldBe "{}"
+        // Commit CAN through the control: one change gesture, then a programmatic refresh.
+        page.selectOption("#board .dp-dashboard-parameter select", "1") // the CAN option (its INDEX)
+        page.evaluate("() => window.__dp.instance.refresh({ scope: 'all' })")
+        page.waitForFunction("() => window.__dp.renders.length >= 2")
+        // The refresh carried the COMMITTED typed selection and the ACCEPTED revision (1).
+        val refresh =
+            page.evaluate(
+                """(body) => {
+                  const doc = JSON.parse(body);
+                  return { selections: JSON.stringify(doc.selections), revision: doc.parameter_revision };
+                }""",
+                refreshBodies.last(),
+            ) as Map<*, *>
+        refresh["selections"] shouldBe """{"country":"CAN"}"""
+        (refresh["revision"] as Number).toInt() shouldBe 1
+        // The pipeline EXECUTED with the selection: the chart's bound column carries CAN's data.
+        page.waitForFunction(
+            """() => {
+              const plot = document.querySelector('#board .js-plotly-plot');
+              return plot && plot.data && plot.data[0] && plot.data[0].x && plot.data[0].x[0] === 'CAN';
+            }""",
+        )
+        // Reset restores the APPLIED baseline: the control returns to the committed default.
+        page.evaluate("() => window.__dp.instance.reset()")
+        page.waitForFunction(
+            "() => window.__dp.instance._adapter.readSelections().country === 'USA'",
+        )
+    }
+
+    @Test
+    @Order(12)
+    fun `light and dark - the handback screenshots of the PARAMETERIZED board`() {
+        val root = ready("dpparamshot")
+        installHostPage(theme = "light")
+        val board = seedParameterisedBoard(root)
+        openHost(board)
+        page.waitForFunction("() => window.__dp.renders.length >= 1")
+        page.waitForTimeout(500.0) // Plotly's draw settle
+        page.screenshot(
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Paths
+                        .get("build", "reports", "dashboards-parameterized-light.png"),
+                ),
+        )
+        installHostPage(theme = "dark")
+        page.navigate("$baseUrl/test/dashboards/host?id=$board")
+        page.waitForFunction("() => window.__dp && window.__dp.renders && window.__dp.renders.length >= 1")
+        page.waitForTimeout(500.0)
+        page.screenshot(
+            com.microsoft.playwright.Page
+                .ScreenshotOptions()
+                .setPath(
+                    java.nio.file.Paths
+                        .get("build", "reports", "dashboards-parameterized-dark.png"),
                 ),
         )
     }

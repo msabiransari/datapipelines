@@ -264,6 +264,65 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         )
     }
 
+    /**
+     * A PARAMETERISED board (the L2 E2E's mould): one SELECT parameter with constants (no
+     * datasource behind the set), a source pipeline declaring the matching pipeline parameter, and
+     * the dashboard pinning the set — the flow the corrected client must drive end to end.
+     */
+    protected fun seedParameterisedBoard(root: String): String {
+        val datasource = registerSourceDatasource()
+        createTemplate("test/${root}_by_country.sql", "SELECT CAST(:country AS TEXT) AS c")
+        createPipeline(
+            "$root/pipelines/by_country",
+            "test/${root}_by_country.sql",
+            datasource,
+            parameters = """{"country":{"type":"STRING","required":true}}""",
+        )
+        releasePipelines(listOf("$root/pipelines/by_country"))
+        val setId = createAndReleaseParameterSet("$root/parameters/geo")
+        val chart =
+            seedVisualization("$root/visualizations/by_country", plotlyBody("""{"type":"bar","x":null,"y":null}""", "c", "c", "STRING"))
+        return seedDashboard(
+            "$root/boards/geo",
+            sources = listOf("s1" to "$root/pipelines/by_country"),
+            occurrences = listOf(Triple("countrychart", chart, "s1")),
+            initial = true,
+            parameterSet = setId,
+            sourceParameters = mapOf("s1" to """{"country":{"parameter":"country"}}"""),
+        )
+    }
+
+    /** The set through its REAL routes (create + release with the If-Match hash); returns its name. */
+    @Suppress("UNCHECKED_CAST")
+    private fun createAndReleaseParameterSet(name: String): String {
+        val result =
+            page.evaluate(
+                """async (args) => {
+                  const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
+                  const headers = { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' };
+                  const body = { name: args.name, display_name: 'Geography', description: 'L3a parameter fixture',
+                    parameters: [{ name: 'country', label: 'Country', type: 'STRING', kind: 'SELECT',
+                      cardinality: 'SINGLE', required: true,
+                      source: { constants: [
+                        { value: 'USA', display_value: 'United States', is_default: true },
+                        { value: 'CAN', display_value: 'Canada', is_default: false } ] },
+                      presentation: { control: 'dropdown' } }] };
+                  const created = await fetch('/api/v1/parameter-sets', { method: 'POST', credentials: 'same-origin',
+                    headers, body: JSON.stringify(body) });
+                  if (!created.ok) return { error: created.status + ' ' + (await created.text()).slice(0, 300) };
+                  const document_ = await created.json();
+                  const id = document_.data.id;
+                  const released = await fetch('/api/v1/parameter-sets/' + id + '/release', { method: 'POST',
+                    credentials: 'same-origin', headers: Object.assign({}, headers, { 'If-Match': document_.data.body_hash }), body: '' });
+                  if (!released.ok) return { error: 'release ' + released.status + ' ' + (await released.text()).slice(0, 300) };
+                  return { id: id };
+                }""",
+                mapOf("name" to name),
+            ) as Map<String, Any?>
+        check(result["error"] == null) { "the parameter set $name failed: ${result["error"]}" }
+        return name
+    }
+
     /** A board whose pinned visualization is a SURFACE trace — the server answers renderer.bundle "3d". */
     protected fun seedSurfaceBoard(root: String): String {
         val datasource = registerSourceDatasource()
@@ -356,6 +415,7 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         name: String,
         templateId: String,
         datasource: String,
+        parameters: String = "{}",
     ) {
         val nodes =
             """[{"id":"read","description":"the dashboard source","type":"DQL","source":"$datasource",""" +
@@ -366,10 +426,11 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                   const csrf = document.cookie.match(/(?:^|;\s*)dp_csrf=([^;]*)/);
                   const headers = { 'Content-Type': 'application/json', 'DP-CSRF-Token': csrf ? decodeURIComponent(csrf[1]) : '' };
                   const res = await fetch('/api/v1/pipelines', { method: 'POST', credentials: 'same-origin', headers,
-                    body: JSON.stringify({ name: args.name, display_name: args.name, description: 'L3a fixture', nodes: JSON.parse(args.nodes) }) });
+                    body: JSON.stringify({ name: args.name, display_name: args.name, description: 'L3a fixture',
+                      parameters: JSON.parse(args.parameters), nodes: JSON.parse(args.nodes) }) });
                   return { status: res.status, body: (await res.text()).slice(0, 300) };
                 }""",
-                mapOf("name" to name, "nodes" to nodes),
+                mapOf("name" to name, "nodes" to nodes, "parameters" to parameters),
             ) as Map<String, Any?>
         val status = (result["status"] as Number).toInt()
         check(status == 201 || status == 409) { "pipeline $name: $status ${result["body"]}" }
@@ -467,6 +528,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         sources: List<Pair<String, String>>,
         occurrences: List<Triple<String, String, String>>,
         initial: Boolean,
+        parameterSet: String? = null,
+        sourceParameters: Map<String, String> = emptyMap(),
     ): String {
         val id =
             java.util.UUID
@@ -475,7 +538,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
         val admin = currentUserId()
         val sourcesJson =
             sources.joinToString(",", "[", "]") { (source, pipeline) ->
-                """{"name":"$source","pipeline":{"name":"$pipeline","version":1},"parameters":{}}"""
+                """{"name":"$source","pipeline":{"name":"$pipeline","version":1},""" +
+                    """"parameters":${sourceParameters[source] ?: "{}"}}"""
             }
         val occurrencesJson =
             occurrences.joinToString(",", "[", "]") { (occurrence, visualization, source) ->
@@ -485,8 +549,15 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             }
         val actionsJson =
             if (initial) """[{"name":"refresh_all","type":"refresh","scope":"all","initial":true}]""" else "[]"
+        val head =
+            if (parameterSet == null) {
+                """{"display_name":"${name.substringAfterLast('/')}","""
+            } else {
+                """{"display_name":"${name.substringAfterLast('/')}","parameter_set":{"name":"$parameterSet","version":1},"""
+            }
         val body =
-            """{"display_name":"${name.substringAfterLast('/')}","sources":$sourcesJson,"visualizations":$occurrencesJson,""" +
+            head +
+                """"sources":$sourcesJson,"visualizations":$occurrencesJson,""" +
                 """"layout":{"columns":12,"grid":[]},"actions":$actionsJson}"""
         sql(
             "INSERT INTO dashboards (id, workspace_id, name, display_name, description, current_version, created_by) " +
