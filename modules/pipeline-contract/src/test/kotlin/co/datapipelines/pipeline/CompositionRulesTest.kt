@@ -2,10 +2,12 @@ package co.datapipelines.pipeline
 
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterConstraints
 import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -137,6 +139,194 @@ class CompositionRulesTest {
         validatorWith(resolver(child()))
             .validate(parent(parameters = supplied, parentParameters = parentParameters), workspaceId)
             .failures shouldContainExactly emptyList()
+    }
+
+    // ------------------------------------------------ #264: a literal is judged by the child's WHOLE declaration
+
+    @Test
+    fun `a same-type reference into a narrower child DECIMAL is pipeline_parameter_invalid - narrowing`() {
+        // The #264 defect: a parent DECIMAL(12,4) feeding a child DECIMAL(12,2) saved, and failed
+        // at run whenever the parent value had more than two places. The parent parameter's
+        // descriptor must widen losslessly into the child's (parameter-engine record §6.4).
+        val child = child(parameters = mapOf("amount" to Parameter(LogicalType.DECIMAL, required = true, precision = 12, scale = 2)))
+        val supplied = mapOf("amount" to Fixtures.json("\"\${anchor}\""))
+        val parentParameters = mapOf("anchor" to Parameter(LogicalType.DECIMAL, required = true, precision = 12, scale = 4))
+
+        val result =
+            validatorWith(resolver(child))
+                .validate(parent(parameters = supplied, parentParameters = parentParameters), workspaceId)
+
+        val failure = result.withCode(Validation.PIPELINE_PARAMETER_INVALID).single()
+        result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_INVALID)
+        failure.details["parameter"] shouldBe "amount"
+        failure.details["reference"] shouldBe "anchor"
+        failure.details["reason"] shouldBe "narrowing"
+        failure.message shouldContain "anchor"
+    }
+
+    @Test
+    fun `a same-type reference between identical descriptors passes`() {
+        val child = child(parameters = mapOf("amount" to Parameter(LogicalType.DECIMAL, required = true, precision = 12, scale = 4)))
+        val supplied = mapOf("amount" to Fixtures.json("\"\${anchor}\""))
+        val parentParameters = mapOf("anchor" to Parameter(LogicalType.DECIMAL, required = true, precision = 12, scale = 4))
+
+        validatorWith(resolver(child))
+            .validate(parent(parameters = supplied, parentParameters = parentParameters), workspaceId)
+            .failures shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `a lossless same-type widening passes - the child holds every digit the parent can carry`() {
+        // The one direction §6.4 admits at equal type: more integer digits AND at least the
+        // parent's fractional digits.
+        val child = child(parameters = mapOf("amount" to Parameter(LogicalType.DECIMAL, required = true, precision = 14, scale = 4)))
+        val supplied = mapOf("amount" to Fixtures.json("\"\${anchor}\""))
+        val parentParameters = mapOf("anchor" to Parameter(LogicalType.DECIMAL, required = true, precision = 12, scale = 2))
+
+        validatorWith(resolver(child))
+            .validate(parent(parameters = supplied, parentParameters = parentParameters), workspaceId)
+            .failures shouldContainExactly emptyList()
+    }
+
+    @Test
+    fun `a cross-type reference is still the type mismatch - widening across types is not adopted`() {
+        // INTEGER -> BIGINTEGER saves nothing today and must stay exactly that refusal: the run's
+        // wire encoder cannot carry a cross-type value (SubPipelineExecutionRunner re-encodes by
+        // the CHILD's type), so the save-time rule must not open that door.
+        val child = child(parameters = mapOf("count" to Parameter(LogicalType.BIGINTEGER, required = true)))
+        val supplied = mapOf("count" to Fixtures.json("\"\${anchor}\""))
+        val parentParameters = mapOf("anchor" to Parameter(LogicalType.INTEGER, required = true))
+
+        val result =
+            validatorWith(resolver(child))
+                .validate(parent(parameters = supplied, parentParameters = parentParameters), workspaceId)
+
+        result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
+    }
+
+    @Test
+    fun `a literal over the child's declared max is pipeline_parameter_invalid`() {
+        // The #264 defect: `-1` for a child declaring `max: 100` saved cleanly and failed only
+        // when the composition ran (the child's binder refused it). Save now judges the literal
+        // by the same declaration the run will.
+        val child =
+            child(
+                parameters =
+                    mapOf(
+                        "amount" to
+                            Parameter(
+                                LogicalType.INTEGER,
+                                required = true,
+                                constraints = ParameterConstraints(max = Fixtures.json("100")),
+                            ),
+                    ),
+            )
+        val supplied = mapOf("amount" to Fixtures.json("500"))
+
+        val result = validatorWith(resolver(child)).validate(parent(parameters = supplied), workspaceId)
+
+        val failure = result.withCode(Validation.PIPELINE_PARAMETER_INVALID).single()
+        result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_INVALID)
+        failure.path shouldBe "nodes[0].parameters.amount"
+        failure.details["node"] shouldBe "run_child"
+        failure.details["parameter"] shouldBe "amount"
+        failure.details["reason"] shouldBe "max"
+        // The refusal names the rule, never the value.
+        failure.message shouldNotContain "500"
+    }
+
+    @Test
+    fun `a literal failing the child's pattern is pipeline_parameter_invalid`() {
+        val child =
+            child(
+                parameters =
+                    mapOf(
+                        "code" to
+                            Parameter(
+                                LogicalType.STRING,
+                                required = true,
+                                constraints = ParameterConstraints(pattern = "[a-z]+"),
+                            ),
+                    ),
+            )
+        val supplied = mapOf("code" to Fixtures.json("\"123\""))
+
+        val result = validatorWith(resolver(child)).validate(parent(parameters = supplied), workspaceId)
+
+        val failure = result.withCode(Validation.PIPELINE_PARAMETER_INVALID).single()
+        failure.details["parameter"] shouldBe "code"
+        failure.details["reason"] shouldBe "pattern"
+    }
+
+    @Test
+    fun `a literal with more places than the child's DECIMAL scale is pipeline_parameter_invalid`() {
+        val child =
+            child(parameters = mapOf("amount" to Parameter(LogicalType.DECIMAL, required = true, precision = 12, scale = 2)))
+        val supplied = mapOf("amount" to Fixtures.json("1.234"))
+
+        val result = validatorWith(resolver(child)).validate(parent(parameters = supplied), workspaceId)
+
+        val failure = result.withCode(Validation.PIPELINE_PARAMETER_INVALID).single()
+        failure.details["parameter"] shouldBe "amount"
+        failure.details["reason"] shouldBe "scale"
+    }
+
+    @Test
+    fun `a list literal into a SINGLE parameter is pipeline_parameter_type_mismatch`() {
+        val supplied = mapOf("start_date" to Fixtures.json("[2026, 8, 1]"))
+
+        val result = validatorWith(resolver(child())).validate(parent(parameters = supplied), workspaceId)
+
+        result.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
+    }
+
+    @Test
+    fun `a literal satisfying the child's whole declaration saves`() {
+        val child =
+            child(
+                parameters =
+                    mapOf(
+                        "amount" to
+                            Parameter(
+                                LogicalType.INTEGER,
+                                required = true,
+                                constraints = ParameterConstraints(min = Fixtures.json("0"), max = Fixtures.json("100")),
+                            ),
+                    ),
+            )
+        val supplied = mapOf("amount" to Fixtures.json("50"))
+
+        validatorWith(resolver(child)).validate(parent(parameters = supplied), workspaceId).failures shouldContainExactly
+            emptyList()
+    }
+
+    @Test
+    fun `an unsound child declaration falls back to the type-only check`() {
+        // The child's own constraints are one save refuses (min > max): reported at the CHILD's
+        // save, so the composition judges only the type — never a declaration it cannot trust
+        // (the validator refuses an unsound declaration outright, the checkDefault mould).
+        val child =
+            child(
+                parameters =
+                    mapOf(
+                        "amount" to
+                            Parameter(
+                                LogicalType.INTEGER,
+                                required = true,
+                                constraints = ParameterConstraints(min = Fixtures.json("100"), max = Fixtures.json("1")),
+                            ),
+                    ),
+            )
+
+        // A type-broken literal is the type mismatch and nothing else.
+        val typeBroken =
+            validatorWith(resolver(child)).validate(parent(parameters = mapOf("amount" to Fixtures.json("\"abc\""))), workspaceId)
+        typeBroken.codes shouldContainExactly listOf(Validation.PIPELINE_PARAMETER_TYPE_MISMATCH)
+
+        // A type-sound literal saves — the unsound constraints are not this save's verdict.
+        val typeSound =
+            validatorWith(resolver(child)).validate(parent(parameters = mapOf("amount" to Fixtures.json("5"))), workspaceId)
+        typeSound.failures shouldContainExactly emptyList()
     }
 
     // ------------------------------------------------ 078 A5-composition: the three parent tiers

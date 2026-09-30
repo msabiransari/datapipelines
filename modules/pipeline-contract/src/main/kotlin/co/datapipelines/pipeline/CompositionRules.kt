@@ -3,6 +3,11 @@ package co.datapipelines.pipeline
 import co.datapipelines.pipeline.PipelineErrorCodes.Validation
 import co.datapipelines.typesystem.LogicalType
 import co.datapipelines.typesystem.ParameterCoercion
+import co.datapipelines.typesystem.ParameterDeclaration
+import co.datapipelines.typesystem.ParameterValueOutcome
+import co.datapipelines.typesystem.ParameterValueRule
+import co.datapipelines.typesystem.TypeDescriptor
+import co.datapipelines.typesystem.TypeWidening
 import com.fasterxml.jackson.databind.JsonNode
 
 /**
@@ -252,7 +257,7 @@ internal object CompositionRules {
             val declared = child.parameters[key]
             when {
                 declared != null -> {
-                    checkValue(pipeline, index, node, key, value, Target.parameter(declared.type), org, into)
+                    checkValue(pipeline, index, node, key, value, Target.parameter(declared), org, into)
                 }
 
                 key in childCalculatorKeys -> {
@@ -285,16 +290,22 @@ internal object CompositionRules {
     /**
      * The mapping target on the child side: a declared parameter or a CALCULATOR `context_key`
      * (078 A5-composition). [type] is null for an ANY-output kind — the value is typed only by
-     * the run, so the save-time check skips rather than guesses (the A6 convention).
+     * the run, so the save-time check skips rather than guesses (the A6 convention). A declared
+     * parameter also carries its WHOLE declaration (#264): the literal a node supplies is judged
+     * by the same rules the child's binder will apply at run, not by the type alone.
      */
     private class Target private constructor(
         val type: LogicalType?,
+        val declaration: ParameterDeclaration?,
         val description: String,
     ) {
-        companion object {
-            fun parameter(type: LogicalType): Target = Target(type, "child parameter")
+        /** The child descriptor the lossless rule reads, or null for a target with no declaration. */
+        fun descriptor(): TypeDescriptor? = declaration?.let { TypeDescriptor(it.type, it.precision, it.scale) }
 
-            fun calculatorOutput(type: LogicalType?): Target = Target(type, "child calculator output")
+        companion object {
+            fun parameter(declared: Parameter): Target = Target(declared.type, declared.declaration, "child parameter")
+
+            fun calculatorOutput(type: LogicalType?): Target = Target(type, null, "child calculator output")
         }
     }
 
@@ -308,9 +319,13 @@ internal object CompositionRules {
      *
      * [type] is null when the tier pins none — an ANY-output parent calculator key, typed only
      * by the run — and the type check then skips rather than guesses (the A6 convention).
+     * [descriptor] is non-null only for a parent PARAMETER tier (#264): a parameter declares
+     * precision and scale, and the lossless rule needs them; the other tiers carry a bare
+     * LogicalType and stay type-only.
      */
     private class ParentTier private constructor(
         val type: LogicalType?,
+        val descriptor: TypeDescriptor?,
         val description: String,
     ) {
         companion object {
@@ -322,19 +337,24 @@ internal object CompositionRules {
             ): ParentTier? =
                 when {
                     name in pipeline.parameters -> {
-                        ParentTier(pipeline.parameters.getValue(name).type, "parent parameter '$name'")
+                        val declared = pipeline.parameters.getValue(name)
+                        ParentTier(
+                            declared.type,
+                            TypeDescriptor(declared.type, declared.precision, declared.scale),
+                            "parent parameter '$name'",
+                        )
                     }
 
                     name in calculatorOutputs -> {
-                        ParentTier(calculatorOutputs.getValue(name), "parent calculator output '$name'")
+                        ParentTier(calculatorOutputs.getValue(name), null, "parent calculator output '$name'")
                     }
 
                     name in ContextKeys.PLATFORM_TYPES -> {
-                        ParentTier(ContextKeys.PLATFORM_TYPES.getValue(name), "platform key '$name'")
+                        ParentTier(ContextKeys.PLATFORM_TYPES.getValue(name), null, "platform key '$name'")
                     }
 
                     name in org.keys -> {
-                        ParentTier(LogicalType.STRING, "org key '$name'")
+                        ParentTier(LogicalType.STRING, null, "org key '$name'")
                     }
 
                     else -> {
@@ -388,21 +408,130 @@ internal object CompositionRules {
                         "reference" to parentName,
                     ),
                 )
+                return
+            }
+            // #264's tightening — identical type is no longer the whole rule when BOTH sides carry
+            // a descriptor (a parent PARAMETER into a child PARAMETER): the parent's must widen
+            // losslessly into the child's (parameter-engine record §6.4), or the parent's value
+            // can lose digits the child's binder never sees at save. Tiers without a descriptor —
+            // a calculator output, an org/platform key — are typed only by their LogicalType and
+            // stay type-only, as today.
+            if (narrowing(tier, target)) {
+                into.add(
+                    Validation.PIPELINE_PARAMETER_INVALID,
+                    path,
+                    "Node '${node.id.truncateForError()}' maps '\${$parentName}' onto ${target.description} " +
+                        "'${key.truncateForError()}', but ${tier?.description} (${describe(tier?.descriptor)}) does not " +
+                        "widen losslessly into the child's declared ${describe(target.descriptor())}; the parent's value " +
+                        "could lose digits at run (reason: narrowing).",
+                    mapOf(
+                        "node" to node.id.truncateForError(),
+                        "parameter" to key.truncateForError(),
+                        "reference" to parentName,
+                        "reason" to "narrowing",
+                    ),
+                )
             }
             return
         }
         // A literal against an ANY-output child target takes any JSON scalar — the same reading
         // the execute-time binder gives an ANY-output key (078 A5).
         val targetType = target.type ?: return
+        val declaration = target.declaration
+        // A child calculator/transform key is typed by the run's contract the body does not carry:
+        // the type check is all this surface can judge (the A6 convention).
+        if (declaration == null) {
+            typeOnlyCheck(index, node, key, value, targetType, target.description, into)
+            return
+        }
+        // #264 — the child's WHOLE declaration judges the literal, the §12.7 `checkDefault` mould:
+        // a value the child's binder would refuse at run (`pipeline_parameter_unmapped`'s twin at
+        // the other end of the supply) is refused at save. The shared validator is the judge, so a
+        // literal and the default it sits beside are one rule apart, never two.
+        val problems = VALIDATOR.checkDeclaration(declaration)
+        if (problems.isNotEmpty()) {
+            // The child's own constraints are one save refuses — reported at the CHILD's save, so
+            // this composition judges only the type and never a declaration it cannot trust (the
+            // validator refuses an unsound declaration outright, `CalculatorInputResolver`'s
+            // convention).
+            typeOnlyCheck(index, node, key, value, targetType, target.description, into)
+            return
+        }
+        when (val judged = VALIDATOR.validate(declaration, value)) {
+            is ParameterValueOutcome.Accepted -> {
+                Unit
+            }
+
+            is ParameterValueOutcome.Refused -> {
+                when (judged.refusal.rule) {
+                    ParameterValueRule.CONSTRAINT_VIOLATION -> {
+                        into.add(
+                            Validation.PIPELINE_PARAMETER_INVALID,
+                            path,
+                            "Value for child parameter '${key.truncateForError()}' breaks the child's declared rules: " +
+                                "${judged.refusal.message}.",
+                            mapOf(
+                                "node" to node.id.truncateForError(),
+                                "parameter" to key.truncateForError(),
+                                "reason" to judged.refusal.reason,
+                            ),
+                        )
+                    }
+
+                    ParameterValueRule.INVALID_VALUE_TYPE, ParameterValueRule.REQUIRED_MISSING -> {
+                        typeMismatch(
+                            index,
+                            node,
+                            key,
+                            targetType,
+                            target.description,
+                            judged.refusal.message,
+                            into,
+                        )
+                    }
+                }
+            }
+
+            // A JSON null literal is answered unsupplied by the shared policy (P25) — but a
+            // composition mapping supplies the key, and the child would bind "not supplied" at
+            // run. A null is not a wire value for any type, so today's type refusal stands.
+            ParameterValueOutcome.Unsupplied -> {
+                typeOnlyCheck(index, node, key, value, targetType, target.description, into)
+            }
+        }
+    }
+
+    /** The pre-#264 check, kept for the targets with no declaration to judge: the type alone. */
+    private fun typeOnlyCheck(
+        index: Int,
+        node: Node,
+        key: String,
+        value: JsonNode,
+        targetType: LogicalType,
+        description: String,
+        into: FailureCollector,
+    ) {
         val outcome = ParameterCoercion.coerce(targetType, value)
         if (outcome is ParameterCoercion.Outcome.Rejected) {
-            into.add(
-                Validation.PIPELINE_PARAMETER_TYPE_MISMATCH,
-                path,
-                "Value for ${target.description} '${key.truncateForError()}' does not match its declared type: ${outcome.reason}.",
-                mapOf("node" to node.id.truncateForError(), "parameter" to key.truncateForError(), "type" to targetType.wire),
-            )
+            typeMismatch(index, node, key, targetType, description, outcome.reason, into)
         }
+    }
+
+    private fun typeMismatch(
+        index: Int,
+        node: Node,
+        key: String,
+        targetType: LogicalType,
+        description: String,
+        reason: String,
+        into: FailureCollector,
+    ) {
+        into.add(
+            Validation.PIPELINE_PARAMETER_TYPE_MISMATCH,
+            "nodes[$index].parameters.${key.truncateForError()}",
+            "Value for $description '${key.truncateForError()}' does not match its declared type: $reason.",
+            mapOf("node" to node.id.truncateForError(), "parameter" to key.truncateForError(), "type" to targetType.wire),
+        )
     }
 
     /**
@@ -419,6 +548,28 @@ internal object CompositionRules {
         val targetType = target.type ?: return false
         return tierType != targetType
     }
+
+    /**
+     * #264's tightening, the `TypeWidening` half: both sides carry a descriptor (a parent
+     * PARAMETER into a child PARAMETER), the types are identical (the `mismatched` gate above
+     * settled everything else), and the parent's does not widen losslessly into the child's —
+     * `DECIMAL(12,4)` into `DECIMAL(12,2)` — the parent's value can lose digits at run.
+     * Cross-type pairs are NOT this rule: they are the type mismatch above, because the run's
+     * wire encoder re-encodes by the child's type and cannot carry a cross-type value.
+     */
+    private fun narrowing(
+        tier: ParentTier?,
+        target: Target,
+    ): Boolean {
+        val from = tier?.descriptor ?: return false
+        val to = target.descriptor() ?: return false
+        if (from.type != to.type) return false
+        return !TypeWidening.isLossless(from, to)
+    }
+
+    /** `(wire(precision,scale))` — descriptors in a message, never a value. */
+    private fun describe(descriptor: TypeDescriptor?): String =
+        descriptor?.let { "${it.type.wire}(${it.precision ?: "unbounded"},${it.scale ?: "approximate"})" } ?: "an untyped key"
 
     /**
      * §12.9 `pipeline_output_on_sideeffect_child`: the `output` block is permitted only when the
@@ -502,4 +653,7 @@ internal object CompositionRules {
 
     /** §12.9 — the whole `${ref}` reference form; a value is a literal or this, nothing in between. */
     private val PARAMETER_REFERENCE = Regex("^\\$\\{([a-z_][a-z0-9_]*)\\}$")
+
+    /** The shared validator (P28), the same judge [ParameterRules]' defaults answer to. */
+    private val VALIDATOR = PipelineParameterValidator.validator
 }
