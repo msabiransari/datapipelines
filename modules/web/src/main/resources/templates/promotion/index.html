@@ -33,11 +33,20 @@
       <th:block th:if="${code == 'nothing_selected'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'Select at least one pipeline, parameter set, visualization or dashboard first.')}"></div></th:block>
       <th:block th:if="${code == 'not_released'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'One of the selected pipelines has no released version. Drafts are never promoted — release it first.')}"></div></th:block>
       <th:block th:if="${code == 'not_newer'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target already serves that version. Nothing changed here since the last promotion.')}"></div></th:block>
-      <th:block th:if="${code == 'missing_datasources'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target has no datasource by one of the names these pipelines reference. Register it there — with the target&#39;s own credentials — and try again.')}"></div></th:block>
+      <th:block th:if="${code == 'missing_datasources'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target has no datasource by one of the names these pipelines reference. Register it there — with the target’s own credentials — and try again.')}"></div></th:block>
       <th:block th:if="${code == 'target_is_authoring'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target has authoring enabled and does not accept promoted content. Set authoring-enabled=false there.')}"></div></th:block>
       <th:block th:if="${code == 'target_unreachable'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target did not answer. Check that it is running and that the base URL is right.')}"></div></th:block>
-      <th:block th:if="${code == 'key_invalid'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target refused this deployment&#39;s promotion key. The same secret must be set on both sides.')}"></div></th:block>
+      <th:block th:if="${code == 'key_invalid'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target refused this deployment’s promotion key. The same secret must be set on both sides.')}"></div></th:block>
       <th:block th:if="${code == 'missing_template' or code == 'missing_datasource' or code == 'version_conflict' or code == 'hash_mismatch'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', ${'The target refused the batch and rolled all of it back. Its own refusal code is ' + code + '.'})}"></div></th:block>
+      <!-- A2 (L1c-c): the receiver's count bounds and strict readers refuse body_invalid — an unmapped
+           key rendered NOTHING (the layout's "safe direction"), which for a refused batch is silence
+           about a push that did not happen. The toast points the operator at the REST answer, which
+           carries the bound's count, max and config key. -->
+      <!-- A2 (L1c-c): the receiver's count bounds and strict readers refuse body_invalid — an unmapped
+           key rendered NOTHING (the layout's "safe direction"), which for a refused batch is silence
+           about a push that did not happen. The toast points the operator at the REST answer, which
+           carries the bound's count, max and config key. -->
+      <th:block th:if="${code == 'body_invalid'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target’s validation refused the batch — for example a count bound on the batch’s size — and rolled all of it back. Nothing was pushed. The REST promotion response names the bound, the count and the key.')}"></div></th:block>
       <th:block th:if="${code == 'session_required'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'Promoting needs a signed-in session — an API key cannot drive a deployment-to-deployment push.')}"></div></th:block>
       <th:block th:if="${code == 'not_found'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target has no workspace by this name. Create it there first.')}"></div></th:block>
     </th:block>

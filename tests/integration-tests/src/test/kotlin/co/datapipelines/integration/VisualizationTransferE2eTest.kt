@@ -35,7 +35,12 @@ import java.util.UUID
  * The L1c acceptance (#10 L1c, the spec's §12): a REAL visualization export envelope travels — REST export, REST
  * import (whole, idempotent, the C29 refusal with its templates staying), and a promotion batch received by a REAL
  * receiver deployment — and the two transfer families land whole inside the receive's ONE transaction, or not at
- * all. The eight cases mirror [ParameterSetTransferE2eTest]'s; the mould's order numbers are kept.
+ * all. The eight cases mirror [ParameterSetTransferE2eTest]'s; the mould's order numbers are kept. The L1c-c round
+ * adds Orders 10–13: the receive's refused-dashboard rollback witnessed end to end for the first time (A1 —
+ * earlier members land, the dashboard refuses on landing, every preceding write is absent; a positive control
+ * lands the same members without the dashboard), and the aggregate batch ceiling proven both ways (A2 — two
+ * individually valid dashboards whose pins together exceed the configured ceiling refuse whole; a genuine batch
+ * at exactly the ceiling lands whole).
  *
  * ## Three deployments, because ids are global (P24)
  * The artifact tables' ids are PRIMARY KEYS of the whole server (C29), so a kept id can land only once per
@@ -50,6 +55,7 @@ import java.util.UUID
  */
 @ExtendWith(SpringExtension::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@Suppress("LargeClass") // one ordered three-deployment scenario; splitting it would boot the three apps twice
 @SpringBootTest(
     classes = [DatapipelinesApplication::class],
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -312,7 +318,212 @@ class VisualizationTransferE2eTest {
         }
     }
 
+    @Test
+    @Order(10)
+    fun `a batch that lands a template and a visualization then refuses its dashboard leaves nothing - the whole rollback witnessed`() {
+        // A1 of the L1c-c round — the receive's refused-dashboard rollback, witnessed END TO END for the
+        // first time (the L1c handback's claim was retracted; this case is its witness). WS_PROMO2 is empty
+        // (Order 7's C29 batch rolled back whole). The batch brings a template and a template-backed
+        // visualization that WOULD land (VIZ_GHOST: its id has never landed on this receiver), then the
+        // dashboard of Order 9 — whose PIPELINE pin exists on the receiver only in WS_PROMO — so the
+        // dashboard refuses `dashboard.import.missing_dependency` ON LANDING, inside the transaction,
+        // after earlier members were written.
+        val batch =
+            setTemplates(
+                batchOf(WS_PROMO2, visualizations = listOf(payloadOf(VIZ_GHOST_NAME)), dashboards = listOf(dashboardPayload())),
+                templateNodes(TRANSFORM to 1),
+            )
+        val (status, refused) = pushBatch(batch)
+
+        withClue("the dashboard's own landing refusal: $refused") { status shouldBe 400 }
+        errorCode(refused) shouldBe "dashboard.import.missing_dependency"
+
+        // The residue, against the receiver's DATABASE: no template, no visualization, no version row, no
+        // dashboard, no current pointer — and no `auth.promotion.accepted` audit row (that row is written
+        // only after the transaction commits).
+        val receiverDb = checkNotNull(receiver).jdbc
+        val ws = receiverDb.scalar("SELECT id::text FROM workspaces WHERE name = '$WS_PROMO2'")
+        withClue("nothing of the batch may have survived the rollback") {
+            receiverDb.scalar("SELECT count(*) FROM templates WHERE workspace_id::text = '$ws'") shouldBe "0"
+            receiverDb.scalar("SELECT count(*) FROM visualizations WHERE workspace_id::text = '$ws'") shouldBe "0"
+            receiverDb
+                .scalar(
+                    "SELECT count(*) FROM visualization_versions v JOIN visualizations s ON s.id = v.visualization_id" +
+                        " WHERE s.workspace_id::text = '$ws'",
+                ) shouldBe
+                "0"
+            receiverDb.scalar("SELECT count(*) FROM dashboards WHERE workspace_id::text = '$ws'") shouldBe "0"
+            receiverDb
+                .scalar(
+                    "SELECT count(*) FROM audit_log WHERE event = 'auth.promotion.accepted' AND details_json->>'workspace' = '$WS_PROMO2'",
+                ) shouldBe
+                "0"
+        }
+    }
+
+    @Test
+    @Order(11)
+    fun `the same batch without its dashboard is the positive control - the earlier members land and stay`() {
+        // The witness's control: the identical template + visualization (Order 10's batch minus its
+        // refusing dashboard) is received whole into the SAME workspace — proving Order 10's emptiness is
+        // the rollback's, not the workspace's.
+        val batch =
+            setTemplates(batchOf(WS_PROMO2, visualizations = listOf(payloadOf(VIZ_GHOST_NAME))), templateNodes(TRANSFORM to 1))
+        val (status, applied) = pushBatch(batch)
+
+        withClue("the control batch must be received: $applied") { status shouldBe 200 }
+        applied.path("data").path("visualizations").asInt() shouldBe 1
+
+        val receiverDb = checkNotNull(receiver).jdbc
+        val ws = receiverDb.scalar("SELECT id::text FROM workspaces WHERE name = '$WS_PROMO2'")
+        receiverDb.scalar("SELECT count(*) FROM templates WHERE workspace_id::text = '$ws'") shouldBe "1"
+        receiverDb.scalar("SELECT count(*) FROM visualizations WHERE workspace_id::text = '$ws'") shouldBe "1"
+        receiverDb
+            .scalar(
+                "SELECT count(*) FROM audit_log WHERE event = 'auth.promotion.accepted' AND details_json->>'workspace' = '$WS_PROMO2'",
+            ) shouldBe
+            "1"
+    }
+
+    @Test
+    @Order(12)
+    fun `two individually valid dashboards whose pins together exceed the ceiling refuse the whole batch - the aggregate bound`() {
+        // A2 of the L1c-c round — the aggregate honesty, proven: AGG_A (30 distinct pins) and AGG_B (21)
+        // are each valid on their own (AGG_A lands whole in Order 13), but their batches' visualization
+        // arm would carry 51 distinct entries — over the configured 50. The receiver refuses BEFORE the
+        // transaction opens, naming the configured key, and NOTHING of either dashboard lands.
+        seedAggregateFixtures()
+
+        val entries = AGG_PINS.map { payloadOf(it) }
+        val batch =
+            batchOf(
+                WS_PROMO,
+                visualizations = entries,
+                dashboards = listOf(dashboardPayloadByName(AGG_A), dashboardPayloadByName(AGG_B)),
+            )
+        val (status, refused) = pushBatch(batch)
+
+        withClue("the aggregate refusal must name the configured ceiling: $refused") { status shouldBe 400 }
+        errorCode(refused) shouldBe "visualization.validation.body_invalid"
+        val details = refused.path("error").path("details")
+        details.path("reason").asText() shouldBe "too_many"
+        details.path("count").asInt() shouldBe AGG_PINS.size
+        details.path("max").asInt() shouldBe 50
+        details.path("config_key").asText() shouldBe
+            "datapipelines.visualization.max-visualizations-per-dashboard"
+
+        val receiverDb = checkNotNull(receiver).jdbc
+        val ws = receiverDb.scalar("SELECT id::text FROM workspaces WHERE name = '$WS_PROMO'")
+        withClue("no partial writes: neither dashboard's pins nor the dashboards themselves may land") {
+            val nameList = AGG_PINS.joinToString(",") { "'$it'" }
+            receiverDb
+                .scalar(
+                    "SELECT count(*) FROM visualizations WHERE workspace_id::text = '$ws' AND name IN ($nameList)",
+                ) shouldBe
+                "0"
+            receiverDb
+                .scalar(
+                    "SELECT count(*) FROM dashboards WHERE workspace_id::text = '$ws'" +
+                        " AND name IN ('$AGG_A', '$AGG_B', '$AGG_C')",
+                ) shouldBe
+                "0"
+        }
+    }
+
+    @Test
+    @Order(13)
+    fun `a genuine batch at the configured ceiling lands whole - the aggregate bound's positive control`() {
+        // The control for Order 12: the same two-dashboard scenario trimmed to EXACTLY the configured
+        // ceiling (50 distinct entries: AGG_A's 30 pins + AGG_C's 20) is received whole — every pin, both
+        // dashboards, judged RELEASED in-transaction. The bound is the operator's ceiling, not a refusal
+        // of multi-dashboard batches.
+        val entries = AGG_PINS.dropLast(1).map { payloadOf(it) }
+        val batch =
+            batchOf(
+                WS_PROMO,
+                visualizations = entries,
+                dashboards = listOf(dashboardPayloadByName(AGG_A), dashboardPayloadByName(AGG_C)),
+            )
+        val (status, applied) = pushBatch(batch)
+
+        withClue("the at-cap batch must be received whole: $applied") { status shouldBe 200 }
+        applied.path("data").path("visualizations").asInt() shouldBe 50
+        applied.path("data").path("dashboards").asInt() shouldBe 2
+
+        val receiverDb = checkNotNull(receiver).jdbc
+        val ws = receiverDb.scalar("SELECT id::text FROM workspaces WHERE name = '$WS_PROMO'")
+        withClue("all fifty entries and both dashboards must be live in the promotion target") {
+            val atCapList = AGG_PINS.dropLast(1).joinToString(",") { "'$it'" }
+            receiverDb
+                .scalar(
+                    "SELECT count(*) FROM visualizations WHERE workspace_id::text = '$ws' AND name IN ($atCapList)",
+                ) shouldBe
+                "50"
+            receiverDb
+                .scalar(
+                    "SELECT count(*) FROM dashboards WHERE workspace_id::text = '$ws' AND name IN ('$AGG_A', '$AGG_C')",
+                ) shouldBe
+                "2"
+        }
+    }
+
     // ---- fixture helpers ----------------------------------------------------------------------
+
+    /**
+     * The aggregate-bound fixtures (Orders 12–13): 51 released plain visualizations plus THREE source
+     * dashboards over them — [Companion.AGG_A] pinning the first 30, [Companion.AGG_B] the last 21
+     * (30 + 21 = 51, over the ceiling), [Companion.AGG_C] the middle 20 (30 + 20 = 50, exactly at it).
+     * Created through the real REST save path; releases are SQL-stamped (the class KDoc's rule).
+     */
+    private fun seedAggregateFixtures() {
+        AGG_PINS.forEach { name -> createReleasedVisualization(name, VIZ_PLAIN_DOCUMENT) }
+        createReleasedAggregateDashboard(AGG_A, AGG_PINS.take(30))
+        createReleasedAggregateDashboard(AGG_B, AGG_PINS.takeLast(21))
+        createReleasedAggregateDashboard(AGG_C, AGG_PINS.drop(30).dropLast(1))
+    }
+
+    private fun createReleasedAggregateDashboard(
+        name: String,
+        pins: List<String>,
+    ) {
+        val (status, created) = rest("POST", "/api/v1/dashboards", sessionFor(WS_SOURCE), aggDashboardDocument(name, pins))
+        withClue("aggregate dashboard $name must create: $created") { status shouldBe 201 }
+        releaseBySql(created, "dashboards", "dashboard_versions", "dashboard_id", name)
+    }
+
+    /** A valid dashboard document over [pins] distinct visualizations, all fed by the one promoted pipeline. */
+    private fun aggDashboardDocument(
+        name: String,
+        pins: List<String>,
+    ): String {
+        val occurrences =
+            pins.mapIndexed { index, pin ->
+                """{"name": "occ_$index", "type": "visualization", "visualization": {"name": "$pin", "version": 1},
+                   "inputs": {"revenue": {"source": "revenue_source"}}, "timeout_seconds": 120}"""
+            }
+        val grid =
+            pins.mapIndexed { index, _ ->
+                """{"name": "occ_$index", "x": ${if (index % 2 == 0) 0 else 6}, "y": ${(index / 2) * 4}, "w": 6, "h": 4}"""
+            } +
+                """{"name": "refresh_button", "x": 0, "y": ${(pins.size / 2 + 1) * 4}, "w": 2, "h": 1}"""
+        return """
+            {"name": "$name", "display_name": "Aggregate bound", "description": "the aggregate ceiling's fixtures",
+             "sources": [{"name": "revenue_source", "pipeline": {"name": "$PIPELINE", "version": 1}, "parameters": {}}],
+             "visualizations": [${occurrences.joinToString(",")}],
+             "actions": [{"name": "refresh_overview", "type": "refresh", "scope": "targets", "targets": ["occ_0"], "initial": true}],
+             "action_controls": [{"name": "refresh_button", "type": "action_control", "action": "refresh_overview", "label": "Apply"}],
+             "layout": {"grid": [${grid.joinToString(",")}], "columns": 12},
+             "timeouts": {"refresh_seconds": 300}}
+            """.trimIndent()
+    }
+
+    /** The wire NODE of [name]'s released dashboard — the sender's exact shape, with its verified hash. */
+    private fun dashboardPayloadByName(name: String): JsonNode {
+        val id = sourceJdbc.scalar("SELECT id::text FROM dashboards WHERE name = '$name'")
+        val (status, body) = rest("GET", "/api/v1/dashboards/$id/export", sessionFor(WS_SOURCE))
+        withClue("dashboard $name export must answer: $body") { status shouldBe 200 }
+        return body.path("data").path("dashboard")
+    }
 
     /** The batch's template closure over one entry's transform pin — what the real sender merges. */
     private fun JsonNode.templatePins(mapper: ObjectMapper): com.fasterxml.jackson.databind.node.ArrayNode {
@@ -647,6 +858,12 @@ class VisualizationTransferE2eTest {
         val DASH_NAME = "vt$RUN/dashboards/revenue_overview"
         val PIPELINE = "vt$RUN/pipelines/revenue_source"
         val SET_NAME = "vt$RUN/acme/region_filters"
+
+        /** The aggregate-bound fixtures (Orders 12–13): 51 distinct pins across three source dashboards. */
+        val AGG_PINS: List<String> = (0 until 51).map { "vt$RUN/charts/agg_$it" }
+        val AGG_A = "vt$RUN/dashboards/agg_a"
+        val AGG_B = "vt$RUN/dashboards/agg_b"
+        val AGG_C = "vt$RUN/dashboards/agg_c"
 
         /** The row-mode transform body: the rows array, one output row per input row. */
         const val TRANSFORM_BODY = """[ rows.{"month_labels": month, "amounts": amount} ]"""

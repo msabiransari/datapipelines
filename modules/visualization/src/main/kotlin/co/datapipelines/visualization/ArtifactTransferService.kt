@@ -263,7 +263,12 @@ class ArtifactTransferService(
      *  O7: the array's COUNT is bounded before any member is parsed or bound — a dashboard's bundle by
      *  `max-visualizations-per-dashboard` (the cap its own body's occurrences obey), a template closure by
      *  the same key, the transfer families' one envelope ceiling. The refusal is the family's `body_invalid`
-     *  with the reader's `too_many` shape (`count`, `max`, `config_key`), before any member's work. */
+     *  with the reader's `too_many` shape (`count`, `max`, `config_key`), before any member's work. The
+     *  ceiling is AGGREGATE (the L1c-c correction): it caps each whole envelope array on TOP of the
+     *  per-document bound the key's name describes, and the promotion batch's whole arms beside them —
+     *  two individually valid artifacts can together exceed it, and such a batch refuses whole. The value
+     *  is the operator's configured [VisualizationConfig] — the production bean factory passes it
+     *  explicitly (C1 of the L1c-c round; the wiring test proves the override both ways). */
     private fun optionalArray(
         root: ObjectNode,
         key: String,

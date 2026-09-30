@@ -131,9 +131,12 @@ class PromotionReceiveService(
             }
 
         // O7 (the L1c pass) — the batch's two family lists are count-bounded BEFORE the transaction opens
-        // and before any member binds: `max-visualizations-per-dashboard` is the transfer families' one
-        // envelope ceiling (a dashboard body may not carry more occurrences, so no genuine batch arm
-        // exceeds it), and the refusal is the family's body_invalid with the reader's `too_many` shape.
+        // and before any member binds. Honest aggregate wording (the L1c-c round): the key is
+        // `max-visualizations-per-dashboard`, whose own document bound caps a dashboard's OCCURRENCES — the
+        // arm bound is an ADDITIONAL ceiling this design puts on each WHOLE batch arm, not a consequence of
+        // the document bound: two individually valid dashboards of 30 pins each can carry 60 distinct
+        // entries, and THIS bound refuses such a batch whole (no partial writes, no automatic split —
+        // [boundTransferArms] states it).
         boundTransferArms(batch)
 
         transactionTemplate.executeWithoutResult {
@@ -218,7 +221,12 @@ class PromotionReceiveService(
      * and validating here means the just-landed templates and pipelines ARE what the
      * import lens resolves against. A shape refusal (the family's body_invalid, bound
      * through the READER) or a dependency refusal rolls the WHOLE batch back — the C36
-     * property, proven at E2E level for a refused dashboard.
+     * property. **Correction (L1c-c):** an earlier revision of this KDoc claimed that case
+     * was proven at E2E level for a refused dashboard; it was not — no receive case refused
+     * a dashboard at all until VisualizationTransferE2eTest's
+     * `a batch that lands a template and a visualization then refuses its dashboard leaves
+     * nothing - the whole rollback witnessed`, which witnesses it now (earlier members land,
+     * the dashboard refuses on landing, every preceding write is absent).
      */
     private fun landTransferFamilies(
         batch: PromotionWire.Batch,
@@ -237,6 +245,14 @@ class PromotionReceiveService(
      * O7 — the batch's two family lists, count-bounded before any member binds. A member's own shape is
      * the reader's business (the ONE entry bind); the LIST's size is the receiver's availability, judged
      * here before the transaction opens so a pathological batch costs one size comparison, not N binds.
+     *
+     * **The ceiling is AGGREGATE (the L1c-c correction):** `max-visualizations-per-dashboard` is re-used
+     * here as the transfer families' one ceiling, so it caps each WHOLE arm (and, on the import surfaces,
+     * each whole envelope array) on TOP of the per-document bound its name describes. Two dashboards that
+     * are each individually valid — 30 distinct pins apiece under a 50 ceiling — can together present 60
+     * entries, and this bound refuses that batch WHOLE: one refusal naming the configured key, nothing
+     * landed, no automatic split. A separate aggregate knob was considered and NOT added (the bounded
+     * correction keeps one key; a follow-up may propose one with tradeoffs).
      */
     private fun boundTransferArms(batch: PromotionWire.Batch) {
         val max = visualizationConfig.maxVisualizationsPerDashboard
