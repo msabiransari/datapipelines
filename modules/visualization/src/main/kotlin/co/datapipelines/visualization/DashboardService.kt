@@ -124,11 +124,35 @@ class DashboardService(
         actor: UUID,
     ): ArtifactVersionDetail = lifecycle.discardVersion(workspaceId, id, version, actor)
 
+    /**
+     * Restore DISCARDED version [version] — after its DEPENDENCIES are judged against today's state (#320, D7). While a
+     * version is DISCARDED it protects nothing (the pin guards count LIVE versions), so the pipeline release, the set
+     * version or the visualization version it pins may have been discarded from under it; restoring it blind would
+     * bring back a RELEASED version the validator refuses on its own (`dependency_not_found`) and the runtime refuses to
+     * serve. Only the dependency failures block a restore — a rule that tightened since (a bound, a name) is not a
+     * dangling pin. A wrong-state version falls through to the lifecycle's own refusals, unchanged.
+     */
     fun restoreVersion(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): ArtifactVersionDetail = lifecycle.restoreVersion(workspaceId, id, version)
+    ): ArtifactVersionDetail {
+        lifecycle.requireAuthoring()
+        val stored = repository.findVersion(workspaceId, id, version)
+        if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPins(workspaceId, id, stored.body)
+        return lifecycle.restoreVersion(workspaceId, id, version)
+    }
+
+    private fun refuseDanglingPins(
+        workspaceId: UUID,
+        id: UUID,
+        body: DashboardBody,
+    ) {
+        val record = repository.findRecord(workspaceId, id) ?: return
+        val invalid = validator.validate(workspaceId, DashboardDocument(record.name, body)) as? ArtifactValidation.Invalid ?: return
+        val dangling = invalid.result.failures.filter { it.code == DashboardErrorCodes.DEPENDENCY_NOT_FOUND }
+        if (dangling.isNotEmpty()) throw ArtifactValidationException(ValidationResult(dangling), DashboardErrorCodes.BODY_INVALID)
+    }
 
     fun switchCurrent(
         workspaceId: UUID,

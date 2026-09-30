@@ -149,11 +149,37 @@ class VisualizationService(
         return lifecycle.discardVersion(workspaceId, id, version, actor)
     }
 
+    /**
+     * Restore DISCARDED version [version] — after its transform template pin is judged against today's state (#320, D7).
+     * A DISCARDED version protects nothing, so the template version it pins may have been discarded meanwhile; restoring
+     * it blind would bring back a RELEASED visualization whose transform cannot resolve. The refusal is the family's own
+     * (`visualization.validation.transform_binding_invalid`, `reason: template_not_found` or `template_version_not_found`);
+     * any other rule that tightened since is not a dangling pin and does not block a restore.
+     */
     fun restoreVersion(
         workspaceId: UUID,
         id: UUID,
         version: Int,
-    ): ArtifactVersionDetail = lifecycle.restoreVersion(workspaceId, id, version)
+    ): ArtifactVersionDetail {
+        lifecycle.requireAuthoring()
+        val stored = repository.findVersion(workspaceId, id, version)
+        if (stored != null && stored.detail.status == PipelineVersionStatus.DISCARDED) refuseDanglingPin(workspaceId, id, stored.body)
+        return lifecycle.restoreVersion(workspaceId, id, version)
+    }
+
+    private fun refuseDanglingPin(
+        workspaceId: UUID,
+        id: UUID,
+        body: VisualizationBody,
+    ) {
+        val record = repository.findRecord(workspaceId, id) ?: return
+        val invalid = validator.validate(workspaceId, VisualizationDocument(record.name, body)) as? ArtifactValidation.Invalid ?: return
+        val dangling =
+            invalid.result.failures.filter {
+                it.code == VisualizationErrorCodes.TRANSFORM_BINDING_INVALID && it.details["reason"] in MISSING_TEMPLATE_REASONS
+            }
+        if (dangling.isNotEmpty()) throw ArtifactValidationException(ValidationResult(dangling), VisualizationErrorCodes.BODY_INVALID)
+    }
 
     fun switchCurrent(
         workspaceId: UUID,
