@@ -84,8 +84,11 @@ postgresql = "42.7.13"
 # 2.21.5, first_patched_version = "2.21.6" (OSV-Scanner at the 300 merge's gate; every
 # lockfile named). Same smallest-step rule: 2.21.6 is the patch on the BOM's minor line;
 # 2.22.3 (the latest) stays a minor upgrade nothing forces.
-# RETIRE when the Spring Boot BOM imports jackson-bom >= 2.21.6.
-jackson = "2.21.6"
+# 2026-09-30: GHSA-cxp5-3px4-pw24 and GHSA-wv8q-qhhj-9h54 (both HIGH 7.5)
+# include 2.21.6; the advisory API names 2.21.7 as patched, and Maven Central serves it.
+# Found by the #336 correction gate. Keep the same minor line and BOM alignment.
+# RETIRE when the Spring Boot BOM imports jackson-bom >= 2.21.7.
+jackson = "2.21.7"
 
 # netty — GHSA-558v-64gr-wgg4 (HIGH 8.7, Bzip2Decoder infinite loop hangs the
 # event-loop thread). Advisory API, verified 2026-08-15:
