@@ -30,7 +30,7 @@
       <div th:replace="~{partials/toast :: toast('success', 'Promoted', ${(param.pipelines != null ? param.pipelines[0] : '0') + ' pipeline(s), ' + (param.templates != null ? param.templates[0] : '0') + ' template version(s) and ' + (param.parameter_sets != null ? param.parameter_sets[0] : '0') + ' parameter set(s) were applied on the target, in one transaction.'})}"></div>
     </th:block>
     <th:block th:if="${param.error}" th:with="code=${param.error[0]}">
-      <th:block th:if="${code == 'nothing_selected'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'Select at least one pipeline or parameter set first.')}"></div></th:block>
+      <th:block th:if="${code == 'nothing_selected'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'Select at least one pipeline, parameter set, visualization or dashboard first.')}"></div></th:block>
       <th:block th:if="${code == 'not_released'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'One of the selected pipelines has no released version. Drafts are never promoted — release it first.')}"></div></th:block>
       <th:block th:if="${code == 'not_newer'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target already serves that version. Nothing changed here since the last promotion.')}"></div></th:block>
       <th:block th:if="${code == 'missing_datasources'}"><div th:replace="~{partials/toast :: toast('danger', 'Nothing was promoted', 'The target has no datasource by one of the names these pipelines reference. Register it there — with the target&#39;s own credentials — and try again.')}"></div></th:block>
@@ -86,7 +86,7 @@
       </div>
 
       <!-- State 2: reachable, nothing to promote. Says "in sync", not "broken". -->
-      <div th:if="${#lists.isEmpty(plan.promotable) and #lists.isEmpty(plan.promotableParameterSets)}" class="ds-empty app-reading">
+      <div th:if="${#lists.isEmpty(plan.promotable) and #lists.isEmpty(plan.promotableParameterSets) and #lists.isEmpty(plan.promotableVisualizations) and #lists.isEmpty(plan.promotableDashboards)}" class="ds-empty app-reading">
         <p class="ds-empty-title">Nothing to promote</p>
         <p class="ds-empty-description">
           All <span th:text="${plan.examined}">0</span> pipelines — and every parameter set — in
@@ -105,7 +105,7 @@
       <!-- 143 (T315): the form — Send column, selection boxes, Promote — exists for a PROMOTER
            only. A reader gets the same plan as a plain table below: no form, no input, no
            control the server would refuse, and the note naming who can send it. -->
-      <form th:if="${canPromote == true and (!#lists.isEmpty(plan.promotable) or !#lists.isEmpty(plan.promotableParameterSets))}"
+      <form th:if="${canPromote == true and (!#lists.isEmpty(plan.promotable) or !#lists.isEmpty(plan.promotableParameterSets) or !#lists.isEmpty(plan.promotableVisualizations) or !#lists.isEmpty(plan.promotableDashboards))}"
             th:action="@{/promotion/promote}" method="post">
         <!-- 282 (#282): PAGE-FLOW data-table frames (ui-screens §3.7). -->
         <div class="dt-frame" th:if="${!#lists.isEmpty(plan.promotable)}">
@@ -184,6 +184,80 @@
         </table>
           </div>
         </div>
+        <!-- #10 L1c — the visualization and dashboard rows (the spec's §12, D61): the admitted
+             dashboards' pins newer than the target, and the admitted dashboards themselves. A
+             dashboard brings its pinned visualizations with it; the target lands the batch's
+             visualizations before any dashboard. The same frame, the same Send column and the
+             same role guard as the pipelines table; the field names are `visualization` and
+             `dashboard`, the action's third and fourth inputs. -->
+        <h2 class="ds-title" th:if="${!#lists.isEmpty(plan.promotableVisualizations)}">Visualizations</h2>
+        <div class="dt-frame" th:if="${!#lists.isEmpty(plan.promotableVisualizations)}">
+          <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table" data-promotion-visualizations="send">
+          <thead>
+            <tr>
+              <th class="app-col-check" data-sort="off" data-resize="off">Send</th>
+              <th>Visualization</th>
+              <th class="num">Here</th>
+              <th class="num">On target</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr th:each="candidate : ${plan.promotableVisualizations}">
+              <td>
+                <input type="checkbox" name="visualization" th:value="${candidate.name}"
+                       th:id="'promote-viz-' + ${candidate.name}" checked>
+              </td>
+              <td>
+                <label th:for="'promote-viz-' + ${candidate.name}">
+                  <span class="app-name" th:text="${candidate.displayName}">Monthly revenue</span>
+                  <span class="app-path" th:text="${candidate.name}">finance/visualizations/monthly_revenue</span>
+                </label>
+              </td>
+              <td class="num">v<span th:text="${candidate.localVersion}">1</span></td>
+              <td class="num">
+                <span th:if="${candidate.targetVersion > 0}">v<span th:text="${candidate.targetVersion}">1</span></span>
+                <span th:if="${candidate.targetVersion == 0}" class="ds-badge">absent</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+          </div>
+        </div>
+        <h2 class="ds-title" th:if="${!#lists.isEmpty(plan.promotableDashboards)}">Dashboards</h2>
+        <div class="dt-frame" th:if="${!#lists.isEmpty(plan.promotableDashboards)}">
+          <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table" data-promotion-dashboards="send">
+          <thead>
+            <tr>
+              <th class="app-col-check" data-sort="off" data-resize="off">Send</th>
+              <th>Dashboard</th>
+              <th class="num">Here</th>
+              <th class="num">On target</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr th:each="candidate : ${plan.promotableDashboards}">
+              <td>
+                <input type="checkbox" name="dashboard" th:value="${candidate.name}"
+                       th:id="'promote-dash-' + ${candidate.name}" checked>
+              </td>
+              <td>
+                <label th:for="'promote-dash-' + ${candidate.name}">
+                  <span class="app-name" th:text="${candidate.displayName}">Revenue overview</span>
+                  <span class="app-path" th:text="${candidate.name}">finance/dashboards/revenue_overview</span>
+                </label>
+              </td>
+              <td class="num">v<span th:text="${candidate.localVersion}">1</span></td>
+              <td class="num">
+                <span th:if="${candidate.targetVersion > 0}">v<span th:text="${candidate.targetVersion}">1</span></span>
+                <span th:if="${candidate.targetVersion == 0}" class="ds-badge">absent</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+          </div>
+        </div>
         <div class="u-row-md u-mt-lg">
           <button type="submit" data-verb="promote" class="ds-button ds-button-primary"
                   th:disabled="${plan.targetAuthoringEnabled}">Promote</button>
@@ -197,7 +271,7 @@
 
       <!-- The reader's plan (143): the same rows, read-only — 114 §B's "the PLAN stays readable
            for everyone" kept, without the submission controls it used to carry. -->
-      <th:block th:if="${canPromote != true and (!#lists.isEmpty(plan.promotable) or !#lists.isEmpty(plan.promotableParameterSets))}">
+      <th:block th:if="${canPromote != true and (!#lists.isEmpty(plan.promotable) or !#lists.isEmpty(plan.promotableParameterSets) or !#lists.isEmpty(plan.promotableVisualizations) or !#lists.isEmpty(plan.promotableDashboards))}">
         <div class="dt-frame" th:if="${!#lists.isEmpty(plan.promotable)}">
           <div class="dt-viewport" tabindex="-1">
         <table class="ds-table" data-promotion-plan="read-only">
@@ -243,6 +317,60 @@
               <td class="num">v<span th:text="${candidate.localVersion}">4</span></td>
               <td class="num">
                 <span th:if="${candidate.targetVersion > 0}">v<span th:text="${candidate.targetVersion}">3</span></span>
+                <span th:if="${candidate.targetVersion == 0}" class="ds-badge">absent</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+          </div>
+        </div>
+        <!-- #10 L1c — the transfer families' rows, read-only (the 313 pattern: the plan stays
+             readable for everyone, without the controls the server would refuse). -->
+        <div class="dt-frame" th:if="${!#lists.isEmpty(plan.promotableVisualizations)}">
+          <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table" data-promotion-plan-visualizations="read-only">
+          <thead>
+            <tr>
+              <th>Visualization</th>
+              <th class="num">Here</th>
+              <th class="num">On target</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr th:each="candidate : ${plan.promotableVisualizations}">
+              <td>
+                <span class="app-name" th:text="${candidate.displayName}">Monthly revenue</span>
+                <span class="app-path" th:text="${candidate.name}">finance/visualizations/monthly_revenue</span>
+              </td>
+              <td class="num">v<span th:text="${candidate.localVersion}">1</span></td>
+              <td class="num">
+                <span th:if="${candidate.targetVersion > 0}">v<span th:text="${candidate.targetVersion}">1</span></span>
+                <span th:if="${candidate.targetVersion == 0}" class="ds-badge">absent</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+          </div>
+        </div>
+        <div class="dt-frame" th:if="${!#lists.isEmpty(plan.promotableDashboards)}">
+          <div class="dt-viewport" tabindex="-1">
+        <table class="ds-table" data-promotion-plan-dashboards="read-only">
+          <thead>
+            <tr>
+              <th>Dashboard</th>
+              <th class="num">Here</th>
+              <th class="num">On target</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr th:each="candidate : ${plan.promotableDashboards}">
+              <td>
+                <span class="app-name" th:text="${candidate.displayName}">Revenue overview</span>
+                <span class="app-path" th:text="${candidate.name}">finance/dashboards/revenue_overview</span>
+              </td>
+              <td class="num">v<span th:text="${candidate.localVersion}">1</span></td>
+              <td class="num">
+                <span th:if="${candidate.targetVersion > 0}">v<span th:text="${candidate.targetVersion}">1</span></span>
                 <span th:if="${candidate.targetVersion == 0}" class="ds-badge">absent</span>
               </td>
             </tr>

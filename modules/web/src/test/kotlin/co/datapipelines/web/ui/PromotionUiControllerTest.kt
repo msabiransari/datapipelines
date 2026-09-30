@@ -103,18 +103,22 @@ class PromotionUiControllerTest {
     @Test
     fun `nothing selected is the nothing_selected flash`() {
         authenticate()
-        controller.promote(names = listOf("  ", ""), parameterSetNames = null) shouldBe "redirect:/promotion?error=nothing_selected"
-        controller.promote(names = null, parameterSetNames = listOf(" ", "")) shouldBe "redirect:/promotion?error=nothing_selected"
-        controller.promote(names = null, parameterSetNames = null) shouldBe "redirect:/promotion?error=nothing_selected"
+        controller.promote(names = listOf("  ", ""), parameterSetNames = null, visualizationNames = null, dashboardNames = null) shouldBe
+            "redirect:/promotion?error=nothing_selected"
+        controller.promote(names = null, parameterSetNames = null, visualizationNames = listOf(" ", ""), dashboardNames = null) shouldBe
+            "redirect:/promotion?error=nothing_selected"
+        controller.promote(names = null, parameterSetNames = null, visualizationNames = null, dashboardNames = null) shouldBe
+            "redirect:/promotion?error=nothing_selected"
     }
 
     @Test
     fun `an api-key principal cannot drive the promote post`() {
         authenticate(method = AuthMethod.API_KEY)
 
-        controller.promote(names = listOf("p1"), parameterSetNames = null) shouldBe "redirect:/promotion?error=session_required"
+        controller.promote(names = listOf("p1"), parameterSetNames = null, visualizationNames = null, dashboardNames = null) shouldBe
+            "redirect:/promotion?error=session_required"
 
-        verify(exactly = 0) { promotionService.promote(any(), any(), any(), any()) }
+        verify(exactly = 0) { promotionService.promote(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -127,10 +131,10 @@ class PromotionUiControllerTest {
                 templates = 2,
                 pipelines = 3,
             )
-        every { promotionService.promote(workspaceId, "acme", listOf("p1", "p2"), emptyList()) } returns applied
+        every { promotionService.promote(workspaceId, "acme", listOf("p1", "p2"), emptyList(), emptyList(), emptyList()) } returns applied
 
-        controller.promote(names = listOf(" p1 ", "p2"), parameterSetNames = null) shouldBe
-            "redirect:/promotion?ok=promoted&pipelines=3&templates=2&parameter_sets=0"
+        controller.promote(names = listOf(" p1 ", "p2"), parameterSetNames = null, visualizationNames = null, dashboardNames = null) shouldBe
+            "redirect:/promotion?ok=promoted&pipelines=3&templates=2&parameter_sets=0&visualizations=0&dashboards=0"
     }
 
     @Test
@@ -144,19 +148,42 @@ class PromotionUiControllerTest {
                 pipelines = 0,
                 parameterSets = 1,
             )
-        every { promotionService.promote(workspaceId, "acme", emptyList(), listOf("acme/sales/filters")) } returns applied
+        every {
+            promotionService.promote(workspaceId, "acme", emptyList(), listOf("acme/sales/filters"), emptyList(), emptyList())
+        } returns applied
 
-        controller.promote(names = null, parameterSetNames = listOf(" acme/sales/filters ")) shouldBe
-            "redirect:/promotion?ok=promoted&pipelines=0&templates=0&parameter_sets=1"
+        controller.promote(names = null, parameterSetNames = listOf(" acme/sales/filters "), visualizationNames = null, dashboardNames = null) shouldBe
+            "redirect:/promotion?ok=promoted&pipelines=0&templates=0&parameter_sets=1&visualizations=0&dashboards=0"
+    }
+
+    @Test
+    fun `a visualization-only selection reaches the six-argument promote and flashes the family counts (#10 L1c)`() {
+        authenticate()
+        val applied =
+            co.datapipelines.web.pipelines.PromotionWire.Applied(
+                workspace = "acme",
+                sourceEnv = "staging",
+                templates = 0,
+                pipelines = 0,
+                visualizations = 1,
+                dashboards = 2,
+            )
+        every {
+            promotionService.promote(workspaceId, "acme", emptyList(), emptyList(), listOf("finance/viz"), listOf("finance/dash"))
+        } returns applied
+
+        controller.promote(names = null, parameterSetNames = null, visualizationNames = listOf(" finance/viz "), dashboardNames = listOf("finance/dash")) shouldBe
+            "redirect:/promotion?ok=promoted&pipelines=0&templates=0&parameter_sets=0&visualizations=1&dashboards=2"
     }
 
     @Test
     fun `a promote refusal's code last segment becomes the flash key`() {
         authenticate()
-        every { promotionService.promote(any(), any(), any(), any()) } throws
+        every { promotionService.promote(any(), any(), any(), any(), any(), any()) } throws
             DatapipelinesException("promotion.receiver_conflict", "version mismatch")
 
-        controller.promote(names = listOf("p1"), parameterSetNames = null) shouldBe "redirect:/promotion?error=receiver_conflict"
+        controller.promote(names = listOf("p1"), parameterSetNames = null, visualizationNames = null, dashboardNames = null) shouldBe
+            "redirect:/promotion?error=receiver_conflict"
     }
 
     @Test
@@ -164,7 +191,7 @@ class PromotionUiControllerTest {
         authenticate(method = AuthMethod.API_KEY)
 
         // The exact exception the gate throws, caught by the action's own handler.
-        val view = controller.promote(names = listOf("p1"), parameterSetNames = null)
+        val view = controller.promote(names = listOf("p1"), parameterSetNames = null, visualizationNames = null, dashboardNames = null)
         view shouldBe "redirect:/promotion?error=session_required"
     }
 }

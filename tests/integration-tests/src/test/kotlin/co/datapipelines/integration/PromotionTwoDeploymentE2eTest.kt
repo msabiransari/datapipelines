@@ -570,6 +570,63 @@ class PromotionTwoDeploymentE2eTest {
         )
     }
 
+    @Order(60)
+    fun `a released visualization and a dashboard bundling its pins promote through the SENDER (#10 L1c)`() {
+        createReleasedVisualizationOn(portDev, VIZ_A, withTransform = false)
+        createReleasedVisualizationOn(portDev, VIZ_B, withTransform = false)
+        createReleasedDashboardOn(portDev, PAGE_DASH, listOf(VIZ_A to VIZ_B))
+
+        val applied = promoteTransferOrExplain(listOf(VIZ_A), listOf(PAGE_DASH))
+
+        assertEquals(1, applied["visualizations"], "the sender's visualization slot")
+        assertEquals(1, applied["dashboards"], "the sender's dashboard slot")
+        assertAll(
+            { assertEquals(1, artifactVersion(devJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A), "dev's viz") },
+            { assertEquals(1, artifactVersion(uatJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A), "uat's viz") },
+            {
+                assertEquals(
+                    artifactHash(devJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A),
+                    artifactHash(uatJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A),
+                    "the visualization's body hash",
+                )
+            },
+            { assertEquals(1, artifactVersion(devJdbc, "dashboards", "dashboard_versions", "dashboard_id", PAGE_DASH), "dev's dash") },
+            { assertEquals(1, artifactVersion(uatJdbc, "dashboards", "dashboard_versions", "dashboard_id", PAGE_DASH), "uat's dash") },
+            {
+                assertEquals(
+                    artifactHash(devJdbc, "dashboards", "dashboard_versions", "dashboard_id", PAGE_DASH),
+                    artifactHash(uatJdbc, "dashboards", "dashboard_versions", "dashboard_id", PAGE_DASH),
+                    "the dashboard's body hash",
+                )
+            },
+        )
+    }
+
+    @Order(61)
+    fun `the PAGE posts both families - the form's family slots reach the six-argument promote`() {
+        createReleasedVisualizationOn(portDev, VIZ_PAGE, withTransform = false)
+
+        val response =
+            given()
+                .port(portDev)
+                .asSession(adminSession())
+                .contentType(ContentType.URLENC)
+                .formParam("visualization", VIZ_PAGE)
+                .formParam("dashboard", PAGE_DASH)
+                .`when`()
+                .post("/promotion/promote")
+                .then()
+                .extract()
+
+        assertEquals(302, response.statusCode(), "the action answers a redirect flash")
+        val location = response.header("Location")
+        assertTrue(
+            location.orEmpty().contains("visualizations=1") && location.orEmpty().contains("dashboards=1"),
+            "the flash must name the applied family counts, was: $location",
+        )
+        assertEquals(1, artifactVersion(uatJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_PAGE), "uat's viz")
+    }
+
     // ------------------------------------------------------------------ content on dev
 
     /** A parent that runs a child through a PIPELINE node and pins a template that imports a library. */
@@ -675,12 +732,183 @@ class PromotionTwoDeploymentE2eTest {
         )
     }
 
+    /** `promote` through the SIX-argument overload (#10 L1c's transfer roots) — the sender's two family slots. */
+    private fun promoteTransfer(
+        visualizations: List<String>,
+        dashboards: List<String>,
+    ): Map<String, Any?> {
+        val service = devPromotionService()
+        val method =
+            service.javaClass.getMethod(
+                "promote",
+                UUID::class.java,
+                String::class.java,
+                List::class.java,
+                List::class.java,
+                List::class.java,
+                List::class.java,
+            )
+        val applied =
+            try {
+                method.invoke(service, WORKSPACE_ID, WORKSPACE, emptyList<String>(), emptyList<String>(), visualizations, dashboards)
+            } catch (e: java.lang.reflect.InvocationTargetException) {
+                throw e.targetException
+            }
+        return mapOf(
+            "workspace" to applied.javaClass.getMethod("getWorkspace").invoke(applied),
+            "templates" to applied.javaClass.getMethod("getTemplates").invoke(applied),
+            "pipelines" to applied.javaClass.getMethod("getPipelines").invoke(applied),
+            "parameter_sets" to applied.javaClass.getMethod("getParameterSets").invoke(applied),
+            "visualizations" to applied.javaClass.getMethod("getVisualizations").invoke(applied),
+            "dashboards" to applied.javaClass.getMethod("getDashboards").invoke(applied),
+        )
+    }
+
+    private fun promoteTransferOrExplain(
+        visualizations: List<String>,
+        dashboards: List<String>,
+    ): Map<String, Any?> =
+        try {
+            promoteTransfer(visualizations, dashboards)
+        } catch (e: Throwable) {
+            throw AssertionError("transfer promotion refused: code=${codeOf(e)} details=${detailsOf(e)} message=${e.message}", e)
+        }
+
     private fun promoteSetsOrExplain(vararg setNames: String): Map<String, Any?> =
         try {
             promoteSets(*setNames)
         } catch (e: Throwable) {
             throw AssertionError("set promotion refused: code=${codeOf(e)} details=${detailsOf(e)} message=${e.message}", e)
         }
+
+    /**
+     * A released visualization (#10 L1c): created as a DRAFT over REST, then stamped RELEASED by SQL — the
+     * evidence gate refuses every REST release until L4, and these rows are exactly the rows a real release
+     * writes (V42's columns, the CHECKs included). The L2 fixtures' precedent.
+     */
+    private fun createReleasedVisualizationOn(
+        port: Int,
+        name: String,
+        withTransform: Boolean,
+    ) {
+        val body =
+            """
+            {"name": "$name", "display_name": "Promotion viz", "description": "promotion round trip",
+             "renderer": {"kind": "plotly", "version": "4"},
+             "inputs": {"revenue": {"columns": [{"name": "month", "type": "DATE", "nullable": false},
+                                                {"name": "amount", "type": "DECIMAL", "nullable": false}]}},
+             "config": {"data": [{"type": "bar", "x": [], "y": []}], "layout": {}},
+             "bindings": {"data[0].x": "month", "data[0].y": "amount"},
+             "presentation": {"title": "Revenue", "tokens": {"series": "categorical"}},
+             "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
+                                  "assertions": [{"kind": "rendered"}]}]}}
+            """.trimIndent()
+        val created =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(adminSession())
+                .body(body)
+                .`when`()
+                .post("/api/v1/visualizations")
+                .then()
+                .extract()
+        require(created.statusCode() == 201) { "visualization '$name' create failed ${created.statusCode()}: ${created.body().asString()}" }
+        stampReleased(port, "visualizations", "visualization_versions", "visualization_id", created.jsonPath().getString("data.id"))
+    }
+
+    /**
+     * A released dashboard pinning the given visualization pair (no set pin — the set facts are optional)
+     * and one ALREADY-PROMOTED pipeline as its source, so the receiver's validation sees the pin RELEASED.
+     */
+    private fun createReleasedDashboardOn(
+        port: Int,
+        name: String,
+        pins: List<Pair<String, String>>,
+    ) {
+        val childVersion = artifactVersion(devJdbc, "pipelines", "pipeline_versions", "pipeline_id", CHILD)
+        val names = pins.flatMapIndexed { index, _ -> listOf("chart_${index}a", "chart_${index}b") }
+        val gridRows = names + "refresh_button"
+        val occurrences =
+            pins.flatMapIndexed { index, (first, second) ->
+                listOf(
+                    """{"name": "chart_${index}a", "type": "visualization",
+                       "visualization": {"name": "$first", "version": 1},
+                       "inputs": {"revenue": {"source": "src$index"}}, "timeout_seconds": 120}""",
+                    """{"name": "chart_${index}b", "type": "visualization",
+                       "visualization": {"name": "$second", "version": 1},
+                       "inputs": {"revenue": {"source": "src$index"}}, "timeout_seconds": 120}""",
+                )
+            }
+        val gridItems =
+            (names + "refresh_button").joinToString(",") { occurrenceName ->
+                """{"name": "$occurrenceName", "x": 0, "y": ${gridRows.indexOf(occurrenceName)}, "w": 6, "h": 4}"""
+            }
+        val body =
+            """
+            {"name": "$name", "display_name": "Promotion dash", "description": "promotion round trip",
+             "sources": [
+               {"name": "src0", "pipeline": {"name": "$CHILD", "version": $childVersion}, "parameters": {}}
+             ],
+             "visualizations": [${occurrences.joinToString(",")}],
+             "actions": [{"name": "refresh_overview", "type": "refresh", "scope": "targets",
+                          "targets": ["chart_a0"], "initial": true}],
+             "action_controls": [{"name": "refresh_button", "type": "action_control",
+                                  "action": "refresh_overview", "label": "Apply"}],
+             "layout": {"grid": [$gridItems,
+                        {"name": "refresh_button", "x": 0, "y": 9, "w": 2, "h": 1}], "columns": 12},
+             "timeouts": {"refresh_seconds": 300}}
+            """.trimIndent()
+        val created =
+            given()
+                .port(port)
+                .contentType(ContentType.JSON)
+                .asSession(adminSession())
+                .body(body)
+                .`when`()
+                .post("/api/v1/dashboards")
+                .then()
+                .extract()
+        require(created.statusCode() == 201) { "dashboard '$name' create failed ${created.statusCode()}: ${created.body().asString()}" }
+        stampReleased(port, "dashboards", "dashboard_versions", "dashboard_id", created.jsonPath().getString("data.id"))
+    }
+
+    /** The rows a real release writes (V42), stamped by SQL — the L2 fixtures' precedent. */
+    private fun stampReleased(
+        port: Int,
+        table: String,
+        versionsTable: String,
+        fkColumn: String,
+        id: String,
+    ) {
+        // The fixtures run on dev only; the admin's id is the released_by FK's real user row.
+        val admin = given().port(port).asSession(adminSession()).`when`().get("/api/v1/auth/me").then().extract().jsonPath().getString("data.id")
+        devJdbc.execute(
+            "UPDATE $versionsTable SET status = 'RELEASED', released_at = NOW(), released_by = '$admin'" +
+                " WHERE $fkColumn = '$id' AND version = 1",
+        )
+        devJdbc.execute("UPDATE $table SET current_version = 1 WHERE id = '$id'")
+    }
+
+    private fun artifactVersion(
+        jdbc: Jdbc,
+        table: String,
+        versionsTable: String,
+        fkColumn: String,
+        name: String,
+    ): Int = jdbc.scalar("SELECT current_version FROM $table WHERE name = '$name'").toInt()
+
+    private fun artifactHash(
+        jdbc: Jdbc,
+        table: String,
+        versionsTable: String,
+        fkColumn: String,
+        name: String,
+    ): String =
+        jdbc.scalar(
+            "SELECT v.body_hash FROM $versionsTable v JOIN $table s ON s.id = v.$fkColumn " +
+                "WHERE s.name = '$name' AND v.version = s.current_version",
+        )
 
     /** A released constants-only parameter set (no template pin, no datasource) — the smallest promotable set. */
     private fun createReleasedSetOn(
@@ -1135,6 +1363,12 @@ class PromotionTwoDeploymentE2eTest {
 
         /** #313 — the set the PAGE's form post promotes (Order 55), distinct from Order 54's. */
         private const val PAGE_SET = "test/page_e2e_filters"
+
+        /** #10 L1c — the transfer families' fixtures (Orders 60–61): two pins, the page's viz, the dashboard. */
+        private const val VIZ_A = "test/page_e2e_viz_a"
+        private const val VIZ_B = "test/page_e2e_viz_b"
+        private const val VIZ_PAGE = "test/page_e2e_viz_page"
+        private const val PAGE_DASH = "test/page_e2e_dash"
         private const val ORPHAN = "test/promo_e2e_orphan"
         private const val TX_TEMPLATE = "test/promo_e2e_tx.sql"
         private const val TX_OK = "test/promo_e2e_tx_ok"
