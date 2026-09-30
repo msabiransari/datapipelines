@@ -82,6 +82,29 @@
     return Date.now();
   }
 
+  /** The canonical key of a wire value: option identity is the TYPED JSON value, never a DOM string. */
+  function wireKey(value) {
+    return JSON.stringify(value === undefined ? null : value);
+  }
+
+  /**
+   * A free (INPUT) control's typed read: the DOM string is parsed toward the parameter's wire type
+   * and an unparsable text travels AS TEXT — the server's validator (P28) is the authority and its
+   * error lands on the row. BIGINTEGER/BIGDECIMAL travel as strings by wire contract.
+   */
+  function typedInputRead(type, control) {
+    return function () {
+      var text = typeof control.value === "string" ? control.value : "";
+      if (type === "BOOLEAN") return control.checked === true;
+      if (text === "") return null;
+      if (type === "INTEGER" || type === "DECIMAL") {
+        var parsed = Number(text);
+        return text.trim() !== "" && isFinite(parsed) ? parsed : text;
+      }
+      return text; // STRING, DATE, TIME, TIMESTAMP, BINARY, BIGINTEGER, BIGDECIMAL
+    };
+  }
+
   function readCookie(name, cookieString) {
     var source =
       typeof cookieString === "string" ? cookieString : typeof document !== "undefined" ? document.cookie : "";
@@ -230,7 +253,9 @@
   };
 
   DashboardInstance.prototype._abortPath = function (refreshId) {
-    return this._configPath().replace(/\/config$/, "/runtime/refreshes/" + encodeURIComponent(refreshId) + "/abort");
+    // The controller's ONE runtime segment: /api/v1/dashboards/{id}/runtime/refreshes/{rid}/abort
+    // (DashboardRuntimeController §8.4). The config path's own /runtime is reused, never doubled.
+    return this._configPath().replace(/\/config$/, "/refreshes/" + encodeURIComponent(refreshId) + "/abort");
   };
 
   DashboardInstance.prototype._renderTimeoutMs = function () {
@@ -555,13 +580,21 @@
 
   // --------------------------------------------------------------------------------------- parameters
 
+  /**
+   * The evaluate response's shape is the WRITER's (EvaluateResponseJson): every parameter is a flat
+   * object — the stored definition's fields (`name`, `label`, `type`, `presentation`, …) beside
+   * `dependents` and `state` — and the value lives at `state.value` in its WIRE type (a JSON number
+   * for INTEGER, a string for BIGDECIMAL, an array for a MULTI, null unresolved). `values` at the
+   * response's top level is the same payload keyed by name.
+   */
   DashboardInstance.prototype._snapshotSelections = function (evaluated) {
     var out = {};
     var parameters = (evaluated && evaluated.parameters) || [];
     for (var i = 0; i < parameters.length; i++) {
       var parameter = parameters[i];
-      if (parameter && parameter.definition && parameter.definition.name) {
-        out[parameter.definition.name] = parameter.value === undefined ? null : parameter.value;
+      if (parameter && parameter.name) {
+        var value = parameter.state ? parameter.state.value : undefined;
+        out[parameter.name] = value === undefined ? null : value;
       }
     }
     return out;
@@ -627,26 +660,64 @@
     return state;
   };
 
-  /** The accepted response: applied to the adapter BEFORE the gate releases (§5.6's order). */
+  /**
+   * The accepted response (§5.6's order, corrected 2026-09-30): the gate releases only AFTER the
+   * host has applied the state — the lock, its deadline and the attempt's timer stay LIVE through
+   * the asynchronous `renderParameters`. Before any runtime state changes, the attempt is
+   * re-validated: liveness, its finished flag (the deadline may have fired mid-render) and LOCK
+   * OWNERSHIP (a newer attempt may hold it). A late render — after timeout, replacement or
+   * disposal — changes nothing and releases nothing it does not own. A synchronous throw and a
+   * rejected render promise follow the same bounded path: the attempt terminates exactly once, the
+   * gate releases, and a recoverable host-render failure is published.
+   */
   DashboardInstance.prototype._acceptParameterResponse = function (attempt, evaluated) {
-    attempt.finished = true;
-    this._clearLockTimer(attempt);
-    if (this._lock === attempt) this._lock = null;
     var self = this;
-    return Promise.resolve(this._adapter.renderParameters(evaluated)).then(function () {
-      self._parameters = evaluated;
-      self._baseline = { selections: self._snapshotSelections(evaluated), revision: evaluated.parameter_revision };
-      self._publishNotification({
-        scope: "parameters",
-        severity: "info",
-        code: "parameters.applied",
-        message: "parameter state applied",
-        retryable: false,
-        recover: null,
-        dedupe: "parameters.applied",
-      });
-      return evaluated;
-    });
+    var render;
+    try {
+      render = Promise.resolve(this._adapter.renderParameters(evaluated));
+    } catch (error) {
+      render = Promise.reject(error);
+    }
+    return render.then(
+      function () {
+        if (self._disposed || attempt.finished || self._lock !== attempt) {
+          throw self._fail("parameters.superseded", "a late parameter render changes nothing");
+        }
+        attempt.finished = true;
+        self._clearLockTimer(attempt);
+        self._lock = null;
+        self._parameters = evaluated;
+        self._baseline = { selections: self._snapshotSelections(evaluated), revision: evaluated.parameter_revision };
+        self._publishNotification({
+          scope: "parameters",
+          severity: "info",
+          code: "parameters.applied",
+          message: "parameter state applied",
+          retryable: false,
+          recover: null,
+          dedupe: "parameters.applied",
+        });
+        return evaluated;
+      },
+      function (error) {
+        if (!attempt.finished && self._lock === attempt) {
+          attempt.finished = true;
+          self._clearLockTimer(attempt);
+          self._lock = null;
+          self._publishNotification({
+            scope: "parameters",
+            severity: "error",
+            code: "parameters.render_failed",
+            message: "the host failed to render the parameter state",
+            retryable: true,
+            recover: "retry",
+          });
+        }
+        throw isDashboardError(error)
+          ? error
+          : self._fail("parameters.render_failed", "the host failed to render the parameter state");
+      },
+    );
   };
 
   /** The deadline expired: release, publish, best-effort cancellation — never awaiting it (§5.6). */
@@ -671,11 +742,19 @@
     }
   };
 
-  /** The one gate (§5.6): refused while a parameter attempt is pending — never queued. */
+  /**
+   * The one gate (§5.6): refused while a parameter attempt is pending — never queued — and refused
+   * while the applied state is INVALID (the writer answers `valid: false` when any parameter
+   * carries an error): submission stays blocked until the state is valid again, which a commit's
+   * re-evaluation restores.
+   */
   DashboardInstance.prototype._requireActionGate = function () {
     if (this._disposed) throw this._fail("dashboard.disposed", "the instance is disposed");
     if (this._lock) throw this._fail("actions.locked", "an action is refused while a parameter evaluation is pending");
     if (!this._bootstrapped) throw this._fail("actions.not_ready", "the instance is not ready");
+    if (this._parameters && this._parameters.valid === false) {
+      throw this._fail("parameters.invalid", "the parameter state is invalid; submission stays blocked until it is valid again");
+    }
   };
 
   // ---------------------------------------------------------------------------------------- refreshes
@@ -1103,8 +1182,11 @@
     if (!name) return;
     var parents = this._parameters.parents || [];
     var bound = this._boundActionFor(name);
-    if (parents.indexOf(name) !== -1 || bound) {
-      this._safeEvaluate(bound ? bound.action : null);
+    // An invalid state is also a reason to re-evaluate: the commit's fresh selections are the way
+    // back to a valid state (§5.6 — submission stays blocked until then).
+    var invalid = this._parameters.valid === false;
+    if (parents.indexOf(name) !== -1 || bound || invalid) {
+      this._safeEvaluate(bound && !invalid ? bound.action : null, invalid ? "retry" : "parent_change");
       return;
     }
     this._markAllStale();
@@ -1118,11 +1200,11 @@
   };
 
   /** The parameter re-evaluation outside the caller's stack; errors reach the runtime-owned path. */
-  DashboardInstance.prototype._safeEvaluate = function (actionName) {
+  DashboardInstance.prototype._safeEvaluate = function (actionName, intent) {
     var self = this;
     (async function () {
       try {
-        await self._evaluateParameters("parent_change");
+        await self._evaluateParameters(intent || "parent_change");
       } catch (error) {
         if (isDashboardError(error) && (error.code === "parameters.superseded" || error.code === "parameters.locked")) return;
         self._publishNotification({
@@ -1274,7 +1356,17 @@
     if (!this._baseline) return Promise.resolve(undefined);
     var self = this;
     var restored = this._baselineRenderable();
-    return Promise.resolve(this._adapter.renderParameters(restored)).then(function () {
+    var stateAtStart = this._parameters;
+    var render;
+    try {
+      render = Promise.resolve(this._adapter.renderParameters(restored));
+    } catch (error) {
+      render = Promise.reject(error);
+    }
+    return render.then(function () {
+      // Ownership: if an evaluation was accepted while the reset's render ran, the NEWER applied
+      // state owns the board — the baseline's values must not clobber its revision.
+      if (self._disposed || self._parameters !== stateAtStart) return undefined;
       self._parameters = Object.assign({}, self._parameters, { parameters: restored.parameters });
       return undefined;
     });
@@ -1288,8 +1380,10 @@
     var baseline = this._baseline.selections;
     for (var i = 0; i < copy.parameters.length; i++) {
       var parameter = copy.parameters[i];
-      var name = parameter && parameter.definition && parameter.definition.name;
-      if (name && Object.prototype.hasOwnProperty.call(baseline, name)) parameter.value = baseline[name];
+      var name = parameter && parameter.name;
+      if (name && Object.prototype.hasOwnProperty.call(baseline, name) && parameter.state) {
+        parameter.state.value = baseline[name];
+      }
     }
     return copy;
   };
@@ -1580,60 +1674,189 @@
           return Promise.reject(error);
         }
       },
+      /**
+       * The parameters pane from the WRITER's response (EvaluateResponseJson): one row per
+       * parameter — label, control, error text — REBUILT WHOLE on every call, so repeated
+       * evaluations and resets replace the owned rows instead of appending duplicates (and no
+       * stale listener ever survives a render). The definition is FLAT (`name`, `label`, `type`,
+       * `kind`, `cardinality`, `presentation.control`); value/options/hidden/disabled live in
+       * `state`; the dashboard's `overrides_applied` wins over the engine's hidden/disabled.
+       * Option identity is the TYPED wire value — nothing is stringified through `select.value`:
+       * a <select>'s option value is an INDEX into the control's wire values (the typed value
+       * never passes through a string form), a checkbox group collects its checked TYPED values,
+       * a MULTI reads an array, an unresolved null stays null, and hidden and disabled values are
+       * read exactly like any other (D23).
+       */
       renderParameters: function (state) {
-        // The parameters pane: one row per parameter — label, control, (hidden/disabled respected).
-        // Round one's controls are the engine's own (text/number/select via <select>); the composite
-        // keeps them text-only and reports one commit per gesture.
-        this.parametersRoot = this.parametersRoot || document.createElement("div");
-        this.parametersRoot.className = "dp-dashboard-parameters";
+        var root = this.parametersRoot;
+        if (!root) {
+          root = this.parametersRoot = document.createElement("div");
+          root.className = "dp-dashboard-parameters";
+        }
         var parent = this.container || this.defaultSlot;
-        if (this.parametersRoot.parentNode !== parent) parent.insertBefore(this.parametersRoot, parent.firstChild);
-        var parameters = (state && state.parameters) || [];
-        var self2 = this;
+        if (parent) {
+          if (root.parentNode !== parent) {
+            if (root.parentNode && typeof root.parentNode.removeChild === "function") root.parentNode.removeChild(root);
+            if (typeof parent.insertBefore === "function") parent.insertBefore(root, parent.firstChild);
+          }
+        }
+        while (root.firstChild) root.removeChild(root.firstChild);
         this._selectionInputs = {};
-        for (var i = 0; i < parameters.length; i++) {
-          var parameter = parameters[i];
-          var definition = parameter.definition || {};
-          var row = document.createElement("div");
+        var parameters = (state && state.parameters) || [];
+        var overrides = (state && state.overrides_applied) || {};
+        var self2 = this;
+        for (let i = 0; i < parameters.length; i++) {
+          let parameter = parameters[i];
+          if (!parameter || !parameter.name) continue;
+          let definitionState = parameter.state || {};
+          let override = overrides[parameter.name] || {};
+          let hidden = override.visible === false || (override.visible === undefined && definitionState.hidden === true);
+          let enabled = override.enabled === true || (override.enabled === undefined && definitionState.disabled !== true);
+          let row = document.createElement("div");
           row.className = "dp-dashboard-parameter";
-          row.setAttribute("data-dp-parameter", definition.name || "");
-          var label = document.createElement("label");
-          label.textContent = definition.label || definition.name || "";
+          row.setAttribute("data-dp-parameter", parameter.name);
+          let label = document.createElement("label");
+          label.textContent = parameter.label || parameter.name || "";
           row.appendChild(label);
-          var control = document.createElement("select");
-          var options = (parameter.options || []).slice();
-          for (var o = 0; o < options.length; o++) {
-            var option = document.createElement("option");
-            option.value = String(options[o].value);
-            option.textContent = String(options[o].display_value !== undefined ? options[o].display_value : options[o].value);
-            control.appendChild(option);
-          }
-          if (parameter.value !== undefined && parameter.value !== null) control.value = String(parameter.value);
-          if (parameter.state) {
-            if (parameter.state.hidden === true) row.style.display = "none";
-            if (parameter.state.disabled === true) control.disabled = true;
-          }
-          control.addEventListener("change", (function (name, input) {
-            return function () {
-              if (listeners.edit && self2._gesture !== name) {
-                listeners.edit({ name: name, type: "parameter" });
-                self2._gesture = name;
-              }
-              if (listeners.commit) listeners.commit({ name: name, type: "parameter" });
-              self2._gesture = null;
+
+          let controlType =
+            parameter.presentation && parameter.presentation.control ? parameter.presentation.control : null;
+          let isMulti = parameter.cardinality === "MULTI";
+          let read = null;
+          let interactives = [];
+          if (parameter.kind === "SELECT") {
+            let options = (definitionState.options || []).slice();
+            let typedValues = [];
+            let byKey = {};
+            for (let o = 0; o < options.length; o++) {
+              typedValues.push(options[o] && options[o].value !== undefined ? options[o].value : null);
+              byKey[wireKey(typedValues[o])] = o;
+            }
+            let indexOfValue = function (value) {
+              return byKey[wireKey(value === undefined ? null : value)];
             };
-          })(definition.name, control));
-          this._selectionInputs[definition.name] = control;
-          row.appendChild(control);
-          this.parametersRoot.appendChild(row);
+            let displayText = function (option) {
+              return option && option.display_value !== undefined ? option.display_value : String(option ? option.value : "");
+            };
+            if (isMulti || controlType === "checkboxes") {
+              // A MULTI renders a checkbox group; the checked boxes' TYPED values are collected.
+              let boxes = [];
+              let current = definitionState.value;
+              let pickedKeys = {};
+              if (Object.prototype.toString.call(current) === "[object Array]") {
+                for (let c = 0; c < current.length; c++) pickedKeys[wireKey(current[c])] = true;
+              }
+              for (let b = 0; b < options.length; b++) {
+                let box = document.createElement("input");
+                box.setAttribute("type", "checkbox");
+                box.checked = pickedKeys[wireKey(typedValues[b])] === true;
+                if (!enabled) box.disabled = true;
+                let boxText = document.createElement("span");
+                boxText.textContent = displayText(options[b]);
+                row.appendChild(box);
+                row.appendChild(boxText);
+                boxes.push({ element: box, value: typedValues[b] });
+                interactives.push(box);
+              }
+              read = function () {
+                let picked = [];
+                for (let p = 0; p < boxes.length; p++) if (boxes[p].element.checked) picked.push(boxes[p].value);
+                return picked;
+              };
+            } else if (controlType === "radio") {
+              let radios = [];
+              let selected = indexOfValue(definitionState.value);
+              for (let r = 0; r < options.length; r++) {
+                let input = document.createElement("input");
+                input.setAttribute("type", "radio");
+                input.setAttribute("name", "dp-param-" + parameter.name);
+                input.checked = selected === r;
+                if (!enabled) input.disabled = true;
+                let radioText = document.createElement("span");
+                radioText.textContent = displayText(options[r]);
+                row.appendChild(input);
+                row.appendChild(radioText);
+                radios.push({ element: input, value: typedValues[r] });
+                interactives.push(input);
+              }
+              read = function () {
+                for (let q = 0; q < radios.length; q++) if (radios[q].element.checked) return radios[q].value;
+                return null;
+              };
+            } else {
+              // dropdown/list (the derived default included): one <select>; its option value is
+              // the INDEX into the wire values.
+              let selectControl = document.createElement("select");
+              let placeholder = document.createElement("option");
+              placeholder.setAttribute("value", "");
+              selectControl.appendChild(placeholder);
+              for (let s = 0; s < options.length; s++) {
+                let option = document.createElement("option");
+                option.setAttribute("value", String(s));
+                option.textContent = displayText(options[s]);
+                selectControl.appendChild(option);
+              }
+              let selectedIndex = indexOfValue(definitionState.value);
+              selectControl.value = selectedIndex === undefined ? "" : String(selectedIndex);
+              if (!enabled) selectControl.disabled = true;
+              interactives.push(selectControl);
+              row.appendChild(selectControl);
+              read = function () {
+                return selectControl.value === "" ? null : typedValues[Number(selectControl.value)];
+              };
+            }
+          } else {
+            // INPUT: one free control; the read parses toward the wire type (typedInputRead).
+            let free = document.createElement("input");
+            free.setAttribute("type", "text");
+            let raw = definitionState.value;
+            free.value = raw === null || raw === undefined ? "" : String(raw);
+            free.checked = raw === true;
+            if (!enabled) free.disabled = true;
+            interactives.push(free);
+            read = typedInputRead(parameter.type, free);
+            row.appendChild(free);
+          }
+          if (hidden) row.style.display = "none";
+          if (definitionState.errors && definitionState.errors.length) {
+            let problem = document.createElement("div");
+            problem.className = "dp-dashboard-parameter-error";
+            problem.setAttribute("role", "alert");
+            let text = "";
+            for (let e = 0; e < definitionState.errors.length; e++) {
+              let one = definitionState.errors[e] || {};
+              text += (one.code || "parameter.error") + (one.message ? ": " + one.message : "") + " ";
+            }
+            problem.textContent = text.trim();
+            row.appendChild(problem);
+          }
+          // One edit + one commit per change gesture, on every interactive element of the row.
+          for (let g = 0; g < interactives.length; g++) {
+            interactives[g].addEventListener("change", (function (name) {
+              return function () {
+                if (listeners.edit && self2._gesture !== name) {
+                  listeners.edit({ name: name, type: "parameter" });
+                  self2._gesture = name;
+                }
+                if (listeners.commit) listeners.commit({ name: name, type: "parameter" });
+                self2._gesture = null;
+              };
+            })(parameter.name));
+          }
+          this._selectionInputs[parameter.name] = read;
+          root.appendChild(row);
         }
         return Promise.resolve(undefined);
       },
+      /** Every parameter's current value — hidden and disabled included (D23) — in its WIRE type. */
       readSelections: function () {
         var out = {};
-        var inputs = this._selectionInputs || {};
-        for (var name in inputs) {
-          if (Object.prototype.hasOwnProperty.call(inputs, name)) out[name] = inputs[name].value;
+        var reads = this._selectionInputs || {};
+        for (var name in reads) {
+          if (Object.prototype.hasOwnProperty.call(reads, name)) {
+            var read = reads[name];
+            out[name] = typeof read === "function" ? read() : read;
+          }
         }
         return out;
       },
@@ -1686,6 +1909,15 @@
           }
         }
         implemented = {};
+        // The composite removes everything IT mounted — the grid and the parameters pane — so a
+        // dispose/re-init cycle leaves exactly one layout/control set. Host-owned DOM (the
+        // container itself, a neighbouring instance's subtree) stands untouched.
+        if (this.parametersRoot && this.parametersRoot.parentNode && this.parametersRoot.parentNode.removeChild) {
+          this.parametersRoot.parentNode.removeChild(this.parametersRoot);
+        }
+        if (this.root && this.root.parentNode && this.root.parentNode.removeChild) {
+          this.root.parentNode.removeChild(this.root);
+        }
       },
     };
   }

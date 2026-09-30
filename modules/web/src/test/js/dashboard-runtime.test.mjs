@@ -306,17 +306,52 @@ function configPayload(overrides) {
   );
 }
 
+/**
+ * The evaluate response EXACTLY as `EvaluateResponseJson` writes it (the server wire is
+ * authoritative — the client consumes the writer's shape, never an invented one): flat definition
+ * fields (`name`, `label`, `type`, `kind`, `cardinality`, `presentation.control`) beside
+ * `dependents` and `state` (`value` in its WIRE type — a JSON number for INTEGER, a string for
+ * BIGDECIMAL, an array for a MULTI, null unresolved — plus `origin`, `computed_default`, `reset`,
+ * `hidden`, `disabled`, `options` with `{value, display_value, is_default}`, `errors`), the typed
+ * `values` map, `valid`, `org`, and the runtime's extras (`overrides_applied`, `parents`,
+ * `parameter_revision`).
+ */
 function evaluatedState(overrides) {
   return Object.assign(
     {
+      id: "9b6f0b2e-0000-4000-8000-000000000001",
+      name: "dbr/sets/reporting",
+      version: 1,
+      valid: true,
+      org: { currency_symbol: "$", currency_name: "US Dollar" },
+      values: { year: 2026 },
       parameters: [
         {
-          definition: { name: "year", label: "Year" },
-          value: 2026,
-          state: { hidden: false, disabled: false },
-          options: [{ value: 2026, display_value: "2026" }],
+          name: "year",
+          label: "Year",
+          type: "INTEGER",
+          kind: "SELECT",
+          cardinality: "SINGLE",
+          required: false,
+          depends_on: [],
+          presentation: { control: "dropdown" },
+          dependents: [],
+          state: {
+            value: 2026,
+            origin: "default",
+            computed_default: 2026,
+            reset: false,
+            hidden: false,
+            disabled: false,
+            options: [
+              { value: 2025, display_value: "2025", is_default: false },
+              { value: 2026, display_value: "2026", is_default: true },
+            ],
+            errors: [],
+          },
         },
       ],
+      overrides_applied: {},
       parents: [],
       parameter_revision: 3,
     },
@@ -329,7 +364,14 @@ async function boot(options) {
   const fetchImpl = options && options.fetch ? options.fetch : fakeFetch();
   globalThis.fetch = fetchImpl;
   fetchImpl.otherwise("/runtime/visualizations", () => fetchImpl.stream([]));
-  fetchImpl.otherwise("/abort", () => fetchImpl.envelope({ refresh_id: "x", status: "abort_requested" }));
+  // The fixture's own route oracle is the controller's COMPLETE path: a client that builds a
+  // different abort URL (the delivered /runtime/runtime defect, say) gets the 404 it would really
+  // get, instead of being absorbed by a substring stub.
+  fetchImpl.otherwise("/abort", (url) =>
+    /\/runtime\/refreshes\/[^/]+\/abort$/.test(url)
+      ? fetchImpl.envelope({ refresh_id: "x", status: "abort_requested" })
+      : fetchImpl.error("dashboard.refresh.not_found", 404),
+  );
   fetchImpl.otherwise("/runtime/parameters", () => fetchImpl.envelope((options && options.parameters) || evaluatedState()));
   fetchImpl.otherwise("/runtime/config", () => fetchImpl.envelope((options && options.config) || configPayload()));
   const adapter = (options && options.adapter) || scriptedAdapter();
@@ -579,16 +621,161 @@ test("a response arriving after its attempt expired changes nothing", async () =
   assert.equal(instance._parameters.parameter_revision, 3, "the applied state is unchanged");
 });
 
-test("abort invalidates locally at once, posts with the instance id, and a 404 is idempotent", async () => {
+test("the lock stays held while the accepted render is pending: actions refuse, then it releases on the render's resolve", async () => {
+  const fetchImpl = fakeFetch();
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  // The host's render is a CONTROLLED promise: the accepted response arrives, but the host has
+  // not applied it yet — the gate must stay shut through that whole window (§5.6's order).
+  let releaseRender;
+  const originalRender = adapter.renderParameters;
+  adapter.renderParameters = (state) => {
+    const pending = new Promise((resolve) => {
+      releaseRender = resolve;
+    });
+    adapter.log.push("renderParameters:" + (state ? state.parameters.length : "null"));
+    return pending;
+  };
+  const evaluation = instance._evaluateParameters("parent_change");
+  await new Promise((resolve) => setTimeout(resolve, 10)); // the response arrived; the render is pending
+  assert.ok(instance._lock, "the lock is HELD while the render is pending");
+  await assert.rejects(() => instance.refresh({ scope: "all" }), (error) => error.code === "actions.locked");
+  await assert.rejects(() => instance.reset(), (error) => error.code === "actions.locked");
+  assert.equal(instance._parameters.parameter_revision, 3, "committed state is not installed before the render resolves");
+  releaseRender();
+  await evaluation;
+  assert.equal(instance._lock, null, "the gate released only after the render");
+  assert.equal(instance._parameters.parameter_revision, 3, "the accepted state was installed after the render");
+  await instance.refresh({ scope: "all" }); // actions flow again
+  adapter.renderParameters = originalRender;
+});
+
+test("a deadline firing mid-render releases the gate; the late render installs nothing and a NEWER attempt owns the lock", async () => {
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/parameters", (url, init) => {
+    if (JSON.parse(init.body).intent === "bootstrap") return fetchImpl.envelope(evaluatedState());
+    return fetchImpl.envelope(evaluatedState({ parameter_revision: 8 }));
+  });
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  instance._config.timeouts.parameter_lock_seconds = 0.05;
+  let releaseDoomed;
+  const originalRender = adapter.renderParameters;
+  adapter.renderParameters = () => new Promise((resolve) => { releaseDoomed = resolve; });
+  const doomed = instance._evaluateParameters("parent_change");
+  doomed.catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 90)); // the deadline fires DURING the pending render
+  assert.ok(adapter.log.includes("notify:parameters.lock_timeout"), adapter.log.join("|"));
+  assert.equal(instance._lock, null, "the deadline released the gate mid-render");
+  // A newer attempt acquires the freed lock and completes normally.
+  adapter.renderParameters = originalRender;
+  const newer = await instance._evaluateParameters("retry");
+  assert.equal(newer.parameter_revision, 8, "the newer attempt applied its state");
+  assert.equal(instance._parameters.parameter_revision, 8);
+  // The OLD attempt's render resolves late: no runtime state changes, no newer lock released.
+  const rendersBefore = adapter.log.filter((line) => line.startsWith("renderParameters")).length;
+  releaseDoomed();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(adapter.log.filter((line) => line.startsWith("renderParameters")).length, rendersBefore, "the late render rendered nothing more");
+  await assert.rejects(() => doomed, (error) => error.code === "parameters.superseded");
+  assert.equal(instance._parameters.parameter_revision, 8, "the newer attempt's state stands");
+  assert.equal(instance._lock, null, "the late render released nothing it did not own");
+});
+
+test("a rejected render releases the gate and publishes a recoverable host-render failure", async () => {
+  const fetchImpl = fakeFetch();
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  adapter.renderParameters = () => Promise.reject(new Error("the host's DOM exploded"));
+  await assert.rejects(() => instance._evaluateParameters("parent_change"), (error) => error.code === "parameters.render_failed");
+  assert.equal(instance._lock, null, "the rejected render released the lock");
+  assert.ok(adapter.log.includes("notify:parameters.render_failed"), adapter.log.join("|"));
+  // ...and a retry (a fresh attempt with the same host) can succeed again.
+  adapter.renderParameters = (state) => {
+    adapter.log.push("renderParameters:" + (state ? state.parameters.length : "null"));
+    return Promise.resolve();
+  };
+  const applied = await instance._evaluateParameters("retry");
+  assert.equal(applied.parameter_revision, 3);
+});
+
+test("a SYNCHRONOUS throw from renderParameters follows the same bounded path", async () => {
+  const fetchImpl = fakeFetch();
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  adapter.renderParameters = () => {
+    throw new Error("thrown, not rejected");
+  };
+  await assert.rejects(() => instance._evaluateParameters("parent_change"), (error) => error.code === "parameters.render_failed");
+  assert.equal(instance._lock, null, "a synchronous throw released the lock");
+  assert.ok(adapter.log.includes("notify:parameters.render_failed"), adapter.log.join("|"));
+});
+
+test("an invalid state refuses submission until a commit's re-evaluation restores validity", async () => {
+  const fetchImpl = fakeFetch();
+  let answer;
+  fetchImpl.on("/runtime/parameters", (url, init) => {
+    const intent = JSON.parse(init.body).intent;
+    if (intent === "bootstrap") return fetchImpl.envelope(evaluatedState());
+    return new Promise((resolve) => {
+      answer = (payload) => resolve(fetchImpl.envelope(payload));
+    });
+  });
+  const { instance, adapter } = await boot({
+    fetch: fetchImpl,
+    config: configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } }),
+  });
+  // The server answers an evaluation whose parameter carries an error: valid false (a 200 —
+  // per-parameter errors ride state.errors).
+  const broken = evaluatedState({
+    valid: false,
+    values: { year: null },
+    parameter_revision: 5,
+  });
+  broken.parameters[0].state.value = null;
+  broken.parameters[0].state.errors = [{ code: "parameter.evaluate.required", message: "a value is required", details: {} }];
+  const firstBroken = instance._evaluateParameters("parent_change");
+  firstBroken.catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 0)); // the fetch (and its answer slot) is live
+  answer(broken);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(instance._parameters.valid, false);
+  await assert.rejects(() => instance.refresh({ scope: "all" }), (error) => error.code === "parameters.invalid");
+  await assert.rejects(() => instance.reset(), (error) => error.code === "parameters.invalid");
+  // The commit gesture re-evaluates (the way back to validity) and a valid answer reopens the gate.
+  const fixed = evaluatedState({ parameter_revision: 6 });
+  adapter.commitCb({ name: "year", type: "parameter" });
+  await new Promise((resolve) => setTimeout(resolve, 0)); // the commit's evaluation fetch is live
+  answer(fixed);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(instance._parameters.valid, true, "the commit's re-evaluation restored a valid state");
+  await instance.refresh({ scope: "all" });
+});
+
+test("abort invalidates locally at once, posts the COMPLETE controller path in session and proxy modes, and a 404 is idempotent", async () => {
   const fetchImpl = fakeFetch();
   fetchImpl.on("/runtime/visualizations", () => fetchImpl.stream([]));
-  const { instance, adapter } = await boot({ fetch: fetchImpl });
+  const { instance, adapter } = await boot({ fetch: fetchImpl, dom: { cookie: "dp_csrf=tok%20123" } });
   const refreshId = await instance.refresh({ scope: "all" });
   const outcome = await instance.abort(refreshId);
   assert.deepEqual(outcome, { abort_requested: true });
   assert.ok(adapter.log.includes("status:chart:abort"), adapter.log.join("|"));
   assert.ok(adapter.log.includes("status:cells:abort"));
-  const abortCall = fetchImpl.calls.find((call) => call.url.includes("/abort"));
+  // The route oracle is the COMPLETE path — the controller's ONE runtime segment
+  // (DashboardRuntimeController §8.4), the method and the body, never a substring stub.
+  const abortCall = fetchImpl.calls.find((call) => call.init.method === "POST" && call.url.endsWith("/abort"));
+  assert.ok(abortCall, "an abort POST happened");
+  assert.equal(abortCall.url, "/api/v1/dashboards/d1/runtime/refreshes/" + refreshId + "/abort");
+  assert.equal(abortCall.init.credentials, "same-origin");
+  assert.ok(abortCall.init.headers["DP-CSRF-Token"], "session mode sends the csrf header");
   assert.equal(JSON.parse(abortCall.init.body).instance_id, instance._instanceId);
   // A second abort (the refresh already ended locally) is a no-op that sends nothing.
   const callsBefore = fetchImpl.calls.length;
@@ -600,6 +787,37 @@ test("abort invalidates locally at once, posts with the instance id, and a 404 i
   const notificationsBefore = adapter.log.filter((line) => line.startsWith("notify:")).length;
   await instance.abort(second);
   assert.equal(adapter.log.filter((line) => line.startsWith("notify:")).length, notificationsBefore, "a 404 abort is the finished-refresh idempotence");
+});
+
+test("proxy mode aborts under the proxy base ONCE, without cookie or csrf header", async () => {
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", () => fetchImpl.stream([]));
+  const { instance } = await boot({
+    fetch: fetchImpl,
+    credentials: { proxyBaseUrl: "https://proxy.example/pipeline" },
+  });
+  const refreshId = await instance.refresh({ scope: "all" });
+  await instance.abort(refreshId);
+  const abortCall = fetchImpl.calls.find((call) => call.url.endsWith("/abort"));
+  assert.ok(abortCall, "the abort POST happened");
+  assert.equal(abortCall.url, "https://proxy.example/pipeline/api/v1/dashboards/d1/runtime/refreshes/" + refreshId + "/abort");
+  assert.equal(abortCall.url.split("https://proxy.example/pipeline").length - 1, 1, "the proxy prefix is added exactly once");
+  assert.equal(abortCall.init.credentials, "omit", "no cookie to the proxy");
+  assert.equal(abortCall.init.headers["DP-CSRF-Token"], undefined, "no csrf header in proxy mode");
+  assert.equal(JSON.parse(abortCall.init.body).instance_id, instance._instanceId);
+});
+
+test("dispose's best-effort abort posts the same complete controller path", async () => {
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/visualizations", () => fetchImpl.stream([]));
+  const { instance } = await boot({ fetch: fetchImpl });
+  const refreshId = await instance.refresh({ scope: "all" });
+  instance.dispose();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const abortCall = fetchImpl.calls.find((call) => call.url.endsWith("/abort"));
+  assert.ok(abortCall, "a running refresh got its best-effort abort");
+  assert.equal(abortCall.url, "/api/v1/dashboards/d1/runtime/refreshes/" + refreshId + "/abort");
+  assert.equal(JSON.parse(abortCall.init.body).instance_id, instance._instanceId);
 });
 
 test("connection loss retains content, marks pending stale, offers Retry, and the retry mints a NEW refresh id", async () => {
@@ -811,4 +1029,99 @@ test("reset restores the applied baseline without executing anything", async () 
   assert.equal(fetchImpl.calls.length, callsBefore, "reset executed nothing");
   assert.ok(adapter.log.some((line) => line.startsWith("renderParameters")), "the baseline was re-rendered");
   assert.equal(instance._parameters.parameter_revision, 3, "the revision is the applied one");
+});
+
+test("selections snapshot and submissions carry the WIRE's typed values, nulls and MULTI arrays", async () => {
+  const bigSet = evaluatedState({
+    values: { year: 2026, amount: "1234.56", regions: ["EU", "US"], maybe: null },
+    parameter_revision: 4,
+  });
+  const amount = JSON.parse(JSON.stringify(bigSet.parameters[0]));
+  amount.name = "amount";
+  amount.label = "Amount";
+  amount.type = "BIGDECIMAL";
+  amount.kind = "INPUT";
+  delete amount.presentation;
+  amount.state = {
+    value: "1234.56",
+    origin: "default",
+    computed_default: "1234.56",
+    reset: false,
+    hidden: false,
+    disabled: false,
+    options: null,
+    errors: [],
+  };
+  const regions = JSON.parse(JSON.stringify(bigSet.parameters[0]));
+  regions.name = "regions";
+  regions.label = "Regions";
+  regions.cardinality = "MULTI";
+  regions.presentation = { control: "checkboxes" };
+  regions.state = {
+    value: ["EU", "US"],
+    origin: "default",
+    computed_default: ["EU", "US"],
+    reset: false,
+    hidden: false,
+    disabled: false,
+    options: [
+      { value: "EU", display_value: "Europe", is_default: true },
+      { value: "US", display_value: "United States", is_default: false },
+    ],
+    errors: [],
+  };
+  const maybe = JSON.parse(JSON.stringify(bigSet.parameters[0]));
+  maybe.name = "maybe";
+  maybe.label = "Maybe";
+  maybe.state = Object.assign({}, maybe.state, { value: null });
+  bigSet.parameters = [bigSet.parameters[0], amount, regions, maybe];
+  // The snapshot is the WRITER's shape: flat names, typed values, nulls and arrays preserved.
+  const fetchImpl = fakeFetch();
+  const { instance } = await boot({ fetch: fetchImpl });
+  assert.deepEqual(instance._snapshotSelections(bigSet), {
+    year: 2026,
+    amount: "1234.56",
+    regions: ["EU", "US"],
+    maybe: null,
+  });
+  // A refresh submission sends those same typed values as the request's selections.
+  instance._parameters = bigSet;
+  const refreshId = await instance.refresh({ scope: "all" });
+  const streamCall = fetchImpl.calls.find((call) => call.url.includes("/runtime/visualizations"));
+  const body = JSON.parse(streamCall.init.body);
+  assert.equal(body.parameter_revision, 4);
+  assert.deepEqual(body.selections, { year: 2026, amount: "1234.56", regions: ["EU", "US"], maybe: null });
+  assert.ok(refreshId);
+});
+
+test("reset's install yields to a NEWER applied state accepted during its render", async () => {
+  const fetchImpl = fakeFetch();
+  fetchImpl.on("/runtime/parameters", (url, init) => {
+    if (JSON.parse(init.body).intent === "bootstrap") return fetchImpl.envelope(evaluatedState());
+    return fetchImpl.envelope(evaluatedState({ parameter_revision: 9 }));
+  });
+  const config = configPayload({ parameter_set: { name: "dbr/sets/reporting", version: 1 } });
+  let holding = false;
+  const held = [];
+  const adapter = scriptedAdapter({
+    renderParameters: (state) => {
+      adapter.log.push("renderParameters:" + (state ? state.parameters.length : "null"));
+      if (!holding) return Promise.resolve(); // the bootstrap's render flows normally
+      return new Promise((resolve) => held.push(resolve));
+    },
+  });
+  const { instance } = await boot({ fetch: fetchImpl, adapter, config });
+  adapter.log.length = 0; // the bootstrap's render is history for this case
+  holding = true;
+  const reset = instance.reset();
+  await new Promise((resolve) => setTimeout(resolve, 10)); // the reset's render is pending (held)
+  const evaluation = instance._evaluateParameters("parent_change"); // the lock is free: it acquires
+  await new Promise((resolve) => setTimeout(resolve, 10)); // its response arrived; its render is held too
+  assert.equal(held.length, 2, "two renders pending: the reset's and the evaluation's");
+  held[1](); // the evaluation's render resolves — the NEWER state (9) installs
+  await evaluation;
+  assert.equal(instance._parameters.parameter_revision, 9, "the newer applied state stands");
+  held[0](); // the reset's render resolves LATE
+  await reset;
+  assert.equal(instance._parameters.parameter_revision, 9, "the reset did not clobber the newer revision");
 });

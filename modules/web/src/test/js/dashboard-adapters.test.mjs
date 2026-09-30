@@ -320,12 +320,209 @@ test("the composite adapter builds the grid, mounts renderers by kind and render
     assert.ok(chip, "a status chip exists");
     assert.ok(chip.textContent.includes("error") && chip.textContent.includes("boom"), chip.textContent);
     assert.ok(!chip.innerHTML, "the chip is text-built");
-    // The contract's readSelections answers every rendered control's value.
-    await adapter.renderParameters({
-      parameters: [{ definition: { name: "year", label: "Year" }, value: 2026, state: { hidden: false, disabled: false }, options: [{ value: 2026, display_value: "2026" }] }],
-    });
-    assert.deepEqual(adapter.readSelections(), { year: "2026" });
+    // The contract's readSelections answers every rendered control's TYPED wire value.
+    await adapter.renderParameters(compositeState());
+    assert.deepEqual(adapter.readSelections(), { year: 2026 });
     adapter.dispose();
+  } finally {
+    uninstallDom();
+  }
+});
+
+/** One SELECT SINGLE (dropdown) parameter exactly as the writer sends it. */
+function compositeState(overrides) {
+  return Object.assign(
+    {
+      valid: true,
+      values: { year: 2026 },
+      parameters: [
+        {
+          name: "year",
+          label: "Year",
+          type: "INTEGER",
+          kind: "SELECT",
+          cardinality: "SINGLE",
+          required: false,
+          depends_on: [],
+          presentation: { control: "dropdown" },
+          dependents: [],
+          state: {
+            value: 2026,
+            origin: "default",
+            computed_default: 2026,
+            reset: false,
+            hidden: false,
+            disabled: false,
+            options: [
+              { value: 2025, display_value: "2025", is_default: false },
+              { value: 2026, display_value: "2026", is_default: true },
+            ],
+            errors: [],
+          },
+        },
+      ],
+      overrides_applied: {},
+      parents: ["year"],
+      parameter_revision: 3,
+    },
+    overrides || {},
+  );
+}
+
+test("repeated evaluations REPLACE the parameter rows: no duplicates, no stale listeners, typed round trip", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: [] });
+    const commits = [];
+    adapter.onCommit((enriched) => commits.push(enriched.name));
+    await adapter.renderParameters(compositeState());
+    await adapter.renderParameters(compositeState({ parameter_revision: 4 }));
+    const rows = container.querySelectorAll("[data-dp-parameter]");
+    assert.equal(rows.length, 1, "two renders, exactly ONE row: " + rows.length);
+    // The rebuilt row's control still round-trips the TYPED value (an INTEGER stays a number).
+    assert.deepEqual(adapter.readSelections(), { year: 2026 });
+    // The rebuilt row's listener is LIVE: a change on the CURRENT control reports one commit.
+    const select = rows[0].children[1];
+    select.value = "0"; // the 2025 option (its INDEX into the wire values)
+    select.fire("change");
+    assert.deepEqual(commits, ["year"], "the rebuilt row's gesture is wired");
+    assert.deepEqual(adapter.readSelections(), { year: 2025 }, "the typed value came back through the wire table");
+    // A change on the ROW element (no listener lives there) commits nothing extra.
+    rows[0].fire("change");
+    assert.deepEqual(commits, ["year"], "no duplicate commit");
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("control types follow the definition: MULTI checkboxes read an array, INPUT reads typed text, radio renders radios", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: [] });
+    const state = compositeState();
+    const multi = JSON.parse(JSON.stringify(state.parameters[0]));
+    multi.name = "regions";
+    multi.label = "Regions";
+    multi.cardinality = "MULTI";
+    multi.presentation = { control: "checkboxes" };
+    multi.state.value = ["EU"];
+    multi.state.options = [
+      { value: "EU", display_value: "Europe", is_default: true },
+      { value: "US", display_value: "United States", is_default: false },
+    ];
+    const free = JSON.parse(JSON.stringify(state.parameters[0]));
+    free.name = "limit";
+    free.label = "Limit";
+    free.type = "INTEGER";
+    free.kind = "INPUT";
+    delete free.presentation;
+    free.state.value = 42;
+    free.state.options = null;
+    const radioParam = JSON.parse(JSON.stringify(state.parameters[0]));
+    radioParam.name = "grade";
+    radioParam.label = "Grade";
+    radioParam.presentation = { control: "radio" };
+    radioParam.state.value = "B";
+    radioParam.state.options = [
+      { value: "A", display_value: "Alpha", is_default: false },
+      { value: "B", display_value: "Beta", is_default: true },
+    ];
+    state.parameters = [state.parameters[0], multi, free, radioParam];
+    state.values = { year: 2026, regions: ["EU"], limit: 42, grade: "B" };
+    await adapter.renderParameters(state);
+    const reads = adapter.readSelections();
+    assert.deepEqual(reads.year, 2026);
+    assert.deepEqual(reads.regions, ["EU"], "a MULTI reads the checked TYPED values as an array");
+    assert.deepEqual(reads.limit, 42, "an INPUT's text parsed to the wire's number");
+    assert.deepEqual(reads.grade, "B", "the radio group reads the TYPED selected value");
+    // Toggle the second region box and change the free text: the reads follow, typed.
+    const rows = container.querySelectorAll("[data-dp-parameter]");
+    const regionBoxes = rows[1].children.filter((child) => child.tagName === "INPUT");
+    regionBoxes[1].checked = true;
+    assert.deepEqual(adapter.readSelections().regions, ["EU", "US"]);
+    const limitInput = rows[2].children[1];
+    limitInput.value = "not-a-number";
+    assert.equal(adapter.readSelections().limit, "not-a-number", "unparsable text travels AS TEXT for the server to judge");
+    limitInput.value = "7";
+    assert.deepEqual(adapter.readSelections().limit, 7);
+    limitInput.value = "";
+    assert.equal(adapter.readSelections().limit, null, "an empty INPUT reads null");
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("hidden and disabled parameters still render and still read (D23); overrides_applied wins; errors are text", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    const container = fakeElement("div");
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: [] });
+    const state = compositeState();
+    state.parameters[0].state.hidden = false;
+    state.parameters[0].state.disabled = false;
+    state.overrides_applied = { year: { visible: false, enabled: false } };
+    await adapter.renderParameters(state);
+    const row = container.querySelectorAll("[data-dp-parameter]")[0];
+    assert.equal(row.style.display, "none", "the override hid the row");
+    assert.deepEqual(adapter.readSelections(), { year: 2026 }, "the hidden value is still read");
+    const select = row.children[1];
+    assert.equal(select.disabled, true, "the override disabled the control");
+    // The engine's own flags (no override): hidden rows render and read; disabled controls too.
+    const state2 = compositeState();
+    state2.parameters[0].state.hidden = true;
+    state2.parameters[0].state.disabled = true;
+    await adapter.renderParameters(state2);
+    const row2 = container.querySelectorAll("[data-dp-parameter]")[0];
+    assert.equal(row2.style.display, "none");
+    assert.deepEqual(adapter.readSelections(), { year: 2026 }, "a disabled control's value still reads");
+    // Per-parameter errors render as accessible TEXT.
+    const state3 = compositeState({ valid: false });
+    state3.parameters[0].state.errors = [{ code: "parameter.evaluate.required", message: "a value is required", details: {} }];
+    await adapter.renderParameters(state3);
+    const problem = container.querySelectorAll(".dp-dashboard-parameter-error")[0];
+    assert.ok(problem, "an error element exists");
+    assert.ok(problem.textContent.includes("parameter.evaluate.required"), problem.textContent);
+    assert.ok(!problem.innerHTML, "the error is text-built");
+  } finally {
+    uninstallDom();
+  }
+});
+
+test("composite dispose removes the mounted DOM; a host sibling stands; re-mount leaves exactly one set", async () => {
+  installDom();
+  try {
+    const runtime = require(resolveStatic("datapipelines-dashboard.js"));
+    runtime._internal.resetRenderers();
+    runtime.registerRenderer({ kind: "plotly", version: "4", create: () => ({ renderData: () => Promise.resolve("rendered") }) });
+    const container = fakeElement("div");
+    const neighbour = fakeElement("div");
+    neighbour.setAttribute("id", "host-owned");
+    container.appendChild(neighbour);
+    const adapter = runtime.adapters(container);
+    await adapter.mountLayout({ columns: 12, grid: [] });
+    await adapter.mountVisualization({ name: "v", renderer: { kind: "plotly", version: "4" }, config: {} }, { kind: "plotly", version: "4" });
+    await adapter.renderParameters(compositeState());
+    const mountedSets = () => container.querySelectorAll(".dp-dashboard").length;
+    assert.equal(mountedSets(), 1, "one layout mounted");
+    assert.ok(container.querySelectorAll(".dp-dashboard-parameters").length === 1, "one parameters pane");
+    adapter.dispose();
+    assert.equal(mountedSets(), 0, "the composite removed its grid");
+    assert.equal(container.querySelectorAll(".dp-dashboard-parameters").length, 0, "the parameters pane went too");
+    assert.ok(container.children.indexOf(neighbour) !== -1, "the host's own DOM stands");
+    // A re-mount after disposal: exactly one fresh set, no leftovers.
+    const second = runtime.adapters(container);
+    await second.mountLayout({ columns: 12, grid: [] });
+    await second.renderParameters(compositeState());
+    assert.equal(mountedSets(), 1);
+    assert.equal(container.querySelectorAll(".dp-dashboard-parameters").length, 1);
   } finally {
     uninstallDom();
   }

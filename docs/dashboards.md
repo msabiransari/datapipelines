@@ -453,8 +453,8 @@ of them, and a no-op is not conformant (the conformance suite drives real behavi
 |---|---|---|
 | `mountLayout(layout) → Promise` | build the grid from the system layout | awaited before anything mounts |
 | `mountVisualization(occurrence, renderer) → Promise<handle>` | create the placeholder and its renderer | the handle's `renderData` is the ONLY data path |
-| `renderParameters(state) → Promise` | render the FULL server state, hidden and disabled included | awaited inside the parameter gate |
-| `readSelections() → {name: value}` | return every current committed value | merged over the server state at each evaluation |
+| `renderParameters(state) → Promise` | render the FULL server state, hidden and disabled included | awaited INSIDE the parameter gate — the lock releases only after the render resolves |
+| `readSelections() → {name: value}` | return every current committed value, in the wire's type | merged over the server state at each evaluation; hidden and disabled values included (D23) |
 | `onEdit/onCommit/onAction(callback)` | register the interaction callbacks | every callback carries `{instanceId, name, type, refreshId}` |
 | `renderData(occurrence, refreshId, rows, bindings) → Promise<'rendered'\|'no-data'>` | render native data | deadline-bounded; a late acknowledgment is discarded |
 | `renderStatus(occurrence, {state, stale, reason})` | show the state accessibly, colour never alone | a throwing hook is isolated and reported |
@@ -468,6 +468,19 @@ load: `plotly` major `4` (`datapipelines-dashboard-plotly.js`), `table` major `1
 same way (`DatapipelinesDashboard.registerRenderer({kind, version, create})`) before `init`; the
 renderer `kind` and `version` on each occurrence's `renderer` are matched against the registrations at
 bootstrap, before any execution.
+
+**The parameter state the adapter receives is the writer's** (`EvaluateResponseJson` — rest-api
+§21.3): every parameter is a FLAT object — the stored definition's fields (`name`, `label`, `type`,
+`kind`, `cardinality`, `presentation.control`) beside `dependents` and a `state` object holding
+`value` (in its WIRE type: a JSON number for INTEGER, a string for BIGDECIMAL, an array for a MULTI,
+`null` unresolved), `options` (`{value, display_value, is_default}` with typed values), `hidden`,
+`disabled` and `errors`. The response's `overrides_applied` (the dashboard's `parameter_state`
+overrides) wins over the engine's `hidden`/`disabled`, and `valid: false` (any parameter in error)
+refuses actions until a commit's re-evaluation restores it. The composite renders each control from
+the definition — a `<select>` for a SINGLE dropdown/list, a radio group for `radio`, a checkbox group
+for a MULTI, a free input for an `INPUT` — and reads selections back in the WIRE type (option
+identity is the typed value, never a DOM string); repeated renders REPLACE the rows, and `dispose`
+removes every element the composite mounted (a host sibling stands).
 
 ### 6.3 The renderers
 
@@ -531,6 +544,16 @@ deduplicated per outcome, delivered to the adapter and `options.onNotification`,
 through `instance.recover(intent)`. A `dashboard.runtime.configuration_stale` (409) publishes the
 outcome with `recover: "reload"` and disposes the instance.
 
+The parameter lock (§5.6 of the record) covers the WHOLE attempt — the server call AND the host's
+asynchronous application of the accepted state: the gate releases, the committed state installs and
+the timer clears only after `renderParameters` resolves, with the attempt re-validated first (liveness,
+its finished flag, lock ownership). The absolute deadline stays live through the render: an expiry
+mid-render publishes the timeout, frees the gate for a NEWER attempt, and the late render changes
+nothing and releases nothing it does not own. A rejected render (or one that throws synchronously)
+follows the same bounded path: the attempt terminates exactly once and a recoverable
+`parameters.render_failed` outcome is published. Reset's install yields the same way — a baseline
+re-rendered while a newer evaluation was accepted does not clobber the newer revision.
+
 The CSP design-around: Plotly's bundle would inject one `<style id="plotly.js-style-global">` and fill
 it with `insertRule` at load. The runtime pre-places that element with the class
 `no-inline-styles` (Plotly's own opt-out, `src/lib/dom.js`), and the page loads the vendored
@@ -542,6 +565,7 @@ the conformance suite proves the rules APPLY and is red when the stylesheet is r
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.6 | L3a-b (#10) the client runtime corrections | The client consumed the WIRE now (corrections on the delivered tip, the server wire authoritative): §6.2 states the parameter state's real writer shape (flat definition + `state`, typed values, `overrides_applied`, `valid`), the composite's per-definition controls and typed selections, the row-replacing renders and dispose's DOM removal; §6.6 states the lock's corrected coverage — held through the host's asynchronous render, deadline live through it, late renders and reset installs yield to a newer attempt. The abort route is the controller's one-`runtime`-segment path (§5's route table unchanged). |
 | 2026-09-30 | v0.5 | L3a (#10) the client runtime | **New §6 The client runtime** — the vendored artifact and what it owns (§6.1's API), the twelve-function adapter contract (§6.2), the three renderers and the data-is-text rule (§6.3), the two Plotly bundles and the one-bundle rule (§6.4), both credential modes' wire contract including the proxy contract L5's reference proxy implements (§6.5), and the states, notifications and the CSP design-around (§6.6). §5.8's "not here" loses the client runtime; the pages remain L3b's. |
 | 2026-09-29 | v0.4 | L2 (#10) the runtime — renumbered at merge after 320's v0.3 | **New §5 The runtime** — the delegated act (D50) and what keeps it safe, the six routes, `configuration_id`, the parameter evaluation, a refresh (order, sharing, admission, caps, dependencies, deadlines, the stream), abort, the record. §4.4's `last_refresh` is live (the caller's own). |
 | 2026-09-30 | v0.3 | 320 (#320) dependency guards | §3.1: the guard's other direction — a pipeline release, parameter set or transform template a dashboard or visualization pins can no longer be discarded or purged from under it (`pipeline.version.pinned`, `parameter.in_use`, `template.in_use`; [Versioning §3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)); why the visualization's own LIVE-only guard is complete; restoring a DISCARDED dashboard version re-judges its dependencies. |
