@@ -74,6 +74,21 @@ internal object SyntheticPlants {
                 """"Authorization": "***" tail""",
             ),
             Plant(
+                "overlap nested bare assignment outruns its json container",
+                """"secret": secret=  planted-secret-z9 tail""",
+                """"secret": "***" tail""",
+            ),
+            Plant(
+                "overlap nested quoted assignment outruns its json container",
+                """"secret": secret="planted-secret-z10" tail""",
+                """"secret": "***" tail""",
+            ),
+            Plant(
+                "overlap json pair opening on the closing quote of an assignment value",
+                """password="x"secret":"planted-secret-z11" tail""",
+                "password=*** tail",
+            ),
+            Plant(
                 "overlap adjacent json pairs",
                 """{"password":"planted-secret-q","secret":"planted-secret-r"}""",
                 """{"password":"***","secret":"***"}""",
