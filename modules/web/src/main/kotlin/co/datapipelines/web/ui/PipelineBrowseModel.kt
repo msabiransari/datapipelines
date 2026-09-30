@@ -433,8 +433,10 @@ class PipelineBrowseModel(
         val parents =
             versions
                 .flatMap { repository.findLiveParentsPinningVersion(workspaceId, record.name, it.version) }
-                // 178: a hidden parent must not leak through the reverse arrow.
+                // 178: a hidden parent must not leak through the reverse arrow. Both halves of the lens apply (#340): the
+                // NAME, and under a narrowing lens RELEASED parent versions only — a draft's number never reaches a promoter.
                 .through(view.pipelines) { it.pipelineName }
+                .filter { !view.isLensed || it.versionStatus == PipelineVersionStatus.RELEASED }
                 .map { UsageView.ParentUse(it.pipelineId, it.pipelineName, it.pipelineVersion, it.nodeId, it.pinnedVersion) }
         val served =
             endpoints

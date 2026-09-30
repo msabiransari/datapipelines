@@ -1,9 +1,9 @@
 # UI Screens Inventory
 
-**Status:** v1.90
+**Status:** v1.91
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
-**Last updated:** 2026-09-29 (313, #313/#312)
+**Last updated:** 2026-09-30 (340, #340/#335)
 
 ---
 
@@ -666,7 +666,9 @@ one. **Usage** is the published endpoints serving the pipeline and the live pipe
 pinning it, and it runs the **same query 101's discard refusal runs**
 (`PipelineRepository.findLiveParentsPinningVersion`, the evidence behind
 `pipeline.version.pinned`), so what the user reads before pressing Discard is what the server
-will decide on. **Dashboards joined the list with #320:** a heading lists the live dashboard versions whose
+will decide on — **for a caller whose lens narrows (a promoter), through both halves of the lens (#340): the parent pipeline's
+NAME must be admitted AND only RELEASED parent versions are listed, so a draft's number never reaches her (the query returns
+DRAFT parent versions too, and the badge counts only what the tab lists)**. **Dashboards joined the list with #320:** a heading lists the live dashboard versions whose
 sources pin a version of this pipeline (`referencing_dashboards` — asked per version through the port
 `PipelineService.refuseIfPinned` asks), through the dashboard lens, and each is refusal evidence, so it counts in the
 badge. Schedules joined the list with #259: a third heading lists the live schedules
@@ -728,7 +730,7 @@ same services 101 wired, never the REST controllers over HTTP and never a second
 | Purge draft | `…/lifecycle/purge?version=v` | the version and its execution count; the button reads "Purge v`<n>` and `<k>` runs" and needs the typed confirm `v<n>` | any with a DRAFT |
 | Discard | `…/lifecycle/discard?version=v` | whether the version is current (then the §3.4 fallback: "v`<m>` becomes current" or "nothing eligible remains — the pipeline will have no current version and its endpoints will answer 503"); parents that pin it (listed, no button) **and, since #320, the dashboards whose sources pin it (`referencing_dashboards`, listed, no button)**; **the schedules that run the pipeline (273)** — from the SAME by-target read the Usage tab makes, lensed for the caller (a promoter's view is R3's; the route itself stays `pipeline.version.manage`) — one row per schedule naming it, its condition (`enabled`/`paused`/`blocked`, the Usage tab's vocabulary) and its stored next occurrence, under "Schedules that run this pipeline — discarding does not pause them: at its next run each blocks (the pointer is gone) until repointed or deleted" (the §5.2 `pointer_null` shape, said before the button); "Discard is reversible — Restore brings it back." | RELEASED rows |
 | Restore | `…/lifecycle/restore?version=v` | whether restoring moves the pointer (v > current, or current is NULL); "Restoring makes v`<n>` a live release again." | DISCARDED rows |
-| Purge entity | `…/lifecycle/purge-entity` | only in the `{D}` shape (else the `last_release` branch, no button); the exclusive draft templates the service offers, with a checkbox "also purge these `<k>` templates (they are pinned by nothing else)"; typed confirm is the entity's NAME | `{D}` |
+| Purge entity | `…/lifecycle/purge-entity` | only in the `{D}` shape (else the `last_release` branch, no button); the exclusive draft templates the service offers, with a checkbox "also purge these `<k>` templates (they are pinned by nothing else)"; **since #335, beneath the offer, the draft templates the offer KEEPS** — a parameter set or a visualization also pins them (`ExclusiveDraftTemplates.keptIds`, the list the REST response reports as `kept_draft_templates`) — each with the sets and visualizations that hold it, under "`<k>` draft template(s) stay — something else pins them" (nothing kept renders nothing; unlensed, the verb is author-or-above); typed confirm is the entity's NAME | `{D}` |
 | Switch | `…/lifecycle/switch` | the live versions as radio rows (RELEASED always; DRAFT under development posture), the current one marked, discarded ones disabled with "restore first"; "endpoints published on this pipeline serve v`<n>` after this." Not authoring-gated (§3.1: the receiver's rollback lever) | ≥ 2 live eligible versions |
 
 The templates twin is addressed by NAME in query/body ([§9.6](template-hierarchy-design.md#96-addressing-the-name-never-travels-in-a-url-path-segment-normative-measured)):
@@ -1066,7 +1068,10 @@ The per-version **in-use count stays** (040 D6 — distinct pipelines pinning th
 their working version) but it is now a phrase in the row rather than an "In use" table column,
 worded by the model so the pipelines' "7 runs" and the templates' "2 uses" cannot be
 confused for one another (#320: the count is the composed reverse arrow's — pipelines, parameter sets and
-visualizations — so the unit is "uses", not "pipelines").
+visualizations — so the unit is "uses", not "pipelines"). **Every arm of the count honours the caller's lens (#340):** under a
+narrowing view the pipeline arm counts only admitted pipelines' RELEASED working versions — re-derived from the pinned rows, as the
+set and visualization arms are, because the aggregate statement has no lens — so the count and the used-by listing agree and a
+hidden pipeline or a draft pin never counts; the whole view keeps the aggregate.
 
 **Filters.** `dialect` and `type` (046's column; four values since 7b — `sql`, `html`, `jsonata`, `javascript` — rendered from `TemplateType`, so the filter and the create modal cannot drift from the enum) are exact matches on the version row and travel with every level and pager request; both narrow the folder derivation too, so a folder whose whole subtree is filtered out is absent rather than empty. The search covers every rendered column (the §5.1 Search rule): id/path, display name, description, and the dialect badge's wire value — the dialect match is repository-level (`ILIKE` on the version's dialect), so a `sqlite` query finds templates whose names never mention it.
 
@@ -1834,6 +1839,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.91 | 340 (#340, #335) lens residue + the purge dialog's kept list | **§4.3b, the Usage tab:** the parents half applies both halves of the promoter lens — the parent NAME, and under a narrowing view RELEASED parent versions only (the live-parents query returns DRAFT ones; a draft's number never reaches a promoter, 178b) — and the badge counts what the tab lists. **§4.6, the template screen:** the per-version count's pipeline arm honours the lens too (admitted pipelines, RELEASED working versions, re-derived from rows like the set and visualization arms; the whole view keeps the aggregate). **§4.3d, the purge-entity dialog:** names the draft templates the offer keeps and the sets/visualizations that hold them (#335), from the same port the REST `kept_draft_templates` reads. No route, permission or role changed. Guards: `PipelineBrowseModelUsageTest`, `TemplateUsageTest`, `PipelineLifecycleDialogModelTest`, `PipelineLifecycleDialogRenderTest`, each falsified. |
 | 2026-09-30 | v1.90 | lane 336-b (#336) | **§4.20**: the refresh answer owns its selection — both completion arms are guarded by the page generation and the originating schedule, so a late reply for a superseded selection (or a page since left) marks nothing, toasts nothing and arms no poll; the outage flag lives on the selection's own state, so the first failure of a NEW selection toasts even though the previous one's did. Correction of the 336 review's F1; the v1.89 stale+toast contract is unchanged. No route, permission or role changed. |
 | 2026-09-30 | v1.89 | lane 336 (#336 D8) | **§4.20**: a failed runs refresh keeps the runs shown and MARKS them stale — a `data-slot="runs-stale"` note plus one toast per outage (never one per poll) — until a refresh answers; the poll keeps its existing cadence. A malformed 2xx body rejects like an error (the same stale+toast path). No route, permission or role changed. |
 | 2026-09-30 | v1.88 | lane 336 (#336 D4) | **§4.13 gains the degraded reads**: a failed members listing or key-owner read renders "Members could not be loaded" / "Key owners could not be loaded" (`ds-empty` notices, `data-members-degraded` / `data-key-owners-degraded`, fixed text — the failure's class + SQLState live in the controller's log line); a catalogued refusal still renders the empty state it always did. No route, permission or role changed. |

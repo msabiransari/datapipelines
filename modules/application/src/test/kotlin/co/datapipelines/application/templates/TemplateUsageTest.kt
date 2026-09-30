@@ -15,6 +15,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -120,6 +121,8 @@ class TemplateUsageTest {
     fun `inUseCounts under a narrowing view re-derives the sets' counts from the admitted RELEASED pins, one per set`() {
         val setA = UUID.randomUUID()
         every { pipelines.inUseCounts(workspaceId, templateId) } returns mapOf(1 to 1)
+        // #340: the pipeline arm re-derives from its rows under a narrowing view too — one admitted RELEASED pipeline.
+        every { pipelineVersions.findWorkingVersionTemplatePins(workspaceId, templateId, 1) } returns listOf(pipelinePin)
         // The unlensed counts statement is still read and then discarded under a narrowing view.
         every { sets.countWorkingPinsByPinnedVersion(workspaceId, templateId) } returns mapOf(1 to 9, 2 to 9)
         noVisualizations()
@@ -134,6 +137,41 @@ class TemplateUsageTest {
             )
 
         usage.inUseCounts(workspaceId, onlyVisible, templateId) shouldBe mapOf(1 to 2)
+    }
+
+    @Test
+    fun `inUseCounts under a narrowing view counts only the admitted RELEASED pipelines, one per pipeline - #340`() {
+        val admitted = UUID.randomUUID()
+        // The unlensed aggregate says 3 pipelines pin version 1 and 1 pins version 2; the lens admits one released one.
+        every { pipelines.inUseCounts(workspaceId, templateId) } returns mapOf(1 to 3, 2 to 1)
+        every { pipelineVersions.findWorkingVersionTemplatePins(workspaceId, templateId, 1) } returns
+            listOf(
+                // two nodes of ONE admitted pipeline — one pipeline, one count
+                TemplatePin(admitted, "acme/p/visible", 3, PipelineVersionStatus.RELEASED, "n1", 1),
+                TemplatePin(admitted, "acme/p/visible", 3, PipelineVersionStatus.RELEASED, "n2", 1),
+                // a pipeline the lens hides never counts
+                TemplatePin(UUID.randomUUID(), "acme/p/hidden", 1, PipelineVersionStatus.RELEASED, "n1", 1),
+                // a DRAFT working version of an ADMITTED pipeline never reaches a lensed caller
+                TemplatePin(UUID.randomUUID(), "acme/p/visible", 4, PipelineVersionStatus.DRAFT, "n1", 1),
+            )
+        every { pipelineVersions.findWorkingVersionTemplatePins(workspaceId, templateId, 2) } returns
+            listOf(TemplatePin(UUID.randomUUID(), "acme/p/hidden", 1, PipelineVersionStatus.RELEASED, "n1", 2))
+        every { sets.countWorkingPinsByPinnedVersion(workspaceId, templateId) } returns emptyMap()
+        every { sets.workingVersionPins(workspaceId, templateId) } returns emptyList()
+        noVisualizations()
+
+        // version 2 has only a hidden pin, so it is absent (renders as zero), not a stale 1
+        usage.inUseCounts(workspaceId, onlyVisible, templateId) shouldBe mapOf(1 to 1)
+    }
+
+    @Test
+    fun `inUseCounts under the whole view keeps the aggregate and reads no pipeline rows - #340`() {
+        every { pipelines.inUseCounts(workspaceId, templateId) } returns mapOf(1 to 2)
+        every { sets.countWorkingPinsByPinnedVersion(workspaceId, templateId) } returns emptyMap()
+        noVisualizations()
+
+        usage.inUseCounts(workspaceId, everything, templateId) shouldBe mapOf(1 to 2)
+        verify(exactly = 0) { pipelineVersions.findWorkingVersionTemplatePins(any(), any(), any()) }
     }
 
     @Test

@@ -363,6 +363,49 @@ class PipelineLifecycleDialogModelTest {
     }
 
     @Test
+    fun `purge entity - a draft-only template a set or a visualization also pins is named as kept with who holds it, not offered (#335)`() {
+        every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = null)
+        every { repository.listVersions(any(), any()) } returns
+            listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, DRAFT, "h1", T0, USER))
+        every { runStats.totalRuns(any()) } returns 0
+        every { exclusive.exclusiveIds(WS, ID) } returns listOf("test/only_here.sql")
+        every { exclusive.keptIds(WS, ID) } returns
+            listOf(
+                co.datapipelines.pipeline.KeptDraftTemplate(
+                    "test/shared.sql",
+                    mapOf(
+                        "referencing_parameter_sets" to listOf("acme/s/regions"),
+                        "referencing_visualizations" to listOf("acme/charts/by_region"),
+                    ),
+                ),
+                co.datapipelines.pipeline.KeptDraftTemplate(
+                    "test/set_only.sql",
+                    mapOf("referencing_parameter_sets" to listOf("acme/s/a", "acme/s/b")),
+                ),
+            )
+
+        val dialog = model.purgeEntity(WS, ID)
+
+        // The offer is unchanged: the unpinned exclusive template is still offered, the shared one is not.
+        dialog.exclusiveTemplates shouldBe listOf("test/only_here.sql")
+        dialog.keptTemplates shouldBe
+            listOf(
+                PipelineLifecycleDialogModel.KeptTemplate("test/shared.sql", listOf("acme/s/regions"), listOf("acme/charts/by_region")),
+                PipelineLifecycleDialogModel.KeptTemplate("test/set_only.sql", listOf("acme/s/a", "acme/s/b"), emptyList()),
+            )
+    }
+
+    @Test
+    fun `purge entity - a pipeline that is not a sole draft names no kept templates and does not ask the port (#335)`() {
+        every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = 1)
+        every { repository.listVersions(any(), any()) } returns
+            listOf(co.datapipelines.pipeline.PipelineVersionRecord(ID, 1, RELEASED, "h1", T0, USER))
+        every { runStats.totalRuns(any()) } returns 0
+
+        model.purgeEntity(WS, ID).keptTemplates shouldBe emptyList()
+    }
+
+    @Test
     fun `switch - eligibility follows the posture - drafts only under development`() {
         every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = 1)
         every { repository.listVersions(any(), any()) } returns

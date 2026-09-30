@@ -196,7 +196,16 @@ class TemplateUsage(
         id: String,
     ): Map<Int, Int> {
         val fromPipelines =
-            pipelines.inUseCounts(workspaceId, id)
+            pipelines.inUseCounts(workspaceId, id).let { counts ->
+                if (view.pipelines.isEverything && view.templates.isEverything) {
+                    counts
+                } else {
+                    // #340: a narrowing view counts only pipelines it admits, RELEASED working versions only — the rule
+                    // [usedBy] applies to the same rows, so the count and the listing agree. The aggregate has no lens,
+                    // so re-derive from the pinned rows, one version at a time (the aggregate's keys say which).
+                    workingPipelineCounts(workspaceId, view, id, counts.keys)
+                }
+            }
         val fromSets =
             parameterSets
                 .countWorkingPinsByPinnedVersion(workspaceId, id)
@@ -214,6 +223,23 @@ class TemplateUsage(
             (fromPipelines[version] ?: 0) + (fromSets[version] ?: 0) + (fromVisualizations[version] ?: 0)
         }
     }
+
+    private fun workingPipelineCounts(
+        workspaceId: UUID,
+        view: LensedView,
+        id: String,
+        versions: Set<Int>,
+    ): Map<Int, Int> =
+        versions
+            .associateWith { version ->
+                pipelineVersions
+                    .findWorkingVersionTemplatePins(workspaceId, id, version)
+                    .through(view.pipelines) { it.pipelineName }
+                    .filter { it.versionStatus == PipelineVersionStatus.RELEASED }
+                    .map(TemplatePin::pipelineId)
+                    .distinct()
+                    .size
+            }.filterValues { it > 0 }
 
     private fun workingVisualizationCounts(
         workspaceId: UUID,
