@@ -57,6 +57,9 @@ class PromotionReceiveService(
     private val checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
     /** #194 lane D — the parameter-set half of promotion (§8.3). Required: a set entry is never silently dropped (#300). */
     private val parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion,
+    /** #10 L1c — the transfer families' halves (§12, D61): bind and land INSIDE the transaction, after the four families. */
+    private val visualizationPromotion: co.datapipelines.web.visualizations.VisualizationPromotion,
+    private val dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
@@ -139,6 +142,20 @@ class PromotionReceiveService(
             // must find it already stored. Republishing an unchanged endpoint is a no-op
             // rather than a conflict, so a re-push is idempotent like every other entry.
             batch.endpoints.forEach { entry -> endpointPromotion.apply(entry, promoter) }
+            // #10 L1c — the two transfer families LAST (D61's order: templates → sets → pipelines →
+            // endpoints → visualizations → dashboards), and — unlike the sets — bound AND landed
+            // INSIDE the transaction: neither validator opens a customer datasource (the template
+            // facts render dry, the pipeline facts take only a resolver), so there is no lease wall,
+            // and validating here means the just-landed templates and pipelines ARE what the
+            // import lens resolves against. A shape refusal (the family's body_invalid, bound
+            // through the READER) or a dependency refusal rolls the WHOLE batch back — the C36
+            // property, proven at E2E level for a refused dashboard.
+            batch.visualizations.forEach { entry ->
+                visualizationPromotion.land(visualizationPromotion.bind(entry), workspace.id, actor)
+            }
+            batch.dashboards.forEach { entry ->
+                dashboardPromotion.land(dashboardPromotion.bind(entry), workspace.id, actor)
+            }
         }
 
         // C4: the promoted rows are stamped with the peer's identity (the System actor for the
@@ -156,15 +173,19 @@ class PromotionReceiveService(
                     "parameter_sets" to batch.parameterSets.size,
                     "pipelines" to batch.pipelines.size,
                     "endpoints" to batch.endpoints.size,
+                    "visualizations" to batch.visualizations.size,
+                    "dashboards" to batch.dashboards.size,
                 ),
         )
         log.info(
-            "event=$AUDIT_ACCEPTED source_env={} workspace={} templates={} sets={} pipelines={} actor={}",
+            "event=$AUDIT_ACCEPTED source_env={} workspace={} templates={} sets={} pipelines={} visualizations={} dashboards={} actor={}",
             batch.sourceEnv,
             batch.workspace,
             batch.templates.size,
             batch.parameterSets.size,
             batch.pipelines.size,
+            batch.visualizations.size,
+            batch.dashboards.size,
             actor,
         )
         return PromotionWire.Applied(
@@ -174,6 +195,8 @@ class PromotionReceiveService(
             pipelines = batch.pipelines.size,
             endpoints = batch.endpoints.size,
             parameterSets = batch.parameterSets.size,
+            visualizations = batch.visualizations.size,
+            dashboards = batch.dashboards.size,
         )
     }
 

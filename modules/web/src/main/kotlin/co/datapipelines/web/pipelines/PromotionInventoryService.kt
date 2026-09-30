@@ -38,6 +38,9 @@ class PromotionInventoryService(
     private val authoringEnabled: Boolean,
     /** #194 lane D — the parameter sets (the record's §8.3). Required: the inventory never silently omits them (#300). */
     private val parameterSets: co.datapipelines.parameters.ParameterSetRepository,
+    /** #10 L1c — the two transfer families' current releases, the sender's delta input for them. */
+    private val visualizations: co.datapipelines.visualization.VisualizationService,
+    private val dashboards: co.datapipelines.visualization.DashboardService,
 ) {
     /** The inventory of [workspaceName], or [WorkspaceNotFoundException] when this deployment has no such workspace. */
     fun inventoryOf(workspaceName: String): PromotionWire.Inventory {
@@ -50,6 +53,8 @@ class PromotionInventoryService(
             templates = templateEntries(workspaceId),
             datasources = datasources.listVisible(workspaceId = workspaceId).map { it.name }.sorted(),
             parameterSets = parameterSetEntries(workspaceId),
+            visualizations = artifactEntries(visualizations.currentVersions(workspaceId)),
+            dashboards = artifactEntries(dashboards.currentVersions(workspaceId)),
         )
     }
 
@@ -105,6 +110,14 @@ class PromotionInventoryService(
             .findCurrentVersions(workspaceId)
             .map { PromotionWire.Entry(it.name, it.version, it.bodyHash) }
             .sortedBy { it.name }
+
+    /**
+     * One entry per live artifact's current RELEASED version (#10 L1c) — `currentVersions` holds released
+     * pointers only (a draft never enters), NO lens: the receiver's own inventory is the whole-truth input
+     * the sender's delta is computed against.
+     */
+    private fun artifactEntries(current: List<co.datapipelines.visualization.CurrentArtifactVersion>): List<PromotionWire.Entry> =
+        current.map { PromotionWire.Entry(it.name, it.version, it.bodyHash) }.sortedBy { it.name }
 
     private companion object {
         /** `TemplateRepository.MAX_PAGE_LIMIT`; the loop above pages rather than assuming one page. */

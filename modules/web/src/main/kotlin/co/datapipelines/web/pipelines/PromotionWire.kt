@@ -46,6 +46,18 @@ object PromotionWire {
          */
         @field:JsonProperty("parameter_sets") @get:JsonProperty("parameter_sets") @param:JsonProperty("parameter_sets")
         val parameterSets: List<Entry> = emptyList(),
+        /**
+         * #10 L1c — the target's visualizations, by name. Defaulted so a sender that predates the
+         * transfer reads an inventory this receiver still answers.
+         */
+        @field:JsonProperty("visualizations") @get:JsonProperty("visualizations") @param:JsonProperty("visualizations")
+        val visualizations: List<Entry> = emptyList(),
+        /**
+         * #10 L1c — the target's dashboards, by name. The dashboards' "newer than the target" lens arm
+         * (D50; the implementation spec's §5) reads THIS.
+         */
+        @field:JsonProperty("dashboards") @get:JsonProperty("dashboards") @param:JsonProperty("dashboards")
+        val dashboards: List<Entry> = emptyList(),
     ) {
         /** Pipelines by name; a pipeline the target does not have counts as version 0 (§10.2). */
         fun pipelineByName(): Map<String, Entry> = pipelines.associateBy { it.name }
@@ -55,6 +67,12 @@ object PromotionWire {
 
         /** Parameter sets by name (194d). */
         fun parameterSetByName(): Map<String, Entry> = parameterSets.associateBy { it.name }
+
+        /** Visualizations by name (L1c). */
+        fun visualizationByName(): Map<String, Entry> = visualizations.associateBy { it.name }
+
+        /** Dashboards by name (L1c). */
+        fun dashboardByName(): Map<String, Entry> = dashboards.associateBy { it.name }
     }
 
     /** One inventory row: the identity, the version the target serves, and its content hash. */
@@ -104,13 +122,30 @@ object PromotionWire {
         @field:JsonProperty("endpoints") @get:JsonProperty("endpoints") @param:JsonProperty("endpoints")
         val endpoints: List<EndpointEntry> = emptyList(),
         /**
-         * #194 lane D — full parameter-set export envelopes (§21.4), in push order AFTER the
-         * templates (a set's pins must resolve) and BEFORE the pipelines — the record's §8.3
-         * order. Defaulted empty so a sender that predates the engine still pushes a batch
-         * this receiver accepts.
+         * #194 lane D — the parameter sets as NODES (rest-api §18.2; a whole §21.4 envelope as an
+         * entry is refused by the strict bind), in push order AFTER the templates (a set's pins must
+         * resolve) and BEFORE the pipelines — the record's §8.3 order. Defaulted empty so a sender
+         * that predates the engine still pushes a batch this receiver accepts.
          */
         @field:JsonProperty("parameter_sets") @get:JsonProperty("parameter_sets") @param:JsonProperty("parameter_sets")
         val parameterSets: List<JsonNode> = emptyList(),
+        /**
+         * #10 L1c — the visualizations as NODES (rest-api §18.2; D61's order: they land after the
+         * batch's templates/sets/pipelines and before the dashboards that pin them). Each entry is the
+         * version's payload — the body with its lifecycle fields — never the §22 export envelope: the
+         * transform templates ride the batch's template closure, and the receiver strips the lifecycle
+         * keys by name and binds the rest through the family READER. Defaulted empty so a sender that
+         * predates the transfer still pushes a batch this receiver accepts.
+         */
+        @field:JsonProperty("visualizations") @get:JsonProperty("visualizations") @param:JsonProperty("visualizations")
+        val visualizations: List<JsonNode> = emptyList(),
+        /**
+         * #10 L1c — the dashboards as NODES, after every visualization they pin (D61's order). The pinned
+         * pipelines and set travel BY REFERENCE — a dashboard assumes they were promoted first — and the
+         * receiver's validation judges them against the just-landed rows inside its one transaction.
+         */
+        @field:JsonProperty("dashboards") @get:JsonProperty("dashboards") @param:JsonProperty("dashboards")
+        val dashboards: List<JsonNode> = emptyList(),
     )
 
     /**
@@ -152,5 +187,10 @@ object PromotionWire {
         val endpoints: Int = 0,
         @field:JsonProperty("parameter_sets") @get:JsonProperty("parameter_sets") @param:JsonProperty("parameter_sets")
         val parameterSets: Int = 0,
+        /** #10 L1c — the two transfer families, counted like every other kind. */
+        @field:JsonProperty("visualizations") @get:JsonProperty("visualizations") @param:JsonProperty("visualizations")
+        val visualizations: Int = 0,
+        @field:JsonProperty("dashboards") @get:JsonProperty("dashboards") @param:JsonProperty("dashboards")
+        val dashboards: Int = 0,
     )
 }

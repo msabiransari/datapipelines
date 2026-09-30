@@ -808,6 +808,8 @@ class RoleVisibilityRenderTest {
                         ),
                     ),
                 promotableParameterSets = PROMOTION_SETS,
+                promotableVisualizations = emptyList(),
+                promotableDashboards = emptyList(),
                 examined = 4,
             )
     }

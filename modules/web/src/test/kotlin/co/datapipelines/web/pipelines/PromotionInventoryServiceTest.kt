@@ -38,6 +38,10 @@ class PromotionInventoryServiceTest {
 
     // #300: required — the inventory's set arm is never silently empty.
     private val parameterSets = mockk<co.datapipelines.parameters.ParameterSetRepository>(relaxed = true)
+
+    // #10 L1c — the two transfer families' arms (relaxed: the suite's assertions name the other families).
+    private val visualizations = mockk<co.datapipelines.visualization.VisualizationService>(relaxed = true)
+    private val dashboards = mockk<co.datapipelines.visualization.DashboardService>(relaxed = true)
     private val service =
         PromotionInventoryService(
             workspaces = workspaces,
@@ -47,6 +51,8 @@ class PromotionInventoryServiceTest {
             deploymentName = "prod",
             authoringEnabled = false,
             parameterSets = parameterSets,
+            visualizations = visualizations,
+            dashboards = dashboards,
         )
 
     private val workspaceId = UUID.randomUUID()

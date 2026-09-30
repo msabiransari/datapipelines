@@ -104,6 +104,8 @@ class PromotionSetsRenderTest {
                         ),
                     ),
                 promotableParameterSets = sets,
+                promotableVisualizations = emptyList(),
+                promotableDashboards = emptyList(),
                 examined = 4,
             )
 

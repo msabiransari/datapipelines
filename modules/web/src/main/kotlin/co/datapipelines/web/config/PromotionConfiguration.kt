@@ -47,6 +47,9 @@ class PromotionConfiguration {
         datasources: DatasourceRegistry,
         // #194 lane D — the set arm of the inventory (§8.3).
         repository: co.datapipelines.parameters.ParameterSetRepository,
+        // #10 L1c — the two transfer families' current releases.
+        visualizations: co.datapipelines.visualization.VisualizationService,
+        dashboards: co.datapipelines.visualization.DashboardService,
     ): PromotionInventoryService =
         PromotionInventoryService(
             workspaces,
@@ -56,6 +59,8 @@ class PromotionConfiguration {
             deploymentName(environment),
             authoringEnabled(environment),
             parameterSets = repository,
+            visualizations,
+            dashboards,
         )
 
     /**
@@ -86,6 +91,9 @@ class PromotionConfiguration {
         checkRunner: co.datapipelines.application.checks.PipelineCheckRunner,
         // #194 lane D — the parameter-set half of promotion (§8.3).
         parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion,
+        // #10 L1c — the transfer families' halves (§12, D61).
+        visualizationPromotion: co.datapipelines.web.visualizations.VisualizationPromotion,
+        dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
     ): PromotionReceiveService =
         PromotionReceiveService(
             inventory,
@@ -97,6 +105,8 @@ class PromotionConfiguration {
             endpointPromotion,
             checkRunner,
             parameterSetPromotion,
+            visualizationPromotion,
+            dashboardPromotion,
         )
 
     /**
@@ -130,6 +140,33 @@ class PromotionConfiguration {
                 co.datapipelines.web.parameters
                     .ParameterSetReceiveValidation(engines, renderer, statuses, datasources, probe, config, templateValidator),
             )
+
+    /**
+     * #10 L1c — the transfer families' sender payloads and the receiver's bind-and-landing, ONE
+     * collaborator per family (the `parameterSetPromotion` mould). Both bind through the transfer
+     * service's ONE entry bind — the family READER, so the document bounds hold on receive as on
+     * save (the L1c HIGH item) — and land through the family service's `import` INSIDE the
+     * receive's transaction (D61's order; no customer datasource is opened, so there is no #302
+     * wall for these two families).
+     */
+    @Bean
+    fun visualizationPromotion(
+        repository: co.datapipelines.visualization.VisualizationRepository,
+        visualizations: co.datapipelines.visualization.VisualizationService,
+        transfer: co.datapipelines.visualization.ArtifactTransferService,
+    ): co.datapipelines.web.visualizations.VisualizationPromotion =
+        co.datapipelines.web.visualizations
+            .VisualizationPromotion(repository, visualizations, transfer)
+
+    /** #10 L1c — the dashboard twin of [visualizationPromotion]. */
+    @Bean
+    fun dashboardPromotion(
+        repository: co.datapipelines.visualization.DashboardRepository,
+        dashboards: co.datapipelines.visualization.DashboardService,
+        transfer: co.datapipelines.visualization.ArtifactTransferService,
+    ): co.datapipelines.web.visualizations.DashboardPromotion =
+        co.datapipelines.web.visualizations
+            .DashboardPromotion(repository, dashboards, transfer)
 
     /** 074 — the endpoint half of a promotion batch, sender and receiver rules in one place. */
     @Bean
@@ -167,7 +204,9 @@ class PromotionConfiguration {
         parameterSets: co.datapipelines.parameters.ParameterSetRepository,
         // #10 L1b — the dashboard and visualization lenses derive from the current released dashboards.
         dashboards: co.datapipelines.visualization.DashboardService,
-    ): PromotableViews = PromotableViews(pipelines, templates, client, parameterSets, dashboards)
+        // #10 L1c — the visualization arm reads the pins against (and the page's visualization rows from).
+        visualizations: co.datapipelines.visualization.VisualizationService,
+    ): PromotableViews = PromotableViews(pipelines, templates, client, parameterSets, dashboards, visualizations)
 
     @Bean
     @Suppress("LongParameterList")
@@ -183,6 +222,9 @@ class PromotionConfiguration {
         // #194 lane D — the sender's set payloads. #300: REQUIRED, and wired — the bean left the
         // default null here since the engine landed, so promote() silently sent NO parameter sets.
         parameterSetPromotion: co.datapipelines.web.parameters.ParameterSetPromotion,
+        // #10 L1c — the transfer families' sender halves (§12, D61).
+        visualizationPromotion: co.datapipelines.web.visualizations.VisualizationPromotion,
+        dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
     ): PromotionService =
         PromotionService(
             pipelines = pipelines,
@@ -193,6 +235,8 @@ class PromotionConfiguration {
             views = views,
             endpointPromotion = endpointPromotion,
             parameterSetPromotion = parameterSetPromotion,
+            visualizationPromotion = visualizationPromotion,
+            dashboardPromotion = dashboardPromotion,
         )
 
     /** The deployment LABEL, carried as data (never branched on) — see the class KDoc. */
