@@ -446,20 +446,48 @@
     // node sweep, and now the toast) could never render from the UI's own Cancel
     // button (031 F5). Send the DELETE with the reader open; abort only as the
     // fallback when no terminal event arrives.
+    //
+    // #336 D8: the outcome is stated. An ACCEPTED cancel arms the 5 s fallback —
+    // the no-terminal-event case is the only one it exists for. A 409 is §15.2's
+    // documented quiet case (the execution already reached its terminal state and
+    // that is what renders). Any other refusal or a network failure toasts the
+    // server's catalogued message (or fixed copy when there is no body) and
+    // leaves the stream open: the run is never presented as cancelled.
     fetch("/api/v1/executions/" + self.executionId, {
       method: "DELETE",
       // Cookie-authenticated DELETE — same double-submit pair as execute (§7.2/§15.2).
       headers: { "DP-CSRF-Token": readCookie("dp_csrf") },
       credentials: "same-origin",
     })
-      .catch(function () {})
-      .then(function () {
-        setTimeout(function () {
-          if (!self.terminalSeen && self.abortController) {
-            self.abortController.abort();
-            self.isConnected = false;
-          }
-        }, 5000);
+      .then(function (res) {
+        if (res.ok) {
+          setTimeout(function () {
+            if (!self.terminalSeen && self.abortController) {
+              self.abortController.abort();
+              self.isConnected = false;
+            }
+          }, 5000);
+          return;
+        }
+        if (res.status === 409) return;
+        res
+          .json()
+          .then(function (err) {
+            var message =
+              (err && err.error && (err.error.user_message || err.error.message)) ||
+              "The execution could not be cancelled (HTTP " + res.status + "). It is still running.";
+            if (window.DpToast && window.DpToast.show) window.DpToast.show("danger", "Cancel failed", message);
+          })
+          .catch(function () {
+            if (window.DpToast && window.DpToast.show) {
+              window.DpToast.show("danger", "Cancel failed", "The execution could not be cancelled. It is still running.");
+            }
+          });
+      })
+      .catch(function () {
+        if (window.DpToast && window.DpToast.show) {
+          window.DpToast.show("danger", "Cancel failed", "The server could not be reached. The execution is still running.");
+        }
       });
   };
 

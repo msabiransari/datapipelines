@@ -38,3 +38,26 @@ test("a missing lifecycle block is treated as no draft", () => {
   assert.equal(executeVersion(null), null);
   assert.equal(executeVersion(undefined), null);
 });
+
+// #336 D8 — malformed lifecycle JSON is NOT "no draft": the run would silently
+// target the latest RELEASED version while the person is editing a draft. The
+// read side records the refusal; the execute path checks it before connecting.
+test("a malformed lifecycle block records the refusal, never a silent no-draft", () => {
+  const loaded = globalThis.window;
+  globalThis.window = {};
+  globalThis.document = {
+    readyState: "complete",
+    addEventListener: function () {},
+    cookie: "",
+    getElementById: (id) =>
+      id === "pipeline-lifecycle" ? { textContent: '{"hasDraft": true, ' } : null,
+  };
+  const { path: p2 } = { path };
+  const require2 = createRequire(import.meta.url);
+  delete require2.cache[require2.resolve(p2.resolve(here, "../../main/resources/static/js/pipeline-editor/draft.js"))];
+  require2(p2.resolve(here, "../../main/resources/static/js/pipeline-editor/draft.js"));
+  assert.equal(loaded === globalThis.window, false);
+  assert.equal(globalThis.window.PEDraftInvalid, true);
+  assert.equal(globalThis.window.PEDraft, null);
+  globalThis.window = loaded;
+});

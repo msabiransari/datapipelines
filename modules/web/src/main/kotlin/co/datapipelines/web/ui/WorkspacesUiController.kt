@@ -97,10 +97,13 @@ class WorkspacesUiController(
             memberships.filter {
                 it.workspaceActive && Permission.WORKSPACE_MEMBERS_MANAGE.satisfiedBy(it.role, principal.isSuperAdmin)
             }
-        // #336 D4 — the workspaces whose reads failed (never the catalogued refusals): the
-        // template renders a degraded notice per name, distinct from the empty state.
-        val degradedMembers = mutableSetOf<String>()
-        val degradedKeyOwners = mutableSetOf<String>()
+        // #336 D4 — whether the ACTIVE workspace's reads failed (never the catalogued
+        // refusals): the template renders the degraded notice, distinct from the empty state.
+        // The listings map is filtered to the ACTIVE workspace above, so each flag is at most
+        // one workspace's verdict — booleans, not names. (The first cut passed Sets of names
+        // in the model; the browser suite hung every page load with them — see the handback.)
+        var degradedMembers = false
+        var degradedKeyOwners = false
         val listings =
             administered
                 .filter { it.workspaceName == activeWorkspace }
@@ -116,7 +119,7 @@ class WorkspacesUiController(
                                 if (failure is AuthException) {
                                     null
                                 } else {
-                                    degradedMembers += membership.workspaceName
+                                    degradedMembers = true
                                     log.warn(
                                         "workspace {} members listing could not be read: error={} sql_state={}",
                                         membership.workspaceName,
@@ -142,7 +145,7 @@ class WorkspacesUiController(
                                 if (failure is AuthException) {
                                     emptySet()
                                 } else {
-                                    degradedKeyOwners += name
+                                    degradedKeyOwners = true
                                     log.warn(
                                         "workspace {} key-owner read could not be read: error={} sql_state={}",
                                         name,
@@ -164,8 +167,8 @@ class WorkspacesUiController(
         // into `managed`: a template that counts members must not count people who have not
         // signed in yet.
         model.addAttribute("pending", listings.mapValues { (_, l) -> l?.invitations?.map(InvitationRowView::of) ?: emptyList() })
-        model.addAttribute("degradedMembers", degradedMembers.toSet())
-        model.addAttribute("degradedKeyOwners", degradedKeyOwners.toSet())
+        model.addAttribute("degradedMembers", degradedMembers)
+        model.addAttribute("degradedKeyOwners", degradedKeyOwners)
         // The ones this caller administers but is not IN — named so the screen can say "switch
         // to manage" instead of silently showing nothing where a section used to be.
         //

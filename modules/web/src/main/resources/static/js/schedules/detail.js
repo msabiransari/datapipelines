@@ -21,6 +21,9 @@
 
   var RUNS_PAGE = 20;
   var POLL_MS = 4000;
+  // #336 D8 — the refresh-outage state: the runs list is stale from the first failed
+  // refresh until one answers; the toast fires once per outage, not once per poll.
+  var staleToastShown = false;
 
   function pane() {
     return document.getElementById("schedule-detail");
@@ -356,6 +359,7 @@
         var before = now.runs.map(function (x) { return x.id + ":" + x.state; }).join();
         now.runs = data.items || [];
         now.runsHasMore = !!(data.pagination && data.pagination.has_more);
+        runsStale(false);
         rerenderRuns();
         var after = now.runs.map(function (x) { return x.id + ":" + x.state; }).join();
         // A run that just ended can have BLOCKED the schedule (unknown, or a refusal that
@@ -363,7 +367,26 @@
         if (before !== after && !now.runs.some(M().isActive)) return reload();
         schedulePoll();
       })
-      .catch(function () { schedulePoll(); });
+      .catch(function (err) {
+        // #336 D8: a failed refresh keeps the STALE runs visible and marked, never
+        // silently re-presented as fresh; the poll keeps its existing cadence. The
+        // first failure says so (a toast per poll would be a second outage); the
+        // note stays until a refresh answers again.
+        runsStale(true);
+        if (!staleToastShown) {
+          staleToastShown = true;
+          S.toastError(err, "Runs could not be refreshed");
+        }
+        schedulePoll();
+      });
+  }
+
+  /** The runs list's staleness marker (#336 D8): shown from the first failed refresh until one answers. */
+  function runsStale(stale) {
+    if (!stale) staleToastShown = false;
+    var root = pane().querySelector("[data-schedule-detail]");
+    var note = root && root.querySelector("[data-slot=runs-stale]");
+    if (note) note.hidden = !stale;
   }
 
   function moreRuns() {

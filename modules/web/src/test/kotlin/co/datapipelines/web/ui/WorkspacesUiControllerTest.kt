@@ -263,9 +263,7 @@ class WorkspacesUiControllerTest {
         val model = ExtendedModelMap()
         controller.screen(model, MockHttpServletRequest()) shouldBe "workspaces/index"
 
-        @Suppress("UNCHECKED_CAST")
-        val degraded = model["degradedMembers"] as Set<String>
-        degraded shouldBe setOf("acme")
+        model["degradedMembers"] shouldBe true
 
         // The page still renders — the notice is the degraded state, distinct from the empty one.
         val html =
@@ -276,7 +274,7 @@ class WorkspacesUiControllerTest {
                     setVariable("own", emptyList<Any>())
                     setVariable("canCreate", false)
                     setVariable("managed", mapOf("acme" to emptyList<MemberRowView>()))
-                    setVariable("degradedMembers", degraded)
+                    setVariable("degradedMembers", true)
                 },
             )
         html shouldContain "Members could not be loaded"
@@ -296,9 +294,7 @@ class WorkspacesUiControllerTest {
         val model = ExtendedModelMap()
         controller.screen(model, MockHttpServletRequest()) shouldBe "workspaces/index"
 
-        @Suppress("UNCHECKED_CAST")
-        val degraded = model["degradedMembers"] as Set<String>
-        degraded shouldBe emptySet()
+        model["degradedMembers"] shouldBe false
     }
 
     @Test
@@ -314,9 +310,7 @@ class WorkspacesUiControllerTest {
         val model = ExtendedModelMap()
         controller.screen(model, MockHttpServletRequest()) shouldBe "workspaces/index"
 
-        @Suppress("UNCHECKED_CAST")
-        val degraded = model["degradedKeyOwners"] as Set<String>
-        degraded shouldBe setOf("acme")
+        model["degradedKeyOwners"] shouldBe true
 
         val html =
             engine().process(
@@ -326,7 +320,7 @@ class WorkspacesUiControllerTest {
                     setVariable("own", emptyList<Any>())
                     setVariable("canCreate", false)
                     setVariable("managed", mapOf("acme" to listOf(MemberRowView.of(memberRow(), hasKey = false))))
-                    setVariable("degradedKeyOwners", degraded)
+                    setVariable("degradedKeyOwners", true)
                 },
             )
         html shouldContain "Key owners could not be loaded"

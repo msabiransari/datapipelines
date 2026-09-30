@@ -5,6 +5,17 @@
     var pipelineId = editor.pipeline.id;
     if (!pipelineId) return;
 
+    // #336 D8: a lifecycle block that could not be read leaves the version pin
+    // unknown — running would target the server's execute-default (latest
+    // RELEASED) while the person may be editing a draft. Refuse, visibly.
+    if (window.PEDraftInvalid) {
+      editor.isExecuting = false;
+      editor.showError(
+        "The editor could not read the pipeline's lifecycle state, so it cannot choose which version to run. Reload the page; if it persists, re-open the pipeline."
+      );
+      return;
+    }
+
     editor.isExecuting = true;
     editor.setBanner("", "");
 

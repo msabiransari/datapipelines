@@ -131,13 +131,13 @@
          (the §4.17 lens-unavailable shape, the ds-empty primitives) renders ABOVE the section,
          whose remaining state stays current. Fixed text only — the failure's evidence lives in
          the controller's log line (class + SQLState), never on the page. -->
-    <div th:if="${degradedMembers != null and degradedMembers.contains(entry.key)}"
+    <div th:if="${degradedMembers == true}"
          class="ds-empty app-reading u-mb-md" data-members-degraded="">
       <p class="ds-empty-title">Members could not be loaded</p>
       <p class="ds-empty-description">The member list could not be read. The rest of this page is
         current — reload to try again.</p>
     </div>
-    <div th:if="${degradedKeyOwners != null and degradedKeyOwners.contains(entry.key)}"
+    <div th:if="${degradedKeyOwners == true}"
          class="ds-empty app-reading u-mb-md" data-key-owners-degraded="">
       <p class="ds-empty-title">Key owners could not be loaded</p>
       <p class="ds-empty-description">Members are listed, but which of them hold a live API key
