@@ -185,13 +185,13 @@ class DashboardPromotion(
         target: PromotionWire.Entry?,
         view: PromotableView,
     ): ArtifactVersion<DashboardBody>? {
-        val record = repository.findRecordByName(workspaceId, name)
-        val current = record?.currentVersion
-        val detail = current?.let { repository.findVersionDetail(workspaceId, record.id, it) }
+        val record = repository.findRecordByName(workspaceId, name) ?: return null
+        val current = record.currentVersion ?: return null
+        val detail = repository.findVersionDetail(workspaceId, record.id, current)
         val promotable =
-            view.dashboardsLens.admits(name) && record != null && current != null &&
+            view.dashboardsLens.admits(name) &&
                 detail?.status == PipelineVersionStatus.RELEASED && PromotableView.isNewer(current, detail.bodyHash, target)
-        if (!promotable || record == null || current == null) return null
+        if (!promotable) return null
         return repository.findVersion(workspaceId, record.id, current)
     }
 

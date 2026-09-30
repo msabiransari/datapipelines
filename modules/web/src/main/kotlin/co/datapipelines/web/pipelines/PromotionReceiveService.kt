@@ -155,7 +155,7 @@ class PromotionReceiveService(
         // C4: the promoted rows are stamped with the peer's identity (the System actor for the
         // config value), and WHERE they came from is recorded here — the source deployment's name and a
         // fingerprint of the key that authorised the push. Never the key.
-        reportApplied(batch, actor)
+        return reportApplied(batch, actor)
     }
 
     /** The applied report, the audit row and the log line — one spelling of the counts, per kind. */
