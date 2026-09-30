@@ -18,10 +18,11 @@ package co.datapipelines.logging
  *
  * **Why the work is bounded.** A regex retries a failed suffix scan from every later key start
  * (`password_password_…z:` was quadratic, F6), and a scan that steps through a merged region would
- * retry every nested start. Every scan here is memoized by what it measured: all starts inside one
- * run of key characters share its end, all starts inside one bare token share its end, a quoted
- * value scanned from one quote is the same scan from any quote escaped inside it, and the
- * continuation after one identifier end is computed once. [work] counts one unit per character
+ * retry every nested start. The scans that nested starts would repeat are memoized by what they
+ * measured: all starts inside one run of key characters share its end, all starts inside one bare
+ * token share its end, and the continuation after one identifier end is computed once. A quoted
+ * value needs no memo: the quote that starts one follows `=` or `:`, so it is never an escaped
+ * quote inside another scan, and the scans of one quote kind tile the text. [work] counts one unit per character
  * stepped and per word compared; a test holds it to a fixed multiple of the input length, so the
  * bound is a counted fact, not a timing on someone's machine.
  *
@@ -53,8 +54,6 @@ internal class RedactionScanner(
     private val keyRun = RunMemo()
     private val bareAssignment = RunMemo()
     private val bareJson = RunMemo()
-    private val doubleQuoted = RunMemo()
-    private val singleQuoted = RunMemo()
 
     // The continuation after the last identifier end tried: the end of its value, or -1.
     private var triedIdentifierEnd = -1
@@ -173,8 +172,8 @@ internal class RedactionScanner(
         val c = text[from]
         val end =
             when {
-                c == '"' -> memoized(doubleQuoted, from, terminatorSlack = 1) { quotedEnd(from, '"') }
-                assignmentForm && c == '\'' -> memoized(singleQuoted, from, terminatorSlack = 1) { quotedEnd(from, '\'') }
+                c == '"' -> quotedEnd(from, '"')
+                assignmentForm && c == '\'' -> quotedEnd(from, '\'')
                 assignmentForm -> memoized(bareAssignment, from) { bareEnd(from, BARE_ASSIGNMENT_STOPS) }
                 else -> memoized(bareJson, from) { bareEnd(from, BARE_JSON_STOPS) }
             }
@@ -208,19 +207,15 @@ internal class RedactionScanner(
 
     /**
      * The end [measure] finds for a scan starting at [from], reusing the memo's last measurement
-     * when [from] falls inside its range: a run of key characters, a bare token, or a quoted value
-     * in which [from] is an ESCAPED quote of the same kind (an unescaped one would have ended it),
-     * all end where the earlier scan did. A quoted scan's last character may be its own closing
-     * quote, which is NOT inside the value: a fresh scan from it starts a new value, so quoted
-     * memos pass a [terminatorSlack] of 1 and the closing quote is measured again.
+     * when [from] falls inside its range: a run of key characters or a bare token, in which every
+     * start ends where the first did (the character that ends the range is not in it).
      */
     private inline fun memoized(
         memo: RunMemo,
         from: Int,
-        terminatorSlack: Int = 0,
         measure: () -> Int,
     ): Int {
-        if (from >= memo.start && from < memo.end - terminatorSlack) return memo.end
+        if (from >= memo.start && from < memo.end) return memo.end
         val end = measure()
         memo.start = from
         memo.end = end

@@ -166,6 +166,15 @@ class LogRedactorTest {
     }
 
     @Test
+    fun `failed and merged matches are linear - nested bare tokens share one scan`() {
+        // Every `secret=` inside the first bare token starts a nested candidate whose own token
+        // runs to the same end: without the shared token scan each would rescan the rest.
+        assertLinear("nested bare tokens") { n -> "secret=".repeat(n) }
+        assertLinear("nested bare tokens in the json form") { n -> "{\"secret\":" + "secret=".repeat(n) }
+        assertLinear("nested quoted values of both kinds") { n -> "password=\"x secret='y ".repeat(n) }
+    }
+
+    @Test
     fun `matching work is linear too - many adjacent secrets and a long value`() {
         assertLinear("adjacent assignments") { n -> "password=x;".repeat(n) }
         assertLinear("adjacent json pairs") { n -> "{\"secret\":\"x\"}".repeat(n) }

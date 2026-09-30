@@ -15,10 +15,10 @@ import java.util.regex.Pattern
  * thought of. The regexes here are a reference, never the shipped mechanism: they are quadratic
  * and their `%replace` form is what F5 and F6 were about.
  *
- * It exists because the memo caches (shared run ends, shared quoted ends) are exactly the kind of
- * optimisation a fixed corpus cannot falsify: the first version of the quoted-value memo reused a
- * closing quote as if it were an escaped one, and only a replay over random fragment soup showed
- * 4,936 mismatches in 400,000 strings. The non-vacuity floors keep the generator honest.
+ * It exists because the memo caches (shared run ends, shared token ends) and the region merging are
+ * exactly the kind of optimisation a fixed corpus cannot falsify: a since-removed quoted-value memo
+ * reused a closing quote as if it were an escaped one, and only a replay over random fragment
+ * soup showed 4,936 mismatches in 400,000 strings. The non-vacuity floors keep the generator honest.
  */
 class RedactionScannerGrammarOracleTest {
     private val identifier = "(?i:(?:${LogRedactor.SENSITIVE_KEYS.joinToString("|")})(?:_[A-Za-z0-9_.-]*+)?)"
