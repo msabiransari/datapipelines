@@ -27,9 +27,13 @@ data class DashboardImport(
  *
  * ## The import
  * The WHOLE envelope's shape is judged before anything lands; then templates → visualizations → the artifact
- * (D61's order). Each payload is bound by the ONE strip-by-name helper ([bodyOf]): the nine lifecycle keys are
- * removed from the payload's TOP level only, and the strict mapper refuses everything else — a lifecycle key
- * smuggled into a nested object (`renderer.id`) never binds. The id is kept, the hash verified, a taken id is
+ * (D61's order). Each payload is bound by the ONE entry bind ([visualizationEntry] / [dashboardEntry]): the nine
+ * lifecycle keys are removed from the payload's TOP level (`name` kept — it is a document key), the family READER
+ * then walks the result — so the seven `datapipelines.visualization.*` bounds and the two dashboard bounds hold on
+ * import and on the promotion receive exactly as on save — and the strict bind refuses everything else; a lifecycle
+ * key smuggled into a nested object (`renderer.id`) refuses as the reader's `unknown_key`. A present-but-non-integer
+ * `version` and a present-but-non-array `templates`/`visualizations` are REFUSED (`body_invalid` naming the path),
+ * never coerced into the version-less/empty paths. The id is kept, the hash verified, a taken id is
  * `import.id_taken` (C29). Like the REST parameter-set import (C35) this path is NOT atomic across its parts: a
  * refused dashboard leaves the templates and visualizations it already landed (each idempotent on re-import).
  */
@@ -37,6 +41,9 @@ class ArtifactTransferService(
     private val visualizations: VisualizationService,
     private val dashboards: DashboardService,
     private val bundle: TemplateBundle,
+    /** The document bounds run on IMPORT too — the L1c HIGH item: the readers, not the bare mapper. */
+    private val visualizationReader: VisualizationReader,
+    private val dashboardReader: DashboardReader,
 ) {
     /** The export envelope of [id]'s CURRENT release. */
     fun exportVisualization(
@@ -100,13 +107,8 @@ class ArtifactTransferService(
         actor: UUID,
     ): DashboardImport {
         val root = objectOrRefuse(envelope, DashboardErrorCodes.BODY_INVALID, "")
-        val dashboard =
-            exportOf(
-                objectOrRefuse(root.get("dashboard"), DashboardErrorCodes.BODY_INVALID, "dashboard"),
-                DashboardBody::class.java,
-                DashboardErrorCodes.BODY_INVALID,
-            )
-        val bundled = (root.get("visualizations") as? ArrayNode)?.map(::parseVisualization).orEmpty()
+        val dashboard = dashboardEntry(objectOrRefuse(root.get("dashboard"), DashboardErrorCodes.BODY_INVALID, "dashboard"))
+        val bundled = optionalArray(root, "visualizations", DashboardErrorCodes.BODY_INVALID).map(::parseVisualization)
         bundled.forEach { bundle.import(workspaceId, it.templates, actor) }
         val landed = bundled.map { visualizations.import(workspaceId, it.export, actor) }
         return DashboardImport(dashboards.import(workspaceId, dashboard, actor), landed)
@@ -148,6 +150,10 @@ class ArtifactTransferService(
             .put("${noun}_version", version.detail.version)
             .put("${noun}_body_hash", version.detail.bodyHash)
             .put("exported_at", Instant.now().toString())
+            // The exported release's evidence summary — the test run id, its verdict, the screenshot hash (L4's
+            // tables). NULL until L4 lands, and the manifest SAYS so: an importing deployment records
+            // `imported_with_evidence: false` on the audit row, never guesses.
+            .putNull("evidence")
 
     // ---- parsing -----------------------------------------------------------------------------------------
 
@@ -159,30 +165,47 @@ class ArtifactTransferService(
     private fun parseVisualization(envelope: JsonNode): ParsedVisualization {
         val root = objectOrRefuse(envelope, VisualizationErrorCodes.BODY_INVALID, "")
         val payload = objectOrRefuse(root.get("visualization"), VisualizationErrorCodes.BODY_INVALID, "visualization")
-        val templates = (root.get("templates") as? ArrayNode)?.toList().orEmpty()
-        return ParsedVisualization(exportOf(payload, VisualizationBody::class.java, VisualizationErrorCodes.BODY_INVALID), templates)
+        val templates = optionalArray(root, "templates", VisualizationErrorCodes.BODY_INVALID)
+        return ParsedVisualization(visualizationEntry(payload), templates)
     }
 
-    /** The payload's lifecycle fields and its strictly bound body — every miss is the family's `body_invalid`. */
-    private fun <B : Any> exportOf(
+    /**
+     * The entry-level bind of ONE artifact payload — the import routes' and the promotion wire's ONE bind (the L1c
+     * HIGH item): the lifecycle keys stripped BY NAME at the top level (`name` kept — the reader's document key),
+     * then the family READER's `readOrThrow`, so every document bound (`datapipelines.visualization.*`, the two
+     * dashboard bounds, the key tables, the strict types) holds here exactly as on save. A miss is the family's
+     * `body_invalid`, with the reader's failure list riding `details.failures`.
+     */
+    fun visualizationEntry(payload: ObjectNode): ArtifactExport<VisualizationBody> =
+        entryOf(payload, VisualizationErrorCodes.BODY_INVALID) { stripped ->
+            visualizationReader.readOrThrow(stripped).let { it.name to it.body }
+        }
+
+    /** The dashboard twin of [visualizationEntry]. */
+    fun dashboardEntry(payload: ObjectNode): ArtifactExport<DashboardBody> =
+        entryOf(payload, DashboardErrorCodes.BODY_INVALID) { stripped ->
+            dashboardReader.readOrThrow(stripped).let { it.name to it.body }
+        }
+
+    private fun <B : Any> entryOf(
         payload: ObjectNode,
-        type: Class<B>,
         bodyInvalid: String,
+        bindBody: (ObjectNode) -> Pair<String, B>,
     ): ArtifactExport<B> {
-        val id =
-            payload
-                .get("id")
-                ?.takeIf(JsonNode::isTextual)
-                ?.asText()
-                ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-        val name = payload.get("name")?.takeIf(JsonNode::isTextual)?.asText()
-        val hash = payload.get("body_hash")?.takeIf(JsonNode::isTextual)?.asText()
-        val body = bodyOf(payload, type)
-        if (listOfNotNull(id, name, hash, body).size != REQUIRED_EXPORT_FIELDS) throw malformed(bodyInvalid, "payload")
+        val id = textualUuid(payload.get("id"), bodyInvalid, "id")
+        val hash = textual(payload.get("body_hash"), bodyInvalid, "body_hash")
+        val versionNode = payload.get("version")
+        // A present-but-non-integer version REFUSES (the owner's ruling): the old takeIf silently sent it down the
+        // version-less path, skipping the hash check on content the sender declared versioned.
+        if (versionNode != null && !versionNode.isNull && !versionNode.isInt) {
+            throw wrongType(bodyInvalid, "version")
+        }
+        val (boundName, body) = bindBody(strippedKeepName(payload))
+        if (listOfNotNull(id, boundName, hash, body).size != REQUIRED_EXPORT_FIELDS) throw malformed(bodyInvalid, "payload")
         return ArtifactExport(
             id = checkNotNull(id),
-            name = checkNotNull(name),
-            version = payload.get("version")?.takeIf(JsonNode::isInt)?.asInt(),
+            name = boundName,
+            version = versionNode?.takeIf(JsonNode::isInt)?.asInt(),
             bodyHash = checkNotNull(hash),
             releasedAt =
                 payload
@@ -200,6 +223,37 @@ class ArtifactTransferService(
         bodyInvalid: String,
         path: String,
     ): ObjectNode = node as? ObjectNode ?: throw malformed(bodyInvalid, path)
+
+    /** The envelope's OPTIONAL array member: present-but-not-an-array REFUSES (the ruling), absent is empty. */
+    private fun optionalArray(
+        root: ObjectNode,
+        key: String,
+        bodyInvalid: String,
+    ): List<JsonNode> {
+        val node = root.get(key) ?: return emptyList()
+        if (node.isNull) return emptyList()
+        if (node !is ArrayNode) throw wrongType(bodyInvalid, key)
+        return node.toList()
+    }
+
+    private fun textual(
+        node: JsonNode?,
+        bodyInvalid: String,
+        path: String,
+    ): String? {
+        if (node == null || node.isNull) return null
+        if (!node.isTextual) throw wrongType(bodyInvalid, path)
+        return node.asText()
+    }
+
+    private fun textualUuid(
+        node: JsonNode?,
+        bodyInvalid: String,
+        path: String,
+    ): UUID? {
+        val text = textual(node, bodyInvalid, path) ?: return null
+        return runCatching { UUID.fromString(text) }.getOrNull()
+    }
 
     // ---- the released version an export needs --------------------------------------------------------------
 
@@ -247,6 +301,16 @@ class ArtifactTransferService(
         mapOf("reason" to "malformed_envelope", "path" to path),
     )
 
+    /** A present field of the wrong JSON type — the ruling: refused, never coerced into an emptier path. */
+    private fun wrongType(
+        bodyInvalid: String,
+        path: String,
+    ) = DatapipelinesException(
+        bodyInvalid,
+        "The export envelope's '$path' has the wrong JSON type.",
+        mapOf("path" to path, "reason" to "wrong_type"),
+    )
+
     companion object {
         private val MAPPER = ArtifactJson.mapper
 
@@ -269,6 +333,16 @@ class ArtifactTransferService(
             val stripped = MAPPER.createObjectNode()
             payload.properties().forEach { (key, value) -> if (key !in LIFECYCLE_KEYS) stripped.set<JsonNode>(key, value) }
             return runCatching { MAPPER.treeToValue(stripped, type) }.getOrNull()
+        }
+
+        /**
+         * The strip the READER bind reads: the nine lifecycle keys removed BY NAME at the top level, `name` KEPT —
+         * it is a document-level key the reader splits off itself ([DocumentBinding]).
+         */
+        private fun strippedKeepName(payload: ObjectNode): ObjectNode {
+            val stripped = MAPPER.createObjectNode()
+            payload.properties().forEach { (key, value) -> if (key == "name" || key !in LIFECYCLE_KEYS) stripped.set<JsonNode>(key, value) }
+            return stripped
         }
 
         /** The exported payload of [version]: its body and the nine lifecycle fields beside it. */
