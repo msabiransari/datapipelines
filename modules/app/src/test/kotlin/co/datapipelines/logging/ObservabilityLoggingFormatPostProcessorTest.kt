@@ -28,6 +28,11 @@ class ObservabilityLoggingFormatPostProcessorTest {
     }
 
     @Test
+    fun `json also switches the banner off so stdout carries records only`() {
+        ObservabilityLoggingFormatPostProcessor.structuredProperties("json")["spring.main.banner-mode"] shouldBe "off"
+    }
+
+    @Test
     fun `console adds nothing - the encoder carries its own redacting pattern`() {
         ObservabilityLoggingFormatPostProcessor.structuredProperties("console") shouldBe emptyMap()
     }

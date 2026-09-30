@@ -65,17 +65,50 @@ internal object LogRedactor {
      * One identifier carrying a sensitive key as itself or an underscore compound: optional
      * `<word>_` prefixes, the key, optional `_<word>` suffixes. Case-insensitive; `passwordless`
      * and `secrets` do not match (no underscore boundary), `user_password` and `api_key_v2` do.
+     * BOTH text shapes below embed this one string, so the JSON form cannot disagree with the
+     * assignment form about case or compounds (#337-b F1).
      */
     private val identifier: String =
         "(?i:(?:[A-Za-z0-9]+_)*(?:$sensitiveAlternation)(?:_[A-Za-z0-9]+)*)"
 
-    /** `key=value` — the value ends at whitespace or a JSON delimiter; quotes make it one token. */
-    private val assignment: Pattern =
-        Pattern.compile("($identifier)[ \\t]*=[ \\t]*(?:\"[^\"]*\"|[^\\s\"\\x27\\x2C;)\\]}]+)")
+    // Regex escapes for characters a logback %replace option string cannot carry raw: `\x5C` is a
+    // backslash (a doubled backslash is an escape in the option tokenizer), `\x27` a single quote,
+    // `\x2C` a comma, `\x2E` a dot, `\x5B`/`\x7B` the opening bracket and brace.
+    private const val BACKSLASH = "\\x5C"
 
-    /** `"key": "value"` — the JSON form, double-quoted on both sides. */
+    /**
+     * A double-quoted value: escape pairs (`\"`, `\\`) are consumed WHOLE, so an escaped quote
+     * never ends the value (#337-b F2); it stops at the first unescaped quote, which is consumed,
+     * or at the end of its line — an unterminated quote masks the rest of that line and never
+     * more, so one stray quote cannot wipe a stack trace. The repetition is possessive: a hostile
+     * line of open quotes is one linear scan per match, never a backtracking search.
+     */
+    private const val DOUBLE_QUOTED = "\"(?:[^\"$BACKSLASH\\r\\n]|$BACKSLASH[^\\r\\n]?)*+\"?"
+
+    /** The single-quoted twin of [DOUBLE_QUOTED] (`secret='two words'`). */
+    private const val SINGLE_QUOTED = "\\x27(?:[^\\x27$BACKSLASH\\r\\n]|$BACKSLASH[^\\r\\n]?)*+\\x27?"
+
+    /** A bare token: ends at whitespace or a delimiter, never starts with a quote. */
+    private const val BARE_TOKEN = "[^\\s\"\\x27\\x2C;)\\]}]+"
+
+    /**
+     * `key=value` — the value is a quoted string (escapes honoured) or a bare token ending at
+     * whitespace or a delimiter. The quotes are part of the masked value.
+     */
+    private val assignment: Pattern =
+        Pattern.compile("($identifier)[ \\t]*=[ \\t]*(?:$DOUBLE_QUOTED|$SINGLE_QUOTED|$BARE_TOKEN)")
+
+    /**
+     * `"key": "value"` — the JSON form. The key is the same [identifier] (case-insensitive,
+     * compounds) behind any dotted prefix (`"spring.datasource.password"`); the value is a
+     * double-quoted string with escapes honoured, or a bare scalar (number, `true`, `null`) —
+     * never an object or array, whose members are matched on their own keys.
+     */
     private val jsonPair: Pattern =
-        Pattern.compile("(\"(?:[A-Za-z0-9]+_)*(?:$sensitiveAlternation)(?:_[A-Za-z0-9]+)*\"[ \\t]*:[ \\t]*)\"[^\"]*\"")
+        Pattern.compile(
+            "(\"(?:[A-Za-z0-9_-]+\\x2E)*$identifier\"[ \\t]*:[ \\t]*)" +
+                "(?:$DOUBLE_QUOTED|[^\\s\"\\x27\\x2C;)\\]}\\x5B\\x7B]+)",
+        )
 
     // The logback %replace option strings are the SAME two patterns as strings: no single
     // quotes, no commas (logback splits options on commas), no `${` (Spring placeholder
@@ -89,11 +122,12 @@ internal object LogRedactor {
         if (normalized.isEmpty() || normalized in NEVER_REDACTED) return false
         val lastSegment = normalized.substringAfterLast('.')
         if (lastSegment in NEVER_REDACTED) return false
-        return SENSITIVE_KEYS.any { sensitive ->
-            lastSegment == sensitive ||
-                lastSegment.startsWith("${sensitive}_") ||
-                lastSegment.endsWith("_$sensitive")
-        }
+        // The key bounded by underscores appears whole in `_<key>_`: that is the whole key, the
+        // `<key>_*` and `*_<key>` compounds AND the prefixed-and-suffixed `db_password_v2` the
+        // text matcher ([identifier]) has always masked — one rule, so a member and a message
+        // cannot disagree.
+        val bounded = "_${lastSegment}_"
+        return SENSITIVE_KEYS.any { sensitive -> bounded.contains("_${sensitive}_") }
     }
 
     /** [text] with every `key=value` and `"key": "value"` occurrence of the list rewritten to `***`. */

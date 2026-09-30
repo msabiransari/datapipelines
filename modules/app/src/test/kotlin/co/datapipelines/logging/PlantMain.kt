@@ -13,7 +13,9 @@ import org.slf4j.MDC
  * - the message in the `key=value` form (`password=...` — layer 2, rendered text);
  * - the message in the `"key": "value"` form (`"api_key": "..."` — layer 2, rendered text);
  * - an exception message quoting a JDBC URL (layer 2, the stack trace — the record's realistic
- *   driver leak).
+ *   driver leak);
+ * - the shared [SyntheticPlants] corpus as a message and as an exception (#337-b), then one line
+ *   with no MDC at all so the proof can check no id goes stale.
  *
  * Runs in its OWN JVM (the test spawns it over the test runtime classpath): logging initialisation
  * is process-global, and a test that re-initialises it would poison every later suite in the same
@@ -57,9 +59,16 @@ fun main() {
     runCatching {
         throw IllegalStateException("connect failed jdbc_url=jdbc:postgresql://svc:planted-secret-exc@db.internal:5432/dp")
     }.onFailure { log.error("boom line quoting the driver", it) }
+    // #337-b: the shared corpus, once as a message and once as an exception message, so the
+    // child JVM's real appender proves every shape under whichever format is pinned.
+    (SyntheticPlants.REDACTED + SyntheticPlants.KEPT).forEach { plant ->
+        log.info("corpus message: ${plant.raw}")
+        log.error("corpus exception", IllegalStateException(plant.raw))
+    }
     MDC.remove("password")
     MDC.remove(LogContextKeys.CORRELATION_ID)
     MDC.remove(LogContextKeys.EXECUTION_ID)
+    log.info("no-context line")
 }
 
 /** The MDC slots PlantMain plants — the same strings the executor's element uses. */

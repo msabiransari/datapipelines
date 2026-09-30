@@ -89,10 +89,19 @@ class FormatSwitchingEncoder : EncoderBase<ILoggingEvent>() {
             "%replace(%replace($word){'${LogRedactor.messageReplacePattern()}','${LogRedactor.messageReplaceReplacement()}'})" +
                 "{'${LogRedactor.exceptionReplacePattern()}','${LogRedactor.exceptionReplaceReplacement()}'}"
 
+        /**
+         * The two correlation slots, by NAME (#337-b F4, observability.md §3.3): `%X{key:--}` reads
+         * exactly one MDC entry and prints `-` when it is absent, so an event with no context shows
+         * no id and never a stale one. Deliberately not a bare `%X`, which dumps every MDC entry
+         * — a member the redaction key list would then have to catch. Wrapped in the same
+         * `%replace` as the message so no rendered word bypasses the scrub.
+         */
+        private const val CORRELATION_FIELDS = "correlation_id=%X{correlation_id:--} execution_id=%X{execution_id:--} "
+
         private val REDACTING_CONSOLE_PATTERN: String =
             "%clr(%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}){faint} %clr(%5p){} " +
                 "%clr(--- %esb(){APPLICATION_NAME}%esb{APPLICATION_GROUP}[%15.15t]){faint} " +
                 "%clr(%-40.40logger{39}){cyan} %clr(:){faint} " +
-                scrubbed("%m") + "%n" + scrubbed("%wEx")
+                scrubbed(CORRELATION_FIELDS) + scrubbed("%m") + "%n" + scrubbed("%wEx")
     }
 }

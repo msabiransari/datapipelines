@@ -22,7 +22,8 @@ import org.springframework.core.env.MapPropertySource
  * refuses startup before any logging configuration exists, with the offending value named. And for
  * `json` the structured encoder's redaction wiring is added to the environment
  * (`logging.structured.json.*`: the redacting customizer, the redacting stack-trace printer and the
- * §3.1 field-name renames), which `FormatSwitchingEncoder`'s structured delegate reads through the
+ * §3.1 field-name renames) together with `spring.main.banner-mode=off` (stdout must be records
+ * only), which `FormatSwitchingEncoder`'s structured delegate reads through the
  * logger context. The console side needs no property: the encoder carries its own redacting
  * pattern, because Boot's `logging.pattern.console` route mangles any pattern value containing
  * regex braces or colons (logback's variable parser consumes it as a `${...}` default).
@@ -67,6 +68,12 @@ class ObservabilityLoggingFormatPostProcessor : EnvironmentPostProcessor {
                             "co.datapipelines.logging.RedactingStackTracePrinter",
                         "logging.structured.json.rename.logger_name" to "logger",
                         "logging.structured.json.rename.thread_name" to "thread",
+                        // Boot prints its banner to stdout BEFORE logging exists; under json that
+                        // stdout is a stream of records, so the banner would be the one non-JSON
+                        // residue per boot (#337-b). Bound after this post-processor runs, so it
+                        // wins over an operator's spring.main.banner-mode too — deliberately: a
+                        // banner in a machine-readable stream is a defect, not a preference.
+                        "spring.main.banner-mode" to "off",
                     )
                 }
 
