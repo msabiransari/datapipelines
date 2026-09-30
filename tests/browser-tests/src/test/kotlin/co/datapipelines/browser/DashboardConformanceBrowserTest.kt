@@ -89,7 +89,8 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         page.waitForFunction("() => window.__dp.renders.length >= 1")
         val fontFamily =
             page.evaluate(
-                "() => { const el = document.querySelector('.js-plotly-plot .plotly'); return el ? getComputedStyle(el).fontFamily : null; }",
+                "() => { const el = document.querySelector('.js-plotly-plot .plotly');" +
+                    " return el ? getComputedStyle(el).fontFamily : null; }",
             ) as String?
         (fontFamily != null && fontFamily.contains("Open Sans")) shouldBe false
     }
@@ -106,14 +107,10 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
         // A slow refresh (the 3 s sleep source), targeted at the slow chart.
         val refreshId =
             page.evaluate("() => window.__dp.instance.refresh({ scope: 'targets', targets: ['slowchart'] })") as String
-        page.waitForFunction(
-            "() => document.querySelector('[data-dp-viz=\\'slowchart\\'] .dp-dashboard-status').getAttribute('data-dp-state') === 'in-progress'",
-        )
+        chipStateIs("slowchart", "in-progress")
         // Abort it; the chip flips to abort locally and the server answers 202.
         page.evaluate("() => window.__dp.instance.abort('$refreshId')")
-        page.waitForFunction(
-            "() => document.querySelector('[data-dp-viz=\\'slowchart\\'] .dp-dashboard-status').getAttribute('data-dp-state') === 'abort'",
-        )
+        chipStateIs("slowchart", "abort")
         // The fast occurrences' state was untouched by the abort of another refresh.
         val revenueState =
             page.evaluate(
@@ -298,6 +295,19 @@ class DashboardConformanceBrowserTest : DashboardBrowserSuite() {
                     java.nio.file.Paths
                         .get("build", "reports", "dashboards-conformance-dark.png"),
                 ),
+        )
+    }
+
+    /** The slow chart's status chip has reached [state]; the wait synchronises on the chip, never on time. */
+    private fun chipStateIs(
+        occurrence: String,
+        state: String,
+    ) {
+        page.waitForFunction(
+            """() => (function () {
+              const el = document.querySelector('[data-dp-viz="$occurrence"] .dp-dashboard-status');
+              return el ? el.getAttribute('data-dp-state') : null;
+            })() === "$state"""",
         )
     }
 

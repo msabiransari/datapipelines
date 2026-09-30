@@ -177,7 +177,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                 )
             val scripts =
                 page.evaluate(
-                    "() => Array.from(document.scripts).map(function (s) { return s.src + (s.dataset ? ' dp=' + (s.getAttribute('data-dp-plotly-bundle') || '') : ''); })",
+                    "() => Array.from(document.scripts).map(function (s) {" +
+                        " return s.src + ' dp=' + (s.getAttribute('data-dp-plotly-bundle') || ''); })",
                 )
             val readyState = page.evaluate("() => document.readyState")
             val body = page.evaluate("() => document.body ? document.body.innerHTML.slice(0, 300) : 'no body'")
@@ -408,18 +409,24 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             .getConnection(SharedBrowserE2e.jdbcUrl, SharedBrowserE2e.username, SharedBrowserE2e.password)
             .use { connection ->
                 connection.createStatement().use { statement ->
-                    statement.executeQuery(query).use { resultSet ->
-                        val metadata = resultSet.metaData
-                        val out = mutableListOf<Map<String, Any?>>()
-                        while (resultSet.next()) {
-                            val row = mutableMapOf<String, Any?>()
-                            for (c in 1..metadata.columnCount) row[metadata.getColumnLabel(c)] = resultSet.getObject(c)
-                            out += row
-                        }
-                        out
-                    }
+                    readRows(statement, query)
                 }
             }
+
+    private fun readRows(
+        statement: java.sql.Statement,
+        query: String,
+    ): List<Map<String, Any?>> =
+        statement.executeQuery(query).use { resultSet ->
+            val metadata = resultSet.metaData
+            val out = mutableListOf<Map<String, Any?>>()
+            while (resultSet.next()) {
+                val row = mutableMapOf<String, Any?>()
+                for (c in 1..metadata.columnCount) row[metadata.getColumnLabel(c)] = resultSet.getObject(c)
+                out += row
+            }
+            out
+        }
 
     protected fun sql(query: String) {
         DriverManager
@@ -472,7 +479,9 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
             }
         val occurrencesJson =
             occurrences.joinToString(",", "[", "]") { (occurrence, visualization, source) ->
-                """{"name":"$occurrence","type":"visualization","visualization":{"name":"$visualization","version":1},"inputs":{"main":{"source":"$source"}}}"""
+                """{"name":"$occurrence","type":"visualization",""" +
+                    """"visualization":{"name":"$visualization","version":1},""" +
+                    """"inputs":{"main":{"source":"$source"}}}"""
             }
         val actionsJson =
             if (initial) """[{"name":"refresh_all","type":"refresh","scope":"all","initial":true}]""" else "[]"
@@ -492,7 +501,8 @@ abstract class DashboardBrowserSuite : BrowserSuite() {
                 "(SELECT id FROM workspaces WHERE name = '${currentWorkspace()}')",
         )
         return rows(
-            "SELECT id::text AS i FROM dashboards WHERE name = '$name' AND workspace_id = (SELECT id FROM workspaces WHERE name = '${currentWorkspace()}')",
+            "SELECT id::text AS i FROM dashboards WHERE name = '$name' AND workspace_id = " +
+                "(SELECT id FROM workspaces WHERE name = '${currentWorkspace()}')",
         ).single()["i"] as String
     }
 
