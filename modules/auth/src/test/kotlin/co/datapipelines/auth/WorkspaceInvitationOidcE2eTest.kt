@@ -252,9 +252,20 @@ class WorkspaceInvitationOidcE2eTest {
         const val MAX_HOPS = 10
         const val SECRET_BYTES = 32
 
-        /** A pre-reserved local port, so `datapipelines.auth.base-url` names the exact origin (§5.2). */
+        /**
+         * A port RESERVED until Tomcat binds it (#334), so `datapipelines.auth.base-url`
+         * names the exact origin (§5.2) and no other JVM can take the port in between: the
+         * socket stays open (loopback) from here through container startup and context
+         * refresh, and [DefinedPortReservation.release] runs inside the `server.port`
+         * supplier — the last read of the port before the connector binds. The bare
+         * `ServerSocket(0).use { it.localPort }` this replaced released the port the
+         * instant it was picked; the gate on ccba12bf lost it to a parallel fork
+         * (`PortInUseException: Port 22283`).
+         */
+        private val serverPortReservation = DefinedPortReservation.reserve()
+
         @JvmStatic
-        val serverPort: Int = java.net.ServerSocket(0).use { it.localPort }
+        val serverPort: Int get() = serverPortReservation.port
 
         // Both shared (SharedPostgres, SharedKeycloak); this suite's provider is the
         // `invites` realm, a namespace no other suite logs into.
@@ -267,7 +278,9 @@ class WorkspaceInvitationOidcE2eTest {
             registry.add("spring.datasource.username", postgres::getUsername)
             registry.add("spring.datasource.password", postgres::getPassword)
 
-            registry.add("server.port") { serverPort }
+            // The release rides the port's last read before the bind (#334): idempotent, so
+            // later readers of the property find it already released.
+            registry.add("server.port") { serverPort.also { serverPortReservation.release() } }
             registry.add("datapipelines.jwt.secret") { Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES) { 9 }) }
             registry.add("datapipelines.auth.base-url") { "http://localhost:$serverPort" }
             registry.add("datapipelines.auth.bootstrap-admin-email") { "Alice@Datapipelines.CO" }

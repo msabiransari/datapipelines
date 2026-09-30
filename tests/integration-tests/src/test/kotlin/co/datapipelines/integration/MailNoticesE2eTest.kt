@@ -514,9 +514,19 @@ class MailNoticesE2eTest {
         /** Generated per run — no literal secret in any test fixture (HIGH-2). */
         private val ADMIN_PASSWORD = "e2e-mail-" + (1..24).map { BASE32[random.nextInt(BASE32.length)] }.joinToString("")
 
-        /** A pre-reserved local port, so `datapipelines.auth.base-url` names the exact origin. */
+        /**
+         * A port RESERVED until Tomcat binds it (#334), so `datapipelines.auth.base-url`
+         * names the exact origin: held open (loopback) from class-load through container
+         * startup and context refresh, released inside the `server.port` supplier — the
+         * last read before the connector binds. The bare `ServerSocket(0).use { it
+         * .localPort }` this replaced released the port the instant it was picked, and a
+         * parallel fork or lane build could take it before Tomcat got there
+         * (`PortInUseException` in a loaded four-fork gate).
+         */
+        private val serverPortReservation = DefinedPortReservation.reserve()
+
         @JvmStatic
-        val serverPort: Int = java.net.ServerSocket(0).use { it.localPort }
+        val serverPort: Int get() = serverPortReservation.port
 
         private val postgres get() = SharedE2e.postgres
 
@@ -599,7 +609,9 @@ class MailNoticesE2eTest {
         @DynamicPropertySource
         @JvmStatic
         fun properties(registry: DynamicPropertyRegistry) {
-            registry.add("server.port") { serverPort }
+            // The release rides the port's last read before the bind (#334): idempotent, so
+            // later readers of the property find it already released.
+            registry.add("server.port") { serverPort.also { serverPortReservation.release() } }
             registry.add("management.server.port") { "0" }
 
             registry.add("spring.datasource.url") { postgres.jdbcUrl }

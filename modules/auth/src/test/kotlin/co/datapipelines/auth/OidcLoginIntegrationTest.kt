@@ -320,16 +320,22 @@ class OidcLoginIntegrationTest {
         const val SECRET_BYTES = 32
 
         /**
-         * A pre-reserved local port, so `datapipelines.auth.base-url` (auth.md §5.2)
-         * can name this server's exact origin BEFORE the context starts. The v2.4
-         * redirect URI is absolute and configured, not derived from the request, so
+         * A port RESERVED until Tomcat binds it (#334), so `datapipelines.auth.base-url`
+         * (auth.md §5.2) can name this server's exact origin BEFORE the context starts.
+         * The v2.4 redirect URI is absolute and configured, not derived from the request, so
          * `RANDOM_PORT` — whose value only exists after startup — is no longer usable
          * here. The realm registers `*` as its redirect URI, so Keycloak accepts
          * whatever port we reserve; the server itself must actually be reachable there,
-         * which is what makes this the real end-to-end callback.
+         * which is what makes this the real end-to-end callback. The reservation holds the
+         * port open (loopback) from class-load through container startup and context
+         * refresh and releases it inside the `server.port` supplier — the last read before
+         * the connector binds — so no parallel fork can take it in between (the gate on
+         * ccba12bf lost that race with the bare `ServerSocket(0).use { it.localPort }`).
          */
+        private val serverPortReservation = DefinedPortReservation.reserve()
+
         @JvmStatic
-        val serverPort: Int = java.net.ServerSocket(0).use { it.localPort }
+        val serverPort: Int get() = serverPortReservation.port
 
         // The module's shared, already-started containers: any @DynamicPropertySource
         // supplier resolves them lazily, so no explicit static-init ordering is needed.
@@ -344,7 +350,9 @@ class OidcLoginIntegrationTest {
             registry.add("spring.datasource.username", postgres::getUsername)
             registry.add("spring.datasource.password", postgres::getPassword)
 
-            registry.add("server.port") { serverPort }
+            // The release rides the port's last read before the bind (#334): idempotent, so
+            // later readers of the property find it already released.
+            registry.add("server.port") { serverPort.also { serverPortReservation.release() } }
             registry.add("datapipelines.jwt.secret") { Base64.getEncoder().encodeToString(ByteArray(SECRET_BYTES) { 9 }) }
             // §5.2 / configuration.md §3.4: the redirect URI is built absolutely from this.
             registry.add("datapipelines.auth.base-url") { "http://localhost:$serverPort" }
