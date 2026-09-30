@@ -428,7 +428,11 @@ class PipelineLifecycleDialogRenderTest {
                 exclusive = listOf("test/only_here.sql"),
                 kept =
                     listOf(
-                        PipelineLifecycleDialogModel.KeptTemplate("test/shared.sql", listOf("acme/s/regions"), listOf("acme/charts/by_region")),
+                        PipelineLifecycleDialogModel.KeptTemplate(
+                            "test/shared.sql",
+                            listOf("acme/s/regions"),
+                            listOf("acme/charts/by_region"),
+                        ),
                         PipelineLifecycleDialogModel.KeptTemplate("test/set_only.sql", listOf("acme/s/a", "acme/s/b"), emptyList()),
                     ),
             )
@@ -440,7 +444,8 @@ class PipelineLifecycleDialogRenderTest {
         html shouldContain "test/set_only.sql"
         html shouldContain "acme/s/a, acme/s/b"
         // The offer stays exactly the unpinned template; the kept ones are not in the offer's list.
-        val offer = html.substring(html.indexOf("data-exclusive-templates"), html.indexOf("</ul>", html.indexOf("data-exclusive-templates")))
+        val offerStart = html.indexOf("data-exclusive-templates")
+        val offer = html.substring(offerStart, html.indexOf("</ul>", offerStart))
         offer shouldContain "test/only_here.sql"
         offer shouldNotContain "test/shared.sql"
     }

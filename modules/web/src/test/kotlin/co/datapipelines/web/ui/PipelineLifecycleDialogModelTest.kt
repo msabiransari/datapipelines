@@ -378,7 +378,10 @@ class PipelineLifecycleDialogModelTest {
                         "referencing_visualizations" to listOf("acme/charts/by_region"),
                     ),
                 ),
-                co.datapipelines.pipeline.KeptDraftTemplate("test/set_only.sql", mapOf("referencing_parameter_sets" to listOf("acme/s/a", "acme/s/b"))),
+                co.datapipelines.pipeline.KeptDraftTemplate(
+                    "test/set_only.sql",
+                    mapOf("referencing_parameter_sets" to listOf("acme/s/a", "acme/s/b")),
+                ),
             )
 
         val dialog = model.purgeEntity(WS, ID)
