@@ -15,7 +15,9 @@ import co.datapipelines.auth.WorkspaceSelfMembershipException
 import co.datapipelines.auth.WorkspaceService
 import co.datapipelines.auth.WorkspaceSessionRequiredException
 import co.datapipelines.auth.sessionCookie
+import co.datapipelines.persistence.FailureShape
 import jakarta.servlet.http.HttpServletRequest
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.context.SecurityContextHolder
@@ -95,23 +97,61 @@ class WorkspacesUiController(
             memberships.filter {
                 it.workspaceActive && Permission.WORKSPACE_MEMBERS_MANAGE.satisfiedBy(it.role, principal.isSuperAdmin)
             }
+        // #336 D4 — the workspaces whose reads failed (never the catalogued refusals): the
+        // template renders a degraded notice per name, distinct from the empty state.
+        val degradedMembers = mutableSetOf<String>()
+        val degradedKeyOwners = mutableSetOf<String>()
         val listings =
             administered
                 .filter { it.workspaceName == activeWorkspace }
                 .associate { membership ->
                     membership.workspaceName to
                         runCatching { workspaceService.membersWithInvitations(principal, membership.workspaceName) }
-                            .getOrNull()
+                            .getOrElse { failure ->
+                                // #336 D4: a degraded read is distinguishable from an empty one.
+                                // A catalogued refusal (AuthException, the role/visibility
+                                // verdicts) is NOT a failure — the role model above already
+                                // filtered the sections, so it renders as the empty state it
+                                // always did. Anything else renders the degraded notice.
+                                if (failure is AuthException) {
+                                    null
+                                } else {
+                                    degradedMembers += membership.workspaceName
+                                    log.warn(
+                                        "workspace {} members listing could not be read: error={} sql_state={}",
+                                        membership.workspaceName,
+                                        FailureShape.cause(failure),
+                                        FailureShape.sqlState(failure),
+                                    )
+                                    null
+                                }
+                            }
                 }
         // #200 — which members hold a live login-minted key: the row's "has a key" state and
         // the revoke verb's affordance. Owner ids only (no key id, no prefix — the members row
         // is not a key listing), resolved through the same service the verbs call.
         val keyOwners =
             listings.mapValues { (name, listing) ->
-                if (listing == null) {
-                    emptySet()
-                } else {
-                    runCatching { workspaceService.liveUserKeyOwnerIds(principal, name) }.getOrDefault(emptySet())
+                when {
+                    listing == null ->
+                        emptySet()
+
+                    else ->
+                        runCatching { workspaceService.liveUserKeyOwnerIds(principal, name) }
+                            .getOrElse { failure ->
+                                if (failure is AuthException) {
+                                    emptySet()
+                                } else {
+                                    degradedKeyOwners += name
+                                    log.warn(
+                                        "workspace {} key-owner read could not be read: error={} sql_state={}",
+                                        name,
+                                        FailureShape.cause(failure),
+                                        FailureShape.sqlState(failure),
+                                    )
+                                    emptySet()
+                                }
+                            }
                 }
             }
         model.addAttribute(
@@ -124,6 +164,8 @@ class WorkspacesUiController(
         // into `managed`: a template that counts members must not count people who have not
         // signed in yet.
         model.addAttribute("pending", listings.mapValues { (_, l) -> l?.invitations?.map(InvitationRowView::of) ?: emptyList() })
+        model.addAttribute("degradedMembers", degradedMembers.toSet())
+        model.addAttribute("degradedKeyOwners", degradedKeyOwners.toSet())
         // The ones this caller administers but is not IN — named so the screen can say "switch
         // to manage" instead of silently showing nothing where a section used to be.
         //
@@ -436,5 +478,9 @@ class WorkspacesUiController(
             throw WorkspaceSessionRequiredException()
         }
         return principal
+    }
+
+    private companion object {
+        private val log = LoggerFactory.getLogger(WorkspacesUiController::class.java)
     }
 }

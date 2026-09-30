@@ -4,6 +4,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthProperties
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.JwtService
+import co.datapipelines.auth.WorkspaceNotFoundException
 import co.datapipelines.auth.User
 import co.datapipelines.auth.UserService
 import co.datapipelines.auth.WorkspaceContext
@@ -249,6 +250,88 @@ class WorkspacesUiControllerTest {
 
         controller.revokeInvitation("acme", "new@acme.test") shouldBe "redirect:/workspaces?ok=invitation_revoked"
         verify { workspaceService.revokeInvitation(principal, "acme", "new@acme.test") }
+    }
+
+    @Test
+    fun `a failed members read renders the degraded notice, not an empty table (#336)`() {
+        authenticate()
+        every { workspaceService.listOwn(principal) } returns
+            listOf(WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.WORKSPACE_ADMIN, Instant.EPOCH, true))
+        every { workspaceService.membersWithInvitations(principal, "acme") } throws RuntimeException("metadata store refused")
+        every { themeResolver.resolve(any()) } returns "saas"
+
+        val model = ExtendedModelMap()
+        controller.screen(model, MockHttpServletRequest()) shouldBe "workspaces/index"
+
+        @Suppress("UNCHECKED_CAST")
+        val degraded = model["degradedMembers"] as Set<String>
+        degraded shouldBe setOf("acme")
+
+        // The page still renders — the notice is the degraded state, distinct from the empty one.
+        val html =
+            engine().process(
+                "workspaces/index",
+                webContext().apply {
+                    fillLayoutChrome()
+                    setVariable("own", emptyList<Any>())
+                    setVariable("canCreate", false)
+                    setVariable("managed", mapOf("acme" to emptyList<MemberRowView>()))
+                    setVariable("degradedMembers", degraded)
+                },
+            )
+        html shouldContain "Members could not be loaded"
+    }
+
+    @Test
+    fun `a refused members read renders as today - a refusal is not a failure (#336)`() {
+        authenticate()
+        every { workspaceService.listOwn(principal) } returns
+            listOf(WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.WORKSPACE_ADMIN, Instant.EPOCH, true))
+        // A catalogued refusal: the caller's role model already filtered the sections; the
+        // service refusal is the same "not visible to this role" verdict, never a degradation.
+        every { workspaceService.membersWithInvitations(principal, "acme") } throws
+            WorkspaceNotFoundException("acme")
+        every { themeResolver.resolve(any()) } returns "saas"
+
+        val model = ExtendedModelMap()
+        controller.screen(model, MockHttpServletRequest()) shouldBe "workspaces/index"
+
+        @Suppress("UNCHECKED_CAST")
+        val degraded = model["degradedMembers"] as Set<String>
+        degraded shouldBe emptySet()
+    }
+
+    @Test
+    fun `a failed key-owner read renders its notice while the members still render (#336)`() {
+        authenticate()
+        every { workspaceService.listOwn(principal) } returns
+            listOf(WorkspaceMembership(UUID.randomUUID(), "acme", WorkspaceRole.WORKSPACE_ADMIN, Instant.EPOCH, true))
+        every { workspaceService.membersWithInvitations(principal, "acme") } returns
+            WorkspaceService.MemberListing(members = listOf(memberRow()), invitations = emptyList())
+        every { workspaceService.liveUserKeyOwnerIds(principal, "acme") } throws RuntimeException("metadata store refused")
+        every { themeResolver.resolve(any()) } returns "saas"
+
+        val model = ExtendedModelMap()
+        controller.screen(model, MockHttpServletRequest()) shouldBe "workspaces/index"
+
+        @Suppress("UNCHECKED_CAST")
+        val degraded = model["degradedKeyOwners"] as Set<String>
+        degraded shouldBe setOf("acme")
+
+        val html =
+            engine().process(
+                "workspaces/index",
+                webContext().apply {
+                    fillLayoutChrome()
+                    setVariable("own", emptyList<Any>())
+                    setVariable("canCreate", false)
+                    setVariable("managed", mapOf("acme" to listOf(MemberRowView.of(memberRow(), hasKey = false))))
+                    setVariable("degradedKeyOwners", degraded)
+                },
+            )
+        html shouldContain "Key owners could not be loaded"
+        // The members table still rendered under the notice.
+        html shouldContain "data-member=\"bob@acme.test\""
     }
 
     @Test
