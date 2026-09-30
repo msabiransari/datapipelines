@@ -309,6 +309,41 @@ section is the contract it implements, not its configuration.
 | Health checks | `/health` and `/ready` work independently per instance. |
 | Size per-instance limits by replica count | The execution-slot ceiling `datapipelines.executor.max-concurrent-executions-per-instance` (default 100) is **per instance** (050/R2): N replicas admit **N × the setting** in total against the source databases, and the tempdb heap multiplier of [Configuration §3.2](configuration.md#32-executor) applies per box the same way. Raise replicas with that multiplication in mind, not just the per-instance number. |
 
+### 6.2A Vendored browser assets — provenance and the rebuild recipe (#10 L3a)
+
+Every third-party file under `static/vendor/` is recorded in
+`static/vendor/design-system/vendor-manifest.json` — per file: version, sha256, source, licence — and
+pinned by the audit tests (`VendoredAlpineAuditTest`, `VendoredHtmxAuditTest`,
+`VendoredPlotlyAuditTest`, …): a served byte that stops matching its recorded hash is a red build,
+and so is a manifest entry nobody serves. The manifest also carries the FIRST-PARTY client runtime and
+its adapters (`js/datapipelines-dashboard*.js`, the same sha256 discipline — a hand edit must move the
+manifest in the same commit).
+
+**Plotly 4.1.1** ships as two custom bundles built with the package's own procedure (its
+`CUSTOM_BUNDLE.md`), from the pinned tag. To rebuild any bundle — a trace added, a security fix
+adopted — run exactly this and commit the OUTPUTS with their new hashes:
+
+```sh
+git clone --depth 1 --branch v4.1.1 https://github.com/plotly/plotly.js.git plotly.js
+cd plotly.js && npm i
+# the 2D bundle (the default): scatter, bar, pie, histogram, box, heatmap
+npm run custom-bundle -- --traces scatter,bar,pie,histogram,box,heatmap --strict --out 2d
+# the 3D bundle (dashboards with a 3D trace): the six above + scatter3d, surface, mesh3d
+npm run custom-bundle -- --traces scatter,bar,pie,histogram,box,heatmap,scatter3d,surface,mesh3d --strict --out 3d
+cp dist/plotly-2d.min.js dist/plotly-3d.min.js  <repo>/modules/web/src/main/resources/static/vendor/plotly/
+```
+
+`plotly.css` is the npm package's own `dist/plotly.css` — the release build's strict-CSP sheet, the
+same rules the bundle would inject at runtime. It is part of the CSP DESIGN-AROUND ([Dashboards
+§6.6](dashboards.md#66-the-states-notifications-and-the-csp)): the client runtime pre-places the empty
+`<style id="plotly.js-style-global" class="no-inline-styles">` element Plotly checks, the page loads
+this file instead, and `style-src` stays `'self'` plus Cytoscape's one hash — no policy change, no
+`'unsafe-hashes'`, no `'unsafe-eval'`. Sizes at vendoring (4.1.1): 2D 1,254,444 B (418,500 gz), 3D
+1,831,489 B (588,881 gz), plotly.css 7,467 B; the npm tarball's sha1
+`f797e8f2d54603fd9d11b08aae8eb31147200b67` verifies the source against the tag. Node 22+ per
+Plotly's own build matrix. After ANY rebuild: update the manifest's `sha256` map, the `sizes`, and the
+trace lists if they changed — `VendoredPlotlyAuditTest` fails the build otherwise.
+
 ### 6.3 Docker Compose (dev / evaluation)
 
 Reference compose file provided in `deploy/compose.yml`. Single instance + Postgres + Redis.
@@ -1104,6 +1139,7 @@ operator.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.38 | L3a (#10) the dashboards client runtime | **New §6.2A Vendored browser assets** — where the vendor manifest and its audit tests live, and the Plotly 4.1.1 provenance: the two custom bundles' exact rebuild recipe (clone the pinned tag, `npm run custom-bundle` per trace list, commit the outputs), the sizes and the npm tarball sha1, and the plotly.css design-around that keeps `style-src` at `'self'` plus Cytoscape's one hash. No code, route or policy change. |
 | 2026-09-29 | v1.37 | the 316 merge's review (#316, #266) | §6's Deployment bullet and §8.3.2: the grace is **60 s** (chart and compose) — the sum had left out 266's persistence drain (`shutdown-drain-ms`, 10 s), so at the configured maxima the runtime could kill mid-drain; §8.3.1 step 4 names the persistence drain and the scheduled jobs' scheduler stop (#316), which sits after every drain and outside the sum. `ShutdownGraceArithmeticTest` carries the new term (red at 50 s: compose needed 55, Helm 60). |
 | 2026-09-28 | v1.36 | 301 (#305) | §6.2's CSP row prints the style-src hash LITERALLY again — 195's rewrite had left a `'<hash>'` placeholder where the value stood: `'sha256-pgvDUBa4IjFA2yuSJ2cqcyxmNYJMborsd0ORcRv9vw8='`, the SHA-256 of the one `<style>` element Cytoscape injects on the editor page. The value is derived, not typed: `SecurityHeadersTest` computes it from `SecurityHeaders.CYTOSCAPE_STYLESHEET` (the vendored sheet verbatim), and `ApplicationSmokeTest` asserts the header the way an operator reads it, literal included — a Cytoscape bump that changes the sheet goes red rather than documented wrong. No code, route or policy change. |
 | 2026-09-28 | v1.35 | 195 (#195) the editor's eval exemption retired — renumbered at merge after 298's v1.33/v1.34 | §6.2's CSP row rewritten: the route-scoped `'unsafe-eval'` exception 188 carried on `GET /pipelines/{id}/editor` is GONE — the editor runs Alpine's CSP build (`@alpinejs/csp` 3.14.1, same vendored path, the vendor manifest records the npm tarball's sha256) and its expressions are pure property paths. One policy covers every policed route; `style-src` carries Cytoscape's one sheet hash on every route (a hash admits exactly that sheet, so no route's posture is weakened). `SecurityHeaders.kt` lost `CSP_POLICY_EDITOR`/`isEditorRoute`; `SecurityHeadersTest` pins the directive's absence on the editor route (falsified by re-adding it), and the browser suite's zero-violation collector is the live proof. No route, permission or role changed. |

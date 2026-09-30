@@ -404,13 +404,145 @@ dashboard she can read but holds no `execution.read`, so her refresh names no ex
 
 ### 5.8 What is not here
 
-The draft preview and the visualization tests (L4), the client runtime (L3), and the `dashboard` key kind and its
-confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard.
+The draft preview and the visualization tests (L4), the first-party PAGES — `/dashboards`, the sidebar tree, the events pane (L3b) — and the `dashboard` key kind and its confinement (L5): until L5, only signed-in sessions reach these routes and no MCP tool refreshes a dashboard.
+
+## 6. The client runtime (L3a)
+
+The browser half is one vendored script, `static/js/datapipelines-dashboard.js` — plain ES2019, one IIFE,
+no dependencies, no build step — publishing `window.DatapipelinesDashboard`, versioned in the vendor
+manifest with its sha256 like every vendored asset (`VendoredPlotlyAuditTest` pins the bytes; a hand
+edit must move the manifest in the same commit). It owns the protocol below and NOTHING else: it never
+renders a chart (the renderers do), never evaluates a parameter (the server does), and never lets a
+stale frame touch the DOM.
+
+### 6.1 The API
+
+```js
+const instance = DatapipelinesDashboard.init({
+  server: { baseUrl, credentials: "session" | { proxyBaseUrl } },
+  dashboard: { id, version: "released" },
+  container: HTMLElement,
+  adapter: DatapipelinesDashboard.adapters(container),  // or the host's own §6.2 object
+  options: { renderTimeoutMs, onNotification },
+});
+instance.ready   // Promise — resolves after the bootstrap barrier, rejects with the failing step
+instance.refresh({ scope, targets })   // the authorized programmatic action, gated like a button
+instance.abort(refreshId)
+instance.reset()      // restores the last APPLIED parameter state; never executes
+instance.resize(); instance.dispose();
+instance.recover("retry" | "reload"); instance.on("edit" | "commit" | "action", listener);
+```
+
+`version` is `"released"` only — the server serves the current release and nothing else (§5.2); a
+numeric version is refused with a clear error until the preview lane (L4) defines it. Re-initialising
+a container that already mounts an instance throws `DashboardAlreadyMounted`; after `dispose()` the
+container is unmarked and a fresh `init` is legitimate.
+
+Bootstrap is the four-step barrier, each step awaited: validate the adapter and the renderer/bundle
+pair → fetch the configuration → mount the layout → fetch and render the parameter state (an explicit
+no-op without a set) → mount the occurrences → invoke the `initial` actions. Any failure rejects
+`ready`, publishes a notification naming the step, and disposes the instance — nothing half-mounted
+ever executes.
+
+### 6.2 The adapter contract
+
+The adapter is the host's DOM. Twelve functions, all required — `init` refuses an adapter missing any
+of them, and a no-op is not conformant (the conformance suite drives real behaviour):
+
+| Function | The host does | The runtime guarantees |
+|---|---|---|
+| `mountLayout(layout) → Promise` | build the grid from the system layout | awaited before anything mounts |
+| `mountVisualization(occurrence, renderer) → Promise<handle>` | create the placeholder and its renderer | the handle's `renderData` is the ONLY data path |
+| `renderParameters(state) → Promise` | render the FULL server state, hidden and disabled included | awaited inside the parameter gate |
+| `readSelections() → {name: value}` | return every current committed value | merged over the server state at each evaluation |
+| `onEdit/onCommit/onAction(callback)` | register the interaction callbacks | every callback carries `{instanceId, name, type, refreshId}` |
+| `renderData(occurrence, refreshId, rows, bindings) → Promise<'rendered'\|'no-data'>` | render native data | deadline-bounded; a late acknowledgment is discarded |
+| `renderStatus(occurrence, {state, stale, reason})` | show the state accessibly, colour never alone | a throwing hook is isolated and reported |
+| `notify(notification)` | show the structured notification | deduplicated per outcome; never a raw server message |
+| `resize()`, `dispose()` | the lifecycle | disposal invalidates every pending callback |
+
+The first-party composite (`DatapipelinesDashboard.adapters(container)`) implements all twelve over a
+CSS grid, text-only parameter controls and the three shipped renderers, which register themselves at
+load: `plotly` major `4` (`datapipelines-dashboard-plotly.js`), `table` major `1` and `kpi` major `1`
+(the table and kpi versions are the seeded fixtures' wire value). A host registers its own kind the
+same way (`DatapipelinesDashboard.registerRenderer({kind, version, create})`) before `init`; the
+renderer `kind` and `version` on each occurrence's `renderer` are matched against the registrations at
+bootstrap, before any execution.
+
+### 6.3 The renderers
+
+- **Plotly.** `renderData` substitutes the resolved bindings into a CLONE of the stored configuration
+  (the stored bytes are never mutated and no structure is ever invented — a path that resolves nowhere
+  is skipped whole; bindings were validated to resolve at save) and calls `Plotly.react`. Bound
+  STRINGS are escaped (`&`, `<`, `>`) before Plotly sees them: Plotly renders a subset of HTML in
+  text, hover and titles, and a data cell is DATA, never markup — an `<img onerror>` in a column
+  renders as text. The theme reaches the chart at EACH render (D25): the adapter resolves the app's
+  `--chart-*` tokens (app.css, bridged off the theme) through a probe element and maps them onto
+  `paper_bgcolor`, `plot_bgcolor`, the grid, the font and the categorical `colorway`.
+  `presentation.tokens` is an OPEN map: `series: "categorical"` is the one name the adapter knows;
+  names it does not know are ignored.
+- **Table.** `columns[]` (`label`, `values` — the path the binding fills, `format`, `align`),
+  `page_size` capping the rows. Every cell is `textContent`.
+- **KPI.** `label`, `value` (the bound path), `format` (`number|integer|percent|currency`), `unit`,
+  and an optional `comparison` bound through the same map. A zero renders — a zero is a value, not
+  `no-data`.
+
+### 6.4 The two bundles
+
+Plotly is vendored as two self-contained custom bundles (D63): `plotly-2d.min.js` (scatter, bar, pie,
+histogram, box, heatmap — the default) and `plotly-3d.min.js` (those plus scatter3d, surface, mesh3d —
+WebGL). The SERVER chooses: `runtime/config` carries `renderer.bundle: "2d" | "3d"` derived from the
+pinned visualizations' trace types, and the page loads exactly one — the two are never on one page.
+The host DECLARES what it loaded on the script tag: `<script src="…/plotly-2d.min.js"
+data-dp-plotly-bundle="2d">`. The runtime judges the pair at bootstrap: two bundle declarations on one
+page, a renderer kind nothing registered, a version mismatch, or a 3D board on a page that loaded the
+2D bundle all fail `ready` before anything executes.
+
+Because the two bundles must never travel between pages, a host that navigates with htmx boosting
+opts its dashboard links OUT (`hx-boost="false"`, the layout's precedent for routes that must not
+boost); the first-party pages apply that (L3b), and the runtime's two-bundle refusal is the backstop.
+
+### 6.5 Credentials: session and proxy
+
+- **`"session"`** — the signed-in app: every request carries the session cookie (`credentials:
+  "same-origin"`) and every POST carries the `DP-CSRF-Token` double-submit header read from the
+  `dp_csrf` cookie, exactly like the app's own scripts.
+- **`{ proxyBaseUrl }`** — an external application's backend holds a `dashboard` key (L5) and proxies
+  the SAME FOUR runtime paths under its base. The runtime sends the same request bodies and Accept
+  headers to `{proxyBaseUrl}/api/v1/dashboards/{id}/runtime/…` with `credentials: "omit"` and NO CSRF
+  header — the key never reaches the browser, and the browser offers it nothing. THE PROXY WIRE
+  CONTRACT (what L5's reference proxy implements, and its conformance test drives): proxy the four
+  routes byte-for-byte — the SSE stream proxied as a STREAM (never buffered), the `DP-CSRF-Token`
+  header absent, no cookie forwarded, and the §4 error envelopes passed through verbatim. The proxy
+  authorizes its own application user; Datapipelines sees the key.
+
+### 6.6 The states, notifications and the CSP
+
+Each occurrence carries the record's states client-side (`ready`, `in-progress`, `error`, `abort`,
+`no-data`, a brief `success` that settles to `ready`); `stale` rides BESIDE the state. Freshness is
+per instance, per occurrence: the newest refresh owns the target, an event touches an occurrence only
+through its owner, and a finished run cannot overwrite a newer view — an old run's late completion
+detaches silently. A stream that ends without `refresh_completed` is a transport failure: content is
+RETAINED, the pending occurrences go stale, and one notification with `recover: "retry"` offers the
+new refresh; nothing replays itself.
+
+Notifications are structured — `{instanceId, scope, severity, code, message, retryable, recover}` —
+deduplicated per outcome, delivered to the adapter and `options.onNotification`, and recovered ONLY
+through `instance.recover(intent)`. A `dashboard.runtime.configuration_stale` (409) publishes the
+outcome with `recover: "reload"` and disposes the instance.
+
+The CSP design-around: Plotly's bundle would inject one `<style id="plotly.js-style-global">` and fill
+it with `insertRule` at load. The runtime pre-places that element with the class
+`no-inline-styles` (Plotly's own opt-out, `src/lib/dom.js`), and the page loads the vendored
+`plotly.css` — the release build's own strict-CSP sheet, the same rules the bundle would inject — as a
+real stylesheet under `style-src 'self'`. The bundle injects nothing; no policy directive is widened;
+the conformance suite proves the rules APPLY and is red when the stylesheet is removed.
 
 ## Appendix A: Change Log
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.5 | L3a (#10) the client runtime | **New §6 The client runtime** — the vendored artifact and what it owns (§6.1's API), the twelve-function adapter contract (§6.2), the three renderers and the data-is-text rule (§6.3), the two Plotly bundles and the one-bundle rule (§6.4), both credential modes' wire contract including the proxy contract L5's reference proxy implements (§6.5), and the states, notifications and the CSP design-around (§6.6). §5.8's "not here" loses the client runtime; the pages remain L3b's. |
 | 2026-09-29 | v0.4 | L2 (#10) the runtime — renumbered at merge after 320's v0.3 | **New §5 The runtime** — the delegated act (D50) and what keeps it safe, the six routes, `configuration_id`, the parameter evaluation, a refresh (order, sharing, admission, caps, dependencies, deadlines, the stream), abort, the record. §4.4's `last_refresh` is live (the caller's own). |
 | 2026-09-30 | v0.3 | 320 (#320) dependency guards | §3.1: the guard's other direction — a pipeline release, parameter set or transform template a dashboard or visualization pins can no longer be discarded or purged from under it (`pipeline.version.pinned`, `parameter.in_use`, `template.in_use`; [Versioning §3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)); why the visualization's own LIVE-only guard is complete; restoring a DISCARDED dashboard version re-judges its dependencies. |
 | 2026-09-29 | v0.2 | L1b (#10) the surfaces | **New §4 The surfaces** — the fourteen permission rows and the promoter's lens (§4.1), validate as an author verb (§4.2, owner ruling), what a source must declare for the save-time input check (§4.3), and the eleven MCP tools (§4.4); the REST routes are rest-api §22/§23. The status line names what L1b added. |
