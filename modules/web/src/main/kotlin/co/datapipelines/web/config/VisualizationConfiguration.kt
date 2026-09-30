@@ -92,6 +92,18 @@ class VisualizationConfiguration {
         visualizations: VisualizationRepository,
     ): DashboardValidator = DashboardValidator(pipelines, sets, visualizations.pins)
 
+    /**
+     * O2 of the L1c pass — an import that lands RELEASED judges its pins by the RELEASE rules: the same
+     * status read, set facts and pin facts the validators and the release paths use, one judge beside them.
+     */
+    @Bean
+    fun artifactImportReleaseRules(
+        statuses: TemplateVersionStatuses,
+        sets: ParameterSetFacts,
+        visualizations: VisualizationRepository,
+    ): co.datapipelines.visualization.ArtifactImportReleaseRules =
+        co.datapipelines.visualization.ArtifactImportReleaseRules(statuses, sets, visualizations.pins)
+
     @Bean
     @Suppress("LongParameterList") // the aggregate's ports ARE the wiring
     fun visualizationService(
@@ -147,7 +159,8 @@ class VisualizationConfiguration {
 
     /**
      * The export/import acts of both families (rest-api §22/§23) — the import and the promotion receive bind
-     * through BOTH readers, so the document bounds hold off the save path too (the L1c HIGH item).
+     * through BOTH readers, so the document bounds hold off the save path too (the L1c HIGH item). The
+     * dashboard import runs in ONE transaction over the metadata manager (F1 of the L1c pass).
      */
     @Bean
     fun artifactTransferService(
@@ -156,6 +169,17 @@ class VisualizationConfiguration {
         bundle: co.datapipelines.visualization.TemplateBundle,
         visualizationReader: VisualizationReader,
         dashboardReader: DashboardReader,
+        transactionManager: PlatformTransactionManager,
+        releaseRules: co.datapipelines.visualization.ArtifactImportReleaseRules,
     ): co.datapipelines.visualization.ArtifactTransferService =
-        co.datapipelines.visualization.ArtifactTransferService(visualizations, dashboards, bundle, visualizationReader, dashboardReader)
+        co.datapipelines.visualization
+            .ArtifactTransferService(
+                visualizations,
+                dashboards,
+                bundle,
+                visualizationReader,
+                dashboardReader,
+                transactions = TransactionTemplate(transactionManager) as TransactionOperations,
+                releaseRules = releaseRules,
+            )
 }

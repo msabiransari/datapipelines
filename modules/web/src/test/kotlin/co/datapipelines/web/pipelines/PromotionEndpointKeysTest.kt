@@ -78,6 +78,7 @@ class PromotionEndpointKeysTest {
             // #10 L1c: strict doubles — a batch carrying visualizations or dashboards would hit them.
             mockk<co.datapipelines.web.visualizations.VisualizationPromotion>(),
             mockk<co.datapipelines.web.visualizations.DashboardPromotion>(),
+            co.datapipelines.visualization.VisualizationConfig(),
         )
 
     @Test

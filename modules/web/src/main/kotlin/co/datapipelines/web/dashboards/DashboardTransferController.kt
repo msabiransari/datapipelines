@@ -14,6 +14,7 @@ import co.datapipelines.web.pipelines.LifecycleVerbs
 import co.datapipelines.web.visualizations.ArtifactFamily
 import co.datapipelines.web.visualizations.ArtifactHttp
 import co.datapipelines.web.visualizations.ArtifactResponses
+import co.datapipelines.web.visualizations.VisualizationTransferController
 import com.fasterxml.jackson.databind.JsonNode
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -88,6 +89,29 @@ class DashboardTransferController(
                 "imported_with_evidence" to envelope.path("manifest").path("evidence").let { !it.isMissingNode && !it.isNull },
             ),
         )
+        // F1 (the L1c pass): every LANDED artifact is audited — one `visualization.imported` row per
+        // bundled visualization, after the import's commit, each naming its id, its version and ITS OWN
+        // envelope manifest's evidence flag. The atomic import (one transaction) means these rows never
+        // name a visualization a refused dashboard left behind.
+        imported.visualizations.forEachIndexed { index, visualization ->
+            LifecycleVerbs.audit(
+                audit,
+                VisualizationTransferController.AUDIT_IMPORTED,
+                principal,
+                workspaceId,
+                mapOf(
+                    "visualization_id" to visualization.detail.artifactId.toString(),
+                    "version" to visualization.detail.version,
+                    "imported_with_evidence" to
+                        envelope
+                            .path("visualizations")
+                            .path(index)
+                            .path("manifest")
+                            .path("evidence")
+                            .let { !it.isMissingNode && !it.isNull },
+                ),
+            )
+        }
         return ApiResponse.of(imported.asResponse())
     }
 

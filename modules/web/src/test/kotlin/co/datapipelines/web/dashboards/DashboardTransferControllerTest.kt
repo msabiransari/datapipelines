@@ -1,9 +1,11 @@
 package co.datapipelines.web.dashboards
 
+import co.datapipelines.application.lens.LensedView
 import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.visualization.ArtifactImported
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRecord
@@ -17,6 +19,8 @@ import co.datapipelines.visualization.DashboardService
 import co.datapipelines.web.api.ApiErrorCatalog
 import co.datapipelines.web.api.ApiErrors
 import co.datapipelines.web.api.ApiException
+import co.datapipelines.web.visualizations.VisualizationTransferController
+import com.fasterxml.jackson.databind.JsonNode
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.mockk.every
@@ -41,6 +45,18 @@ class DashboardTransferControllerTest {
     private val dashboards = mockk<DashboardService>()
     private val recorder = RecordingAuditSink()
     private val controller = DashboardTransferController(transfer, dashboards, co.datapipelines.web.EVERYTHING_LENS, recorder)
+
+    /** The O3 case's lens: a view whose dashboard lens admits another name — never this artifact's. */
+    private val narrowingLens = ReadLens.Only(setOf("finance/dashboards/something_else"))
+    private val narrowing =
+        DashboardTransferController(
+            transfer,
+            dashboards,
+            {
+                LensedView(ReadLens.Everything, ReadLens.Everything, dashboards = narrowingLens)
+            },
+            recorder,
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -85,6 +101,27 @@ class DashboardTransferControllerTest {
         )
     }
 
+    /**
+     * O3 of the L1c pass: a case that goes RED if the controller dropped the lens. The EVERYTHING-lens case
+     * above cannot see a dropped lens; this one resolves the caller's view to a NARROWING lens whose view
+     * does not admit the artifact — the working read is stubbed for THAT lens alone (a controller reading
+     * through the everything view fails the stub) and the view's admission is asserted on its name.
+     */
+    @Test
+    fun `a narrowing lens refuses a dashboard the view does not admit - the lens check can fail`() {
+        authenticate()
+        every { dashboards.findWorking(workspaceId, narrowingLens, id) } returns released()
+
+        val error = shouldThrow<ApiException> { narrowing.export(id) }
+
+        assertAll(
+            { error.code shouldBe DashboardErrorCodes.NOT_FOUND },
+            { ApiErrorCatalog.statusFor(error.code) shouldBe HttpStatus.NOT_FOUND },
+            { verify(exactly = 0) { transfer.exportDashboard(any(), any()) } },
+            { recorder.events shouldBe emptyList() },
+        )
+    }
+
     @Test
     fun `import reads the envelope through the request mapper - a malformed body is the family's 400, the transfer never asked`() {
         authenticate()
@@ -100,16 +137,33 @@ class DashboardTransferControllerTest {
     }
 
     @Test
-    fun `import lands through the transfer and audits the dashboard and its bundled visualizations`() {
+    fun `import lands through the transfer and audits the dashboard AND each landed bundled visualization`() {
         authenticate()
         val envelope = envelope()
+        // Two bundled envelopes: the first with NO evidence in its manifest, the second WITH one — so the
+        // per-visualization rows are pinned to each envelope's own manifest, not the dashboard's.
+        val payload = ArtifactTransferService.payloadOf(released())
+        val firstEntry = ArtifactJson.mapper.createObjectNode()
+        firstEntry.set<JsonNode>("visualization", payload.deepCopy())
+        firstEntry.putObject("manifest")
+        val secondEntry = ArtifactJson.mapper.createObjectNode()
+        secondEntry.set<JsonNode>("visualization", payload.deepCopy())
+        secondEntry.putObject("manifest").putObject("evidence").put("verdict", "PASS")
+        (envelope.get("visualizations") as com.fasterxml.jackson.databind.node.ArrayNode)
+            .addAll(listOf(firstEntry, secondEntry))
+
+        val firstVizId = UUID.randomUUID()
+        val secondVizId = UUID.randomUUID()
         val detail = { artifactId: UUID ->
             ArtifactVersionDetail(artifactId, 1, PipelineVersionStatus.RELEASED, "hash-v1", CREATED, userId)
         }
         every { transfer.importDashboard(workspaceId, any(), userId) } returns
             DashboardImport(
                 ArtifactImported(detail(id), created = true, unchanged = false),
-                listOf(ArtifactImported(detail(UUID.randomUUID()), created = true, unchanged = false)),
+                listOf(
+                    ArtifactImported(detail(firstVizId), created = true, unchanged = false),
+                    ArtifactImported(detail(secondVizId), created = false, unchanged = true),
+                ),
             )
 
         val response = controller.import(envelope.toString())
@@ -118,13 +172,28 @@ class DashboardTransferControllerTest {
         val bundled = response.data["visualizations"] as List<*>
         assertAll(
             { dashboard["id"] shouldBe id.toString() },
-            { bundled.size shouldBe 1 },
+            { bundled.size shouldBe 2 },
             {
-                recorder.single(AUDIT_IMPORTED).second.let {
+                // F1: each LANDED artifact is audited after commit — the dashboard's row, then one
+                // `visualization.imported` row per bundled visualization, each carrying its id, its
+                // version and ITS OWN envelope manifest's evidence flag (verbatim, false until L4).
+                recorder.events.map { it.first } shouldBe
+                    listOf(AUDIT_IMPORTED, VisualizationTransferController.AUDIT_IMPORTED, VisualizationTransferController.AUDIT_IMPORTED)
+                recorder.events[0].second.let {
                     it["dashboard_id"] shouldBe id.toString()
                     it["version"] shouldBe 1
-                    it["visualizations"] shouldBe 1
+                    it["visualizations"] shouldBe 2
                     it["imported_with_evidence"] shouldBe false
+                }
+                recorder.events[1].second.let {
+                    it["visualization_id"] shouldBe firstVizId.toString()
+                    it["version"] shouldBe 1
+                    it["imported_with_evidence"] shouldBe false
+                }
+                recorder.events[2].second.let {
+                    it["visualization_id"] shouldBe secondVizId.toString()
+                    it["version"] shouldBe 1
+                    it["imported_with_evidence"] shouldBe true
                 }
             },
         )

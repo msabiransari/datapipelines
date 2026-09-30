@@ -9,9 +9,12 @@ import co.datapipelines.auth.KeyRole
 import co.datapipelines.web.parameters.ParameterSetPromotion
 import co.datapipelines.web.templates.TemplateImportService
 import com.fasterxml.jackson.databind.JsonNode
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
@@ -65,6 +68,7 @@ class PromotionReceiveSetsOrderTest {
             parameterSetPromotion,
             visualizationPromotion,
             dashboardPromotion,
+            visualizationConfig = co.datapipelines.visualization.VisualizationConfig(),
         )
 
     @Test
@@ -116,6 +120,37 @@ class PromotionReceiveSetsOrderTest {
         // transaction (#302's wall) the first entry is "transaction" — this pin is red; with a
         // family landing moved outside it (or before the rows its validation reads) the tail is red.
         calls shouldBe listOf("validate", "transaction", "templates", "sets", "pipelines", "visualizations", "dashboards")
+    }
+
+    /**
+     * O7 of the L1c pass: the batch's two family arms are count-bounded BEFORE the transaction opens and
+     * before any member binds — `max-visualizations-per-dashboard`, the families' one envelope ceiling.
+     * The refusal is the arm family's `body_invalid` with the reader's `too_many` shape, and it costs one
+     * size comparison, not 51 binds.
+     */
+    @Test
+    fun `a batch whose visualization arm exceeds the count bound refuses BEFORE the transaction opens`() {
+        every { inventory.contextFor("acme") } returns co.datapipelines.auth.WorkspaceContext(UUID, "acme")
+
+        val batch =
+            PromotionWire.Batch(
+                sourceEnv = "dev",
+                keyFingerprint = "fp",
+                workspace = "acme",
+                visualizations = List(51) { NODE },
+            )
+
+        val refused = shouldThrow<co.datapipelines.web.api.ApiException> { service.apply(batch, peer) }
+
+        withClue("the refusal must be the count bound: ${refused.details}") {
+            refused.code shouldBe co.datapipelines.visualization.VisualizationErrorCodes.BODY_INVALID
+            refused.details["reason"] shouldBe "too_many"
+            refused.details["count"] shouldBe 51
+            refused.details["max"] shouldBe 50
+        }
+        // Nothing opened, nothing bound: one size comparison refused the batch.
+        calls shouldBe emptyList()
+        verify(exactly = 0) { visualizationPromotion.bind(any()) }
     }
 
     private companion object {

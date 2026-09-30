@@ -97,6 +97,8 @@ class PromotionConfiguration {
         // #10 L1c — the transfer families' halves (§12, D61).
         visualizationPromotion: co.datapipelines.web.visualizations.VisualizationPromotion,
         dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
+        // O7 — the batch's family arms are count-bounded before any member binds.
+        visualizationConfig: co.datapipelines.visualization.VisualizationConfig,
     ): PromotionReceiveService =
         PromotionReceiveService(
             inventory,
@@ -110,6 +112,7 @@ class PromotionConfiguration {
             parameterSetPromotion,
             visualizationPromotion,
             dashboardPromotion,
+            visualizationConfig,
         )
 
     /**
@@ -157,9 +160,10 @@ class PromotionConfiguration {
         repository: co.datapipelines.visualization.VisualizationRepository,
         visualizations: co.datapipelines.visualization.VisualizationService,
         transfer: co.datapipelines.visualization.ArtifactTransferService,
+        releaseRules: co.datapipelines.visualization.ArtifactImportReleaseRules,
     ): co.datapipelines.web.visualizations.VisualizationPromotion =
         co.datapipelines.web.visualizations
-            .VisualizationPromotion(repository, visualizations, transfer)
+            .VisualizationPromotion(repository, visualizations, transfer, releaseRules)
 
     /** #10 L1c — the dashboard twin of [visualizationPromotion]. */
     @Bean
@@ -167,9 +171,10 @@ class PromotionConfiguration {
         repository: co.datapipelines.visualization.DashboardRepository,
         dashboards: co.datapipelines.visualization.DashboardService,
         transfer: co.datapipelines.visualization.ArtifactTransferService,
+        releaseRules: co.datapipelines.visualization.ArtifactImportReleaseRules,
     ): co.datapipelines.web.visualizations.DashboardPromotion =
         co.datapipelines.web.visualizations
-            .DashboardPromotion(repository, dashboards, transfer)
+            .DashboardPromotion(repository, dashboards, transfer, releaseRules)
 
     /** 074 — the endpoint half of a promotion batch, sender and receiver rules in one place. */
     @Bean

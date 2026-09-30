@@ -65,6 +65,8 @@ class PromotionReceiveService(
     /** #10 L1c — the transfer families' halves (§12, D61): bind and land INSIDE the transaction, after the four families. */
     private val visualizationPromotion: co.datapipelines.web.visualizations.VisualizationPromotion,
     private val dashboardPromotion: co.datapipelines.web.visualizations.DashboardPromotion,
+    /** O7 — the batch's two family lists are count-bounded BEFORE any member binds; the config carries the key's name. */
+    private val visualizationConfig: co.datapipelines.visualization.VisualizationConfig,
 ) {
     private val log = LoggerFactory.getLogger(PromotionReceiveService::class.java)
 
@@ -127,6 +129,12 @@ class PromotionReceiveService(
             } else {
                 parameterSetPromotion.validate(batch.parameterSets, batch.templates, workspace.id)
             }
+
+        // O7 (the L1c pass) — the batch's two family lists are count-bounded BEFORE the transaction opens
+        // and before any member binds: `max-visualizations-per-dashboard` is the transfer families' one
+        // envelope ceiling (a dashboard body may not carry more occurrences, so no genuine batch arm
+        // exceeds it), and the refusal is the family's body_invalid with the reader's `too_many` shape.
+        boundTransferArms(batch)
 
         transactionTemplate.executeWithoutResult {
             if (batch.templates.isNotEmpty()) {
@@ -222,6 +230,38 @@ class PromotionReceiveService(
         }
         batch.dashboards.forEach { entry ->
             dashboardPromotion.land(dashboardPromotion.bind(entry), workspaceId, actor)
+        }
+    }
+
+    /**
+     * O7 — the batch's two family lists, count-bounded before any member binds. A member's own shape is
+     * the reader's business (the ONE entry bind); the LIST's size is the receiver's availability, judged
+     * here before the transaction opens so a pathological batch costs one size comparison, not N binds.
+     */
+    private fun boundTransferArms(batch: PromotionWire.Batch) {
+        val max = visualizationConfig.maxVisualizationsPerDashboard
+        listOf(
+            "visualizations" to batch.visualizations,
+            "dashboards" to batch.dashboards,
+        ).forEach { (arm, entries) ->
+            if (entries.size > max) {
+                throw ApiException(
+                    if (arm == "visualizations") {
+                        co.datapipelines.visualization.VisualizationErrorCodes.BODY_INVALID
+                    } else {
+                        co.datapipelines.visualization.DashboardErrorCodes.BODY_INVALID
+                    },
+                    "The batch's $arm arm carries ${entries.size} entries; at most $max " +
+                        "(datapipelines.visualization.max-visualizations-per-dashboard).",
+                    mapOf(
+                        "reason" to "too_many",
+                        "path" to arm,
+                        "count" to entries.size,
+                        "max" to max,
+                        "config_key" to co.datapipelines.visualization.VisualizationKey.MAX_VISUALIZATIONS_PER_DASHBOARD.path,
+                    ),
+                )
+            }
         }
     }
 

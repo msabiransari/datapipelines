@@ -48,10 +48,26 @@ class VisualizationPromotionTest {
     private val visualizations = mockk<VisualizationService>()
     private val dashboards = mockk<DashboardService>()
     private val bundle = mockk<co.datapipelines.visualization.TemplateBundle>()
-    private val transfer = ArtifactTransferService(visualizations, dashboards, bundle, VisualizationReader(), DashboardReader())
 
-    private val promotion = VisualizationPromotion(repository, visualizations, transfer)
-    private val dashboardPromotion = DashboardPromotion(dashboardRepository, dashboards, transfer)
+    /**
+     * The release judge (O2) over map-backed ports, the mould's fake shape: statuses/facts seeded
+     * RELEASED, flipped to DRAFT by the case that proves a receive judges by the RELEASE rules.
+     */
+    private val templateStatuses = mutableMapOf(TRANSFORM_REF to PipelineVersionStatus.RELEASED)
+    private val setFacts =
+        mutableMapOf(SET_REF to co.datapipelines.visualization.ParameterSetFact(PipelineVersionStatus.RELEASED, emptyList()))
+    private val releaseRules =
+        co.datapipelines.visualization.ArtifactImportReleaseRules(
+            templateStatuses = { _, name, version -> templateStatuses[co.datapipelines.visualization.ArtifactRef(name, version)] },
+            sets = { _, ref -> setFacts[ref] },
+            visualizations = { _, _ -> co.datapipelines.visualization.PinnedVisualization(PipelineVersionStatus.RELEASED, mockk()) },
+        )
+
+    private val transfer =
+        ArtifactTransferService(visualizations, dashboards, bundle, VisualizationReader(), DashboardReader(), releaseRules = releaseRules)
+
+    private val promotion = VisualizationPromotion(repository, visualizations, transfer, releaseRules)
+    private val dashboardPromotion = DashboardPromotion(dashboardRepository, dashboards, transfer, releaseRules)
 
     private val workspaceId = UUID.randomUUID()
     private val actor = UUID.randomUUID()
@@ -113,6 +129,43 @@ class VisualizationPromotionTest {
             { captured.captured.name shouldBe NAME },
             { captured.captured.version shouldBe 1 },
             { captured.captured.bodyHash shouldBe bound.bodyHash },
+        )
+    }
+
+    @Test
+    fun `land refuses a transform pin held here as a DRAFT - a receive judges by the RELEASE rules (O2)`() {
+        val bound = promotion.bind(entry())
+        templateStatuses[TRANSFORM_REF] = PipelineVersionStatus.DRAFT
+
+        val refusal = shouldThrow<DatapipelinesException> { promotion.land(bound, workspaceId, actor) }
+
+        assertAll(
+            { refusal.code shouldBe VisualizationErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED },
+            { verify { visualizations wasNot Called } },
+        )
+    }
+
+    @Test
+    fun `a dashboard land refuses a set pin held here as a DRAFT - the same release judge on the receive (O2)`() {
+        val bound =
+            ArtifactExport(
+                id = artifactId,
+                name = DASH_NAME,
+                version = 1,
+                bodyHash = "hash-v1",
+                releasedAt = now,
+                body =
+                    DashboardReader()
+                        .readOrThrow((ArtifactJson.mapper.readTree(DASHBOARD_DOCUMENT) as ObjectNode).put("name", DASH_NAME))
+                        .body,
+            )
+        setFacts[SET_REF] = co.datapipelines.visualization.ParameterSetFact(PipelineVersionStatus.DRAFT, emptyList())
+
+        val refusal = shouldThrow<DatapipelinesException> { dashboardPromotion.land(bound, workspaceId, actor) }
+
+        assertAll(
+            { refusal.code shouldBe DashboardErrorCodes.RELEASE_DEPENDENCY_NOT_RELEASED },
+            { verify { dashboards wasNot Called } },
         )
     }
 
@@ -189,6 +242,11 @@ class VisualizationPromotionTest {
 
     private companion object {
         const val NAME = "finance/visualizations/monthly_revenue"
+        const val DASH_NAME = "finance/dashboards/revenue_overview"
+
+        /** The judge's port seeds — the §3.1 worked transform pin and the dashboard's pinned set. */
+        val TRANSFORM_REF = co.datapipelines.visualization.ArtifactRef("finance/transforms/revenue_bars", 2)
+        val SET_REF = co.datapipelines.visualization.ArtifactRef("finance/parameters/reporting_period", 1)
 
         /** The implementation spec's §3.1 worked document — the reader binds it unchanged. */
         val DOCUMENT =
@@ -203,6 +261,36 @@ class VisualizationPromotionTest {
              "presentation": {"title": "Monthly revenue", "tokens": {"series": "categorical"}},
              "tests": {"cases": [{"name": "twelve months", "fixtures": {"revenue": [{"month": "2026-01-01", "amount": 10.5}]},
                                   "assertions": [{"kind": "rendered"}, {"kind": "trace_count", "equals": 1}]}]}}
+            """.trimIndent()
+
+        /**
+         * The implementation spec's §3.2 worked dashboard (the dashboard controller test's document) — its
+         * pinned set is [SET_REF], so the O2 case's DRAFT seed is the pin the judge refuses on.
+         */
+        val DASHBOARD_DOCUMENT =
+            """
+            {"name": "$DASH_NAME", "display_name": "Revenue overview", "description": "",
+             "parameter_set": {"name": "finance/parameters/reporting_period", "version": 1},
+             "sources": [
+               {"name": "revenue_source", "pipeline": {"name": "finance/pipelines/monthly_revenue", "version": 7},
+                "parameters": {"year": {"parameter": "year"}, "currency": {"value": "USD"}}}
+             ],
+             "visualizations": [
+               {"name": "revenue_chart", "type": "visualization",
+                "visualization": {"name": "finance/visualizations/monthly_revenue", "version": 3},
+                "inputs": {"revenue": {"source": "revenue_source"}}, "timeout_seconds": 120}
+             ],
+             "groups": [{"name": "overview_group", "type": "group", "members": ["year", "revenue_chart", "refresh_button"]}],
+             "actions": [{"name": "refresh_overview", "type": "refresh", "scope": "targets", "targets": ["revenue_chart"], "initial": true}],
+             "action_controls": [{"name": "refresh_button", "type": "action_control",
+                                  "action": "refresh_overview", "label": "Apply"}],
+             "parameter_scopes": {"year": ["overview_group"]},
+             "parameter_state": {"dashboard": {"visible": "inherit", "enabled": "inherit"},
+                                 "parameters": {"currency": {"visible": "force_false"}}},
+             "outgoing_overrides": {"revenue_source": {"currency": {"value": "USD"}}},
+             "layout": {"parameter_set": {"position": "left"}, "parameter_placements": {"year": {"group": "overview_group"}},
+                        "grid": [{"name": "revenue_chart", "x": 0, "y": 0, "w": 6, "h": 4}], "columns": 12},
+             "timeouts": {"refresh_seconds": 300}}
             """.trimIndent()
     }
 }

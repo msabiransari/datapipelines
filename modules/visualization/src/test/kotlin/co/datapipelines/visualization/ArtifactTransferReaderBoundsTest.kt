@@ -53,7 +53,16 @@ class ArtifactTransferReaderBoundsTest {
         VisualizationTestDb.reset()
         h = LifecycleHarness()
         bundle = RecordingTransferBundle()
-        transfer = ArtifactTransferService(h.visualizations, h.dashboards, bundle, VisualizationReader(), DashboardReader())
+        transfer =
+            ArtifactTransferService(
+                h.visualizations,
+                h.dashboards,
+                bundle,
+                VisualizationReader(),
+                DashboardReader(),
+                transactions = h.transactions,
+                releaseRules = h.importReleaseRules,
+            )
     }
 
     @Test
@@ -79,6 +88,35 @@ class ArtifactTransferReaderBoundsTest {
             bundle.imported shouldBe emptyList()
             countVisualizations(OTHER_WORKSPACE, released.record.name) shouldBe 0
         }
+    }
+
+    /**
+     * O7 of the L1c pass: the envelope's `visualizations` BUNDLE is count-bounded before its members
+     * bind — `max-visualizations-per-dashboard`, the cap the dashboard's own body obeys. The entries
+     * below are 51 copies of a VALID bundled envelope, so on the unbounded path the first copy lands
+     * and the second refuses `id_taken` with one visualization already landed — this case's red shape.
+     */
+    @Test
+    fun `a dashboard envelope whose bundle exceeds max-visualizations-per-dashboard refuses BEFORE its members bind`() {
+        val created = h.createVisualization()
+        val released = h.visualizations.release(WORKSPACE, created.record.id, created.detail.bodyHash, AUTHOR)
+        val document = h.dashboardDocument(released.version.detail.version)
+        val dashboard = h.dashboards.create(WORKSPACE, document, AUTHOR, co.datapipelines.pipeline.WriteSurface.MCP)
+        h.dashboards.release(WORKSPACE, dashboard.record.id, dashboard.detail.bodyHash, AUTHOR)
+        val envelope = transfer.exportDashboard(WORKSPACE, dashboard.record.id)
+        val bundled = (envelope.get("visualizations") as ArrayNode).get(0)
+        repeat(BUNDLE_OVER_BOUND - 1) { (envelope.get("visualizations") as ArrayNode).add(bundled.deepCopy()) }
+
+        val refusal = shouldThrow<DatapipelinesException> { transfer.importDashboard(OTHER_WORKSPACE, envelope, AUTHOR) }
+
+        withClue("the refusal must be the count bound, not a landing refusal: ${refusal.details}") {
+            refusal.code shouldBe DashboardErrorCodes.BODY_INVALID
+            refusal.details["reason"] shouldBe "too_many"
+            refusal.details["count"] shouldBe BUNDLE_OVER_BOUND
+            refusal.details["max"] shouldBe 50
+        }
+        bundle.imported shouldBe emptyList()
+        countVisualizations(OTHER_WORKSPACE, released.version.record.name) shouldBe 0
     }
 
     @Test
@@ -140,6 +178,7 @@ class ArtifactTransferReaderBoundsTest {
     private companion object {
         const val ROWS_OVER_BOUND = 1_001 // max-fixture-rows-per-case defaults to 1,000
         const val DASHBOARD_OCCURRENCES_OVER_BOUND = 51 // max-visualizations-per-dashboard defaults to 50
+        const val BUNDLE_OVER_BOUND = 51 // the envelope bundle's O7 ceiling: the same key
         const val DASHBOARD_NAME = "finance/dashboards/bounds_probe"
     }
 }

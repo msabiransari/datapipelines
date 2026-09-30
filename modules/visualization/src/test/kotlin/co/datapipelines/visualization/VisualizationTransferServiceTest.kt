@@ -60,7 +60,16 @@ class VisualizationTransferServiceTest {
         VisualizationTestDb.reset()
         h = LifecycleHarness()
         bundle = RecordingBundle()
-        transfer = ArtifactTransferService(h.visualizations, h.dashboards, bundle, VisualizationReader(), DashboardReader())
+        transfer =
+            ArtifactTransferService(
+                h.visualizations,
+                h.dashboards,
+                bundle,
+                VisualizationReader(),
+                DashboardReader(),
+                transactions = h.transactions,
+                releaseRules = h.importReleaseRules,
+            )
     }
 
     private fun releasedVisualization(): ArtifactVersion<VisualizationBody> {

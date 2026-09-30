@@ -55,6 +55,14 @@ internal class LifecycleHarness(
             transactions = transactions,
         )
 
+    /** The production-shaped release judge (O2) over this harness's ports — statuses and facts as seeded. */
+    val importReleaseRules =
+        ArtifactImportReleaseRules(
+            templateStatuses = TemplateVersionStatuses { _, name, version -> templateStatuses[ArtifactRef(name, version)] },
+            sets = fakes.setFacts,
+            visualizations = visualizationRepository.pins,
+        )
+
     fun visualizationDocument(
         name: String = DocumentFixtures.VISUALIZATION_NAME,
         edit: (com.fasterxml.jackson.databind.node.ObjectNode) -> Unit = {},

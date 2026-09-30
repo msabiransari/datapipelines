@@ -5,6 +5,7 @@ import co.datapipelines.auth.AuthMethod
 import co.datapipelines.auth.AuthenticatedPrincipal
 import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.visualization.ArtifactImported
 import co.datapipelines.visualization.ArtifactJson
 import co.datapipelines.visualization.ArtifactRecord
@@ -44,6 +45,16 @@ class VisualizationTransferControllerTest {
     private val visualizations = mockk<VisualizationService>()
     private val recorder = RecordingAuditSink()
     private val controller = VisualizationTransferController(transfer, visualizations, EVERYTHING_LENS, recorder)
+
+    /** The O3 case's lens: a view whose visualization lens admits another name — never this artifact's. */
+    private val narrowingLens = ReadLens.Only(setOf("finance/visualizations/something_else"))
+    private val narrowing =
+        VisualizationTransferController(
+            transfer,
+            visualizations,
+            { LensedView(LensedView.EVERYTHING.pipelines, LensedView.EVERYTHING.templates, visualizations = narrowingLens) },
+            recorder,
+        )
 
     private val userId = UUID.randomUUID()
     private val workspaceId = UUID.randomUUID()
@@ -86,6 +97,27 @@ class VisualizationTransferControllerTest {
         every { visualizations.findWorking(workspaceId, LensedView.EVERYTHING.visualizations, id) } returns null
 
         val error = shouldThrow<ApiException> { controller.export(id) }
+
+        assertAll(
+            { error.code shouldBe VisualizationErrorCodes.NOT_FOUND },
+            { ApiErrorCatalog.statusFor(error.code) shouldBe HttpStatus.NOT_FOUND },
+            { verify(exactly = 0) { transfer.exportVisualization(any(), any()) } },
+            { recorder.events shouldBe emptyList() },
+        )
+    }
+
+    /**
+     * O3 of the L1c pass: a case that goes RED if the controller dropped the lens. The EVERYTHING-lens cases
+     * above cannot see a dropped lens; this one resolves the caller's view to a NARROWING lens whose view does
+     * not admit the artifact — the working read is stubbed for THAT lens alone (a controller reading through
+     * the everything view fails the stub) and the view's admission is asserted on its name.
+     */
+    @Test
+    fun `a narrowing lens refuses a visualization the view does not admit - the lens check can fail`() {
+        authenticate()
+        every { visualizations.findWorking(workspaceId, narrowingLens, id) } returns released()
+
+        val error = shouldThrow<ApiException> { narrowing.export(id) }
 
         assertAll(
             { error.code shouldBe VisualizationErrorCodes.NOT_FOUND },

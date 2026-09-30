@@ -6,6 +6,7 @@ import co.datapipelines.typesystem.DatapipelinesException
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
+import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 import java.util.UUID
 
@@ -34,8 +35,16 @@ data class DashboardImport(
  * key smuggled into a nested object (`renderer.id`) refuses as the reader's `unknown_key`. A present-but-non-integer
  * `version` and a present-but-non-array `templates`/`visualizations` are REFUSED (`body_invalid` naming the path),
  * never coerced into the version-less/empty paths. The id is kept, the hash verified, a taken id is
- * `import.id_taken` (C29). Like the REST parameter-set import (C35) this path is NOT atomic across its parts: a
- * refused dashboard leaves the templates and visualizations it already landed (each idempotent on re-import).
+ * `import.id_taken` (C29).
+ *
+ * ## Atomicity (F1, the L1c pass)
+ * The VISUALIZATION import keeps the parameter-set mould's accepted shape (C35: templates then the artifact,
+ * each idempotent, an interactive re-runnable action — the transfer E2E's case 4 pins it). The DASHBOARD
+ * import is ONE transaction (F1 of the orchestrator's pass): templates → every bundled visualization → the
+ * dashboard, so a refused dashboard leaves NOTHING landed — at the L1c tip each bundled visualization landed
+ * RELEASED in its own transaction before the dashboard was judged, evidence-less and unaudited. The
+ * lifecycle's inner `transactions.execute` joins this one, exactly as it joins the promotion receive's (the
+ * transfer E2E's case 8 proves the join); production wiring passes the metadata manager's template.
  */
 class ArtifactTransferService(
     private val visualizations: VisualizationService,
@@ -44,6 +53,12 @@ class ArtifactTransferService(
     /** The document bounds run on IMPORT too — the L1c HIGH item: the readers, not the bare mapper. */
     private val visualizationReader: VisualizationReader,
     private val dashboardReader: DashboardReader,
+    /** The dashboard import's one transaction; [ArtifactLifecycle.DIRECT] in a directly constructed test. */
+    private val transactions: TransactionOperations = ArtifactLifecycle.DIRECT,
+    /** O2: an import landing RELEASED judges its pins by the RELEASE rules — both transfer surfaces' one judge. */
+    private val releaseRules: ArtifactImportReleaseRules,
+    /** O7: the envelope arrays' count ceiling before their members bind — the family's one `too_many` shape. */
+    private val config: VisualizationConfig = VisualizationConfig(),
 ) {
     /** The export envelope of [id]'s CURRENT release. */
     fun exportVisualization(
@@ -96,11 +111,18 @@ class ArtifactTransferService(
         actor: UUID,
     ): ArtifactImported {
         val parsed = parseVisualization(envelope)
+        // O2: the artifact lands RELEASED — its pin is judged by the RELEASE rules BEFORE the templates
+        // land, so a refused import leaves nothing (the save rules' import lens, inside `import`, names
+        // the pins this workspace does not hold at all).
+        releaseRules.judgeVisualization(workspaceId, parsed.export.body)
         bundle.import(workspaceId, parsed.templates, actor)
         return visualizations.import(workspaceId, parsed.export, actor)
     }
 
-    /** Imports a dashboard envelope: every template, then every bundled visualization, then the dashboard. */
+    /**
+     * Imports a dashboard envelope: ONE transaction around every template, every bundled visualization and the
+     * dashboard (F1) — a refused dashboard leaves nothing landed.
+     */
     fun importDashboard(
         workspaceId: UUID,
         envelope: JsonNode,
@@ -109,9 +131,22 @@ class ArtifactTransferService(
         val root = objectOrRefuse(envelope, DashboardErrorCodes.BODY_INVALID, "")
         val dashboard = dashboardEntry(objectOrRefuse(root.get("dashboard"), DashboardErrorCodes.BODY_INVALID, "dashboard"))
         val bundled = optionalArray(root, "visualizations", DashboardErrorCodes.BODY_INVALID).map(::parseVisualization)
-        bundled.forEach { bundle.import(workspaceId, it.templates, actor) }
-        val landed = bundled.map { visualizations.import(workspaceId, it.export, actor) }
-        return DashboardImport(dashboards.import(workspaceId, dashboard, actor), landed)
+        // The whole act, or nothing (F1): the inner `transactions.execute` of every landing JOINS this
+        // transaction (the transfer E2E's case 8 proves the join at the receive; the same mechanism here).
+        return checkNotNull(
+            transactions.execute {
+                bundled.forEach { parsed ->
+                    // O2: each bundled artifact lands RELEASED — the RELEASE rules judge its pins first.
+                    releaseRules.judgeVisualization(workspaceId, parsed.export.body)
+                    bundle.import(workspaceId, parsed.templates, actor)
+                }
+                val landed = bundled.map { visualizations.import(workspaceId, it.export, actor) }
+                // The dashboard's own pins — the set, and every visualization it pins (the bundle just
+                // landed) — are judged RELEASE before its landing (O2), inside the same transaction.
+                releaseRules.judgeDashboard(workspaceId, dashboard.body)
+                DashboardImport(dashboards.import(workspaceId, dashboard, actor), landed)
+            },
+        )
     }
 
     // ---- envelopes ---------------------------------------------------------------------------------------
@@ -224,7 +259,11 @@ class ArtifactTransferService(
         path: String,
     ): ObjectNode = node as? ObjectNode ?: throw malformed(bodyInvalid, path)
 
-    /** The envelope's OPTIONAL array member: present-but-not-an-array REFUSES (the ruling), absent is empty. */
+    /** The envelope's OPTIONAL array member: present-but-not-an-array REFUSES (the ruling), absent is empty.
+     *  O7: the array's COUNT is bounded before any member is parsed or bound — a dashboard's bundle by
+     *  `max-visualizations-per-dashboard` (the cap its own body's occurrences obey), a template closure by
+     *  the same key, the transfer families' one envelope ceiling. The refusal is the family's `body_invalid`
+     *  with the reader's `too_many` shape (`count`, `max`, `config_key`), before any member's work. */
     private fun optionalArray(
         root: ObjectNode,
         key: String,
@@ -233,7 +272,22 @@ class ArtifactTransferService(
         val node = root.get(key) ?: return emptyList()
         if (node.isNull) return emptyList()
         if (node !is ArrayNode) throw wrongType(bodyInvalid, key)
-        return node.toList()
+        val entries = node.toList()
+        if (entries.size > config.maxVisualizationsPerDashboard) {
+            throw DatapipelinesException(
+                bodyInvalid,
+                "${entries.size} entries at '$key'; at most ${config.maxVisualizationsPerDashboard} " +
+                    "(${VisualizationKey.MAX_VISUALIZATIONS_PER_DASHBOARD.path}).",
+                mapOf(
+                    "reason" to "too_many",
+                    "path" to key,
+                    "count" to entries.size,
+                    "max" to config.maxVisualizationsPerDashboard,
+                    "config_key" to VisualizationKey.MAX_VISUALIZATIONS_PER_DASHBOARD.path,
+                ),
+            )
+        }
+        return entries
     }
 
     private fun textual(
@@ -325,8 +379,12 @@ class ArtifactTransferService(
         val LIFECYCLE_KEYS: Set<String> =
             setOf("id", "name", "version", "created_at", "updated_at", "current_version", "status", "body_hash", "released_at")
 
-        /** The payload [payload] as a strict [type] body — the ONE bind the transfer surfaces share. Null when it does not bind. */
-        fun <B : Any> bodyOf(
+        /**
+         * The payload [payload] as a strict [type] body — the strip half of the ONE bind the transfer
+         * surfaces share, module-internal (O8 of the L1c pass: the reader bind is the entry path; an
+         * unbounded `treeToValue` must not grow production callers). Null when it does not bind.
+         */
+        internal fun <B : Any> bodyOf(
             payload: ObjectNode,
             type: Class<B>,
         ): B? {
