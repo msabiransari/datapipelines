@@ -26,8 +26,13 @@
 #
 # Usage: ./scripts/pregate.sh [base-ref]     (default: origin/main; the diff is base...HEAD
 #        plus the working tree). Logs: .pregate-logs/.
+#        ./scripts/pregate.sh --self-test    (the stage-2b selector over isolated fixtures
+#        and a recording, refusing Gradle stand-in — no gradle, no repo state touched).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
+# shellcheck source=scripts/pregate-2b-lib.sh
+source "$ROOT/scripts/pregate-2b-lib.sh"
+if [ "${1:-}" = "--self-test" ]; then pg2b::self_test; exit $?; fi
 BASE="${1:-origin/main}"; LOGDIR="$ROOT/.pregate-logs"; mkdir -p "$LOGDIR"
 
 run() { # run <logfile> <args...> → echoes exit code; never pipes gradle
@@ -101,41 +106,38 @@ PY
   fi
 done
 
-# --- 2b. tests/* modules: the changed test classes only -------------------------
+# --- 2b. tests/* modules: the changed test classes and their affected consumers ------
 # A changed `tests/<m>/build.gradle.kts` means the knobs changed → that module unfiltered.
-# Otherwise every changed/added `*.kt` under `tests/<m>/src/test/kotlin/` is a class to
-# run (file name = class name, package from the path), with that module's zero-test guard
-# skipped (a filtered run always trips it). The merge gate runs these modules whole.
+# The selection itself lives in scripts/pregate-2b-lib.sh (drivable by --self-test): a
+# changed CONCRETE test class runs focused by class; a changed file that is not runnable —
+# an abstract base, an interface, an object, a helper — schedules its REAL runnable
+# consumers, found transitively through intermediate bases; when consumers cannot be
+# established (orphan helper, deleted/renamed file, changed test resource) the fallback is
+# the WHOLE module. The plan is never empty while test sources changed: the abstract/sealed
+# SKIP this stage once had let a BrowserSuite-only change pass without any browser class
+# running (#342 round review, 2026-09-30). The module's zero-test guard is skipped (a
+# filtered run always trips it — §9.4); the merge gate runs these modules whole.
 t2b=0
 if [ -n "$touched_tests" ]; then
   targs=()
   for m in $touched_tests; do
-    if echo "$changed_files" | grep -qE "^tests/$m/build\.gradle\.kts$"; then
-      targs+=(":tests:$m:test")
-      echo "  2b tests/$m: build file changed → whole module"
+    mfiles=()
+    while IFS= read -r cf; do
+      [ -n "$cf" ] && mfiles+=("$ROOT/$cf")
+    done < <(echo "$changed_files" | grep -E "^tests/$m/")
+    if [ "${#mfiles[@]}" -eq 0 ]; then
+      echo "  2b tests/$m: no changed files → nothing to run here"
+      continue
+    fi
+    plan="$(pg2b::plan_module "$m" "$ROOT/tests/$m/build.gradle.kts" "$ROOT/tests/$m/src/test/kotlin" ${mfiles[@]+"${mfiles[@]}"})"
+    margs=()
+    while IFS= read -r ga; do
+      [ -n "$ga" ] && margs+=("$ga")
+    done < <(pg2b::gradle_args "$m" $plan)
+    if [ "${#margs[@]}" -gt 0 ]; then
+      targs+=("${margs[@]}")
     else
-      classes=""
-      for f in $(echo "$changed_files" | grep -E "^tests/$m/src/test/kotlin/.*\.kt$"); do
-        # An abstract or sealed declaration has no runnable tests, and Gradle fails the
-        # whole task with "No tests found" on its --tests filter (#342 lane, 2026-09-30:
-        # a lane editing the browser suite's abstract BrowserSuite base). File name =
-        # class name, so the check reads the file itself. The helper's consumers are not
-        # derivable from the diff — the merge gate runs this module whole.
-        if grep -qE "^[[:space:]]*(abstract|sealed) (class|interface) $(basename "$f" .kt)\b" "$ROOT/$f"; then
-          echo "  2b tests/$m: skipping $f — abstract/sealed, no runnable tests"
-          continue
-        fi
-        classes="$classes $(echo "$f" | sed -E "s|^tests/$m/src/test/kotlin/||; s|\.kt$||; s|/|.|g")"
-      done
-      classes="${classes# }"
-      if [ -n "$classes" ]; then
-        targs+=(":tests:$m:test")
-        for c in $classes; do targs+=("--tests" "$c"); done
-        targs+=("-x" ":tests:$m:verifyTestsExecuted")
-        echo "  2b tests/$m: $(echo "$classes" | wc -l | tr -d ' ') changed test class(es)"
-      else
-        echo "  2b tests/$m: touched, but no test class and no build file changed → nothing to run here"
-      fi
+      echo "  2b tests/$m: touched, but no test source changed → nothing to run here"
     fi
   done
   if [ ${#targs[@]} -gt 0 ]; then

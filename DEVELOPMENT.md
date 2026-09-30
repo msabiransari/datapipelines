@@ -748,7 +748,16 @@ off every module's `check`, so the gate's `build` reaches them before any test);
 every module the diff touched — its **unfiltered** `test` (so `verifyTestsExecuted` stays
 meaningful), every other test task it carries (scripting's `breachSuite`, web's `editorJsTest`) and
 its coverage floor (`koverVerify`), each floor printed as a number beside it (2026-09-28's landing
-failed two gates on floors no pregate had run, #297); (3) the
+failed two gates on floors no pregate had run, #297); (2b) for the two `tests/*` modules the
+changed test classes, focused — where the changed file is not itself a runnable test class (an
+abstract base, an interface, an object, a helper), its real runnable consumers run, found through
+intermediate bases; when consumers cannot be established — an orphan helper, a deleted or renamed
+file, a changed test resource or build file — the WHOLE module runs. The selection is never a
+no-op while test sources changed: an earlier version skipped abstract/sealed files, and a lane
+editing the browser suite's shared base passed stage 2b without any browser test executing
+(#342's round review, 2026-09-30). `./scripts/pregate.sh --self-test` drives that selector over
+isolated fixtures and a recording, refusing Gradle stand-in and asserts the real consumer
+selection — run it after changing the selector; (3) the
 cross-cutting guard classes, filtered, with the zero-test guard skipped for those modules — the
 spec-drift tests, the route and read floors, the coverage scans, the page-count and keyword pins,
 the served-manual guards, the config-key drift tests (the list lives in the script; a new guard that
