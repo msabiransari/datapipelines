@@ -98,6 +98,26 @@ internal object SyntheticPlants {
                 "password=***",
             ),
             Plant(
+                "assignment glued camel-case key",
+                "dbPassword=planted-secret-camel next",
+                "dbPassword=*** next",
+            ),
+            Plant(
+                "assignment prefixed and suffixed compound",
+                "db_password_v2=planted-secret-pv rest",
+                "db_password_v2=*** rest",
+            ),
+            Plant(
+                "json hyphenated key",
+                """{"client-secret":"planted-secret-hyphen"}""",
+                """{"client-secret":"***"}""",
+            ),
+            Plant(
+                "json glued camel-case key",
+                """{"dbPassword":"planted-secret-glued"}""",
+                """{"dbPassword":"***"}""",
+            ),
+            Plant(
                 "assignment inside delimiters",
                 "(password=planted-secret-m),next=1",
                 "(password=***),next=1",
@@ -114,6 +134,7 @@ internal object SyntheticPlants {
             ),
             keep("non-matching json keys", """{"passwordless":"keep-4","secrets":"keep-5"}"""),
             keep("non-matching assignment keys", "passwordless=keep-6 pipeline_id=p-2"),
+            keep("non-matching compound and separators", """{"passwordless_x":"keep-7","user-id":"keep-8","node.id":"keep-9"}"""),
         )
 
     private fun keep(

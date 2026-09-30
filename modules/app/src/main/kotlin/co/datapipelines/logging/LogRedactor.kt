@@ -62,18 +62,24 @@ internal object LogRedactor {
     private val sensitiveAlternation: String = SENSITIVE_KEYS.joinToString("|")
 
     /**
-     * One identifier carrying a sensitive key as itself or an underscore compound: optional
-     * `<word>_` prefixes, the key, optional `_<word>` suffixes. Case-insensitive; `passwordless`
-     * and `secrets` do not match (no underscore boundary), `user_password` and `api_key_v2` do.
-     * BOTH text shapes below embed this one string, so the JSON form cannot disagree with the
-     * assignment form about case or compounds (#337-b F1).
+     * A sensitive key with its optional underscore suffix: `password`, `password_hash`,
+     * `api_key_v2`. Case-insensitive; `passwordless` and `secrets` do not match (no underscore
+     * boundary). There is deliberately NO prefix part: the text shapes are searched unanchored, so
+     * `db_password=` and `dbPassword=` are found at the key itself and the prefix is re-emitted
+     * untouched — and a prefix group is what made the delivered pattern throw
+     * `StackOverflowError` on a few-KB `a_a_a_…` token and take quadratic time on a long word
+     * (measured; a group loop recurses per iteration and a prefix is retried from every start).
+     * The suffix is one possessive character run, never a group loop. BOTH text shapes embed this
+     * one string, so the JSON form cannot disagree with the assignment form about case or
+     * compounds (#337-b F1).
      */
     private val identifier: String =
-        "(?i:(?:[A-Za-z0-9]+_)*(?:$sensitiveAlternation)(?:_[A-Za-z0-9]+)*)"
+        "(?i:(?:$sensitiveAlternation)(?:_[A-Za-z0-9_.-]*+)?)"
 
     // Regex escapes for characters a logback %replace option string cannot carry raw: `\x5C` is a
     // backslash (a doubled backslash is an escape in the option tokenizer), `\x27` a single quote,
-    // `\x2C` a comma, `\x2E` a dot, `\x5B`/`\x7B` the opening bracket and brace.
+    // `\x2C` a comma, `\x5B`/`\x7B` the opening bracket and brace. No bounded repetition either:
+    // `{0,64}` carries a comma, which splits the option.
     private const val BACKSLASH = "\\x5C"
 
     /**
@@ -100,13 +106,15 @@ internal object LogRedactor {
 
     /**
      * `"key": "value"` — the JSON form. The key is the same [identifier] (case-insensitive,
-     * compounds) behind any dotted prefix (`"spring.datasource.password"`); the value is a
+     * compounds) behind any prefix of key characters — dotted (`"spring.datasource.password"`),
+     * underscored, hyphenated (`"client-secret"`) or glued (`"dbPassword"`), as the assignment form
+     * already matches glued names; the value is a
      * double-quoted string with escapes honoured, or a bare scalar (number, `true`, `null`) —
      * never an object or array, whose members are matched on their own keys.
      */
     private val jsonPair: Pattern =
         Pattern.compile(
-            "(\"(?:[A-Za-z0-9_-]+\\x2E)*$identifier\"[ \\t]*:[ \\t]*)" +
+            "(\"[A-Za-z0-9_.-]*?$identifier\"[ \\t]*:[ \\t]*)" +
                 "(?:$DOUBLE_QUOTED|[^\\s\"\\x27\\x2C;)\\]}\\x5B\\x7B]+)",
         )
 

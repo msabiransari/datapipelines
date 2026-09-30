@@ -55,12 +55,49 @@ class LogRedactorTest {
     @Test
     fun `scrubbing is linear in the number of open quotes on one line`() {
         // A hostile line of 50,000 `password="` fragments must not backtrack quadratically: each
-        // pair of quotes is one match, so 25,000 masks come out. A generous wall-clock bound keeps
-        // this a smoke test rather than a benchmark.
+        // pair of quotes is one match, so 25,000 masks come out.
         val hostile = "password=\"".repeat(50_000)
-        val started = System.nanoTime()
         LogRedactor.scrubText(hostile) shouldBe "password=***".repeat(25_000)
+    }
+
+    // The delivered pattern threw StackOverflowError on a few-KB a_a_a_ token (one recursion per
+    // group iteration) and ran ~15 s on a 50 KB plain word before an equals sign (a prefix retried
+    // from every start position). Each shape below is a plain string a log message can carry, and
+    // each is its own test so a regression names the shape.
+
+    @Test
+    fun `a long underscore-segmented token neither overflows the stack nor changes`() {
+        val token = "a_".repeat(50_000) + "z=1"
+        assertScrubbed(token, token)
+    }
+
+    @Test
+    fun `a long plain word before an equals sign is scrubbed in linear time`() {
+        val token = "a".repeat(60_000) + "=1"
+        assertScrubbed(token, token)
+    }
+
+    @Test
+    fun `a long quoted body with escapes is one match`() {
+        // Pairs of backslashes keep the closing quote real: the body is 1.2 million characters.
+        assertScrubbed("password=\"" + "ab\\\\".repeat(300_000) + "\"", "password=***")
+    }
+
+    @Test
+    fun `a long compound suffix on a sensitive key is masked without overflowing`() {
+        assertScrubbed("password_" + "a_".repeat(50_000) + "=x", "password_" + "a_".repeat(50_000) + "=***")
+    }
+
+    private fun assertScrubbed(
+        input: String,
+        expected: String,
+    ) {
+        val started = System.nanoTime()
+        val out = LogRedactor.scrubText(input)
         val elapsedMillis = (System.nanoTime() - started) / 1_000_000
-        withClue("took ${elapsedMillis}ms") { (elapsedMillis < 5_000) shouldBe true }
+        withClue("took ${elapsedMillis}ms") {
+            (out == expected) shouldBe true
+            (elapsedMillis < 5_000) shouldBe true
+        }
     }
 }
