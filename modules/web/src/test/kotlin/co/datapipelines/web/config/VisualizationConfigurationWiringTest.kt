@@ -101,6 +101,11 @@ class VisualizationConfigurationWiringTest {
         @Bean
         fun jdbcTemplate(): NamedParameterJdbcTemplate = NamedParameterJdbcTemplate(dataSource())
 
+        /** The runtime's numbers (`DashboardRuntimeConfiguration`'s in the application) — the validator reads two of them. */
+        @Bean
+        fun dashboardRuntimeConfig(): co.datapipelines.visualization.DashboardRuntimeConfig =
+            co.datapipelines.visualization.DashboardRuntimeConfig()
+
         @Bean
         fun templateDryRenderer(): co.datapipelines.pipeline.TemplateDryRenderer = io.mockk.mockk(relaxed = true)
 

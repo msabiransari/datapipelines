@@ -6,7 +6,6 @@ import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.ColumnSchema
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.Dialect
-import co.datapipelines.typesystem.JsonEncoder
 import co.datapipelines.typesystem.TypeMappingWarning
 import com.fasterxml.jackson.core.JacksonException
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -183,38 +182,6 @@ class RedisResultStore(
         }
     }
 
-    /** UTF-8 byte length without allocating a second copy of the string (F4). */
-    private fun utf8Length(value: String): Long {
-        var length = 0L
-        var index = 0
-        while (index < value.length) {
-            val code = value[index].code
-            length +=
-                when {
-                    code < ONE_BYTE_CEILING -> {
-                        1
-                    }
-
-                    code < TWO_BYTE_CEILING -> {
-                        2
-                    }
-
-                    Character.isHighSurrogate(value[index]) && index + 1 < value.length &&
-                        Character.isLowSurrogate(value[index + 1]) -> {
-                        // A surrogate pair is one code point encoded in four bytes.
-                        index++
-                        SURROGATE_PAIR_BYTES
-                    }
-
-                    else -> {
-                        BASIC_PLANE_BYTES
-                    }
-                }
-            index++
-        }
-        return length
-    }
-
     /**
      * Streams [rows] into the rows list, batching pushes and measuring encoded size as it
      * goes. The TTL is applied on the **first** batch as well as at the end, so an execution that
@@ -233,7 +200,7 @@ class RedisResultStore(
         var ttlApplied = false
 
         while (rows.hasNext()) {
-            val encoded = encodeRow(rows.next(), schema.columns)
+            val encoded = ResultBytes.encodeRow(rows.next(), schema.columns)
             // F4: a CHARACTER-length gate before anything is measured in bytes. `toByteArray`
             // allocates a second full copy of the row, so the old order materialised a single
             // oversized LOB twice on the heap purely to discover it was over the cap — which is the
@@ -244,7 +211,7 @@ class RedisResultStore(
                 discard(key)
                 throw tooLarge(bytes + encoded.length)
             }
-            bytes += utf8Length(encoded)
+            bytes += ResultBytes.utf8Length(encoded)
             if (bytes > config.maxSizeBytes) {
                 discard(key)
                 throw tooLarge(bytes)
@@ -285,12 +252,6 @@ class RedisResultStore(
                 yield(columns.mapIndexed { index, column -> ResultRowReader.readValue(resultSet, index + 1, column) })
             }
         }
-
-    /** One row as a JSON array, each value encoded by the type system's egress rules (§3.5). */
-    private fun encodeRow(
-        row: List<Any?>,
-        columns: List<ColumnSchema>,
-    ): String = ExecutorJson.write(row.mapIndexed { index, value -> JsonEncoder.encode(value, columns[index]) })
 
     private fun writeMeta(
         key: String,
@@ -393,11 +354,5 @@ class RedisResultStore(
          * cross exactly one push.
          */
         internal const val PUSH_BATCH_ROWS = 500
-
-        /** UTF-8 code-unit boundaries — the encoding's own definition, not tunable values. */
-        const val ONE_BYTE_CEILING = 0x80
-        const val TWO_BYTE_CEILING = 0x800
-        const val BASIC_PLANE_BYTES = 3
-        const val SURROGATE_PAIR_BYTES = 4
     }
 }

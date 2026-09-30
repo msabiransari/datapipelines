@@ -576,6 +576,23 @@ datapipelines:
     max-bindings-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_BINDINGS_PER_VISUALIZATION:64}
     max-inputs-per-visualization: ${DATAPIPELINES_VISUALIZATION_MAX_INPUTS_PER_VISUALIZATION:8}
     max-columns-per-input: ${DATAPIPELINES_VISUALIZATION_MAX_COLUMNS_PER_INPUT:256}
+  # #10 L2 — the dashboard runtime's admission, byte and deadline numbers (configuration.md §3.34). Appended after
+  # the visualization block, the last child of datapipelines: (the reparenting lesson);
+  # DashboardRuntimeConfigKeysSpecDriftTest pins the neighbours. The admission counters are JVM-LOCAL.
+  dashboards:
+    admission:
+      max-concurrent-refreshes-per-workspace: ${DATAPIPELINES_DASHBOARDS_MAX_CONCURRENT_REFRESHES_PER_WORKSPACE:4}
+      max-executions-per-refresh: ${DATAPIPELINES_DASHBOARDS_MAX_EXECUTIONS_PER_REFRESH:16}
+      max-concurrent-dashboard-executions-per-instance: ${DATAPIPELINES_DASHBOARDS_MAX_CONCURRENT_DASHBOARD_EXECUTIONS_PER_INSTANCE:40}
+      max-wait-seconds: ${DATAPIPELINES_DASHBOARDS_MAX_WAIT_SECONDS:10}
+    results:
+      max-bytes-per-source: ${DATAPIPELINES_DASHBOARDS_MAX_BYTES_PER_SOURCE:4194304}
+      max-bytes-per-refresh: ${DATAPIPELINES_DASHBOARDS_MAX_BYTES_PER_REFRESH:33554432}
+    timeouts:
+      default-refresh-seconds: ${DATAPIPELINES_DASHBOARDS_DEFAULT_REFRESH_SECONDS:600}
+      max-refresh-seconds: ${DATAPIPELINES_DASHBOARDS_MAX_REFRESH_SECONDS:900}
+      parameter-lock-seconds: ${DATAPIPELINES_DASHBOARDS_PARAMETER_LOCK_SECONDS:30}
+      render-seconds: ${DATAPIPELINES_DASHBOARDS_RENDER_SECONDS:20}
 
 # db-scheduler's starter reads its OWN prefix; every value is a datapipelines.scheduler.* key above
 # (configuration.md §3.29 is the one definition — D8), so the library's defaults (10 threads, a

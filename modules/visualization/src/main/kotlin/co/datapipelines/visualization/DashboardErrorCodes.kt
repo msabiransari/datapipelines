@@ -57,6 +57,12 @@ object DashboardErrorCodes {
     /** A visualization input mapped to no source, or a mapping to an input it does not declare. */
     const val INPUT_UNBOUND = "dashboard.validation.input_unbound"
 
+    /**
+     * The dashboard needs more DISTINCT executions than one refresh may run (`max-executions-per-refresh`, spec §18
+     * premise 11): a document valid at save that no refresh could ever be admitted for. `details.invocations` and `max`.
+     */
+    const val TOO_MANY_INVOCATIONS = "dashboard.validation.too_many_invocations"
+
     /** A source's output columns do not satisfy the input's by name and type; `details.column`. */
     const val INPUT_CONTRACT_MISMATCH = "dashboard.validation.input_contract_mismatch"
 

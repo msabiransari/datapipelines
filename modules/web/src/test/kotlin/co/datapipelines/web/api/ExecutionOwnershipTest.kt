@@ -94,6 +94,31 @@ class ExecutionOwnershipTest {
         keysRun.visibleTo(session(WorkspaceRole.WORKSPACE_ADMIN)) shouldBe true
     }
 
+    /**
+     * #10 L2 (D50): a dashboard refresh runs its sources AS the viewer, so the run is the viewer's own — visible to
+     * them and to an admin exactly like any run — but it is cancelled only through the refresh's abort. The
+     * executions route refuses it for everyone, the super admin included; falsified by dropping the trigger arm
+     * from `cancellableBy` (the owner's cancel then reads true).
+     */
+    @Test
+    fun `a dashboard-triggered run is visible like any run but cancellable by no one on the executions route`() {
+        val dashboardRun = run(executedBy = me).copy(triggeredVia = ExecutionTrigger.DASHBOARD)
+        WorkspaceRole.entries.forEach { role ->
+            val principal = session(role)
+            withClue(role.wire) {
+                dashboardRun.visibleTo(principal) shouldBe true
+                dashboardRun.cancellableBy(principal) shouldBe false
+            }
+        }
+        val superAdmin =
+            session(WorkspaceRole.VIEWER).copy(
+                superAdmin = true,
+                workspace = WorkspaceContext.superAdminOver(workspaceId, "acme", explicitRole = null),
+            )
+        dashboardRun.cancellableBy(superAdmin) shouldBe false
+        run(executedBy = me).cancellableBy(session(WorkspaceRole.VIEWER)) shouldBe true
+    }
+
     private fun session(role: WorkspaceRole) =
         AuthenticatedPrincipal(
             userId = me,

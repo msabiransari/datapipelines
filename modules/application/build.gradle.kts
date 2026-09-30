@@ -29,6 +29,10 @@ dependencies {
     // `visualization` interface over the read-only rule this module owns — the edge the root map allowed ahead.
     implementation(project(":modules:visualization"))
 
+    // #10 L2: RefreshEngine — the dashboard refresh's fan-out, deadlines and non-cancellable end are coroutines
+    // (the executor's `execute` is `suspend`). The catalog's existing version, already locked and verified for `dag`.
+    implementation(libs.kotlinx.coroutines.core)
+
     // ExecutionLauncher binds parameters and reserves idempotency keys before the surface
     // starts anything; the reservation store and ExecuteRequest are dag types, the principal
     // is an auth type, and the parameter values are Jackson trees.
@@ -55,6 +59,7 @@ dependencies {
     // mockk mocks final classes, which is what lets those units be tested here rather than only
     // through the web module's integration suite (where this module earns no coverage).
     testImplementation(libs.mockk)
+    testImplementation(libs.kotlinx.coroutines.test)
 
     // 083 §D — the three JDBC classes here (PublishedEndpointRepository,
     // EndpointKeyBindingRepository, EndpointServeAudit) were covered only by the WEB module's

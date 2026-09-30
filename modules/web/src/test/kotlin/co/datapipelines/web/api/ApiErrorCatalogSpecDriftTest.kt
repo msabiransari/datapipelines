@@ -302,8 +302,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 371 → 372 with #320: `parameter.in_use` (§13.20, 409 — the consumer binding the parameter record reserved),
          * landed in the SAME commit as `ParameterErrorCodes.IN_USE`, its `PipelineErrorCodes.Parameters` mirror and its
          * explicit catalog row (it shares no family prefix with the `parameter.version.` 409s).
+         *
+         * 372 → 373 at the L2 merge (#10): `dashboard.validation.too_many_invocations` (§13.23, 400 — a dashboard whose
+         * distinct source invocations exceed `max-executions-per-refresh`). L2 and #320 had each moved 371 → 372 on their
+         * own bases, so the identical edits merged silently; the merged document parses to 373.
          */
-        const val SECTION_13_ROW_COUNT = 372
+        const val SECTION_13_ROW_COUNT = 373
 
         /**
          * §12's distinct validation codes.

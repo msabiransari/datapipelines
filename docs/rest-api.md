@@ -1,6 +1,6 @@
 # REST API + SSE Specification
 
-**Status:** v2.58 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
+**Status:** v2.59 (frozen contract — additive-only changes after this point; see the 2026-09-20, 2026-09-24 and 2026-09-26 (v2.36, v2.37) rows for the deliberate breaks)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [Auth spec](auth.md)
 **Last updated:** 2026-09-29
@@ -1525,7 +1525,7 @@ result is unexpired):
 | `correlation_id` | uuid \| null | The caller-supplied correlation id |
 | `executed_by` | uuid | The user the run belongs to (D11, 177): the session's user, or a key's OWNER. Was `triggered_by` until 2026-09-20 — renamed, not re-derived; every row kept its actor |
 | `executed_by_key_kind` | string \| null | Which KIND of credential started it when a key did — `user` \| `endpoint` \| `server` ([enums §18A](enums.md#18a-executedbykeykind--which-kind-of-credential-started-an-execution)); `null` for a signed-in session. An `endpoint` run is nobody's OWN: it lists for workspace admins only, and for the endpoint key itself (§19) |
-| `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` \| `ENDPOINT` \| `SCHEDULE` (#9 — a schedule fired it; `executed_by` is then the system identity, [Auth §4.5](auth.md#45-the-system-service-account-r7)) |
+| `triggered_via` | string | `UI` \| `REST` \| `MCP` \| `PIPELINE` \| `ENDPOINT` \| `SCHEDULE` (#9 — a schedule fired it; `executed_by` is then the system identity, [Auth §4.5](auth.md#45-the-system-service-account-r7)) \| `DASHBOARD` (#10 — a dashboard refresh started it; `executed_by` is the refreshing person, [Dashboards §5](dashboards.md#5-the-runtime); it writes no stored result and is cancelled only through its refresh's abort) |
 | `result_row_count` | int \| null | Rows in the caller result; null for a zero-caller pipeline and for a `direct`-delivered child |
 | `result_size_bytes` | int \| null | Size of the materialized caller result |
 | `parent_execution_id` | uuid \| null | The execution whose PIPELINE node spawned this one; null for a root ([§10.2](#102-get-execution-metadata)) |
@@ -1564,7 +1564,7 @@ Returns the execution record (without rows — use §7 for result data):
     "result_size_bytes": 48213,
     "executed_by": "user-uuid",           // D11: the run's user — the session's, or the key's OWNER
     "executed_by_key_kind": null,         // "user" | "endpoint" | "server" when a key started it; null for a session
-    "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE" | "ENDPOINT" | "SCHEDULE",
+    "triggered_via": "UI" | "REST" | "MCP" | "PIPELINE" | "ENDPOINT" | "SCHEDULE" | "DASHBOARD",
 
     "parent_execution_id": "exec-uuid",   // the execution whose PIPELINE node spawned this one; null for a root
     "parent_node_id": "run_leaf",         // that node's id; null for a root
@@ -2531,7 +2531,7 @@ The seven lifecycle permissions govern the same thirteen routes as §22.2 under 
 | `POST /api/v1/dashboards/{id}/release?release_pinned_visualizations=` | `dashboard.release` | Release the draft at `If-Match` ([Dashboards §3.2](dashboards.md#32-releasing-a-dashboard)): the rules re-run against the dependencies as they are NOW; the pinned set release RELEASED; every pinned visualization RELEASED — or, under `release_pinned_visualizations=true`, released through ITS OWN release (its gate, and its template drafts NOT consented by this flag — they need that visualization's own `release_pinned_templates`); every source release RELEASED and read-only. Otherwise `409 dashboard.release.dependency_not_released` naming every dependency. One transaction; the answer names `visualizations_released`. Until L4 a DRAFT visualization cannot be released, so the consented cascade answers the visualization's `409 visualization.release.tests_missing`. |
 | `POST /api/v1/dashboards/{id}/validate` | `dashboard.update` | Validate the WORKING version against the dependencies' CURRENT state — the §3.2 rules, no write (the agent's loop before a human releases). The verdict is the answer: `200` with `id`, `name`, `version`, `status`, `body_hash`, `valid` and `failures` (each `{code, path, message, details}` — the 400's failure shape, exhaustive). An AUTHOR verb — the implementation spec's §6.2 names `dashboard.read`; the owner ruled it `dashboard.update` (2026-09-29) because the validator reads the pinned pipelines', set's and visualizations' statuses unlensed, so a viewer and a promoter are refused `403 auth.role_required` before the handler. No body. |
 
-A source whose pinned release does not DECLARE its caller columns — a SQL caller node; only a transform caller node's contract names them — is not judged against its visualization's input contract at save (`input_contract_mismatch` needs declared columns); the runtime judges the real columns ([Dashboards §2.2](dashboards.md#22-dashboard)). The runtime, refresh and key-binding routes (L2, L5) and export/import (L1c) are not routes yet.
+A source whose pinned release does not DECLARE its caller columns — a SQL caller node; only a transform caller node's contract names them — is not judged against its visualization's input contract at save (`input_contract_mismatch` needs declared columns); the runtime judges the real columns ([Dashboards §2.2](dashboards.md#22-dashboard)). The runtime, refresh and key-binding routes (L5) and export/import (L1c) are not routes yet; the runtime and refresh routes are §23.3.
 
 | Error | HTTP | When |
 |---|---|---|
@@ -2542,8 +2542,50 @@ A source whose pinned release does not DECLARE its caller columns — a SQL call
 | `dashboard.version.not_draft` / `.not_released` / `.not_discarded` / `.last_release` / `.not_eligible` | 409 | The lifecycle precondition of the verb |
 | `dashboard.release.dependency_not_released` | 409 | A pinned visualization, set or source not RELEASED (and not cascaded) — `details` names each |
 
+### 23.3 The runtime and the refresh routes
+
+Six routes under `/api/v1/dashboards/{id}`, all `dashboard.execute` ([Auth §7.6](auth.md#76-operation-matrix--the-permission-catalog-authoritative);
+the promoter reads through the lens of §23.1 — a dashboard it hides is `404 dashboard.not_found`). The semantics are
+[Dashboards §5](dashboards.md#5-the-runtime); this section is the wire. Only signed-in sessions reach them until the `dashboard`
+key kind (L5); no MCP tool executes a dashboard. A request body is read whole before anything is looked up: not JSON, or a
+field missing / of the wrong type, is `400 dashboard.validation.body_invalid` with `details.path` and `details.reason`
+(`missing`, `wrong_type`, `malformed`, `too_large`, `unknown_value`, `unexpected`, `reused`) — never the value.
+
+| Route | Request | Answer |
+|---|---|---|
+| `GET /{id}/runtime/config` | — | `200` `{configuration_id, dashboard: {id, name, version, status}, layout, parameter_set, visualizations: [{name, artifact: {id, name, version}, renderer: {kind, version}, config, bindings, presentation, timeout_seconds}], groups, actions, action_controls, parameter_scopes, parameter_state, timeouts: {refresh_seconds, parameter_lock_seconds, render_seconds}, budgets: {max_bytes_per_source, max_bytes_per_refresh}}` |
+| `POST /{id}/runtime/parameters` | `{configuration_id, instance_id, selections, intent}` (`intent`: `bootstrap` \| `parent_change` \| `retry`) | `200` the parameter engine's evaluate response ([§21.3](#213-evaluate)) plus `overrides_applied`, `parents`, `parameter_revision` |
+| `POST /{id}/runtime/visualizations` | `{configuration_id, instance_id, refresh_id, parameter_revision, selections, scope, targets}` — `refresh_id` a fresh v4 UUID the client mints; `scope` `all` \| `targets`; `selections` at most 64 KiB | `200` `text/event-stream` (below) |
+| `POST /{id}/runtime/refreshes/{refresh_id}/abort` | `{instance_id}` | `202` `{refresh_id, status: "abort_requested"}` — no wait |
+| `GET /{id}/refreshes?offset=&limit=` | — | `200` a page of the caller's refreshes, newest first (every refresh with `execution.read_all`) |
+| `GET /{id}/refreshes/{refresh_id}` | — | `200` `{refresh_id, dashboard_id, dashboard_version, instance_id, scope, targets, parameter_revision, selections, status, started_at, finished_at, summary, executions?}` — `executions` (`[{source, execution_id, shared}]`) only for a caller holding `execution.read` |
+
+**The stream.** The execution stream's framing (§6): `event:` name, `id:` monotonic per refresh from 1, `data:` JSON, and a
+`: heartbeat` comment while quiet; a client that stays away past the disconnect grace (§6.8) aborts its refresh. Events, in the
+order they can occur: `refresh_started` `{refresh_id, targets, sources: [{name, shared}], deadline_at}`; per source
+`source_started` `{refresh_id, source, execution_id}` (the source is already linked to the refresh), `source_completed`
+`{…, rows, bytes}` or `source_failed` `{…, execution_id?, error: {code, message}}`; per target `visualization_status`
+`{refresh_id, name, type, state, stage?, reason?}` (`state`: `in-progress`, `error`, `abort`, `no-data`; `stage`: `source`,
+`transform`, `budget`, `timeout`, `abort`) and `visualization_data` `{refresh_id, name, type, bindings: {path: [values]}, rows, bytes}`;
+and `refresh_completed` `{refresh_id, status, targets: {name: {outcome, stage?, reason?}}}` — always last (`status`: `COMPLETED`,
+`PARTIAL`, `FAILED`, `ABORTED`, `TIMED_OUT`). A `source_failed` names a code and never a driver or datasource message. A
+dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` on it is `404 execution.not_found`, and
+`DELETE /api/v1/executions/{id}` on it is `404` for everyone — it is cancelled only through its refresh's abort.
+
+| Error | HTTP | When |
+|---|---|---|
+| `dashboard.validation.body_invalid` | 400 | The request body is unreadable or a field is missing, mistyped or a reused `refresh_id`; the selections are invalid (`details.reason: selections_invalid`, `details.parameters`) |
+| `dashboard.validation.empty_targets` / `.target_not_visualization` | 400 | `scope: targets` naming nothing, or a name that is no visualization occurrence |
+| `dashboard.runtime.configuration_stale` | 409 | `configuration_id` is not the current one (`details.configuration_id`); the client reloads |
+| `dashboard.runtime.dependency_missing` | 409 | A pinned visualization, set or source no longer holds — gone, not released, or no longer read-only (`details.dependency`, `.name`, `.reason`) |
+| `dashboard.refresh.saturated` | 429 | No room for the refresh within `max-wait-seconds`; carries `Retry-After`; **no row is written** |
+| `dashboard.refresh.result_too_large` | — | Inside the stream only: `source_failed` / a target's `reason` at stage `budget` |
+| `dashboard.refresh.not_found` | 404 | No such refresh for the caller on this dashboard, or it already finished (abort) |
+| `rate_limit.exceeded` | 429 | The per-user concurrent-stream cap (§12.1) — execution and refresh streams count together |
+
 ## Appendix A: Change Log
 
+| 2026-09-29 | v2.59 | L2 (#10) the dashboard runtime — renumbered at merge after 320's v2.57 and 264's v2.58 | Additive. **New §23.3** — the six runtime and refresh routes (`GET /runtime/config`, `POST /runtime/parameters`, `POST /runtime/visualizations` — the SSE stream, `POST /runtime/refreshes/{refresh_id}/abort`, `GET /refreshes`, `GET /refreshes/{refresh_id}`), all `dashboard.execute`, with the stream's events, the request-body reasons and the runtime's errors (`dashboard.runtime.configuration_stale` / `.dependency_missing`, `dashboard.refresh.saturated` with `Retry-After` and no row, `.not_found`). **§10 / §11's `triggered_via`** gains `DASHBOARD`: the execution's `executed_by` is the refreshing person, it writes no stored result (its `/result` is 404) and only its refresh's abort cancels it (`DELETE /executions/{id}` is 404 for it). |
 | 2026-09-29 | v2.58 | 264 (#264, #265) parameter values at every entry — renumbered at merge after 320's v2.57 | **Deliberate tightening at save, release and import (v2.36–v2.37's promise completed): a `PIPELINE` node's parameter literals are now judged by the child parameter's WHOLE declaration**, not its type alone — a literal that coerces but breaks the child's `constraints` bound, length or pattern, or its declared precision/scale, is refused at save (and at release and import, which run the same rules) with the new `400 pipeline.validation.pipeline_parameter_invalid` (`details.reason` names the rule; pipeline-contract §12.9). Until now such a body saved and the value failed only when the composition ran (`child_execution_failed`). **A same-type `${ref}` into a child parameter is accepted only when the parent parameter's descriptor widens losslessly into the child's** (parameter-engine record §6.4): a `DECIMAL(12,4)` parent feeding a `DECIMAL(12,2)` child is now `pipeline_parameter_invalid` with `reason: narrowing` — it used to save and fail at run whenever the parent value had more than two places. **Existing bodies: a stored parent that saves cleanly today may refuse its next save** (never a run of an already-stored version); the shipped demo set and every documented example were replayed — 12 bodies, 3 composition mappings, 0 refused (the lane's replay guard pins the corpus). Calculator `context_key` targets and org/platform tiers carry no descriptor and stay type-only. **`sql_probe` parameters are judged by the shared strict coercion (#265)** — v2.36's no-trim rule reaches the probe, which still trimmed: `" 12 "` for an `INTEGER` and `"TRUE"` for a `BOOLEAN` are now `-32602` argument faults naming the parameter, never the value; the BIG-number digit cap (#278) applies to the probe's values before any parse. |
 | 2026-09-30 | v2.57 | 320 (#320) dependency guards | **§5.6:** the pipeline entity purge's response gains `kept_draft_templates` — the draft-only templates the exclusive offer skipped because a parameter set or a visualization also pins them. **§8.10:** the template draft purge is refused `409 template.in_use` while a pipeline, set or visualization pins the draft (it ran no pin check before). **§21.2:** the parameter-set purge and discard routes refuse the new `409 parameter.in_use` while a dashboard pins the set. |
 | 2026-09-29 | v2.56 | 321 (#323) the parameter-set routes read their body the #291 way — renumbered at merge: L1b took v2.55 | **§4.2 and §21.4's error table:** a parameter-set request body that cannot be read — not JSON, or nested past §13.21's depth of 100 — is `400 parameter.validation.body_invalid` with `details.reason: malformed_json` on create, update, evaluate and import (the four routes that parse their own text, now through the request mapper) and on the switch (bound by the message converter; the malformed-body handler had no row for the family and answered the pipeline family's `schema_version_unsupported`). The four text routes answered the `500` backstop before (reproduced on the wire: `{` as the body). Well-formed bodies are unchanged; no route, permission or §13 code added. |

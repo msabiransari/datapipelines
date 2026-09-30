@@ -3,6 +3,7 @@ package co.datapipelines.mcp
 import co.datapipelines.executor.ExecutionRecord
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutionStatus
+import co.datapipelines.executor.ExecutionTrigger
 import co.datapipelines.executor.ExecutorJson
 import co.datapipelines.executor.ResultConfig
 import co.datapipelines.executor.ResultPage
@@ -154,7 +155,10 @@ class ExecutionsGetResultTool(
         ctx: McpToolContext,
     ): ExecutionRecord {
         val record =
-            executions.findById(ctx.principal.requireWorkspace().id, executionId)?.takeIf { it.visibleTo(ctx, readRow) }
+            executions
+                .findById(ctx.principal.requireWorkspace().id, executionId)
+                // #10 L2: a DASHBOARD run stores no result — not-found, not an empty page that reads as zero rows.
+                ?.takeIf { it.visibleTo(ctx, readRow) && it.triggeredVia != ExecutionTrigger.DASHBOARD }
                 ?: throw McpNotFound.execution(executionId)
         notReadable(record)?.let { throw it }
         return record

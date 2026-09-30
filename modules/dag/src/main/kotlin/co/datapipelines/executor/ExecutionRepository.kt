@@ -31,6 +31,14 @@ enum class ExecutionTrigger {
      * role reaches `execution.read` (R3) — [ExecutionRepository.findByUser]'s scheduled arm.
      */
     SCHEDULE,
+
+    /**
+     * A dashboard refresh started a source (#10 L2, dashboards spec §9 step 4). Delegated execution (D50): `executed_by`
+     * is the refreshing principal and the run happens WITHOUT consulting that principal's `pipeline.execute` —
+     * `dashboard.execute` is the one authorization event. The run has a `directSink` collector, so it writes NO stored
+     * result; it is linked to its refresh by `dashboard_refresh_executions` and cancelled only through the refresh's abort.
+     */
+    DASHBOARD,
 }
 
 /**

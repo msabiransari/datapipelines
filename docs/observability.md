@@ -1,6 +1,6 @@
 # Observability Specification
 
-**Status:** v1.25 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.26 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
 **Last updated:** 2026-09-29
@@ -225,6 +225,27 @@ The executor's two scheduled jobs on the `dp-scheduled` thread (§3.4H) — the 
 | WARN | `execution.sweep_failed` | The stale sweep's UPDATE threw; the tick is skipped and the next one retries | `cutoff`, `heartbeat_cutoff`, `error`, `sql_state` |
 | WARN | `execution.event_retention_failed` | The retention tick's DELETE threw; the next tick retries | `cutoff`, `error`, `sql_state` |
 
+#### 3.4J The dashboard refresh events (#10 L2)
+
+The dashboard runtime ([Dashboards §5](dashboards.md#5-the-runtime)) logs at these points. Every failure line names its cause by class (`error=`) and, for a store, by SQLState — never by message: an exception's text can carry a row, a selection or a driver's echo of a refused statement (the 321 rule, §3.4G). NO line carries a selection, a row, a binding value or an execution's message.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| INFO | `dashboard.refresh_finished` | A refresh ended (any status) | `refresh_id`, `status`, `targets` |
+| ERROR | `dashboard.refresh_work_failed` | The refresh's work threw unexpectedly; the row is still closed `FAILED` | `refresh_id`, `error` |
+| ERROR | `dashboard.refresh_end_failed` | A terminal step (`finish` — the row write — or `audit`) threw; the remaining steps and the last frame still ran | `refresh_id`, `step`, `error` |
+| ERROR | `dashboard.refresh_link_failed` | The `dashboard_refresh_executions` link could not be written for a started source; the execution carries on unlinked | `refresh_id`, `error` |
+| WARN | `dashboard.source_not_started` | A source's RUNNING row could not be written (fail-closed): the source did not run | `refresh_id`, `source`, `error` |
+| INFO | `dashboard.refresh_stream_cut` | A stream was cut because its subscriber's standing no longer holds (P4); the refresh keeps running | `refresh_id`, `verdict` |
+| INFO | `dashboard.refresh_client_gone` | A stream's client vanished before `refresh_completed`; the disconnect grace begins | `refresh_id`, `grace_seconds` |
+| INFO | `dashboard.refresh_grace_elapsed` | The grace elapsed: the refresh is aborted | `refresh_id`, `action=abort` |
+| WARN | `dashboard.refresh_abort_cancel_failed` | The abort route could not cancel one of the refresh's executions through the executor | `refresh_id`, `error` |
+| WARN | `dashboard.refresh_abort_flag_unreadable` / `dashboard.refresh_abort_flag_not_cleared` | Redis could not be read / cleared for the refresh-level abort flag (`dp:refresh-abort:{refresh_id}`); an unreadable flag reads as "not requested" and the next poll retries | `refresh_id`, `error` |
+| WARN | `dashboard.refresh_swept` | The stale sweep closed a `RUNNING` refresh past its deadline as `TIMED_OUT` (metadata-db §8.4) | `refresh_id` |
+| WARN | `dashboard.refresh_sweep_failed` | The sweep's UPDATE threw; the next tick retries | `error`, `sql_state` |
+| INFO | `dashboard.refreshes_purged` | The retention step deleted finished refreshes (nothing is logged for an empty tick) | `count`, `retention_days` |
+| WARN | `dashboard.refresh_retention_failed` | The retention DELETE threw; the next tick retries | `error`, `sql_state` |
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -262,6 +283,11 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.templates.cache.hits` | counter | (none) | Template cache hits |
 | `datapipelines.templates.cache.misses` | counter | (none) | Template cache misses |
 | `http.server.requests` | timer | `method`, `uri`, `status`, `outcome` | HTTP request duration. **Spring Boot's own metric — unprefixed.** `uri` is the templated path (`/api/v1/executions/{id}`), never the expanded one. |
+| `datapipelines.dashboard.refreshes` | counter | `status` (`COMPLETED`/`PARTIAL`/`FAILED`/`ABORTED`/`TIMED_OUT`) | (#10 L2) Dashboard refreshes by terminal status, counted when the refresh ends ([Dashboards §5](dashboards.md#5-the-runtime)). A refresh refused at admission is not one — see `…refresh.refused` |
+| `datapipelines.dashboard.refresh.duration` | timer | `status` | A refresh's wall-clock time from admission to its terminal row |
+| `datapipelines.dashboard.refresh.refused` | counter | `reason` (`saturated`/`stream_limit`) | Refreshes refused before they started: `saturated` is the `429 dashboard.refresh.saturated` (no row written), `stream_limit` the per-user stream cap |
+| `datapipelines.dashboard.refreshes.active` | gauge | (none) | Refreshes admitted and not yet ended on THIS instance (the admission counters are JVM-local, [Configuration §3.34](configuration.md)) |
+| `datapipelines.dashboard.executions.reserved` | gauge | (none) | Dashboard executions reserved by those refreshes, against `max-concurrent-dashboard-executions-per-instance` |
 | `datapipelines.mcp.tool.calls` | counter | `tool_name`, `status` | MCP tool invocations |
 | `datapipelines.promotion.lens.inventory` | counter | `outcome` (`hit`/`miss`/`unreachable`) | The promoter lens's inventory reads (178, §3.4D): `hit` served from the per-workspace cache window, `miss` probed the target and got an inventory, `unreachable` probed and failed (the failure is then cached for the window, so `unreachable` counts windows, not reads). A steady `unreachable` rate with no `miss` is a dead target; `hit`/`miss` ≫ 1 is the cache doing its job |
 | `datapipelines.auth.login.attempts` | counter | `outcome` (`success`/`domain_not_allowed`/`user_inactive`/`oidc_error`) | Login attempts. Outcomes mirror the audit events in [Auth §10.1](auth.md#101-events). There is **no** lockout outcome: authentication is OIDC-only, the product stores no local passwords, and no lockout mechanism exists to count. |
@@ -506,6 +532,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.26 | L2 (#10) the dashboard runtime | New **§3.4J** — the refresh events (`dashboard.refresh_finished`, the failure lines by class and SQLState only, the stream cut / grace lines, the sweep and retention lines) — and five **§4.1 rows**: `datapipelines.dashboard.refreshes` (by terminal status), `…refresh.duration`, `…refresh.refused` (`saturated` / `stream_limit`), and the two gauges `…refreshes.active` and `…executions.reserved`. |
 | 2026-09-29 | v1.25 | 321 (#321) the scheduled jobs' failure lines — renumbered at merge: 306/316 and their reviews took v1.21–v1.24 | §3.4's `dag` row states the rule for the crash sweep's and the event retention's failure lines: a failed tick logs `error=<class> sql_state=<state>` where it logged the store's message (`FailureShape`, the §3.4G rule; `dag` gains the `persistence` edge for it, module-structure §4.2). The event names are not cited here: on this base the docs audit reads `execution.*` as a permission family (#307), and the events' own table arrives with the 316 merge (§3.4I). §7's retention paragraph said `audit.retention_failed … message=…`; the line has logged `error=`/`sql_state=` since #310 — corrected. |
 | 2026-09-29 | v1.24 | the 316 merge's review (#316) | New **§3.4I**: `execution.events_purged` catalogued — §3.4H cited it and the docs audit's citation check (#307, on main since 4b91c387; not on the lane's base) refused the uncatalogued name; #321 adds the two failure rows. |
 | 2026-09-29 | v1.23 | 316 (#316) the scheduled jobs' own thread — renumbered at merge: 306 took v1.21 and its pass v1.22 | New **§3.4H**: every `@Scheduled` job runs on `dp-scheduled`, the jobs' own scheduler, so their lines (named there) carry that `thread` — until #316 they carried `dp-sse-log`, the SSE log streamer's; two shutdown lines, `shutdown.scheduled_jobs_stopped` (INFO, after both drains) and `shutdown.scheduled_jobs_incomplete` (WARN, a tick outlived the shutdown wait). |

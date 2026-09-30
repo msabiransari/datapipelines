@@ -1,6 +1,6 @@
 # MCP Server Specification
 
-**Status:** v1.65 (frozen contract — additive-only changes after this point)
+**Status:** v1.66 (frozen contract — additive-only changes after this point)
 **Owner:** datapipelines.co core
 **Depends on:** [Type System spec](type-system.md), [Pipeline Contract spec](pipeline-contract.md), [REST API spec](rest-api.md), [Auth spec](auth.md), [Templates spec](templates.md)
 **Last updated:** 2026-09-29
@@ -2170,7 +2170,7 @@ Browse ONE level of the dashboard tree, the `visualizations_list` shape. A promo
 
 #### 6.2.56 `dashboards_get`
 
-Read one dashboard by id: the WORKING version's full document and lifecycle state, plus `dependencies` — each pinned visualization occurrence's version status and each source pipeline release's status and `read_only` verdict as they are NOW, each read through the caller's lens (a hidden or absent pin answers `status: null` alike; one read per pin, bounded by the reader's 50 visualizations) — and `last_refresh`, which is the dashboard runtime's and answers `null` until it ships.
+Read one dashboard by id: the WORKING version's full document and lifecycle state, plus `dependencies` — each pinned visualization occurrence's version status and each source pipeline release's status and `read_only` verdict as they are NOW, each read through the caller's lens (a hidden or absent pin answers `status: null` alike; one read per pin, bounded by the reader's 50 visualizations) — and `last_refresh`, the CALLER's own latest refresh of the dashboard (#10 L2) — `{refresh_id, dashboard_version, status, started_at, finished_at}` — or `null` when they have none. It names nobody else's refresh, whatever their role, and carries no selection; an MCP key acts as its OWN identity (keys v2 A13) and a refresh belongs to a person's session until the `dashboard` key kind (L5), so through a key it is `null` today; no tool refreshes a dashboard (the runtime is a person's surface until the `dashboard` key kind, L5).
 
 ```json
 {
@@ -2192,7 +2192,7 @@ Read one dashboard by id: the WORKING version's full document and lifecycle stat
 }
 ```
 
-**Permission:** `dashboard.read`. **Returns:** `{id, name, display_name, description, version, status, body_hash, current_version, draft?, document, dependencies: {visualizations: [{occurrence, name, version, status}], pipelines: [{source, name, version, status, read_only}]}, last_refresh: null}`. **Errors:** `dashboard.not_found`.
+**Permission:** `dashboard.read`. **Returns:** `{id, name, display_name, description, version, status, body_hash, current_version, draft?, document, dependencies: {visualizations: [{occurrence, name, version, status}], pipelines: [{source, name, version, status, read_only}]}, last_refresh: {refresh_id, dashboard_version, status, started_at, finished_at} | null}`. **Errors:** `dashboard.not_found`.
 
 #### 6.2.57 `dashboards_create`
 
@@ -2976,6 +2976,7 @@ the audit green over the exported set.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.66 | L2 (#10) the dashboard runtime — renumbered at merge after 320's v1.64 and 264's v1.65 | §6.2.56 `dashboards_get`: `last_refresh` is live — the CALLER's own latest refresh of the dashboard, `{refresh_id, dashboard_version, status, started_at, finished_at}`, or `null` when they have none (it was always `null` until the runtime shipped). Read through `DashboardRefreshHistory`, which asks by the caller's user id and no other: nobody else's refresh appears, whatever their role, and no selection is returned. No tool refreshes a dashboard — `dashboard.execute` has no MCP placement until the `dashboard` key kind (L5). The served manual's dashboards page gains one sentence. |
 | 2026-09-29 | v1.65 | 265 (#265) the probe's parameters judged by the shared coercion — renumbered at merge after 320's v1.64 | **§6.2.34 `sql_probe`: the `parameters` values are judged by the shared strict coercion** (typesystem's `ParameterCoercion` through `ParameterLift`) instead of the datasources-local copy that still trimmed — the tool's `parameters` description states the forms exactly: plain decimal text for the BIG numerics, exact ISO temporals (TIMESTAMP with an explicit offset or `Z`), padded standard base64, nothing trimmed, booleans exactly `true`/`false`, the 1024-digit cap before any parse. A padded or truthy-looking value that bound before is now a `-32602` argument fault naming the parameter, never the value. No tool, argument, count or permission changed ([Datasources §7D](datasources.md#7d-the-sql-probe)). |
 | 2026-09-30 | v1.64 | 320 (#320) dependency guards | §6.2.21 `templates_used_by` gains `visualization_references` (a visualization's `transform.template` pin, working-version scan, under the visualization lens); §6.2.32 `templates_purge_draft`'s guard gains its third arm — a visualization version that pins ANY version of the draft refuses it (`template.in_use`, `details.referencing_visualizations`, the echo narrowed by the caller's view with `pins_hidden`, the #300 shape). No tool added, no permission added. |
 | 2026-09-29 | v1.63 | L1b (#10) the visualization and dashboard tools | **§6.1: 48 → 59 tools — five `visualizations_*` and six `dashboards_*`** (the implementation spec §7; addressed by id per P24; no tool releases or executes anything): `visualizations_list`/`get` and `dashboards_list`/`get` (reads, the promoter lens — dashboards whose every source pipeline the pipeline lens admits, and the visualizations they pin; `used_by` on the visualization rows; `dashboards_get` carries each pin's lensed status and `last_refresh: null` until the runtime ships), `_create`/`_update` (writes through the same strict reader, bounds and save-time validation REST uses; the 094 new-root confirmation), `_purge_draft` (versioning §5.4, hash-guarded; a pinned visualization draft refused `visualization.version.pinned`), and `dashboards_validate` — the §3.2 rules against current state, no write, on `dashboard.update` (owner ruling 2026-09-29; the spec said `dashboard.read` — the validator reads pin statuses unlensed, O5). New §6.2.50–6.2.60; §5.1's static count 48 → 59. The manual gains the `dashboards` area (`skill/dashboards.md`, the `visualizations`/`dashboards` prefixes mapped; `dashboards` leaves the reserved prefixes). `visualizations_test_start` / `_submit` land with the test sessions (L4). |

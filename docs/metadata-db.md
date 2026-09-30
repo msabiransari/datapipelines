@@ -1,6 +1,6 @@
 # Metadata Database Schema Specification
 
-**Status:** v1.34 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
+**Status:** v1.35 (frozen — Flyway V1 migration source of truth; **sole DDL authority**, D4)
 **Owner:** datapipelines.co core
 **Depends on:** all specs (this is the physical schema for every logical model)
 **Last updated:** 2026-09-29
@@ -302,7 +302,7 @@ CREATE TABLE pipeline_executions (
     parameters_json     JSONB       NOT NULL DEFAULT '{}', -- the FULLY RESOLVED Context (see below)
     executed_by         UUID        NOT NULL REFERENCES users(id), -- the run's user: the session's, or who the key ACTS AS — the member for an MCP key, the key's own identity for an endpoint/server key since V34 (was triggered_by; renamed by V30, D11)
     executed_by_key_kind TEXT,                       -- 'user' | 'endpoint' | 'server' when a key started it; NULL = a signed-in session (V30)
-    triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP' | 'PIPELINE' | 'ENDPOINT' | 'SCHEDULE'
+    triggered_via       TEXT        NOT NULL,        -- 'UI' | 'REST' | 'MCP' | 'PIPELINE' | 'ENDPOINT' | 'SCHEDULE' | 'DASHBOARD'
     correlation_id      UUID,
     started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at        TIMESTAMPTZ,
@@ -317,7 +317,7 @@ CREATE TABLE pipeline_executions (
     root_execution_id   UUID        NOT NULL,        -- top ancestor; equals execution_id for roots — backfilled = own id (V3)
     heartbeat_at        TIMESTAMPTZ,                 -- the owning instance's liveness stamp while RUNNING; NULL on a pre-V21 row (V21, §8.3)
     CONSTRAINT chk_status CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED', 'ABORTED')),
-    CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE', 'ENDPOINT', 'SCHEDULE')),  -- 'PIPELINE' added by V3, 'ENDPOINT' by V11, 'SCHEDULE' by V38
+    CONSTRAINT chk_triggered_via CHECK (triggered_via IN ('UI', 'REST', 'MCP', 'PIPELINE', 'ENDPOINT', 'SCHEDULE', 'DASHBOARD')),  -- 'PIPELINE' added by V3, 'ENDPOINT' by V11, 'SCHEDULE' by V38, 'DASHBOARD' by V43
     CONSTRAINT chk_executions_executed_by_key_kind CHECK (executed_by_key_kind IS NULL OR executed_by_key_kind IN ('user', 'endpoint', 'server')),  -- V30
     CONSTRAINT fk_executions_pipeline_version
         FOREIGN KEY (pipeline_id, pipeline_version)
@@ -1301,6 +1301,58 @@ CREATE TABLE visualization_test_screenshots (
 
 **Notes:** the 4 MiB cap is the schema's as well as the route's (spec §17 — its own cap, independent of the platform's 2 MiB request-body cap); `sha256` is the server's digest of the stored bytes (integrity, not authorship — D56's trust boundary); `ON DELETE CASCADE` from the run.
 
+### 4.34 `dashboard_refreshes`
+
+**One row per refresh of a released dashboard** (V43; #10 L2, the implementation spec's §8.3, §9 and §18). `id` is the refresh id the CLIENT mints (a UUID v4, validated in code — a reused id is refused before any insert). The row is inserted `RUNNING` only AFTER admission holds the slots (§18 premise 3): a refused refresh (`429 dashboard.refresh.saturated`) leaves NO row, and the status list has no value for a refusal.
+
+```sql
+CREATE TABLE dashboard_refreshes (
+    id                 UUID        PRIMARY KEY,                     -- the client-minted refresh id (UUID v4)
+    dashboard_id       UUID        NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
+    dashboard_version  INTEGER     NOT NULL,                        -- the RELEASED version this refresh served
+    workspace_id       UUID        NOT NULL REFERENCES workspaces(id),
+    instance_id        UUID        NOT NULL,                        -- the client's page instance: ownership of ITS refreshes, nothing else
+    principal_user_id  UUID        NULL REFERENCES users(id),
+    principal_key_id   TEXT        NULL REFERENCES api_keys(id),    -- L5's column, present so V44 needs no rewrite
+    scope              TEXT        NOT NULL,                        -- 'ALL' | 'TARGETS'
+    targets_json       JSONB       NOT NULL DEFAULT '[]'::jsonb,
+    parameter_revision INTEGER     NOT NULL,
+    selections_json    JSONB       NOT NULL DEFAULT '{}'::jsonb,    -- <= 64 KiB stored (CHECK)
+    status             TEXT        NOT NULL,                        -- RefreshStatus (enums.md §38)
+    started_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at        TIMESTAMPTZ NULL,
+    summary_json       JSONB       NOT NULL DEFAULT '{}'::jsonb,    -- per target: outcome, stage, reason; per source: rows, bytes
+    CONSTRAINT chk_dashboard_refreshes_principal CHECK ((principal_user_id IS NOT NULL AND principal_key_id IS NULL)
+        OR (principal_user_id IS NULL AND principal_key_id IS NOT NULL)),
+    CONSTRAINT chk_dashboard_refreshes_scope CHECK (scope IN ('ALL', 'TARGETS')),
+    CONSTRAINT chk_dashboard_refreshes_status CHECK (status IN ('RUNNING', 'COMPLETED', 'PARTIAL', 'FAILED', 'ABORTED', 'TIMED_OUT')),
+    CONSTRAINT chk_dashboard_refreshes_selections_size CHECK (pg_column_size(selections_json) <= 65536),
+    CONSTRAINT chk_dashboard_refreshes_finished CHECK ((status = 'RUNNING' AND finished_at IS NULL) OR (status <> 'RUNNING' AND finished_at IS NOT NULL))
+);
+CREATE INDEX idx_dashboard_refreshes_dashboard_started ON dashboard_refreshes (workspace_id, dashboard_id, started_at DESC);
+CREATE INDEX idx_dashboard_refreshes_running ON dashboard_refreshes (started_at) WHERE status = 'RUNNING';
+CREATE INDEX idx_dashboard_refreshes_finished ON dashboard_refreshes (finished_at) WHERE finished_at IS NOT NULL;
+```
+
+**Notes:** a refresh is the CALLER's — the list and read routes return the caller's own (`dashboard.execute`), all of the dashboard's with `execution.read_all`. `dashboard_id` cascades: purging a draft-only dashboard drops the preview refreshes it accumulated (§18 premise 7); a released dashboard is never purged (versioning §3.2). Retention is the execution events' ([§8.1](#81-execution-event-cleanup)); a crash that leaves a row `RUNNING` is closed by [§8.4](#84-stale-dashboard-refresh-sweep). The terminal write (status, `finished_at`, `summary_json`) and its audit row run under a non-cancellable context, so a client that disconnects mid-stream still ends the row.
+
+### 4.35 `dashboard_refresh_executions`
+
+**The link D52 requires** — a refresh to the executions it started, one per source. The events pane joins here and never copies. Written by the launcher's `onRecorded` hook, which fires right after the execution's `RUNNING` insert and before its first event, so "linked before its first event" holds by construction. `shared` marks an invocation that served more than one target within the refresh (sharing is within ONE refresh, never across refreshes).
+
+```sql
+CREATE TABLE dashboard_refresh_executions (
+    refresh_id   UUID    NOT NULL REFERENCES dashboard_refreshes(id) ON DELETE CASCADE,
+    source_name  TEXT    NOT NULL,
+    execution_id UUID    NOT NULL REFERENCES pipeline_executions(execution_id),
+    shared       BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT pk_dashboard_refresh_executions PRIMARY KEY (refresh_id, source_name)
+);
+CREATE INDEX idx_dashboard_refresh_executions_execution ON dashboard_refresh_executions (execution_id);
+```
+
+**Notes:** the execution reference has NO cascade — the execution rows are the durable history and outlive their refresh's link (§8.1). A dashboard run writes no stored result (`directSink`): the execution has no `result_row_count` and `GET /api/v1/executions/{id}/result` answers the family's `not_found`; the per-source byte and row counts are in the refresh's `summary_json`.
+
 ## 5. Index Strategy Summary
 
 **This table is generated from §4 and must contain nothing §4 does not create.** Two kinds of entry appear:
@@ -1404,6 +1456,12 @@ CREATE TABLE visualization_test_screenshots (
 | `visualization_test_runs` | `visualization_test_runs_pkey` | via PK | Lookup by run id |
 | `visualization_test_runs` | `uq_visualization_test_runs_session` | via UNIQUE | V42: one run per (visualization, version, session); its leading `(visualization_id, version)` is the per-version run lookup and the cascade's index ([§4.32](#432-visualization_test_runs)) |
 | `visualization_test_screenshots` | `visualization_test_screenshots_pkey` | via PK | One image per run, fetched by the run ([§4.33](#433-visualization_test_screenshots)) |
+| `dashboard_refreshes` | `dashboard_refreshes_pkey` | via PK | Lookup by the client-minted refresh id — the abort, the read and the stream's own row ([§4.34](#434-dashboard_refreshes)) |
+| `dashboard_refreshes` | `idx_dashboard_refreshes_dashboard_started` | explicit | V43: a dashboard's refreshes, newest first — the list route and `dashboards_get`'s `last_refresh` |
+| `dashboard_refreshes` | `idx_dashboard_refreshes_running` | explicit (partial) | V43: the stale-refresh sweeper's worklist (`RUNNING` only, so the scan stays tiny) |
+| `dashboard_refreshes` | `idx_dashboard_refreshes_finished` | explicit (partial) | V43: the retention step's cutoff scan |
+| `dashboard_refresh_executions` | `pk_dashboard_refresh_executions` | explicit (PK) | V43: one link per (refresh, source) ([§4.35](#435-dashboard_refresh_executions)) |
+| `dashboard_refresh_executions` | `idx_dashboard_refresh_executions_execution` | explicit | V43: the refresh of an execution — the events pane's reverse lookup |
 
 **Deliberately absent:**
 - `uq_users_email` — this name never existed. The uniqueness rule is a `UNIQUE` *constraint* declared inline in §4, so Postgres names its index `users_email_key`. The old entry would have sent a migration author looking for a `CREATE UNIQUE INDEX` statement that was not there. (`uq_pipelines_name`/`pipelines_name_key` are gone too — V4 replaced the global rule with the explicitly named `uq_pipelines_workspace_name`.)
@@ -1464,6 +1522,8 @@ table and the test's expected-table list in the same commit.
 | `dashboard_versions` | promotable | Dashboard | per-dashboard `version` — global identity, preserved on import (D5) | `(id, version)` | The artifacts; an export carries its pinned visualizations and REFERENCES its pipelines and set (spec §12) |
 | `visualization_test_runs` | environment-local | Visualization | — | — | Test evidence qualifies a release in the environment that ran it; the released version travels, its evidence does not |
 | `visualization_test_screenshots` | environment-local | Visualization | — | — | A run's image — the run's classification |
+| `dashboard_refreshes` | derived | DashboardRefresh | — | — | What THIS deployment's viewers refreshed; per-environment by construction, never authored, never promoted |
+| `dashboard_refresh_executions` | derived | DashboardRefresh | — | — | The refresh's link to its executions — the refresh's classification |
 | `template_implements` | promotable | Template | — (follows `template_versions`) | `(name, version)` + the fact ids | The citations ride the template version's payload (export, import, the promotion batch) outside its `body_hash` (R9). Their targets are [`learned_facts`](#418-learned_facts) rows, which are environment-local: the importing workspace stores the ids that resolve there and drops the rest without refusing (owner ruling 2026-09-25), so a cross-deployment promotion lands with none ([§4.21](#421-template_implements)) |
 
 ---
@@ -1632,7 +1692,7 @@ Flyway uses Postgres advisory locks (`pg_advisory_lock`). Multiple instances sta
 
 ## 8. Operational Jobs
 
-Three scheduled jobs act on this schema. **None of them hard-codes an interval literal.** Every retention and timeout bound is a bind parameter fed from a config key owned by [Configuration §3](configuration.md#3-optional-configuration-with-defaults) (D8) — the SQL below shows the parameterized form, because an `INTERVAL '7 days'` written into a query is a config key that silently stopped working.
+Four scheduled jobs act on this schema. **None of them hard-codes an interval literal.** Every retention and timeout bound is a bind parameter fed from a config key owned by [Configuration §3](configuration.md#3-optional-configuration-with-defaults) (D8) — the SQL below shows the parameterized form, because an `INTERVAL '7 days'` written into a query is a config key that silently stopped working.
 
 The `make_interval()` form is used rather than string concatenation: it takes an integer bind parameter, so there is no interval literal to build and nothing to inject.
 
@@ -1648,6 +1708,8 @@ DELETE FROM execution_events
 ```
 
 `:eventRetentionDays` ← [`datapipelines.executions.event-retention-days`](configuration.md#311-execution-history).
+
+**Dashboard refreshes ride the same tick (#10 L2).** After the events, the step deletes `dashboard_refreshes` rows that FINISHED before the same cutoff — `DELETE FROM dashboard_refreshes WHERE finished_at IS NOT NULL AND finished_at < NOW() - make_interval(days => :eventRetentionDays)` — and the cascade takes their `dashboard_refresh_executions` links (never the executions, which are never deleted). Before this rule the spec said "the executions' own policy"; `pipeline_executions` has none, so refreshes are retained like the events that describe them (§18 premise 7). A `RUNNING` row is never deleted by retention.
 
 This purges the **durable** 7-day record only. The 1-hour Redis event log ([§9](#9-what-is-not-in-this-database)) expires on its own TTL and is not this job's concern.
 
@@ -1712,6 +1774,26 @@ Two things this job must get right:
 
 Scheduling for all three (Spring `@Scheduled`, or external cron in multi-instance deployments where a single runner is preferred) is an implementation choice, not a schema concern. Each statement is idempotent and safe to run concurrently from more than one instance.
 
+### 8.4 Stale dashboard refresh sweep
+
+An instance that crashes mid-refresh leaves its `dashboard_refreshes` row `RUNNING` forever — the coroutine that would write the terminal state died with it (the [§8.3](#83-stale-execution-sweep) shape, one level up). `DashboardRefreshSweeper` (#10 L2; on the `dp-scheduled` thread like `StaleExecutionSweeper`, registered in `ArchitectureGuardTest.APPROVED_SCHEDULING_FILES`) closes them:
+
+```sql
+UPDATE dashboard_refreshes
+   SET status = 'TIMED_OUT',
+       finished_at = NOW(),
+       summary_json = summary_json || jsonb_build_object('reason', CASE WHEN EXISTS (
+               SELECT 1 FROM dashboard_refresh_executions l
+                 JOIN pipeline_executions e ON e.execution_id = l.execution_id
+                WHERE l.refresh_id = dashboard_refreshes.id AND e.status = 'ABORTED'
+                  AND e.error_json ->> 'code' = 'pipeline.execution.instance_lost')
+           THEN 'instance_lost' ELSE 'deadline_passed' END)
+ WHERE status = 'RUNNING'
+   AND started_at < NOW() - make_interval(secs => :staleAfterSeconds);
+```
+
+`:staleAfterSeconds` = [`datapipelines.dashboards.timeouts.max-refresh-seconds`](configuration.md#334-the-dashboard-runtime-10-l2) plus one [`cancel-poll-interval-seconds`](configuration.md#32-executor) — no live refresh outlives its own deadline (§9.6 caps it), so a row past both is not running anywhere. The `AND status = 'RUNNING'` guard is the whole safety: a refresh that finishes as the sweep runs keeps its own terminal state. Every replica may run it (one idempotent `UPDATE`, like §8.1); a tick that fails is logged (`event=dashboard.refresh_sweep_failed`, the class and SQLState only) and retried.
+
 ---
 
 ## 9. What Is NOT In This Database
@@ -1740,6 +1822,7 @@ Three pieces of execution state that a reader might reasonably expect to find he
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.35 | V43 (#10 L2, dashboards round one) | New **§4.34 `dashboard_refreshes`** and **§4.35 `dashboard_refresh_executions`** (the refresh per run, the link D52 requires; a refused refresh writes no row, the terminal write is non-cancellable), `pipeline_executions.triggered_via` gains **`DASHBOARD`** (§4.6's CHECK text and column comment), the §5 index rows and the §5A rows (both `derived`), **§8.1** gains the refresh retention (the events' cutoff — the spec's "the executions' own policy" was none) and a new **§8.4 Stale dashboard refresh sweep**. V43 is L2's only (the `api_keys` kind/role CHECKs, `executed_by_key_kind = 'dashboard'` and `dashboard_key_bindings` are L5's V44). |
 | 2026-09-29 | v1.34 | V42 (#10 L1a, dashboards round one) | New **§4.28 `visualizations`**, **§4.29 `visualization_versions`**, **§4.30 `dashboards`**, **§4.31 `dashboard_versions`** (V39's two tables twice, the names changed: the kept UUID, the per-workspace name unique forever, the index row over the current body, the one-draft partial index, the database-computed hash, the release/discard/via stamps) and the test evidence L4 writes — **§4.32 `visualization_test_runs`** (a run per version and session, hanging off the version by a composite foreign key that cascades, the preview token stored hashed with its expiry, the closed status list) and **§4.33 `visualization_test_screenshots`** (PNG/WebP, ≤ 4 MiB in the schema, the server's SHA-256). §5 gains their eleven indexes; §5A classifies the four artifact tables promotable and the evidence environment-local. The spec's `byte_length(bytes)` is Postgres's `octet_length`. Down path documented in the migration's header and proven on a copy of the demo database. |
 | 2026-09-29 | v1.33 | 310 (#310) | §8.2 is IMPLEMENTED (it was documented and never run): the batched form of the same statement — the cutoff read once per tick from the database's clock, then `DELETE … WHERE id IN (SELECT id … WHERE "timestamp" < :cutoff ORDER BY "timestamp" LIMIT :batchSize)` until a batch comes back short, at most 50 batches or 2 s a tick. The rows deleted are exactly the one-statement form's; no schema change |
 | 2026-09-28 | v1.32 | 286 (#286) | §4.13's `retired_reason` bullet says what sees a legacy row: the workspace-scoped legacy read (the unscoped `null` branch, which had no caller, is removed), the unpublish row read, and nothing valid-only — the registry, the conflict check, key binding (`requireInsideWorkspace`), the Usage tab (`findByPipeline`), promotion (omitted, the count logged). The echo of a stored path is cut at the grammar's 200 characters; the column is unchanged (no CHECK added — unpublish is by path). The boot WARN reads `at_least`. No DDL change. |

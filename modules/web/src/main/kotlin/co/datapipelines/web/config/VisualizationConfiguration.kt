@@ -10,6 +10,7 @@ import co.datapipelines.pipeline.TemplateReleaser
 import co.datapipelines.pipeline.TemplateVersionStatuses
 import co.datapipelines.visualization.DashboardReader
 import co.datapipelines.visualization.DashboardRepository
+import co.datapipelines.visualization.DashboardRuntimeConfig
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.DashboardValidator
 import co.datapipelines.visualization.ParameterSetFacts
@@ -90,7 +91,10 @@ class VisualizationConfiguration {
         pipelines: PipelineReleaseFacts,
         sets: ParameterSetFacts,
         visualizations: VisualizationRepository,
-    ): DashboardValidator = DashboardValidator(pipelines, sets, visualizations.pins)
+        runtime: DashboardRuntimeConfig,
+    ): DashboardValidator =
+        // L2: the validator's two runtime limits — the refresh deadline cap and the most distinct executions a refresh runs.
+        DashboardValidator(pipelines, sets, visualizations.pins, runtime.maxRefreshSeconds, runtime.maxExecutionsPerRefresh)
 
     @Bean
     @Suppress("LongParameterList") // the aggregate's ports ARE the wiring

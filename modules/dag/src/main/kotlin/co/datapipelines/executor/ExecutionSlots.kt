@@ -1,5 +1,7 @@
 package co.datapipelines.executor
 
+import kotlinx.coroutines.delay
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -18,7 +20,10 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * Admission is **reject, not queue**: a request over the limit fails immediately with
  * `pipeline.execution.concurrency_limit`. Waiting for a slot would turn a limit into a latency
- * cliff on a synchronous SSE call whose client is holding a connection open.
+ * cliff on a synchronous SSE call whose client is holding a connection open. The one exception is
+ * [acquireInstanceOnly] (#10 L2): a dashboard refresh reserves all its executions' slots together and MAY wait,
+ * boundedly (`datapipelines.dashboards.admission.max-wait-seconds`), because it has not yet opened its stream
+ * and refusing it costs the viewer a whole refresh.
  *
  * ## Why per-user counters are a map of ints and not a map of semaphores
  *
@@ -32,6 +37,11 @@ class ExecutionSlots(
 ) {
     private val instanceWide = AtomicInteger()
     private val perUser = ConcurrentHashMap<UUID, Int>()
+
+    private companion object {
+        /** How often a bounded wait re-tries: a slot frees on an execution's end, so tens of milliseconds is prompt and cheap. */
+        const val POLL_INTERVAL_MILLIS = 25L
+    }
 
     /** Live executions across all users on THIS instance — observability and the §15.3 gauge. */
     val inFlight: Int get() = instanceWide.get()
@@ -95,6 +105,43 @@ class ExecutionSlots(
         }
     }
 
+    /**
+     * **All-or-none, instance-only, bounded-wait** admission for a dashboard refresh (#10 L2, spec §9.4, §18
+     * premise 2): reserves [count] INSTANCE-wide slots atomically and takes NO per-user slot — a refresh runs
+     * as the viewer (D50) and must not starve the viewer's own runs, which `acquire(userId, Int.MAX)` would
+     * still have counted against. If the instance does not have [count] free it waits, polling, for at most
+     * [maxWait] and then answers null with NOTHING held (all or none: a partial fan-out under saturation is
+     * the defect this exists to prevent). A [count] above the instance ceiling can never be admitted and
+     * answers null at once. Never queues past [maxWait]; a zero wait is a single attempt.
+     *
+     * The reservation hands out one [SlotLease] per execution ([SlotReservation.next]) — each execution
+     * releases its own slot at its end, exactly as a scheduled run's lease does — and its [SlotReservation.close]
+     * releases the slots never handed out.
+     */
+    suspend fun acquireInstanceOnly(
+        count: Int,
+        maxWait: Duration,
+    ): SlotReservation? {
+        require(count >= 1) { "count must be positive, was $count" }
+        if (count > maxPerInstance) return null
+        val deadline = System.nanoTime() + maxWait.toNanos()
+        while (true) {
+            if (tryReserveInstanceWide(count)) return SlotReservation(count) { instanceWide.decrementAndGet() }
+            val remainingNanos = deadline - System.nanoTime()
+            if (remainingNanos <= 0) return null
+            delay(minOf(POLL_INTERVAL_MILLIS, Duration.ofNanos(remainingNanos).toMillis().coerceAtLeast(1)))
+        }
+    }
+
+    /** One CAS loop: `+count` iff it stays within the ceiling — the atomic unit that makes the reservation all-or-none. */
+    private fun tryReserveInstanceWide(count: Int): Boolean {
+        while (true) {
+            val current = instanceWide.get()
+            if (current + count > maxPerInstance) return false
+            if (instanceWide.compareAndSet(current, current + count)) return true
+        }
+    }
+
     private fun acquireInstanceWide() {
         while (true) {
             val current = instanceWide.get()
@@ -149,5 +196,40 @@ class SlotLease internal constructor(
 
     override fun close() {
         if (released.compareAndSet(false, true)) release()
+    }
+}
+
+/**
+ * [count] instance-wide slots reserved together by [ExecutionSlots.acquireInstanceOnly] (#10 L2), handed out one
+ * [SlotLease] at a time. Every reserved slot is released exactly once: by its lease's [SlotLease.close] when it
+ * was handed out, by [close] when it was not. [close] is idempotent and never touches a lease already handed out
+ * (that execution releases its own slot at its end), so a refresh that fails halfway through its fan-out closes
+ * the reservation in a `finally` and leaks nothing.
+ */
+class SlotReservation internal constructor(
+    count: Int,
+    private val releaseOne: () -> Unit,
+) : AutoCloseable {
+    private val unhandedOut = AtomicInteger(count)
+
+    /** Slots reserved and not yet handed out — the leak assertion surface. */
+    val remaining: Int get() = unhandedOut.get()
+
+    /**
+     * One reserved slot as a lease for one execution.
+     *
+     * @throws IllegalStateException every slot was already handed out, or the reservation is closed.
+     */
+    fun next(): SlotLease {
+        while (true) {
+            val current = unhandedOut.get()
+            check(current > 0) { "no reserved slot left to hand out" }
+            if (unhandedOut.compareAndSet(current, current - 1)) return SlotLease(releaseOne)
+        }
+    }
+
+    /** Releases the slots never handed out. */
+    override fun close() {
+        repeat(unhandedOut.getAndSet(0)) { releaseOne() }
     }
 }

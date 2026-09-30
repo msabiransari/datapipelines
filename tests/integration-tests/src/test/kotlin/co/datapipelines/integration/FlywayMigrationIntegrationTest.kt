@@ -147,6 +147,8 @@ class FlywayMigrationIntegrationTest {
                 // #10 L1a — visualizations + dashboards (the V39 shape twice, one-draft index each) and the two
                 // test-evidence tables L4 writes (a run per session over one version, one capped screenshot per run).
                 "42|visualizations and dashboards|true",
+                // #10 L2 — DASHBOARD in chk_triggered_via, dashboard_refreshes and its execution link.
+                "43|dashboard refreshes|true",
             )
     }
 
@@ -476,6 +478,65 @@ class FlywayMigrationIntegrationTest {
     }
 
     /**
+     * #10 L2 (V43) — a dashboard's refreshes, read from the SHIPPED database (metadata-db §4.34–§4.35): the
+     * column inventory (one execution link per source, the client-minted refresh id as the PK), the CHECKs that make
+     * the row honest (a person XOR a key; RUNNING iff unfinished; the 64 KiB selections cap on the STORED size), and
+     * the cascades (a purged dashboard drops its refreshes, a purged refresh its links — never the execution).
+     * The BEHAVIOUR (an insert refused, a cascade taken) is `DashboardRefreshRepositoryIntegrationTest`'s.
+     */
+    @Test
+    fun `V43 creates the refresh tables with the principal, status and stamp checks and the cascading links`() {
+        columnsOf("dashboard_refreshes") shouldContainExactlyInAnyOrder
+            listOf(
+                "id",
+                "dashboard_id",
+                "dashboard_version",
+                "workspace_id",
+                "instance_id",
+                "principal_user_id",
+                "principal_key_id",
+                "scope",
+                "targets_json",
+                "parameter_revision",
+                "selections_json",
+                "status",
+                "started_at",
+                "finished_at",
+                "summary_json",
+            )
+        columnsOf("dashboard_refresh_executions") shouldContainExactlyInAnyOrder
+            listOf("refresh_id", "source_name", "execution_id", "shared")
+        query(
+            "SELECT conname || '|' || pg_get_constraintdef(oid) FROM pg_constraint" +
+                " WHERE conrelid = 'dashboard_refreshes'::regclass AND contype = 'c' ORDER BY conname",
+        ) { it.getString(1) } shouldContainExactly
+            listOf(
+                "chk_dashboard_refreshes_finished|CHECK ((((status = 'RUNNING'::text) AND (finished_at IS NULL)) OR " +
+                    "((status <> 'RUNNING'::text) AND (finished_at IS NOT NULL))))",
+                "chk_dashboard_refreshes_principal|CHECK ((((principal_user_id IS NOT NULL) AND (principal_key_id IS NULL)) OR " +
+                    "((principal_user_id IS NULL) AND (principal_key_id IS NOT NULL))))",
+                "chk_dashboard_refreshes_scope|CHECK ((scope = ANY (ARRAY['ALL'::text, 'TARGETS'::text])))",
+                "chk_dashboard_refreshes_selections_size|CHECK ((pg_column_size(selections_json) <= 65536))",
+                "chk_dashboard_refreshes_status|CHECK ((status = ANY (ARRAY['RUNNING'::text, 'COMPLETED'::text, " +
+                    "'PARTIAL'::text, 'FAILED'::text, 'ABORTED'::text, 'TIMED_OUT'::text])))",
+            )
+        // The two cascades and the one deliberate non-cascade: the link references the EXECUTION without ON DELETE.
+        query(
+            "SELECT conrelid::regclass::text || '->' || confrelid::regclass::text || ' ' || confdeltype::text FROM pg_constraint" +
+                " WHERE contype = 'f' AND conrelid IN ('dashboard_refreshes'::regclass, 'dashboard_refresh_executions'::regclass)" +
+                " ORDER BY 1",
+        ) { it.getString(1) } shouldContainExactlyInAnyOrder
+            listOf(
+                "dashboard_refreshes->dashboards c",
+                "dashboard_refreshes->workspaces a",
+                "dashboard_refreshes->users a",
+                "dashboard_refreshes->api_keys a",
+                "dashboard_refresh_executions->dashboard_refreshes c",
+                "dashboard_refresh_executions->pipeline_executions a",
+            )
+    }
+
+    /**
      * #10 L1a (V42) — the test-evidence tables L4 writes (spec §2.1, §11.2, §17): a run hangs off ONE
      * version (purging a draft takes its evidence), one run per session, the closed status list; a
      * screenshot is PNG or WebP and at most 4 MiB — the cap is the schema's, not only the route's.
@@ -537,7 +598,7 @@ class FlywayMigrationIntegrationTest {
                     "'not_started'::text, 'skipped'::text])))",
                 "chk_schedules_missed_run_policy|CHECK ((missed_run_policy = ANY (ARRAY['skip'::text, 'latest'::text])))",
                 "chk_triggered_via|CHECK ((triggered_via = ANY (ARRAY['UI'::text, 'REST'::text, 'MCP'::text, " +
-                    "'PIPELINE'::text, 'ENDPOINT'::text, 'SCHEDULE'::text])))",
+                    "'PIPELINE'::text, 'ENDPOINT'::text, 'SCHEDULE'::text, 'DASHBOARD'::text])))",
             )
         query(
             "SELECT pg_get_indexdef(indexrelid) FROM pg_index WHERE indexrelid = 'uq_schedule_runs_one_active'::regclass",
@@ -1002,6 +1063,9 @@ class FlywayMigrationIntegrationTest {
                 "parameter_set_versions",
                 "parameter_sets",
                 // #10 L1a (V42) — the two artifact families and the test evidence (metadata-db §4.28–§4.33).
+                // #10 L2 (V43) — a dashboard's refreshes and their execution links (§4.34–§4.35).
+                "dashboard_refresh_executions",
+                "dashboard_refreshes",
                 "dashboard_versions",
                 "dashboards",
                 "visualization_test_runs",
@@ -1097,6 +1161,14 @@ class FlywayMigrationIntegrationTest {
                 "parameter_sets.uq_parameter_sets_workspace_name",
                 // #10 L1a (V42) — the same four per family; a run's (visualization, version, session) uniqueness
                 // is also its per-version lookup; a screenshot's PK is its run.
+                // #10 L2 (V43) — a refresh's list (newest first), the sweeper's RUNNING scan, the retention cutoff, and the
+                // execution link's PK (refresh, source) with its reverse lookup.
+                "dashboard_refresh_executions.idx_dashboard_refresh_executions_execution",
+                "dashboard_refresh_executions.pk_dashboard_refresh_executions",
+                "dashboard_refreshes.dashboard_refreshes_pkey",
+                "dashboard_refreshes.idx_dashboard_refreshes_dashboard_started",
+                "dashboard_refreshes.idx_dashboard_refreshes_finished",
+                "dashboard_refreshes.idx_dashboard_refreshes_running",
                 "dashboard_versions.dashboard_versions_pkey",
                 "dashboard_versions.uq_dashboard_versions_one_draft",
                 "dashboards.dashboards_pkey",
@@ -1209,6 +1281,13 @@ class FlywayMigrationIntegrationTest {
                 "chk_api_keys_role",
                 // #10 L1a (V42) — dashboard_versions' body shape, stamps, status, version floor and write surface,
                 // then dashboards' pointer floor: pg_constraint's collation sorts `dashboard_versions` first.
+                // #10 L2 (V43) — a refresh's principal (a person XOR a key), scope, status, the 64 KiB selections cap and
+                // the finished stamp; sorted BEFORE `dashboard_versions` (`r` < `v`).
+                "chk_dashboard_refreshes_finished",
+                "chk_dashboard_refreshes_principal",
+                "chk_dashboard_refreshes_scope",
+                "chk_dashboard_refreshes_selections_size",
+                "chk_dashboard_refreshes_status",
                 "chk_dashboard_versions_body",
                 "chk_dashboard_versions_discard_stamps",
                 "chk_dashboard_versions_release_stamps",

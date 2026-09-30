@@ -10,6 +10,7 @@ import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardDocument
 import co.datapipelines.visualization.DashboardErrorCodes
 import co.datapipelines.visualization.DashboardReader
+import co.datapipelines.visualization.DashboardRefreshHistory
 import co.datapipelines.visualization.DashboardService
 import co.datapipelines.visualization.PipelineReleaseFacts
 import co.datapipelines.visualization.VisualizationService
@@ -60,14 +61,17 @@ class DashboardsListTool(
  * `dashboards_get` (§6.2.56) — the WORKING version by id with its RESOLVED dependency state: each pinned
  * visualization's version status and each source pipeline's release status and read-only verdict — every one read
  * through the caller's lens, one read per pin (bounded by the reader's 50 visualizations and the sources it declares),
- * a hidden or absent pin answering `status: null` alike. `last_refresh` is the runtime's (L2): null until it lands.
- * Permission: `dashboard.read`.
+ * a hidden or absent pin answering `status: null` alike. `last_refresh` is the CALLER's own latest refresh of the
+ * dashboard (#10 L2) — `{refresh_id, dashboard_version, status, started_at, finished_at}` — or null when they have none;
+ * it names nobody else's, whatever their role. No tool refreshes a dashboard: the runtime is a person's surface until
+ * the `dashboard` key kind. Permission: `dashboard.read`.
  */
 class DashboardsGetTool(
     private val dashboards: DashboardService,
     private val visualizations: VisualizationService,
     private val pipelines: PipelineReleaseFacts,
     private val lens: PromoterLens,
+    private val refreshes: DashboardRefreshHistory,
 ) : McpTool {
     override val definition: McpSchema.Tool =
         McpTools.tool(
@@ -76,9 +80,9 @@ class DashboardsGetTool(
                 "Read one dashboard by ID: the WORKING version's full document and lifecycle state (version, status, " +
                     "body_hash for an update's expected_hash, current_version), plus dependencies — each pinned " +
                     "visualization's version status and each source pipeline release's status and read_only verdict " +
-                    "as they are NOW (a status of null: absent, or not visible to this key) — and last_refresh, null " +
-                    "until the dashboard runtime ships. A dashboard of another workspace, or one the promoter lens " +
-                    "hides, answers not-found.",
+                    "as they are NOW (a status of null: absent, or not visible to this key) — and last_refresh, the " +
+                    "caller's own latest refresh of it (null when they have none). No tool refreshes a dashboard. A " +
+                    "dashboard of another workspace, or one the promoter lens hides, answers not-found.",
             schema = ArtifactTools.idSchema("dashboard", withHash = false),
         )
 
@@ -93,11 +97,25 @@ class DashboardsGetTool(
         return ArtifactTools.full(loaded, view.dashboards.isEverything) +
             mapOf(
                 "dependencies" to dependencies(workspaceId, loaded.body, view),
-                // The runtime's refresh record (L2's V43 tables) does not exist yet: the key is here so an agent's
-                // parser is stable across the landing, and null says "never refreshed" honestly.
-                "last_refresh" to null,
+                // The CALLER's own latest refresh (V43): never another person's, and null says "never refreshed".
+                "last_refresh" to lastRefresh(workspaceId, loaded.record.id, ctx.principal.userId),
             )
     }
+
+    private fun lastRefresh(
+        workspaceId: UUID,
+        dashboardId: UUID,
+        userId: UUID,
+    ): Map<String, Any?>? =
+        refreshes.latestOf(workspaceId, dashboardId, userId)?.let {
+            mapOf(
+                "refresh_id" to it.id.toString(),
+                "dashboard_version" to it.dashboardVersion,
+                "status" to it.status.name,
+                "started_at" to it.startedAt.toString(),
+                "finished_at" to it.finishedAt?.toString(),
+            )
+        }
 
     private fun dependencies(
         workspaceId: UUID,
@@ -326,10 +344,11 @@ internal fun dashboardTools(
     pipelines: PipelineReleaseFacts,
     reader: DashboardReader,
     lens: PromoterLens,
+    refreshes: DashboardRefreshHistory,
 ): List<McpTool> =
     listOf(
         DashboardsListTool(dashboards, lens),
-        DashboardsGetTool(dashboards, visualizations, pipelines, lens),
+        DashboardsGetTool(dashboards, visualizations, pipelines, lens, refreshes),
         DashboardsCreateTool(dashboards, reader, lens),
         DashboardsUpdateTool(dashboards, reader),
         DashboardsPurgeDraftTool(dashboards, lens),

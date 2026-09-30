@@ -61,9 +61,10 @@ class ConfigValidator(
          * `checkDemoApiKey` and `checkEndpointKeyBudget`. 30 since #194 lane B added
          * `ParametersRules.checkParametersBounds` (§3.30). 31 since #279 added
          * `checkRequestLimits` (§3.31). 32 since #10 L1a added
-         * `VisualizationRules.checkVisualizationBounds` (§3.33).
+         * `VisualizationRules.checkVisualizationBounds` (§3.33). 33 since #10 L2 added
+         * `DashboardRuntimeRules.checkDashboardRuntimeBounds` (§3.34).
          */
-        internal const val CHECK_COUNT = 32
+        internal const val CHECK_COUNT = 33
 
         /**
          * `users.provider` values the system writes itself (`UserService.BOOTSTRAP_PROVIDER`,
@@ -140,6 +141,8 @@ class ConfigValidator(
             RequestLimitsRules.checkRequestBounds(snapshot, violations)
             // §3.33 (#10) — the dashboard documents' collection bounds, their own file like the parameters' limits.
             VisualizationRules.checkVisualizationBounds(snapshot, violations)
+            // §3.34 (#10 L2) — the dashboard runtime's admission, byte and deadline numbers, their own file too.
+            DashboardRuntimeRules.checkDashboardRuntimeBounds(snapshot, violations)
             // §3.27 (137) — the mail rules live in their own file (MailRules), like the posture ones.
             MailRules.checkMailShape(snapshot, violations)
             MailRules.checkMailHardened(snapshot, violations)
@@ -903,6 +906,8 @@ class ConfigValidator(
                 parameters = ParametersRules.KEYS.associateWith { environment.getProperty(it) },
                 // §3.33 (#10) — the dashboard documents' bounds, raw strings (a malformed value is a named violation).
                 visualization = VisualizationRules.KEYS.associateWith { environment.getProperty(it) },
+                // §3.34 (#10 L2) — the dashboard runtime's numbers, raw strings likewise.
+                dashboards = DashboardRuntimeRules.KEYS.associateWith { environment.getProperty(it) },
                 // §3.31 (#279) — the request-body cap, raw (a malformed value is a named violation).
                 webMaxRequestBytes = environment.getProperty("datapipelines.web.max-request-bytes"),
                 activeProfiles = environment.activeProfiles.toSet(),
@@ -1140,6 +1145,8 @@ internal data class ConfigSnapshot(
     val parameters: Map<String, String?> = emptyMap(),
     /** §3.33 (#10) — every `datapipelines.visualization.*` key as its raw string (`VisualizationRules.KEYS`). */
     val visualization: Map<String, String?> = emptyMap(),
+    /** §3.34 (#10 L2) — every `datapipelines.dashboards.*` key as its raw string (`DashboardRuntimeRules.KEYS`). */
+    val dashboards: Map<String, String?> = emptyMap(),
     /** §3.31 (#279) — `datapipelines.web.max-request-bytes`, raw so a bad value is a NAMED violation. */
     val webMaxRequestBytes: String? = null,
     val activeProfiles: Set<String>,

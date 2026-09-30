@@ -413,6 +413,15 @@ class WorkspaceIsolationIntegrationTest {
 
         /** 118: a WORKSPACE-scope learned fact of globex, on its own datasource — `semantics_retire`'s foreign id. */
         const val FACT_GLOBEX = "fac00000-0000-0000-0000-000000000002"
+
+        /**
+         * #10 L2: a RELEASED dashboard of globex and one COMPLETED refresh of it — the foreign ids the sweep substitutes
+         * into every dashboard runtime, refresh and abort route under `/api/v1/dashboards/{id}`. Before L2 the sweep's
+         * `{id}` there was a PIPELINE id, so the whole family read "no such dashboard" in every workspace and the
+         * differential could not go red.
+         */
+        const val DASH_GLOBEX = "d7b00000-0000-0000-0000-000000000002"
+        const val REFRESH_GLOBEX = "d8b00000-0000-0000-0000-000000000002"
         private const val TPL_ACME_ID = "a3b00000-0000-0000-0000-000000000001"
         private const val TPL_GLOBEX_ID = "b4b00000-0000-0000-0000-000000000002"
         private const val EXEC_ACME = "a5b00000-0000-0000-0000-000000000001"
@@ -549,6 +558,30 @@ class WorkspaceIsolationIntegrationTest {
             }
         }
 
+        /** #10 L2: globex's released dashboard and one finished refresh of it (V42, V43). */
+        private fun seedDashboardRefresh(statement: java.sql.Statement) {
+            statement.execute(
+                """
+                INSERT INTO dashboards (id, workspace_id, name, display_name, description, current_version, created_by)
+                VALUES ('$DASH_GLOBEX', '$WS_GLOBEX', 'finance/boards/sales', 'Globex Sales', '', 1, '$BOB')
+                """.trimIndent(),
+            )
+            statement.execute(
+                """
+                INSERT INTO dashboard_versions (dashboard_id, version, body_json, status, body_hash, released_at, released_by, created_by)
+                VALUES ('$DASH_GLOBEX', 1, '{"display_name":"Globex Sales","visualizations":[],"layout":{}}'::jsonb,
+                        'RELEASED', 'seed-hash', NOW(), '$BOB', '$BOB')
+                """.trimIndent(),
+            )
+            statement.execute(
+                """
+                INSERT INTO dashboard_refreshes (id, dashboard_id, dashboard_version, workspace_id, instance_id, principal_user_id,
+                                                 scope, parameter_revision, status, finished_at)
+                VALUES ('$REFRESH_GLOBEX', '$DASH_GLOBEX', 1, '$WS_GLOBEX', '$REFRESH_GLOBEX', '$BOB', 'ALL', 1, 'COMPLETED', NOW())
+                """.trimIndent(),
+            )
+        }
+
         private fun seedContent(connection: java.sql.Connection) {
             connection.createStatement().use { statement ->
                 // Same pipeline name in BOTH workspaces — legal per-workspace (D2), and the
@@ -582,6 +615,7 @@ class WorkspaceIsolationIntegrationTest {
                         ('$TPL_GLOBEX_ID', 1, 'freemarker', 'POSTGRES', FALSE, '[]'::jsonb, 'SELECT 2', 'seed-hash', 'RELEASED', '$BOB', '$BOB', NOW())
                     """.trimIndent(),
                 )
+                seedDashboardRefresh(statement)
                 // One execution per pipeline — visibility scopes via the pipeline's workspace (§5.3).
                 statement.execute(
                     """

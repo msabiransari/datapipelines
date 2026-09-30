@@ -1,6 +1,6 @@
 # Enumerations Reference
 
-**Status:** v1.25 (living document — updated as enums evolve)
+**Status:** v1.26 (living document — updated as enums evolve)
 **Owner:** datapipelines.co core
 **Purpose:** Single source of truth for every enum value used across the system. Prevents spelling drift across specs and across the codebase.
 
@@ -485,6 +485,12 @@ Pre-created and fixed: the three member roles are the ONLY roles an `mcp` key ca
 | `schedule.deleted` | Soft-deleted. `details` carries `schedule_id` |
 | `schedule.run_requested` | Run now recorded a manual run (a replay writes no second row). `details` carries `schedule_id`, `run_id` |
 
+**Dashboard audit events** (same `audit_log` table; emitted by the dashboard runtime's refresh, [Dashboards §5](dashboards.md#5-the-runtime), #10 L2). ONE row per refresh, AWAITED (audit rows are authorization inputs — never the fire-and-forget path) and written at the refresh's END whatever its ending, the client gone or the process stopping included. `user_id` is the refreshing person. `details` carries `refresh_id`, `dashboard_id`, `dashboard_version`, `workspace_id`, `instance_id`, `scope`, `status` (a [`RefreshStatus`](#38-refreshstatus--a-dashboard-refreshs-state-10)), `targets` (name → outcome) and `execution_ids` — never a selection, a row or a driver message. A refresh refused at admission (`429`) writes no row and so no event.
+
+| Value | Trigger |
+|---|---|
+| `dashboard.refresh` | A dashboard refresh ended — COMPLETED, PARTIAL, FAILED, ABORTED or TIMED_OUT |
+
 ---
 
 ## 16. Error Code Domains (prefix catalog)
@@ -564,6 +570,7 @@ Error codes follow `{domain}.{entity}.{failure}` — three segments, all lowerca
 | `PIPELINE` | Spawned by a parent execution's PIPELINE node (pipeline composition; metadata-db §4.6 lineage columns link the family) |
 | `ENDPOINT` | A published endpoint served a `GET` request on the published tree (074; re-rooted to `/api/<category>/<version>/<path…>` by 172). The execution runs in-process as the endpoint's workspace, `executed_by` is the key's owner with `executed_by_key_kind = endpoint` (§18A — the run lists for admins only, D11), and the serve's audit row carries the key id |
 | `SCHEDULE` | A schedule fired it (#9, V38) — a cron occurrence, a `latest` catch-up or a Run now. `executed_by` is the system identity, `executed_by_key_kind` is null, and the run is visible to every member with `execution.read` (R3); the schedule's run (`schedule_runs.execution_id`) links back to it |
+| `DASHBOARD` | A dashboard refresh started it (#10 L2, V43). The delegated act (D50): `executed_by` is the refreshing person, who needs `dashboard.execute` and not `pipeline.execute`; the run streams into the refresh's bounded collector, writes NO stored result, is linked to its refresh by `dashboard_refresh_executions` and is cancelled only through that refresh's abort ([Dashboards §5](dashboards.md#5-the-runtime)) |
 | `SCHEDULED` | **Never shipped — superseded by `SCHEDULE` (#9) before any row carried it.** The old future placeholder, kept here only because this document never removes a value; no CHECK admits it |
 | `WEBHOOK` | (Future) External webhook trigger |
 
@@ -910,6 +917,24 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 
 ---
 
+## 38. `RefreshStatus` — a dashboard refresh's state (#10)
+
+**Source:** [Dashboards §5](dashboards.md#5-the-runtime), the implementation spec's §2.2; the Kotlin enum is `RefreshStatus` (`visualization`) — the CHECK of `dashboard_refreshes.status` (V43) and `refresh_completed.status` on the stream.
+**Used by:** the visualization module, the dashboard runtime, rest-api §23.3, metadata-db §4.34.
+
+| Value | Meaning |
+|---|---|
+| `RUNNING` | Admitted and running. The only non-terminal value; a row with `finished_at` NULL |
+| `COMPLETED` | Every target produced data (or the no-data state) |
+| `PARTIAL` | Some targets did, some did not — including a refresh that crossed `max-bytes-per-refresh` |
+| `FAILED` | No target produced anything |
+| `ABORTED` | An abort was requested, the client stayed away past the disconnect grace, or the process stopped |
+| `TIMED_OUT` | The refresh's own deadline passed — or a `RUNNING` row an instance crash left was closed by the sweeper |
+
+**Closed.** A refresh refused at admission has NO status: it writes no row.
+
+---
+
 ## Cross-Reference: Where Each Enum Is Authored
 
 | Enum | Authoring spec | Consuming specs |
@@ -942,6 +967,7 @@ The CHECK (`chk_executions_executed_by_key_kind`) admits these three and NULL. V
 | `MissedRunPolicy`, `RunOrigin`, `RunState`, `TrailKind` | [scheduler.md](scheduler.md) (`scheduler` declares them; §22–§25 here are the wire tables) | metadata-db (the V38 CHECKs), rest-api §20 |
 | `ParameterCardinality` | pipeline-contract §6.1 (`typesystem` declares it; §26 here is the wire table) | the parameter engine (#194), rest-api, mcp-server |
 | `ParameterKind`, `SelectorSourceKind`, `PresentationControl`, `NumericFormatKind` | the [parameter-engine record §3](superpowers/specs/2026-09-21-parameter-engine-design.md) (`parameters` declares them; §27–§30 here are the wire tables) | rest-api, mcp-server (#194 lane D) |
+| `RefreshStatus` | [Dashboards §5](dashboards.md#5-the-runtime) (`visualization` declares it; §38 here is the wire table) | metadata-db (the V43 CHECK), rest-api §23.3, the dashboard runtime |
 | `RendererKind`, `AssertionKind`, `TestRunStatus`, `DashboardObjectType`, `ActionScope`, `StateSetting`, `LayoutPosition` | the [dashboard implementation spec §3](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) (`visualization` declares them; §31–§37 here are the wire tables) | [Dashboards](dashboards.md), metadata-db (the V42 CHECK), rest-api and mcp-server (L1b) |
 
 ---
@@ -965,6 +991,7 @@ This document itself is **additive-only** — values are never removed (only mar
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.26 | L2 (#10) the dashboard runtime — renumbered at merge after 320's v1.25 | §15 gains the **dashboard audit event** `dashboard.refresh` (one awaited row per refresh, at its end). §18 gains **`DASHBOARD`** (V43): the delegated-act trigger — `executed_by` the refreshing person, no stored result, cancelled only through its refresh. New **§38 `RefreshStatus`**. |
 | 2026-09-30 | v1.25 | 320 (#320) dependency guards | §16 registers `parameter.in_use` (pipeline-contract §13.20, 409 — a dashboard pins the set) as a two-segment code beside `parameter.not_found`: a parameter set is the entity, and "a dashboard pins it" is a state of the set, the `template.in_use` shape; the `parameter.*` domain row lists it. The `pipeline.purged` audit row gains `kept_draft_templates`. |
 | 2026-09-29 | v1.24 | L1a (#10) the visualization module | New **§31 `RendererKind`**, **§32 `AssertionKind`**, **§33 `TestRunStatus`**, **§34 `DashboardObjectType`**, **§35 `ActionScope`**, **§36 `StateSetting`**, **§37 `LayoutPosition`** — the dashboard documents' closed vocabularies, each held to its Kotlin enum by `VisualizationEnumsSpecDriftTest`; §16 registers the `visualization.*` and `dashboard.*` domains (pipeline-contract §13.22/§13.23) and their entity-level `not_found`s as two-segment. |
 | 2026-09-28 | v1.23 | 279 (#279) the request-body cap | §16 registers the `request.*` domain (pipeline-contract §13.21) with `request.body_too_large` as its one two-segment code; §17 gains the `413 Content Too Large` row. |

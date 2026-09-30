@@ -201,6 +201,24 @@ class DashboardService(
         version: Int,
     ): ArtifactVersion<DashboardBody>? = lifecycle.findVersion(workspaceId, lens, id, version)
 
+    /**
+     * The version the RUNTIME serves (#10 L2, spec §18 premise 12): the CURRENT RELEASED version of dashboard [id],
+     * through [lens] — nothing else. A draft is never served here (the draft preview is L4's, §6.3), a dashboard
+     * whose pointer names no live release (never released, or every release discarded) is absent, and a hidden one
+     * (the promoter lens) is the same absence. `ArtifactLifecycle.findWorking` cannot answer this: under the whole view
+     * it prefers the draft.
+     */
+    fun findServed(
+        workspaceId: UUID,
+        lens: ReadLens,
+        id: UUID,
+    ): ArtifactVersion<DashboardBody>? =
+        repository
+            .findCurrent(
+                workspaceId,
+                id,
+            )?.takeIf { it.detail.status == PipelineVersionStatus.RELEASED && lens.admits(it.record.name) }
+
     /** A version by name, through [lens] — `ArtifactLifecycle.findVersionByName`. */
     fun findVersionByName(
         workspaceId: UUID,

@@ -6,6 +6,8 @@ import co.datapipelines.auth.KeyRetentionPurge
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionEventRetention
 import co.datapipelines.persistence.FailureShape
+import co.datapipelines.visualization.DashboardRefreshRepository
+import co.datapipelines.web.dashboards.runtime.DashboardRefreshRetention
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
@@ -51,25 +53,35 @@ class RetentionSchedulingConfiguration {
         meterRegistry: MeterRegistry,
     ): AuditLogRetention = AuditLogRetention(jdbc, properties.retentionDays, meterRegistry)
 
+    /** Finished dashboard refreshes ride the event retention's tick and cutoff (#10 L2, metadata-db §8.1). */
+    @Bean
+    fun dashboardRefreshRetention(
+        jdbc: NamedParameterJdbcTemplate,
+        properties: ExecutionsProperties,
+    ): DashboardRefreshRetention = DashboardRefreshRetention(DashboardRefreshRepository(jdbc), properties.eventRetentionDays)
+
     @Bean
     fun executionEventRetentionScheduler(
         retention: ExecutionEventRetention,
         keyPurge: KeyRetentionPurge,
         auditRetention: AuditLogRetention,
-    ): ExecutionEventRetentionScheduler = ExecutionEventRetentionScheduler(retention, keyPurge, auditRetention)
+        dashboardRefreshRetention: DashboardRefreshRetention,
+    ): ExecutionEventRetentionScheduler = ExecutionEventRetentionScheduler(retention, keyPurge, auditRetention, dashboardRefreshRetention)
 }
 
 /**
- * The `@Scheduled` adapter over the retention sweep's three steps — see
+ * The `@Scheduled` adapter over the retention sweep's four steps — see
  * [RetentionSchedulingConfiguration]. In order:
  *
  * 1. [ExecutionEventRetention] — `execution_events` past their execution's retention;
- * 2. [KeyRetentionPurge] (keys v2 A17/B5) — revoked keys and their identities once nothing
+ * 2. [DashboardRefreshRetention] (#10 L2) — finished dashboard refreshes, on the same cutoff as the events that
+ *    describe them (metadata-db §8.1);
+ * 3. [KeyRetentionPurge] (keys v2 A17/B5) — revoked keys and their identities once nothing
  *    references them;
- * 3. [AuditLogRetention] (#310) — `audit_log` rows older than `datapipelines.audit.retention-days`.
+ * 4. [AuditLogRetention] (#310) — `audit_log` rows older than `datapipelines.audit.retention-days`.
  *    Last, so the purges before it never compete with a backlog for the sweep's hour. An audit
- *    row naming a key's identity is one of the references that keeps that key (step 2), so an
- *    identity whose last audit rows expire here is purged by the NEXT tick's step 2, an hour on.
+ *    row naming a key's identity is one of the references that keeps that key (step 3), so an
+ *    identity whose last audit rows expire here is purged by the NEXT tick's step 3, an hour on.
  *
  * ## Each step is isolated
  * A step that throws is one ERROR line naming it (`event=retention.step_failed step=<name>`), and
@@ -83,10 +95,13 @@ class ExecutionEventRetentionScheduler(
     private val retention: ExecutionEventRetention,
     private val keyPurge: KeyRetentionPurge,
     private val auditRetention: AuditLogRetention,
+    private val dashboardRefreshRetention: DashboardRefreshRetention,
 ) {
     @Scheduled(fixedDelay = RETENTION_INTERVAL_MILLIS)
     fun retain() {
         step("execution_events") { retention.retainOnce() }
+        // #10 L2: finished dashboard refreshes go with the events that describe them (metadata-db §8.1).
+        step("dashboard_refreshes") { dashboardRefreshRetention.retainOnce() }
         step("keys") { keyPurge.purgeOnce() }
         step("audit_log") { auditRetention.purgeOnce() }
     }

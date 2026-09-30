@@ -26,8 +26,13 @@ class DashboardValidator(
     private val pipelines: PipelineReleaseFacts,
     private val sets: ParameterSetFacts,
     private val visualizations: VisualizationPins,
-    /** The refresh deadline's cap (the spec's §9.6: `max-refresh-seconds`, 900) — L2 wires its key. */
+    /**
+     * The refresh deadline's cap (the spec's §9.6: `max-refresh-seconds`, 900) —
+     * `datapipelines.dashboards.timeouts.max-refresh-seconds`.
+     */
     private val maxRefreshSeconds: Int = DEFAULT_MAX_REFRESH_SECONDS,
+    /** The most DISTINCT executions one refresh may run (`datapipelines.dashboards.admission.max-executions-per-refresh`, 16). */
+    private val maxExecutionsPerRefresh: Int = DEFAULT_MAX_EXECUTIONS_PER_REFRESH,
 ) {
     /** Every rule over [document]; the document itself when it passes. */
     fun validate(
@@ -43,6 +48,7 @@ class DashboardValidator(
         val graph = GroupGraph(body)
         namespace(body, names, failures)
         val sources = sources(workspaceId, body, set, failures)
+        invocations(body, failures)
         occurrences(workspaceId, body, names, sources, failures)
         groups(body, names, failures)
         actions(body, names, failures)
@@ -108,6 +114,55 @@ class DashboardValidator(
         }
         return facts
     }
+
+    /**
+     * The dashboard's DISTINCT executions (spec §18 premise 11): the sources some occurrence reads, collapsed by the
+     * refresh's own sharing identity — pinned release plus bindings, the outgoing overrides applied. A refresh reserves
+     * one slot per distinct execution and is admitted for at most [maxExecutionsPerRefresh], so a document needing more
+     * could be saved and released and then be `dashboard.refresh.saturated` for ever; it is refused here instead.
+     *
+     * The identity here is decided from the DOCUMENT (a set-parameter binding is its name, a literal its canonical
+     * text), the refresh's from the evaluated values, so two bindings that happen to evaluate equal are two here and one
+     * there — this count is never below the refresh's, and a document that passes here is admissible on that ground.
+     */
+    private fun invocations(
+        body: DashboardBody,
+        failures: ArtifactFailures,
+    ) {
+        val read = body.visualizations.flatMap { occurrence -> occurrence.inputs.values.map { it.source } }.toSet()
+        val distinct =
+            body.sources
+                .filter { it.name in read }
+                .map { staticIdentity(body, it) }
+                .toSet()
+                .size
+        if (distinct > maxExecutionsPerRefresh) {
+            failures.add(
+                DashboardErrorCodes.TOO_MANY_INVOCATIONS,
+                "sources",
+                "The dashboard needs $distinct distinct executions per refresh; one refresh may run $maxExecutionsPerRefresh.",
+                mapOf("invocations" to distinct, "max" to maxExecutionsPerRefresh),
+            )
+        }
+    }
+
+    private fun staticIdentity(
+        body: DashboardBody,
+        source: DashboardSource,
+    ): String {
+        val bound = source.parameters.mapValues { (_, binding) -> binding.parameter?.let { "@$it" } ?: ("=" + canonical(binding.value)) }
+        val overridden = body.outgoingOverrides[source.name].orEmpty().mapValues { (_, literal) -> "=" + canonical(literal.value) }
+        return source.pipeline.toString() + "#" + (bound + overridden).toSortedMap()
+    }
+
+    /** JSON text with object keys sorted at every level — two spellings of one literal are one. */
+    private fun canonical(node: com.fasterxml.jackson.databind.JsonNode?): String =
+        when {
+            node == null -> "null"
+            node.isObject -> node.properties().sortedBy { it.key }.joinToString(",", "{", "}") { "\"${it.key}\":" + canonical(it.value) }
+            node.isArray -> node.joinToString(",", "[", "]") { canonical(it) }
+            else -> node.toString()
+        }
 
     @Suppress("LongParameterList") // one source's bindings judged against its release, the set and the overrides
     private fun sourceParameters(
@@ -415,6 +470,9 @@ class DashboardValidator(
     companion object {
         /** The spec's §9.6 cap until L2 binds `datapipelines.dashboards.timeouts.max-refresh-seconds`. */
         const val DEFAULT_MAX_REFRESH_SECONDS = 900
+
+        /** The shipped `max-executions-per-refresh` — the constructor's default for callers that wire no runtime config. */
+        const val DEFAULT_MAX_EXECUTIONS_PER_REFRESH = 16
     }
 }
 

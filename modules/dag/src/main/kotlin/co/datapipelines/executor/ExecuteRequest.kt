@@ -59,9 +59,10 @@ enum class ExecutionStatus {
  *   The default is [ExecutionTrigger.REST] — the catalogued value for a direct programmatic call,
  *   which is what an in-process construction is. It exists so callers predating this field still
  *   compile, not as a value a surface should rely on: `web` and `mcp-server` pass theirs.
- * @param directSink the `direct` delivery target (design §4.2) — set only on a CHILD execution
- *   spawned by a PIPELINE node through the internal execution service. When present, the caller
- *   node's result streams here and never reaches the [ResultStore]. Null for root executions.
+ * @param directSink the `direct` delivery target (design §4.2) — set on a CHILD execution
+ *   spawned by a PIPELINE node through the internal execution service, and (#10 L2) on a ROOT execution
+ *   a dashboard refresh starts as its source: the second caller. When present, the caller
+ *   node's result streams here and never reaches the [ResultStore]. Null for every other root execution.
  * @param parentExecutionId the execution whose PIPELINE node spawned this one; null for roots
  *   (metadata-db §4.6, design §5).
  * @param parentNodeId the PIPELINE node id in the parent that spawned this execution.

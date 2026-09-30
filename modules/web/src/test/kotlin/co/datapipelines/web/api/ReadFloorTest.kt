@@ -71,6 +71,10 @@ class ReadFloorTest {
         familyOf("/api/v1/visualizations/{id}/versions/{version}") shouldBeFamily Family.VISUALIZATIONS
         familyOf("/api/v1/dashboards") shouldBeFamily Family.DASHBOARDS
         familyOf("/api/v1/dashboards/{id}/versions") shouldBeFamily Family.DASHBOARDS
+        familyOf("/api/v1/dashboards/{id}") shouldBeFamily Family.DASHBOARDS
+        familyOf("/api/v1/dashboards/{id}/runtime/config") shouldBeFamily Family.DASHBOARD_RUNTIME
+        familyOf("/api/v1/dashboards/{id}/refreshes") shouldBeFamily Family.DASHBOARD_RUNTIME
+        familyOf("/api/v1/dashboards/{id}/refreshes/{refresh_id}") shouldBeFamily Family.DASHBOARD_RUNTIME
         familyOf("/executions") shouldBeFamily Family.EXECUTIONS
         familyOf("/api/v1/executions/{id}/result") shouldBeFamily Family.EXECUTIONS
         familyOf("/partials/recent-executions") shouldBeFamily Family.EXECUTIONS
@@ -227,6 +231,20 @@ class ReadFloorTest {
             floor = 5,
             permissions = setOf(Permission.VISUALIZATION_READ),
             matches = { path -> path.startsWith("/api/v1/visualizations") },
+        ),
+
+        /**
+         * #10 L2: the dashboard RUNTIME's three GETs — the configuration and the caller's refresh list and read — floor
+         * `dashboard.execute` (D50), not `dashboard.read`: reading a runtime configuration is the act of running the
+         * dashboard. AHEAD of [DASHBOARDS] because the first match wins and both start with the same prefix.
+         */
+        DASHBOARD_RUNTIME(
+            floor = 3,
+            permissions = setOf(Permission.DASHBOARD_EXECUTE),
+            matches = { path ->
+                path.startsWith("/api/v1/dashboards/") &&
+                    (path.contains("/runtime/") || path.endsWith("/refreshes") || path.contains("/refreshes/"))
+            },
         ),
 
         /** #10 L1b: the dashboards — the same row shape; floor = the family's five GET handlers. */
