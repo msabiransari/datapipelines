@@ -1,5 +1,6 @@
 package co.datapipelines.executor
 
+import co.datapipelines.persistence.FailureShape
 import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -101,9 +102,19 @@ class JdbcExecutionProgress(
     private val executions: ExecutionRepository,
     private val nodeStatsJson: (List<NodeStats>) -> String,
     private val throttleMillis: Long,
+    private val metrics: ExecutorMetrics? = null,
 ) : ExecutionProgress {
     /** Per execution, the last time a THROTTLED write went out. Cleared by nothing — see below. */
     private val lastWriteMs = ConcurrentHashMap<UUID, Long>()
+
+    /**
+     * The executions whose writes are CURRENTLY failing — the outage state the two report
+     * helpers share (#336 D7). The first refusal after a healthy write logs the WARN (the
+     * healthy → failing transition); the refusals between are counted, not logged; the first
+     * write that answers again logs the INFO. One entry per failing execution, dropped on the
+     * recovery or by [forget].
+     */
+    private val failing = ConcurrentHashMap.newKeySet<UUID>()
 
     override fun record(
         executionId: UUID,
@@ -132,14 +143,16 @@ class JdbcExecutionProgress(
         write(executionId, nodeStats())
     }
 
-    /** Drops [executionId]'s throttle state — called from the executor's `finally`. */
+    /** Drops [executionId]'s throttle and outage state — called from the executor's `finally`. */
     override fun forget(executionId: UUID) {
         lastWriteMs.remove(executionId)
+        failing.remove(executionId)
     }
 
     override fun heartbeat(executionId: UUID) {
         runCatching { executions.heartbeat(executionId) }
-            .onFailure { LOG.debug("heartbeat for execution {} not written: {}", executionId, it.message) }
+            .onSuccess { recovered(executionId) }
+            .onFailure { reportWriteFailure(executionId, "heartbeat", it) }
     }
 
     private fun write(
@@ -147,7 +160,37 @@ class JdbcExecutionProgress(
         nodeStats: List<NodeStats>,
     ) {
         runCatching { executions.recordProgress(executionId, nodeStatsJson(nodeStats)) }
-            .onFailure { LOG.debug("progress for execution {} not written: {}", executionId, it.message) }
+            .onSuccess { recovered(executionId) }
+            .onFailure { reportWriteFailure(executionId, "progress", it) }
+    }
+
+    /**
+     * §3.2's degradation rule at write rate: one WARN on the healthy → failing transition, per
+     * execution, named by class and SQLState (`FailureShape`, §3.4G) — never the driver's
+     * message, and never one line per refused write. Every refusal is counted.
+     */
+    private fun reportWriteFailure(
+        executionId: UUID,
+        kind: String,
+        failure: Throwable,
+    ) {
+        metrics?.progressWriteFailed()
+        if (failing.add(executionId)) {
+            LOG.warn(
+                "event=execution.progress_write_failed execution={} kind={} error={} sql_state={}",
+                executionId,
+                kind,
+                FailureShape.cause(failure),
+                FailureShape.sqlState(failure),
+            )
+        }
+    }
+
+    /** One INFO when a write answers again — the failing → healthy transition. */
+    private fun recovered(executionId: UUID) {
+        if (failing.remove(executionId)) {
+            LOG.info("event=execution.progress_write_recovered execution={}", executionId)
+        }
     }
 
     private companion object {

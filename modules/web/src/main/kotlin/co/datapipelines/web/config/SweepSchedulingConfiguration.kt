@@ -2,6 +2,7 @@ package co.datapipelines.web.config
 
 import co.datapipelines.executor.ExecutionProgress
 import co.datapipelines.executor.ExecutionRepository
+import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.JdbcExecutionProgress
 import co.datapipelines.executor.StaleExecutionSweeper
 import co.datapipelines.web.sse.SseJson
@@ -80,11 +81,13 @@ class SweepSchedulingConfiguration {
     fun executionProgress(
         executions: ExecutionRepository,
         executor: ExecutorProperties,
+        executorMetrics: ExecutorMetrics,
     ): ExecutionProgress =
         JdbcExecutionProgress(
             executions = executions,
             nodeStatsJson = { stats -> SseJson.mapper.writeValueAsString(stats) },
             throttleMillis = Duration.ofSeconds(executor.progressWriteIntervalSeconds).toMillis(),
+            metrics = executorMetrics,
         )
 
     @Bean
