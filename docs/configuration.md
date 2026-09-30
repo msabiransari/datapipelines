@@ -229,7 +229,7 @@ These framework key paths appear in `application.yml` as internal wiring. They a
 |---|---|---|---|
 | `datapipelines.observability.tracing.enabled` | `DATAPIPELINES_OBSERVABILITY_TRACING_ENABLED` | `false` | Enable OpenTelemetry tracing |
 | `datapipelines.observability.tracing.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OTLP collector endpoint (standard OTel env var, exception to §1 derivation) |
-| `datapipelines.observability.logging.format` | `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` | `json` (prod), `console` (dev) | Log output format — the closed set `json` \| `console` ([Observability §3.1](observability.md#31-format)). **Bound at startup (#337)**: resolved before logging initialises, and an unknown value refuses startup with the offending value named. `console` is the human-readable development output (`defaults.env` ships it for local runs); `json` is the structured §3.1 line a log collector parses (compose passes `json`, the VPS included, until an operator sets the env otherwise). |
+| `datapipelines.observability.logging.format` | `DATAPIPELINES_OBSERVABILITY_LOGGING_FORMAT` | `json` (prod), `console` (dev) | Log output format — the closed set `json` \| `console` ([Observability §3.1](observability.md#31-format)). **Bound at startup (#337)**: resolved before logging initialises, and an unknown value refuses startup with the offending value named. `console` is the human-readable development output (`defaults.env` ships it for local runs); `json` is the structured §3.1 line a log collector parses (compose passes `json`, the VPS included, until an operator sets the env otherwise). `json` also switches Spring's startup banner off, so stdout carries JSON lines only; `console` keeps it (#337-b). |
 
 ### 3.16 Pipelines
 
