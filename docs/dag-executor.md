@@ -1,6 +1,6 @@
 # DAG Executor Specification
 
-**Status:** v1.25 (revised — see Change Log)
+**Status:** v1.26 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract spec](pipeline-contract.md), [Templates spec](templates.md), [Datasources spec](datasources.md), [Staging spec](staging.md)
 **Last updated:** 2026-09-29
@@ -803,6 +803,8 @@ output — an object output accepts any JSON object under the byte cap — and t
 ### 6.4 DQL output dispatch
 
 For DQL nodes, behavior depends on `node.output`:
+
+**The source connection's streaming commit (108 §B; #336).** On a Postgres source with a nonzero `source-fetch-size`, the executor takes the connection out of autocommit so the driver hands back rows incrementally, and the `finally` commits unconditionally — a multi-statement DQL node's earlier statements committed as they ran under autocommit, so the commit restores autocommit's NET effect on every path, failure included. The commit's own refusal is never discarded (#336): **on a node that returned a result, a refused commit fails the node** with the catalogued `pipeline.node.commit_failed` ([pipeline-contract §13.4](pipeline-contract.md#134-node-execution)) — the net effect the author SQL is promised did not happen, and a success that hides it would report a node whose durability is unknown as done. **On a node that failed for its own reasons, the refusal is `addSuppressed` to that failure** — the primary verdict (a query failure, or a cancellation, which §5.2 keeps out of the failure path entirely) stays the result and the refusal rides as secondary evidence. The failure record names the refusal by class and SQLState (`FailureShape`), never a message that could quote connection material ([Observability §3.4G](observability.md#34-whats-logged-per-module)).
 
 #### 6.4.1 `output.target: "tempdb"` — stage ResultSet
 
@@ -1616,6 +1618,7 @@ document a customer can read before they need it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.26 | lane 336 (#336 D1) | §6.4 gains **the source connection's streaming commit** rule: `SourceStreaming.enable`'s out-of-autocommit and the finally's unconditional commit were documented in the code only, and the commit's own refusal was discarded (`runCatching`) on every path — a successful node whose finalizing commit refused reported SUCCESS. Now: on a node that returned, a refused commit fails it with the new catalogued `pipeline.node.commit_failed` (§13.4, 502); on a failing or cancelled node the refusal is `addSuppressed` to the primary failure, which stays the verdict. |
 | 2026-09-29 | v1.25 | the 306 merge's security pass (#311) | §10.1: the terminal UPDATE that matches no row is counted (`lifecycle_write_failed`) and logged, and the composition of the two late-landing cases is stated (#325); the bound now reaches the emitter's caller-side wait through `ExecutorConfig` (the bean had not copied it); the lifecycle failure lines log class + SQLState at WARN (§3.4G). |
 | 2026-09-29 | v1.24 | 306/#311 (the execution row's order and bounds) — numbered after 266's v1.21 | §10.1: the RUNNING row is written BEFORE the live send (#306 — an id never reaches a client before the id resolves; the started hook still runs first, the scheduler barrier is unchanged); the two lifecycle writes gain `datapipelines.executor.lifecycle-write-timeout-seconds` (#311) in two layers — a JDBC `queryTimeout` on the two statements plus the emitter's caller-side wait (a statement timeout cannot reach a never-answering database; measured) — with the outcomes stated (`recorded = false` / the row left RUNNING for the stale sweep, counted `datapipelines.executions.lifecycle_write_failed`), and the "honest limit" paragraph replaced by the residual that remains (an abandoned statement holds its pool thread until the database answers). |
 | 2026-09-29 | v1.23 | the 307 merge's security pass (#314) | §5.3's depth bullet: on the save and validate paths the compile-time ceiling's refusal is the templates validator's failure list (`template.validation.syntax_error`, `invariant_invalid` for an invariant, `details.kind: DEPTH`) — the merged branch let `ScriptResourceLimitException` escape `validate` as the catalogued 500 on every save path; the skill's transforms-evaluation sentence says the same. |

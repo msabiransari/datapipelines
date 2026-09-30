@@ -170,6 +170,9 @@ object ApiErrorCatalog {
             PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED to HttpStatus.BAD_GATEWAY,
             PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED to HttpStatus.BAD_GATEWAY,
+            // §13.4 (#336) — the streamed read's finalizing commit was refused: the source
+            // connection's failure, not the SQL's, so 502 like its connection sibling.
+            PipelineErrorCodes.Node.COMMIT_FAILED to HttpStatus.BAD_GATEWAY,
             // §13.4 — the node's statement outlived its JDBC query timeout: 504 like its sibling
             // `pipeline.execution.timeout`, not the 502 a wrong query earns.
             PipelineErrorCodes.Node.QUERY_TIMEOUT to HttpStatus.GATEWAY_TIMEOUT,

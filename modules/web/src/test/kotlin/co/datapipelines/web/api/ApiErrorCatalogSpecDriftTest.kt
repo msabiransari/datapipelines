@@ -298,8 +298,12 @@ class ApiErrorCatalogSpecDriftTest {
          * verbs need — landed in the SAME commit as their constants (`PipelineErrorCodes.Visualization` /
          * `.Dashboard` and the module's mirrors), these catalog rows and the two `AuthErrors` anchors.
          * Re-derived from the document's own parse.
+         *
+         * 371 → 372 with #336: §13.4 gains `pipeline.node.commit_failed` (502 — the streamed read's
+         * finalizing commit refused, an explicit catalog row beside its `query_execution_failed`
+         * sibling), landed in the SAME commit as its constant. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 371
+        const val SECTION_13_ROW_COUNT = 372
 
         /**
          * §12's distinct validation codes.
