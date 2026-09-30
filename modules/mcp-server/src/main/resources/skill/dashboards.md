@@ -38,9 +38,12 @@ Build in this order — each step's refusal names the path to fix.
 6. **Validate** with `dashboards_validate` whenever a pinned pipeline, set or visualization may have
    changed: it judges the working version against the dependencies as they are now and answers `valid`
    with every failure. `dashboards_get` shows each pin's status and each source's read-only verdict.
-7. **Release is a person's step.** No tool releases anything. A visualization release also needs its
-   evidence gate, which refuses every release until the visualization test sessions ship
-   (`visualization.release.tests_missing`); tell the person the dashboard is ready for review instead.
+7. **Release and import are human verbs.** No tool releases anything, and no tool imports an exported
+   envelope — `POST /api/v1/visualizations|dashboards/import` is a workspace-admin verb, and a
+   promotion lands artifacts through the promotion wire, never through the import route. A
+   visualization release also needs its evidence gate, which refuses every release until the
+   visualization test sessions ship (`visualization.release.tests_missing`); tell the person the
+   dashboard is ready for review instead.
 8. **Clean up** a draft you abandoned with `visualizations_purge_draft` / `dashboards_purge_draft`
    (`expected_hash` required). A visualization draft a live dashboard pins is refused
    `visualization.version.pinned` — the refusal names the dashboards.

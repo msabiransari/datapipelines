@@ -1,6 +1,6 @@
 # Dashboards
 
-**Status:** v0.2 — the two documents and their lifecycle (#10, lane L1a); the REST routes, the MCP tools and the
+**Status:** v0.3 — the transfer (L1c); the REST routes, the MCP tools and the
 permissions (§4, lane L1b). The transfer routes (L1c), the runtime (L2), the client runtime and the first-party page
 (L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add their sections as they land.
 **Owner:** datapipelines.co core
@@ -214,12 +214,23 @@ reach a visualization's own draft transform pin, which needs that visualization'
 An export is the CURRENT release's envelope: `{"visualization": …, "templates": […], "manifest": {…}}` — the transform
 pin's templates travel with it — and `{"dashboard": …, "visualizations": [each pinned visualization's envelope],
 "manifest": {…}}`, whose manifest names the pinned pipelines and set by reference: a dashboard assumes they were
-promoted first (D61's order: templates, parameter sets, pipelines, visualizations, dashboards). An import lands the
+promoted first (D61's order: templates, parameter sets, pipelines, visualizations, dashboards). The manifest carries
+`evidence: null` until the test sessions land (L4) — the exported release's evidence summary rides it from then on,
+and an importing deployment records `imported_with_evidence` on its audit row verbatim. An import lands the
 templates, then the visualizations, then the dashboard, each at its exported version with its exported id; the
 envelope's shape is judged before anything lands, the lifecycle fields beside a body are ignored by name and any
 other unknown key refuses; the same version with the same hash is a no-op; a pin the target lacks is
 `visualization.import.missing_template` or `dashboard.import.missing_dependency`; an id another artifact on the
 server holds is `*.import.id_taken` — never re-issued (C29).
+
+**The verb is a workspace-admin's, by the owner's ruling (2026-09-29, the `api_key.bind` cells):** the import lands
+RELEASED with no evidence re-run — the D56 promise traveled WITH the exported release, and an authoring deployment
+never re-runs it — so an author never holds `visualization.import` / `dashboard.import`. The promotion receiver
+lands promoted artifacts through the WIRE, never through the import verb: a batch's entries are the versions'
+payloads (never the envelopes), bound through the same strict readers (the bounds hold on receive as on save), and
+landed INSIDE the receive's one transaction after the batch's templates, sets, pipelines and endpoints, where the
+just-landed rows are what the import lens resolves against. An export is lensed BEFORE it is built — a visualization
+or dashboard the promoter lens hides is the same 404 an absent id gets.
 
 ---
 
@@ -247,8 +258,8 @@ parameter sets' shape:
 The two transport key roles (`api_caller`, `promotion_receiver`) hold none of them. **The promoter's lens:** a
 RELEASED dashboard newer than the promotion target's whose EVERY source pipeline her pipeline lens admits — so her
 dashboards never outrun her pipelines — and the visualizations those dashboards pin; anything else answers as an absent
-id. The two import rows land with the transfer routes (L1c), the execute row with the runtime (L2), and the key-binding
-row and the `dashboard_viewer` key column with the key kind (L5).
+id. The two import rows landed with the transfer routes (L1c — the workspace-admin verb, the ruling above), the execute
+row lands with the runtime (L2), and the key-binding row and the `dashboard_viewer` key column with the key kind (L5).
 
 ### 4.2 Validate is an author verb
 
@@ -288,5 +299,6 @@ authoring loop in the order an agent needs it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v0.3 | L1c (#10) the transfer | **§3.3** names the manifest's `evidence: null` (L4 fills it) and the import audit's `imported_with_evidence`; the import verb is the workspace-admin verb by the owner's ruling (the `api_key.bind` cells — the envelope lands RELEASED with no evidence re-run), and the promotion wire's receive order and reader binding are stated (the bounds hold on receive as on save; the import lens resolves inside the receive's transaction). §4.1's "the import rows land with the transfer routes" is past tense. |
 | 2026-09-29 | v0.2 | L1b (#10) the surfaces | **New §4 The surfaces** — the fourteen permission rows and the promoter's lens (§4.1), validate as an author verb (§4.2, owner ruling), what a source must declare for the save-time input check (§4.3), and the eleven MCP tools (§4.4); the REST routes are rest-api §22/§23. The status line names what L1b added. |
 | 2026-09-29 | v0.1 | L1a (#10) the module | The two documents, their bounds and their lifecycle (§1–§3). |

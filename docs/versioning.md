@@ -1,6 +1,6 @@
 # Versioning: Draft, Release, Promotion
 
-**Status:** v1.17 — #10: visualizations and dashboards join the lifecycle table (§3.5)
+**Status:** v1.18 — #10 L1c: the promotion wire carries the two transfer families (§10.4)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md) (§13 error catalog, §17 persistence), [Templates](templates.md), [Metadata DB](metadata-db.md) (§4.4/§4.5/§4.8/§4.9 — DDL authority), [REST API](rest-api.md), [Pipeline Editor UI](pipeline-editor.md)
 **Last updated:** 2026-09-28
@@ -1048,10 +1048,17 @@ Both ends guard; a client bug cannot smuggle a draft or a stale version through.
 Per promotion batch, push in topological order:
 
 1. **Template versions** referenced by any pushed pipeline (direct node refs plus the
-   transitive `imports_json` closure — the export bundle already computes this set).
+   transitive `imports_json` closure — the export bundle already computes this set), plus —
+   since #10 L1c — the transform pins of any pushed visualization.
 2. **Child pipelines** referenced by PIPELINE nodes (recursively — the export bundle does
    NOT include these today; promotion computes the closure itself).
 3. The **pipelines**, children before parents.
+
+The receiver applies the batch in ONE transaction in that order, then — since #10 L1c — the
+parameter sets' entries and, LAST (D61), the batch's **visualizations** and **dashboards**:
+the transfer families bind through the families' strict readers and land inside the
+transaction, where the just-landed templates and pipelines are what the import lens resolves
+against. A refusal at any entry rolls the whole batch back — the templates included.
 
 Pins are immutable and cycle-free, so the order always exists. Templates/pipelines already
 present at the same version and hash are skipped (idempotent).
@@ -1353,6 +1360,7 @@ re-opening it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-29 | v1.18 | L1c (#10 L1c) the transfer on the wire | **§10.4:** the closure includes the pushed visualizations' transform pins; the receiver's one-transaction order is stated through to the two transfer families — templates → sets → pipelines → endpoints → visualizations → dashboards (D61) — landed inside the transaction, bound through the families' strict readers, the just-landed rows visible to the import lens, a refusal at any entry rolling the batch back whole. |
 | 2026-09-29 | v1.17 | L1a (#10) visualizations and dashboards | **§3.5: the tree gains its fourth and fifth families** — visualizations and dashboards (V42; the parameter-set shape twice, one generic lifecycle): their rows read with `visualization.*` / `dashboard.*` codes; a visualization's release needs a test case, a released (or consented-cascade) transform pin and the D56 evidence gate (refusing until the tests lane installs it); a pinned visualization version is never purged or discarded while a live dashboard version pins it (`visualization.version.pinned`, graph rule 1); a dashboard's release cascades its DRAFT visualization pins under `release_pinned_visualizations` in one transaction (D61). |
 | 2026-09-28 | v1.16 | 194d (#194) parameter sets — renumbered at merge after 286's v1.15 | **§3.5: the tree gains its third family — parameter sets** (the record's §8.1: the templates' table shape, the pipelines' hash and index semantics, addressed by id, the `parameter.*` codes reading every lifecycle row). Release carries the pinned-template precondition plus the record's §4 source re-validation; the C14 boot rule adds parameter-set drafts to the authoring-disabled refusal. §5.5's refusal names all three draft families. |
 | 2026-09-28 | v1.15 | 286 (#276) | §3.3 names the constraint the race loser actually hits: both first writers allocate the same `max + 1`, so the loser collides on the version PRIMARY KEY before the one-draft index. `TemplateRepository.mappingDraftRace` mapped only the index and answered a first-draft race with a raw `DuplicateKeyException` (measured by a forced race — the winner's row held uncommitted until Postgres reported the contender blocked); it now maps both, as `PipelineRepository` and `ParameterSetRepository` do. No lifecycle rule changed. |
