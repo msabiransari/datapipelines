@@ -1,6 +1,8 @@
 # Dashboards
 
-**Status:** v0.4 — the transfer round's corrections (L1c-b): the import's atomicity, the
+**Status:** v0.5 — the transfer limits' honest contract (L1c-c): the count ceiling is aggregate, the receive's
+refused-dashboard rollback witnessed, the transfer bean takes the operator's configured value. The transfer round's
+corrections (L1c-b): the import's atomicity, the
 RELEASE rules on a landing, the count bounds, the wire's per-family arms. The REST routes, the MCP tools and the
 permissions (§4, lane L1b); the transfer routes (L1c). The transfer routes (L1c), the runtime (L2), the client runtime and the first-party page
 (L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add their sections as they land.
@@ -234,7 +236,13 @@ refuses with the family's release code (`visualization.release.dependency_not_re
 `dashboard.release.dependency_not_released`); a pin this deployment lacks stays the import lens' precise code.
 **The envelope's arrays are count-bounded** (O7): at most `datapipelines.visualization.max-visualizations-per-dashboard`
 entries in a dashboard's bundle or a template closure, refused `body_invalid` with `reason: too_many` before any
-member is parsed.
+member is parsed. **The ceiling is AGGREGATE (the L1c-c round):** the same value also caps each whole promotion
+batch arm (`visualizations`, `dashboards`) and each whole envelope array — an ADDITIONAL ceiling on top of the
+per-document bound the key's name describes, not a consequence of it. Two dashboards that are each individually
+valid — 30 distinct pins apiece under a 50 ceiling — can together present 60 entries, and such a batch refuses
+WHOLE: one refusal naming the configured key and the count, nothing landed, no automatic split. A genuine batch at
+exactly the configured ceiling lands whole. A separately scoped aggregate bound may be proposed as a follow-up;
+until one is ratified, this documented behaviour is the shipped behaviour.
 
 **The verb is a workspace-admin's, by the owner's ruling (2026-09-29, the `api_key.bind` cells):** the import lands
 RELEASED with no evidence re-run — the D56 promise traveled WITH the exported release, and an authoring deployment
@@ -315,6 +323,7 @@ authoring loop in the order an agent needs it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.5 | L1c-c (#10) transfer limits and evidence | **§3.3:** the count ceiling is stated as AGGREGATE — `max-visualizations-per-dashboard` also caps each whole envelope array and each whole promotion batch arm, an additional ceiling on top of the per-document bound (two individually valid dashboards can together exceed it; the batch refuses whole, no partial writes, no split; a batch at exactly the ceiling lands whole — E2E-proven both ways). The promotion page's `body_invalid` flash renders its toast (it was unmapped, hence silent; the `missing_datasources` and `key_invalid` branches' `&#39;` entities inside fragment-expression literals were a latent render-500, fixed with typographic apostrophes). The transfer service now receives the operator's configured value (the bean factory passed nothing; the constructor default stood in silently). |
 | 2026-09-30 | v0.4 | L1c-b (#10) the transfer round's corrections | **§3.3:** the dashboard import is ONE transaction (a refused dashboard leaves nothing landed) and its audit carries one `visualization.imported` row per landed bundled visualization (F1); a landing's pins are judged by the RELEASE rules — a present-but-not-RELEASED pin refuses the family's `release.dependency_not_released` (O2); the envelope's bundle and the batch's family arms are count-bounded by `max-visualizations-per-dashboard` before any member binds (O7); a dashboard root's pins travel as entries of the batch's `visualizations` arm, the dashboard arm carrying dashboards alone (O1). |
 | 2026-09-29 | v0.3 | L1c (#10) the transfer | **§3.3** names the manifest's `evidence: null` (L4 fills it) and the import audit's `imported_with_evidence`; the import verb is the workspace-admin verb by the owner's ruling (the `api_key.bind` cells — the envelope lands RELEASED with no evidence re-run), and the promotion wire's receive order and reader binding are stated (the bounds hold on receive as on save; the import lens resolves inside the receive's transaction). §4.1's "the import rows land with the transfer routes" is past tense. |
 | 2026-09-29 | v0.2 | L1b (#10) the surfaces | **New §4 The surfaces** — the fourteen permission rows and the promoter's lens (§4.1), validate as an author verb (§4.2, owner ruling), what a source must declare for the save-time input check (§4.3), and the eleven MCP tools (§4.4); the REST routes are rest-api §22/§23. The status line names what L1b added. |

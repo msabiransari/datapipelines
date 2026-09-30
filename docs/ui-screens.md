@@ -1,6 +1,6 @@
 # UI Screens Inventory
 
-**Status:** v1.87
+**Status:** v1.88
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Editor](pipeline-editor.md), [Design System](pipeline-editor.md#34-design-system-acmedesign-tokens), [REST API](rest-api.md), [Auth & Security](auth.md), [Templates](templates.md), [Configuration Reference](configuration.md)
 **Last updated:** 2026-09-29 (313, #313/#312)
@@ -1496,6 +1496,16 @@ read the target", with the code) is the one place the target's state is shown as
 promoter — every list screen shows the same sentence as its empty state instead, and no read
 ever answers a 502.
 
+**The `body_invalid` flash is a toast (L1c-c).** The receiver's count bounds and strict readers refuse
+`visualization.validation.body_invalid` / `dashboard.validation.body_invalid` — the aggregate batch ceiling among
+them — and the action flashes that code's last segment. Until L1c-c the key was UNMAPPED in this page's bin, and an
+unmapped key renders nothing: a push that did not happen was silent on the very screen that issued it. The page now
+renders the toast ("the target's validation refused the batch — for example a count bound on the batch's size — and
+rolled all of it back"), pointing the operator at the REST answer, which names the bound, the count and the key.
+Apostrophes inside these fragment-expression literals are TYPOGRAPHIC (`’`): an `&#39;` entity is decoded before the
+expression parses, where the apostrophe terminates the string literal — the `missing_datasources` and `key_invalid`
+branches shipped with exactly that latent render-500 and were fixed in the same round.
+
 **079 §F: the redirect flash is a TOAST, not a banner.** `?ok=`/`?error=` used to render two
 full-width `.ds-card` blocks at the top of the screen that pushed the page down and stayed
 until the next navigation. They are now §5.1 Shape A — the workspaces pattern. What is NOT
@@ -1837,6 +1847,7 @@ reachability gap this round left open and the one-line fix it needs.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.88 | L1c-c (#10) transfer limits and evidence | **§4.17**: the `body_invalid` flash renders its toast (it was unmapped, hence silent — a refused batch said nothing on the screen that issued it), the toast text points at the REST answer's bound/count/key, and the two shipped branches whose `&#39;` entities sat inside fragment-expression literals (`missing_datasources`, `key_invalid`) — a latent render-500 on those flashes — now use typographic apostrophes. Guard: `PromotionErrorFlashRenderTest` (the body_invalid toast renders; the unmapped-key closure unchanged; red-first with the branch removed). No route, permission or role changed. |
 | 2026-09-29 | v1.87 | L1c (#10 L1c) the transfer families on the promotion page | **§4.17**: the two family tables in the parameter-set mould's shape inside the same form (`name="visualization"` / `name="dashboard"`, the Send column and role guard), the read-only arm, the four-list empty state and form condition, the flash's `visualizations=N dashboards=N`, and the action's six-argument `promote`. The plan lists are the lens (the dashboard's newer-than-target arm stated). Guards named in the section. No route, permission or role changed. |
 | 2026-09-29 | v1.86 | 313 (#313, with #312) the promotion page offers parameter sets | **§4.17 Promotion**: the plan's parameter-set rows render as their own table — the pipelines table's frame, Send column and `canPromote` role guard, heading "Parameter sets", checkboxes `name="parameter_set"` — inside the form for a promoter and as a second read-only table for a reader; the "Nothing to promote" empty state fires only when BOTH lists are empty, and the success flash carries `parameter_sets=N` into the toast's sentence. The action reads the second field and calls the sender's four-argument `promote` (§8.3's order: templates → sets → pipelines); a set-only selection is a valid submit. Guards: `PromotionSetsRenderTest` (the sets table inside the same role guard; red with the table removed), `PromotionUiControllerTest` (the four-argument call, the counts in the flash), `PromotionTwoDeploymentE2eTest` Order 55 (the form post promotes a set to uat), `PromotionSetsBrowserTest` (light/dark screens of the page with a set candidate, against a stub target — the browser harness boots one app). No route, permission or role changed. |
 | 2026-09-28 | v1.85 | 301 (#301, #273, #149) UI residue — the 287 security pass's observations 2–9, the discard dialog's schedules, the facts link | **§4.3d, the Discard dialog**: it now lists **the schedules that run the pipeline** (273) — the SAME by-target read the Usage tab makes, lensed for the caller, one row per schedule with its condition and stored next occurrence, under a note that says the consequence (the discard succeeds; each schedule then blocks at its next run — the §5.2 `pointer_null` shape — until repointed or deleted). **§3.7, keyboard viewports**: the `tabindex="0"` tab stop lands only on a viewport that actually scrolls (301) — the enhancer checks the computed overflow and the content, re-checked in `measure()`; a fitting page-flow frame (`overflow: clip`) keeps its inert `-1`. The history snapshot cleanups run on the **live page** an instant before it is snapshotted (301 — htmx clones only after the event), wording corrected in the shell and the enhancer; the app.css modal comment matches the class toggle the scripts actually do; the token test's duration rule reads the longhand properties too; the paged-sort rule's every-row-new decision is a node-tested seam (`allRowsNew`) and the dock's ancestor walk is linear in the batch (a Set). **The datasource facts' source-pipeline link is a full document load** (149) — it carried the one boosting `<a>` into the editor, which cannot initialise on a swap. Guards: `DataTableBrowserTest` (a non-scrolling frame keeps `-1`; the evidence names in the observer KDoc corrected to the numbers), `DataTableCssTokenTest` (longhand), `data-table.test.mjs` (`allRowsNew`), `PipelineLifecycleDialogRenderTest`/`RoleVisibilityRenderTest` (the schedules evidence, the promoter contract), `DiscardDialogSchedulesBrowserTest` (two schedules; a promoter sees no Discard verb), `DatasourceFactsLinkBrowserTest` (the full load, red on the boosting tree at the issue's own symptom). No route, permission or role changed — the dialog's read rides `pipeline.version.manage` as before. |
