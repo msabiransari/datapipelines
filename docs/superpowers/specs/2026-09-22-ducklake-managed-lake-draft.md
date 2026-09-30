@@ -6,6 +6,7 @@
 **Evidence:** official documentation consulted during the discussions; initial repository contracts inspected at `09b0e715`, skill update based on `1aac294e`. No lake prototype, benchmarks or recovery tests were run.
 **Related work:** [#219](https://github.com/msabiransari/datapipelines/issues/219) tracks the current skill correction and this draft update, not implementation of writable dp-lake.
 **Distribution:** contributor design material under `docs/superpowers/specs/`; not part of the product documentation packaging allowlist.
+**Companion discussion:** [Ingestion and generic validation engine](2026-09-24-ingestion-validation-design-draft.md) — the full ingestion design agenda, validation contract questions and proposed acceptance scenarios to revisit before implementation.
 
 This document preserves the substantive discussion, including corrections and unresolved
 choices. Owner direction, externally documented facts and assistant recommendations are
@@ -514,6 +515,10 @@ automatic arbitrary schema evolution and source deletion. Dashboards/scheduling/
 remain shared Datapipelines features rather than parallel lake-specific subsystems.
 
 ## 12. Resume checklist and learning path
+
+Revisit the [ingestion and validation companion](2026-09-24-ingestion-validation-design-draft.md)
+alongside this checklist. Validation is a major design workstream and must be developed
+together with publication, checkpointing and recovery, not added after the write path.
 
 Start with the owner's request to learn before finalizing the architecture:
 
