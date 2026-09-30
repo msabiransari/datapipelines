@@ -572,8 +572,8 @@ class PromotionTwoDeploymentE2eTest {
 
     @Order(60)
     fun `a released visualization and a dashboard bundling its pins promote through the SENDER (#10 L1c)`() {
-        createReleasedVisualizationOn(portDev, VIZ_A, withTransform = false)
-        createReleasedVisualizationOn(portDev, VIZ_B, withTransform = false)
+        createReleasedVisualizationOn(portDev, VIZ_A)
+        createReleasedVisualizationOn(portDev, VIZ_B)
         createReleasedDashboardOn(portDev, PAGE_DASH, listOf(VIZ_A to VIZ_B))
 
         val applied = promoteTransferOrExplain(listOf(VIZ_A), listOf(PAGE_DASH))
@@ -584,14 +584,14 @@ class PromotionTwoDeploymentE2eTest {
             {
                 assertEquals(
                     1,
-                    artifactVersion(devJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A),
+                    artifactVersion(devJdbc, "visualizations", VIZ_A),
                     "dev's viz",
                 )
             },
             {
                 assertEquals(
                     1,
-                    artifactVersion(uatJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A),
+                    artifactVersion(uatJdbc, "visualizations", VIZ_A),
                     "uat's viz",
                 )
             },
@@ -602,8 +602,8 @@ class PromotionTwoDeploymentE2eTest {
                     "the visualization's body hash",
                 )
             },
-            { assertEquals(1, artifactVersion(devJdbc, "dashboards", "dashboard_versions", "dashboard_id", PAGE_DASH), "dev's dash") },
-            { assertEquals(1, artifactVersion(uatJdbc, "dashboards", "dashboard_versions", "dashboard_id", PAGE_DASH), "uat's dash") },
+            { assertEquals(1, artifactVersion(devJdbc, "dashboards", PAGE_DASH), "dev's dash") },
+            { assertEquals(1, artifactVersion(uatJdbc, "dashboards", PAGE_DASH), "uat's dash") },
             {
                 assertEquals(
                     artifactHash(devJdbc, "dashboards", "dashboard_versions", "dashboard_id", PAGE_DASH),
@@ -616,7 +616,7 @@ class PromotionTwoDeploymentE2eTest {
 
     @Order(61)
     fun `the PAGE posts both families - the form's family slots reach the six-argument promote`() {
-        createReleasedVisualizationOn(portDev, VIZ_PAGE, withTransform = false)
+        createReleasedVisualizationOn(portDev, VIZ_PAGE)
 
         val response =
             given()
@@ -636,7 +636,7 @@ class PromotionTwoDeploymentE2eTest {
             location.orEmpty().contains("visualizations=1") && location.orEmpty().contains("dashboards=1"),
             "the flash must name the applied family counts, was: $location",
         )
-        assertEquals(1, artifactVersion(uatJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_PAGE), "uat's viz")
+        assertEquals(1, artifactVersion(uatJdbc, "visualizations", VIZ_PAGE), "uat's viz")
     }
 
     // ------------------------------------------------------------------ content on dev
@@ -801,7 +801,6 @@ class PromotionTwoDeploymentE2eTest {
     private fun createReleasedVisualizationOn(
         port: Int,
         name: String,
-        withTransform: Boolean,
     ) {
         val body =
             """
@@ -838,7 +837,7 @@ class PromotionTwoDeploymentE2eTest {
         name: String,
         pins: List<Pair<String, String>>,
     ) {
-        val childVersion = artifactVersion(devJdbc, "pipelines", "pipeline_versions", "pipeline_id", CHILD)
+        val childVersion = artifactVersion(devJdbc, "pipelines", CHILD)
         val names = pins.flatMapIndexed { index, _ -> listOf("chart_${index}a", "chart_${index}b") }
         val gridRows = names + "refresh_button"
         val occurrences =
@@ -915,8 +914,6 @@ class PromotionTwoDeploymentE2eTest {
     private fun artifactVersion(
         jdbc: Jdbc,
         table: String,
-        versionsTable: String,
-        fkColumn: String,
         name: String,
     ): Int = jdbc.scalar("SELECT current_version FROM $table WHERE name = '$name'").toInt()
 

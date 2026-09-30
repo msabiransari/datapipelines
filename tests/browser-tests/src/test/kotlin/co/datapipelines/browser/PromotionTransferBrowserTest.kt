@@ -350,7 +350,8 @@ class PromotionTransferBrowserTest : BrowserSuite() {
                         val body =
                             """{"schema_version":1,"correlation_id":"stub","data":{"deployment":"uat",""" +
                                 """"authoring_enabled":false,"workspace":"default",""" +
-                                """"pipelines":[],"templates":[],"datasources":[],"parameter_sets":[],"visualizations":[],"dashboards":[]}}"""
+                                """"pipelines":[],"templates":[],"datasources":[],"parameter_sets":[],""" +
+                                """"visualizations":[],"dashboards":[]}}"""
                         val bytes = body.toByteArray(Charsets.UTF_8)
                         exchange.responseHeaders.add("Content-Type", "application/json")
                         exchange.sendResponseHeaders(200, bytes.size.toLong())

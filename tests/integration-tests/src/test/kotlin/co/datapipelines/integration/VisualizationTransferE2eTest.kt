@@ -925,16 +925,15 @@ class VisualizationTransferE2eTest {
         fun rowOrNull(sql: String): Map<String, String>? =
             DriverManager.getConnection(url, user, password).use { connection ->
                 connection.createStatement().use { statement ->
-                    statement.executeQuery(sql).use { rs ->
-                        if (!rs.next()) {
-                            null
-                        } else {
-                            (1..rs.metaData.columnCount).associate { i ->
-                                rs.metaData.getColumnLabel(i) to (rs.getString(i) ?: "")
-                            }
-                        }
-                    }
+                    statement.executeQuery(sql).use(::rowAt)
                 }
+            }
+
+        private fun rowAt(rs: java.sql.ResultSet): Map<String, String>? =
+            if (!rs.next()) {
+                null
+            } else {
+                (1..rs.metaData.columnCount).associate { i -> rs.metaData.getColumnLabel(i) to (rs.getString(i) ?: "") }
             }
 
         fun row(sql: String): Map<String, String> =
