@@ -142,7 +142,7 @@ class DatasourceQueryCommitTest {
             }
         }
 
-    /** The suppression contract of [SourceCommit.finalize], asserted directly. */
+    /** The suppression contract of [SourceCommit.settle], asserted directly. */
     @Test
     fun `a refused commit under a primary failure is suppressed, and the primary propagates untouched`() {
         val primary = SQLException("the primary query failure")
@@ -160,19 +160,19 @@ class DatasourceQueryCommitTest {
         // commit failure as cause.
         val signal =
             shouldThrow<NodeFailedSignal> {
-                SourceCommit.finalize(conn, tookOutOfAutocommit = true, primary = null)
+                SourceCommit.settle(conn, tookOutOfAutocommit = true, primary = null)
             }
         signal.error.code shouldBe "pipeline.node.commit_failed"
         signal.error.details["sql_state"] shouldBe "08000"
         signal.cause shouldBe commitFailure
 
         // A primary in flight: the refusal rides along suppressed; the primary is unchanged.
-        SourceCommit.finalize(conn, tookOutOfAutocommit = true, primary = primary)
+        SourceCommit.settle(conn, tookOutOfAutocommit = true, primary = primary)
         primary.suppressed shouldBe arrayOf<Throwable>(commitFailure)
 
         // Streaming never engaged: no commit is attempted at all.
         val before = commitsAttempted.get()
-        SourceCommit.finalize(conn, tookOutOfAutocommit = false, primary = primary)
+        SourceCommit.settle(conn, tookOutOfAutocommit = false, primary = primary)
         commitsAttempted.get() shouldBe before
     }
 }

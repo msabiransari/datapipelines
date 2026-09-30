@@ -145,7 +145,8 @@ val allowedInternalDependencies: Map<String, Set<String>> = mapOf(
     ":modules:persistence" to emptySet(),
     ":modules:pipeline-contract" to setOf(":modules:typesystem", ":modules:calculators"),
     ":modules:templates" to setOf(":modules:typesystem", ":modules:pipeline-contract", ":modules:scripting"),
-    ":modules:datasources" to setOf(":modules:typesystem"),
+    // `persistence` since #336: FailureShape for the lease's cleanup WARNs (module-structure §5.4).
+    ":modules:datasources" to setOf(":modules:typesystem", ":modules:persistence"),
     ":modules:staging" to setOf(":modules:typesystem"),
     // #266 — the audit log's batching writer (module-structure §5.19).
     ":modules:auth" to setOf(":modules:typesystem", ":modules:persistence"),

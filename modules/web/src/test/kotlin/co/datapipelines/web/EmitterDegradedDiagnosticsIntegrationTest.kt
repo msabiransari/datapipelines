@@ -212,16 +212,29 @@ class EmitterDegradedDiagnosticsIntegrationTest {
             )
 
         private fun cleanSchema() {
+            // The cleaning rule (SharedPostgres KDoc): restore what other suites seed. The
+            // truncate removes the shared `default` workspace row the fixtures expect — it is
+            // re-seeded idempotently before this suite hands the database back.
             JdbcTemplate(pool).execute("TRUNCATE pipeline_executions, pipeline_versions, pipelines, users, workspaces CASCADE")
             JdbcTemplate(pool).execute("DELETE FROM execution_events")
+            JdbcTemplate(pool).execute(
+                "INSERT INTO workspaces (id, name, display_name) VALUES" +
+                    " ('defa0000-0000-0000-0000-000000000001', 'default', 'Default') ON CONFLICT DO NOTHING",
+            )
         }
 
         private fun seedPipeline() {
             jdbc.jdbcTemplate.execute(
-                "INSERT INTO workspaces (id, name, display_name) VALUES ('$DEFAULT_WORKSPACE', 'default', 'Default') ON CONFLICT DO NOTHING",
+                "INSERT INTO workspaces (id, name, display_name) VALUES" +
+                    " ('$DEFAULT_WORKSPACE', 'd5', 'D5 suite') ON CONFLICT DO NOTHING",
+            )
+            jdbc.jdbcTemplate.execute(
+                "INSERT INTO workspaces (id, name, display_name) VALUES" +
+                    " ('$DEFAULT_WORKSPACE', 'default', 'Default') ON CONFLICT DO NOTHING",
             )
             jdbc.update(
-                "INSERT INTO users (id, email, display_name, provider, provider_subject) VALUES (:id, :email, 'P', 'google', :sub)",
+                "INSERT INTO users (id, email, display_name, provider, provider_subject)" +
+                    " VALUES (:id, :email, 'P', 'google', :sub)",
                 mapOf("id" to userId, "email" to "d5-$userId@example.com", "sub" to "d5-$userId"),
             )
             jdbc.update(

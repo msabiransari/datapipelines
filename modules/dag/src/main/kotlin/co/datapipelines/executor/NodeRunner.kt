@@ -834,6 +834,10 @@ class NodeRunner(
         // The primary failure, if the query raises one — the commit in the finally needs to know
         // whether it is finalizing a success or unwinding alongside a failure (#336 D1).
         var primary: Throwable? = null
+        // ANY in-flight failure rides as primary — SQLException, cancellation (§5.2: a commit
+        // refusal during cancellation is suppressed onto it, never re-labelled) — so the catch
+        // is deliberately Throwable-wide (#336 D1).
+        @Suppress("TooGenericExceptionCaught")
         try {
             return runDatasourceQuery(node, conn, bound, ctx, startedAt, resolved, dialect)
         } catch (t: Throwable) {
@@ -848,7 +852,7 @@ class NodeRunner(
             // and then only committing on success would silently change that: a failed node's
             // earlier side effects would roll back. Streaming is a transport decision and must not
             // become a transaction-semantics decision, so the commit is unconditional.
-            SourceCommit.finalize(conn, tookOutOfAutocommit, primary)
+            SourceCommit.settle(conn, tookOutOfAutocommit, primary)
         }
     }
 
@@ -1216,32 +1220,34 @@ internal object SourceCommit {
      *
      * @throws NodeFailedSignal on a refusal with no primary failure.
      */
-    fun finalize(
+    @Suppress("TooGenericExceptionCaught") // the primary may be ANY in-flight failure — cancellation included (§5.2)
+    fun settle(
         conn: Connection,
         tookOutOfAutocommit: Boolean,
         primary: Throwable?,
     ) {
         if (!tookOutOfAutocommit) return
-        try {
-            conn.commit()
-        } catch (e: Throwable) {
-            val inFlight = primary
-            if (inFlight != null) {
-                inFlight.addSuppressed(e)
-            } else {
-                throw NodeFailedSignal(
-                    MappedError(
-                        code = PipelineErrorCodes.Node.COMMIT_FAILED,
-                        message = e.message?.take(ErrorCodeMapper.MAX_MESSAGE_CHARS) ?: PipelineErrorCodes.Node.COMMIT_FAILED,
-                        details =
-                            mapOf(
-                                "error" to FailureShape.cause(e),
-                                "sql_state" to FailureShape.sqlState(e),
-                            ),
-                    ),
-                    e,
-                )
-            }
+        val refusal = runCatching { conn.commit() }.exceptionOrNull() ?: return
+        val inFlight = primary
+        if (inFlight != null) {
+            inFlight.addSuppressed(refusal)
+        } else {
+            throw commitFailedSignal(refusal)
         }
     }
+
+    /** The success-path refusal as the node's own failure: the catalogued code, the refusal as cause. */
+    private fun commitFailedSignal(refusal: Throwable): NodeFailedSignal =
+        NodeFailedSignal(
+            MappedError(
+                code = PipelineErrorCodes.Node.COMMIT_FAILED,
+                message = refusal.message?.take(ErrorCodeMapper.MAX_MESSAGE_CHARS) ?: PipelineErrorCodes.Node.COMMIT_FAILED,
+                details =
+                    mapOf(
+                        "error" to FailureShape.cause(refusal),
+                        "sql_state" to FailureShape.sqlState(refusal),
+                    ),
+            ),
+            refusal,
+        )
 }

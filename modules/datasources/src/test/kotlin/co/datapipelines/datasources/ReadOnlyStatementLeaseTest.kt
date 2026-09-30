@@ -239,28 +239,6 @@ class ReadOnlyStatementLeaseTest {
     // refuses: the flow is the production one, and only the finalization lies.
     // ---------------------------------------------------------------------
 
-    /** A statement that is real for everything but the two endings this class refuses on demand. */
-    private class RefusingStatement(
-        private val delegate: java.sql.PreparedStatement,
-        private val refuseCancel: Boolean,
-        private val refuseClose: Boolean,
-    ) : java.sql.PreparedStatement by delegate {
-        val closeAttempts =
-            java.util.concurrent.atomic
-                .AtomicInteger()
-
-        override fun cancel() {
-            if (refuseCancel) throw java.sql.SQLException("cancel refused by the double", "0A000")
-            delegate.cancel()
-        }
-
-        override fun close() {
-            closeAttempts.incrementAndGet()
-            if (refuseClose) throw java.sql.SQLException("close refused by the double", "08003")
-            delegate.close()
-        }
-    }
-
     /** A connection that is real for everything but the statement it hands out and its own close. */
     private class RefusingConnection(
         private val delegate: Connection,

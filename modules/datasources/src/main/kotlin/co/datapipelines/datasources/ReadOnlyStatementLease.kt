@@ -184,10 +184,14 @@ class LeasedStatement internal constructor(
      * #336 D2: a cancel refusal is one WARN (class + SQLState, `datasources.md` §5.3) — evidence,
      * not a reason to skip the discard, which runs unconditionally.
      */
+    @Suppress("TooGenericExceptionCaught") // a cleanup ending refuses in ANY shape; the WARN is the evidence (§5.3)
     fun abandon() {
         if (!ending.compareAndSet(OPEN, ABANDONED)) return
         try {
             statement.cancel()
+            // A cleanup ending may refuse with ANY exception shape — drivers raise
+            // RuntimeExceptions from close/cancel as readily as SQLExceptions (#336 D2) —
+            // and the WARN is the evidence either way. Nothing propagates: the discard runs.
         } catch (e: Exception) {
             logCleanupFailure("statement_cancel", e)
         }
@@ -203,6 +207,7 @@ class LeasedStatement internal constructor(
      * be holding session state the pool would hand to the next borrower. The pool's own
      * `discard` is the disposition (for Hikari, `evictConnection`; the interface default closes).
      */
+    @Suppress("TooGenericExceptionCaught") // a cleanup ending refuses in ANY shape; the WARN is the evidence (§5.3)
     override fun close() {
         if (ending.compareAndSet(OPEN, CLOSED)) {
             try {
