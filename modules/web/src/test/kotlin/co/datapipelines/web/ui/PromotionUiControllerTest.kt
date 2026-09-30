@@ -133,7 +133,12 @@ class PromotionUiControllerTest {
             )
         every { promotionService.promote(workspaceId, "acme", listOf("p1", "p2"), emptyList(), emptyList(), emptyList()) } returns applied
 
-        controller.promote(names = listOf(" p1 ", "p2"), parameterSetNames = null, visualizationNames = null, dashboardNames = null) shouldBe
+        controller.promote(
+            names = listOf(" p1 ", "p2"),
+            parameterSetNames = null,
+            visualizationNames = null,
+            dashboardNames = null,
+        ) shouldBe
             "redirect:/promotion?ok=promoted&pipelines=3&templates=2&parameter_sets=0&visualizations=0&dashboards=0"
     }
 
@@ -152,7 +157,12 @@ class PromotionUiControllerTest {
             promotionService.promote(workspaceId, "acme", emptyList(), listOf("acme/sales/filters"), emptyList(), emptyList())
         } returns applied
 
-        controller.promote(names = null, parameterSetNames = listOf(" acme/sales/filters "), visualizationNames = null, dashboardNames = null) shouldBe
+        controller.promote(
+            names = null,
+            parameterSetNames = listOf(" acme/sales/filters "),
+            visualizationNames = null,
+            dashboardNames = null,
+        ) shouldBe
             "redirect:/promotion?ok=promoted&pipelines=0&templates=0&parameter_sets=1&visualizations=0&dashboards=0"
     }
 
@@ -172,7 +182,12 @@ class PromotionUiControllerTest {
             promotionService.promote(workspaceId, "acme", emptyList(), emptyList(), listOf("finance/viz"), listOf("finance/dash"))
         } returns applied
 
-        controller.promote(names = null, parameterSetNames = null, visualizationNames = listOf(" finance/viz "), dashboardNames = listOf("finance/dash")) shouldBe
+        controller.promote(
+            names = null,
+            parameterSetNames = null,
+            visualizationNames = listOf(" finance/viz "),
+            dashboardNames = listOf("finance/dash"),
+        ) shouldBe
             "redirect:/promotion?ok=promoted&pipelines=0&templates=0&parameter_sets=0&visualizations=1&dashboards=2"
     }
 

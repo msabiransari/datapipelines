@@ -67,6 +67,7 @@ enum class Permission(
     VISUALIZATION_UPDATE("visualization.update"),
     VISUALIZATION_VERSION_MANAGE("visualization.version.manage"),
     VISUALIZATION_DELETE("visualization.delete"),
+
     // #10 L1c — the transfer (rest-api §22). Workspace admin and super admin ONLY (the owner's ruling, the
     // `api_key.bind` cells): the import verb lands RELEASED content with no evidence run, so an author never
     // holds it on an authoring deployment — the promotion receiver lands promoted artifacts through the WIRE.

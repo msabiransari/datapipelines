@@ -581,8 +581,20 @@ class PromotionTwoDeploymentE2eTest {
         assertEquals(1, applied["visualizations"], "the sender's visualization slot")
         assertEquals(1, applied["dashboards"], "the sender's dashboard slot")
         assertAll(
-            { assertEquals(1, artifactVersion(devJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A), "dev's viz") },
-            { assertEquals(1, artifactVersion(uatJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A), "uat's viz") },
+            {
+                assertEquals(
+                    1,
+                    artifactVersion(devJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A),
+                    "dev's viz",
+                )
+            },
+            {
+                assertEquals(
+                    1,
+                    artifactVersion(uatJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A),
+                    "uat's viz",
+                )
+            },
             {
                 assertEquals(
                     artifactHash(devJdbc, "visualizations", "visualization_versions", "visualization_id", VIZ_A),
@@ -882,7 +894,17 @@ class PromotionTwoDeploymentE2eTest {
         id: String,
     ) {
         // The fixtures run on dev only; the admin's id is the released_by FK's real user row.
-        val admin = given().port(port).asSession(adminSession()).`when`().get("/api/v1/auth/me").then().extract().jsonPath().getString("data.id")
+        val admin =
+            given()
+                .port(
+                    port,
+                ).asSession(adminSession())
+                .`when`()
+                .get("/api/v1/auth/me")
+                .then()
+                .extract()
+                .jsonPath()
+                .getString("data.id")
         devJdbc.execute(
             "UPDATE $versionsTable SET status = 'RELEASED', released_at = NOW(), released_by = '$admin'" +
                 " WHERE $fkColumn = '$id' AND version = 1",
