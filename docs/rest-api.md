@@ -2554,7 +2554,7 @@ field missing / of the wrong type, is `400 dashboard.validation.body_invalid` wi
 | Route | Request | Answer |
 |---|---|---|
 | `GET /{id}/runtime/config` | — | `200` `{configuration_id, dashboard: {id, name, version, status}, layout, parameter_set, visualizations: [{name, artifact: {id, name, version}, renderer: {kind, version}, config, bindings, presentation, timeout_seconds}], groups, actions, action_controls, parameter_scopes, parameter_state, timeouts: {refresh_seconds, parameter_lock_seconds, render_seconds}, budgets: {max_bytes_per_source, max_bytes_per_refresh}}` |
-| `POST /{id}/runtime/parameters` | `{configuration_id, instance_id, selections, intent}` (`intent`: `bootstrap` \| `parent_change` \| `retry`) | `200` the parameter engine's evaluate response ([§21.3](#213-evaluate)) plus `overrides_applied`, `parents`, `parameter_revision` |
+| `POST /{id}/runtime/parameters` | `{configuration_id, instance_id, selections, intent}` (`intent`: `bootstrap` \| `parent_change` \| `retry`) | `200` the parameter engine's evaluate response ([§21.3](#213-evaluate)) unchanged, plus `overrides_applied`, `parents`, `parameter_revision` |
 | `POST /{id}/runtime/visualizations` | `{configuration_id, instance_id, refresh_id, parameter_revision, selections, scope, targets}` — `refresh_id` a fresh v4 UUID the client mints; `scope` `all` \| `targets`; `selections` at most 64 KiB | `200` `text/event-stream` (below) |
 | `POST /{id}/runtime/refreshes/{refresh_id}/abort` | `{instance_id}` | `202` `{refresh_id, status: "abort_requested"}` — no wait |
 | `GET /{id}/refreshes?offset=&limit=` | — | `200` a page of the caller's refreshes, newest first (every refresh with `execution.read_all`) |
@@ -2569,7 +2569,16 @@ order they can occur: `refresh_started` `{refresh_id, targets, sources: [{name, 
 `transform`, `budget`, `timeout`, `abort`) and `visualization_data` `{refresh_id, name, type, bindings: {path: [values]}, rows, bytes}`;
 and `refresh_completed` `{refresh_id, status, targets: {name: {outcome, stage?, reason?}}}` — always last (`status`: `COMPLETED`,
 `PARTIAL`, `FAILED`, `ABORTED`, `TIMED_OUT`). A `source_failed` names a code and never a driver or datasource message. A
-dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` on it is `404 execution.not_found`, and
+For `POST /runtime/parameters`, `dashboard.execute` authorizes the pinned set evaluation under D50 without separately
+requiring `parameter_set.evaluate`. The response remains the evaluator's unchanged response, including its existing
+bounded selector diagnostics and safe echo for failed or unreachable selectors. The stream's code-only error rule
+applies only to stream frames.
+
+The `execution_id` member on each `source_started`, `source_completed` and `source_failed` frame is present only when
+the subscriber's current principal holds `execution.read`; `source_failed` omits the member even when its internal id
+is null. Stream admission and this projection use the same current-authority decision on every write. The internal event
+and durable refresh-execution link still retain the id. A role change is reflected under the auth cache's membership
+window. A dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` on it is `404 execution.not_found`, and
 `DELETE /api/v1/executions/{id}` on it is `404` for everyone — it is cancelled only through its refresh's abort.
 
 | Error | HTTP | When |
@@ -2577,7 +2586,7 @@ dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` o
 | `dashboard.validation.body_invalid` | 400 | The request body is unreadable or a field is missing, mistyped or a reused `refresh_id`; the selections are invalid (`details.reason: selections_invalid`, `details.parameters`) |
 | `dashboard.validation.empty_targets` / `.target_not_visualization` | 400 | `scope: targets` naming nothing, or a name that is no visualization occurrence |
 | `dashboard.runtime.configuration_stale` | 409 | `configuration_id` is not the current one (`details.configuration_id`); the client reloads |
-| `dashboard.runtime.dependency_missing` | 409 | A pinned visualization, set or source no longer holds — gone, not released, or no longer read-only (`details.dependency`, `.name`, `.reason`) |
+| `dashboard.runtime.dependency_missing` | 409 | A pinned visualization, set, transform template or source no longer holds — gone, not released, or no longer read-only (`details.dependency`, `.name`, `.reason`); a transform that changes status after resolution fails its target before evaluation |
 | `dashboard.refresh.saturated` | 429 | No room for the refresh within `max-wait-seconds`; carries `Retry-After`; **no row is written** |
 | `dashboard.refresh.result_too_large` | — | Inside the stream only: `source_failed` / a target's `reason` at stage `budget` |
 | `dashboard.refresh.not_found` | 404 | No such refresh for the caller on this dashboard, or it already finished (abort) |
@@ -2605,6 +2614,7 @@ dashboard execution has no stored result: `GET /api/v1/executions/{id}/result` o
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v2.60 | #343 dashboard runtime residue | Clarify unchanged bounded parameter-evaluation diagnostics and current `execution.read` projection of source-frame execution ids; include transform-template pins in runtime dependency refusals. |
 | 2026-09-27 | v2.42 | 274 (#274) legacy endpoint rows, retired never fatal | **§19.5's listing carries legacy rows.** A stored `published_endpoints` row whose path predates R-EP5 (fewer than three segments — the shape that made the row mapper throw inside the demo seeder's conflict check and refuse the boot) is now retired: the `GET /api/v1/endpoints` listing answers it flagged (`legacy: true`, `reason`, `enabled`) after the valid rows, in the MCP listing too; a single read (`?path=`) and the serve path answer it `404`; the existing `DELETE /api/v1/endpoints` removes it — the one verb the row supports, offered by the API console with its reason. No route, permission or status code changed; the wire shape of a valid row is byte-identical to v2.40. V40 (metadata-db §4.13) disables such rows in the database and records `retired_reason`; the repository's defensive mapping makes the boot itself immune regardless. |
 | 2026-09-27 | v2.41 | scheduler follow-ups (#258, #261) — numbered after origin/main's v2.38 (scheduler-3) at dispatch | Additive. **§20's run object carries the EXECUTION's own timing** — `execution_started_at`, `execution_completed_at`, `execution_duration_ms` — copied by the reconciler from the execution row it already reads (V40's two nullable columns on `schedule_runs`); the run's own `finished_at` stays the reconciler's stamp and is documented as never answering "how long did it take". A runs list answers duration per run in one read, for every member who may read the schedule, including readers without `execution.read`. **§20 names people beside their ids** — `created_by_name` / `updated_by_name` on the schedule, `requested_by_name` on the run (#261): display names resolved in one batched read per response (the pipelines explorer's `ActorNames`), a stamp whose user row is gone falling back to the id's short form. The trail JSON no longer carries `worker` (#253). |
 | 2026-09-27 | v2.40 | 250 (#250, #259) R3 on every surface — the split ends | No route, field or code changes. **§10.1's R3 paragraph now states "every surface"**: the UI's execution lists (the executions screen, the dashboard's recent executions and run figures) and MCP's `executions_list`/`executions_get`/`executions_get_result` read the same `findVisible` predicate the REST listing does — own runs plus every `triggered_via = SCHEDULE` run of the workspace — so the temporary split (REST only) is closed. **§4.3b of ui-screens**: the pipelines explorer's Usage tab gains a Schedules heading (#259) — the schedules whose `target_ref` names the pipeline, read through `ScheduleService.listByTarget` under the promoter lens; a schedule is not refusal evidence and the tab badge does not count it. Numbered v2.40 after origin/main's v2.39 (262) at lane time. |

@@ -420,6 +420,7 @@ class WorkspaceIsolationIntegrationTest {
          * `{id}` there was a PIPELINE id, so the whole family read "no such dashboard" in every workspace and the
          * differential could not go red.
          */
+        const val DASH_ACME = "d7a00000-0000-0000-0000-000000000001"
         const val DASH_GLOBEX = "d7b00000-0000-0000-0000-000000000002"
         const val REFRESH_GLOBEX = "d8b00000-0000-0000-0000-000000000002"
         private const val TPL_ACME_ID = "a3b00000-0000-0000-0000-000000000001"
@@ -560,6 +561,19 @@ class WorkspaceIsolationIntegrationTest {
 
         /** #10 L2: globex's released dashboard and one finished refresh of it (V42, V43). */
         private fun seedDashboardRefresh(statement: java.sql.Statement) {
+            statement.execute(
+                """
+                INSERT INTO dashboards (id, workspace_id, name, display_name, description, current_version, created_by)
+                VALUES ('$DASH_ACME', '$WS_ACME', 'finance/boards/acme', 'Acme Dashboard', '', 1, '$ALICE')
+                """.trimIndent(),
+            )
+            statement.execute(
+                """
+                INSERT INTO dashboard_versions (dashboard_id, version, body_json, status, body_hash, released_at, released_by, created_by)
+                VALUES ('$DASH_ACME', 1, '{"display_name":"Acme Dashboard","visualizations":[],"layout":{}}'::jsonb,
+                        'RELEASED', 'seed-hash-acme', NOW(), '$ALICE', '$ALICE')
+                """.trimIndent(),
+            )
             statement.execute(
                 """
                 INSERT INTO dashboards (id, workspace_id, name, display_name, description, current_version, created_by)

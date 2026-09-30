@@ -3,9 +3,12 @@ package co.datapipelines.web.dashboards.runtime
 import co.datapipelines.application.dashboards.TransformOutcome
 import co.datapipelines.application.templates.TemplateEvaluateService
 import co.datapipelines.pipeline.PipelineErrorCodes
+import co.datapipelines.pipeline.PipelineVersionStatus
+import co.datapipelines.pipeline.ReadLens
 import co.datapipelines.pipeline.TemplateDryRenderer
 import co.datapipelines.pipeline.TemplateRef
 import co.datapipelines.pipeline.TransformContractView
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.templates.TransformTestInput
 import co.datapipelines.typesystem.DatapipelinesException
 import co.datapipelines.typesystem.LogicalType
@@ -30,7 +33,8 @@ class WebDashboardTransformerTest {
     private val now = Instant.parse("2026-09-29T10:00:00Z")
     private val evaluate = mockk<TemplateEvaluateService>()
     private val renderer = mockk<TemplateDryRenderer>()
-    private val transformer = WebDashboardTransformer(evaluate, renderer)
+    private val templateService = mockk<TemplateService>()
+    private val transformer = WebDashboardTransformer(evaluate, renderer, templateService)
     private val tables = mapOf("orders" to listOf(mapOf<String, Any?>("x" to 1)), "rates" to listOf(mapOf<String, Any?>("r" to 2)))
 
     private fun contract(mode: TransformContractView.Mode) =
@@ -43,8 +47,14 @@ class WebDashboardTransformerTest {
 
     private fun evaluated(output: Any?) = TemplateEvaluateService.Evaluation(output, emptyList(), emptyList())
 
+    private fun released() {
+        every { templateService.findVersionStatus(workspace, ReadLens.Everything, "dbr/templates/t", 2) } returns
+            PipelineVersionStatus.RELEASED
+    }
+
     @Test
     fun `a table-mode transform receives every table under inputs and answers its rows`() {
+        released()
         every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns
             contract(TransformContractView.Mode.TABLE)
         val seen = slot<TransformTestInput>()
@@ -59,6 +69,7 @@ class WebDashboardTransformerTest {
 
     @Test
     fun `a row-mode transform receives the one table as rows and no inputs`() {
+        released()
         every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns contract(TransformContractView.Mode.ROW)
         val seen = slot<TransformTestInput>()
         every { evaluate.evaluate(workspace, "dbr/templates/t", 2, capture(seen), now) } returns evaluated(emptyList<Map<String, Any?>>())
@@ -71,6 +82,7 @@ class WebDashboardTransformerTest {
 
     @Test
     fun `an output that is not a table is refused with the row-shape code, never bound blind`() {
+        released()
         every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns
             contract(TransformContractView.Mode.TABLE)
         every { evaluate.evaluate(workspace, "dbr/templates/t", 2, any(), now) } returns evaluated(mapOf("scalar" to 1))
@@ -81,11 +93,24 @@ class WebDashboardTransformerTest {
 
     @Test
     fun `the evaluation's own refusal is carried by code - the message stays behind`() {
+        released()
         every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns null
         every { evaluate.evaluate(workspace, "dbr/templates/t", 2, any(), now) } throws
             DatapipelinesException(PipelineErrorCodes.Transform.EVALUATION_FAILED, "a row said SECRET")
 
         transformer.transform(workspace, template, tables, now) shouldBe
             TransformOutcome.Refused(PipelineErrorCodes.Transform.EVALUATION_FAILED)
+    }
+
+    @Test
+    fun `a transform that is draft discarded or missing at evaluation is refused before execution`() {
+        every { renderer.transformContract(workspace, TemplateRef("dbr/templates/t", 2)) } returns null
+        every { evaluate.evaluate(workspace, "dbr/templates/t", 2, any(), now) } returns evaluated(emptyList<Map<String, Any?>>())
+        listOf(PipelineVersionStatus.DRAFT, PipelineVersionStatus.DISCARDED, null).forEach { status ->
+            every { templateService.findVersionStatus(workspace, ReadLens.Everything, "dbr/templates/t", 2) } returns status
+            transformer.transform(workspace, template, tables, now) shouldBe
+                TransformOutcome.Refused(co.datapipelines.visualization.DashboardErrorCodes.RUNTIME_DEPENDENCY_MISSING)
+        }
+        io.mockk.verify(exactly = 0) { evaluate.evaluate(any(), any(), any(), any(), any()) }
     }
 }

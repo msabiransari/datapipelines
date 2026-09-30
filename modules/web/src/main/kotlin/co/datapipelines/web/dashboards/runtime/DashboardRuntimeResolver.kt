@@ -7,6 +7,7 @@ import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineService
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.ReadLens
+import co.datapipelines.templates.TemplateService
 import co.datapipelines.visualization.ArtifactVersion
 import co.datapipelines.visualization.DashboardBody
 import co.datapipelines.visualization.DashboardErrorCodes
@@ -68,6 +69,7 @@ class DashboardRuntimeResolver(
     private val releaseFacts: PipelineReleaseFacts,
     private val pipelineRepository: PipelineRepository,
     private val pipelines: PipelineService,
+    private val templates: TemplateService,
 ) {
     @Suppress("ThrowsCount") // each missing or unusable piece is its own refusal, in the spec's order
     fun resolve(
@@ -80,23 +82,27 @@ class DashboardRuntimeResolver(
         val vizByOccurrence =
             body.visualizations.associate { occurrence ->
                 val pinned =
-                    visualizations
-                        .findVersionByName(
-                            workspaceId,
-                            ReadLens.Everything,
-                            occurrence.visualization.name,
-                            occurrence.visualization.version,
-                        )?.takeIf { it.detail.status != PipelineVersionStatus.DISCARDED }
-                        ?: throw missing("visualization", occurrence.name, NOT_FOUND)
+                    visualizations.findVersionByName(
+                        workspaceId,
+                        ReadLens.Everything,
+                        occurrence.visualization.name,
+                        occurrence.visualization.version,
+                    ) ?: throw missing("visualization", occurrence.name, NOT_FOUND)
+                if (pinned.detail.status != PipelineVersionStatus.RELEASED) throw missing("visualization", occurrence.name, NOT_RELEASED)
+                pinned.body.transform?.template?.let { transform ->
+                    val status = templates.findVersionStatus(workspaceId, ReadLens.Everything, transform.name, transform.version)
+                    if (status == null) throw missing("transform", transform.name, NOT_FOUND)
+                    if (status != PipelineVersionStatus.RELEASED) throw missing("transform", transform.name, NOT_RELEASED)
+                }
                 occurrence.name to pinned
             }
         val set =
             body.parameterSet?.let { ref ->
-                sets
-                    .findRecordByName(workspaceId, ref.name)
-                    ?.let { record -> sets.findVersion(workspaceId, record.id, ref.version) }
-                    ?.takeIf { it.detail.status != PipelineVersionStatus.DISCARDED }
-                    ?: throw missing("parameter_set", ref.name, NOT_FOUND)
+                val pinned =
+                    sets.findRecordByName(workspaceId, ref.name)?.let { record -> sets.findVersion(workspaceId, record.id, ref.version) }
+                        ?: throw missing("parameter_set", ref.name, NOT_FOUND)
+                if (pinned.detail.status != PipelineVersionStatus.RELEASED) throw missing("parameter_set", ref.name, NOT_RELEASED)
+                pinned
             }
         val sources = body.sources.associate { it.name to resolveSource(workspaceId, it) }
         return ResolvedDashboard(served, vizByOccurrence, set, sources, configurationId(workspaceId, served, vizByOccurrence, set, sources))
@@ -150,5 +156,6 @@ class DashboardRuntimeResolver(
 
     private companion object {
         const val NOT_FOUND = "not_found"
+        const val NOT_RELEASED = "not_released"
     }
 }

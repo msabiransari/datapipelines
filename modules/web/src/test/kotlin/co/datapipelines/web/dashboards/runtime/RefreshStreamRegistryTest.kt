@@ -7,6 +7,7 @@ import co.datapipelines.auth.WorkspaceContext
 import co.datapipelines.auth.WorkspaceRole
 import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.RefreshAbortFlags
+import co.datapipelines.web.CapturingSseEmitter
 import co.datapipelines.web.config.SseProperties
 import co.datapipelines.web.sse.ExecutionStreamRegistry
 import co.datapipelines.web.sse.SseJson
@@ -68,7 +69,7 @@ class RefreshStreamRegistryTest {
         )
 
     private fun open(refreshId: UUID = UUID.randomUUID()): RefreshStream {
-        every { authority.verdict(any()) } returns StreamVerdict.ALLOWED
+        every { authority.access(any()) } returns RefreshStreamAccess(StreamVerdict.ALLOWED, executionRead = false)
         return registry.open(refreshId, principal(), authority)
     }
 
@@ -125,7 +126,7 @@ class RefreshStreamRegistryTest {
     fun `a stream cut because its reader lost authority is not a disconnect - the refresh is NOT aborted and the stream goes at its end`() {
         val stream = open()
         abort.register(stream.refreshId)
-        every { authority.verdict(any()) } returns StreamVerdict.REVOKED
+        every { authority.access(any()) } returns RefreshStreamAccess(StreamVerdict.REVOKED, executionRead = false)
 
         stream.emit(RefreshEvent.SourceStarted(stream.refreshId, "s", UUID.randomUUID())).shouldBeFalse() // cut at this write
         stream.isRevoked.shouldBeTrue()
@@ -147,7 +148,56 @@ class RefreshStreamRegistryTest {
         stream.emit(RefreshEvent.SourceStarted(stream.refreshId, "t", UUID.randomUUID())).shouldBeTrue()
         stream.heartbeat().shouldBeTrue()
 
-        verify(exactly = 3) { authority.verdict(any()) }
+        verify(exactly = 3) { authority.access(any()) }
+    }
+
+    @Test
+    fun `source frame serialization removes every execution link for a current non-reader including null failure ids`() {
+        val emitter = CapturingSseEmitter()
+        val id = UUID.randomUUID()
+        val stream = RefreshStream(id, user, emitter, SseJson.mapper, principal(), authority)
+        val execution = UUID.randomUUID()
+        every { authority.access(any()) } returns RefreshStreamAccess(StreamVerdict.ALLOWED, executionRead = false)
+        val events =
+            listOf(
+                RefreshEvent.SourceStarted(id, "a", execution),
+                RefreshEvent.SourceCompleted(id, "a", execution, 1, 16),
+                RefreshEvent.SourceFailed(id, "a", null, "source.failed", "safe"),
+            )
+
+        events.forEach { stream.emit(it).shouldBeTrue() }
+
+        emitter.eventNames() shouldBe listOf("source_started", "source_completed", "source_failed")
+        events.forEach { event ->
+            val payload = SseJson.mapper.readTree(SseJson.mapper.writeValueAsString(projectRefreshPayload(event, executionRead = false)))
+            payload.has("execution_id") shouldBe false
+        }
+        (events[0] as RefreshEvent.SourceStarted).executionId shouldBe execution
+        (events[1] as RefreshEvent.SourceCompleted).executionId shouldBe execution
+        verify(exactly = 3) { authority.access(any()) }
+    }
+
+    @Test
+    fun `a current execution reader keeps the exact id in every source frame`() {
+        val emitter = CapturingSseEmitter()
+        val id = UUID.randomUUID()
+        val stream = RefreshStream(id, user, emitter, SseJson.mapper, principal(), authority)
+        val execution = UUID.randomUUID()
+        every { authority.access(any()) } returns RefreshStreamAccess(StreamVerdict.ALLOWED, executionRead = true)
+        val events =
+            listOf(
+                RefreshEvent.SourceStarted(id, "a", execution),
+                RefreshEvent.SourceCompleted(id, "a", execution, 1, 16),
+                RefreshEvent.SourceFailed(id, "a", execution, "source.failed", "safe"),
+            )
+
+        events.forEach { stream.emit(it).shouldBeTrue() }
+
+        events.forEach { event ->
+            val payload = SseJson.mapper.readTree(SseJson.mapper.writeValueAsString(projectRefreshPayload(event, executionRead = true)))
+            payload.path("execution_id").asText() shouldBe execution.toString()
+        }
+        verify(exactly = 3) { authority.access(any()) }
     }
 
     @Test

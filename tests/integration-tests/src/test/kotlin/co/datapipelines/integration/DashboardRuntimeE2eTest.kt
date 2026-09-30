@@ -10,6 +10,7 @@ import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.ints.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
@@ -105,10 +106,11 @@ class DashboardRuntimeE2eTest {
 
     @Test
     @Order(1)
-    fun `fixture - a workspace, five people, a source database, six pipelines and the released boards`() {
+    fun `fixture - a workspace, five people, a source database, seven pipelines and the released boards`() {
         seedPeople()
         registerDatasource()
         createTemplates()
+        releaseTemplates()
         PIPELINES.forEach { (name, spec) -> createPipeline(name, spec) }
         releasePipelines()
         seedVisualizations()
@@ -572,6 +574,15 @@ class DashboardRuntimeE2eTest {
         val record = get("/api/v1/dashboards/$PROMO_SHOWN/refreshes/$refreshId", PROMOTER)
         record.statusCode shouldBe 200
         record.jsonPath().getList<Any>("data.executions") shouldBe null // she reads no execution.read; the record names none for her
+        rows("SELECT COUNT(*) AS n FROM dashboard_refresh_executions WHERE refresh_id = '$refreshId'").single()["n"] shouldBe "1"
+        frames.filter { it.event.startsWith("source_") }.forEach { it.data.has("execution_id") shouldBe false }
+
+        val failed = refresh(PROMO_FAILED, PROMOTER, refreshBody(configurationId(PROMO_FAILED, PROMOTER), uuid()))
+        failed
+            .of("source_failed")
+            .single()
+            .data
+            .has("execution_id") shouldBe false
 
         val hidden = get("/api/v1/dashboards/$PROMO_HIDDEN/runtime/config", PROMOTER)
         val absent = get("/api/v1/dashboards/${UUID.randomUUID()}/runtime/config", PROMOTER)
@@ -583,10 +594,220 @@ class DashboardRuntimeE2eTest {
         get("/api/v1/dashboards/$PROMO_HIDDEN/runtime/config", ADMIN).statusCode shouldBe 200
     }
 
+    @Test
+    @Order(16)
+    fun `delegated parameter evaluation returns the unchanged bounded evaluator response while standalone evaluation stays refused`() {
+        val dashboardConfig = get("/api/v1/dashboards/$PARAMETERISED/runtime/config", PROMOTER)
+        withClue(dashboardConfig.asString().take(EXCERPT)) { dashboardConfig.statusCode shouldBe 200 }
+        val id = parameterSetId()
+        val configurationId = dashboardConfig.jsonPath().getString("data.configuration_id")
+        val instance = uuid()
+        val runtime =
+            post(
+                "/api/v1/dashboards/$PARAMETERISED/runtime/parameters",
+                """{"configuration_id":"$configurationId","instance_id":"$instance","selections":{},"intent":"bootstrap"}""",
+                PROMOTER,
+            )
+        withClue(runtime.asString().take(EXCERPT)) { runtime.statusCode shouldBe 200 }
+
+        val standalone = post("/api/v1/parameter-sets/$id/evaluate", """{"selections":{}}""", PROMOTER)
+        refused(standalone, 403) shouldBe "auth.role_required"
+        val direct = post("/api/v1/parameter-sets/$id/evaluate", """{"selections":{}}""", ADMIN)
+        direct.statusCode shouldBe 200
+        runtime.jsonPath().getString("data.name") shouldBe PARAMETER_SET
+        runtime.jsonPath().getString("data.valid") shouldBe direct.jsonPath().getString("data.valid")
+        runtime.jsonPath().getMap<String, Any>("data.values") shouldBe direct.jsonPath().getMap("data.values")
+        runtime.jsonPath().getList<Map<String, Any>>("data.parameters") shouldBe direct.jsonPath().getList("data.parameters")
+
+        // Exercise the real runtime response with a post-release selector failure. This synthetic test mutation uses
+        // only the lane's local Postgres fixture; it is restored before the next scenario.
+        val original =
+            rows(
+                "SELECT body_json::text AS body FROM parameter_set_versions WHERE parameter_set_id = '$id' AND version = 1",
+            ).single()["body"]!!
+        try {
+            sql(
+                "UPDATE parameter_set_versions SET body_json = jsonb_set(body_json, '{parameters,0,source}', " +
+                    "'{\"template\":{\"id\":\"dbr/templates/boom.sql\",\"version\":1},\"datasource\":\"dbr-src\"}'::jsonb) " +
+                    "WHERE parameter_set_id = '$id' AND version = 1",
+            )
+            val diagnostic =
+                post(
+                    "/api/v1/dashboards/$PARAMETERISED/runtime/parameters",
+                    """{"configuration_id":"$configurationId","instance_id":"${uuid()}","selections":{},"intent":"retry"}""",
+                    PROMOTER,
+                )
+            withClue(diagnostic.asString().take(EXCERPT)) { diagnostic.statusCode shouldBe 200 }
+            val message = diagnostic.jsonPath().getString("data.parameters[0].state.errors[0].message")
+            message shouldContain "division by zero"
+            message.length shouldBeLessThanOrEqual 200
+        } finally {
+            sql(
+                "UPDATE parameter_set_versions SET body_json = '${original.replace("'", "''")}'::jsonb " +
+                    "WHERE parameter_set_id = '$id' AND version = 1",
+            )
+        }
+    }
+
+    @Test
+    @Order(17)
+    fun `stream projection rechecks a changed role immediately while dashboard execute remains admitted`() {
+        fun changeRole(role: String) {
+            val response =
+                given()
+                    .port(port)
+                    .asSession(ADMIN)
+                    .contentType(ContentType.JSON)
+                    .body("""{"role":"$role"}""")
+                    .put("/api/v1/workspaces/$WORKSPACE/members/$OTHER_VIEWER_ID")
+            withClue(response.asString().take(EXCERPT)) { response.statusCode shouldBe 200 }
+        }
+
+        changeRole("author")
+        val refreshId = uuid()
+        val config = configurationId(ROLE_CHANGE_BOARD, OTHER_VIEWER)
+        val live = openRefresh(ROLE_CHANGE_BOARD, OTHER_VIEWER, refreshBody(config, refreshId))
+        live.await("source_started")
+        val first = live.frames().first { it.event == "source_started" }
+        val executionId = first.data.path("execution_id").asText()
+        executionId shouldNotBe ""
+
+        // WorkspaceService invalidates this instance's membership cache on the role update. Other instances converge
+        // at AuthCache's 60-second TTL; this E2E uses the mutating instance and expects the next write immediately.
+        changeRole("promoter")
+        get("/api/v1/dashboards/$ROLE_CHANGE_BOARD/runtime/config", OTHER_VIEWER).statusCode shouldBe 200
+        refused(post("/api/v1/pipelines/${pipelineId("dbr/pipelines/small")}/execute", "{}", OTHER_VIEWER), 403) shouldBe
+            "auth.role_required"
+        live.await("source_completed")
+        live.done(30)
+        val completed = live.frames().first { it.event == "source_completed" }
+        completed.data.has("execution_id") shouldBe false
+        rows("SELECT COUNT(*) AS n FROM dashboard_refresh_executions WHERE refresh_id = '$refreshId' AND execution_id = '$executionId'")
+            .single()["n"] shouldBe "1"
+        changeRole("viewer")
+    }
+
+    @Test
+    @Order(20)
+    fun `runtime refuses draft and discarded visualization set and transform pins before source work`() {
+        val before = rows("SELECT COUNT(*) AS n FROM pipeline_executions WHERE triggered_via = 'DASHBOARD'").single()["n"]
+        get("/api/v1/dashboards/$TRANSFORM_PIN_BOARD/runtime/config", VIEWER).statusCode shouldBe 200
+        listOf("visualization", "parameter_set", "transform").forEach { dependency ->
+            listOf("DRAFT", "DISCARDED").forEach { status ->
+                assertRuntimePinRejected(dependency, status)
+            }
+        }
+        rows("SELECT COUNT(*) AS n FROM pipeline_executions WHERE triggered_via = 'DASHBOARD'").single()["n"] shouldBe before
+    }
+
+    private fun assertRuntimePinRejected(
+        dependency: String,
+        status: String,
+    ) {
+        setRuntimePinStatus(dependency, status)
+        try {
+            val dashboard = if (dependency == "transform") TRANSFORM_PIN_BOARD else PARAMETERISED
+            val config = get("/api/v1/dashboards/$dashboard/runtime/config", VIEWER)
+            config.statusCode shouldBe 409
+            config.jsonPath().getString("error.code") shouldBe "dashboard.runtime.dependency_missing"
+            config.jsonPath().getString("error.details.dependency") shouldBe dependency
+            config.jsonPath().getString("error.details.reason") shouldBe "not_released"
+            val refresh =
+                post(
+                    "/api/v1/dashboards/$dashboard/runtime/visualizations",
+                    refreshBody("0".repeat(64), uuid()),
+                    VIEWER,
+                )
+            refresh.statusCode shouldBe 409
+            refresh.jsonPath().getString("error.code") shouldBe "dashboard.runtime.dependency_missing"
+            refresh.jsonPath().getString("error.details.dependency") shouldBe dependency
+            refresh.jsonPath().getString("error.details.reason") shouldBe "not_released"
+        } finally {
+            setRuntimePinStatus(dependency, "RELEASED")
+        }
+    }
+
+    @Test
+    @Order(21)
+    fun `runtime refuses missing set visualization and transform versions before source work`() {
+        val original =
+            rows(
+                "SELECT body_json::text AS body FROM dashboard_versions WHERE dashboard_id = '$PARAMETERISED' AND version = 1",
+            ).single()["body"]!!
+        val originalTransform =
+            rows(
+                "SELECT body_json::text AS body FROM visualization_versions WHERE visualization_id = " +
+                    "(SELECT id FROM visualizations WHERE name = '$VIZ_TRANSFORM' AND workspace_id = '$WORKSPACE_ID') AND version = 1",
+            ).single()["body"]!!
+        val before = rows("SELECT COUNT(*) AS n FROM pipeline_executions WHERE triggered_via = 'DASHBOARD'").single()["n"]
+        listOf("parameter_set", "visualization", "transform").forEach { dependency ->
+            val dashboard = if (dependency == "transform") TRANSFORM_PIN_BOARD else PARAMETERISED
+            if (dependency == "transform") {
+                sql(updateTransformPinVersionSql("99"))
+            } else {
+                val expression =
+                    if (dependency == "parameter_set") {
+                        "{parameter_set,version}"
+                    } else {
+                        "{visualizations,0,visualization,version}"
+                    }
+                sql(
+                    "UPDATE dashboard_versions SET body_json = jsonb_set(body_json, '$expression', '99'::jsonb) " +
+                        "WHERE dashboard_id = '$dashboard' AND version = 1",
+                )
+            }
+            try {
+                assertMissingRuntimePinRejected(dashboard, dependency)
+            } finally {
+                if (dependency == "transform") {
+                    sql(restoreTransformPinSql(originalTransform))
+                } else {
+                    sql(
+                        "UPDATE dashboard_versions SET body_json = '${original.replace(
+                            "'",
+                            "''",
+                        )}'::jsonb WHERE dashboard_id = '$dashboard' AND version = 1",
+                    )
+                }
+            }
+        }
+        rows("SELECT COUNT(*) AS n FROM pipeline_executions WHERE triggered_via = 'DASHBOARD'").single()["n"] shouldBe before
+    }
+
+    private fun assertMissingRuntimePinRejected(
+        dashboard: String,
+        dependency: String,
+    ) {
+        val config = get("/api/v1/dashboards/$dashboard/runtime/config", VIEWER)
+        config.statusCode shouldBe 409
+        config.jsonPath().getString("error.code") shouldBe "dashboard.runtime.dependency_missing"
+        config.jsonPath().getString("error.details.dependency") shouldBe dependency
+        config.jsonPath().getString("error.details.reason") shouldBe "not_found"
+        val refresh =
+            post(
+                "/api/v1/dashboards/$dashboard/runtime/visualizations",
+                refreshBody("0".repeat(64), uuid()),
+                VIEWER,
+            )
+        refresh.statusCode shouldBe 409
+        refresh.jsonPath().getString("error.code") shouldBe "dashboard.runtime.dependency_missing"
+        refresh.jsonPath().getString("error.details.dependency") shouldBe dependency
+    }
+
+    private fun updateTransformPinVersionSql(version: String): String =
+        "UPDATE visualization_versions SET body_json = jsonb_set(body_json, '{transform,template,version}', " +
+            "'$version'::jsonb) WHERE visualization_id = (SELECT id FROM visualizations " +
+            "WHERE name = '$VIZ_TRANSFORM' AND workspace_id = '$WORKSPACE_ID') AND version = 1"
+
+    private fun restoreTransformPinSql(body: String): String =
+        "UPDATE visualization_versions SET body_json = '${body.replace("'", "''")}'::jsonb " +
+            "WHERE visualization_id = (SELECT id FROM visualizations WHERE name = '$VIZ_TRANSFORM' " +
+            "AND workspace_id = '$WORKSPACE_ID') AND version = 1"
+
     // ------------------------------------------------------------------------------------------ 9 housekeeping
 
     @Test
-    @Order(16)
+    @Order(18)
     fun `the sweeper closes a RUNNING refresh an instance crash left - and only that one`() {
         val stale = uuid()
         val young = uuid()
@@ -610,7 +831,7 @@ class DashboardRuntimeE2eTest {
     }
 
     @Test
-    @Order(17)
+    @Order(19)
     fun `retention deletes finished refreshes and their links - never the execution, never a RUNNING refresh`() {
         val old = uuid()
         val recent = uuid()
@@ -639,7 +860,7 @@ class DashboardRuntimeE2eTest {
     }
 
     @Test
-    @Order(18)
+    @Order(22)
     fun `non-vacuity - every refusal the walk exists for happened, counted by code`() {
         println("event=dashboard_runtime_e2e.refusals total=${refusals.size} ${refusals.groupingBy { it }.eachCount()}")
         refusals.groupingBy { it }.eachCount() shouldBe
@@ -654,7 +875,7 @@ class DashboardRuntimeE2eTest {
                 "dashboard.not_found" to 4,
                 "dashboard.runtime.dependency_missing" to 2,
                 "dashboard.refresh.saturated" to 1,
-                "auth.role_required" to 1,
+                "auth.role_required" to 3, // promoter direct execute, denied standalone evaluation, role-change control
             )
     }
 
@@ -912,6 +1133,14 @@ class DashboardRuntimeE2eTest {
         }
     }
 
+    /** L4 is not installed in this lane; seed released template rows just like pipeline releases below. */
+    private fun releaseTemplates() {
+        sql(
+            "UPDATE template_versions SET status = 'RELEASED', released_at = NOW(), released_by = '$ADMIN_ID' " +
+                "WHERE version = 1 AND template_id IN (SELECT id FROM templates WHERE workspace_id = '$WORKSPACE_ID')",
+        )
+    }
+
     private fun createPipeline(
         name: String,
         spec: PipelineSpec,
@@ -955,10 +1184,14 @@ class DashboardRuntimeE2eTest {
         PIPELINES.keys.forEach { name ->
             sql(
                 "UPDATE pipeline_versions SET status = 'RELEASED', released_at = NOW(), released_by = '$ADMIN_ID' " +
-                    "WHERE version = 1 AND pipeline_id = (SELECT id FROM pipelines WHERE name = '$name' AND workspace_id = " +
+                    "WHERE version = 1 AND pipeline_id = (SELECT id FROM pipelines " +
+                    "WHERE name = '$name' AND workspace_id = " +
                     "'$WORKSPACE_ID')",
             )
-            sql("UPDATE pipelines SET current_version = 1 WHERE name = '$name' AND workspace_id = '$WORKSPACE_ID'")
+            sql(
+                "UPDATE pipelines SET current_version = 1 WHERE name = '$name' AND " +
+                    "workspace_id = '$WORKSPACE_ID'",
+            )
         }
         hiddenHash =
             rows(
@@ -970,6 +1203,51 @@ class DashboardRuntimeE2eTest {
     private fun pipelineId(name: String): String =
         rows("SELECT id::text AS i FROM pipelines WHERE name = '$name' AND workspace_id = '$WORKSPACE_ID'").single()["i"]!!
 
+    private fun parameterSetId(): String =
+        rows("SELECT id::text AS i FROM parameter_sets WHERE name = '$PARAMETER_SET' AND workspace_id = '$WORKSPACE_ID'").single()["i"]!!
+
+    private fun setRuntimePinStatus(
+        dependency: String,
+        status: String,
+    ) {
+        require(dependency == "visualization" || dependency == "parameter_set" || dependency == "transform")
+        require(status == "DRAFT" || status == "DISCARDED" || status == "RELEASED")
+        val stamp = runtimeStatusStamp(status)
+        if (dependency == "transform") {
+            sql(
+                "UPDATE template_versions SET status = '$status', $stamp WHERE template_id = " +
+                    "(SELECT id FROM templates WHERE name = 'dbr/templates/small.sql' AND " +
+                    "workspace_id = '$WORKSPACE_ID') AND version = 1",
+            )
+            return
+        }
+        val table = if (dependency == "visualization") "visualization_versions" else "parameter_set_versions"
+        val foreignKey = if (dependency == "visualization") "visualization_id" else "parameter_set_id"
+        val family = if (dependency == "visualization") "visualizations" else "parameter_sets"
+        val name = if (dependency == "visualization") VIZ_C else PARAMETER_SET
+        sql(
+            "UPDATE $table SET status = '$status', $stamp WHERE $foreignKey = " +
+                "(SELECT id FROM $family WHERE name = '$name' AND workspace_id = '$WORKSPACE_ID') AND version = 1",
+        )
+    }
+
+    private fun runtimeStatusStamp(status: String): String =
+        when (status) {
+            "DRAFT" -> {
+                "released_at = NULL, released_by = NULL, discarded_at = NULL, discarded_by = NULL"
+            }
+
+            "DISCARDED" -> {
+                "released_at = COALESCE(released_at, NOW()), released_by = COALESCE(released_by, '$ADMIN_ID'), " +
+                    "discarded_at = NOW(), discarded_by = '$ADMIN_ID'"
+            }
+
+            else -> {
+                "released_at = COALESCE(released_at, NOW()), released_by = COALESCE(released_by, '$ADMIN_ID'), " +
+                    "discarded_at = NULL, discarded_by = NULL"
+            }
+        }
+
     private fun seedVisualizations() {
         listOf(
             VIZ_X to
@@ -978,6 +1256,11 @@ class DashboardRuntimeE2eTest {
             VIZ_C to
                 """{"display_name":"C","renderer":{"kind":"table","version":"1"},"inputs":{"main":{"columns":[{"name":"c",""" +
                 """"type":"STRING","nullable":false}]}},"config":{},"bindings":{"cells.c":"c"}}""",
+            VIZ_TRANSFORM to
+                """{"display_name":"Transform pin","renderer":{"kind":"table","version":"1"},"inputs":{"main":{"columns":[""" +
+                """{"name":"x","type":"INTEGER","nullable":false}]}},""" +
+                """"transform":{"template":{"name":"dbr/templates/small.sql","version":1},"inputs":{"rows":"main"}},""" +
+                """"config":{},"bindings":{"cells.x":"x"}}""",
         ).forEach { (name, body) -> seedArtifact("visualizations", "visualization_versions", "visualization_id", uuid(), name, body) }
     }
 
@@ -1021,6 +1304,9 @@ class DashboardRuntimeE2eTest {
                 Board(HUNG_LONG, "hung_long", listOf(src("s1", "hang")), listOf(occ("vh", VIZ_X, "s1"))),
                 Board(PROMO_SHOWN, "promo_shown", listOf(src("s1", "small")), listOf(occ("v1", VIZ_X, "s1"))),
                 Board(PROMO_HIDDEN, "promo_hidden", listOf(src("s1", "hidden")), listOf(occ("v1", VIZ_X, "s1"))),
+                Board(PROMO_FAILED, "promo_failed", listOf(src("s1", "boom")), listOf(occ("v1", VIZ_X, "s1"))),
+                Board(TRANSFORM_PIN_BOARD, "transform_pin", listOf(src("s1", "small")), listOf(occ("v1", VIZ_TRANSFORM, "s1"))),
+                Board(ROLE_CHANGE_BOARD, "role_change", listOf(src("s1", "slow")), listOf(occ("v1", VIZ_X, "s1"))),
             )
         boards.forEach { board ->
             val body =
@@ -1196,6 +1482,7 @@ class DashboardRuntimeE2eTest {
         const val PARAMETER_SET = "dbr/sets/country"
         const val VIZ_X = "dbr/charts/x"
         const val VIZ_C = "dbr/charts/c"
+        const val VIZ_TRANSFORM = "dbr/charts/transform_pin"
         const val INSTANCE = "11111111-1111-4111-8111-111111111111"
 
         val PIPELINES: Map<String, PipelineSpec> =
@@ -1203,6 +1490,7 @@ class DashboardRuntimeE2eTest {
                 "dbr/pipelines/small" to PipelineSpec("dbr/templates/small.sql", "SELECT 1 AS x UNION ALL SELECT 2 AS x"),
                 "dbr/pipelines/small_b" to PipelineSpec("dbr/templates/small_b.sql", "SELECT 10 AS x UNION ALL SELECT 20 AS x"),
                 "dbr/pipelines/boom" to PipelineSpec("dbr/templates/boom.sql", "SELECT 1 / 0 AS x"),
+                "dbr/pipelines/slow" to PipelineSpec("dbr/templates/slow.sql", "SELECT 1 AS x FROM pg_sleep(3)"),
                 "dbr/pipelines/hang" to PipelineSpec("dbr/templates/hang.sql", "SELECT 1 AS x FROM pg_sleep(120)"),
                 "dbr/pipelines/big" to PipelineSpec("dbr/templates/big.sql", "SELECT g AS x FROM generate_series(1, 5000) g"),
                 "dbr/pipelines/writer" to PipelineSpec("dbr/templates/writer.sql", "SELECT 1 AS x", writeBack = true),
@@ -1233,6 +1521,9 @@ class DashboardRuntimeE2eTest {
         val HUNG_LONG = UUID.randomUUID().toString()
         val PROMO_SHOWN = UUID.randomUUID().toString()
         val PROMO_HIDDEN = UUID.randomUUID().toString()
+        val PROMO_FAILED = UUID.randomUUID().toString()
+        val TRANSFORM_PIN_BOARD = UUID.randomUUID().toString()
+        val ROLE_CHANGE_BOARD = UUID.randomUUID().toString()
 
         private val JWT_SECRET = E2eSession.newSecret()
         private val ENCRYPTION_KEY = E2eSession.newSecret()

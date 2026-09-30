@@ -310,6 +310,10 @@ caller's `pipeline.execute`, the set is evaluated without `parameter_set.evaluat
 - **Sources are read-only.** Every source pins a RELEASED pipeline that passes the read-only rule (D38),
   transitively through its child pipelines. It is checked at save, at release, at every configuration read AND at
   every refresh; a pin that stops holding is `dashboard.runtime.dependency_missing` (409), never a run.
+- **Every runtime pin is released.** Configuration reads and refreshes require RELEASED visualization and parameter-set
+  versions, and RELEASED transform templates for every visualization that pins one. A missing or changed pin is
+  `dashboard.runtime.dependency_missing` (409); a transform that changes status after configuration resolution fails
+  that target in the already-open stream before evaluation.
 - **Isolation.** Every read is workspace-scoped; the dashboard is read through the caller's lens (a promoter refreshes
   a dashboard only if every source pipeline her lens admits — otherwise the family's 404); a refresh belongs to the
   person who started it.
@@ -345,8 +349,12 @@ deadline, and the budgets the client is held to.
 `POST /runtime/parameters` answers the parameter engine's evaluate response UNCHANGED plus `overrides_applied` (only the
 parameters whose hide/show or enable/disable the dashboard's `parameter_state` changed, with both effective values),
 `parents` (parameters that have dependents) and `parameter_revision`, assigned by the server per client instance and
-increasing — a hint the client compares, held in memory, that starts again after a restart. A dashboard with no set
-answers an empty evaluation.
+increasing — a hint the client compares, held in memory, that starts again after a restart. This is the D50 delegated
+act: `dashboard.execute` authorizes evaluation of the dashboard's pinned set without separately requiring
+`parameter_set.evaluate`. The unchanged response retains the evaluator's existing bounded selector diagnostics,
+including its safe echo for a failed or unreachable selector; the refresh stream's code-only rule applies to stream
+frames, not this response. No additional diagnostic redaction is applied here. A dashboard with no set answers an empty
+evaluation.
 
 ### 5.5 A refresh
 
@@ -379,7 +387,9 @@ disconnect grace of rest-api §6.8): `refresh_started`, `source_started` / `sour
 before it is announced, so a pane can open its execution the moment `source_started` arrives. `source_failed` names a
 code, never a driver's message; the execution's own events (visible to its owner) carry the detail. A subscriber is
 re-judged before every write (a revoked session, a removed member or a lost `dashboard.execute` cuts the STREAM at that
-write); the refresh itself runs to its end.
+write); the refresh itself runs to its end. The three source frames include `execution_id` only when the subscriber's
+current principal also holds `execution.read`; a role change takes effect under the auth cache's membership window.
+The internal event and durable refresh-execution link retain the id either way.
 
 ### 5.6 Abort
 
@@ -411,6 +421,7 @@ confinement (L5): until L5, only signed-in sessions reach these routes and no MC
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.5 | #343 dashboard runtime residue | Require RELEASED visualization, set and transform pins at runtime; clarify the unchanged bounded parameter response and current-authority execution-id projection on source frames. |
 | 2026-09-29 | v0.4 | L2 (#10) the runtime — renumbered at merge after 320's v0.3 | **New §5 The runtime** — the delegated act (D50) and what keeps it safe, the six routes, `configuration_id`, the parameter evaluation, a refresh (order, sharing, admission, caps, dependencies, deadlines, the stream), abort, the record. §4.4's `last_refresh` is live (the caller's own). |
 | 2026-09-30 | v0.3 | 320 (#320) dependency guards | §3.1: the guard's other direction — a pipeline release, parameter set or transform template a dashboard or visualization pins can no longer be discarded or purged from under it (`pipeline.version.pinned`, `parameter.in_use`, `template.in_use`; [Versioning §3.5.3](versioning.md#353-the-reverse-arrows-into-other-families-320)); why the visualization's own LIVE-only guard is complete; restoring a DISCARDED dashboard version re-judges its dependencies. |
 | 2026-09-29 | v0.2 | L1b (#10) the surfaces | **New §4 The surfaces** — the fourteen permission rows and the promoter's lens (§4.1), validate as an author verb (§4.2, owner ruling), what a source must declare for the save-time input check (§4.3), and the eleven MCP tools (§4.4); the REST routes are rest-api §22/§23. The status line names what L1b added. |
