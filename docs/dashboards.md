@@ -1,7 +1,8 @@
 # Dashboards
 
-**Status:** v0.3 — the transfer (L1c); the REST routes, the MCP tools and the
-permissions (§4, lane L1b). The transfer routes (L1c), the runtime (L2), the client runtime and the first-party page
+**Status:** v0.4 — the transfer round's corrections (L1c-b): the import's atomicity, the
+RELEASE rules on a landing, the count bounds, the wire's per-family arms. The REST routes, the MCP tools and the
+permissions (§4, lane L1b); the transfer routes (L1c). The transfer routes (L1c), the runtime (L2), the client runtime and the first-party page
 (L3), the visualization tests and their release gate (L4) and the `dashboard` key kind (L5) add their sections as they land.
 **Owner:** datapipelines.co core
 **Depends on:** [Versioning](versioning.md) (§3.5 — the lifecycle table), [Pipeline Contract](pipeline-contract.md)
@@ -10,7 +11,7 @@ permissions (§4, lane L1b). The transfer routes (L1c), the runtime (L2), the cl
 [MCP Server](mcp-server.md) (§6.2.50–§6.2.60 — the tools), [Auth](auth.md) (§7.6 — the permissions)
 **Design:** the [dashboard implementation spec](superpowers/specs/2026-09-28-dashboard-implementation-spec.md) and
 the [design record](superpowers/specs/2026-09-25-dashboard-authoring-design-draft.md) (decisions D1–D63)
-**Last updated:** 2026-09-29
+**Last updated:** 2026-09-30
 
 A dashboard presents released pipeline results. It is built from two versioned artifacts: **visualizations** —
 a chart, table or KPI bound to named inputs, reusable across dashboards — and **dashboards**, which pin released
@@ -223,14 +224,29 @@ other unknown key refuses; the same version with the same hash is a no-op; a pin
 `visualization.import.missing_template` or `dashboard.import.missing_dependency`; an id another artifact on the
 server holds is `*.import.id_taken` — never re-issued (C29).
 
+**The import is ONE transaction for a dashboard** (the L1c-b round, F1): templates → bundled visualizations → the
+dashboard inside one transaction, so a refused dashboard leaves NOTHING landed — the visualization import keeps the
+parameter-set mould's accepted shape (templates then the artifact, each idempotent). The dashboard import's audit
+carries one `visualization.imported` row per LANDED bundled visualization, each naming its id, its version and its
+own envelope manifest's evidence flag — nothing landed is unaudited. **A landing is judged by the RELEASE rules**
+(O2): an import lands RELEASED, so a pin that exists here but is not RELEASED — a draft, or a discarded version —
+refuses with the family's release code (`visualization.release.dependency_not_released` /
+`dashboard.release.dependency_not_released`); a pin this deployment lacks stays the import lens' precise code.
+**The envelope's arrays are count-bounded** (O7): at most `datapipelines.visualization.max-visualizations-per-dashboard`
+entries in a dashboard's bundle or a template closure, refused `body_invalid` with `reason: too_many` before any
+member is parsed.
+
 **The verb is a workspace-admin's, by the owner's ruling (2026-09-29, the `api_key.bind` cells):** the import lands
 RELEASED with no evidence re-run — the D56 promise traveled WITH the exported release, and an authoring deployment
 never re-runs it — so an author never holds `visualization.import` / `dashboard.import`. The promotion receiver
 lands promoted artifacts through the WIRE, never through the import verb: a batch's entries are the versions'
-payloads (never the envelopes), bound through the same strict readers (the bounds hold on receive as on save), and
-landed INSIDE the receive's one transaction after the batch's templates, sets, pipelines and endpoints, where the
-just-landed rows are what the import lens resolves against. An export is lensed BEFORE it is built — a visualization
-or dashboard the promoter lens hides is the same 404 an absent id gets.
+payloads (never the envelopes), bound through the same strict readers (the bounds hold on receive as on save, the
+arms count-bounded before any member binds), and landed INSIDE the receive's one transaction after the batch's
+templates, sets, pipelines and endpoints, where the just-landed rows are what the import lens resolves against.
+**A dashboard root's pins travel as entries of the batch's `visualizations` arm** (O1) — deduplicated against the
+explicit visualization roots — and the `dashboards` arm carries dashboards alone; the receiver binds each arm's
+entries with that family's reader and lands the visualizations before the dashboards that pin them. An export is
+lensed BEFORE it is built — a visualization or dashboard the promoter lens hides is the same 404 an absent id gets.
 
 ---
 
@@ -299,6 +315,7 @@ authoring loop in the order an agent needs it.
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v0.4 | L1c-b (#10) the transfer round's corrections | **§3.3:** the dashboard import is ONE transaction (a refused dashboard leaves nothing landed) and its audit carries one `visualization.imported` row per landed bundled visualization (F1); a landing's pins are judged by the RELEASE rules — a present-but-not-RELEASED pin refuses the family's `release.dependency_not_released` (O2); the envelope's bundle and the batch's family arms are count-bounded by `max-visualizations-per-dashboard` before any member binds (O7); a dashboard root's pins travel as entries of the batch's `visualizations` arm, the dashboard arm carrying dashboards alone (O1). |
 | 2026-09-29 | v0.3 | L1c (#10) the transfer | **§3.3** names the manifest's `evidence: null` (L4 fills it) and the import audit's `imported_with_evidence`; the import verb is the workspace-admin verb by the owner's ruling (the `api_key.bind` cells — the envelope lands RELEASED with no evidence re-run), and the promotion wire's receive order and reader binding are stated (the bounds hold on receive as on save; the import lens resolves inside the receive's transaction). §4.1's "the import rows land with the transfer routes" is past tense. |
 | 2026-09-29 | v0.2 | L1b (#10) the surfaces | **New §4 The surfaces** — the fourteen permission rows and the promoter's lens (§4.1), validate as an author verb (§4.2, owner ruling), what a source must declare for the save-time input check (§4.3), and the eleven MCP tools (§4.4); the REST routes are rest-api §22/§23. The status line names what L1b added. |
 | 2026-09-29 | v0.1 | L1a (#10) the module | The two documents, their bounds and their lifecycle (§1–§3). |
