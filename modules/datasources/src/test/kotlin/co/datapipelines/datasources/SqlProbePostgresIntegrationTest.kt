@@ -57,8 +57,11 @@ class SqlProbePostgresIntegrationTest {
         DriverManager.getConnection(postgres.jdbcUrl, postgres.username, postgres.password).use { connection ->
             connection.createStatement().use { st ->
                 st.execute("DROP TABLE IF EXISTS task107_probe")
-                st.execute("CREATE TABLE task107_probe (id BIGINT PRIMARY KEY, note VARCHAR(50))")
-                st.execute("INSERT INTO task107_probe SELECT i, 'note-' || i FROM generate_series(1, 20) i")
+                st.execute("CREATE TABLE task107_probe (id BIGINT PRIMARY KEY, note VARCHAR(50), seen_at TIMESTAMPTZ)")
+                st.execute(
+                    "INSERT INTO task107_probe SELECT i, 'note-' || i, TIMESTAMPTZ '2026-08-01 10:00:00+00' + (i || ' days')::interval " +
+                        "FROM generate_series(1, 20) i",
+                )
             }
         }
     }
@@ -101,6 +104,30 @@ class SqlProbePostgresIntegrationTest {
             { result.rows.rows.size shouldBe 1 },
             { result.rows.rows.single()["id"] shouldBe "7" },
             { result.rows.rows.single()["note"] shouldBe "note-7" },
+        )
+    }
+
+    /**
+     * #265 F2 — the probe had NO test binding a TIMESTAMP, and the house rule
+     * ([ReadOnlyStatementLease]'s KDoc) says pgjdbc cannot infer a SQL type for the `Instant`
+     * the shared coercion produces for TIMESTAMP: the bind fails with "Can't infer the SQL type"
+     * unless the value is converted to an `OffsetDateTime` at UTC first, exactly as the lease and
+     * the repositories do. This is the reproduction; the conversion lives in the probe's
+     * `toJdbcValue` now.
+     */
+    @Test
+    fun `a TIMESTAMP parameter binds against a timestamptz column through the lease's jdbc-form rule`() {
+        val result =
+            probe.probe(
+                ds,
+                "SELECT id, note FROM task107_probe WHERE seen_at = :at",
+                parameters = mapOf("at" to SqlProbeParameter(LogicalType.TIMESTAMP, "2026-08-09T10:00:00Z")),
+            )
+
+        assertAll(
+            { result.rows.rows.size shouldBe 1 },
+            { result.rows.rows.single()["id"] shouldBe "8" },
+            { result.rows.rows.single()["note"] shouldBe "note-8" },
         )
     }
 

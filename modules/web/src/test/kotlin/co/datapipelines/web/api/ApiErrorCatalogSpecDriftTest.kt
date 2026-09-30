@@ -348,7 +348,12 @@ class ApiErrorCatalogSpecDriftTest {
          * `constraint_not_applicable`, `constraint_invalid`, `pattern_invalid` and
          * `cardinality_unsupported` — all 400 through the family default, landed in the SAME
          * commit as their constants. Re-derived from the document's own parse.
+         *
+         * 84 → 85 with #264: §12.9's `pipeline_parameter_invalid` — the composition twin of
+         * `default_invalid`, 400 through the family default (which is why the brief's
+         * `SECTION_13_ROW_COUNT` does not move: a §12 row carries no HTTP column), landed in
+         * the SAME commit as its constant. Re-derived from the document's own parse.
          */
-        const val SECTION_12_CODE_COUNT = 84
+        const val SECTION_12_CODE_COUNT = 85
     }
 }

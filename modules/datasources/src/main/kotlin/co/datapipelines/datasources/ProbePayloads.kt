@@ -1,12 +1,11 @@
 package co.datapipelines.datasources
 
 import co.datapipelines.typesystem.LogicalType
-import java.math.BigDecimal
-import java.time.LocalDate
-import java.time.LocalTime
+import co.datapipelines.typesystem.ParameterCoercion
+import co.datapipelines.typesystem.ParameterLift
+import java.time.Instant
 import java.time.OffsetDateTime
-import java.time.format.DateTimeParseException
-import java.util.Base64
+import java.time.ZoneOffset
 
 /*
  * The §7D SQL-probe payloads, one home per the `SchemaPayloads` precedent. The wire projections
@@ -20,10 +19,12 @@ import java.util.Base64
  * base64 (type-system §7.3/§3.5). Null [value] binds SQL NULL, the pipeline's own rule for a
  * supplied-but-null parameter.
  *
- * The typed-string shape exists because the wire cannot carry a bigint or a decimal natively,
- * and the coercion below mirrors `pipeline-contract`'s `ParameterCoercion` rather than importing
- * it: `datasources` may depend on `typesystem` only (module-structure §5.4), and the conversion
- * is small enough to duplicate under that fence.
+ * The value is judged by the ONE strict coercion every parameter surface shares
+ * ([ParameterCoercion], parameter-engine record P10/P28), through [ParameterLift] — the same
+ * strictness rest-api's change log v2.36 recorded for every other surface: nothing is trimmed,
+ * booleans are `true`/`false` only, and the §6.3 digit cap bounds any big-number parse (#278).
+ * The typed-string shape exists because the wire cannot carry a bigint or a decimal natively;
+ * the lift turns the text into the wire node the shared judge reads.
  */
 data class SqlProbeParameter(
     val type: LogicalType,
@@ -69,104 +70,24 @@ class SqlProbeParameterException(
 /** Coerces this parameter's wire value to the Java object the JDBC bind expects. */
 internal fun SqlProbeParameter.toJdbcValue(parameter: String): Any? {
     val text = value ?: return null
-
-    fun reject(): Nothing = throw SqlProbeParameterException.coercion(parameter, type)
-    return when (type) {
-        // Unreachable through the tool surface (NULL is not a declarable parameter type,
-        // pipeline-contract §6.2); refused here rather than coerced to a guessed null.
-        LogicalType.NULL -> {
-            reject()
-        }
-
-        LogicalType.STRING -> {
-            text
-        }
-
-        LogicalType.INTEGER, LogicalType.BIGINTEGER, LogicalType.DECIMAL, LogicalType.BIGDECIMAL, LogicalType.BOOLEAN -> {
-            coerceScalar(type, text) ?: reject()
-        }
-
-        LogicalType.BINARY, LogicalType.DATE, LogicalType.TIME, LogicalType.TIMESTAMP -> {
-            coerceEncoded(type, text) { reject() }
-        }
+    val node = ParameterLift.lift(type, text) ?: throw SqlProbeParameterException.coercion(parameter, type)
+    return when (val outcome = ParameterCoercion.coerce(type, node)) {
+        is ParameterCoercion.Outcome.Coerced -> jdbcForm(outcome.value)
+        is ParameterCoercion.Outcome.Rejected -> throw SqlProbeParameterException.coercion(parameter, type)
     }
-}
-
-/** The numeric/boolean family, or null when the wire text does not parse. */
-private fun coerceScalar(
-    type: LogicalType,
-    text: String,
-): Any? =
-    when (type) {
-        LogicalType.INTEGER -> text.trim().toIntOrNull()
-
-        // int64, like the pipeline grammar's BIGINTEGER range rule.
-        LogicalType.BIGINTEGER -> text.trim().toLongOrNull()
-
-        LogicalType.DECIMAL, LogicalType.BIGDECIMAL -> runCatching { BigDecimal(text.trim()) }.getOrNull()
-
-        else -> coerceBoolean(text)
-    }
-
-private fun coerceBoolean(text: String): Boolean? =
-    when (text.trim().lowercase()) {
-        "true" -> true
-        "false" -> false
-        else -> null
-    }
-
-/** The encoded family — base64 BINARY and the ISO temporals. */
-private fun coerceEncoded(
-    type: LogicalType,
-    text: String,
-    reject: () -> Nothing,
-): Any =
-    when (type) {
-        LogicalType.BINARY -> coerceBinary(text) ?: reject()
-        LogicalType.DATE -> coerceTemporal(text, DATE_SHAPE, { reject() }) { LocalDate.parse(it) }
-        LogicalType.TIME -> coerceTemporal(text, TIME_SHAPE, { reject() }) { LocalTime.parse(it) }
-        else -> coerceTimestamp(text) ?: reject()
-    }
-
-/** Padded standard base64 (the §6.3 symmetric-contract rule), or null. */
-private fun coerceBinary(text: String): ByteArray? {
-    if (text.length % BASE64_QUANTUM != 0) return null
-    return runCatching { Base64.getDecoder().decode(text) }.getOrNull()
 }
 
 /**
- * What the executor binds for a TIMESTAMP parameter: an Instant — the offset is the caller's
- * statement, per §6.3's "the server never guesses the client's timezone".
+ * The JDBC form of a canonical value — the [ReadOnlyStatementLease] rule verbatim: spring-jdbc's
+ * `TYPE_UNKNOWN` path hands anything but a String, a `java.util.Date` or a Calendar to `setObject`,
+ * and pgjdbc cannot infer a SQL type for an `Instant` ("Can't infer the SQL type to use for an
+ * instance of java.time.Instant"), so an `Instant` binds as an `OffsetDateTime` at UTC — what the
+ * coercion produces for TIMESTAMP, and what every pinned driver maps to `timestamptz`. Every other
+ * canonical value the coercion returns (String, BigDecimal, BigInteger, Boolean, Int, ByteArray,
+ * LocalDate, LocalTime) binds through the drivers' own table. The conversion changes only the
+ * value's Java form, never what is bound.
  */
-private fun coerceTimestamp(text: String): java.time.Instant? =
-    try {
-        OffsetDateTime.parse(text).toInstant()
-    } catch (_: DateTimeParseException) {
-        null
-    }
-
-/** A shape-checked ISO temporal parse, or the rejection — one rule for DATE and TIME. */
-private fun <T : Any> coerceTemporal(
-    text: String,
-    shape: Regex,
-    reject: () -> Nothing,
-    parse: (String) -> T,
-): T {
-    if (!shape.matches(text)) reject()
-    return try {
-        parse(text)
-    } catch (_: DateTimeParseException) {
-        reject()
-    }
-}
-
-private const val BASE64_QUANTUM = 4
-
-/** The pipeline grammar's exact DATE shape — four digits, no sign (§6.3). */
-private val DATE_SHAPE = Regex("""^\d{4}-\d{2}-\d{2}$""")
-
-/** The pipeline grammar's exact TIME shape — HH:MM:SS with up to 6 fractional digits (§6.3). */
-private val TIME_SHAPE = Regex("""^\d{2}:\d{2}:\d{2}(\.\d{1,6})?$""")
+private fun jdbcForm(value: Any?): Any? = if (value is Instant) OffsetDateTime.ofInstant(value, ZoneOffset.UTC) else value
 
 /**
  * A summarized EXPLAIN plan. [scan] is the short per-dialect access description (`seq`,

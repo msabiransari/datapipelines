@@ -5,12 +5,8 @@ import co.datapipelines.pipeline.ParameterBinder
 import co.datapipelines.pipeline.ParameterBindingResult
 import co.datapipelines.pipeline.PipelineErrorCodes
 import co.datapipelines.typesystem.LogicalType
+import co.datapipelines.typesystem.ParameterLift
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.BooleanNode
-import com.fasterxml.jackson.databind.node.DecimalNode
-import com.fasterxml.jackson.databind.node.LongNode
-import com.fasterxml.jackson.databind.node.TextNode
-import java.math.BigDecimal
 
 /**
  * The published-endpoint request validator (design §5.3) — everything between "this URL resolves
@@ -240,7 +236,10 @@ class EndpointRequestValidator(
     /**
      * The raw text as the wire form [type] expects, or null when it cannot be one.
      *
-     * Nothing is trimmed (#194, a deliberate break of 2026-09-26): `?amount=%2012.50%20` is
+     * The shared [co.datapipelines.typesystem.ParameterLift] (#265) — the same lift the SQL
+     * probe's typed-string parameters ride: nothing is trimmed (#194, a deliberate break of
+     * 2026-09-26), booleans are strict, and the #278 digit cap refuses an oversized decimal
+     * text in bounded time BEFORE any `BigDecimal` is constructed. `?amount=%2012.50%20` is
      * refused with `invalid_parameter_type`, exactly as the execute body refuses `" 12.50 "` —
      * the server never normalises what the caller sent (parameter-engine record P19/P28).
      *
@@ -252,18 +251,7 @@ class EndpointRequestValidator(
     private fun lift(
         type: LogicalType,
         raw: String,
-    ): JsonNode? =
-        when (type) {
-            LogicalType.INTEGER -> raw.toLongOrNull()?.let { LongNode(it) }
-
-            LogicalType.DECIMAL -> runCatching { DecimalNode(BigDecimal(raw)) }.getOrNull()
-
-            // Strictly "true"/"false": Kotlin's toBooleanStrictOrNull, not toBoolean, because the
-            // latter maps every other string to false — a `?dry_run=yes` would run for real.
-            LogicalType.BOOLEAN -> raw.toBooleanStrictOrNull()?.let { BooleanNode.valueOf(it) }
-
-            else -> TextNode(raw)
-        }
+    ): JsonNode? = ParameterLift.lift(type, raw)
 
     /**
      * v1 serves JSON. A wildcard `Accept`, an absent header and a blank one all mean

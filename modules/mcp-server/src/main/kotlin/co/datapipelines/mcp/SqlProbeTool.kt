@@ -91,7 +91,7 @@ class SqlProbeTool(
                     "sql": {"type": "string", "description": "ONE SELECT or WITH statement. A second statement or a denylisted verb is refused before any connection opens."},
                     "parameters": {
                       "type": "object",
-                      "description": "Bind values for the statement's :name placeholders, keyed by name. type is the canonical logical type; value is its wire string (BIGINTEGER/BIGDECIMAL as decimal text, temporal in ISO forms, BINARY as padded base64). A null value binds SQL NULL.",
+                      "description": "Bind values for the statement's :name placeholders, keyed by name. type is the canonical logical type; value is its wire string (BIGINTEGER/BIGDECIMAL as plain decimal text, temporal in exact ISO forms — TIMESTAMP with an explicit offset or Z —, BINARY as padded standard base64). The forms are judged strictly, exactly as a pipeline parameter is: nothing is trimmed (a padded value is refused), booleans are exactly true/false, and numeric text over 1024 digits is refused before parsing. A null value binds SQL NULL.",
                       "additionalProperties": {
                         "type": "object",
                         "required": ["type"],

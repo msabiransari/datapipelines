@@ -549,6 +549,103 @@ class PipelineCompositionE2eTest {
         rows.map { it[1] } shouldContainExactly expected.map { it.second }
     }
 
+    /**
+     * #264 — a composition literal is judged by the child parameter's WHOLE declaration at save.
+     * Before this the body saved (`201`) and the value failed only when the composition ran: the
+     * child's binder refused `500` over the declared `max: 100` and the parent reported
+     * `child_execution_failed`. The save answer is the same validator the binder applies, so the
+     * refusal moves to where the author is.
+     */
+    @Test
+    @Order(8)
+    fun `a literal over the child's declared max is refused at save with pipeline_parameter_invalid`() {
+        createReleasedConstrainedChild("test/comp_constrained_leaf")
+
+        // The parent supplies 500 — the value that used to save and fail at run.
+        postPipeline(
+            "test/comp_over_max_parent",
+            "Composition Over-Max Parent",
+            listOf(pipelineNodeSupplying("run_leaf", "test/comp_constrained_leaf", mapOf("amount" to 500))),
+        ).then()
+            .statusCode(400)
+            .body("error.code", org.hamcrest.Matchers.equalTo("pipeline.validation.pipeline_parameter_invalid"))
+            // A validation refusal lists every failure under details.failures (the house shape);
+            // each entry carries its own details, where `reason` names the rule.
+            .body("error.details.failures[0].code", org.hamcrest.Matchers.equalTo("pipeline.validation.pipeline_parameter_invalid"))
+            .body("error.details.failures[0].details.reason", org.hamcrest.Matchers.equalTo("max"))
+            .body("error.details.failures[0].details.parameter", org.hamcrest.Matchers.equalTo("amount"))
+
+        // And the type rule is unchanged beside it: a wrong-typed literal keeps its own code.
+        postPipeline(
+            "test/comp_wrong_type_parent",
+            "Composition Wrong-Type Parent",
+            listOf(pipelineNodeSupplying("run_leaf", "test/comp_constrained_leaf", mapOf("amount" to "not-a-number"))),
+        ).then()
+            .statusCode(400)
+            .body("error.code", org.hamcrest.Matchers.equalTo("pipeline.validation.pipeline_parameter_type_mismatch"))
+    }
+
+    /**
+     * The #264 child fixture: one DQL caller node over the Order-1 template, declaring `amount`
+     * INTEGER with `constraints.max` 100 (optional — nothing needs to supply it to run) —
+     * created AND released (a PIPELINE node pins a released version only).
+     */
+    private fun createReleasedConstrainedChild(name: String) {
+        val childBody =
+            postPipeline(
+                name,
+                "Composition Constrained Leaf",
+                listOf(
+                    mapOf(
+                        "id" to "fetch_users",
+                        "description" to "Fetch users from H2",
+                        "type" to "DQL",
+                        "source" to H2_DATASOURCE,
+                        "template" to mapOf("id" to "test/comp_users.sql", "version" to 1),
+                        "output" to mapOf("target" to "caller"),
+                        "depends_on" to emptyList<String>(),
+                    ),
+                ),
+                parameters =
+                    mapOf(
+                        "amount" to
+                            mapOf(
+                                "type" to "INTEGER",
+                                "required" to false,
+                                "constraints" to mapOf("max" to 100),
+                            ),
+                    ),
+            )
+        if (childBody.statusCode() != 201) {
+            throw AssertionError("child creation failed: ${childBody.body().asString()}")
+        }
+        val childId = childBody.jsonPath().getString("data.id")
+        given()
+            .port(port)
+            .asSession(ADMIN_SESSION)
+            .header("If-Match", childBody.jsonPath().getString("data.body_hash"))
+            .`when`()
+            .post("/api/v1/pipelines/$childId/release")
+            .then()
+            .statusCode(200)
+    }
+
+    /** A PIPELINE node pinning [childName], supplying [supplied] as the node's parameter map. */
+    private fun pipelineNodeSupplying(
+        id: String,
+        childName: String,
+        supplied: Map<String, Any?>,
+    ): Map<String, Any?> =
+        mapOf(
+            "id" to id,
+            "description" to "Invoke $childName v1",
+            "type" to "PIPELINE",
+            "pipeline" to mapOf("name" to childName, "version" to 1),
+            "parameters" to supplied,
+            "output" to mapOf("target" to "caller"),
+            "depends_on" to emptyList<String>(),
+        )
+
     // ------------------------------------------------------------ helpers
 
     /**
@@ -808,6 +905,7 @@ class PipelineCompositionE2eTest {
         name: String,
         displayName: String,
         nodes: List<Map<String, Any?>>,
+        parameters: Map<String, Any?> = emptyMap(),
     ): Response {
         val bodyJson =
             mapper.writeValueAsString(
@@ -816,7 +914,7 @@ class PipelineCompositionE2eTest {
                     "name" to name,
                     "display_name" to displayName,
                     "description" to "Composition E2E pipeline — $displayName",
-                    "parameters" to emptyMap<String, String>(),
+                    "parameters" to parameters,
                     "nodes" to nodes,
                 ),
             )

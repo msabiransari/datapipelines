@@ -322,6 +322,17 @@ object PipelineErrorCodes {
          */
         const val PIPELINE_PARAMETER_TYPE_MISMATCH = "pipeline.validation.pipeline_parameter_type_mismatch"
 
+        /**
+         * §12.9 (#264) — a literal coerces but breaks the child parameter's own declaration:
+         * a `constraints` bound, length or pattern, or the child's declared precision/scale —
+         * the composition twin of `default_invalid` (§12.7), judged by the same shared
+         * validator, so a value the child's binder would refuse at run is refused at save.
+         * `details.reason` names the rule, as `parameter_constraint_violation` does; the
+         * value text never travels. Also the code for a same-type `${ref}` whose parent
+         * descriptor does not widen losslessly into the child's (`reason: narrowing`).
+         */
+        const val PIPELINE_PARAMETER_INVALID = "pipeline.validation.pipeline_parameter_invalid"
+
         /** §12.9 — `output` is absent when the pinned child has zero caller nodes. */
         const val PIPELINE_OUTPUT_ON_SIDEEFFECT_CHILD = "pipeline.validation.pipeline_output_on_sideeffect_child"
 
