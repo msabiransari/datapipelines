@@ -43,7 +43,11 @@ class SchedulerClockTestConfiguration {
          * crossing mid-suite.
          */
         val SCHEDULER_NOW: Instant =
-            LocalDate.now(NY_ZONE).atStartOfDay(NY_ZONE).plusSeconds(PIN_SECONDS_AFTER_MIDNIGHT).toInstant()
+            LocalDate
+                .now(NY_ZONE)
+                .atStartOfDay(NY_ZONE)
+                .plusSeconds(PIN_SECONDS_AFTER_MIDNIGHT)
+                .toInstant()
 
         /** The clock every scheduler consumer in the suite's context reads. */
         val CLOCK: Clock = Clock.fixed(SCHEDULER_NOW, NY_ZONE)

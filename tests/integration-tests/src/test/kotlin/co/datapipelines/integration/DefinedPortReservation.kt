@@ -1,8 +1,8 @@
 package co.datapipelines.integration
 
-import java.net.ServerSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.ServerSocket
 
 /**
  * A port RESERVED until the instant Tomcat binds it (#334).

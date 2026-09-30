@@ -114,8 +114,20 @@ if [ -n "$touched_tests" ]; then
       targs+=(":tests:$m:test")
       echo "  2b tests/$m: build file changed → whole module"
     else
-      classes=$(echo "$changed_files" | grep -E "^tests/$m/src/test/kotlin/.*\.kt$" \
-        | sed -E "s|^tests/$m/src/test/kotlin/||; s|\.kt$||; s|/|.|g")
+      classes=""
+      for f in $(echo "$changed_files" | grep -E "^tests/$m/src/test/kotlin/.*\.kt$"); do
+        # An abstract or sealed declaration has no runnable tests, and Gradle fails the
+        # whole task with "No tests found" on its --tests filter (#342 lane, 2026-09-30:
+        # a lane editing the browser suite's abstract BrowserSuite base). File name =
+        # class name, so the check reads the file itself. The helper's consumers are not
+        # derivable from the diff — the merge gate runs this module whole.
+        if grep -qE "^[[:space:]]*(abstract|sealed) (class|interface) $(basename "$f" .kt)\b" "$ROOT/$f"; then
+          echo "  2b tests/$m: skipping $f — abstract/sealed, no runnable tests"
+          continue
+        fi
+        classes="$classes $(echo "$f" | sed -E "s|^tests/$m/src/test/kotlin/||; s|\.kt$||; s|/|.|g")"
+      done
+      classes="${classes# }"
       if [ -n "$classes" ]; then
         targs+=(":tests:$m:test")
         for c in $classes; do targs+=("--tests" "$c"); done

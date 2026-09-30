@@ -497,6 +497,14 @@ could open the NEW run while it was still queued — not prepared, so its §20.1
 `resolved_parameters` and the slot it waited for never appeared (30 s on the box, 90 s on CI).
 A loop in a test re-synchronises in every iteration; no iteration inherits the previous one's state.
 
+**A page's FIRST render gets the loaded-box bound, not the action default (#327).** The one wait
+that competes with everything else the box is doing — the create-workspace form's appearance after
+`navigate("/workspaces")`, the switcher's after the create's reload — has red three gates
+(#283/#303/#327) at 30 s while every assertion held, each green on the incremental. Those waits
+use `BrowserSuite.FIRST_RENDER_TIMEOUT_MS` (90 s, CI and local alike); every action after them
+acts on a present DOM and keeps the ordinary patience (30 s locally, where a 30 s wait IS the
+defect).
+
 ```bash
 # The marketing site's screenshots, produced by a script rather than by hand (070 §C).
 ./app.sh --start --demo nyc                      # the deployment being photographed
