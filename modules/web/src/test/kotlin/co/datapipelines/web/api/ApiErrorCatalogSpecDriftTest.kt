@@ -306,8 +306,12 @@ class ApiErrorCatalogSpecDriftTest {
          * 372 → 373 at the L2 merge (#10): `dashboard.validation.too_many_invocations` (§13.23, 400 — a dashboard whose
          * distinct source invocations exceed `max-executions-per-refresh`). L2 and #320 had each moved 371 → 372 on their
          * own bases, so the identical edits merged silently; the merged document parses to 373.
+         *
+         * 373 → 374 with #336: §13.4 gains `pipeline.node.commit_failed` (502 — the streamed read's
+         * finalizing commit refused, an explicit catalog row beside its `query_execution_failed`
+         * sibling), landed in the SAME commit as its constant. Re-derived from the document's own parse.
          */
-        const val SECTION_13_ROW_COUNT = 373
+        const val SECTION_13_ROW_COUNT = 374
 
         /**
          * §12's distinct validation codes.

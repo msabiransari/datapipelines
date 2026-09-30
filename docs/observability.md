@@ -1,9 +1,9 @@
 # Observability Specification
 
-**Status:** v1.26 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
+**Status:** v1.27 draft (to be elaborated before production hardening — the rules marked **normative** below are already binding)
 **Owner:** datapipelines.co core
 **Depends on:** all other specs
-**Last updated:** 2026-09-29
+**Last updated:** 2026-09-30
 
 ---
 
@@ -172,6 +172,7 @@ The scheduler ([Scheduler](scheduler.md)) logs its own work under `scheduler.*`.
 | ERROR | `scheduler.inspect_refused` | The system identity was refused `execution.read` in a workspace — the reconciler cannot see outcomes there, and its runs stay `running` until it can. A configuration defect: the identity's fixed set is code, not data | `workspace_id` |
 | INFO | `scheduler.admission_closed` | Shutdown: admission closed and no launch was in progress, so the execution drain may start | — |
 | WARN | `scheduler.admission_wait_expired` | Shutdown: launches were still in progress when `shutdown-wait-seconds` ran out; their runs reconcile from the execution record | `launching`, `wait_ms` |
+| WARN | `scheduler.outcome_evidence_unreadable` (#336) | A finished run's persisted outcome evidence could not be read: the execution row's `error_json` (the run lands `unknown` / `outcome_unreadable` — it may have said `instance_lost`), or the last `execution_aborted` event's payload (the run stays `aborted`; only the reason is lost) | `execution`, `evidence` (`error_json`/`abort_payload`), `error` |
 
 A `scheduler.schedule_blocked` needs a person. A steady `scheduler.run_not_started` means `max-concurrent-runs` is too low for this instance's schedules, or runs are too long for their cadence — `datapipelines.scheduler.capacity.retries` (§4.1) is the leading signal.
 
@@ -246,6 +247,25 @@ The dashboard runtime ([Dashboards §5](dashboards.md#5-the-runtime)) logs at th
 | INFO | `dashboard.refreshes_purged` | The retention step deleted finished refreshes (nothing is logged for an empty tick) | `count`, `retention_days` |
 | WARN | `dashboard.refresh_retention_failed` | The retention DELETE threw; the next tick retries | `error`, `sql_state` |
 
+#### 3.4K The live-write outage events (#336)
+
+`pipeline_executions.heartbeat_at` is the stale-execution sweep's primary signal ([Metadata DB §8.3](metadata-db.md#83-stale-execution-sweep)): a store that refuses the live writes makes a LIVE execution look dead to the sweep on another instance. `JdbcExecutionProgress` logs its write failures by §3.2's degradation rule — **once per execution per outage**, on the healthy → failing transition, with an INFO when a write answers again — because a heartbeating execution writes at a fixed cadence and a per-refusal line would be a second outage in the log pipeline. The failures between the transition lines are counted by the metric, not logged.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| WARN | `execution.progress_write_failed` | An execution's first refused live write after a healthy one — a heartbeat or a progress write (`kind` says which); a steady presence means the metadata store is refusing writes while executions run, and the stale sweep on another instance is reading their heartbeats going stale | `execution`, `kind`, `error`, `sql_state` |
+| INFO | `execution.progress_write_recovered` | A live write answered again after the outage — one line, per execution | `execution` |
+
+A refusal is named by `error` (its class) and `sql_state` (`FailureShape`, the §3.4G rule), never the driver's message.
+
+#### 3.4L The selector-lease cleanup events (#336)
+
+`ReadOnlyStatementLease`'s cleanup endings ([Datasources §5.3](datasources.md#53-lease-lifecycle)) log one WARN per refused ending — a statement close, a connection close, or a statement cancel in `abandon()`. The cancelled-connection path's discard runs unconditionally; the WARN is evidence, not a reason to keep a connection in service.
+
+| Level | `event=` | When | Fields |
+|---|---|---|---|
+| WARN | `datasource.lease_cleanup_failed` | A selector lease's statement close, connection close or statement cancel was refused; a refused connection close DISCARDS the connection (never returned to service) | `datasource`, `operation` (`statement_close`/`connection_close`/`statement_cancel`), `error`, `sql_state` |
+
 ### 3.5 Log destination
 
 - **Stdout** by default — collected by container runtime (Docker / k8s) and shipped to the operator's log aggregator (CloudWatch, Stackdriver, Loki, ELK, etc.).
@@ -269,6 +289,7 @@ Tag sets below are the complete, normative set for each metric — adding a tag 
 | `datapipelines.executions.duration` | timer | `pipeline_id` | Execution wall-clock duration |
 | `datapipelines.executions.concurrent` | gauge | (none) | Currently-running executions |
 | `datapipelines.executions.lifecycle_write_failed` | counter | (none) | (#311) The terminal UPDATE of `pipeline_executions` failed, outlived its bound, or matched no row (the RUNNING insert abandoned or never landed — #325) (`datapipelines.executor.lifecycle-write-timeout-seconds`, [Configuration §3.2](configuration.md#32-executor)): the row is left RUNNING for the stale sweep to reap, so this counter is how an operator tells an unrecorded outcome apart from silence. The companion WARN names the execution id. The RUNNING insert's failure is deliberately NOT counted here — for scheduled runs it is the fail-closed refusal the scheduler records (`record_unwritable`), for interactive ones a WARN — the counter exists because a terminal row that stays RUNNING otherwise looks exactly like a dead instance |
+| `datapipelines.executions.progress_write_failed` | counter | (none) | (#336) A live heartbeat or progress write failed while the execution runs — the row's `heartbeat_at` and `node_stats_json` lag the live work, and another instance's stale sweep reads the stale heartbeat as instance loss ([Metadata DB §8.3](metadata-db.md#83-stale-execution-sweep)). Counts every refusal; the WARN is once per execution per outage (§3.4K), so between the transition lines the counter is the only evidence. No tags: one closed condition |
 | `datapipelines.nodes.duration` | timer | `pipeline_id`, `node_id`, `source` | Per-node duration |
 | `datapipelines.nodes.rows_out` | counter | `pipeline_id`, `node_id` | Rows emitted by node |
 | `datapipelines.staging.rows` | counter | (none) | Total rows staged across all executions |
@@ -532,6 +553,7 @@ This is a construction rule, not a filter — the redacting encoder covers logs,
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.27 | lane 336 (#336 D7) | New **§3.4K the live-write outage events**: `execution.progress_write_failed` (WARN, once per execution per outage — §3.2's rule at heartbeat cadence) and `execution.progress_write_recovered` (INFO), named by class and SQLState through `FailureShape`. §4.1 gains `datapipelines.executions.progress_write_failed` (counter, no tags): a live heartbeat/progress write refused — the state that makes a LIVE execution look dead to another instance's stale sweep. Renumbered at merge: L2 retains §3.4J. New **§3.4L**: the selector-lease cleanup WARN `datasource.lease_cleanup_failed` (operation-named, class + SQLState — a refused connection close discards the connection). |
 | 2026-09-29 | v1.26 | L2 (#10) the dashboard runtime | New **§3.4J** — the refresh events (`dashboard.refresh_finished`, the failure lines by class and SQLState only, the stream cut / grace lines, the sweep and retention lines) — and five **§4.1 rows**: `datapipelines.dashboard.refreshes` (by terminal status), `…refresh.duration`, `…refresh.refused` (`saturated` / `stream_limit`), and the two gauges `…refreshes.active` and `…executions.reserved`. |
 | 2026-09-29 | v1.25 | 321 (#321) the scheduled jobs' failure lines — renumbered at merge: 306/316 and their reviews took v1.21–v1.24 | §3.4's `dag` row states the rule for the crash sweep's and the event retention's failure lines: a failed tick logs `error=<class> sql_state=<state>` where it logged the store's message (`FailureShape`, the §3.4G rule; `dag` gains the `persistence` edge for it, module-structure §4.2). The event names are not cited here: on this base the docs audit reads `execution.*` as a permission family (#307), and the events' own table arrives with the 316 merge (§3.4I). §7's retention paragraph said `audit.retention_failed … message=…`; the line has logged `error=`/`sql_state=` since #310 — corrected. |
 | 2026-09-29 | v1.24 | the 316 merge's review (#316) | New **§3.4I**: `execution.events_purged` catalogued — §3.4H cited it and the docs audit's citation check (#307, on main since 4b91c387; not on the lane's base) refused the uncatalogued name; #321 adds the two failure rows. |

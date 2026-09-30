@@ -93,6 +93,19 @@ class ExecutorMetrics(
         registry.counter(EXECUTIONS_LIFECYCLE_WRITE_FAILED).increment()
     }
 
+    /**
+     * `datapipelines.executions.progress_write_failed` (#336) — a live heartbeat or progress
+     * write to `pipeline_executions` failed, so the row's `heartbeat_at` and `node_stats_json`
+     * lag the live work while another instance's stale sweep reads the stale heartbeat as
+     * instance loss. This counter is how an operator tells that state apart from silence — the
+     * companion WARN is once per execution per outage (observability §3.2's rule), so between
+     * the transition lines the counter is the only evidence. No tags: it is one closed
+     * condition, like [lifecycleWriteFailed]'s.
+     */
+    fun progressWriteFailed() {
+        registry.counter(EXECUTIONS_PROGRESS_WRITE_FAILED).increment()
+    }
+
     /** Binds `datapipelines.executions.concurrent` to the live slot count. */
     fun bindConcurrency(slots: ExecutionSlots) {
         Gauge
@@ -107,6 +120,7 @@ class ExecutorMetrics(
         const val EXECUTIONS_CONCURRENT = "datapipelines.executions.concurrent"
         const val EXECUTIONS_ABORTED = "datapipelines.executions.aborted"
         const val EXECUTIONS_LIFECYCLE_WRITE_FAILED = "datapipelines.executions.lifecycle_write_failed"
+        const val EXECUTIONS_PROGRESS_WRITE_FAILED = "datapipelines.executions.progress_write_failed"
         const val NODES_DURATION = "datapipelines.nodes.duration"
         const val NODES_ROWS_OUT = "datapipelines.nodes.rows_out"
         const val STAGING_ROWS = "datapipelines.staging.rows"

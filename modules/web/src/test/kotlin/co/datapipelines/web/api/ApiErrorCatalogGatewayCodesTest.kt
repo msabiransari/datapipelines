@@ -18,12 +18,16 @@ import org.junit.jupiter.api.assertAll
  */
 class ApiErrorCatalogGatewayCodesTest {
     @Test
-    fun `gateway codes are exactly the deliberate five`() {
+    fun `gateway codes are exactly the deliberate six`() {
         ApiErrorCatalog.GATEWAY_CODES shouldContainExactly
             setOf(
                 PipelineErrorCodes.Execution.DATASOURCE_UNREACHABLE,
                 PipelineErrorCodes.Node.DATASOURCE_CONNECTION_FAILED,
                 PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED,
+                // #336: the streamed read's finalizing commit was refused — the source
+                // connection's failure, not the SQL's and not this process's bug. WARN
+                // without a stack, like its connection sibling.
+                PipelineErrorCodes.Node.COMMIT_FAILED,
                 // 055: the promotion target did not answer. WARN without a stack — the
                 // operator's own peer deployment being down is not a defect in this one.
                 PipelineErrorCodes.Versioning.PROMOTION_TARGET_UNREACHABLE,
@@ -53,6 +57,11 @@ class ApiErrorCatalogGatewayCodesTest {
     @Test
     fun `every gateway code is classified - the ERROR-with-stack remainder is exactly the our-bug set`() {
         ApiErrorCatalog.GATEWAY_CODES - ApiErrorCatalog.CALLER_DOWNSTREAM_DOWN shouldContainExactly
-            setOf(PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED)
+            setOf(
+                PipelineErrorCodes.Node.QUERY_EXECUTION_FAILED,
+                // #336: the rendered SQL's batch may be the reason the transaction cannot
+                // finalize — like query_execution_failed, possibly our bug, ERROR with stack.
+                PipelineErrorCodes.Node.COMMIT_FAILED,
+            )
     }
 }

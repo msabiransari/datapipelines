@@ -12,6 +12,7 @@ import co.datapipelines.executor.ExecutionCancellationService
 import co.datapipelines.executor.ExecutionEventRepository
 import co.datapipelines.executor.ExecutionRepository
 import co.datapipelines.executor.ExecutorConfig
+import co.datapipelines.executor.ExecutorMetrics
 import co.datapipelines.executor.InMemoryCancellationRegistry
 import co.datapipelines.persistence.BatchSink
 import co.datapipelines.persistence.BatchingConfig
@@ -221,6 +222,10 @@ class ScheduledJobsSchedulerTest {
             registerBean(ExecutionRepository::class.java, Supplier { executions })
             registerBean(ExecutorProperties::class.java, Supplier { ExecutorProperties() })
             registerBean(ExecutionsProperties::class.java, Supplier { ExecutionsProperties() })
+            // #336 D7 — the progress sink's outage counter. A real in-memory registry: the
+            // contract under test is "the counter is READ when a write fails", and a strict
+            // mock would make the missing increment unobservable.
+            registerBean(ExecutorMetrics::class.java, Supplier { ExecutorMetrics(SimpleMeterRegistry()) })
             registerBean(DatasourceRegistry::class.java, Supplier { datasources })
             registerBean(MeterRegistry::class.java, Supplier { SimpleMeterRegistry() })
             registerBean(ExecutionEventRepository::class.java, Supplier { events })

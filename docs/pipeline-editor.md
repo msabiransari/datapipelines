@@ -1,6 +1,6 @@
 # Pipeline Editor UI Specification
 
-**Status:** v1.18 (revised — see Change Log)
+**Status:** v1.19 (revised — see Change Log)
 **Owner:** datapipelines.co core
 **Depends on:** [Pipeline Contract](pipeline-contract.md), [REST API + SSE](rest-api.md), [Type System](type-system.md), [Enums](enums.md), [Auth](auth.md), [Configuration](configuration.md), [@acme/design-tokens Design System](https://github.com/msabir/design-system-starter)
 **Last updated:** 2026-09-27
@@ -1650,8 +1650,11 @@ async function handleConnectionLoss(executionId) {
 While an execution is running, the Execute button is replaced by **Cancel**, which issues `DELETE /api/v1/executions/{execution_id}` ([REST API §10.4](rest-api.md#104-cancel-execution); scope `execute` + ownership) — a cookie-authenticated state-changing call, so it carries the same `DP-CSRF-Token` double-submit header as execute (§7.2, [Auth §8.4](auth.md#84-api-endpoints-auth-via-api-key-or-jwt)).
 
 - The `204` acknowledges the *request*, not completion. The UI shows "Cancelling…" and waits for the `execution_aborted` event on the still-open stream, which is what actually finalizes the graph (§6.3).
+- **The delete's outcome is stated (#336).** An ACCEPTED cancel arms the 5-second abort fallback — the only case it exists for (a cancel the server took whose terminal event never arrives). A `409` is the documented quiet case: the execution already reached a terminal state and that is what renders. Any OTHER refusal, or a network failure, toasts the server's catalogued `error.message` (fixed copy when there is no body) and leaves the stream open — **the run is never presented as cancelled**, and the fallback never arms.
 - Cancellation works from any server instance (it travels via a Redis flag), so completion can lag by up to one heartbeat interval. The UI must not assume the `204` means the nodes have stopped.
 - Cancelling an execution that already reached a terminal state returns `409` with `pipeline.execution.not_running` — the editor swallows this quietly and just renders the terminal state it already has.
+
+**The lifecycle block refuses the run (#336).** `draft.js` reads the page's `pipeline-lifecycle` JSON to pin the run to the draft it shows (versioning §8). A block that cannot be parsed is NOT "no draft" — silently running the RELEASED version while the person edits a draft runs the wrong body. The read records the refusal and **Execute stops with the error modal** (fixed copy: the editor cannot choose which version to run; reload), before any execute request leaves the page.
 
 ### 15.3 What is NOT offered
 
@@ -1896,6 +1899,7 @@ Themes shipped by the design system — `saas` (modern indigo, devtool-oriented)
 
 | Date | Version | Author | Change |
 |---|---|---|---|
+| 2026-09-30 | v1.19 | lane 336 (#336 D8) | §15.2: the cancel DELETE's outcome is stated — accepted arms the 5 s fallback, 409 stays the quiet case, any other refusal or a network failure toasts the catalogued message and leaves the stream open (the run is never presented as cancelled); the malformed-lifecycle refusal (§7.1's draft pin: an unreadable `pipeline-lifecycle` block stops Execute at the error modal instead of silently running the RELEASED version). |
 | 2026-09-27 | v1.18 | 282 (#282) the data table | §3.4's load order: `data-table.css` loads right after `app.css` (it folds app.css's old `.ds-table` block) and before the page sheets; the result dock's grid (§10) is the house data table — [UI Screens §3.7](ui-screens.md#37-the-data-table-282-normative). |
 | 2026-09-18 | v1.17 | 159 addendum / #151 cards re-measure when they grow mid-run | §5.3: `measureCard` per height-changing write (state, stats, the port lines, the markers' elapsed line, the reset), deferred behind the html-label's re-render, no relayout in flight except on overlap; `settleCardHeights` re-runs a stale layout once at End's terminal state; the oscillation bound never reaches this path. |
 | 2026-09-17 | v1.16 | 159 / #148 the Start disc runs on a human press and cancels while running | §5.3b: **the press guard** — the cause of "Start does nothing" on the live editor was Cytoscape's mousedown `activate()` on the marker node re-rendering the disc (cytoscape-node-html-label re-parses on every `style` event, `setTimeout(0)`) under a held button, so no click was ever dispatched; `wireMarkerActivation` now stops `mousedown`/`pointerdown`/`touchstart` for `.pe-marker-run` targets in the capture phase. **Cancel from the marker**: while `isExecuting` the disc is `.pe-marker-cancel` (`Cancel execution`, the word Cancel, the square glyph, the danger fill, never `aria-disabled`) and its activation calls the toolbar's own `cancelExecution()`; Start again on any terminal state; a viewer who may not execute keeps the plain marker. **Focus survives the re-render** (`keepMarkerFocus`). §6.3: `execution_started` / `execution_aborted` rows name the disc's two faces. |

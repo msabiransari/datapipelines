@@ -43,8 +43,10 @@ import co.datapipelines.web.pipelines.RecordingExecutionRunner
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.TextNode
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -140,6 +142,47 @@ class PipelineJobExecutorTest {
         outcomeFor(record) shouldBe
             ExecutionOutcome.Finished(RunState.UNKNOWN, PipelineJobExecutor.INSTANCE_LOST, record.startedAt, record.completedAt)
         verify(exactly = 0) { events.findByExecution(any()) }
+    }
+
+    @Test
+    fun `an unreadable error_json is unknown - it may have said instance_lost (#336)`() {
+        val record = record(ExecutionStatus.ABORTED).copy(errorJson = """{"code": not-json""")
+        every { events.findByExecution(executionId) } returns listOf(abortEvent("cancelled"))
+
+        // The readable abort payload WOULD have said cancelled — that is exactly the lie the
+        // old runCatching told: the unreadable row may have been the sweeper's instance_lost
+        // marker, and instance_lost blocks (scheduler.md §5.2) while cancelled does not.
+        outcomeFor(record) shouldBe
+            ExecutionOutcome.Finished(RunState.UNKNOWN, "outcome_unreadable", record.startedAt, record.completedAt)
+    }
+
+    @Test
+    fun `an unreadable abort payload stays aborted with one WARN - the record proves the abort, only the reason is lost (#336)`() {
+        val record =
+            record(ExecutionStatus.ABORTED).copy(errorJson = """{"code":"pipeline.node.query_execution_failed"}""")
+        every { events.findByExecution(executionId) } returns
+            listOf(ExecutionEventRecord(executionId, 7, "execution_aborted", Instant.EPOCH, """{"reason": not-json"""))
+
+        val logger = org.slf4j.LoggerFactory.getLogger(PipelineJobExecutor::class.java) as ch.qos.logback.classic.Logger
+        val appender =
+            ch.qos.logback.core.read
+                .ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>()
+                .apply { start() }
+        logger.addAppender(appender)
+        val outcome =
+            try {
+                outcomeFor(record)
+            } finally {
+                logger.detachAppender(appender)
+            }
+
+        // `unknown` would BLOCK the schedule on an outcome the execution record itself proves
+        // ended by abort — the state stays `aborted`; the unreadable evidence gets its WARN.
+        outcome shouldBe ExecutionOutcome.Finished(RunState.ABORTED, null, record.startedAt, record.completedAt)
+        val warns = appender.list.filter { it.level == ch.qos.logback.classic.Level.WARN }
+        warns.shouldHaveSize(1)
+        warns.single().formattedMessage.shouldContain("abort_payload")
+        warns.single().formattedMessage.shouldContain("JsonParse")
     }
 
     @Test

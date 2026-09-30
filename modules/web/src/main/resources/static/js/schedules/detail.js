@@ -347,15 +347,21 @@
     var c = current();
     if (!c) return Promise.resolve();
     var id = c.schedule.id;
+    // #336-b — this read answers for THIS selection of THIS schedule on THIS page. A show()
+    // bumps detailSeq, so a selection made (or a reload started) after the request left
+    // supersedes it: whichever way it lands, it acts on nothing.
+    var seq = S.state.detailSeq || 0;
     return API()
       .runs(id, 0, RUNS_PAGE)
       .then(function (r) {
         var now = current();
-        if (!S.live() || !now || now.schedule.id !== id) return;
+        if (!S.live() || seq !== S.state.detailSeq || !now || now.schedule.id !== id) return;
         var data = r.data || {};
         var before = now.runs.map(function (x) { return x.id + ":" + x.state; }).join();
         now.runs = data.items || [];
         now.runsHasMore = !!(data.pagination && data.pagination.has_more);
+        runsStale(false);
+        now.staleToastShown = false;
         rerenderRuns();
         var after = now.runs.map(function (x) { return x.id + ":" + x.state; }).join();
         // A run that just ended can have BLOCKED the schedule (unknown, or a refusal that
@@ -363,7 +369,33 @@
         if (before !== after && !now.runs.some(M().isActive)) return reload();
         schedulePoll();
       })
-      .catch(function () { schedulePoll(); });
+      .catch(function (err) {
+        // #336 D8: a failed refresh keeps the STALE runs visible and marked, never
+        // silently re-presented as fresh; the poll keeps its existing cadence. The
+        // first failure says so (a toast per poll would be a second outage); the
+        // note stays until a refresh answers again.
+        // #336-b — only while this failure is still the CURRENT selection's outage:
+        // A's late refusal after B was selected (or after the page was left) marks
+        // nothing and toasts nothing. The flag lives on the selection's own state, so
+        // B's first failure toasts even though A's did, and a successful reload (a
+        // fresh selection object) starts a fresh outage.
+        var now = current();
+        if (!S.live() || seq !== S.state.detailSeq || !now || now.schedule.id !== id) return;
+        runsStale(true);
+        if (!now.staleToastShown) {
+          now.staleToastShown = true;
+          S.toastError(err, "Runs could not be refreshed");
+        }
+        schedulePoll();
+      });
+  }
+
+  /** The runs list's staleness marker (#336 D8): shown from the first failed refresh until one answers. */
+  function runsStale(stale) {
+    var view = pane();
+    var root = view && view.querySelector("[data-schedule-detail]");
+    var note = root && root.querySelector("[data-slot=runs-stale]");
+    if (note) note.hidden = !stale;
   }
 
   function moreRuns() {

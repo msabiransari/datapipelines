@@ -84,7 +84,22 @@
         if (res.status === 204) return { status: 204, etag: etag, data: null };
         return res.text().then(function (text) {
           var body = null;
-          try { body = text ? JSON.parse(text) : null; } catch (e) { body = null; }
+          try {
+            body = text ? JSON.parse(text) : null;
+          } catch (e) {
+            // #336 D8: a 2xx whose body cannot be read is a failed response, not a
+            // null payload — a silent null rendered pages that looked freshly empty.
+            // Fixed copy: a body that cannot be parsed carries nothing trustworthy.
+            if (res.ok) {
+              throw new ApiError({
+                status: res.status,
+                code: "malformed_response",
+                message: "The server answered " + res.status + " with a body that could not be read.",
+                userMessage: "The server's response could not be read. Try again.",
+              });
+            }
+            body = null; // a refused call falls through to errorFrom's readable no-body error
+          }
           if (!res.ok) throw errorFrom(res.status, body);
           return { status: res.status, etag: etag, data: body ? body.data : null };
         });

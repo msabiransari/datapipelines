@@ -34,8 +34,9 @@ internal fun String?.asNonBlankOrNull(): String? = this?.takeUnless { it.isBlank
  *
  * Every [SQLException] this read can produce is classified HERE, in ONE place — extending
  * the lease boundary's own [isConnectionFailure] classification, never
- * forking a second one. Three families (R5 F1; the shapes are live-pinned per driver in
- * `EmbeddedDialectBehaviorTest`):
+ * forking a second one. The same three families apply to BOTH levels, the innermost read and
+ * the outer-catalog read on a `hasOuterCatalog` shape (#336 D3; the shapes are live-pinned per
+ * driver in `EmbeddedDialectBehaviorTest`):
  *
  * 1. **Feature-unsupported** — [SQLFeatureNotSupportedException], or a driver signaling
  *    the same via plain `SQLException` with SQLState `0A000` — reads as null: a legitimate
@@ -62,9 +63,30 @@ internal fun Connection.currentNamespace(
     val shape = adapter.namespaceShape
     val innermost = currentInnermost(shape, datasourceName) ?: return emptyList()
     // The outer segment matters as much as the inner one on a multi-catalog connection: a
-    // current schema of `sales` with no catalog is what merged two ATTACHed catalogs' tables.
-    // `getCatalog()` failing is not fatal here — the one-catalog dialects behave as before.
-    val outer = if (shape.hasOuterCatalog) runCatching { catalog }.getOrNull()?.takeUnless { it.isBlank() } else null
+    // current schema of `sales` with no catalog is what merged two ATTACHed catalogs' tables
+    // (datasources.md §7A). It is classified EXACTLY like the innermost read (#336 D3) — a
+    // capability statement keeps the fallback (the driver reports none; the one-catalog
+    // dialects never consult it), any other failure raises: on a `hasOuterCatalog` shape the
+    // fallback is the merge, so "the outer segment is unknown" must never read as "there is
+    // none".
+    val outer =
+        if (shape.hasOuterCatalog) {
+            try {
+                catalog.asNonBlankOrNull()
+            } catch (_: SQLFeatureNotSupportedException) {
+                // The typed capability statement: the driver reports none. Deliberately
+                // discarded — the exception type itself is the entire signal.
+                null
+            } catch (e: SQLException) {
+                when {
+                    e.sqlState == FEATURE_UNSUPPORTED_STATE -> null
+                    e.isConnectionFailure() -> ConnectionLease.unreachable(datasourceName, e)
+                    else -> throw CurrentSchemaUnknownException(datasourceName, e)
+                }
+            }
+        } else {
+            null
+        }
     return listOfNotNull(outer, innermost)
 }
 

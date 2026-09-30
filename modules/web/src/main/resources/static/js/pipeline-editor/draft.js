@@ -25,6 +25,11 @@
     try {
       return JSON.parse(el.textContent);
     } catch (e) {
+      // #336 D8: malformed lifecycle JSON is NOT "no draft" — silently running
+      // the RELEASED version while the person edits a draft runs the wrong body.
+      // The refusal is recorded for the execute path, which stops with a visible
+      // error instead of choosing a version by accident.
+      window.PEDraftInvalid = true;
       return { hasDraft: false };
     }
   }

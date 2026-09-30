@@ -138,6 +138,11 @@
                       data-sch-action="refresh-runs" aria-label="Refresh runs">Refresh</button>
             </div>
             <div class="tplx-tabpanel">
+              <!-- #336 D8 — a failed refresh keeps the runs shown and MARKS them stale until
+                   one answers; the toast fires once per outage, the note per outage too. -->
+              <p class="ds-empty-description" data-slot="runs-stale" hidden>
+                The runs shown may be out of date — the last refresh failed. Refreshing continues.
+              </p>
               <div class="tplx-runs sch-runs" data-slot="runs" aria-live="polite"></div>
               <p class="ds-empty-description" data-slot="runs-empty" hidden>No runs yet. The first appears at the next occurrence<th:block th:if="${canAuthor == true}">, or when someone presses Run now</th:block>.</p>
               <div class="sch-runs-more" data-slot="runs-more-wrap" hidden>

@@ -644,6 +644,17 @@ object PipelineErrorCodes {
          * over immutable pins should have caught the chain first.
          */
         const val COMPOSITION_DEPTH_EXCEEDED = "pipeline.node.composition_depth_exceeded"
+
+        /**
+         * §13.4 (#336) — a streamed DQL node's finalizing commit was refused, so the
+         * autocommit-equivalent net effect its multi-statement author SQL is promised
+         * (dag-executor §6.4.2) did not happen. HTTP 502: the failure is the source
+         * connection's, not the SQL's. A success that hides it would report a node whose
+         * durability is unknown as done. On a node that failed for its own reasons the commit
+         * refusal rides along as a suppressed cause instead — the primary failure stays the
+         * result.
+         */
+        const val COMMIT_FAILED = "pipeline.node.commit_failed"
     }
 
     /** §13.5 — staging (tempdb). */

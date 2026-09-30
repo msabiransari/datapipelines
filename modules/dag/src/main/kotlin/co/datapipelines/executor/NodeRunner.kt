@@ -7,6 +7,7 @@ import co.datapipelines.datasources.Datasource
 import co.datapipelines.datasources.DatasourceRegistry
 import co.datapipelines.datasources.LakeBrokenTable
 import co.datapipelines.datasources.ResultRowReader
+import co.datapipelines.persistence.FailureShape
 import co.datapipelines.pipeline.CalculatorInputResolver
 import co.datapipelines.pipeline.NodeOutput
 import co.datapipelines.pipeline.NodeSource
@@ -830,8 +831,18 @@ class NodeRunner(
         dialect: Dialect,
     ): NodeResult {
         val tookOutOfAutocommit = SourceStreaming.enable(conn, dialect, config.sourceFetchSize)
+        // The primary failure, if the query raises one — the commit in the finally needs to know
+        // whether it is finalizing a success or unwinding alongside a failure (#336 D1).
+        var primary: Throwable? = null
+        // ANY in-flight failure rides as primary — SQLException, cancellation (§5.2: a commit
+        // refusal during cancellation is suppressed onto it, never re-labelled) — so the catch
+        // is deliberately Throwable-wide (#336 D1).
+        @Suppress("TooGenericExceptionCaught")
         try {
             return runDatasourceQuery(node, conn, bound, ctx, startedAt, resolved, dialect)
+        } catch (t: Throwable) {
+            primary = t
+            throw t
         } finally {
             // Restore autocommit's NET effect, on every path including failure (108 §B).
             //
@@ -841,11 +852,7 @@ class NodeRunner(
             // and then only committing on success would silently change that: a failed node's
             // earlier side effects would roll back. Streaming is a transport decision and must not
             // become a transaction-semantics decision, so the commit is unconditional.
-            //
-            // `runCatching`: the cursor is fully consumed by the time this runs, so a commit that
-            // refuses has nothing left to protect — and it must never replace the node's own
-            // failure with a bookkeeping one.
-            if (tookOutOfAutocommit) runCatching { conn.commit() }
+            SourceCommit.settle(conn, tookOutOfAutocommit, primary)
         }
     }
 
@@ -1185,4 +1192,62 @@ internal object SourceStreaming {
             dialect == Dialect.MYSQL -> Int.MIN_VALUE
             else -> sourceFetchSize
         }
+}
+
+/**
+ * The streaming commit's finalization (#336 D1; dag-executor §6.4.2).
+ *
+ * `datasourceQuery`'s finally commits unconditionally — the net effect the unconditional commit
+ * restores is stated there. What this object owns is the COMMIT'S OWN REFUSAL, which the
+ * `runCatching` it replaced discarded on every path:
+ *
+ * - **Finalizing a success** (no primary failure): the refusal becomes the node's failure with
+ *   the catalogued `pipeline.node.commit_failed` — the net effect the multi-statement author SQL
+ *   is promised did not happen, and a success that hides it would report a node whose durability
+ *   is unknown as done.
+ * - **Unwinding with a primary failure** (the query failed, or the node was cancelled): the
+ *   refusal is `addSuppressed` to that failure and the primary stays the result. A bookkeeping
+ *   refusal must never re-label the node's own verdict — §5.2's cancellation rule included.
+ *
+ * The failure record names the commit refusal by class and SQLState (`FailureShape`), never by a
+ * message that could quote connection material; the envelope's `message` carries the bounded
+ * driver text, exactly like its `query_execution_failed` sibling (rest-api §4.2's rule).
+ */
+internal object SourceCommit {
+    /**
+     * Commits [conn] when [tookOutOfAutocommit] says streaming switched it off, resolving a
+     * refusal against [primary] — null when the query returned, the in-flight failure otherwise.
+     *
+     * @throws NodeFailedSignal on a refusal with no primary failure.
+     */
+    @Suppress("TooGenericExceptionCaught") // the primary may be ANY in-flight failure — cancellation included (§5.2)
+    fun settle(
+        conn: Connection,
+        tookOutOfAutocommit: Boolean,
+        primary: Throwable?,
+    ) {
+        if (!tookOutOfAutocommit) return
+        val refusal = runCatching { conn.commit() }.exceptionOrNull() ?: return
+        val inFlight = primary
+        if (inFlight != null) {
+            inFlight.addSuppressed(refusal)
+        } else {
+            throw commitFailedSignal(refusal)
+        }
+    }
+
+    /** The success-path refusal as the node's own failure: the catalogued code, the refusal as cause. */
+    private fun commitFailedSignal(refusal: Throwable): NodeFailedSignal =
+        NodeFailedSignal(
+            MappedError(
+                code = PipelineErrorCodes.Node.COMMIT_FAILED,
+                message = refusal.message?.take(ErrorCodeMapper.MAX_MESSAGE_CHARS) ?: PipelineErrorCodes.Node.COMMIT_FAILED,
+                details =
+                    mapOf(
+                        "error" to FailureShape.cause(refusal),
+                        "sql_state" to FailureShape.sqlState(refusal),
+                    ),
+            ),
+            refusal,
+        )
 }

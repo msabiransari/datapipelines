@@ -371,8 +371,7 @@ class WebEventEmitter(
                 is PipelineCompleted -> event.contextSnapshot
                 is PipelineFailed -> event.contextSnapshot
                 is ExecutionAborted -> event.contextSnapshot
-            }.takeIf { it.isNotEmpty() }
-                ?.let { snapshot -> runCatching { SseJson.mapper.writeValueAsString(snapshot) }.getOrNull() }
+            }.takeIf { it.isNotEmpty() }?.let { serializedContext(event.executionId, it) }
         runCatching {
             withinLifecycleBound {
                 executionRepository.complete(
@@ -444,6 +443,26 @@ class WebEventEmitter(
             else -> abortedDurationMs(event.executionId, event)
         }
 
+    /**
+     * The context snapshot serialized for the terminal row (#336 D5): a failure is one WARN —
+     * the designed degradation (the row keeps its insert-time value) still says so, because a
+     * terminal record that silently kept stale parameters looked exactly like a fresh one.
+     */
+    private fun serializedContext(
+        executionId: UUID,
+        snapshot: Map<String, Any?>,
+    ): String? =
+        runCatching { SseJson.mapper.writeValueAsString(snapshot) }
+            .onFailure {
+                log.warn(
+                    "execution {} context snapshot could not be serialized — the row keeps its" +
+                        " insert-time parameters: error={} sql_state={}",
+                    executionId,
+                    FailureShape.cause(it),
+                    FailureShape.sqlState(it),
+                )
+            }.getOrNull()
+
     private fun abortedDurationMs(
         executionId: UUID,
         event: ExecutionEvent,
@@ -454,6 +473,16 @@ class WebEventEmitter(
                     .between(it.startedAt, event.timestamp)
                     .toMillis()
             }
+        }.onFailure {
+            // #336 D5: metadata-db §8.3 (F1) requires every terminal row to carry a duration,
+            // so the read failure records the 0 sentinel — but the record must SAY the duration
+            // is unknown, never present it as measured.
+            log.warn(
+                "execution {} aborted duration could not be read — recorded 0 (unknown): error={} sql_state={}",
+                executionId,
+                FailureShape.cause(it),
+                FailureShape.sqlState(it),
+            )
         }.getOrNull() ?: 0
 
     private fun ExecutionEvent.completesTheRow(): Boolean = this is PipelineCompleted || this is PipelineFailed || this is ExecutionAborted
