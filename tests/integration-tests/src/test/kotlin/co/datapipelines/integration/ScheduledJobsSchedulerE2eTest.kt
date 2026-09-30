@@ -117,12 +117,12 @@ class ScheduledJobsSchedulerE2eTest {
     @Order(1)
     fun `every scheduled job's own tick runs on dp-scheduled, and nothing else shares that scheduler`() {
         val recorder = app.getBean(TickRecorder::class.java)
-        awaitCondition("a startup tick of each of the three jobs") { SCHEDULED_METHODS.all { job -> recorder.threadsOf(job).isNotEmpty() } }
+        awaitCondition("a startup tick of each job") { SCHEDULED_METHODS.all { job -> recorder.threadsOf(job).isNotEmpty() } }
         val observed = SCHEDULED_METHODS.associateWith { job -> recorder.threadsOf(job) }
         // Non-vacuity: the clue names the thread each job was actually observed on.
         withClue("the thread each job's ticks ran on, as Spring's observation saw them: $observed") {
             observed shouldBe SCHEDULED_METHODS.associateWith { setOf(JOBS_THREAD) }
-            // Every @Scheduled task the application runs, not just the three named here.
+            // Every @Scheduled task the application runs, not just the ones named here.
             recorder.jobs() shouldBe SCHEDULED_METHODS
         }
 
@@ -451,6 +451,8 @@ class ScheduledJobsSchedulerE2eTest {
                 SWEEP,
                 "co.datapipelines.web.config.DatasourcePoolReaperScheduler.reap",
                 "co.datapipelines.web.config.ExecutionEventRetentionScheduler.retain",
+                // #10 L2: the dashboard refresh sweep — an approved `@Scheduled` home riding the same thread.
+                "co.datapipelines.web.dashboards.runtime.DashboardRefreshSweepScheduler.sweep",
             )
         val WRITERS = listOf("audit", "execution_events", "replay_log")
 
