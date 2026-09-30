@@ -16,6 +16,8 @@
       <p class="u-secondary u-text-sm" th:text="${dlg.refusal.message}">in use</p>
       <ul class="u-text-sm u-mb-md" data-purge-pinnerPipelines>
         <li th:each="p : ${dlg.inUsePipelines}" class="u-mono" th:text="${p}">parent/pipeline</li>
+        <li th:each="p : ${dlg.inUseParameterSets}" class="u-mono" data-purge-pinner-set th:text="${p}">parameter/set</li>
+        <li th:each="p : ${dlg.inUseVisualizations}" class="u-mono" data-purge-pinner-visualization th:text="${p}">a/visualization</li>
       </ul>
     </th:block>
 

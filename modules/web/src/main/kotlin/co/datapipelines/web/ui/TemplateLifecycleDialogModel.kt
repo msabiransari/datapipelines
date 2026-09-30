@@ -1,8 +1,8 @@
 package co.datapipelines.web.ui
 
+import co.datapipelines.application.templates.TemplateUsage
 import co.datapipelines.pipeline.AuthoringGuard
 import co.datapipelines.pipeline.PipelineErrorCodes
-import co.datapipelines.pipeline.PipelineRepository
 import co.datapipelines.pipeline.PipelineVersionStatus
 import co.datapipelines.pipeline.PipelineVersionStatus.RELEASED
 import co.datapipelines.templates.TemplateRepository
@@ -16,26 +16,21 @@ import java.util.UUID
  * the guard — over the template lifecycle 101 wired in [TemplateReleaseService].
  *
  * Two template-specific facts. The pin evidence is `template.in_use` (graph rule 1: no
- * `template.version.pinned` exists — the in-use scan IS the refusal), and there is no Switch
+ * `template.version.pinned` exists — the in-use scan IS the refusal), read from [usage] — the SAME
+ * evidence [TemplateReleaseService] refuses with, over pipelines, parameter sets and (#320) visualizations,
+ * so the list a dialog shows is the list the POST would name. And there is no Switch
  * dialog: templates are pinned by exact version, so there is no served pointer a human would
  * roll back.
  */
 class TemplateLifecycleDialogModel(
     private val templates: TemplateRepository,
-    private val pipelines: PipelineRepository,
+    private val usage: TemplateUsage,
     private val actors: ActorNames,
     private val authoring: AuthoringGuard,
 ) {
     data class Refusal(
         val code: String,
         val message: String,
-    )
-
-    /** A live pipeline version pinning the target — the `template.in_use` evidence, named. */
-    data class PinnerView(
-        val pipelineName: String,
-        val pipelineVersion: Int,
-        val nodeId: String,
     )
 
     // ------------------------------------------------------------------ release
@@ -88,6 +83,9 @@ class TemplateLifecycleDialogModel(
         val inUsePipelines: List<String>,
         val expected: String,
         val refusal: Refusal?,
+        /** #320 — the parameter sets and visualizations that pin it, beside the pipelines. */
+        val inUseParameterSets: List<String> = emptyList(),
+        val inUseVisualizations: List<String> = emptyList(),
     )
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -105,28 +103,24 @@ class TemplateLifecycleDialogModel(
                 details = mapOf("template_id" to id, "version" to version, "status" to detail.status.name),
             )
         }
-        // The purge's own guard, pre-read: a live pipeline version pinning THIS version is
-        // `template.in_use` and the purge would refuse — the dialog shows who, with no button.
-        val pinners =
-            pipelines
-                .findLiveVersionsPinningTemplateVersion(workspaceId, id, version)
-                .map { PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId) }
+        // The purge's own guard, pre-read: a live version of a pipeline, a parameter set or a visualization pinning
+        // THIS version is `template.in_use` and the purge would refuse — the dialog shows who, with no button. The
+        // sole draft's purge takes the template with it, so it is the entity rule (any version ever), exactly as
+        // the service asks.
         val sole = templates.listVersions(workspaceId, id).size == 1
+        val pins = if (sole) usage.everPins(workspaceId, id) else usage.liveVersionPins(workspaceId, id, version)
         return PurgeDialog(
             id = id,
             version = version,
             soleVersion = sole,
-            inUsePipelines = pinners.map { it.pipelineName }.distinct(),
+            inUsePipelines = pins.pipelines.map { it.pipelineName }.distinct(),
             expected = "v$version",
             refusal =
-                pinners.takeIf { it.isNotEmpty() }?.let {
-                    Refusal(
-                        "template.in_use",
-                        "Version $version is pinned by ${it.size} live pipeline version(s): " +
-                            it.map { p -> p.pipelineName }.distinct().joinToString(", ") +
-                            " — repoint or discard them first.",
-                    )
+                pins.takeUnless { it.isEmpty() }?.let {
+                    Refusal("template.in_use", "Version $version is pinned by ${pinSentence(it)} — repoint or discard them first.")
                 },
+            inUseParameterSets = pins.parameterSets.map { it.setName }.distinct(),
+            inUseVisualizations = pins.visualizations.map { it.name }.distinct(),
         )
     }
 
@@ -138,6 +132,9 @@ class TemplateLifecycleDialogModel(
         val isCurrent: Boolean,
         val fallback: String?,
         val pinnerPipelines: List<String>,
+        /** #320 — the parameter sets and visualizations whose LIVE versions pin it. */
+        val pinnerParameterSets: List<String> = emptyList(),
+        val pinnerVisualizations: List<String> = emptyList(),
     )
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -155,10 +152,7 @@ class TemplateLifecycleDialogModel(
                 details = mapOf("template_id" to id, "version" to version, "status" to detail.status.name),
             )
         }
-        val pinners =
-            pipelines
-                .findLiveVersionsPinningTemplateVersion(workspaceId, id, version)
-                .map { PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId) }
+        val pins = usage.liveVersionPins(workspaceId, id, version)
         // The pointer preview: `findLatest` resolves the pointer to a LIVE version row, so a
         // null means "no current release" — the shape whose discard leaves nothing eligible.
         val current = templates.findLatest(workspaceId, id)?.version
@@ -176,7 +170,15 @@ class TemplateLifecycleDialogModel(
             } else {
                 null
             }
-        return DiscardDialog(id, version, isCurrent, fallback, pinners.map { it.pipelineName }.distinct())
+        return DiscardDialog(
+            id,
+            version,
+            isCurrent,
+            fallback,
+            pins.pipelines.map { it.pipelineName }.distinct(),
+            pins.parameterSets.map { it.setName }.distinct(),
+            pins.visualizations.map { it.name }.distinct(),
+        )
     }
 
     // ------------------------------------------------------------------ restore
@@ -221,6 +223,9 @@ class TemplateLifecycleDialogModel(
         val inUsePipelines: List<String>,
         val expected: String,
         val refusal: Refusal?,
+        /** #320 — the parameter sets and visualizations that pin ANY version of it. */
+        val inUseParameterSets: List<String> = emptyList(),
+        val inUseVisualizations: List<String> = emptyList(),
     )
 
     fun purgeEntity(
@@ -238,20 +243,19 @@ class TemplateLifecycleDialogModel(
             )
         }
         val soleDraft = versions.size == 1 && versions.single().status == PipelineVersionStatus.DRAFT
-        // Graph rule 3's template arm: the ANY-version scan the delete guard itself runs.
-        val pinners = pipelines.findAnyVersionTemplatePins(workspaceId, id).map { it.pipelineName }.distinct()
+        // Graph rule 3's template arm: the ANY-version scan the delete guard itself runs, all three aggregates.
+        val pins = usage.everPins(workspaceId, id)
         return PurgeEntityDialog(
             id = id,
             leafName = id.substringAfterLast('/'),
-            inUsePipelines = pinners,
+            inUsePipelines = pins.pipelines.map { it.pipelineName }.distinct(),
             expected = id,
+            inUseParameterSets = pins.parameterSets.map { it.setName }.distinct(),
+            inUseVisualizations = pins.visualizations.map { it.name }.distinct(),
             refusal =
                 when {
-                    pinners.isNotEmpty() -> {
-                        Refusal(
-                            "template.in_use",
-                            "Pinned by ${pinners.size} pipeline(s): ${pinners.joinToString(", ")} — a pinned template is never deleted.",
-                        )
+                    !pins.isEmpty() -> {
+                        Refusal("template.in_use", "Pinned by ${pinSentence(pins)} — a pinned template is never deleted.")
                     }
 
                     !soleDraft -> {
@@ -268,6 +272,26 @@ class TemplateLifecycleDialogModel(
                 },
         )
     }
+
+    /** The pinners in one phrase: the pipelines first (as the refusal always said), then the sets, then the visualizations. */
+    private fun pinSentence(pins: TemplateUsage.Pins): String =
+        listOfNotNull(
+            pins.pipelines
+                .map { it.pipelineName }
+                .distinct()
+                .takeIf { it.isNotEmpty() }
+                ?.let { "${pins.pipelines.size} live pipeline version(s): ${it.joinToString(", ")}" },
+            pins.parameterSets
+                .map { it.setName }
+                .distinct()
+                .takeIf { it.isNotEmpty() }
+                ?.let { "${it.size} parameter set(s): ${it.joinToString(", ")}" },
+            pins.visualizations
+                .map { it.name }
+                .distinct()
+                .takeIf { it.isNotEmpty() }
+                ?.let { "${it.size} visualization(s): ${it.joinToString(", ")}" },
+        ).joinToString(" and ")
 
     /** §3.4: RELEASED always, DRAFT only under the development posture. */
     private fun eligible(status: PipelineVersionStatus): Boolean =

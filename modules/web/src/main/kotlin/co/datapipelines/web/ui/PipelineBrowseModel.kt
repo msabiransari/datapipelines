@@ -56,6 +56,7 @@ import java.util.UUID
  * DI stereotypes in production code with **no** allowlist (015 / module-structure §8.4), and
  * `ArchitectureGuardTest` enforces it.
  */
+@Suppress("LongParameterList") // one collaborator per fact the screen shows; the constructor is the container's business
 class PipelineBrowseModel(
     private val pipelines: PipelineService,
     private val repository: PipelineRepository,
@@ -67,6 +68,8 @@ class PipelineBrowseModel(
     private val authoring: co.datapipelines.pipeline.AuthoringGuard,
     /** #259 — the Usage tab's Schedules list, the scheduler's one transport-facing type. */
     private val schedules: co.datapipelines.scheduler.ScheduleService,
+    /** #320 — the dashboards whose sources pin a version of the pipeline: the port `PipelineService.refuseIfPinned` asks. */
+    private val dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
 ) {
     private val deserializer = PipelineDeserializer()
 
@@ -256,7 +259,7 @@ class PipelineBrowseModel(
         model.addAttribute("draftHash", working?.draft?.bodyHash)
         fillIdentity(model, record)
         fillOverview(model, workspaceId, record, body, working?.version?.version ?: record.currentVersion, working?.draft?.version)
-        fillActing(model, workspaceId, view.pipelines, record, versions)
+        fillActing(model, workspaceId, view, record, versions)
         return DETAIL_VIEW
     }
 
@@ -303,7 +306,7 @@ class PipelineBrowseModel(
     private fun fillActing(
         model: Model,
         workspaceId: UUID,
-        lens: ReadLens,
+        view: LensedView,
         record: PipelineRecord,
         versions: List<PipelineVersionRecord>,
     ) {
@@ -350,7 +353,7 @@ class PipelineBrowseModel(
         )
         model.addAttribute("versionCount", versions.size)
         model.addAttribute("runCount", runStats.totalRuns(record.id))
-        model.addAttribute("usageCount", usage(workspaceId, lens, record).total)
+        model.addAttribute("usageCount", usage(workspaceId, view, record).total)
         // The reading column's Created line chip (V20): the FIRST version's surface.
         model.addAttribute("createdVia", versions.minByOrNull { it.version }?.createdVia)
     }
@@ -402,7 +405,7 @@ class PipelineBrowseModel(
         val record = pipelines.findRecord(workspaceId, view.pipelines, pipelineId)
         model.addAttribute(
             "usage",
-            record?.let { usage(workspaceId, view.pipelines, it, principal) } ?: UsageView(emptyList(), emptyList()),
+            record?.let { usage(workspaceId, view, it, principal) } ?: UsageView(emptyList(), emptyList()),
         )
         return USAGE_VIEW
     }
@@ -422,23 +425,31 @@ class PipelineBrowseModel(
      */
     private fun usage(
         workspaceId: UUID,
-        lens: ReadLens,
+        view: LensedView,
         record: PipelineRecord,
         principal: AuthenticatedPrincipal? = null,
     ): UsageView {
+        val versions = repository.listVersions(workspaceId, record.id)
         val parents =
-            repository
-                .listVersions(workspaceId, record.id)
+            versions
                 .flatMap { repository.findLiveParentsPinningVersion(workspaceId, record.name, it.version) }
                 // 178: a hidden parent must not leak through the reverse arrow.
-                .through(lens) { it.pipelineName }
+                .through(view.pipelines) { it.pipelineName }
                 .map { UsageView.ParentUse(it.pipelineId, it.pipelineName, it.pipelineVersion, it.nodeId, it.pinnedVersion) }
         val served =
             endpoints
                 .findByPipeline(record.id)
                 .map { UsageView.EndpointUse(it.pathPattern, it.isEnabled, it.description) }
         val runsOnIt = runSchedules(workspaceId, record, principal)
-        return UsageView(endpoints = served, parents = parents, schedules = runsOnIt)
+        // #320: the dashboards whose sources pin a version — the SAME question `PipelineService.refuseIfPinned` asks per
+        // version (`pipeline.version.pinned`'s `referencing_dashboards`), through the dashboard lens (a hidden dashboard
+        // must not leak through the reverse arrow either).
+        val dashboardUses =
+            versions
+                .flatMap { v -> dashboards.liveVersionPins(workspaceId, record.name, v.version).map { it to v.version } }
+                .through(view.dashboards) { (pin, _) -> pin.name }
+                .map { (pin, pinned) -> UsageView.DashboardUse(pin.name, pin.version, pin.status.name, pinned) }
+        return UsageView(endpoints = served, parents = parents, schedules = runsOnIt, dashboards = dashboardUses)
     }
 
     /** The schedule half of the Usage read — empty when no principal is supplied (the badge). */

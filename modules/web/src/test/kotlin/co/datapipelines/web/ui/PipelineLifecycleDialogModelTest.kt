@@ -38,6 +38,22 @@ class PipelineLifecycleDialogModelTest {
     private val usage = mockk<TemplateUsageService>()
     private val schedules = mockk<co.datapipelines.scheduler.ScheduleService>()
 
+    /** #320 — the dashboards that pin a version: none unless a case fills [pinnedByDashboards]; the port has no default. */
+    private val pinnedByDashboards = mutableListOf<co.datapipelines.pipeline.DashboardPin>()
+    private val dashboards =
+        object : co.datapipelines.pipeline.PipelineVersionConsumers {
+            override fun liveVersionPins(
+                workspaceId: java.util.UUID,
+                pipelineName: String,
+                version: Int,
+            ) = pinnedByDashboards.toList()
+
+            override fun anyVersionPins(
+                workspaceId: java.util.UUID,
+                pipelineName: String,
+            ) = pinnedByDashboards.toList()
+        }
+
     private val model =
         PipelineLifecycleDialogModel(
             repository,
@@ -48,6 +64,7 @@ class PipelineLifecycleDialogModelTest {
             AuthoringGuard(enabled = true),
             usage,
             schedules = schedules,
+            dashboards = dashboards,
         )
 
     @Test
@@ -137,6 +154,7 @@ class PipelineLifecycleDialogModelTest {
                 usage,
                 marks,
                 schedules = schedules,
+                dashboards = dashboards,
             )
         every { repository.findById(any(), any()) } returns recordOf(current = 1)
         every { repository.findDraftDetail(any(), any()) } returns detail(status = DRAFT)
@@ -269,6 +287,25 @@ class PipelineLifecycleDialogModelTest {
         dialog.schedules[1].nextRunLabel shouldBe null
     }
 
+    /**
+     * #320 — the dashboards whose sources pin the version are the discard's evidence, from the SAME port
+     * `PipelineService.refuseIfPinned` asks: a dialog that listed none while the POST refused would be a lie.
+     */
+    @Test
+    fun `discard - the dashboards whose sources pin the version are listed, from the port the service's guard asks (320)`() {
+        every { repository.findByIdAnyStatus(any(), any()) } returns recordOf(current = 2)
+        every { repository.findVersionDetail(any(), any(), any()) } returns detail(status = RELEASED)
+        every { repository.findLiveParentsPinningVersion(any(), any(), any()) } returns emptyList()
+        every { repository.listVersions(any(), any()) } returns emptyList()
+        every { schedules.listByTarget(any(), any(), any()) } returns emptyList()
+        pinnedByDashboards += co.datapipelines.pipeline.DashboardPin("acme/boards/revenue", 4, RELEASED)
+
+        val dialog = model.discard(WS, ID, 1, TargetViewer.EVERYONE)
+
+        dialog.pinnerPipelines shouldBe emptyList()
+        dialog.pinnerDashboards shouldBe listOf(co.datapipelines.pipeline.DashboardPin("acme/boards/revenue", 4, RELEASED))
+    }
+
     /** A `schedules` row with only the fields the evidence read touches (the rest are inert). */
     private fun schedule(
         name: String,
@@ -347,6 +384,7 @@ class PipelineLifecycleDialogModelTest {
                 AuthoringGuard(enabled = false),
                 usage,
                 schedules = schedules,
+                dashboards = dashboards,
             )
         val hard = hardened.switch(WS, ID)
         hard.options.first { it.version == 2 }.eligible shouldBe false

@@ -515,7 +515,27 @@ class PipelineExplorerRenderTest {
         blocked shouldContain ">blocked<"
 
         val empty = render("partials/pipeline-usage") { fillUsage(empty = true) }
-        empty shouldContain "no published endpoint serves it, no live pipeline pins it and no schedule runs it"
+        empty shouldContain "no published endpoint serves it, no live pipeline or dashboard pins it and no schedule runs it"
+    }
+
+    @Test
+    fun `320 - a dashboard whose source pins a version is refusal evidence on the tab - named, and the empty sentence is gone`() {
+        val html =
+            render("partials/pipeline-usage") {
+                setVariable(
+                    "usage",
+                    UsageView(
+                        endpoints = emptyList(),
+                        parents = emptyList(),
+                        dashboards = listOf(UsageView.DashboardUse("acme/boards/revenue", 4, "RELEASED", 2)),
+                    ),
+                )
+            }
+
+        html shouldContain "Dashboards pinning it"
+        html shouldContain "acme/boards/revenue"
+        html shouldContain "source pins v2"
+        html shouldNotContain "Nothing depends on this pipeline"
     }
 
     @Test

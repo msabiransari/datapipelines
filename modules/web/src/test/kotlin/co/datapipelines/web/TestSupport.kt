@@ -282,9 +282,10 @@ fun pipelineBrowseModelOver(
     runStats: co.datapipelines.web.ui.PipelineRunStats = io.mockk.mockk(),
     authoring: co.datapipelines.pipeline.AuthoringGuard = co.datapipelines.pipeline.AuthoringGuard(enabled = true),
     schedules: co.datapipelines.scheduler.ScheduleService = io.mockk.mockk(),
+    dashboards: co.datapipelines.pipeline.PipelineVersionConsumers = NO_DASHBOARDS,
 ): co.datapipelines.web.ui.PipelineBrowseModel =
     co.datapipelines.web.ui
-        .PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats, authoring, schedules)
+        .PipelineBrowseModel(service, pipelines, executions, endpoints, datasources, actors, runStats, authoring, schedules, dashboards)
 
 /**
  * The templates twin of [pipelineBrowseModelOver], for the same reason. Since 178 the model

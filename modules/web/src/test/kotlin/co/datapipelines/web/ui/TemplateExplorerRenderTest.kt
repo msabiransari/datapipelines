@@ -263,6 +263,64 @@ class TemplateExplorerRenderTest {
         viewer shouldContain "Open in editor"
     }
 
+    /**
+     * #320 — the "Used by" card lists what the `template.in_use` refusal would name: a parameter set and a visualization
+     * are rows of the same card, and the header counts each kind by its own object — an "unused" card beside a refusal
+     * would be a lie.
+     */
+    @Test
+    fun `320 - the used-by card names the parameter sets and the visualizations that pin the template`() {
+        val html =
+            render("partials/template-detail") {
+                fillDetail()
+                setVariable(
+                    "usedBySets",
+                    listOf(
+                        co.datapipelines.parameters.ParameterSetPin(
+                            java.util.UUID.randomUUID(),
+                            "acme/sales/regions",
+                            "region",
+                            3,
+                            PipelineVersionStatus.RELEASED,
+                            2,
+                        ),
+                    ),
+                )
+                setVariable(
+                    "usedByVisualizations",
+                    listOf(
+                        co.datapipelines.visualization.ArtifactPin(
+                            java.util.UUID.randomUUID(),
+                            "acme/charts/revenue",
+                            5,
+                            PipelineVersionStatus.DRAFT,
+                            1,
+                        ),
+                    ),
+                )
+                setVariable("usedBySummary", "1 parameter set · 1 visualization")
+            }
+
+        html shouldContain "data-used-by-summary"
+        html shouldContain "1 parameter set · 1 visualization"
+        html shouldContain "data-used-by-set"
+        html shouldContain "acme/sales/regions"
+        html shouldContain "parameter set · parameter region"
+        html shouldContain "data-used-by-visualization"
+        html shouldContain "acme/charts/revenue"
+        html shouldContain "in v5 (DRAFT)"
+        html shouldNotContain "Nothing pins this template"
+    }
+
+    @Test
+    fun `320 - with no pin from any kind the used-by card says nothing pins the template`() {
+        val html = render("partials/template-detail") { fillDetail() }
+
+        html shouldContain "Nothing pins this template"
+        html shouldNotContain "data-used-by-set"
+        html shouldNotContain "data-used-by-visualization"
+    }
+
     // ------------------------------------------------------------------ 7d: the three faces
 
     /**

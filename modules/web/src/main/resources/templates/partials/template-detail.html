@@ -136,8 +136,7 @@
         <section class="ds-card">
           <div class="app-card-h">
             <h3>Used by</h3>
-            <span class="app-card-note"
-                  th:text="${usedByCount} + (${usedByCount} == 1 ? ' pipeline' : ' pipelines')">2 pipelines</span>
+            <span class="app-card-note" data-used-by-summary th:text="${usedBySummary}">2 pipelines</span>
           </div>
           <div class="tplx-scroll">
             <div th:replace="~{partials/template-used-by :: usedBy}"></div>

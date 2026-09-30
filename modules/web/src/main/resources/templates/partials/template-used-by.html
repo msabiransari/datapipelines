@@ -1,13 +1,15 @@
 <!-- WHO PINS THIS TEMPLATE (106) — every pin of any version, from any stored pipeline version.
      `TemplateUsageService.referencedAnywhere`, which is the SAME evidence the `template.in_use`
      delete guard answers with (D4), so the card a user reads is the list a refusal would name.
+     #320: the parameter sets and visualizations that pin it are rows of the same card — the guard
+     refuses on them, so an "unused" card beside a refusal would be a lie.
 
      One row per PIN, not per pipeline: two nodes of one pipeline pinning two versions is two
-     facts, and collapsing them would hide which node to go and change. The card's count in the
-     header is the distinct-pipeline number, which is the one people quote. -->
+     facts, and collapsing them would hide which node to go and change. The card's header counts
+     distinct OBJECTS per kind (pipelines, parameter sets, visualizations) — the numbers people quote. -->
 <div xmlns:th="http://www.thymeleaf.org" th:fragment="usedBy" class="tplx-usage">
-  <p class="ds-empty-description" th:if="${#lists.isEmpty(usedBy)}">
-    No pipeline pins this template — nothing breaks if it changes.
+  <p class="ds-empty-description" th:if="${#lists.isEmpty(usedBy) and #lists.isEmpty(usedBySets) and #lists.isEmpty(usedByVisualizations)}">
+    Nothing pins this template — nothing breaks if it changes.
   </p>
 
   <div class="tplx-vrow" th:each="p : ${usedBy}">
@@ -17,6 +19,24 @@
     <span class="tplx-vmeta">
       <span th:text="'node ' + ${p.nodeId}">node trips</span>
       <span> · </span><span th:text="'in v' + ${p.pipelineVersion} + ' (' + ${p.versionStatus} + ')'">in v2 (RELEASED)</span>
+    </span>
+  </div>
+
+  <div class="tplx-vrow" data-used-by-set th:each="p : ${usedBySets}">
+    <span class="u-mono" th:text="${p.setName}">acme/sales/region_filters</span>
+    <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'pins v' + p.pinnedVersion}">pins v1</span>
+    <span class="tplx-vmeta">
+      <span th:text="'parameter set · parameter ' + ${p.parameter}">parameter set · parameter region</span>
+      <span> · </span><span th:text="'in v' + ${p.setVersion} + ' (' + ${p.versionStatus} + ')'">in v2 (RELEASED)</span>
+    </span>
+  </div>
+
+  <div class="tplx-vrow" data-used-by-visualization th:each="p : ${usedByVisualizations}">
+    <span class="u-mono" th:text="${p.name}">acme/charts/revenue</span>
+    <span class="ds-badge ds-badge-default app-chip-mono" th:text="${'pins v' + p.pinnedVersion}">pins v1</span>
+    <span class="tplx-vmeta">
+      <span>visualization</span>
+      <span> · </span><span th:text="'in v' + ${p.version} + ' (' + ${p.status} + ')'">in v2 (RELEASED)</span>
     </span>
   </div>
 </div>

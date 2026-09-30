@@ -242,7 +242,9 @@ class TemplateBrowseModel(
                     actor = names[v.createdBy] ?: ActorNames.fallback(v.createdBy),
                     now = now,
                     usage = inUse[v.version] ?: 0,
-                    usageUnit = "pipeline",
+                    // The count is the composed reverse arrow's — pipelines, parameter sets AND (#320) visualizations
+                    // — so the unit names none of them: a per-version "N pipelines" undercounted the moment a set pinned it.
+                    usageUnit = "use",
                     isCurrent = v.version == currentRelease,
                     // The chip's fact (V20): a draft row shows its last write's surface.
                     via = if (v.status == PipelineVersionStatus.DRAFT) v.updatedVia else v.createdVia,
@@ -263,12 +265,38 @@ class TemplateBrowseModel(
         model.addAttribute("excerptTruncated", template.body.lineSequence().count() > EXCERPT_LINES)
         model.addAttribute("interpolations", interpolations(template.body))
 
-        // 178/178b: neither a hidden pipeline nor a visible one's DRAFT pin leaks through the reverse arrow.
-        val pins = usage.pipelinesReferencedAnywhere(workspaceId, view, id)
-        model.addAttribute("usedBy", pins)
-        model.addAttribute("usedByCount", pins.map { it.pipelineId }.distinct().size)
-        model.addAttribute("runCount", pins.map { it.pipelineId }.distinct().size)
+        fillUsedBy(model, workspaceId, view, id)
         return DETAIL_VIEW
+    }
+
+    /**
+     * The "Used by" card's facts. 178/178b: neither a hidden pipeline nor a visible one's DRAFT pin leaks through the
+     * reverse arrow. #320: the card lists what the `template.in_use` refusal would name — parameter sets and
+     * visualizations beside the pipelines, each under its own lens, from the same evidence methods every guard reads.
+     */
+    private fun fillUsedBy(
+        model: Model,
+        workspaceId: UUID,
+        view: LensedView,
+        id: String,
+    ) {
+        val pins = usage.pipelinesReferencedAnywhere(workspaceId, view, id)
+        val setPins = usage.referencedAnywhere(workspaceId, view, id)
+        val visualizationPins = usage.visualizationsReferencedAnywhere(workspaceId, view, id)
+        val pipelineCount = pins.map { it.pipelineId }.distinct().size
+        model.addAttribute("usedBy", pins)
+        model.addAttribute("usedByCount", pipelineCount)
+        model.addAttribute("usedBySets", setPins)
+        model.addAttribute("usedByVisualizations", visualizationPins)
+        model.addAttribute(
+            "usedBySummary",
+            usedBySummary(
+                pipelines = pipelineCount,
+                parameterSets = setPins.map { it.setId }.distinct().size,
+                visualizations = visualizationPins.map { it.artifactId }.distinct().size,
+            ),
+        )
+        model.addAttribute("runCount", pipelineCount)
     }
 
     /**
@@ -349,6 +377,24 @@ class TemplateBrowseModel(
             .distinct()
             .sorted()
             .toList()
+
+    /** The "Used by" card's header: each kind that pins the template, counted once per object ("nothing" when none does). */
+    private fun usedBySummary(
+        pipelines: Int,
+        parameterSets: Int,
+        visualizations: Int,
+    ): String =
+        listOfNotNull(
+            plural(pipelines, "pipeline", "pipelines"),
+            plural(parameterSets, "parameter set", "parameter sets"),
+            plural(visualizations, "visualization", "visualizations"),
+        ).joinToString(" · ").ifEmpty { "nothing" }
+
+    private fun plural(
+        count: Int,
+        one: String,
+        many: String,
+    ): String? = if (count == 0) null else "$count ${if (count == 1) one else many}"
 
     companion object {
         /** The templates screen's page size — the value the flat list has always used. */

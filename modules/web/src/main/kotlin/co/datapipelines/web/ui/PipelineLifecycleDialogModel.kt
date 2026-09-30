@@ -57,6 +57,8 @@ class PipelineLifecycleDialogModel(
      * the lens admits).
      */
     private val schedules: co.datapipelines.scheduler.ScheduleService,
+    /** #320 — the dashboards that pin a release: the SAME port `PipelineService.refuseIfPinned` asks, so the dialog and the POST agree. */
+    private val dashboards: co.datapipelines.pipeline.PipelineVersionConsumers,
 ) {
     /** "v3 is not draft" and friends: a dialog for a shape the table refuses still OPENS. */
     data class Refusal(
@@ -297,6 +299,8 @@ class PipelineLifecycleDialogModel(
         val pinnerPipelines: List<PinnerView>,
         /** #273 — the live schedules that run this pipeline, by name; empty renders no section. */
         val schedules: List<ScheduleEvidence> = emptyList(),
+        /** #320 — the live dashboard versions whose sources pin this version (`referencing_dashboards`); each refuses the discard. */
+        val pinnerDashboards: List<co.datapipelines.pipeline.DashboardPin> = emptyList(),
     )
 
     @Suppress("ThrowsCount") // each throw is a distinct catalogued refusal the dialog renders
@@ -324,6 +328,7 @@ class PipelineLifecycleDialogModel(
             repository.findLiveParentsPinningVersion(workspaceId, record.name, version).map {
                 PinnerView(it.pipelineName, it.pipelineVersion, it.nodeId)
             }
+        val pinnerDashboards = dashboards.liveVersionPins(workspaceId, record.name, version)
         val isCurrent = record.currentVersion == version
         val fallback =
             if (isCurrent) {
@@ -345,7 +350,7 @@ class PipelineLifecycleDialogModel(
             schedules
                 .listByTarget(workspaceId, PipelineJobExecutor.TARGET_PREFIX + record.name, viewer)
                 .map { ScheduleEvidence(it.id, it.name, it.condition, it.nextDueAt?.let(RelativeTime::absolute)) }
-        return DiscardDialog(id, record.name, version, isCurrent, fallback, pinners, runsOnIt)
+        return DiscardDialog(id, record.name, version, isCurrent, fallback, pinners, runsOnIt, pinnerDashboards)
     }
 
     // ------------------------------------------------------------------ restore
