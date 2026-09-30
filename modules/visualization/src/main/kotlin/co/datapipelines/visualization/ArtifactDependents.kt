@@ -54,6 +54,11 @@ enum class PinScope {
  * workspace never matches, and every probe is a BOUND JSON value (no JSON path is built from input). **No index**:
  * `body_json` has no GIN index (V42) and none is proposed; one scan per arrow per verb over a workspace's stored
  * versions is the cost, measured in the #320 evidence.
+ *
+ * **Public and UNLENSED, by design (#340):** every row comes back, drafts and hidden names included, because the guards
+ * that ask it are author-or-above verbs. A consumer that answers a caller whose lens narrows (a promoter) applies BOTH
+ * halves itself — the name through the family's lens, and RELEASED rows only (178b: a draft's number never reaches a
+ * promoter; see `TemplateUsage.visible` and the Usage tab's dashboards half) — or it leaks what the lens hides.
  */
 class ArtifactDependents(
     private val jdbc: NamedParameterJdbcTemplate,
