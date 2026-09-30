@@ -39,8 +39,6 @@
 (function () {
   "use strict";
 
-  var CSRF_COOKIE = "dp_csrf";
-  var CSRF_HEADER = "DP-CSRF-Token";
   var SUCCESS_SETTLE_MS = 1200;
   var MOUNTED_ATTRIBUTE = "data-datapipelines-dashboard";
   var STYLE_ELEMENT_ID = "plotly.js-style-global";
@@ -258,7 +256,7 @@
       init.credentials = "omit"; // the proxy holds the key: no cookie, no csrf header
     } else {
       init.credentials = "same-origin";
-      if (body !== undefined) headers[CSRF_HEADER] = readCookie(CSRF_COOKIE);
+      if (body !== undefined) headers["DP-CSRF-Token"] = readCookie("dp_csrf");
     }
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
@@ -317,10 +315,10 @@
     var headers = { "Content-Type": "application/json", Accept: "text/event-stream" };
     var init = { method: "POST", headers: headers };
     if (this._proxyMode()) {
-      init.credentials = "omit";
+      init.credentials = "omit"; // the proxy holds the key: no cookie, no csrf header
     } else {
       init.credentials = "same-origin";
-      headers[CSRF_HEADER] = readCookie(CSRF_COOKIE);
+      headers["DP-CSRF-Token"] = readCookie("dp_csrf");
     }
     init.body = JSON.stringify(body);
     var closed = false;
